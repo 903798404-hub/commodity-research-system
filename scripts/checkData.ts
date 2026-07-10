@@ -5,6 +5,7 @@ type Severity = 'fatal' | 'warning' | 'info'
 type Issue = { severity: Severity; file: string; message: string }
 type IndexCommodity = { commodityCode?: unknown; commodityDescription?: unknown; category?: unknown }
 type IndexCountry = { countryCode?: unknown; countryName?: unknown }
+type IndexMatrix = { category?: unknown; commodityCode?: unknown; commodity?: unknown; countryCode?: unknown; country?: unknown; file?: unknown }
 type Matrix = {
   commodityCode?: unknown
   commodity?: unknown
@@ -141,22 +142,25 @@ function main() {
 
   const matrixFiles = readdirSync(MATRIX_DIRECTORY).filter((file) => file.endsWith('.json'))
   const matrices = new Map<string, Matrix>()
+  const matricesByFile = new Map<string, Matrix>()
   for (const file of matrixFiles) {
     const matrix = validateMatrix(join(MATRIX_DIRECTORY, file))
     if (matrix && typeof matrix.commodityCode === 'string' && typeof matrix.countryCode === 'string') {
       matrices.set(`${matrix.commodityCode}|${matrix.countryCode}`, matrix)
+      matricesByFile.set(`matrix/${file}`, matrix)
     }
   }
 
   const indexPath = join(DATA_DIRECTORY, 'index.json')
   const parsedIndex = parseJson(indexPath)
   let indexParsed = false
-  if (!isRecord(parsedIndex) || !Array.isArray(parsedIndex.commodities) || !Array.isArray(parsedIndex.countries) || !Array.isArray(parsedIndex.categories)) {
-    if (parsedIndex !== null) addIssue('fatal', indexPath, '缺少 categories、commodities 或 countries 基础结构。')
+  if (!isRecord(parsedIndex) || !Array.isArray(parsedIndex.commodities) || !Array.isArray(parsedIndex.countries) || !Array.isArray(parsedIndex.categories) || !Array.isArray(parsedIndex.matrices)) {
+    if (parsedIndex !== null) addIssue('fatal', indexPath, '缺少 categories、commodities、countries 或 matrices 基础结构。')
   } else {
     indexParsed = true
     const commodities = parsedIndex.commodities as IndexCommodity[]
     const countries = parsedIndex.countries as IndexCountry[]
+    const indexMatrices = parsedIndex.matrices as IndexMatrix[]
     const commodityKeys = new Set<string>()
     const countryKeys = new Set<string>()
     for (const commodity of commodities) {
@@ -179,13 +183,33 @@ function main() {
         addIssue('fatal', indexPath, `matrix 引用 ${key} 未同时出现在 index 的 commodity 与 country 列表中。`)
       }
     }
+    const referencedFiles = new Set<string>()
+    for (const reference of indexMatrices) {
+      if (typeof reference.category !== 'string' || typeof reference.commodityCode !== 'string' || typeof reference.commodity !== 'string' || typeof reference.countryCode !== 'string' || typeof reference.country !== 'string' || typeof reference.file !== 'string') {
+        addIssue('fatal', indexPath, 'matrices 中存在缺少 category、commodity、country 或 file 的记录。')
+        continue
+      }
+      const matrix = matricesByFile.get(reference.file)
+      if (!matrix) {
+        addIssue('fatal', indexPath, `matrix 文件路径不存在：${reference.file}。`)
+        continue
+      }
+      referencedFiles.add(reference.file)
+      if (matrix.category !== reference.category || matrix.commodityCode !== reference.commodityCode || matrix.commodity !== reference.commodity || matrix.countryCode !== reference.countryCode || matrix.country !== reference.country) {
+        addIssue('fatal', indexPath, `matrix 文件 ${reference.file} 的元数据与 index 引用不一致。`)
+      }
+    }
+    for (const file of matricesByFile.keys()) {
+      if (!referencedFiles.has(file)) addIssue('fatal', indexPath, `真实 matrix 文件未在 index.matrices 中引用：${file}。`)
+    }
     const selection = parsedIndex.defaultSelection
     if (!isRecord(selection) || typeof selection.commodityDescription !== 'string' || typeof selection.countryName !== 'string') {
       addIssue('fatal', indexPath, 'defaultSelection 基础结构缺失。')
     } else {
       const commodity = commodities.find((item) => item.commodityDescription === selection.commodityDescription)
       const country = countries.find((item) => item.countryName === selection.countryName)
-      if (!commodity || !country || !matrices.has(`${commodity.commodityCode}|${country.countryCode}`)) {
+      const defaultMatrix = indexMatrices.find((item) => item.commodity === selection.commodityDescription && item.country === selection.countryName)
+      if (!commodity || !country || !defaultMatrix) {
         addIssue('fatal', indexPath, 'defaultSelection 未对应到真实 matrix 文件。')
       }
     }

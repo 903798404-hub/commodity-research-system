@@ -63,7 +63,7 @@ select { min-height: 40px; border: 1px solid #d6dee5; border-radius: 8px; backgr
 
 .year-toggle { align-self: center; padding: 10px 12px; background: #eaf4f8; color: #17617f; white-space: nowrap; }
 
-.table-scroll { max-height: 580px; overflow: auto; }
+.table-scroll { overflow-x: auto; }
 
 table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
 

@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import Papa from 'papaparse'
+import { G3_COMMODITIES, G3_COUNTRIES, isResearchCombination, RESEARCH_SCOPE, researchScopeReportLines } from './researchScope'
 
 type Category = 'Oilseeds' | 'Oils' | 'Meals'
 
@@ -31,6 +32,7 @@ type IndexData = {
   categories: Category[]
   commodities: Array<{ commodityCode: string; commodityDescription: string; category: Category; displayName: string }>
   countries: Array<{ countryCode: string; countryName: string }>
+  matrices: Array<{ category: Category; commodityCode: string; commodity: string; countryCode: string; country: string; file: string }>
   defaultSelection: { category: 'Oils'; commodityDescription: 'Oil, Soybean'; countryName: 'United States' }
 }
 
@@ -49,6 +51,7 @@ const MATRIX_DIRECTORY = join(DATA_DIRECTORY, 'matrix')
 const REPORT_FILE = join(process.cwd(), 'output', 'data_build_report.md')
 const CATEGORIES: Category[] = ['Oilseeds', 'Oils', 'Meals']
 const MIN_YEAR = 2018
+const NON_ADDITIVE_ATTRIBUTES = new Set(['Yield'])
 
 const ATTRIBUTE_NAMES: Array<{ source: string; name: string }> = [
   { source: 'Beginning Stocks', name: '期初库存' },
@@ -219,12 +222,39 @@ function buildMatrix(store: MatrixStore, allMatrices: Map<string, MatrixStore>):
   return { commodityCode: store.commodityCode, commodity: store.commodity, category: store.category, countryCode: store.countryCode, country: store.country, years, rows }
 }
 
-function writeReport(sourceFile: string, index: IndexData, matrixCount: number, defaultCreated: boolean, unknownCommodities: Set<string>, missingKeyFields: number) {
+function cloneAsVirtualStore(source: MatrixStore, countryCode: string, country: string): MatrixStore {
+  return { ...source, countryCode, country }
+}
+
+function aggregateStores(sources: MatrixStore[], commodityCode: string, commodity: string, category: Category, countryCode: string, country: string): MatrixStore | null {
+  if (sources.length === 0) return null
+  const attributes = new Map<string, Map<number, StoredValue>>()
+  const attributeNames = new Set(sources.flatMap((source) => [...source.attributes.keys()]))
+  for (const attribute of attributeNames) {
+    if (NON_ADDITIVE_ATTRIBUTES.has(attribute)) continue
+    const years = new Set<number>()
+    for (const source of sources) for (const year of source.attributes.get(attribute)?.keys() ?? []) years.add(year)
+    const totals = new Map<number, StoredValue>()
+    for (const year of years) {
+      const values = sources.map((source) => source.attributes.get(attribute)?.get(year)).filter((value): value is StoredValue => Boolean(value) && Number.isFinite(value.value))
+      if (values.length > 0) totals.set(year, { value: roundOneDecimal(values.reduce((sum, value) => sum + value.value, 0)), unit: values[0].unit })
+    }
+    if (totals.size > 0) attributes.set(attribute, totals)
+  }
+  return { commodityCode, commodity, category, countryCode, country, attributes }
+}
+
+function isWorldStore(store: MatrixStore): boolean {
+  return /(^|\s)(world|global)(\s|$)/i.test(store.country)
+}
+
+function writeReport(sourceFile: string, index: IndexData, matrixCount: number, defaultCreated: boolean, unknownCommodities: Set<string>, missingKeyFields: number, globalSources: Map<string, 'USDA World' | 'synthetic sum'>) {
   mkdirSync(join(process.cwd(), 'output'), { recursive: true })
   const lines = [
     '# 数据构建报告',
     '',
     `- 原始 CSV：\`${basename(sourceFile)}\``,
+    '- 数据模式：研究白名单模式，仅生成核心油脂油粕商品与指定国家组合。',
     `- 年份过滤：仅保留 Market_Year >= ${MIN_YEAR} 的数据`,
     `- 生成商品数：${index.commodities.length}`,
     `- 生成国家数：${index.countries.length}`,
@@ -232,6 +262,16 @@ function writeReport(sourceFile: string, index: IndexData, matrixCount: number, 
     `- Oil, Soybean + United States：${defaultCreated ? '成功生成' : '未生成'}`,
     `- 无法识别 category 的 Commodity_Description：${unknownCommodities.size}${unknownCommodities.size ? `（${[...unknownCommodities].slice(0, 20).join('；')}）` : ''}`,
     `- 缺少关键字段的数据行：${missingKeyFields}`,
+    '',
+    '## 研究白名单',
+    '',
+    ...researchScopeReportLines(),
+    '',
+    '## 聚合口径',
+    '',
+    '- G3 = United States + Brazil + Argentina，仅用于 Oilseed, Soybean / Meal, Soybean / Oil, Soybean；期末库销比按 G3 期末库存 ÷ G3 消费量重新计算。',
+    '- Global 优先使用 USDA World 原始口径；本次未发现可识别 World/Global 原始国家记录，以下 Global 均为 synthetic sum（原始数据全部国家记录汇总）。',
+    ...[...globalSources.entries()].map(([commodity, source]) => `- ${commodity}: ${source}`),
     '',
     '说明：matrix 文件按 Commodity_Code + Country_Code 拆分；数量单位为 (1000 MT) 或 1000 MT 时已转换为万吨。',
   ]
@@ -246,14 +286,44 @@ async function buildData() {
 
   const commodityIndex = new Map<string, IndexData['commodities'][number]>()
   const countryIndex = new Map<string, IndexData['countries'][number]>()
+  const matrixIndex: IndexData['matrices'] = []
+  const renderStores = new Map<string, MatrixStore>()
+  const globalSources = new Map<string, 'USDA World' | 'synthetic sum'>()
   let defaultMatrix: MatrixData | null = null
 
-  let generatedMatrixCount = 0
   for (const store of matrices.values()) {
-    const matrix = buildMatrix(store, matrices)
+    if (isResearchCombination(store.commodity, store.country)) renderStores.set(matrixKey(store.commodityCode, store.countryCode), store)
+  }
+
+  for (const commodity of G3_COMMODITIES) {
+    const sources = [...matrices.values()].filter((store) => store.commodity === commodity && G3_COUNTRIES.includes(store.country))
+    const source = sources[0]
+    const g3 = source && aggregateStores(sources, source.commodityCode, commodity, source.category, 'G3', 'G3')
+    if (g3) renderStores.set(matrixKey(g3.commodityCode, g3.countryCode), g3)
+  }
+
+  for (const commodity of Object.keys(RESEARCH_SCOPE)) {
+    const sources = [...matrices.values()].filter((store) => store.commodity === commodity)
+    const source = sources[0]
+    if (!source) continue
+    const world = sources.find(isWorldStore)
+    const global = world
+      ? cloneAsVirtualStore(world, 'GL', 'Global')
+      : aggregateStores(sources.filter((store) => !isWorldStore(store)), source.commodityCode, commodity, source.category, 'GL', 'Global')
+    if (global) {
+      renderStores.set(matrixKey(global.commodityCode, global.countryCode), global)
+      globalSources.set(commodity, world ? 'USDA World' : 'synthetic sum')
+    }
+  }
+
+  let generatedMatrixCount = 0
+  for (const store of renderStores.values()) {
+    const matrix = buildMatrix(store, renderStores)
     if (matrix.years.length === 0) continue
-    writeFileSync(join(MATRIX_DIRECTORY, safeFileName(store.commodityCode, store.countryCode)), `${JSON.stringify(matrix, null, 2)}\n`, 'utf8')
+    const file = `matrix/${safeFileName(store.commodityCode, store.countryCode)}`
+    writeFileSync(join(DATA_DIRECTORY, file), `${JSON.stringify(matrix, null, 2)}\n`, 'utf8')
     generatedMatrixCount += 1
+    matrixIndex.push({ category: matrix.category, commodityCode: matrix.commodityCode, commodity: matrix.commodity, countryCode: matrix.countryCode, country: matrix.country, file })
     commodityIndex.set(store.commodityCode, {
       commodityCode: store.commodityCode,
       commodityDescription: store.commodity,
@@ -268,6 +338,7 @@ async function buildData() {
     categories: CATEGORIES,
     commodities: [...commodityIndex.values()].sort((a, b) => a.category.localeCompare(b.category) || a.displayName.localeCompare(b.displayName)),
     countries: [...countryIndex.values()].sort((a, b) => a.countryName.localeCompare(b.countryName)),
+    matrices: matrixIndex.sort((a, b) => a.category.localeCompare(b.category) || a.commodity.localeCompare(b.commodity) || a.country.localeCompare(b.country)),
     defaultSelection: { category: 'Oils', commodityDescription: 'Oil, Soybean', countryName: 'United States' },
   }
 
@@ -278,7 +349,7 @@ async function buildData() {
     const legacyMatrix = { ...defaultMatrix, rows: legacyOrder.flatMap((name) => defaultMatrix.rows.filter((row) => row.name === name)) }
     writeFileSync(join(DATA_DIRECTORY, 'soybean_oil_US.json'), `${JSON.stringify(legacyMatrix, null, 2)}\n`, 'utf8')
   }
-  writeReport(sourceFile, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields)
+  writeReport(sourceFile, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields, globalSources)
   console.log(`已生成 ${generatedMatrixCount} 个 matrix JSON、${index.commodities.length} 个商品和 ${index.countries.length} 个国家。`)
 }
 
