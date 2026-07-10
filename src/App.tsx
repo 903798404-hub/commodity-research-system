@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
+import { buildChartSeries, type ChartMode } from './utils/chart'
+import { buildMetricCsv, downloadCsv } from './utils/csv'
 import { formatNumber, formatPercent, normalizeSeries } from './utils/number'
 
 type Category = 'Oilseeds' | 'Oils' | 'Meals'
@@ -38,6 +40,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showAllYears, setShowAllYears] = useState(false)
+  const [selectedIndicators, setSelectedIndicators] = useState<string[]>([])
+  const [chartMode, setChartMode] = useState<ChartMode>('raw')
 
   useEffect(() => {
     fetch('/data/index.json')
@@ -81,22 +85,36 @@ function App() {
     return () => controller.abort()
   }, [catalog, selection])
 
+  useEffect(() => {
+    if (!data) return
+    const available = data.rows.filter((row) => normalizeSeries(row.values, data.years.length).some((value) => value !== null))
+    const preferred = ['期末库存', '期末库销比'].filter((name) => available.some((row) => row.name === name))
+    setSelectedIndicators(preferred.length > 0 ? preferred : available.slice(0, 2).map((row) => row.name))
+    setChartMode('raw')
+  }, [data])
+
   const visibleStart = data && !showAllYears ? Math.max(0, data.years.length - 15) : 0
   const visibleYears = data?.years.slice(visibleStart) ?? []
   const forecastStart = data ? Math.max(0, data.years.length - 2) : 0
   const chartOption = useMemo(() => {
     if (!data) return undefined
-    const endingStocks = normalizeSeries(data.rows.find((row) => row.name === '期末库存')?.values, data.years.length).slice(visibleStart)
-    const stockToUse = normalizeSeries(data.rows.find((row) => row.name === '期末库销比')?.values, data.years.length).slice(visibleStart)
+    const selectedMetrics = data.rows.filter((row) => selectedIndicators.includes(row.name))
+    const definitions = buildChartSeries(selectedMetrics, data.years.length, chartMode)
+    const hasPercentageSeries = definitions.some((series) => series.isPercent)
+    const hasNumberSeries = definitions.some((series) => !series.isPercent)
     const chartForecastStart = Math.max(0, data.years.length - 2 - visibleStart)
     return {
       tooltip: {
         trigger: 'axis',
-        formatter: (params: Array<{ axisValueLabel?: string; marker?: string; seriesName?: string; value?: unknown }>) => {
+        formatter: (params: Array<{ axisValueLabel?: string; marker?: string; seriesName?: string; seriesIndex?: number; dataIndex?: number; value?: unknown }>) => {
           const title = params[0]?.axisValueLabel ?? ''
           const lines = params.map((item) => {
-            const formatted = item.seriesName === '期末库销比' ? formatPercent(item.value) : formatNumber(item.value)
-            return `${item.marker ?? ''}${item.seriesName ?? ''}：${formatted === '—' ? '暂无数据' : formatted}`
+            const definition = definitions[item.seriesIndex ?? -1]
+            const isForecast = (item.dataIndex ?? -1) >= chartForecastStart
+            const sampleInsufficient = definition?.sampleInsufficient[(item.dataIndex ?? -1) + visibleStart]
+            const formatted = definition?.isPercent ? formatPercent(item.value) : formatNumber(item.value)
+            const valueText = sampleInsufficient ? '样本不足' : formatted === '—' ? '暂无数据' : formatted
+            return `${item.marker ?? ''}${item.seriesName ?? ''}：${valueText}${isForecast ? '（预测年份）' : ''}`
           })
           return [title, ...lines].join('<br/>')
         },
@@ -111,16 +129,25 @@ function App() {
           rich: { forecast: { color: '#c8372d', fontWeight: 700 } },
         },
       },
-      yAxis: [
-        { type: 'value', name: '万吨', nameTextStyle: { color: '#667085' } },
-        { type: 'value', name: '%', nameTextStyle: { color: '#667085' }, axisLabel: { formatter: '{value}%' } },
-      ],
-      series: [
-        { name: '期末库存', type: 'bar', data: endingStocks, itemStyle: { color: '#2f6f8f' } },
-        { name: '期末库销比', type: 'line', yAxisIndex: 1, data: stockToUse, smooth: true, symbolSize: 6, itemStyle: { color: '#c8372d' } },
-      ],
+      yAxis: chartMode === 'yoy'
+        ? [{ type: 'value', name: '%', nameTextStyle: { color: '#667085' }, axisLabel: { formatter: '{value}%' } }]
+        : [
+          { type: 'value', show: hasNumberSeries, name: '万吨', nameTextStyle: { color: '#667085' } },
+          { type: 'value', show: hasPercentageSeries, name: '%', nameTextStyle: { color: '#667085' }, axisLabel: { formatter: '{value}%' } },
+        ],
+      series: definitions.map((definition, index) => ({
+        name: definition.name,
+        type: chartMode === 'raw' && index === 0 ? 'bar' : 'line',
+        yAxisIndex: chartMode === 'yoy' || !definition.isPercent ? 0 : 1,
+        data: definition.values.slice(visibleStart),
+        smooth: true,
+        connectNulls: false,
+        symbolSize: 6,
+        itemStyle: { color: index % 2 === 0 ? '#2f6f8f' : '#c8372d' },
+        lineStyle: chartMode === 'fiveYearAverage' && definition.name.endsWith('原始') ? { type: 'dashed' } : undefined,
+      })),
     }
-  }, [data, visibleStart, visibleYears])
+  }, [chartMode, data, selectedIndicators, visibleStart, visibleYears])
 
   function chooseCategory(category: Category) {
     if (!catalog || !selection) return
@@ -128,6 +155,10 @@ function App() {
     if (!firstCommodity) return
     setShowAllYears(false)
     setSelection({ ...selection, category, commodityDescription: firstCommodity.commodityDescription })
+  }
+
+  function toggleIndicator(name: string) {
+    setSelectedIndicators((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name])
   }
 
   if (error && !catalog) return <main className="page-state">加载失败：{error}</main>
@@ -171,6 +202,18 @@ function App() {
 
       {data && chartOption && (
         <>
+          <section className="card chart-controls" aria-label="图表设置">
+            <fieldset>
+              <legend>图表指标</legend>
+              <div className="indicator-list">
+                {data.rows.map((row) => <label key={row.name}><input type="checkbox" checked={selectedIndicators.includes(row.name)} onChange={() => toggleIndicator(row.name)} />{row.name}</label>)}
+              </div>
+            </fieldset>
+            <div className="analysis-actions">
+              <label>图表模式<select value={chartMode} onChange={(event) => setChartMode(event.target.value as ChartMode)}><option value="raw">原始数值</option><option value="yoy">同比变化</option><option value="fiveYearAverage">五年均值对比</option></select></label>
+              <button className="year-toggle" type="button" onClick={() => downloadCsv(buildMetricCsv(data.rows.filter((row) => selectedIndicators.includes(row.name)), data.years, visibleStart), data.commodity, data.country)}>下载 CSV</button>
+            </div>
+          </section>
           <section className="card table-card" aria-label="供需平衡表">
             <div className="card-heading">
               <div>
@@ -200,7 +243,7 @@ function App() {
           </section>
 
           <section className="card chart-card" aria-label="期末库存与库销比图表">
-            <div className="card-heading"><div><h2>期末库存与库销比</h2><p>柱状图为期末库存，折线为期末库销比。</p></div></div>
+            <div className="card-heading"><div><h2>供需指标趋势</h2><p>{chartMode === 'raw' ? '显示所选指标的原始数值。' : chartMode === 'yoy' ? '同比变化仅在上一年有效且不为零时计算。' : '五年均值仅在窗口内有五个有效年份时显示。'}</p></div></div>
             <ReactECharts option={chartOption} style={{ height: 390, width: '100%' }} />
           </section>
         </>

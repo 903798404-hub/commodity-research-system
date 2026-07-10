@@ -37,6 +37,22 @@ h1 { margin-bottom: 8px; color: #12324a; font-size: clamp(28px, 4vw, 38px); lett
 
 .selectors label { display: grid; gap: 6px; min-width: 240px; color: #475467; font-size: 13px; font-weight: 700; }
 
+.chart-controls { display: flex; flex-wrap: wrap; gap: 20px; padding: 18px 20px; align-items: end; }
+
+.chart-controls fieldset { flex: 1 1 600px; min-width: 0; margin: 0; padding: 0; border: 0; }
+
+.chart-controls legend { margin-bottom: 8px; color: #475467; font-size: 13px; font-weight: 700; }
+
+.indicator-list { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+
+.indicator-list label { color: #344054; cursor: pointer; font-size: 13px; white-space: nowrap; }
+
+.indicator-list input { margin-right: 5px; vertical-align: middle; }
+
+.analysis-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+
+.analysis-actions label { display: grid; gap: 6px; color: #475467; font-size: 13px; font-weight: 700; }
+
 select { min-height: 40px; border: 1px solid #d6dee5; border-radius: 8px; background: #fff; color: #172b3a; font: inherit; padding: 0 10px; }
 
 .card-heading { display: flex; justify-content: space-between; padding: 21px 24px 18px; border-bottom: 1px solid #e8edf1; }
@@ -76,6 +92,7 @@ tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
   .card-heading { padding: 18px 16px; }
   .controls-card { padding: 14px; }
   .selectors label { min-width: 100%; }
+  .chart-controls { padding: 16px; }
   .card-heading { gap: 12px; flex-direction: column; }
   .year-toggle { align-self: flex-start; }
 }
