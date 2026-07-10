@@ -1,0 +1,90 @@
+{
+  "commodityCode": "0813300",
+  "commodity": "Meal, Cottonseed",
+  "category": "Meals",
+  "countryCode": "GG",
+  "country": "Georgia",
+  "years": [
+    1987
+  ],
+  "rows": [
+    {
+      "name": "棉籽产量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "棉籽压榨",
+      "values": [
+        2
+      ]
+    },
+    {
+      "name": "期初库存",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "产量",
+      "values": [
+        0.9
+      ]
+    },
+    {
+      "name": "进口量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "压榨量",
+      "values": [
+        2
+      ]
+    },
+    {
+      "name": "出口量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "消费量",
+      "values": [
+        0.9
+      ]
+    },
+    {
+      "name": "工业消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "食用消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "饲用及损耗消费",
+      "values": [
+        0.9
+      ]
+    },
+    {
+      "name": "期末库存",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "期末库销比",
+      "values": [
+        0
+      ]
+    }
+  ]
+}

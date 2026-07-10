@@ -1,0 +1,90 @@
+{
+  "commodityCode": "4234000",
+  "commodity": "Oil, Peanut",
+  "category": "Oils",
+  "countryCode": "SP",
+  "country": "Spain",
+  "years": [
+    1978
+  ],
+  "rows": [
+    {
+      "name": "花生产量",
+      "values": [
+        0.6
+      ]
+    },
+    {
+      "name": "花生压榨",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "期初库存",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "产量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "进口量",
+      "values": [
+        0.3
+      ]
+    },
+    {
+      "name": "压榨量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "出口量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "消费量",
+      "values": [
+        0.3
+      ]
+    },
+    {
+      "name": "工业消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "食用消费",
+      "values": [
+        0.3
+      ]
+    },
+    {
+      "name": "饲用及损耗消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "期末库存",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "期末库销比",
+      "values": [
+        0
+      ]
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "commodityCode": "2223000",
+  "commodity": "Oilseed, Cottonseed",
+  "category": "Oilseeds",
+  "countryCode": "DA",
+  "country": "Denmark",
+  "years": [
+    1969,
+    1970,
+    1980
+  ],
+  "rows": [
+    {
+      "name": "期初库存",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "产量",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "进口量",
+      "values": [
+        0.1,
+        0.1,
+        0.2
+      ]
+    },
+    {
+      "name": "压榨量",
+      "values": [
+        0.1,
+        0.1,
+        0
+      ]
+    },
+    {
+      "name": "出口量",
+      "values": [
+        0,
+        0,
+        0.2
+      ]
+    },
+    {
+      "name": "消费量",
+      "values": [
+        0.1,
+        0.1,
+        0
+      ]
+    },
+    {
+      "name": "食用消费",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "饲用及损耗消费",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "期末库存",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "收获面积",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "单产",
+      "values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "期末库销比",
+      "values": [
+        0,
+        0,
+        null
+      ]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "commodityCode": "4239100",
+  "commodity": "Oil, Rapeseed",
+  "category": "Oils",
+  "countryCode": "HU",
+  "country": "Hungary",
+  "years": [
+    1998
+  ],
+  "rows": [
+    {
+      "name": "菜籽产量",
+      "values": [
+        7.4
+      ]
+    },
+    {
+      "name": "菜籽压榨",
+      "values": [
+        4.2
+      ]
+    },
+    {
+      "name": "期初库存",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "产量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "进口量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "压榨量",
+      "values": [
+        4.2
+      ]
+    },
+    {
+      "name": "出口量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "消费量",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "工业消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "食用消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "饲用及损耗消费",
+      "values": [
+        0
+      ]
+    },
+    {
+      "name": "期末库存",
+      "values": [
+        0
+      ]
+    }
+  ]
+}
