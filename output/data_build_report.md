@@ -1,9 +1,10 @@
 # 数据构建报告
 
 - 原始 CSV：`psd_oilseeds_202606.csv`
+- 年份过滤：仅保留 Market_Year >= 2018 的数据
 - 生成商品数：27
-- 生成国家数：168
-- 生成 matrix JSON 数：1592
+- 生成国家数：127
+- 生成 matrix JSON 数：1027
 - Oil, Soybean + United States：成功生成
 - 无法识别 category 的 Commodity_Description：0
 - 缺少关键字段的数据行：0

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
+import { formatNumber, formatPercent, normalizeSeries } from './utils/number'
 
 type Category = 'Oilseeds' | 'Oils' | 'Meals'
-type BalanceRow = { name: string; values: Array<number | null> }
+type BalanceRow = { name: string; values: unknown }
 type MatrixData = {
   commodityCode: string
   commodity: string
@@ -26,9 +27,8 @@ function formatMarketYear(year: number): string {
   return `${String(year).slice(-2)}/${String(year + 1).slice(-2)}`
 }
 
-function formatValue(value: number | null, isRatio: boolean): string {
-  if (value === null) return '—'
-  return isRatio ? `${value.toFixed(1)}%` : value.toFixed(1)
+function formatValue(value: unknown, isRatio: boolean): string {
+  return isRatio ? formatPercent(value) : formatNumber(value)
 }
 
 function App() {
@@ -86,11 +86,21 @@ function App() {
   const forecastStart = data ? Math.max(0, data.years.length - 2) : 0
   const chartOption = useMemo(() => {
     if (!data) return undefined
-    const endingStocks = data.rows.find((row) => row.name === '期末库存')?.values.slice(visibleStart) ?? []
-    const stockToUse = data.rows.find((row) => row.name === '期末库销比')?.values.slice(visibleStart) ?? []
+    const endingStocks = normalizeSeries(data.rows.find((row) => row.name === '期末库存')?.values, data.years.length).slice(visibleStart)
+    const stockToUse = normalizeSeries(data.rows.find((row) => row.name === '期末库销比')?.values, data.years.length).slice(visibleStart)
     const chartForecastStart = Math.max(0, data.years.length - 2 - visibleStart)
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: Array<{ axisValueLabel?: string; marker?: string; seriesName?: string; value?: unknown }>) => {
+          const title = params[0]?.axisValueLabel ?? ''
+          const lines = params.map((item) => {
+            const formatted = item.seriesName === '期末库销比' ? formatPercent(item.value) : formatNumber(item.value)
+            return `${item.marker ?? ''}${item.seriesName ?? ''}：${formatted === '—' ? '暂无数据' : formatted}`
+          })
+          return [title, ...lines].join('<br/>')
+        },
+      },
       legend: { top: 4, data: ['期末库存', '期末库销比'] },
       grid: { top: 52, right: 58, bottom: 48, left: 58 },
       xAxis: {
@@ -179,7 +189,8 @@ function App() {
                 })}</tr></thead>
                 <tbody>{data.rows.map((row) => {
                   const isRatio = row.name === '期末库销比'
-                  return <tr key={row.name}><th scope="row">{row.name}</th>{row.values.slice(visibleStart).map((value, index) => {
+                  const values = normalizeSeries(row.values, data.years.length).slice(visibleStart)
+                  return <tr key={row.name}><th scope="row">{row.name}</th>{values.map((value, index) => {
                     const absoluteIndex = visibleStart + index
                     return <td className={absoluteIndex >= forecastStart ? 'forecast' : ''} key={`${row.name}-${visibleYears[index]}`}>{formatValue(value, isRatio)}</td>
                   })}</tr>

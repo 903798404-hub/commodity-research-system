@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:data": "tsx scripts/buildData.ts"
+    "build:data": "tsx scripts/buildData.ts",
+    "check:data": "tsx scripts/checkData.ts"
   },
   "dependencies": {
     "echarts": "^6.0.0",

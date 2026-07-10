@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import Papa from 'papaparse'
 
@@ -48,6 +48,7 @@ const DATA_DIRECTORY = join(process.cwd(), 'public', 'data')
 const MATRIX_DIRECTORY = join(DATA_DIRECTORY, 'matrix')
 const REPORT_FILE = join(process.cwd(), 'output', 'data_build_report.md')
 const CATEGORIES: Category[] = ['Oilseeds', 'Oils', 'Meals']
+const MIN_YEAR = 2018
 
 const ATTRIBUTE_NAMES: Array<{ source: string; name: string }> = [
   { source: 'Beginning Stocks', name: '期初库存' },
@@ -186,7 +187,7 @@ function hasAnyValue(values: Array<number | null>): boolean {
 function buildMatrix(store: MatrixStore, allMatrices: Map<string, MatrixStore>): MatrixData {
   const yearSet = new Set<number>()
   for (const values of store.attributes.values()) for (const year of values.keys()) yearSet.add(year)
-  const years = [...yearSet].sort((a, b) => a - b)
+  const years = [...yearSet].filter((year) => year >= MIN_YEAR).sort((a, b) => a - b)
   const rows: DataRow[] = []
   const upstream = UPSTREAM_RULES[store.commodity]
 
@@ -224,6 +225,7 @@ function writeReport(sourceFile: string, index: IndexData, matrixCount: number, 
     '# 数据构建报告',
     '',
     `- 原始 CSV：\`${basename(sourceFile)}\``,
+    `- 年份过滤：仅保留 Market_Year >= ${MIN_YEAR} 的数据`,
     `- 生成商品数：${index.commodities.length}`,
     `- 生成国家数：${index.countries.length}`,
     `- 生成 matrix JSON 数：${matrixCount}`,
@@ -239,13 +241,19 @@ function writeReport(sourceFile: string, index: IndexData, matrixCount: number, 
 async function buildData() {
   const sourceFile = findSingleSourceFile()
   const { matrices, unknownCommodities, missingKeyFields } = await readMatrices(sourceFile)
+  rmSync(MATRIX_DIRECTORY, { recursive: true, force: true })
   mkdirSync(MATRIX_DIRECTORY, { recursive: true })
 
   const commodityIndex = new Map<string, IndexData['commodities'][number]>()
   const countryIndex = new Map<string, IndexData['countries'][number]>()
   let defaultMatrix: MatrixData | null = null
 
+  let generatedMatrixCount = 0
   for (const store of matrices.values()) {
+    const matrix = buildMatrix(store, matrices)
+    if (matrix.years.length === 0) continue
+    writeFileSync(join(MATRIX_DIRECTORY, safeFileName(store.commodityCode, store.countryCode)), `${JSON.stringify(matrix, null, 2)}\n`, 'utf8')
+    generatedMatrixCount += 1
     commodityIndex.set(store.commodityCode, {
       commodityCode: store.commodityCode,
       commodityDescription: store.commodity,
@@ -253,6 +261,7 @@ async function buildData() {
       displayName: store.commodity.replace(/^(Oilseed|Oil|Meal),\s*/, ''),
     })
     countryIndex.set(store.countryCode, { countryCode: store.countryCode, countryName: store.country })
+    if (matrix.commodity === 'Oil, Soybean' && matrix.country === 'United States') defaultMatrix = matrix
   }
 
   const index: IndexData = {
@@ -262,12 +271,6 @@ async function buildData() {
     defaultSelection: { category: 'Oils', commodityDescription: 'Oil, Soybean', countryName: 'United States' },
   }
 
-  for (const store of matrices.values()) {
-    const matrix = buildMatrix(store, matrices)
-    writeFileSync(join(MATRIX_DIRECTORY, safeFileName(store.commodityCode, store.countryCode)), `${JSON.stringify(matrix, null, 2)}\n`, 'utf8')
-    if (matrix.commodity === 'Oil, Soybean' && matrix.country === 'United States') defaultMatrix = matrix
-  }
-
   mkdirSync(DATA_DIRECTORY, { recursive: true })
   writeFileSync(join(DATA_DIRECTORY, 'index.json'), `${JSON.stringify(index, null, 2)}\n`, 'utf8')
   if (defaultMatrix) {
@@ -275,8 +278,8 @@ async function buildData() {
     const legacyMatrix = { ...defaultMatrix, rows: legacyOrder.flatMap((name) => defaultMatrix.rows.filter((row) => row.name === name)) }
     writeFileSync(join(DATA_DIRECTORY, 'soybean_oil_US.json'), `${JSON.stringify(legacyMatrix, null, 2)}\n`, 'utf8')
   }
-  writeReport(sourceFile, index, matrices.size, defaultMatrix !== null, unknownCommodities, missingKeyFields)
-  console.log(`已生成 ${matrices.size} 个 matrix JSON、${index.commodities.length} 个商品和 ${index.countries.length} 个国家。`)
+  writeReport(sourceFile, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields)
+  console.log(`已生成 ${generatedMatrixCount} 个 matrix JSON、${index.commodities.length} 个商品和 ${index.countries.length} 个国家。`)
 }
 
 buildData().catch((error: unknown) => {

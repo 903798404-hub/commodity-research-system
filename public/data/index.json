@@ -174,10 +174,6 @@
       "countryName": "Afghanistan"
     },
     {
-      "countryCode": "AL",
-      "countryName": "Albania"
-    },
-    {
       "countryCode": "AG",
       "countryName": "Algeria"
     },
@@ -190,16 +186,8 @@
       "countryName": "Argentina"
     },
     {
-      "countryCode": "AM",
-      "countryName": "Armenia"
-    },
-    {
       "countryCode": "AS",
       "countryName": "Australia"
-    },
-    {
-      "countryCode": "AU",
-      "countryName": "Austria"
     },
     {
       "countryCode": "AJ",
@@ -218,16 +206,8 @@
       "countryName": "Belarus"
     },
     {
-      "countryCode": "BE",
-      "countryName": "Belgium-Luxembourg"
-    },
-    {
       "countryCode": "DM",
       "countryName": "Benin"
-    },
-    {
-      "countryCode": "BD",
-      "countryName": "Bermuda"
     },
     {
       "countryCode": "BL",
@@ -240,10 +220,6 @@
     {
       "countryCode": "BR",
       "countryName": "Brazil"
-    },
-    {
-      "countryCode": "BU",
-      "countryName": "Bulgaria"
     },
     {
       "countryCode": "UV",
@@ -302,24 +278,8 @@
       "countryName": "Cote d'Ivoire"
     },
     {
-      "countryCode": "HR",
-      "countryName": "Croatia"
-    },
-    {
       "countryCode": "CU",
       "countryName": "Cuba"
-    },
-    {
-      "countryCode": "CY",
-      "countryName": "Cyprus"
-    },
-    {
-      "countryCode": "EZ",
-      "countryName": "Czech Republic"
-    },
-    {
-      "countryCode": "DA",
-      "countryName": "Denmark"
     },
     {
       "countryCode": "DJ",
@@ -342,16 +302,8 @@
       "countryName": "El Salvador"
     },
     {
-      "countryCode": "EN",
-      "countryName": "Estonia"
-    },
-    {
       "countryCode": "ET",
       "countryName": "Ethiopia"
-    },
-    {
-      "countryCode": "E2",
-      "countryName": "EU-15"
     },
     {
       "countryCode": "E4",
@@ -366,22 +318,6 @@
       "countryName": "Fiji"
     },
     {
-      "countryCode": "FI",
-      "countryName": "Finland"
-    },
-    {
-      "countryCode": "CZ",
-      "countryName": "Former Czechoslovakia"
-    },
-    {
-      "countryCode": "YO",
-      "countryName": "Former Yugoslavia"
-    },
-    {
-      "countryCode": "FR",
-      "countryName": "France"
-    },
-    {
       "countryCode": "GA",
       "countryName": "Gambia, The"
     },
@@ -390,24 +326,8 @@
       "countryName": "Georgia"
     },
     {
-      "countryCode": "GC",
-      "countryName": "German Democratic Republic"
-    },
-    {
-      "countryCode": "GM",
-      "countryName": "Germany"
-    },
-    {
-      "countryCode": "GE",
-      "countryName": "Germany, Federal Republic of"
-    },
-    {
       "countryCode": "GH",
       "countryName": "Ghana"
-    },
-    {
-      "countryCode": "GR",
-      "countryName": "Greece"
     },
     {
       "countryCode": "GT",
@@ -438,10 +358,6 @@
       "countryName": "Hong Kong"
     },
     {
-      "countryCode": "HU",
-      "countryName": "Hungary"
-    },
-    {
       "countryCode": "IC",
       "countryName": "Iceland"
     },
@@ -462,16 +378,8 @@
       "countryName": "Iraq"
     },
     {
-      "countryCode": "EI",
-      "countryName": "Ireland"
-    },
-    {
       "countryCode": "IS",
       "countryName": "Israel"
-    },
-    {
-      "countryCode": "IT",
-      "countryName": "Italy"
     },
     {
       "countryCode": "JM",
@@ -510,10 +418,6 @@
       "countryName": "Kyrgyzstan"
     },
     {
-      "countryCode": "LG",
-      "countryName": "Latvia"
-    },
-    {
       "countryCode": "LE",
       "countryName": "Lebanon"
     },
@@ -524,10 +428,6 @@
     {
       "countryCode": "LY",
       "countryName": "Libya"
-    },
-    {
-      "countryCode": "LH",
-      "countryName": "Lithuania"
     },
     {
       "countryCode": "MA",
@@ -544,10 +444,6 @@
     {
       "countryCode": "ML",
       "countryName": "Mali"
-    },
-    {
-      "countryCode": "MT",
-      "countryName": "Malta"
     },
     {
       "countryCode": "MR",
@@ -572,18 +468,6 @@
     {
       "countryCode": "MZ",
       "countryName": "Mozambique"
-    },
-    {
-      "countryCode": "NL",
-      "countryName": "Netherlands"
-    },
-    {
-      "countryCode": "NA",
-      "countryName": "Netherlands Antilles"
-    },
-    {
-      "countryCode": "NC",
-      "countryName": "New Caledonia"
     },
     {
       "countryCode": "NZ",
@@ -642,18 +526,6 @@
       "countryName": "Philippines"
     },
     {
-      "countryCode": "PL",
-      "countryName": "Poland"
-    },
-    {
-      "countryCode": "PO",
-      "countryName": "Portugal"
-    },
-    {
-      "countryCode": "RO",
-      "countryName": "Romania"
-    },
-    {
       "countryCode": "RS",
       "countryName": "Russia"
     },
@@ -682,24 +554,12 @@
       "countryName": "Serbia"
     },
     {
-      "countryCode": "SR",
-      "countryName": "Serbia and Montenegro"
-    },
-    {
       "countryCode": "SL",
       "countryName": "Sierra Leone"
     },
     {
       "countryCode": "SN",
       "countryName": "Singapore"
-    },
-    {
-      "countryCode": "LO",
-      "countryName": "Slovakia"
-    },
-    {
-      "countryCode": "SI",
-      "countryName": "Slovenia"
     },
     {
       "countryCode": "BP",
@@ -714,24 +574,12 @@
       "countryName": "South Africa"
     },
     {
-      "countryCode": "SP",
-      "countryName": "Spain"
-    },
-    {
       "countryCode": "CE",
       "countryName": "Sri Lanka"
     },
     {
       "countryCode": "SU",
       "countryName": "Sudan"
-    },
-    {
-      "countryCode": "NS",
-      "countryName": "Suriname"
-    },
-    {
-      "countryCode": "SW",
-      "countryName": "Sweden"
     },
     {
       "countryCode": "SZ",
@@ -786,10 +634,6 @@
       "countryName": "Ukraine"
     },
     {
-      "countryCode": "UR",
-      "countryName": "Union of Soviet Socialist Repu"
-    },
-    {
       "countryCode": "TC",
       "countryName": "United Arab Emirates"
     },
@@ -824,14 +668,6 @@
     {
       "countryCode": "YM",
       "countryName": "Yemen"
-    },
-    {
-      "countryCode": "YS",
-      "countryName": "Yemen (Aden)"
-    },
-    {
-      "countryCode": "YE",
-      "countryName": "Yemen (Sanaa)"
     },
     {
       "countryCode": "ZA",
