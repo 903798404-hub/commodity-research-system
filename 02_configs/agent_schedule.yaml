@@ -1,0 +1,21 @@
+daily_tasks:
+  morning:
+    time: "08:30"
+    tasks:
+      - update_overseas_market
+      - generate_morning_snapshot
+
+  afternoon:
+    time: "16:30"
+    tasks:
+      - update_futures_market
+      - update_basis_excel
+      - run_basis_spread_skill
+      - run_position_change_skill
+
+  evening:
+    time: "20:30"
+    tasks:
+      - run_daily_research_agent
+      - generate_markdown_report
+      - export_excel_report

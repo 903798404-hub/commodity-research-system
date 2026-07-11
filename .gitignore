@@ -1,0 +1,49 @@
+# Python environments and caches
+.venv/
+venv/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local credentials and runtime secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Logs, editor state, dependencies and temporary files
+*.log
+10_logs/
+node_modules/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+market-data-new.zip
+09_deploy/market-data-server-package.zip
+
+# Regenerable data, operational state and dated backups
+01_data/backups/
+01_data/processed/basis_spread/*.csv
+01_data/database/basis/basis_quotes.parquet
+01_data/historical_price_long.xlsx
+01_data/historical_spread_database.xlsx
+01_data/historical_spread_database.parquet
+01_data/update_status.json
+
+# Local/raw market inputs that are updated independently of the codebase
+01_data/manual/basis/国内现货基差.xlsx
+01_data/manual_history/*.xlsx
+01_data/原始数据/*.xlsx
+
+# Regenerable operational outputs; documentation under 06_outputs remains trackable
+06_outputs/daily_price_updates/
+06_outputs/env_check.xlsx
+06_outputs/最终迁移与天气卸载报告.md

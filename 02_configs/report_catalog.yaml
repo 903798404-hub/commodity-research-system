@@ -1,0 +1,47 @@
+[
+  {
+    "title": "国内现货基差、一口价、价差",
+    "category": "价格",
+    "commodities": "大豆/菜籽/棕榈油",
+    "region": "中国",
+    "description": "国内现货报价、主力基差和地区价差研究入口。",
+    "page_key": "basis_domestic",
+    "enabled": true
+  },
+  {
+    "title": "外盘现货价格",
+    "category": "价格",
+    "commodities": "大豆/菜籽/棕榈油",
+    "region": "全球",
+    "description": "全球油籽与油脂现货价格跟踪。",
+    "page_key": "global_flat_price",
+    "enabled": false
+  },
+  {
+    "title": "价差动态看板",
+    "category": "价差",
+    "commodities": "油脂油料",
+    "region": "中国",
+    "description": "月间价差与品种间价差的历史季节性对比。",
+    "page_key": "spreads_dashboard",
+    "enabled": true
+  },
+  {
+    "title": "主力席位动向",
+    "category": "席位",
+    "commodities": "油脂油料",
+    "region": "中国",
+    "description": "主力席位持仓变化与资金方向跟踪。",
+    "page_key": "positions_dashboard",
+    "enabled": false
+  },
+  {
+    "title": "日更运行状态",
+    "category": "运行监控",
+    "commodities": "系统",
+    "region": "服务器",
+    "description": "查看最近一次自动更新结果、数据日期和合约完整性。",
+    "page_key": "status",
+    "enabled": true
+  }
+]

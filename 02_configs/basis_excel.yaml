@@ -1,0 +1,58 @@
+source_file:
+  path: 01_data/manual/basis/国内现货基差.xlsx
+  description: 手动维护的国内现货基差 Excel，保持中文文件名，不要重命名
+
+basis_sheets:
+  豆粕基差:
+    commodity: 豆粕
+    type: basis
+    use_columns: ["日期", "区域", "提货月", "对应合约月", "基差", "盘面价", "一口价（元/吨）", "对应盘面价列数"]
+
+  菜粕基差:
+    commodity: 菜粕
+    type: basis
+    use_columns: ["日期", "区域", "提货月", "对应合约月", "基差", "盘面价", "一口价（元/吨）", "对应盘面价列数"]
+
+  葵粕基差:
+    commodity: 葵粕
+    type: basis
+    use_columns: ["日期", "区域", "提货月", "对应合约月", "基差", "盘面价", "一口价（元/吨）", "对应盘面价列数"]
+
+  一豆基差:
+    commodity: 一豆
+    type: basis
+    use_columns: ["日期", "区域", "提货月", "对应合约月", "基差", "盘面价", "一口价（元/吨）", "对应盘面价列数"]
+
+  24度基差:
+    commodity: 24度
+    type: basis
+    use_columns: ["日期", "区域", "提货月", "对应合约月", "基差", "盘面价", "一口价（元/吨）", "对应盘面价列数"]
+
+  三菜基差:
+    commodity: 三菜
+    type: basis
+    use_columns: ["日期", "区域", "提货月", "对应合约月", "基差", "盘面价", "一口价（元/吨）", "对应盘面价列数"]
+
+cash_price_sheets:
+  一葵价格:
+    commodity: 一葵
+    type: cash_price
+    use_columns: ["日期", "区域", "提货月", "一口价（元/吨）"]
+
+  一级玉米油价格:
+    commodity: 一级玉米油
+    type: cash_price
+    use_columns: ["日期", "区域", "提货月", "一口价（元/吨）"]
+
+futures_sheet:
+  sheet_name: 内盘期货收盘价
+  date_column: Date
+
+spot_spread_sheet:
+  sheet_name: 历史现货价差
+  type: spot_spread
+  description: 国内现货历史价差数据，用于后续价差监控和价差分析
+
+excluded_sheets:
+  - 国内现货价格分析
+  - 历史现货基差

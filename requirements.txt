@@ -1,0 +1,11 @@
+streamlit
+plotly
+pandas
+openpyxl
+akshare
+matplotlib
+pillow
+pyarrow
+filelock
+PyYAML
+pytest

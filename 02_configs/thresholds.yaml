@@ -1,0 +1,14 @@
+basis:
+  daily_change_alert: 50
+  weekly_change_alert: 120
+
+spread:
+  daily_change_alert: 80
+  weekly_change_alert: 150
+
+position:
+  open_interest_change_ratio_alert: 2.0
+  volume_change_ratio_alert: 2.0
+
+inventory:
+  five_year_average_deviation_alert: 1.0

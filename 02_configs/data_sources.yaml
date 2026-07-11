@@ -1,0 +1,30 @@
+akshare:
+  enabled: true
+  type: api
+  update_frequency: daily
+  description: 国内期货行情、部分现货和市场数据
+
+usda:
+  enabled: true
+  type: report
+  update_frequency: monthly
+  description: 全球油籽、豆类、油脂油粕供需报告
+
+mpob:
+  enabled: true
+  type: report
+  update_frequency: monthly
+  description: 马来西亚棕榈油产量、出口、库存数据
+
+customs:
+  enabled: true
+  type: manual_or_file
+  update_frequency: monthly
+  description: 中国海关进出口数据
+
+basis_excel:
+  enabled: true
+  type: manual_excel
+  update_frequency: daily
+  description: 手动维护的基差 Excel
+  path: 01_data/manual/basis/
