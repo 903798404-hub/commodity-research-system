@@ -6,5 +6,8 @@ dist/
 ~$*.xlsx
 output/temp/
 raw/
+data/raw/
+data/snapshots/
+output/*.log
 *.tsbuildinfo
 .vite/

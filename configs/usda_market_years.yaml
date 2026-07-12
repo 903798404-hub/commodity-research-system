@@ -1,0 +1,91 @@
+commodity_aliases:
+  "Oilseed, Soybean":
+    rule_key: soybean
+    commodity_name: 大豆
+  "Oil, Soybean":
+    rule_key: soybean_oil
+    commodity_name: 豆油
+  "Meal, Soybean":
+    rule_key: soybean_meal
+    commodity_name: 豆粕
+  "Oilseed, Rapeseed":
+    rule_key: rapeseed
+    commodity_name: 菜籽
+  "Oil, Rapeseed":
+    rule_key: rapeseed_oil
+    commodity_name: 菜油
+  "Meal, Rapeseed":
+    rule_key: rapeseed_meal
+    commodity_name: 菜粕
+  "Oil, Palm":
+    rule_key: palm_oil
+    commodity_name: 棕榈油
+
+market_year_rules:
+  United States:
+    soybean: { start_month: 9, end_month: 8, label_mode: start_year, display_name: 美国大豆 }
+    soybean_oil: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 美国豆油 }
+    soybean_meal: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 美国豆粕 }
+  Argentina:
+    soybean: { start_month: 4, end_month: 3, label_mode: second_year, display_name: 阿根廷大豆 }
+    soybean_oil: { start_month: 4, end_month: 3, label_mode: second_year, display_name: 阿根廷豆油 }
+    soybean_meal: { start_month: 4, end_month: 3, label_mode: second_year, display_name: 阿根廷豆粕 }
+  Brazil:
+    soybean: { start_month: 1, end_month: 12, label_mode: second_year_calendar, display_name: 巴西大豆 }
+    soybean_oil: { start_month: 1, end_month: 12, label_mode: second_year_calendar, display_name: 巴西豆油 }
+    soybean_meal: { start_month: 1, end_month: 12, label_mode: second_year_calendar, display_name: 巴西豆粕 }
+  Canada:
+    rapeseed: { start_month: 8, end_month: 7, label_mode: start_year, display_name: 加拿大菜籽 }
+    rapeseed_oil: { start_month: 8, end_month: 7, label_mode: start_year, display_name: 加拿大菜油 }
+    rapeseed_meal: { start_month: 8, end_month: 7, label_mode: start_year, display_name: 加拿大菜粕 }
+  Australia:
+    rapeseed: { start_month: 11, end_month: 10, label_mode: start_year, display_name: 澳大利亚菜籽 }
+    rapeseed_oil: { start_month: 11, end_month: 10, label_mode: start_year, display_name: 澳大利亚菜油 }
+    rapeseed_meal: { start_month: 11, end_month: 10, label_mode: start_year, display_name: 澳大利亚菜粕 }
+  European Union:
+    rapeseed: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 欧盟菜籽 }
+    rapeseed_oil: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 欧盟菜油 }
+    rapeseed_meal: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 欧盟菜粕 }
+  China:
+    rapeseed: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 中国菜籽 }
+    rapeseed_oil: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 中国菜油 }
+    rapeseed_meal: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 中国菜粕 }
+  Russia:
+    rapeseed: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 俄罗斯菜籽 }
+    rapeseed_oil: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 俄罗斯菜油 }
+    rapeseed_meal: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 俄罗斯菜粕 }
+  Ukraine:
+    rapeseed: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 乌克兰菜籽 }
+    rapeseed_oil: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 乌克兰菜油 }
+    rapeseed_meal: { start_month: 7, end_month: 6, label_mode: start_year, display_name: 乌克兰菜粕 }
+  Malaysia:
+    palm_oil: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 马来西亚棕榈油 }
+  Indonesia:
+    palm_oil: { start_month: 10, end_month: 9, label_mode: start_year, display_name: 印度尼西亚棕榈油 }
+  G2:
+    palm_oil: { start_month: 10, end_month: 9, label_mode: start_year, display_name: G2棕榈油 }
+
+reference_rows:
+  - { country: United States, commodity_scope: 大豆, rule_key: soybean }
+  - { country: United States, commodity_scope: 豆油、豆粕, rule_key: soybean_oil }
+  - { country: Argentina, commodity_scope: 大豆、豆油、豆粕, rule_key: soybean }
+  - { country: Brazil, commodity_scope: 大豆、豆油、豆粕, rule_key: soybean }
+  - { country: Canada, commodity_scope: 菜籽、菜油、菜粕, rule_key: rapeseed }
+  - { country: Australia, commodity_scope: 菜籽、菜油、菜粕, rule_key: rapeseed }
+  - { country: European Union, commodity_scope: 菜籽、菜油、菜粕, rule_key: rapeseed }
+  - { country: China, commodity_scope: 菜籽、菜油、菜粕, rule_key: rapeseed }
+  - { country: Russia, commodity_scope: 菜籽、菜油、菜粕, rule_key: rapeseed }
+  - { country: Ukraine, commodity_scope: 菜籽、菜油、菜粕, rule_key: rapeseed }
+  - { country: G2, commodity_scope: 棕榈油, rule_key: palm_oil }
+
+country_display_names:
+  United States: 美国
+  Argentina: 阿根廷
+  Brazil: 巴西
+  Canada: 加拿大
+  Australia: 澳大利亚
+  European Union: 欧盟
+  China: 中国
+  Russia: 俄罗斯
+  Ukraine: 乌克兰
+  G2: 马来西亚、印度尼西亚、G2

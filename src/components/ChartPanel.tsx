@@ -15,6 +15,13 @@ type ChartPanelProps = {
 
 export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }: ChartPanelProps) {
   const visibleYears = data.years.slice(visibleStart)
+  const chartTitle = useMemo(() => {
+    const names = filterVisibleMetrics(data.rows)
+      .filter((row) => selectedIndicators.includes(row.name))
+      .map((row) => row.name)
+
+    return names.length > 0 ? `供需指标趋势：${names.join('、')}` : '供需指标趋势'
+  }, [data.rows, selectedIndicators])
   const chartOption = useMemo(() => {
     const selectedMetrics = filterVisibleMetrics(data.rows).filter((row) => selectedIndicators.includes(row.name))
     const definitions = buildChartSeries(selectedMetrics, data.years.length, chartMode)
@@ -38,7 +45,7 @@ export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }
           return [title, ...lines].join('<br/>')
         },
       },
-      legend: { top: 4, data: ['期末库存', '期末库销比'] },
+      legend: { top: 4, data: definitions.map((definition) => definition.name) },
       grid: { top: 52, right: 58, bottom: 48, left: 58 },
       xAxis: {
         type: 'category',
@@ -69,5 +76,5 @@ export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }
   }, [chartMode, data, selectedIndicators, visibleStart, visibleYears])
 
   const description = chartMode === 'raw' ? '显示所选指标的原始数值。' : chartMode === 'yoy' ? '同比变化仅在上一年有效且不为零时计算。' : '五年均值仅在窗口内有五个有效年份时显示。'
-  return <section className="card chart-card" aria-label="期末库存与库销比图表"><div className="card-heading"><div><h2>供需指标趋势</h2><p>{description}</p></div></div><ReactECharts option={chartOption} style={{ height: 390, width: '100%' }} /></section>
+  return <section className="card chart-card" aria-label="供需指标趋势图表"><div className="card-heading"><div><h2>{chartTitle}</h2><p>{description}</p></div></div><ReactECharts option={chartOption} style={{ height: 390, width: '100%' }} /></section>
 }

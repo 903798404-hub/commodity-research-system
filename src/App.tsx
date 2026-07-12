@@ -3,12 +3,14 @@ import { AnalysisControls } from './components/AnalysisControls'
 import { ChartPanel } from './components/ChartPanel'
 import { DashboardHeader } from './components/DashboardHeader'
 import { MatrixTable } from './components/MatrixTable'
+import { MarketYearGuide } from './components/MarketYearGuide'
 import { SelectorPanel } from './components/SelectorPanel'
 import { EmptyState, ErrorState, LoadingState } from './components/StateViews'
 import type { Catalog, Category, Commodity, Country, MatrixData, MatrixReference, Selection } from './types/dashboard'
 import { type ChartMode } from './utils/chart'
 import { buildMetricCsv, downloadCsv } from './utils/csv'
 import { filterVisibleMetrics } from './utils/metrics'
+import { buildMonthlyRevisionLookup, type MonthlyRevisionLookup } from './utils/monthlyRevision'
 import { normalizeSeries } from './utils/number'
 
 function uniqueByCode<T extends { commodityCode?: string; countryCode?: string }>(items: T[], key: 'commodityCode' | 'countryCode'): T[] {
@@ -23,6 +25,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>([])
   const [chartMode, setChartMode] = useState<ChartMode>('raw')
+  const [reportVersion, setReportVersion] = useState<{ currentReportMonth: string; previousReportMonth: string } | null>(null)
+  const [monthlyRevisions, setMonthlyRevisions] = useState<MonthlyRevisionLookup | null>(null)
 
   useEffect(() => {
     fetch('/data/index.json').then((response) => {
@@ -33,6 +37,16 @@ function App() {
       const initial = index.matrices.find((item) => item.category === index.defaultSelection.category && item.commodity === index.defaultSelection.commodityDescription && item.country === index.defaultSelection.countryName) ?? index.matrices[0]
       setSelection(initial ? { category: initial.category, commodityDescription: initial.commodity, countryName: initial.country } : null)
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : '无法读取数据索引'))
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/data/report_version.json', { signal: controller.signal }).then((response) => {
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!response.ok || !contentType.includes('application/json')) return null
+      return response.json() as Promise<{ currentReportMonth: string; previousReportMonth: string }>
+    }).then((version) => setReportVersion(version)).catch(() => setReportVersion(null))
+    return () => controller.abort()
   }, [])
 
   const categoryMatrices = useMemo(() => catalog && selection ? catalog.matrices.filter((item) => item.category === selection.category) : [], [catalog, selection])
@@ -64,9 +78,22 @@ function App() {
   }, [catalog, selection])
 
   useEffect(() => {
+    if (!data || !catalog || !selection || !reportVersion) { setMonthlyRevisions(null); return }
+    const matrix = catalog.matrices.find((item) => item.category === selection.category && item.commodity === selection.commodityDescription && item.country === selection.countryName)
+    if (!matrix) { setMonthlyRevisions(null); return }
+    const controller = new AbortController()
+    fetch(`/data/snapshots/usda_psd/${reportVersion.previousReportMonth}/${matrix.file}`, { signal: controller.signal }).then((response) => {
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!response.ok || !contentType.includes('application/json')) return null
+      return response.json() as Promise<MatrixData>
+    }).then((previous) => setMonthlyRevisions(buildMonthlyRevisionLookup(data, previous))).catch(() => setMonthlyRevisions(null))
+    return () => controller.abort()
+  }, [catalog, data, reportVersion, selection])
+
+  useEffect(() => {
     if (!data) return
     const available = filterVisibleMetrics(data.rows).filter((row) => normalizeSeries(row.values, data.years.length).some((value) => value !== null))
-    const preferred = ['期末库存', '期末库销比'].filter((name) => available.some((row) => row.name === name))
+    const preferred = ['期末库存', '库存/总使用比'].filter((name) => available.some((row) => row.name === name))
     setSelectedIndicators(preferred.length > 0 ? preferred : available.slice(0, 2).map((row) => row.name))
     setChartMode('raw')
   }, [data])
@@ -86,7 +113,7 @@ function App() {
   if (error && !catalog) return <main className="page-state">加载失败：{error}</main>
   if (!catalog) return <main className="page-state">正在加载 USDA PS&amp;D 数据…</main>
 
-  return <main className="dashboard"><DashboardHeader />{selection && <SelectorPanel categories={catalog.categories} selection={selection} commodityOptions={commodityOptions} countries={countryOptions} onCategory={chooseCategory} onCommodity={chooseCommodity} onCountry={chooseCountry} />}{isLoading && <LoadingState />}{error && <ErrorState message={error} />}{!isLoading && !error && !data && <EmptyState />}{data && <><AnalysisControls rows={visibleRows} selectedIndicators={selectedIndicators} chartMode={chartMode} onToggleIndicator={toggleIndicator} onChartMode={setChartMode} onDownload={() => downloadCsv(buildMetricCsv(visibleRows.filter((row) => selectedIndicators.includes(row.name)), data.years, visibleStart), data.commodity, data.country)} /><MatrixTable data={data} rows={visibleRows} visibleStart={visibleStart} /><ChartPanel data={data} selectedIndicators={selectedIndicators} chartMode={chartMode} visibleStart={visibleStart} /></>}</main>
+  return <main className="dashboard"><DashboardHeader />{selection && <><SelectorPanel categories={catalog.categories} selection={selection} commodityOptions={commodityOptions} countries={countryOptions} onCategory={chooseCategory} onCommodity={chooseCommodity} onCountry={chooseCountry} /><MarketYearGuide country={selection.countryName} commodity={selection.commodityDescription} marketYear={data?.years.at(-1)} /></>}{isLoading && <LoadingState />}{error && <ErrorState message={error} />}{!isLoading && !error && !data && <EmptyState />}{data && <><AnalysisControls rows={visibleRows} selectedIndicators={selectedIndicators} chartMode={chartMode} onToggleIndicator={toggleIndicator} onChartMode={setChartMode} onDownload={() => downloadCsv(buildMetricCsv(visibleRows.filter((row) => selectedIndicators.includes(row.name)), data.years, visibleStart, monthlyRevisions), data.commodity, data.country)} /><MatrixTable data={data} rows={visibleRows} visibleStart={visibleStart} monthlyRevisions={monthlyRevisions} /><ChartPanel data={data} selectedIndicators={selectedIndicators} chartMode={chartMode} visibleStart={visibleStart} /></>}</main>
 }
 
 export default App

@@ -29,6 +29,11 @@ export function safePercentChange(current: unknown, previous: unknown): number |
   return ratio === null ? null : ratio * 100
 }
 
+export function safeDifference(current: unknown, previous: unknown): number | null {
+  if (!isValidNumber(current) || !isValidNumber(previous)) return null
+  return current - previous
+}
+
 export function safeAverage(values: unknown): number | null {
   if (!Array.isArray(values)) return null
   const valid = values.filter(isValidNumber)

@@ -1,4 +1,5 @@
 import { isValidNumber, normalizeSeries, safeAverage, safePercentChange } from './number'
+import { isRatioMetric } from './metrics'
 
 export type ChartMode = 'raw' | 'yoy' | 'fiveYearAverage'
 export type ChartMetric = { name: string; values: unknown }
@@ -9,8 +10,6 @@ export type ChartSeriesDefinition = {
   isPercent: boolean
   sampleInsufficient: boolean[]
 }
-
-const isRatioMetric = (name: string) => name === '期末库销比'
 
 function emptyFlags(length: number) {
   return Array.from({ length }, () => false)

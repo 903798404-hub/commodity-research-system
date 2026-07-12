@@ -16,7 +16,7 @@ export function SelectorPanel({ categories, selection, commodityOptions, countri
     <CategoryTabs categories={categories} selected={selection.category} onSelect={onCategory} />
     <div className="selectors">
       <label>Commodity<select value={selection.commodityDescription} onChange={(event) => onCommodity(event.target.value)}>{commodityOptions.map((commodity) => <option key={commodity.commodityCode} value={commodity.commodityDescription}>{commodity.displayName}</option>)}</select></label>
-      <label>Country<select value={selection.countryName} onChange={(event) => onCountry(event.target.value)}>{countries.map((country) => <option key={country.countryCode} value={country.countryName}>{country.countryName}</option>)}</select></label>
+      <label>Country<select value={selection.countryName} onChange={(event) => onCountry(event.target.value)}>{countries.map((country) => <option key={country.countryCode} value={country.countryName}>{country.displayName ?? country.countryName}</option>)}</select></label>
     </div>
   </section>
 }

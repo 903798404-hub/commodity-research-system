@@ -25,6 +25,32 @@ h1 { margin-bottom: 8px; color: #12324a; font-size: clamp(28px, 4vw, 38px); lett
 
 .controls-card { padding: 16px 20px 20px; }
 
+.market-year-guide details { padding: 0 20px; }
+
+.market-year-guide summary { padding: 17px 0; color: #12324a; cursor: pointer; font-weight: 750; }
+
+.market-year-guide-content { padding: 0 0 18px; }
+
+.market-year-current { margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: #eaf4f8; color: #17617f; font-size: 14px; font-weight: 650; }
+
+.market-year-table-wrap { overflow-x: auto; }
+
+.market-year-table { min-width: 0; width: 100%; table-layout: fixed; font-size: 13px; }
+
+.market-year-table th, .market-year-table td { min-width: 0; padding: 10px 12px; text-align: left; white-space: normal; }
+
+.market-year-table th:first-child, .market-year-table td:first-child { position: static; background: transparent; color: inherit; }
+
+.market-year-table thead th { position: static; background: #f8fafb; box-shadow: none; }
+
+.market-year-table th:nth-child(1), .market-year-table td:nth-child(1) { width: 30%; }
+
+.market-year-table th:nth-child(2), .market-year-table td:nth-child(2) { width: 35%; }
+
+.market-year-table th:nth-child(3), .market-year-table td:nth-child(3) { width: 35%; }
+
+.market-year-note { margin: 14px 0 0; color: #667085; font-size: 13px; line-height: 1.6; }
+
 .category-tabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid #e8edf1; }
 
 .category-tabs button, .year-toggle { border: 0; border-radius: 8px; background: transparent; color: #667085; cursor: pointer; font: inherit; font-weight: 700; }

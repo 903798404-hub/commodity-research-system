@@ -12,7 +12,7 @@ export type MatrixData = {
   rows: BalanceRow[]
 }
 export type Commodity = { commodityCode: string; commodityDescription: string; category: Category; displayName: string }
-export type Country = { countryCode: string; countryName: string }
+export type Country = { countryCode: string; countryName: string; displayName?: string }
 export type MatrixReference = { category: Category; commodityCode: string; commodity: string; countryCode: string; country: string; file: string }
 export type Catalog = {
   categories: Category[]

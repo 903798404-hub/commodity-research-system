@@ -1,0 +1,227 @@
+{
+  "reportMonth": "2026-07",
+  "fetchedAt": "2026-07-10T17:29:33.654Z",
+  "apiKeyStatus": "已使用（3SAf***hWlf）",
+  "proxyUsed": true,
+  "proxyProtocol": "socks5",
+  "authMode": "X-Api-Key header",
+  "commodityMappings": [
+    {
+      "requested": "Oilseed, Soybean",
+      "code": "2222000",
+      "matchedName": "Oilseed, Soybean"
+    },
+    {
+      "requested": "Meal, Soybean",
+      "code": "0813100",
+      "matchedName": "Meal, Soybean"
+    },
+    {
+      "requested": "Oil, Soybean",
+      "code": "4232000",
+      "matchedName": "Oil, Soybean"
+    },
+    {
+      "requested": "Oilseed, Rapeseed",
+      "code": "2226000",
+      "matchedName": "Oilseed, Rapeseed"
+    },
+    {
+      "requested": "Meal, Rapeseed",
+      "code": "0813600",
+      "matchedName": "Meal, Rapeseed"
+    },
+    {
+      "requested": "Oil, Rapeseed",
+      "code": "4239100",
+      "matchedName": "Oil, Rapeseed"
+    },
+    {
+      "requested": "Oil, Palm",
+      "code": "4243000",
+      "matchedName": "Oil, Palm"
+    },
+    {
+      "requested": "Oilseed, Sunflowerseed",
+      "code": "2224000",
+      "matchedName": "Oilseed, Sunflowerseed"
+    },
+    {
+      "requested": "Oil, Sunflowerseed",
+      "code": "4236000",
+      "matchedName": "Oil, Sunflowerseed"
+    }
+  ],
+  "countryMappings": [
+    {
+      "requested": "United States",
+      "code": "US",
+      "matchedName": "United States"
+    },
+    {
+      "requested": "Brazil",
+      "code": "BR",
+      "matchedName": "Brazil"
+    },
+    {
+      "requested": "Argentina",
+      "code": "AR",
+      "matchedName": "Argentina"
+    },
+    {
+      "requested": "China",
+      "code": "CH",
+      "matchedName": "China"
+    },
+    {
+      "requested": "India",
+      "code": "IN",
+      "matchedName": "India"
+    },
+    {
+      "requested": "Canada",
+      "code": "CA",
+      "matchedName": "Canada"
+    },
+    {
+      "requested": "Australia",
+      "code": "AS",
+      "matchedName": "Australia"
+    },
+    {
+      "requested": "European Union",
+      "code": "E4",
+      "matchedName": "European Union"
+    },
+    {
+      "requested": "Ukraine",
+      "code": "UP",
+      "matchedName": "Ukraine"
+    },
+    {
+      "requested": "Russia",
+      "code": "RS",
+      "matchedName": "Russia"
+    },
+    {
+      "requested": "Malaysia",
+      "code": "MY",
+      "matchedName": "Malaysia"
+    },
+    {
+      "requested": "Indonesia",
+      "code": "ID",
+      "matchedName": "Indonesia"
+    },
+    {
+      "requested": "Thailand",
+      "code": "TH",
+      "matchedName": "Thailand"
+    }
+  ],
+  "marketYearsByCommodity": {
+    "Oilseed, Soybean": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Meal, Soybean": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Oil, Soybean": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Oilseed, Rapeseed": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Meal, Rapeseed": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Oil, Rapeseed": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Oil, Palm": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Oilseed, Sunflowerseed": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "Oil, Sunflowerseed": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ]
+  },
+  "failedRequests": [],
+  "emptyDataRequests": [],
+  "apiRequestCount": 454,
+  "rawDataDirectory": "C:\\Users\\xx202\\Desktop\\codex自动更新\\USDA平衡表\\data\\raw\\usda_psd_api\\2026-07"
+}
