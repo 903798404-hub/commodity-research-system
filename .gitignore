@@ -1,26 +1,35 @@
+# Dependencies and build artifacts
 node_modules/
 dist/
+.vite/
+*.tsbuildinfo
+
+# Local credentials
 .env
 .env.*
 !.env.example
-.DS_Store
-*.tmp
-~$*.xlsx
-output/temp/
+
+# Raw data, local snapshots, and generated reports
 raw/
 data/raw/
 data/snapshots/
-output/*.log
-*.tsbuildinfo
-.vite/
-
-# Local reports are deployed outside Git; public/data remains versioned application data.
 output/
 
-# Shared local runtime artifacts; these are not part of the USDA source baseline.
+# Shared local runtime directories
 01_data/
-10_logs/
 06_outputs/
+10_logs/
+
+# Caches and temporary files
 **/__pycache__/
 .pytest_cache/
+*.log
+*.tmp
+*.temp
+*.bak
+~$*.xlsx
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 *-server-latest/

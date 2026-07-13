@@ -1,7 +1,7 @@
 # 阶段验收报告
 
 验收日期：2026-07-12
-正式项目路径：`C:\Users\xx202\Desktop\codex自动更新\codex-projects\USDA平衡表`
+正式项目路径：USDA平衡表项目根目录
 
 ## 数据与构建结果
 
