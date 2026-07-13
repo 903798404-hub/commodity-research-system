@@ -33,7 +33,7 @@
 
 ```text
 01_data\historical_price_long.xlsx
-01_data\historical_spread_config.xlsx
+02_configs\historical_spread_config.xlsx
 01_data\historical_spread_database.xlsx
 ```
 

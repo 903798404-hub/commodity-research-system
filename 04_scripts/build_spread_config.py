@@ -143,7 +143,7 @@ def build_configs() -> pd.DataFrame:
 def main() -> int:
     project_root = Path(__file__).resolve().parents[1]
     source_file = project_root / "01_data" / "manual_history" / "spread_system_base.xlsx"
-    output_file = project_root / "01_data" / "historical_spread_config.xlsx"
+    output_file = project_root / "02_configs" / "historical_spread_config.xlsx"
     logs_dir = project_root / "10_logs"
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M")
     log_file = logs_dir / f"build_spread_config_{timestamp}.log"

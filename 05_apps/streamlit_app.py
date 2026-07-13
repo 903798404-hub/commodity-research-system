@@ -20,13 +20,14 @@ from home import get_external_app_url, render_home
 
 PAGE_TITLE = "油脂油料价差动态看板"
 DATA_DIR = PROJECT_ROOT / "01_data"
+CONFIG_DIR = PROJECT_ROOT / "02_configs"
 DATABASE_XLSX_FILE = DATA_DIR / "historical_spread_database.xlsx"
 DATABASE_PARQUET_FILE = DATA_DIR / "historical_spread_database.parquet"
-SPREAD_CONFIG_FILE = DATA_DIR / "historical_spread_config.xlsx"
+SPREAD_CONFIG_FILE = CONFIG_DIR / "historical_spread_config.xlsx"
 UPDATE_STATUS_FILE = DATA_DIR / "update_status.json"
-REPORT_CATALOG_FILE = PROJECT_ROOT / "02_configs" / "report_catalog.yaml"
+REPORT_CATALOG_FILE = CONFIG_DIR / "report_catalog.yaml"
 BASIS_DATABASE_FILE = DATA_DIR / "database" / "basis" / "basis_quotes.parquet"
-BASIS_SAMPLE_DATABASE_FILE = (
+BASIS_RUNTIME_FALLBACK_FILE = (
     DATA_DIR / "database" / "basis" / "basis_quotes_sample.parquet"
 )
 USDA_PAGE_TITLE = "USDA平衡表"
@@ -515,7 +516,7 @@ def main() -> None:
     if selected_page == "首页":
         render_home(REPORT_CATALOG_FILE)
     elif selected_page == "基差/一口价":
-        render_basis_page(BASIS_DATABASE_FILE, BASIS_SAMPLE_DATABASE_FILE)
+        render_basis_page(BASIS_DATABASE_FILE, BASIS_RUNTIME_FALLBACK_FILE)
     elif selected_page == USDA_PAGE_TITLE:
         render_usda_page()
     elif selected_page == "运行监控":

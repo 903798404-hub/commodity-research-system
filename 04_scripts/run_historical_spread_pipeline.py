@@ -67,7 +67,7 @@ def main() -> int:
 
     print("Pipeline completed successfully.")
     print(f"historical_price_long.xlsx: {project_root / '01_data' / 'historical_price_long.xlsx'}")
-    print(f"historical_spread_config.xlsx: {project_root / '01_data' / 'historical_spread_config.xlsx'}")
+    print(f"historical_spread_config.xlsx: {project_root / '02_configs' / 'historical_spread_config.xlsx'}")
     print(f"historical_spread_database.xlsx: {project_root / '01_data' / 'historical_spread_database.xlsx'}")
     print(f"RM 5-9 PNG: {rm_png}")
     print(f"RM 5-9 chart_data Excel: {rm_chart_data}")

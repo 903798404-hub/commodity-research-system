@@ -194,7 +194,7 @@ def main() -> int:
     database_file = data_dir / DATABASE_NAME
     parquet_file = data_dir / PARQUET_NAME
     price_file = data_dir / PRICE_LONG_NAME
-    config_file = data_dir / CONFIG_NAME
+    config_file = root / "02_configs" / CONFIG_NAME
     status_file = data_dir / STATUS_NAME
     lock_file = data_dir / LOCK_NAME
     run_mode = run_mode_for_args(args)

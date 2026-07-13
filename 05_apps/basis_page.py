@@ -807,7 +807,7 @@ def _render_legacy_excel_upload() -> None:
 
 def render_basis_page(
     formal_database_path: Path,
-    sample_database_path: Path,
+    runtime_fallback_path: Path,
 ) -> None:
     st.markdown(
         "<h1 style='text-align:center;'>国内现货基差、一口价及价差</h1>",
@@ -818,11 +818,11 @@ def render_basis_page(
     if formal_database_path.exists():
         database_path = formal_database_path
         source_label = "正式数据"
-    elif sample_database_path.exists():
-        database_path = sample_database_path
-        source_label = "样例数据"
+    elif runtime_fallback_path.exists():
+        database_path = runtime_fallback_path
+        source_label = "本地回退数据"
     else:
-        st.info("暂未找到正式基差数据库或样例数据库。")
+        st.info("暂未找到正式基差数据库或本地回退数据库。")
         return
 
     try:
@@ -838,12 +838,12 @@ def render_basis_page(
         f"当前读取：{source_label}（{database_path.name}），"
         f"共 {len(data)} 行。"
     )
-    if source_label == "正式数据" and sample_database_path.exists():
+    if source_label == "正式数据" and runtime_fallback_path.exists():
         try:
-            sample_rows = len(pd.read_parquet(sample_database_path))
+            fallback_rows = len(pd.read_parquet(runtime_fallback_path))
             st.success(
-                "样例回退文件可用（当前未读取），"
-                f"共 {sample_rows} 行。"
+                "本地回退文件可用（当前未读取），"
+                f"共 {fallback_rows} 行。"
             )
         except Exception:  # noqa: BLE001
             pass

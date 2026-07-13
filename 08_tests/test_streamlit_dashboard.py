@@ -13,9 +13,8 @@ PAGE_ENTRIES = sorted((PROJECT_ROOT / "05_apps" / "pages").glob("*.py"))
 CATALOG_FILE = PROJECT_ROOT / "02_configs" / "report_catalog.yaml"
 BASIS_SAMPLE_FILE = (
     PROJECT_ROOT
-    / "01_data"
-    / "database"
-    / "basis"
+    / "08_tests"
+    / "fixtures"
     / "basis_quotes_sample.parquet"
 )
 

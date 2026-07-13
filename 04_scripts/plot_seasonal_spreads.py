@@ -207,7 +207,7 @@ def main() -> int:
 
     try:
         spread_long = pd.read_excel(database_file, sheet_name="spread_long")
-        config_file = project_root / "01_data" / "historical_spread_config.xlsx"
+        config_file = project_root / "02_configs" / "historical_spread_config.xlsx"
         try:
             config = pd.read_excel(config_file, sheet_name="spread_config")
             full_history_map = {

@@ -344,7 +344,7 @@ def main() -> int:
     output_dir = root / "06_outputs" / "daily_price_updates"
     backups_dir = data_dir / "backups"
     price_file = data_dir / "historical_price_long.xlsx"
-    config_file = data_dir / "historical_spread_config.xlsx"
+    config_file = root / "02_configs" / "historical_spread_config.xlsx"
     database_file = data_dir / "historical_spread_database.xlsx"
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M")
     log_file = logs_dir / f"update_price_long_from_akshare_{dt.datetime.now().strftime('%Y%m%d')}.log"

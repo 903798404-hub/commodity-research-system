@@ -20,7 +20,7 @@ BASIS_EXCEL_FILE = BASIS_MANUAL_DIR / "国内现货基差.xlsx"
 BASIS_PROCESSED_DIR = DATA_DIR / "processed" / "basis_spread"
 BASIS_DATABASE_DIR = DATA_DIR / "database" / "basis"
 BASIS_DATABASE_FILE = BASIS_DATABASE_DIR / "basis_quotes.parquet"
-BASIS_SAMPLE_DATABASE_FILE = BASIS_DATABASE_DIR / "basis_quotes_sample.parquet"
+BASIS_RUNTIME_FALLBACK_FILE = BASIS_DATABASE_DIR / "basis_quotes_sample.parquet"
 
 # OUTPUT_DIR 指向新 Agent 输出目录 `06_outputs/`。
 OUTPUT_DIR = PROJECT_ROOT / "06_outputs"

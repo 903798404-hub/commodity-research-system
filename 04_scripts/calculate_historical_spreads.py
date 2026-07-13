@@ -187,7 +187,7 @@ def calculate_one_spread(config: pd.Series, price_long: pd.DataFrame, updated_at
 def main() -> int:
     project_root = Path(__file__).resolve().parents[1]
     price_file = project_root / "01_data" / "historical_price_long.xlsx"
-    config_file = project_root / "01_data" / "historical_spread_config.xlsx"
+    config_file = project_root / "02_configs" / "historical_spread_config.xlsx"
     output_file = project_root / "01_data" / "historical_spread_database.xlsx"
     parquet_file = project_root / "01_data" / "historical_spread_database.parquet"
     tmp_output_file = project_root / "01_data" / "historical_spread_database.tmp.xlsx"
