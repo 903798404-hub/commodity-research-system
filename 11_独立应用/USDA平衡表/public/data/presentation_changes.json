@@ -1,0 +1,3991 @@
+{
+  "snapshotCurrent": "2026-07",
+  "snapshotPrevious": "2026-06",
+  "matrices": [
+    {
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 100,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 77,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -13,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 100,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 18,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.40000000000000036,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "BR",
+      "country": "Brazil",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 600,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 350,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 68.80000000000001,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 253.30000000000018,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 350,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 190,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 120,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 120,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 12.099999999999966,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.3000000000000007,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "CH",
+      "country": "China",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 200,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 32.8,
+          "monthlyRevision": -0.8000000000000114
+        },
+        {
+          "name": "产量",
+          "latestYoY": 158.40000000000146,
+          "monthlyRevision": 79.20000000000073
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 200,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 160,
+          "monthlyRevision": 80
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 160,
+          "monthlyRevision": 80
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 16.200000000000017,
+          "monthlyRevision": -1.5999999999999943
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.10000000000000009,
+          "monthlyRevision": -0.09999999999999987
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 1224,
+          "monthlyRevision": 36.400000000001455
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 1168.2000000000044,
+          "monthlyRevision": 108.20000000000437
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 138.5999999999999,
+          "monthlyRevision": 17.90000000000009
+        },
+        {
+          "name": "产量",
+          "latestYoY": 854.9000000000015,
+          "monthlyRevision": 83
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 351.60000000000036,
+          "monthlyRevision": 26.100000000000364
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 1168.2000000000044,
+          "monthlyRevision": 108.20000000000437
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 378.6999999999989,
+          "monthlyRevision": 27.19999999999891
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 865.9000000000015,
+          "monthlyRevision": 72.20000000000073
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": -2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 868.3999999999978,
+          "monthlyRevision": 72.20000000000073
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 100.5,
+          "monthlyRevision": 27.59999999999991
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.09999999999999964,
+          "monthlyRevision": 0.09999999999999964
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "IN",
+      "country": "India",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 47.299999999999955,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -11,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 18,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 15,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": -3,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": -3,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.10000000000000009,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "US",
+      "country": "United States",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 580.1000000000004,
+          "monthlyRevision": 108.89999999999964
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 272.1999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 4.699999999999996,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 176.69999999999982,
+          "monthlyRevision": -3.699999999999818
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 3.6000000000000085
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 272.1999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 154.20000000000005,
+          "monthlyRevision": 27.200000000000045
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 27.199999999999818,
+          "monthlyRevision": -27.300000000000182
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 27.199999999999818,
+          "monthlyRevision": -27.300000000000182
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "AS",
+      "country": "Australia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": -88,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 0.6000000000000001,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 5.800000000000011,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 6,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 6,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 0.3999999999999999,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.20000000000000018,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "CA",
+      "country": "Canada",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 80,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 1.9999999999999982,
+          "monthlyRevision": 0.8999999999999986
+        },
+        {
+          "name": "产量",
+          "latestYoY": 37.799999999999955,
+          "monthlyRevision": 11.5
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 80,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 25,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 14,
+          "monthlyRevision": 12
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 14,
+          "monthlyRevision": 12
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 0.8000000000000007,
+          "monthlyRevision": 0.3999999999999986
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": -2.199999999999818,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": -30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 7.799999999999997,
+          "monthlyRevision": -0.10000000000000142
+        },
+        {
+          "name": "产量",
+          "latestYoY": -17.09999999999991,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": -30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -20,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": -5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 5.700000000000003,
+          "monthlyRevision": -0.10000000000000142
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.40000000000000036,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 202.6999999999989,
+          "monthlyRevision": 68.5
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 292.2000000000007,
+          "monthlyRevision": 33.5
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 17.5,
+          "monthlyRevision": 2.5
+        },
+        {
+          "name": "产量",
+          "latestYoY": 162.30000000000018,
+          "monthlyRevision": 19.800000000000182
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -3.900000000000091,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 292.2000000000007,
+          "monthlyRevision": 33.5
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -3.400000000000091,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 163.80000000000018,
+          "monthlyRevision": 20.300000000000182
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 163.80000000000018,
+          "monthlyRevision": 20.300000000000182
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 15.5,
+          "monthlyRevision": 2
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.20000000000000018,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 90,
+          "monthlyRevision": 40
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 3.1000000000000005,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 23.599999999999994,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 4.199999999999999,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.1999999999999997,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 85,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 2.9999999999999996,
+          "monthlyRevision": 1.2999999999999998
+        },
+        {
+          "name": "产量",
+          "latestYoY": 17.200000000000003,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 17.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 0.7000000000000002,
+          "monthlyRevision": 1.2999999999999998
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -1,
+          "monthlyRevision": 1.2999999999999998
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": -85,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -55,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 100,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -280,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 100,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 800,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.20000000000000018,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 2.1000000000000014,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "BR",
+      "country": "Brazil",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 600,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 350,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 300,
+          "monthlyRevision": 50
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 370,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 20,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -80,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 1500,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -1.1000000000000014,
+          "monthlyRevision": -0.3000000000000007
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "CH",
+      "country": "China",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": -12,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 200,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 200,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 210,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.6000000000000014,
+          "monthlyRevision": -0.29999999999999716
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "G3",
+      "country": "G3",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": -71.19999999999982,
+          "monthlyRevision": -27.19999999999891
+        },
+        {
+          "name": "产量",
+          "latestYoY": 1180.0999999999985,
+          "monthlyRevision": 108.90000000000146
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -65,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 722.2000000000007,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 401,
+          "monthlyRevision": 131.70000000000073
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 737.2000000000007,
+          "monthlyRevision": 0.5999999999985448
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 15,
+          "monthlyRevision": 0.6000000000001364
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -94.30000000000018,
+          "monthlyRevision": -50.600000000000364
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.8000000000000007,
+          "monthlyRevision": -0.20714734729237705
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": -60.79999999999927,
+          "monthlyRevision": -19.700000000000728
+        },
+        {
+          "name": "产量",
+          "latestYoY": 1224,
+          "monthlyRevision": 36.400000000001455
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 292.59999999999854,
+          "monthlyRevision": 125
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 1168.2000000000044,
+          "monthlyRevision": 108.20000000000437
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 333.1000000000022,
+          "monthlyRevision": 119.20000000000073
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 1238.199999999997,
+          "monthlyRevision": 93.80000000000291
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 11.700000000000273,
+          "monthlyRevision": 0.5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 58.30000000000018,
+          "monthlyRevision": -14.900000000000091
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -115.5,
+          "monthlyRevision": -71.29999999999927
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 3493,
+          "monthlyRevision": -66
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.6999999999999993,
+          "monthlyRevision": -0.1999999999999993
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "IN",
+      "country": "India",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 8.199999999999989,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 47.299999999999955,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -50,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 25,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -19.999999999999993,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": -390,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.09999999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -1.9000000000000004,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "US",
+      "country": "United States",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 13.799999999999955,
+          "monthlyRevision": -27.200000000000045
+        },
+        {
+          "name": "产量",
+          "latestYoY": 580.1000000000004,
+          "monthlyRevision": 108.89999999999964
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 272.1999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 381,
+          "monthlyRevision": 81.69999999999982
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 267.1999999999998,
+          "monthlyRevision": 0.6000000000003638
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -5,
+          "monthlyRevision": 0.5999999999999659
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -54.299999999999955,
+          "monthlyRevision": -0.6000000000000227
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 1604,
+          "monthlyRevision": 284
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.7999999999999998,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 18.5,
+          "monthlyRevision": -4.1000000000000085
+        },
+        {
+          "name": "产量",
+          "latestYoY": 60,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -0.9,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 35,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 15,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 42.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 7.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 20.10000000000001,
+          "monthlyRevision": -4.099999999999994
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 400,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.10000000000000009,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.799999999999999,
+          "monthlyRevision": -0.5
+        }
+      ]
+    },
+    {
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 9,
+          "monthlyRevision": 8.5
+        },
+        {
+          "name": "产量",
+          "latestYoY": 114.5,
+          "monthlyRevision": -10
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -10,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 160,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -65,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 165,
+          "monthlyRevision": 16
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 5,
+          "monthlyRevision": 6
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 13.5,
+          "monthlyRevision": 2.5
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 326,
+          "monthlyRevision": 54
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.10000000000000009,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.7999999999999998,
+          "monthlyRevision": 0.10000000000000053
+        }
+      ]
+    },
+    {
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 33.099999999999966,
+          "monthlyRevision": 0.5
+        },
+        {
+          "name": "产量",
+          "latestYoY": 737.5,
+          "monthlyRevision": 59.30000000000018
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -66.80000000000001,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 580.3000000000002,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -57.700000000000045,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 628.8999999999996,
+          "monthlyRevision": 34.899999999999636
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 12.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 36.099999999999966,
+          "monthlyRevision": 14.899999999999977
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 132.60000000000002,
+          "monthlyRevision": 24.899999999999977
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 2553,
+          "monthlyRevision": 649
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.09999999999999987,
+          "monthlyRevision": null
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.5999999999999996,
+          "monthlyRevision": 0.2999999999999998
+        }
+      ]
+    },
+    {
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 320,
+          "monthlyRevision": 120
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 200,
+          "monthlyRevision": 50
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 30,
+          "monthlyRevision": 30
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 216,
+          "monthlyRevision": 60
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 16,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 76.99999999999999,
+          "monthlyRevision": 29.999999999999986
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 1500,
+          "monthlyRevision": 800
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 3.3,
+          "monthlyRevision": 1.1999999999999993
+        }
+      ]
+    },
+    {
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": -15.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 200,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 160,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 6.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 162.5,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 15.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 200,
+          "monthlyRevision": -200
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.20000000000000018,
+          "monthlyRevision": -0.09999999999999964
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.0999999999999999,
+          "monthlyRevision": 0.10000000000000009
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "AS",
+      "country": "Australia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 65.69999999999999,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": -88,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -25,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 7.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -4.799999999999997,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": -2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.30000000000000004,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.40000000000000036,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "CA",
+      "country": "Canada",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 95,
+          "monthlyRevision": -60.00000000000003
+        },
+        {
+          "name": "产量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 80,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -35,
+          "monthlyRevision": -35
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 90,
+          "monthlyRevision": 5
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 10,
+          "monthlyRevision": -15
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 40.00000000000003,
+          "monthlyRevision": -30
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 700,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.20000000000000018,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.5999999999999996,
+          "monthlyRevision": -1.1999999999999993
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "CH",
+      "country": "China",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": -62.5,
+          "monthlyRevision": null
+        },
+        {
+          "name": "产量",
+          "latestYoY": 20,
+          "monthlyRevision": null
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 100,
+          "monthlyRevision": null
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 40,
+          "monthlyRevision": null
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 40,
+          "monthlyRevision": null
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 17.5,
+          "monthlyRevision": null
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 50,
+          "monthlyRevision": null
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.10000000000000009,
+          "monthlyRevision": null
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.5,
+          "monthlyRevision": null
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 17.19999999999999,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "产量",
+          "latestYoY": -2.199999999999818,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -75,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": -30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -15,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": -32.5,
+          "monthlyRevision": 7.5
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -2.5,
+          "monthlyRevision": 7.5
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -12.5,
+          "monthlyRevision": 12.5
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 163,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.3000000000000007,
+          "monthlyRevision": 0.5
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 160.60000000000002,
+          "monthlyRevision": -30.700000000000045
+        },
+        {
+          "name": "产量",
+          "latestYoY": 202.6999999999989,
+          "monthlyRevision": 68.5
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 29.299999999999955,
+          "monthlyRevision": -3.5
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 292.2000000000007,
+          "monthlyRevision": 33.5
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 8,
+          "monthlyRevision": 8.299999999999955
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 321.09999999999854,
+          "monthlyRevision": 25.399999999999636
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 28.900000000000034,
+          "monthlyRevision": -8.099999999999966
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 63.5,
+          "monthlyRevision": 0.6000000000001364
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 1868,
+          "monthlyRevision": 332
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.10000000000000009,
+          "monthlyRevision": null
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.29999999999999893,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 14.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 90,
+          "monthlyRevision": 40
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -3,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 40,
+          "monthlyRevision": 30
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 47.5,
+          "monthlyRevision": 2
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 7.5,
+          "monthlyRevision": 2
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 13.999999999999996,
+          "monthlyRevision": 7.9999999999999964
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 500,
+          "monthlyRevision": 200
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.5999999999999996,
+          "monthlyRevision": 1
+        }
+      ]
+    },
+    {
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 9.8,
+          "monthlyRevision": 5
+        },
+        {
+          "name": "产量",
+          "latestYoY": 85,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0.2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 60,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 5,
+          "monthlyRevision": 5
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 150,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.2999999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.20000000000000018,
+          "monthlyRevision": 1.1999999999999997
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 100,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 6.900000000000006,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 20,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 100,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 20,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 5.899999999999999,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.5,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "BR",
+      "country": "Brazil",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 600,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 350,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 72,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 350,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 35,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 26.000000000000004,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.9,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "CH",
+      "country": "China",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 200,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 6.800000000000011,
+          "monthlyRevision": -0.5999999999999943
+        },
+        {
+          "name": "产量",
+          "latestYoY": 38.79999999999973,
+          "monthlyRevision": 19.40000000000009
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 200,
+          "monthlyRevision": 100
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 15.599999999999994,
+          "monthlyRevision": -1.2000000000000028
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.7000000000000002,
+          "monthlyRevision": -0.09999999999999964
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "G3",
+      "country": "G3",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 1180.0999999999985,
+          "monthlyRevision": 108.90000000000146
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 722.2000000000007,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 170.69999999999982,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 12.200000000000003,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 722.2000000000007,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 2.7000000000000455,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 156.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 177.4000000000001,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": -20.899999999999864,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 33.70000000000002,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.7999999999999998,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 1224,
+          "monthlyRevision": 36.400000000001455
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 1168.2000000000044,
+          "monthlyRevision": 108.20000000000437
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -15.100000000000023,
+          "monthlyRevision": 27.799999999999955
+        },
+        {
+          "name": "产量",
+          "latestYoY": 254.59999999999945,
+          "monthlyRevision": 21.199999999999818
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 24.40000000000009,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 1168.2000000000044,
+          "monthlyRevision": 108.20000000000437
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 20.5,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 195,
+          "monthlyRevision": 12
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 172.10000000000014,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 22.899999999999636,
+          "monthlyRevision": 12
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 48.39999999999998,
+          "monthlyRevision": 37
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.2999999999999998,
+          "monthlyRevision": 0.2999999999999998
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "IN",
+      "country": "India",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 47.299999999999955,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -20,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "产量",
+          "latestYoY": 4,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -15,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 22.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -0.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": -31,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": -31,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 0.5,
+          "monthlyRevision": 30
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.1000000000000014,
+          "monthlyRevision": 4.5
+        }
+      ]
+    },
+    {
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "US",
+      "country": "United States",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "大豆产量",
+          "latestYoY": 580.1000000000004,
+          "monthlyRevision": 108.89999999999964
+        },
+        {
+          "name": "大豆压榨",
+          "latestYoY": 272.1999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 4.099999999999994,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 78.70000000000005,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 12.2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 272.1999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -27.299999999999997,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 120.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 147.39999999999998,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": -26.899999999999977,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 1.7999999999999972,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.20000000000000018,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "葵籽产量",
+          "latestYoY": 60,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "葵籽压榨",
+          "latestYoY": 35,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 3.4000000000000004,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 15.299999999999983,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 35,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 12.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 0.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 5.699999999999999,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.9000000000000004,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "葵籽产量",
+          "latestYoY": 114.5,
+          "monthlyRevision": -10
+        },
+        {
+          "name": "葵籽压榨",
+          "latestYoY": 160,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -1.7999999999999972,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 67.60000000000002,
+          "monthlyRevision": 4.300000000000011
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 12.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 160,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 20,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 47.49999999999994,
+          "monthlyRevision": 5
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 45,
+          "monthlyRevision": 5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 10.799999999999997,
+          "monthlyRevision": -0.7000000000000028
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.9000000000000004,
+          "monthlyRevision": -0.1999999999999993
+        }
+      ]
+    },
+    {
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "葵籽产量",
+          "latestYoY": 737.5,
+          "monthlyRevision": 59.30000000000018
+        },
+        {
+          "name": "葵籽压榨",
+          "latestYoY": 580.3000000000002,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -12.900000000000006,
+          "monthlyRevision": -1.200000000000017
+        },
+        {
+          "name": "产量",
+          "latestYoY": 246.5999999999999,
+          "monthlyRevision": 7.599999999999909
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 250,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 580.2999999999993,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 194.70000000000005,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 237.4000000000001,
+          "monthlyRevision": 3.5
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 234.9000000000001,
+          "monthlyRevision": 3.5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 51.60000000000002,
+          "monthlyRevision": 2.900000000000034
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.6000000000000005,
+          "monthlyRevision": 0.10000000000000053
+        }
+      ]
+    },
+    {
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "葵籽产量",
+          "latestYoY": 320,
+          "monthlyRevision": 120
+        },
+        {
+          "name": "葵籽压榨",
+          "latestYoY": 200,
+          "monthlyRevision": 50
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 12.3,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 82.59999999999991,
+          "monthlyRevision": 20.59999999999991
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 200,
+          "monthlyRevision": 50
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 80,
+          "monthlyRevision": 15
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 12.5,
+          "monthlyRevision": 2.5
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 12.5,
+          "monthlyRevision": 2.5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 2.400000000000002,
+          "monthlyRevision": 3.1000000000000014
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.2999999999999998,
+          "monthlyRevision": 0.3000000000000007
+        }
+      ]
+    },
+    {
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "葵籽产量",
+          "latestYoY": 200,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "葵籽压榨",
+          "latestYoY": 160,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -10.000000000000002,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 68.79999999999995,
+          "monthlyRevision": -21.5
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 160,
+          "monthlyRevision": -50
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 52.5,
+          "monthlyRevision": -20
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 1.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 1.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 4.799999999999999,
+          "monthlyRevision": -1.5
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.6000000000000001,
+          "monthlyRevision": -0.20000000000000018
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "AS",
+      "country": "Australia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": -88,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 0.20000000000000018,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 4.299999999999997,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -1.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 1.6000000000000014,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "CA",
+      "country": "Canada",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 80,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 6,
+          "monthlyRevision": 4.5
+        },
+        {
+          "name": "产量",
+          "latestYoY": 31.299999999999955,
+          "monthlyRevision": 8.5
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 80,
+          "monthlyRevision": 20
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 45,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 1.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": -2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 4,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -9.200000000000003,
+          "monthlyRevision": 13
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -2.8000000000000007,
+          "monthlyRevision": 2.299999999999999
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "CH",
+      "country": "China",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 20,
+          "monthlyRevision": null
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 40,
+          "monthlyRevision": null
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -22.099999999999994,
+          "monthlyRevision": null
+        },
+        {
+          "name": "产量",
+          "latestYoY": 15.600000000000023,
+          "monthlyRevision": null
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 10,
+          "monthlyRevision": null
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 40,
+          "monthlyRevision": null
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -5,
+          "monthlyRevision": null
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 7.5,
+          "monthlyRevision": null
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 7.5,
+          "monthlyRevision": null
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 1,
+          "monthlyRevision": null
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": -2.199999999999818,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": -30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 21.8,
+          "monthlyRevision": 14.399999999999999
+        },
+        {
+          "name": "产量",
+          "latestYoY": -12.599999999999909,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -25,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": -30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 0,
+          "monthlyRevision": 15
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -15.800000000000004,
+          "monthlyRevision": -0.6000000000000014
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -1.4000000000000004,
+          "monthlyRevision": -0.10000000000000009
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 202.6999999999989,
+          "monthlyRevision": 68.5
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 292.2000000000007,
+          "monthlyRevision": 33.5
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 20.5,
+          "monthlyRevision": 19.400000000000034
+        },
+        {
+          "name": "产量",
+          "latestYoY": 116.19999999999982,
+          "monthlyRevision": 14.699999999999818
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 57.10000000000002,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 292.2000000000007,
+          "monthlyRevision": 33.5
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 72,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 135.9000000000001,
+          "monthlyRevision": 21.5
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 79.09999999999991,
+          "monthlyRevision": 10
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 54.399999999999636,
+          "monthlyRevision": 11.5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 2.3999999999999986,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -14.100000000000023,
+          "monthlyRevision": 12.600000000000023
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.7000000000000002,
+          "monthlyRevision": 0.20000000000000018
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 90,
+          "monthlyRevision": 40
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 2.700000000000001,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 15.600000000000023,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 40,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 15,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": 2.299999999999999,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.5,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "菜籽产量",
+          "latestYoY": 85,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "菜籽压榨",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": 3.8,
+          "monthlyRevision": 2.0999999999999996
+        },
+        {
+          "name": "产量",
+          "latestYoY": 12.100000000000001,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "压榨量",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 16.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -0.5999999999999996,
+          "monthlyRevision": 2.1
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -3.6999999999999993,
+          "monthlyRevision": 3
+        }
+      ]
+    },
+    {
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "G2",
+      "country": "G2",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 19,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 20,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 48.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 32.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 17,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -4.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.20000000000000107,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "GL",
+      "country": "Global",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 50,
+          "monthlyRevision": 13.199999999999818
+        },
+        {
+          "name": "产量",
+          "latestYoY": -2,
+          "monthlyRevision": 8
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 11.900000000000546,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -9.399999999999636,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 119.39999999999964,
+          "monthlyRevision": 9.5
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 39.19999999999982,
+          "monthlyRevision": 2
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 82.19999999999982,
+          "monthlyRevision": 7.5
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -50.09999999999991,
+          "monthlyRevision": 11.700000000000045
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 90,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": null
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.5,
+          "monthlyRevision": 0.09999999999999964
+        }
+      ]
+    },
+    {
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "ID",
+      "country": "Indonesia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 7.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": 80,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 45,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 45,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 30,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 15,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0.10000000000000009,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -0.1999999999999993,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "MY",
+      "country": "Malaysia",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 11.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": -60,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": -55,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 3.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 2.5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": -1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -2,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 50,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.10000000000000009,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": 0.1999999999999993,
+          "monthlyRevision": 0
+        }
+      ]
+    },
+    {
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "TH",
+      "country": "Thailand",
+      "latestMarketYear": 2026,
+      "previousMarketYear": 2025,
+      "rows": [
+        {
+          "name": "期初库存",
+          "latestYoY": 16.700000000000003,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "产量",
+          "latestYoY": -18,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "进口量",
+          "latestYoY": -0.1,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "出口量",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "消费量",
+          "latestYoY": 15,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "工业消费",
+          "latestYoY": 5,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "食用消费",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "饲用及损耗消费",
+          "latestYoY": 0,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期末库存",
+          "latestYoY": -16.4,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "收获面积",
+          "latestYoY": 10,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "单产",
+          "latestYoY": -0.20000000000000018,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "库存/总使用比",
+          "latestYoY": -4.800000000000001,
+          "monthlyRevision": 0
+        }
+      ]
+    }
+  ]
+}

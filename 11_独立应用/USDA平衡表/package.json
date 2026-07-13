@@ -1,0 +1,33 @@
+{
+  "name": "usda-balance-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "tsx --test src/utils/marketYear.test.ts src/utils/monthlyRevision.test.ts",
+    "build:data": "tsx scripts/buildData.ts",
+    "check:data": "tsx scripts/checkData.ts",
+    "compare:data": "tsx scripts/compareSnapshots.ts",
+    "fetch:usda": "tsx scripts/fetchUsdaPsdApi.ts"
+  },
+  "dependencies": {
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.5",
+    "papaparse": "^5.5.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "socks-proxy-agent": "^10.1.0",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.6"
+  }
+}

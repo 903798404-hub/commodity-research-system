@@ -1,0 +1,35 @@
+# Dependencies and build artifacts
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Raw data, local snapshots, and generated reports
+raw/
+data/raw/
+data/snapshots/
+output/
+
+# Shared local runtime directories
+01_data/
+06_outputs/
+10_logs/
+
+# Caches and temporary files
+**/__pycache__/
+.pytest_cache/
+*.log
+*.tmp
+*.temp
+*.bak
+~$*.xlsx
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*-server-latest/
