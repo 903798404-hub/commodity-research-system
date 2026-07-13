@@ -1,0 +1,42 @@
+reports:
+  rapeseed:
+    label: 菜系
+    title: USDA菜系年度供需
+    start_market_year: 2021
+    show_latest_yoy: true
+    show_monthly_revision: true
+    market_year_note: 加拿大8月/7月；澳大利亚11月/10月；欧盟、乌克兰、俄罗斯7月/6月；中国10月/9月。
+    seed_commodity: Oilseed, Rapeseed
+    seed_display_name: 菜籽
+    seed_metrics: [期初库存, 产量, 进口量, 出口量, 压榨量, 消费量, 期末库存, 库存/总使用比]
+    oil_commodity: Oil, Rapeseed
+    oil_display_name: 菜油
+    oil_metrics: [期初库存, 产量, 进口量, 出口量, 消费量, 工业消费, 期末库存, 库存/总使用比]
+    region_pairs:
+      - { region: Canada, display_name: 加拿大 }
+      - { region: Australia, display_name: 澳大利亚 }
+      - { region: European Union, display_name: 欧盟 }
+      - { region: Ukraine, display_name: 乌克兰 }
+      - { region: Russia, display_name: 俄罗斯 }
+      - { region: China, display_name: 中国 }
+    rows_per_slide: 3
+
+  soybean:
+    label: 豆系
+    title: USDA豆系年度供需
+    start_market_year: 2021
+    show_latest_yoy: true
+    show_monthly_revision: true
+    market_year_note: 美国大豆9月/8月；美国豆油10月/9月；巴西大豆、豆油1月/12月；阿根廷大豆、豆油4月/3月；G3按USDA相同市场年度标签汇总，成员国市场年度起止月份不同。
+    seed_commodity: Oilseed, Soybean
+    seed_display_name: 大豆
+    seed_metrics: [期初库存, 产量, 进口量, 压榨量, 出口量, 消费量, 期末库存, 库存/总使用比]
+    oil_commodity: Oil, Soybean
+    oil_display_name: 豆油
+    oil_metrics: [期初库存, 产量, 进口量, 出口量, 消费量, 工业消费, 期末库存, 库存/总使用比]
+    region_pairs:
+      - { region: United States, display_name: 美国 }
+      - { region: Brazil, display_name: 巴西 }
+      - { region: Argentina, display_name: 阿根廷 }
+      - { region: G3, display_name: G3 }
+    rows_per_slide: 4

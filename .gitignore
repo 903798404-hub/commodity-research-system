@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
 .DS_Store
 *.tmp
 ~$*.xlsx
@@ -11,3 +13,14 @@ data/snapshots/
 output/*.log
 *.tsbuildinfo
 .vite/
+
+# Local reports are deployed outside Git; public/data remains versioned application data.
+output/
+
+# Shared local runtime artifacts; these are not part of the USDA source baseline.
+01_data/
+10_logs/
+06_outputs/
+**/__pycache__/
+.pytest_cache/
+*-server-latest/

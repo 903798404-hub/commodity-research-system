@@ -92,7 +92,8 @@
     },
     {
       "countryCode": "G3",
-      "countryName": "G3"
+      "countryName": "G3",
+      "displayName": "G3（美国 + 巴西 + 阿根廷）"
     },
     {
       "countryCode": "GL",
@@ -204,14 +205,6 @@
       "category": "Meals",
       "commodityCode": "0813100",
       "commodity": "Meal, Soybean",
-      "countryCode": "G3",
-      "country": "G3",
-      "file": "matrix/0813100_G3.json"
-    },
-    {
-      "category": "Meals",
-      "commodityCode": "0813100",
-      "commodity": "Meal, Soybean",
       "countryCode": "GL",
       "country": "Global",
       "file": "matrix/0813100_GL.json"
@@ -287,6 +280,14 @@
       "countryCode": "CA",
       "country": "Canada",
       "file": "matrix/4239100_CA.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/4239100_CH.json"
     },
     {
       "category": "Oils",
@@ -431,6 +432,14 @@
       "countryCode": "CA",
       "country": "Canada",
       "file": "matrix/2226000_CA.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/2226000_CH.json"
     },
     {
       "category": "Oilseeds",

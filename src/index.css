@@ -9,6 +9,12 @@
 
 body { margin: 0; min-width: 320px; }
 
+.usda-module-nav { position: fixed; z-index: 20; top: 14px; right: 20px; display: flex; gap: 4px; padding: 4px; border: 1px solid rgb(207 216 223 / 92%); border-radius: 9px; background: rgb(255 255 255 / 94%); box-shadow: 0 3px 12px rgb(22 44 67 / 10%); backdrop-filter: blur(8px); }
+
+.usda-module-nav a { border-radius: 6px; color: #475467; font-size: 13px; font-weight: 750; line-height: 1; padding: 8px 10px; text-decoration: none; white-space: nowrap; }
+
+.usda-module-nav a.active { background: #243f55; color: #fff; }
+
 .dashboard { max-width: 1440px; margin: 0 auto; padding: 44px 28px 64px; }
 
 .page-header { margin-bottom: 26px; }
@@ -112,6 +118,87 @@ tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
 .page-state { display: grid; min-height: 100vh; place-items: center; padding: 24px; color: #475467; }
 
 .page-state.compact { min-height: 160px; margin-bottom: 24px; border: 1px dashed #d6dee5; border-radius: 14px; background: #fff; }
+
+.presentation-shell { display: grid; min-width: 1920px; gap: 24px; min-height: 1080px; padding: 0 0 24px; background: #eef1f3; }
+
+.presentation-report-tabs { display: flex; gap: 8px; width: 1920px; padding: 16px 42px 0; background: #eef1f3; }
+
+.presentation-report-tabs button { border: 1px solid #cfd8df; border-radius: 7px; background: #fff; color: #475467; cursor: pointer; font: 750 15px/1.1 Inter, "Microsoft YaHei", sans-serif; padding: 8px 18px; }
+
+.presentation-report-tabs button.active { border-color: #243f55; background: #243f55; color: #fff; }
+
+.presentation-canvas { width: 1920px; height: 1080px; overflow: hidden; padding: 36px 42px 30px; background: #fff; color: #172b3a; }
+
+.presentation-state { display: grid; place-items: center; color: #667085; font-size: 26px; }
+
+.presentation-header { display: flex; justify-content: space-between; align-items: end; padding-bottom: 12px; border-bottom: 2px solid #243f55; }
+
+.presentation-header p { margin: 0 0 4px; color: #547087; font-size: 14px; font-weight: 800; letter-spacing: .12em; }
+
+.presentation-header h1 { margin: 0; color: #172b3a; font-size: 34px; line-height: 1.1; letter-spacing: -.03em; }
+
+.presentation-header span { color: #667085; font-size: 14px; }
+
+.presentation-market-year-note { margin: 10px 0 4px; color: #475467; font-size: 14px; }
+
+.presentation-change-note { margin: 0 0 10px; color: #667085; font-size: 13px; font-weight: 650; }
+
+.presentation-paired-rows { display: grid; gap: 16px; }
+
+.presentation-pair-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; min-width: 0; }
+
+.presentation-sheet { break-after: page; page-break-after: always; }
+
+.presentation-sheet:last-child { break-after: auto; page-break-after: auto; }
+
+.presentation-sheet--dense { padding-top: 26px; padding-bottom: 22px; }
+
+.presentation-sheet--dense .presentation-header { padding-bottom: 8px; }
+
+.presentation-sheet--dense .presentation-market-year-note { margin-top: 7px; font-size: 13px; }
+
+.presentation-sheet--dense .presentation-change-note { margin-bottom: 7px; font-size: 12px; }
+
+.presentation-sheet--dense .presentation-paired-rows { gap: 9px; }
+
+.presentation-sheet--dense .compact-balance-table h2 { padding-top: 4px; padding-bottom: 4px; }
+
+.presentation-sheet--dense .compact-balance-table th, .presentation-sheet--dense .compact-balance-table td { padding-top: 2px; padding-bottom: 2px; line-height: 1.2; }
+
+.compact-balance-table { overflow: hidden; border: 1px solid #cfd8df; background: #fff; }
+
+.compact-balance-table h2 { margin: 0; padding: 5px 9px; background: #f6d75d; color: #26333d; font-size: 15px; line-height: 1.1; font-weight: 800; }
+
+.compact-balance-table table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; border-spacing: 0; font-size: 11px; }
+
+.compact-balance-table th, .compact-balance-table td { min-width: 0; padding: 3px 5px; border: 1px solid #e2e7eb; text-align: right; line-height: 1.28; white-space: nowrap; }
+
+.compact-balance-table thead th { position: static; background: #f3f5f6; color: #354552; font-weight: 800; box-shadow: none; }
+
+.compact-balance-table th:first-child { position: static; width: 100px; background: #fafbfc; text-align: left; color: #354552; font-weight: 750; }
+
+.compact-balance-table thead th:not(:first-child), .compact-balance-table td { width: 70px; }
+
+.compact-balance-table .presentation-summary { width: 76px; padding-right: 4px; padding-left: 4px; }
+
+.compact-balance-table tbody tr:last-child td, .compact-balance-table tbody tr:last-child th { border-bottom: 1px solid #e2e7eb; }
+
+.presentation-forecast { color: #c8372d !important; font-weight: 800; }
+
+.presentation-positive { color: #c8372d; font-weight: 800; }
+
+.presentation-negative { color: #1d7a46; font-weight: 800; }
+
+.presentation-zero { color: #475467; font-weight: 700; }
+
+.presentation-na { color: #98a2b3; }
+
+@media print {
+  @page { size: 16in 9in; margin: 0; }
+  .presentation-shell { gap: 0; padding: 0; background: #fff; }
+  .presentation-report-tabs { display: none; }
+  .presentation-canvas { margin: 0; }
+}
 
 @media (max-width: 640px) {
   .dashboard { padding: 28px 14px 42px; }

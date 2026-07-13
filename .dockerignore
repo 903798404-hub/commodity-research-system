@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.git/
+.env
+.env.*
+raw/
+data/raw/
+data/snapshots/
+output/
+*.log
+*.tmp
+.vite/

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "tsx --test src/utils/marketYear.test.ts",
+    "test": "tsx --test src/utils/marketYear.test.ts src/utils/monthlyRevision.test.ts",
     "build:data": "tsx scripts/buildData.ts",
     "check:data": "tsx scripts/checkData.ts",
     "compare:data": "tsx scripts/compareSnapshots.ts",

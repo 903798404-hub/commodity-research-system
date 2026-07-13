@@ -4,6 +4,7 @@ import Papa from 'papaparse'
 import { G3_COMMODITIES, G3_COUNTRIES, isResearchCombination, RESEARCH_SCOPE, researchScopeReportLines } from './researchScope'
 import { readReportVersion } from './reportVersion'
 import { readUsdaApiConfig } from './usdaApiConfig'
+import { writePresentationChanges } from './presentationChanges'
 
 type Category = 'Oilseeds' | 'Oils' | 'Meals'
 
@@ -71,6 +72,14 @@ type G2AggregationAudit = {
   singleSidedMissing: Array<{ attribute: string; years: number[] }>
 }
 
+type G3AggregationAudit = {
+  commodity: string
+  created: boolean
+  sources: string[]
+  commonValidYears: number[]
+  incompleteYears: Array<{ attribute: string; years: number[] }>
+}
+
 const RAW_DIRECTORY = join(process.cwd(), 'raw')
 const VERSIONED_RAW_DIRECTORY = join(process.cwd(), 'data', 'raw', 'usda_psd')
 const API_RAW_DIRECTORY = join(process.cwd(), 'data', 'raw', 'usda_psd_api')
@@ -92,6 +101,10 @@ const G2_ADDITIVE_ATTRIBUTES = [
   'Ending Stocks', 'Total Distribution',
 ]
 const G2_CORE_ATTRIBUTES = ['Production', 'Imports', 'Exports', 'Domestic Consumption', 'Ending Stocks']
+const G3_ADDITIVE_ATTRIBUTES = [
+  'Beginning Stocks', 'Production', 'Imports', 'Exports', 'Crush', 'Domestic Consumption',
+  'Industrial Dom. Cons.', 'Food Use Dom. Cons.', 'Feed Waste Dom. Cons.', 'Ending Stocks', 'Total Distribution',
+]
 const EUROPEAN_UNION_MEMBER_NAMES = new Set([
   'Austria', 'Belgium', 'Bulgaria', 'Croatia', 'Cyprus', 'Czech Republic', 'Denmark', 'Estonia', 'Finland',
   'France', 'Germany', 'Greece', 'Hungary', 'Ireland', 'Italy', 'Latvia', 'Lithuania', 'Luxembourg',
@@ -171,7 +184,9 @@ function safeFileName(commodityCode: string, countryCode: string): string {
 }
 
 function countryDisplayName(countryCode: string, country: string): string | undefined {
-  return countryCode === 'G2' && country === 'G2' ? 'G2（马来西亚 + 印度尼西亚）' : undefined
+  if (countryCode === 'G2' && country === 'G2') return 'G2（马来西亚 + 印度尼西亚）'
+  if (countryCode === 'G3' && country === 'G3') return 'G3（美国 + 巴西 + 阿根廷）'
+  return undefined
 }
 
 function findSingleSourceFile(reportMonth: string): string {
@@ -246,6 +261,14 @@ type MatrixCollection = { matrices: Map<string, MatrixStore>; unknownCommodities
 
 function createMatrixCollection(): MatrixCollection {
   return { matrices: new Map<string, MatrixStore>(), unknownCommodities: new Set<string>(), missingKeyFields: 0 }
+}
+
+function supplementMissingResearchMatrices(primary: Map<string, MatrixStore>, fallback: Map<string, MatrixStore>) {
+  for (const store of fallback.values()) {
+    if (!isResearchCombination(store.commodity, store.country)) continue
+    const key = matrixKey(store.commodityCode, store.countryCode)
+    if (!primary.has(key)) primary.set(key, store)
+  }
 }
 
 function ingestRecord(record: RawRecord, collection: MatrixCollection) {
@@ -463,6 +486,46 @@ function aggregatePalmG2(sources: MatrixStore[]): { store: MatrixStore | null; a
   }
 }
 
+function aggregateSoybeanG3(sources: MatrixStore[], commodityCode: string, commodity: string, category: Category): { store: MatrixStore | null; audit: G3AggregationAudit } {
+  const sourceByCountry = new Map(sources.map((source) => [source.country, source]))
+  const orderedSources = G3_COUNTRIES.map((country) => sourceByCountry.get(country)).filter((source): source is MatrixStore => Boolean(source))
+  const audit: G3AggregationAudit = { commodity, created: false, sources: [...G3_COUNTRIES], commonValidYears: [], incompleteYears: [] }
+  if (orderedSources.length !== G3_COUNTRIES.length) return { store: null, audit }
+
+  const attributes = new Map<string, Map<number, StoredValue>>()
+  for (const attribute of G3_ADDITIVE_ATTRIBUTES) {
+    const years = new Set<number>()
+    for (const source of orderedSources) for (const year of source.attributes.get(attribute)?.keys() ?? []) years.add(year)
+    const totals = new Map<number, StoredValue>()
+    const incompleteYears: number[] = []
+    for (const year of years) {
+      const values = orderedSources.map((source) => source.attributes.get(attribute)?.get(year))
+      if (values.every(isValidStoredValue) && hasMatchingUnits(values)) {
+        totals.set(year, { value: roundOneDecimal(values.reduce((sum, value) => sum + value.value, 0)), unit: values[0].unit })
+      } else if (values.some(isValidStoredValue)) {
+        incompleteYears.push(year)
+      }
+    }
+    if (totals.size > 0) attributes.set(attribute, totals)
+    if (incompleteYears.length > 0) audit.incompleteYears.push({ attribute, years: incompleteYears.sort((a, b) => a - b) })
+  }
+
+  const coreAttributes = commodity === 'Oilseed, Soybean'
+    ? ['Production', 'Crush', 'Exports', 'Domestic Consumption', 'Ending Stocks']
+    : ['Production', 'Exports', 'Domestic Consumption', 'Ending Stocks']
+  const allYears = new Set<number>()
+  for (const source of orderedSources) for (const attribute of coreAttributes) for (const year of source.attributes.get(attribute)?.keys() ?? []) allYears.add(year)
+  audit.commonValidYears = [...allYears].filter((year) => coreAttributes.every((attribute) => {
+    const values = orderedSources.map((source) => source.attributes.get(attribute)?.get(year))
+    return values.every(isValidStoredValue) && hasMatchingUnits(values)
+  })).filter((year) => year >= MIN_YEAR).sort((a, b) => a - b)
+  audit.created = attributes.size > 0
+  return {
+    store: audit.created ? { commodityCode, commodity, category, countryCode: 'G3', country: 'G3', attributes } : null,
+    audit,
+  }
+}
+
 function stockToTotalUseAtYear(store: MatrixStore, year: number): { totalUse: number | null; ratio: number | null } {
   const ending = store.attributes.get('Ending Stocks')?.get(year)?.value
   const domestic = store.attributes.get('Domestic Consumption')?.get(year)?.value
@@ -553,7 +616,7 @@ function writeGlobalAggregationReport(audits: GlobalAggregationAudit[]) {
   writeFileSync(GLOBAL_AGGREGATION_REPORT_MARKDOWN_FILE, `${lines.join('\n')}\n`, 'utf8')
 }
 
-function writeReport(sourceFile: string, reportMonth: string, index: IndexData, matrixCount: number, defaultCreated: boolean, unknownCommodities: Set<string>, missingKeyFields: number, globalSources: Map<string, GlobalSourceType>, g2Store: MatrixStore | null, g2Audit: G2AggregationAudit, g2Sources: MatrixStore[]) {
+function writeReport(sourceFile: string, reportMonth: string, index: IndexData, matrixCount: number, defaultCreated: boolean, unknownCommodities: Set<string>, missingKeyFields: number, globalSources: Map<string, GlobalSourceType>, g2Store: MatrixStore | null, g2Audit: G2AggregationAudit, g2Sources: MatrixStore[], g3Stores: Map<string, MatrixStore>, g3Audits: G3AggregationAudit[]) {
   mkdirSync(join(process.cwd(), 'output'), { recursive: true })
   const lines = [
     '# 数据构建报告',
@@ -576,7 +639,8 @@ function writeReport(sourceFile: string, reportMonth: string, index: IndexData, 
     '',
     '## 聚合口径',
     '',
-    '- G3 = United States + Brazil + Argentina，仅用于 Oilseed, Soybean / Meal, Soybean / Oil, Soybean；库存/总使用比按 G3 期末库存 ÷（G3 国内消费 + G3 出口）重新计算，缺失时回退为 G3 期末库存 ÷（G3 总分配 - G3 期末库存）。',
+    '- G3 = United States + Brazil + Argentina，仅用于 Oilseed, Soybean / Oil, Soybean；库存/总使用比按 G3 期末库存 ÷（G3 国内消费 + G3 出口）重新计算，缺失时回退为 G3 期末库存 ÷（G3 总分配 - G3 期末库存）。',
+    '- G3 绝对量仅在美国、巴西、阿根廷三个来源于相同年度、指标和单位均有效时生成；任一来源缺失时保持为空，不以 0 补齐。',
     '- Global 优先使用 USDA World 原始口径；本次未发现可识别 World/Global 原始国家记录，以下 Global 均为 synthetic sum（原始数据全部国家记录汇总）。',
     ...[...globalSources.entries()].map(([commodity, source]) => `- ${commodity}: ${source}`),
     '',
@@ -595,9 +659,30 @@ function writeReport(sourceFile: string, reportMonth: string, index: IndexData, 
     ]),
     ...g2ReportLines(g2Store, g2Audit.commonValidYears, g2Sources),
     '',
+    '## 豆系 G3 检查',
+    '',
+    ...g3ReportLines(g3Stores, g3Audits),
+    '',
     '说明：matrix 文件按 Commodity_Code + Country_Code 拆分；数量单位为 (1000 MT) 或 1000 MT 时已转换为万吨。',
   ]
   writeFileSync(REPORT_FILE, `${lines.join('\n')}\n`, 'utf8')
+}
+
+function g3ReportLines(stores: Map<string, MatrixStore>, audits: G3AggregationAudit[]): string[] {
+  const lines: string[] = []
+  for (const audit of audits) {
+    const store = stores.get(audit.commodity)
+    lines.push(`- ${audit.commodity} + G3：${audit.created ? '成功生成' : '未生成'}；三方共同有效年度数量 ${audit.commonValidYears.length}${audit.commonValidYears.length ? `（${audit.commonValidYears.join('、')}）` : ''}；单边缺失或单位不一致 ${audit.incompleteYears.length === 0 ? '未发现' : '存在'}。`)
+    const latestYear = audit.commonValidYears.at(-1)
+    if (!store || latestYear === undefined || !['Oilseed, Soybean', 'Oil, Soybean'].includes(audit.commodity)) continue
+    const value = (attribute: string) => store.attributes.get(attribute)?.get(latestYear)?.value ?? '—'
+    const ratio = stockToTotalUseAtYear(store, latestYear).ratio
+    const details = audit.commodity === 'Oilseed, Soybean'
+      ? `产量 ${value('Production')}；压榨 ${value('Crush')}；期末库存 ${value('Ending Stocks')}`
+      : `产量 ${value('Production')}；消费 ${value('Domestic Consumption')}；出口 ${value('Exports')}；期末库存 ${value('Ending Stocks')}`
+    lines.push(`  - 最新共同有效年度 ${latestYear}：${details}；库存/总使用比 ${ratio === null ? '—' : `${ratio}%`}（由 G3 合计绝对量重新计算）。`)
+  }
+  return lines.length > 0 ? lines : ['- 未找到可用于 G3 检查的数据。']
 }
 
 function g2ReportLines(store: MatrixStore | null, commonValidYears: number[], sources: MatrixStore[]): string[] {
@@ -632,7 +717,12 @@ async function buildData() {
   const apiDataDirectory = join(API_RAW_DIRECTORY, apiConfig.reportMonth, 'psd')
   const useApiSource = apiConfig.useApi && existsSync(apiDataDirectory) && readdirSync(apiDataDirectory).some((file) => file.toLowerCase().endsWith('.json'))
   const sourceFile = useApiSource ? join(apiDataDirectory, 'API_PSD_JSON') : findSingleSourceFile(reportVersion.currentReportMonth)
-  const { matrices, unknownCommodities, missingKeyFields } = useApiSource ? readApiMatrices(apiDataDirectory) : await readMatrices(sourceFile)
+  const collection = useApiSource ? readApiMatrices(apiDataDirectory) : await readMatrices(sourceFile)
+  const { matrices, unknownCommodities, missingKeyFields } = collection
+  if (useApiSource) {
+    const csvFallback = await readMatrices(findSingleSourceFile(reportVersion.currentReportMonth))
+    supplementMissingResearchMatrices(matrices, csvFallback.matrices)
+  }
   const activeReportMonth = useApiSource ? apiConfig.reportMonth : reportVersion.currentReportMonth
   rmSync(MATRIX_DIRECTORY, { recursive: true, force: true })
   mkdirSync(MATRIX_DIRECTORY, { recursive: true })
@@ -643,6 +733,8 @@ async function buildData() {
   const renderStores = new Map<string, MatrixStore>()
   const globalSources = new Map<string, GlobalSourceType>()
   const globalAudits: GlobalAggregationAudit[] = []
+  const g3Stores = new Map<string, MatrixStore>()
+  const g3Audits: G3AggregationAudit[] = []
   const palmG2Sources = [...matrices.values()].filter((store) => store.commodity === G2_PALM_COMMODITY && G2_PALM_COUNTRIES.includes(store.country as typeof G2_PALM_COUNTRIES[number]))
   const { store: palmG2, audit: palmG2Audit } = aggregatePalmG2(palmG2Sources)
   let defaultMatrix: MatrixData | null = null
@@ -654,8 +746,13 @@ async function buildData() {
   for (const commodity of G3_COMMODITIES) {
     const sources = [...matrices.values()].filter((store) => store.commodity === commodity && G3_COUNTRIES.includes(store.country))
     const source = sources[0]
-    const g3 = source && aggregateStores(sources, source.commodityCode, commodity, source.category, 'G3', 'G3')
-    if (g3) renderStores.set(matrixKey(g3.commodityCode, g3.countryCode), g3)
+    if (!source) continue
+    const { store: g3, audit } = aggregateSoybeanG3(sources, source.commodityCode, commodity, source.category)
+    g3Audits.push(audit)
+    if (g3) {
+      renderStores.set(matrixKey(g3.commodityCode, g3.countryCode), g3)
+      g3Stores.set(commodity, g3)
+    }
   }
 
   if (palmG2) renderStores.set(matrixKey(palmG2.commodityCode, palmG2.countryCode), palmG2)
@@ -716,8 +813,9 @@ async function buildData() {
   publishSnapshotForFrontend(reportVersion.previousReportMonth)
   synchronizeSnapshotRatioRows(SNAPSHOT_DIRECTORY)
   synchronizeSnapshotRatioRows(PUBLIC_SNAPSHOT_DIRECTORY)
+  writePresentationChanges(DATA_DIRECTORY)
   writeFileSync(join(DATA_DIRECTORY, 'report_version.json'), `${JSON.stringify({ currentReportMonth: activeReportMonth, previousReportMonth: reportVersion.previousReportMonth }, null, 2)}\n`, 'utf8')
-  writeReport(sourceFile, activeReportMonth, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields, globalSources, palmG2, palmG2Audit, palmG2Sources)
+  writeReport(sourceFile, activeReportMonth, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields, globalSources, palmG2, palmG2Audit, palmG2Sources, g3Stores, g3Audits)
   writeGlobalAggregationReport(globalAudits)
   console.log(`已生成 ${generatedMatrixCount} 个 matrix JSON、${index.commodities.length} 个商品和 ${index.countries.length} 个国家。`)
 }
