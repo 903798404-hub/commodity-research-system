@@ -12,6 +12,7 @@ if str(APPS_DIR) not in sys.path:
     sys.path.insert(0, str(APPS_DIR))
 
 from basis_page import (  # noqa: E402
+    _commodity_sort_key,
     build_seasonal_report_figure,
     calculate_wholesale_spread,
     filter_display_data,
@@ -125,27 +126,57 @@ def test_wholesale_spread_reports_missing_commodity() -> None:
     assert missing == ["菜粕"]
 
 
-def test_cash_price_data_is_independent_and_excludes_sunflower_oil() -> None:
+def test_display_data_maps_supported_codes_and_excludes_other_oils() -> None:
     data = pd.DataFrame(
         {
-            "commodity": ["豆粕", "菜粕", "葵油", "一葵", "葵粕"],
+            "commodity": [
+                "一豆",
+                "24度",
+                "三菜",
+                "豆粕",
+                "菜粕",
+                "一葵",
+                "一级玉米油",
+                "葵粕",
+            ],
             "quote_type": [
                 "基差报价",
                 "一口价",
                 "一口价",
                 "一口价",
                 "基差报价",
+                "一口价",
+                "一口价",
+                "一口价",
             ],
-            "cash_price": [3200, 2500, 9000, 8800, 2300],
-            "basis": [100, pd.NA, pd.NA, pd.NA, -500],
+            "cash_price": [8200, 7800, 9100, 3200, 2500, 9000, 8800, 2300],
+            "basis": [pd.NA, pd.NA, pd.NA, 100, -500, pd.NA, pd.NA, pd.NA],
         }
     )
 
     visible = filter_display_data(data)
     cash = prepare_cash_price_data(visible)
 
-    assert cash["commodity"].tolist() == ["豆粕", "菜粕", "葵粕"]
-    assert set(cash["quote_type"]) == {"基差报价", "一口价"}
-    assert "葵油" not in set(visible["commodity"])
-    assert "一葵" not in set(visible["commodity"])
-    assert "葵粕" in set(visible["commodity"])
+    assert visible["commodity_code"].tolist() == [
+        "一豆",
+        "24度",
+        "三菜",
+        "豆粕",
+        "菜粕",
+    ]
+    assert visible["commodity"].tolist() == [
+        "豆油",
+        "棕榈油",
+        "菜油",
+        "豆粕",
+        "菜粕",
+    ]
+    assert [_commodity_sort_key(value) for value in visible["commodity"]] == [
+        (0, "豆油"),
+        (1, "棕榈油"),
+        (2, "菜油"),
+        (3, "豆粕"),
+        (4, "菜粕"),
+    ]
+    assert set(cash["commodity"]) == {"豆油", "棕榈油", "菜油", "豆粕", "菜粕"}
+    assert not {"一葵", "一级玉米油", "葵粕"} & set(visible["commodity_code"])

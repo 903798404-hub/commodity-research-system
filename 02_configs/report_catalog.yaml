@@ -27,6 +27,17 @@
     "enabled": true
   },
   {
+    "title": "USDA 平衡表",
+    "category": "供需",
+    "commodities": "油籽/油脂/粕类",
+    "region": "全球",
+    "description": "查看全球主要农产品供需平衡表、月度修正及历史变化。",
+    "type": "external_app",
+    "url": "http://127.0.0.1:5173",
+    "url_env": "USDA_DASHBOARD_URL",
+    "enabled": true
+  },
+  {
     "title": "主力席位动向",
     "category": "席位",
     "commodities": "油脂油料",

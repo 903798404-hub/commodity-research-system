@@ -1,0 +1,7 @@
+varieties:
+  Y: {name: 豆油, aliases: [豆油, Y, y, 一级豆油]}
+  OI: {name: 菜油, aliases: [菜油, 菜籽油, OI, oi, 三级菜油]}
+  P: {name: 棕榈油, aliases: [棕榈油, 棕油, P, p, 24度棕榈油, 24度棕油]}
+  M: {name: 豆粕, aliases: [豆粕, M, m, 43蛋白豆粕, 豆粕43]}
+  RM: {name: 菜粕, aliases: [菜粕, 菜籽粕, RM, rm, 普通菜粕]}
+regions: [张家港, 东莞, 广东, 广西, 福建, 华东, 华南]

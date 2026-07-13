@@ -7,8 +7,21 @@ services:
     command: streamlit run 05_apps/streamlit_app.py --server.address=0.0.0.0 --server.port=8501
     ports:
       - "8501:8501"
+    environment:
+      USDA_DASHBOARD_URL: ${USDA_DASHBOARD_URL:-http://127.0.0.1:8080/usda/}
     volumes:
       - ./01_data:/app/01_data
       - ./06_outputs:/app/06_outputs
       - ./10_logs:/app/10_logs
+    restart: unless-stopped
+
+  usda-dashboard:
+    build:
+      context: ../USDA平衡表
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: /usda/
+    container_name: usda-dashboard
+    ports:
+      - "8080:80"
     restart: unless-stopped

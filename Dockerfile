@@ -7,6 +7,15 @@ ENV PIP_DEFAULT_TIMEOUT=120
 
 WORKDIR /app
 
+RUN sed -i \
+        -e 's|http://deb.debian.org/debian|http://mirrors.cloud.tencent.com/debian|g' \
+        -e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig \
+    && fc-cache -fv \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir --default-timeout=120 -r requirements.txt
 

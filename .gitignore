@@ -46,4 +46,16 @@ market-data-new.zip
 # Regenerable operational outputs; documentation under 06_outputs remains trackable
 06_outputs/daily_price_updates/
 06_outputs/env_check.xlsx
+
+# Server runtime data and generated outputs are synchronized outside Git.
+01_data/
+06_outputs/
+
+# Cross-project build artifacts, legacy data roots, and comparison downloads.
+dist/
+raw/
+data/raw/
+data/snapshots/
+output/
+*-server-latest/
 06_outputs/最终迁移与天气卸载报告.md

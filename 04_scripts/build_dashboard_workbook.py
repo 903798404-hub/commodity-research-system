@@ -74,7 +74,7 @@ def style_merged_header(sheet, cell_range: str, value: str, fill_color: str) -> 
     sheet.merge_cells(cell_range)
     cell = sheet[cell_range.split(":")[0]]
     cell.value = value
-    cell.font = Font(name="Microsoft YaHei", bold=True, size=14, color="FFFFFF")
+    cell.font = Font(name="Noto Sans CJK SC", bold=True, size=14, color="FFFFFF")
     cell.fill = PatternFill("solid", fgColor=fill_color)
     cell.alignment = Alignment(horizontal="center", vertical="center")
 
@@ -99,7 +99,7 @@ def add_chart_image(sheet, png_file: Path, spread_name: str, start_cell: str, st
     sheet.merge_cells(f"{title_range[0]}:{title_range[1]}")
     title_cell = sheet.cell(row=start_row, column=start_col)
     title_cell.value = spread_name
-    title_cell.font = Font(name="Microsoft YaHei", bold=True, size=12)
+    title_cell.font = Font(name="Noto Sans CJK SC", bold=True, size=12)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     sheet.row_dimensions[start_row].height = 22
 
@@ -116,7 +116,7 @@ def add_missing_note(sheet, message: str, start_row: int, start_col: int) -> Non
     sheet.merge_cells(f"{start}:{end}")
     cell = sheet.cell(row=start_row, column=start_col)
     cell.value = message
-    cell.font = Font(name="Microsoft YaHei", bold=True, size=12, color="666666")
+    cell.font = Font(name="Noto Sans CJK SC", bold=True, size=12, color="666666")
     cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
@@ -176,7 +176,7 @@ def build_dashboard(current_dir: Path, output_file: Path) -> dict[str, object]:
     style_merged_header(sheet, "S2:Z2", f"报告日期：{report_date}", "FFF2CC")
 
     for cell in ["A2", "J2", "S2"]:
-        sheet[cell].font = Font(name="Microsoft YaHei", bold=True, size=14, color="000000")
+        sheet[cell].font = Font(name="Noto Sans CJK SC", bold=True, size=14, color="000000")
 
     for column_index in list(range(1, 9)) + list(range(10, 18)) + list(range(19, 27)):
         sheet.column_dimensions[get_column_letter(column_index)].width = 10
@@ -247,7 +247,7 @@ def build_dashboard(current_dir: Path, output_file: Path) -> dict[str, object]:
 
     directory.append(["category", "spread_name", "png_path", "status"])
     for cell in directory[1]:
-        cell.font = Font(name="Microsoft YaHei", bold=True, size=11, color="FFFFFF")
+        cell.font = Font(name="Noto Sans CJK SC", bold=True, size=11, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F4E79")
         cell.alignment = Alignment(horizontal="center", vertical="center")
     for row in directory_rows:

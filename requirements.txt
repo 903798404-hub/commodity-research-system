@@ -9,3 +9,4 @@ pyarrow
 filelock
 PyYAML
 pytest
+PySocks

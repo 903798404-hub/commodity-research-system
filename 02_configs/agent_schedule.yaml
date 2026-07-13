@@ -19,3 +19,15 @@ daily_tasks:
       - run_daily_research_agent
       - generate_markdown_report
       - export_excel_report
+
+  foreign_seats:
+    first_update:
+      time: "18:30"
+      weekdays: "Mon-Fri"
+      tasks:
+        - update_foreign_seats
+    compensation_update:
+      time: "20:30"
+      weekdays: "Mon-Fri"
+      tasks:
+        - update_foreign_seats

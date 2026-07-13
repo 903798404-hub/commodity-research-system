@@ -6,5 +6,5 @@ build-backend = "setuptools.build_meta"
 where = ["03_src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["03_src"]
+pythonpath = ["03_src", "04_scripts"]
 testpaths = ["08_tests"]

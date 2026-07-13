@@ -2,11 +2,21 @@
 
 import datetime as dt
 import logging
+import sys
 from pathlib import Path
 
-import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "03_src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
+    configure_matplotlib_chinese_fonts,
+)
 
 
 RECENT_SEASON_COUNT = 6
@@ -45,14 +55,7 @@ def clear_current_outputs(current_dir: Path) -> list[str]:
 
 
 def setup_font() -> str:
-    available_fonts = {font.name for font in fm.fontManager.ttflist}
-    if "Microsoft YaHei" in available_fonts:
-        plt.rcParams["font.sans-serif"] = ["Microsoft YaHei"]
-        font_used = "Microsoft YaHei"
-    else:
-        font_used = "default"
-    plt.rcParams["axes.unicode_minus"] = False
-    return font_used
+    return ", ".join(configure_matplotlib_chinese_fonts())
 
 
 def season_sort_key(season: str) -> int:

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+import yaml
 from matplotlib.figure import Figure
-from matplotlib.font_manager import fontManager
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,10 +19,25 @@ if str(SRC_DIR) not in sys.path:
 from agri_research_agent.data_sources.basis_upload import (  # noqa: E402
     update_basis_from_upload,
 )
+from agri_research_agent.data_sources.basis_database import build_basis_database  # noqa: E402
+from agri_research_agent.data_sources.basis_entry import (  # noqa: E402
+    adapt_excel_result, classify_duplicates, config as entry_config, parse_fixed_rows, parse_paste, parse_text, write_confirmed,
+)
+from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
+    configure_matplotlib_chinese_fonts,
+)
 
 
 UNIT_LABEL = "元/吨"
-EXCLUDED_DISPLAY_COMMODITIES = {"葵油", "一葵"}
+DISPLAY_COMMODITY_MAP = {
+    "一豆": "豆油",
+    "24度": "棕榈油",
+    "三菜": "菜油",
+    "豆粕": "豆粕",
+    "菜粕": "菜粕",
+}
+SUPPORTED_COMMODITY_CODES = set(DISPLAY_COMMODITY_MAP)
+EXCLUDED_COMMODITY_CODES = {"一葵", "一级玉米油", "葵粕"}
 YEAR_COLORS = {
     2024: "#4C78A8",
     2025: "#F58518",
@@ -29,14 +45,11 @@ YEAR_COLORS = {
 }
 FALLBACK_COLORS = ["#4C78A8", "#F58518", "#D62728"]
 COMMODITY_ORDER = [
+    "豆油",
+    "棕榈油",
+    "菜油",
     "豆粕",
     "菜粕",
-    "葵粕",
-    "一豆",
-    "24度",
-    "三菜",
-    "一葵",
-    "一级玉米油",
 ]
 MONTH_TICKS = pd.to_datetime(
     [f"2000-{month:02d}-01" for month in range(1, 13)]
@@ -44,21 +57,7 @@ MONTH_TICKS = pd.to_datetime(
 MONTH_LABELS = [f"{month:02d}-01" for month in range(1, 13)]
 
 
-def _configure_matplotlib() -> None:
-    available = {font.name for font in fontManager.ttflist}
-    for font_name in (
-        "Microsoft YaHei",
-        "SimHei",
-        "Noto Sans CJK SC",
-        "Arial Unicode MS",
-    ):
-        if font_name in available:
-            plt.rcParams["font.sans-serif"] = [font_name]
-            break
-    plt.rcParams["axes.unicode_minus"] = False
-
-
-_configure_matplotlib()
+configure_matplotlib_chinese_fonts()
 
 
 def _missing_columns(
@@ -79,10 +78,13 @@ def _options(dataframe: pd.DataFrame, column: str) -> list[str]:
 def filter_display_data(dataframe: pd.DataFrame) -> pd.DataFrame:
     if "commodity" not in dataframe.columns:
         return dataframe.copy()
-    commodity = dataframe["commodity"].astype("string").str.strip()
-    return dataframe[
-        ~commodity.isin(EXCLUDED_DISPLAY_COMMODITIES)
-    ].copy()
+    commodity_code = dataframe["commodity"].astype("string").str.strip()
+    filtered = dataframe[commodity_code.isin(SUPPORTED_COMMODITY_CODES)].copy()
+    filtered["commodity_code"] = commodity_code.loc[filtered.index]
+    filtered["commodity"] = filtered["commodity_code"].map(
+        DISPLAY_COMMODITY_MAP
+    ).astype("string")
+    return filtered
 
 
 def prepare_cash_price_data(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -678,6 +680,45 @@ def _render_wholesale_spread_tab(
 
 
 def _render_upload_update() -> None:
+    """Keep the legacy workbook importer and add an explicit text-entry flow."""
+    cfg = entry_config(PROJECT_ROOT / "02_configs" / "basis_varieties.yaml")
+    quote_date = st.date_input("统一报价日期", value=pd.Timestamp.today().date(), key="basis_entry_date")
+    source = st.text_input("统一数据来源", value="手工录入", key="basis_entry_source")
+    excel_tab, table_tab, paste_tab = st.tabs(["Excel 导入", "表格录入", "批量粘贴"])
+    with excel_tab:
+        _render_legacy_excel_upload()
+    with table_tab:
+        columns=["地区","品种","基准合约","基差","一口价","报价名称","备注"]
+        blank=pd.DataFrame([["","豆油","Y2609",pd.NA,pd.NA,"",""]],columns=columns)
+        editable=st.data_editor(blank,num_rows="dynamic",use_container_width=True,key="basis_table_input",column_config={"品种":st.column_config.SelectboxColumn(options=["豆油","菜油","棕榈油","豆粕","菜粕"]),"基差":st.column_config.NumberColumn(),"一口价":st.column_config.NumberColumn()})
+        if st.button("生成表格录入预览",key="basis_table_parse"):
+            st.session_state["basis_preview"]=parse_fixed_rows(editable,quote_date,source,cfg,"table")
+    with paste_tab:
+        raw=st.text_area("地区|品种|基准合约|基差|一口价|报价名称|备注",height=150,key="basis_paste_input")
+        if st.button("解析固定格式粘贴",key="basis_paste_parse"):
+            st.session_state["basis_preview"]=parse_paste(raw,quote_date,source,cfg)
+        with st.expander("实验性快速文字识别",expanded=False):
+            st.warning("该功能会推断日期和合约，必须检查预览结果后再写入。")
+            natural=st.text_area("自然语言报价",key="basis_natural_input")
+            if st.button("实验性识别",key="basis_natural_parse"):
+                st.session_state["basis_preview"]=parse_text(natural,quote_date,source,cfg)
+    _render_shared_preview()
+
+
+def _render_shared_preview() -> None:
+    preview=st.session_state.get("basis_preview")
+    if not isinstance(preview,pd.DataFrame) or preview.empty:return
+    path=PROJECT_ROOT/"01_data"/"database"/"basis"/"basis_quotes.parquet"
+    existing=pd.read_parquet(path) if path.exists() else pd.DataFrame()
+    preview=classify_duplicates(preview,existing)
+    edited=st.data_editor(preview,use_container_width=True,key="basis_shared_preview")
+    st.caption(f"有效 {int((edited.parse_status=='parsed').sum())}｜待确认 {int((edited.parse_status=='needs_review').sum())}｜无效 {int((edited.parse_status=='invalid').sum())}｜重复 {int(edited.duplicate_status.str.startswith('duplicate').sum())}")
+    overwrite=st.checkbox("冲突时使用新值覆盖",key="basis_shared_overwrite")
+    if st.button("确认写入",type="primary",key="basis_shared_write"):
+        st.session_state["basis_last_entry"]=write_confirmed(edited,path,PROJECT_ROOT/"01_data"/"backups",overwrite)
+
+
+def _render_legacy_excel_upload() -> None:
     with st.expander("上传更新国内基差 Excel", expanded=False):
         st.caption(
             "仅支持 .xlsx。上传成功后会先备份旧文件，再生成最新正式 parquet。"
@@ -739,6 +780,29 @@ def _render_upload_update() -> None:
                 st.caption(f"旧 Excel 备份：{result['backup_file']}")
             else:
                 st.error(f"导入失败：{result['error']}")
+
+
+def _render_legacy_excel_upload() -> None:
+    with st.expander("上传更新国内基差 Excel", expanded=False):
+        uploaded_file = st.file_uploader("选择 Excel", type=["xlsx"], key="basis_excel_shared")
+        if st.button("解析 Excel 到共享预览", disabled=uploaded_file is None, key="basis_excel_shared_parse"):
+            try:
+                with tempfile.TemporaryDirectory(prefix="basis_excel_preview_") as folder:
+                    folder_path = Path(folder); source_path = folder_path / uploaded_file.name
+                    source_path.write_bytes(uploaded_file.getvalue())
+                    cfg_data = yaml.safe_load((PROJECT_ROOT / "02_configs" / "basis_excel.yaml").read_text(encoding="utf-8"))
+                    cfg_data["source_file"]["path"] = str(source_path)
+                    cfg_path = folder_path / "basis_excel.yaml"
+                    cfg_path.write_text(yaml.safe_dump(cfg_data, allow_unicode=True), encoding="utf-8")
+                    output_path = folder_path / "legacy_basis.parquet"
+                    build_basis_database(config_path=cfg_path, output_path=output_path)
+                    legacy = pd.read_parquet(output_path)
+                cfg = entry_config(PROJECT_ROOT / "02_configs" / "basis_varieties.yaml")
+                st.session_state["basis_preview"] = adapt_excel_result(legacy, uploaded_file.name, cfg)
+                st.success("Excel 已进入共享预览表，请检查后确认写入。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Excel 解析失败：{exc}")
 
 
 def render_basis_page(

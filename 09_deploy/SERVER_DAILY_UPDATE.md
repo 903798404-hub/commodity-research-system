@@ -225,6 +225,16 @@ docker compose up -d --build
 
 ## 配置 cron
 
+### 外资与重点席位（北京时间）
+
+在与现有看板相同的运行环境中增加以下两条幂等任务。数据写入以
+`trade_date + exchange + variety + seat_name_normalized` 去重，20:30 的补偿执行不会制造重复记录。
+
+```cron
+30 18 * * 1-5 cd /home/ubuntu/market-data && /usr/bin/docker compose exec -T spread-dashboard python 04_scripts/update_foreign_seats.py --recent >> 10_logs/cron_foreign_seats.log 2>&1
+30 20 * * 1-5 cd /home/ubuntu/market-data && /usr/bin/docker compose exec -T spread-dashboard python 04_scripts/update_foreign_seats.py --recent >> 10_logs/cron_foreign_seats.log 2>&1
+```
+
 先不要直接启用 cron。确认手动运行没有问题后，再配置。
 
 默认安全检查示例：

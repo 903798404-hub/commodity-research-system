@@ -29,7 +29,7 @@ def test_streamlit_entries_start_without_exceptions() -> None:
 
 def test_report_catalog_cards_and_disabled_state() -> None:
     cards = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
-    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=15).run()
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
 
     assert not app.exception
     rendered_titles = {title.value for title in app.markdown if title.value.startswith("#### ")}
@@ -38,10 +38,63 @@ def test_report_catalog_cards_and_disabled_state() -> None:
 
     disabled_buttons = [button for button in app.button if button.label == "待接入"]
     enabled_buttons = [button for button in app.button if button.label == "打开"]
+    external_cards = [card for card in cards if card.get("type") == "external_app"]
+    internal_enabled_cards = [
+        card for card in cards if card["enabled"] and card.get("type") != "external_app"
+    ]
     assert len(disabled_buttons) == sum(not card["enabled"] for card in cards)
-    assert len(enabled_buttons) == sum(card["enabled"] for card in cards)
+    assert len(enabled_buttons) == len(internal_enabled_cards)
     assert all(button.disabled for button in disabled_buttons)
     assert all(not button.disabled for button in enabled_buttons)
+    assert len(external_cards) == 1
+    assert external_cards[0]["title"] == "USDA 平衡表"
+    assert external_cards[0]["url"] == "http://127.0.0.1:5173"
+
+
+def test_usda_dashboard_card_supports_environment_url_override(monkeypatch) -> None:
+    import sys
+
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+
+    from home import get_external_url
+
+    card = {
+        "type": "external_app",
+        "url": "http://127.0.0.1:5173",
+        "url_env": "USDA_DASHBOARD_URL",
+    }
+    assert get_external_url(card) == "http://127.0.0.1:5173"
+
+    monkeypatch.setenv("USDA_DASHBOARD_URL", "http://127.0.0.1:5199")
+    assert get_external_url(card) == "http://127.0.0.1:5199"
+
+
+def test_workspace_navigation_includes_usda_entry_in_requested_order() -> None:
+    import sys
+
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+
+    from home import get_external_app_url
+
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=15).run()
+
+    assert app.radio[0].options == [
+        "首页",
+        "价差动态看板",
+        "基差/一口价",
+        "USDA平衡表",
+        "外资与重点席位",
+        "运行监控",
+    ]
+
+    app.radio[0].set_value("USDA平衡表").run()
+    assert not app.exception
+    assert any(title.value == "USDA平衡表" for title in app.title)
+    assert get_external_app_url(CATALOG_FILE, "USDA平衡表") == "http://127.0.0.1:5173"
 
 
 def test_basis_page_reads_three_rows_and_formulas_are_correct() -> None:

@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import datetime as dt
 import json
 import sys
 from pathlib import Path
@@ -15,43 +14,31 @@ if str(APPS_DIR) not in sys.path:
     sys.path.insert(0, str(APPS_DIR))
 
 from basis_page import render_basis_page
-from home import render_home
+from foreign_seats_page import render_foreign_seats_page
+from home import get_external_app_url, render_home
 
 
 PAGE_TITLE = "油脂油料价差动态看板"
 DATA_DIR = PROJECT_ROOT / "01_data"
 DATABASE_XLSX_FILE = DATA_DIR / "historical_spread_database.xlsx"
 DATABASE_PARQUET_FILE = DATA_DIR / "historical_spread_database.parquet"
+SPREAD_CONFIG_FILE = DATA_DIR / "historical_spread_config.xlsx"
 UPDATE_STATUS_FILE = DATA_DIR / "update_status.json"
 REPORT_CATALOG_FILE = PROJECT_ROOT / "02_configs" / "report_catalog.yaml"
 BASIS_DATABASE_FILE = DATA_DIR / "database" / "basis" / "basis_quotes.parquet"
 BASIS_SAMPLE_DATABASE_FILE = (
     DATA_DIR / "database" / "basis" / "basis_quotes_sample.parquet"
 )
-WORKSPACE_PAGES = ["首页", "价差动态看板", "基差/一口价", "运行监控"]
+USDA_PAGE_TITLE = "USDA平衡表"
+WORKSPACE_PAGES = ["首页", "价差动态看板", "基差/一口价", USDA_PAGE_TITLE, "外资与重点席位", "运行监控"]
+FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
-SERIES_SPREADS = {
-    "09月主力系列": ["M 9-1", "RM 9-1", "Y 9-1", "OI 9-1", "P 9-1"],
-    "01月主力系列": ["M 1-5", "RM 1-5", "Y 1-5", "OI 1-5", "P 1-5"],
-    "05月主力系列": ["M 5-9", "RM 5-9", "Y 5-9", "OI 5-9", "P 5-9"],
-    "品种套利": [
-        "M-RM 1",
-        "M-RM 5",
-        "M-RM 9",
-        "Y-P 1",
-        "Y-P 5",
-        "Y-P 9",
-        "OI-Y 1",
-        "OI-Y 5",
-        "OI-Y 9",
-        "OI-P 1",
-        "OI-P 5",
-        "OI-P 9",
-    ],
-    "油粕比": ["Y/M 1", "Y/M 5", "Y/M 9", "OI/RM 1", "OI/RM 5", "OI/RM 9", "P/M 1", "P/M 5", "P/M 9"],
-}
-
-SERIES_BUTTONS = ["智能季节推荐", "09月主力系列", "01月主力系列", "05月主力系列", "品种套利", "油粕比"]
+BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "品种间套利"]
+INSTRUMENT_LABELS = {"M": "豆粕", "Y": "豆油", "RM": "菜粕", "OI": "菜油", "P": "棕榈油"}
+SOY_INSTRUMENTS = {"M", "Y"}
+PALM_RAPESEED_INSTRUMENTS = {"P", "OI", "RM"}
+OIL_INSTRUMENTS = {"Y", "OI", "P"}
+MEAL_INSTRUMENTS = {"M", "RM"}
 FIVE_YEAR_MEAN_LABEL = "五年均值"
 FIVE_YEAR_MEAN_SMOOTH_WINDOW = 7
 NON_SEASON_KEYWORDS = ["历史均值", "十年均值", "五年均值", "均值", "mean", "avg", "average", "five_year", "五年", "十年"]
@@ -78,6 +65,17 @@ def load_database(database_path: Path, mtime: float) -> pd.DataFrame:
     data["season"] = data["season"].astype(str)
     data["spread_name"] = data["spread_name"].astype(str)
     return data
+
+
+@st.cache_data(show_spinner=False)
+def load_spread_config(config_path: Path, mtime: float) -> pd.DataFrame:
+    del mtime
+    if not config_path.exists():
+        return pd.DataFrame(columns=["spread_name", "enabled"])
+    config = pd.read_excel(config_path, sheet_name="spread_config")
+    if "enabled" in config.columns:
+        config = config[config["enabled"].fillna(False)].copy()
+    return config
 
 
 @st.cache_data(show_spinner=False)
@@ -120,69 +118,97 @@ def season_sort_key(season: str) -> int:
         return -1
 
 
-def classify_spread(spread_name: str) -> str:
+def parse_spread_name(spread_name: str) -> tuple[list[str], list[int]] | None:
+    name, _, delivery = str(spread_name).partition(" ")
+    instruments = name.split("-")
+    if not delivery:
+        return None
+    month_parts = delivery.split("-")
+    try:
+        months = [int(month) for month in month_parts]
+    except ValueError:
+        return None
+    if not instruments or not all(instrument in INSTRUMENT_LABELS for instrument in instruments):
+        return None
+    return instruments, months
+
+
+def classify_board(spread_name: str) -> tuple[str, str]:
+    """Classify configured spreads from their instrument legs; unknowns remain visible."""
     name = str(spread_name)
-    if "-" in name.split(" ")[0]:
-        return "品种间价差"
-    return "月间价差"
+    if "/" in name or any(keyword in name.lower() for keyword in ["压榨", "crush", "ratio"]):
+        return "排除", "比值或利润"
+    parsed = parse_spread_name(name)
+    if parsed is None:
+        return "品种间套利", "其他"
+    instruments, months = parsed
+    if len(instruments) == 1 and len(months) == 2:
+        if instruments[0] in SOY_INSTRUMENTS:
+            return "豆系月差", "月差"
+        if instruments[0] in PALM_RAPESEED_INSTRUMENTS:
+            return "棕榈油与菜系月差", "月差"
+        return "品种间套利", "其他"
+    if len(instruments) == 2 and len(months) == 1:
+        instrument_set = set(instruments)
+        if instrument_set <= OIL_INSTRUMENTS:
+            return "品种间套利", "油脂之间套利"
+        if instrument_set <= MEAL_INSTRUMENTS:
+            return "品种间套利", "粕之间套利"
+        if instrument_set & OIL_INSTRUMENTS and instrument_set & MEAL_INSTRUMENTS:
+            return "排除", "油粕跨类"
+    return "品种间套利", "其他"
 
 
-def spread_options(data: pd.DataFrame, mode: str) -> list[str]:
-    names = sorted(data["spread_name"].dropna().unique().tolist())
-    if mode == "全部":
-        return names
-    return [name for name in names if classify_spread(name) == mode]
+def display_spread_name(spread_name: str) -> str:
+    parsed = parse_spread_name(spread_name)
+    if parsed is None:
+        return str(spread_name)
+    instruments, months = parsed
+    labels = [INSTRUMENT_LABELS[instrument] for instrument in instruments]
+    if len(instruments) == 1 and len(months) == 2:
+        return f"{labels[0]} {months[0]:02d}-{months[1]:02d}"
+    if len(instruments) == 2 and len(months) == 1:
+        preferred_order = {"Y": 0, "OI": 1, "P": 2, "M": 0, "RM": 1}
+        labels = [label for _, label in sorted(zip(instruments, labels), key=lambda item: preferred_order[item[0]])]
+        return f"{'-'.join(labels)} {months[0]:02d}"
+    return str(spread_name)
 
 
-def analysis_mode_for_spread(spread_name: str) -> str:
-    spread_type = classify_spread(spread_name)
-    if spread_type in {"月间价差", "品种间价差"}:
-        return spread_type
-    return "全部"
+def spread_sort_key(spread_name: str) -> tuple[int, int, int, str]:
+    """Use dashboard order instead of source/config-file row order."""
+    parsed = parse_spread_name(spread_name)
+    if parsed is None:
+        return (9, 9, 9, str(spread_name))
+    instruments, months = parsed
+    if len(instruments) == 1 and len(months) == 2:
+        instrument_order = {"Y": 0, "M": 1, "P": 0, "OI": 1, "RM": 2}
+        month_order = {(9, 1): 0, (1, 5): 1, (5, 9): 2}
+        return (0, instrument_order.get(instruments[0], 9), month_order.get(tuple(months), 9), str(spread_name))
+    if len(instruments) == 2 and len(months) == 1:
+        pair_order = {
+            frozenset({"Y", "P"}): 0,
+            frozenset({"Y", "OI"}): 1,
+            frozenset({"OI", "P"}): 2,
+            frozenset({"M", "RM"}): 3,
+        }
+        month_order = {1: 0, 5: 1, 9: 2}
+        return (1, pair_order.get(frozenset(instruments), 9), month_order.get(months[0], 9), str(spread_name))
+    return (9, 9, 9, str(spread_name))
 
 
-def available_first(spreads: list[str], available: set[str]) -> str | None:
-    return next((spread for spread in spreads if spread in available), None)
-
-
-def recommended_series(today: dt.date | None = None) -> list[str]:
-    month = (today or dt.date.today()).month
-    recommendations: list[str] = []
-    if 2 <= month <= 8:
-        recommendations.append("09月主力系列")
-    if month >= 6 or month <= 1:
-        recommendations.append("01月主力系列")
-    if month >= 10 or month <= 4:
-        recommendations.append("05月主力系列")
-    return recommendations
-
-
-def smart_spreads() -> tuple[list[str], list[str]]:
-    groups = recommended_series()
-    spreads: list[str] = []
-    for group in groups:
-        spreads.extend(SERIES_SPREADS[group])
-    return groups, spreads
-
-
-def set_selected_spread(spread_name: str) -> None:
-    st.session_state.selected_spread = spread_name
-    st.session_state.selected_analysis_mode = analysis_mode_for_spread(spread_name)
-
-
-def set_series_group(series_group: str, available: set[str]) -> None:
-    st.session_state.selected_series_group = series_group
-    if series_group == "智能季节推荐":
-        _, candidate_spreads = smart_spreads()
-    else:
-        candidate_spreads = SERIES_SPREADS.get(series_group, [])
-    first = available_first(candidate_spreads, available)
-    if first:
-        set_selected_spread(first)
-    elif series_group == "品种套利":
-        st.session_state.selected_analysis_mode = "品种间价差"
-    elif series_group in {"09月主力系列", "01月主力系列", "05月主力系列"}:
-        st.session_state.selected_analysis_mode = "月间价差"
+def configured_spreads(data: pd.DataFrame, config: pd.DataFrame) -> dict[str, list[str]]:
+    available = set(data["spread_name"].dropna().astype(str))
+    configured = config.get("spread_name", pd.Series(dtype=str)).dropna().astype(str).tolist()
+    names = [name for name in configured if name in available]
+    names.extend(sorted(available - set(names)))
+    grouped = {board: [] for board in BOARD_OPTIONS}
+    for name in names:
+        board, _ = classify_board(name)
+        if board in grouped:
+            grouped[board].append(name)
+    for board in grouped:
+        grouped[board] = sorted(grouped[board], key=spread_sort_key)
+    return grouped
 
 
 def add_plot_value(data: pd.DataFrame, method: str) -> pd.DataFrame:
@@ -204,6 +230,16 @@ def format_market_number(value: object) -> str:
     if number.is_integer():
         return f"{number:.0f}"
     return f"{number:.1f}"
+
+
+def latest_plot_value(data: pd.DataFrame) -> object:
+    """Return the most recent plotted value without changing the source data."""
+    seasons = sorted(data["season"].unique().tolist(), key=season_sort_key)
+    if not seasons:
+        return pd.NA
+    latest_data = data[data["season"] == seasons[-1]].sort_values("calendar_offset")
+    latest_values = latest_data["plot_value"].dropna()
+    return latest_values.iloc[-1] if not latest_values.empty else pd.NA
 
 
 def is_non_season_name(name: object) -> bool:
@@ -235,8 +271,7 @@ def validate_five_year_mean_trace(fig: go.Figure) -> None:
 
 def build_figure(
     data: pd.DataFrame,
-    spread_name: str,
-    latest_red_only: bool,
+    chart_title: str,
     mean_source_data: pd.DataFrame | None = None,
 ) -> go.Figure:
     fig = go.Figure()
@@ -252,26 +287,21 @@ def build_figure(
     seasons = sorted(data["season"].unique().tolist(), key=season_sort_key)
     mean_source_seasons = sorted(mean_source_data["season"].unique().tolist(), key=season_sort_key)
     latest_season = mean_source_seasons[-1] if mean_source_seasons else (seasons[-1] if seasons else "")
-    previous_season = seasons[-2] if len(seasons) >= 2 else ""
 
     for season in seasons:
         season_data = data[data["season"] == season].sort_values("calendar_offset")
         is_latest = season == latest_season
-        is_previous = season == previous_season
         line_color = None
-        line_width = 2
-        if is_latest and latest_red_only:
+        line_width = 2.25
+        if is_latest:
             line_color = "#D62728"
-            line_width = 4
-        elif is_previous:
-            line_color = "#111111"
-            line_width = 3
+            line_width = 5
         fig.add_trace(
             go.Scatter(
                 x=season_data["calendar_offset"],
                 y=season_data["plot_value"],
                 mode="lines",
-                name=season,
+                name=f"{season}（当前年度）" if is_latest else season,
                 line={
                     "width": line_width,
                     "color": line_color,
@@ -314,14 +344,14 @@ def build_figure(
         tick_source = data[["calendar_offset", "month_day"]].drop_duplicates().iloc[::14]
 
     fig.update_layout(
-        title=spread_name,
-        height=620,
+        title={"text": f"<b>{chart_title}</b>", "x": 0, "xanchor": "left", "font": {"size": 16, "family": "Noto Sans CJK SC, Noto Sans CJK JP, Noto Sans CJK TC, Arial, sans-serif"}},
+        height=350,
         hovermode="x unified",
-        legend_title_text="season",
-        legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
-        margin={"l": 40, "r": 150, "t": 70, "b": 70},
-        xaxis_title="month_day",
-        yaxis_title=data["value_label"].iloc[0] if not data.empty else "spread_value",
+        legend_title_text="年度",
+        legend={"orientation": "v", "x": 0.99, "xanchor": "right", "y": 1, "yanchor": "top", "font": {"size": 10}},
+        margin={"l": 54, "r": 12, "t": 54, "b": 62},
+        xaxis_title={"text": "日期", "font": {"size": 13}},
+        yaxis_title={"text": data["value_label"].iloc[0] if not data.empty else "价差（元/吨）", "font": {"size": 13}},
     )
     offset_to_month_day = (
         data[["calendar_offset", "month_day"]]
@@ -336,7 +366,9 @@ def build_figure(
         ticktext=tick_source["month_day"].tolist(),
         tickangle=-45,
         labelalias=offset_to_month_day,
+        tickfont={"size": 10},
     )
+    fig.update_yaxes(tickfont={"size": 10})
     validate_five_year_mean_trace(fig)
     return fig
 
@@ -382,26 +414,38 @@ def latest_metrics(data: pd.DataFrame, mean_source_data: pd.DataFrame | None = N
     )
 
 
-def render_button_grid(spreads: list[str], available: set[str], columns: int = 5) -> None:
-    cols = st.columns(columns)
-    for index, spread in enumerate(spreads):
-        exists = spread in available
-        with cols[index % columns]:
-            if st.button(
-                spread,
-                key=f"watch_{spread}",
-                disabled=not exists,
-                use_container_width=True,
-                help=None if exists else "当前尚未生成该指标",
-            ):
-                set_selected_spread(spread)
-                st.rerun()
+def render_spread_grid(
+    spreads: list[str],
+    all_data: pd.DataFrame,
+    year_count: int,
+    method: str,
+) -> None:
+    if not spreads:
+        st.info("当前配置中没有可用指标。")
+        return
+    for start in range(0, len(spreads), 2):
+        columns = st.columns(2)
+        for column, spread_name in zip(columns, spreads[start : start + 2]):
+            selected_all = add_plot_value(
+                all_data[all_data["spread_name"] == spread_name].copy(),
+                method,
+            )
+            seasons = sorted(selected_all["season"].unique().tolist(), key=season_sort_key)
+            selected = selected_all[selected_all["season"].isin(seasons[-year_count:])].copy()
+            if selected.empty:
+                continue
+            latest_value = format_market_number(latest_plot_value(selected)) or "-"
+            unit = "元/吨" if method == "绝对价差 A-B" else ""
+            chart_title = f"{display_spread_name(spread_name)}｜最新 {latest_value}{unit}"
+            with column:
+                st.plotly_chart(
+                    build_figure(selected, chart_title, mean_source_data=selected_all),
+                    use_container_width=True,
+                    key=f"spread_chart_{spread_name}_{method}_{year_count}",
+                )
 
 
 def render_spread_dashboard() -> None:
-    st.title(PAGE_TITLE)
-    render_update_status()
-
     database_path = get_database_path()
     if not database_path.exists():
         st.error(f"未找到历史价差数据库：{DATABASE_XLSX_FILE}")
@@ -410,120 +454,26 @@ def render_spread_dashboard() -> None:
     with st.spinner("正在读取历史价差数据库，请稍等..."):
         data = load_database(database_path, database_path.stat().st_mtime)
     success_data = data[data["status"] == "success"].copy()
-    available_spreads = set(success_data["spread_name"].dropna().astype(str).unique())
-
-    if "selected_analysis_mode" not in st.session_state:
-        st.session_state.selected_analysis_mode = "月间价差"
-    if "selected_series_group" not in st.session_state:
-        st.session_state.selected_series_group = "智能季节推荐"
-    if "selected_spread" not in st.session_state:
-        st.session_state.selected_spread = "RM 5-9" if "RM 5-9" in available_spreads else sorted(available_spreads)[0]
-    if "latest_red_only" not in st.session_state:
-        st.session_state.latest_red_only = True
+    config = load_spread_config(SPREAD_CONFIG_FILE, SPREAD_CONFIG_FILE.stat().st_mtime if SPREAD_CONFIG_FILE.exists() else 0)
+    board_spreads = configured_spreads(success_data, config)
 
     with st.sidebar:
-        st.header("参数")
-        st.subheader("智能看板")
-        series_cols = st.columns(2)
-        for index, group in enumerate(SERIES_BUTTONS):
-            with series_cols[index % 2]:
-                if st.button(group, key=f"series_{group}", use_container_width=True):
-                    set_series_group(group, available_spreads)
-                    st.rerun()
+        st.header("价差看板")
+        board = st.radio("板块", BOARD_OPTIONS, label_visibility="collapsed")
+        with st.expander("展示设置"):
+            method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
+            year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
 
-        current_group = st.session_state.selected_series_group
-        if current_group == "智能季节推荐":
-            groups, watch_spreads = smart_spreads()
-            st.caption(f"当前推荐：{' / '.join(groups) if groups else '暂无推荐'}")
-        else:
-            watch_spreads = SERIES_SPREADS.get(current_group, [])
-        st.markdown("**常规看盘**")
-        render_button_grid(watch_spreads, available_spreads, columns=2)
-        if current_group == "油粕比":
-            missing_ratios = [spread for spread in SERIES_SPREADS["油粕比"] if spread not in available_spreads]
-            if missing_ratios:
-                st.caption("当前尚未生成该指标：" + "、".join(missing_ratios))
-
-        st.divider()
-        mode = st.selectbox(
-            "分析模式",
-            ["月间价差", "品种间价差", "全部"],
-            index=["月间价差", "品种间价差", "全部"].index(st.session_state.selected_analysis_mode),
-            key=f"analysis_mode_selectbox_{st.session_state.selected_analysis_mode}",
-        )
-        if mode != st.session_state.selected_analysis_mode:
-            st.session_state.selected_analysis_mode = mode
-        options = spread_options(success_data, mode)
-        if not options:
-            st.warning("当前模式下没有可用价差。")
-            return
-        if st.session_state.selected_spread not in options:
-            st.session_state.selected_spread = options[0]
-        selected_index = options.index(st.session_state.selected_spread)
-        spread_name = st.selectbox(
-            "价差选择",
-            options,
-            index=selected_index,
-            key=f"spread_selectbox_{st.session_state.selected_spread}",
-        )
-        if spread_name != st.session_state.selected_spread:
-            st.session_state.selected_spread = spread_name
-        method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
-        year_count = st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1)
-        latest_red_only = st.checkbox(
-            "是否只显示最新年份加粗红线",
-            key="latest_red_only",
-        )
-
-    spread_name = st.session_state.selected_spread
-    selected_all = success_data[success_data["spread_name"] == spread_name].copy()
-    selected_all = add_plot_value(selected_all, method)
-    seasons = sorted(selected_all["season"].unique().tolist(), key=season_sort_key)
-    selected_seasons = seasons[-int(year_count) :]
-    selected = selected_all[selected_all["season"].isin(selected_seasons)].copy()
-
-    if selected.empty:
-        st.warning("当前筛选没有可用成功记录。")
-        return
-
-    fig = build_figure(
-        selected,
-        spread_name,
-        latest_red_only,
-        mean_source_data=selected_all,
-    )
-    chart_key = (
-        f"spread_chart_{spread_name}_{st.session_state.selected_analysis_mode}_"
-        f"latest_{latest_red_only}_{method}_{int(year_count)}"
-    )
-    st.plotly_chart(fig, use_container_width=True, key=chart_key)
-
-    st.subheader("最新值与历史对比")
-    metrics = latest_metrics(selected, mean_source_data=selected_all)
-    st.dataframe(
-        metrics.style.format(
-            {
-                "历史分位数": "{:.1%}",
-            },
-            na_rep="",
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.subheader("当前图表数据")
-    display_columns = [
-        "date",
-        "spread_name",
-        "season",
-        "month_day",
-        "calendar_offset",
-        "leg1_price",
-        "leg2_price",
-        "spread_value",
-        "plot_value",
-    ]
-    st.dataframe(selected.loc[:, display_columns].sort_values(["season", "calendar_offset"]), use_container_width=True)
+    st.title(board)
+    render_update_status()
+    if board == "品种间套利":
+        for subgroup in ["油脂之间套利", "粕之间套利", "其他"]:
+            names = [name for name in board_spreads[board] if classify_board(name)[1] == subgroup]
+            if names:
+                st.subheader(subgroup)
+                render_spread_grid(names, success_data, year_count, method)
+    else:
+        render_spread_grid(board_spreads[board], success_data, year_count, method)
 
 
 def render_status_page() -> None:
@@ -537,31 +487,41 @@ def render_status_page() -> None:
             pass
 
 
+def render_usda_page() -> None:
+    """Provide a workspace entry point for the independently running USDA app."""
+    st.title(USDA_PAGE_TITLE)
+    st.caption("全球主要农产品供需平衡表、月度修正与年度供需展示。")
+    external_url = get_external_app_url(REPORT_CATALOG_FILE, USDA_PAGE_TITLE)
+    if external_url:
+        st.link_button("打开 USDA 平衡表", external_url, use_container_width=False)
+    else:
+        st.info("尚未配置 USDA 平衡表地址。请在报告目录配置或 USDA_DASHBOARD_URL 环境变量中设置访问地址。")
+
+
 def main() -> None:
     st.set_page_config(page_title="油脂油料研究工作台", layout="wide")
     if "selected_workspace_page" not in st.session_state:
         st.session_state.selected_workspace_page = "首页"
 
-    selected_page = st.session_state.selected_workspace_page
     with st.sidebar:
         st.subheader("研究工作台")
-        page_from_nav = st.radio(
+        selected_page = st.radio(
             "页面",
             WORKSPACE_PAGES,
-            index=WORKSPACE_PAGES.index(selected_page),
-            key=f"workspace_navigation_{selected_page}",
+            key="selected_workspace_page",
             label_visibility="collapsed",
         )
-    if page_from_nav != st.session_state.selected_workspace_page:
-        st.session_state.selected_workspace_page = page_from_nav
-        selected_page = page_from_nav
 
     if selected_page == "首页":
         render_home(REPORT_CATALOG_FILE)
     elif selected_page == "基差/一口价":
         render_basis_page(BASIS_DATABASE_FILE, BASIS_SAMPLE_DATABASE_FILE)
+    elif selected_page == USDA_PAGE_TITLE:
+        render_usda_page()
     elif selected_page == "运行监控":
         render_status_page()
+    elif selected_page == "外资与重点席位":
+        render_foreign_seats_page(FOREIGN_SEATS_DATABASE_FILE)
     else:
         render_spread_dashboard()
 

@@ -15,11 +15,7 @@ def test_basis_page_uses_formal_database_and_renders_modules() -> None:
 
     assert not app.exception
     assert any("当前读取：正式数据" in item.value for item in app.success)
-    assert {item.label for item in app.tabs} == {
-        "基差",
-        "一口价",
-        "批发价差",
-    }
+    assert {"基差", "一口价", "批发价差", "Excel 导入", "表格录入", "批量粘贴"}.issubset({item.label for item in app.tabs})
     expander_labels = [item.label for item in app.expander]
     assert expander_labels.count("上传更新国内基差 Excel") == 1
     assert expander_labels.count("查看明细") >= 3
