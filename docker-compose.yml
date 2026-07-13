@@ -17,7 +17,7 @@ services:
 
   usda-dashboard:
     build:
-      context: ../USDA平衡表
+      context: ./11_独立应用/USDA平衡表
       dockerfile: Dockerfile
       args:
         VITE_BASE_PATH: /usda/

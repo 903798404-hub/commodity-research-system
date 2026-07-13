@@ -2,7 +2,7 @@
 
 ## 项目用途
 
-本项目用于构建农产品市场研究 Agent，逐步接入行情、国内现货基差、USDA、MPOB 和海关等数据，并生成研究报告、图表与风险提醒。
+本项目是农产品研究系统的唯一 Git 仓库，用于构建市场研究 Agent，并在同一仓库内维护 USDA 平衡表等独立应用。
 
 当前已实现国内现货基差、现货一口价、内盘期货收盘价和国内现货价差的读取与标准化。
 
@@ -19,6 +19,7 @@
 - `08_tests/`：测试层
 - `09_deploy/`：部署层
 - `10_logs/`：日志层
+- `11_独立应用/`：保持独立技术栈的应用；当前包含 `USDA平衡表/`
 
 ## 快速入口
 
@@ -53,3 +54,7 @@ python 04_scripts/run_basis_import.py
 pytest
 streamlit run 05_apps/streamlit_app.py
 ```
+
+USDA 子项目位于 `11_独立应用/USDA平衡表/`。本地开发在该目录运行 `pnpm run dev`，测试和生产构建分别运行 `pnpm run test`、`pnpm exec tsc -b --pretty false` 和 `pnpm run build`。
+
+整套服务使用根目录 `docker-compose.yml` 管理：`spread-dashboard` 提供 Streamlit 看板，`usda-dashboard` 从仓库内 USDA 子项目构建静态站点。服务器只需要部署一个 `market-data` 项目目录。

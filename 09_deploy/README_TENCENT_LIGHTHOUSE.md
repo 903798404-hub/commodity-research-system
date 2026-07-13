@@ -3,7 +3,7 @@
 服务器信息：
 
 ```text
-公网 IP：124.222.106.25
+公网 IP：<服务器公网IP>
 系统镜像：Ubuntu22.04-Docker26
 Docker version 26.1.3
 Docker Compose version v2.27.1
@@ -17,8 +17,8 @@ Docker Compose version v2.27.1
 示例做法一：使用 `scp` 上传压缩包。
 
 ```bash
-scp market-data.zip ubuntu@124.222.106.25:/home/ubuntu/
-ssh ubuntu@124.222.106.25
+scp market-data.zip ubuntu@<服务器公网IP>:/home/ubuntu/
+ssh ubuntu@<服务器公网IP>
 cd /home/ubuntu
 unzip market-data.zip -d market-data
 ```
@@ -26,7 +26,7 @@ unzip market-data.zip -d market-data
 示例做法二：如果代码已放在私有 Git 仓库，可在服务器拉取。
 
 ```bash
-ssh ubuntu@124.222.106.25
+ssh ubuntu@<服务器公网IP>
 cd /home/ubuntu
 git clone <your-private-repo-url> market-data
 ```
@@ -70,13 +70,17 @@ python -m pip install --no-cache-dir --default-timeout=120 -r requirements.txt
 
 ```text
 spread-dashboard
+usda-dashboard
 ```
 
 容器内 Streamlit 监听 `8501`，服务器端口映射为：
 
 ```text
 8501:8501
+8080:80
 ```
+
+USDA 镜像从同一项目目录内的 `11_独立应用/USDA平衡表/` 构建，不再依赖任何同级 USDA 项目目录。生产地址通过 `.env` 中的 `USDA_DASHBOARD_URL` 注入。
 
 ## 4. 查看日志
 
@@ -130,7 +134,8 @@ tar -xzf market-data-backup-YYYYMMDD_HHMM.tar.gz -C /home/ubuntu/market-data
 在浏览器访问：
 
 ```text
-http://124.222.106.25:8501
+http://<服务器公网IP>:8501
+http://<服务器公网IP>:8080/usda/
 ```
 
 如果无法访问，请检查：

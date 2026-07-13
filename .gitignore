@@ -37,3 +37,14 @@ Thumbs.db
 .vscode/
 .idea/
 *-server-latest/
+
+# Nested USDA application local-only artifacts
+/11_独立应用/USDA平衡表/node_modules/
+/11_独立应用/USDA平衡表/dist/
+/11_独立应用/USDA平衡表/raw/
+/11_独立应用/USDA平衡表/data/raw/
+/11_独立应用/USDA平衡表/data/snapshots/
+/11_独立应用/USDA平衡表/output/
+!/11_独立应用/USDA平衡表/.env.example
+!/11_独立应用/USDA平衡表/public/data/
+!/11_独立应用/USDA平衡表/public/data/**
