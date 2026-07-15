@@ -17,6 +17,10 @@ export interface PresentationSlideConfig {
   shortTitle: string;
   pageNumber: number;
   layoutOrder: number;
+  groupId: string;
+  groupTitle: string;
+  groupOrder: number;
+  groupPageNumber: number;
   system: string;
   product: string;
   productLabel: string;
@@ -24,11 +28,22 @@ export interface PresentationSlideConfig {
   subtitle: string;
   metrics: string[];
   regions: PresentationRegionConfig[];
-  navigationGroup: string;
   layoutMode: "two-by-three" | "two-by-four-notes";
   derivePresentationStockUsageRatio: boolean;
   euStockUsageRatio: "not-applicable" | "external-exports-confirmed" | "exports-scope-unconfirmed";
 }
+
+const SOYBEAN_SYSTEM_GROUP = {
+  groupId: "soybean-system",
+  groupTitle: "大豆体系",
+  groupOrder: 1,
+} as const;
+
+const RAPESEED_SYSTEM_GROUP = {
+  groupId: "rapeseed-system",
+  groupTitle: "菜籽体系",
+  groupOrder: 2,
+} as const;
 
 const RESEARCH_REGIONS = [
   { region: "Global", label: "全球" },
@@ -133,13 +148,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "大豆供需",
     pageNumber: 1,
     layoutOrder: 0,
+    ...SOYBEAN_SYSTEM_GROUP,
+    groupPageNumber: 1,
     system: "大豆体系",
     product: "Soybeans",
     productLabel: "大豆",
     title: "Oil World 大豆年度供需",
     subtitle: "高密度季度研究演示 · Soybeans · 六地区",
     metrics: BALANCE_METRICS,
-    navigationGroup: "大豆体系",
     layoutMode: "two-by-three",
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "not-applicable",
@@ -161,13 +177,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "大豆生产",
     pageNumber: 2,
     layoutOrder: 1,
+    ...SOYBEAN_SYSTEM_GROUP,
+    groupPageNumber: 2,
     system: "大豆体系",
     product: "Soybeans",
     productLabel: "大豆",
     title: "Oil World 大豆生产条件",
     subtitle: "高密度季度研究演示 · Soybeans · 六地区",
     metrics: PRODUCTION_METRICS,
-    navigationGroup: "大豆体系",
     layoutMode: "two-by-three",
     derivePresentationStockUsageRatio: false,
     euStockUsageRatio: "not-applicable",
@@ -184,13 +201,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "豆油供需",
     pageNumber: 3,
     layoutOrder: 2,
+    ...SOYBEAN_SYSTEM_GROUP,
+    groupPageNumber: 3,
     system: "大豆体系",
     product: "Soybean Oil",
     productLabel: "豆油",
     title: "Oil World 豆油年度供需",
     subtitle: "高密度季度研究演示 · Soybean Oil · 六地区",
     metrics: PRODUCT_BALANCE_METRICS,
-    navigationGroup: "大豆体系",
     layoutMode: "two-by-three",
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "not-applicable",
@@ -202,13 +220,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "豆粕供需",
     pageNumber: 4,
     layoutOrder: 3,
+    ...SOYBEAN_SYSTEM_GROUP,
+    groupPageNumber: 4,
     system: "大豆体系",
     product: "Soybean Meal",
     productLabel: "豆粕",
     title: "Oil World 豆粕年度供需",
     subtitle: "高密度季度研究演示 · Soybean Meal · 六地区",
     metrics: PRODUCT_BALANCE_METRICS,
-    navigationGroup: "大豆体系",
     layoutMode: "two-by-three",
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "not-applicable",
@@ -220,13 +239,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "菜籽供需",
     pageNumber: 5,
     layoutOrder: 4,
+    ...RAPESEED_SYSTEM_GROUP,
+    groupPageNumber: 1,
     system: "菜籽体系",
     product: "Rapeseed / Canola",
     productLabel: "菜籽",
     title: "Oil World 菜籽年度供需",
     subtitle: "高密度季度研究演示 · Rapeseed / Canola · 七地区",
     metrics: RAPESEED_BALANCE_METRICS,
-    navigationGroup: "菜籽体系",
     layoutMode: "two-by-four-notes",
     derivePresentationStockUsageRatio: false,
     euStockUsageRatio: "not-applicable",
@@ -238,13 +258,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "菜籽生产",
     pageNumber: 6,
     layoutOrder: 5,
+    ...RAPESEED_SYSTEM_GROUP,
+    groupPageNumber: 2,
     system: "菜籽体系",
     product: "Rapeseed / Canola",
     productLabel: "菜籽",
     title: "Oil World 菜籽生产条件",
     subtitle: "高密度季度研究演示 · Rapeseed / Canola · 七地区",
     metrics: PRODUCTION_METRICS,
-    navigationGroup: "菜籽体系",
     layoutMode: "two-by-four-notes",
     derivePresentationStockUsageRatio: false,
     euStockUsageRatio: "not-applicable",
@@ -256,13 +277,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "菜油供需",
     pageNumber: 7,
     layoutOrder: 6,
+    ...RAPESEED_SYSTEM_GROUP,
+    groupPageNumber: 3,
     system: "菜籽体系",
     product: "Rapeseed Oil",
     productLabel: "菜油",
     title: "Oil World 菜油年度供需",
     subtitle: "高密度季度研究演示 · Rapeseed Oil · 七地区",
     metrics: PRODUCT_BALANCE_METRICS,
-    navigationGroup: "菜籽体系",
     layoutMode: "two-by-four-notes",
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "external-exports-confirmed",
@@ -274,13 +296,14 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     shortTitle: "菜粕供需",
     pageNumber: 8,
     layoutOrder: 7,
+    ...RAPESEED_SYSTEM_GROUP,
+    groupPageNumber: 4,
     system: "菜籽体系",
     product: "Rapeseed Meal",
     productLabel: "菜粕",
     title: "Oil World 菜粕年度供需",
     subtitle: "高密度季度研究演示 · Rapeseed Meal · 七地区",
     metrics: PRODUCT_BALANCE_METRICS,
-    navigationGroup: "菜籽体系",
     layoutMode: "two-by-four-notes",
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "exports-scope-unconfirmed",

@@ -166,15 +166,17 @@ test("八页配置顺序和页码固定", () => {
     shortTitle: slide.shortTitle,
     pageNumber: slide.pageNumber,
     layoutOrder: slide.layoutOrder,
+    groupId: slide.groupId,
+    groupPageNumber: slide.groupPageNumber,
   })), [
-    { slideId: "soybeans-balance", shortTitle: "大豆供需", pageNumber: 1, layoutOrder: 0 },
-    { slideId: "soybeans-production-conditions", shortTitle: "大豆生产", pageNumber: 2, layoutOrder: 1 },
-    { slideId: "soybean-oil-balance", shortTitle: "豆油供需", pageNumber: 3, layoutOrder: 2 },
-    { slideId: "soybean-meal-balance", shortTitle: "豆粕供需", pageNumber: 4, layoutOrder: 3 },
-    { slideId: "rapeseed-canola-balance", shortTitle: "菜籽供需", pageNumber: 5, layoutOrder: 4 },
-    { slideId: "rapeseed-canola-production-conditions", shortTitle: "菜籽生产", pageNumber: 6, layoutOrder: 5 },
-    { slideId: "rapeseed-oil-balance", shortTitle: "菜油供需", pageNumber: 7, layoutOrder: 6 },
-    { slideId: "rapeseed-meal-balance", shortTitle: "菜粕供需", pageNumber: 8, layoutOrder: 7 },
+    { slideId: "soybeans-balance", shortTitle: "大豆供需", pageNumber: 1, layoutOrder: 0, groupId: "soybean-system", groupPageNumber: 1 },
+    { slideId: "soybeans-production-conditions", shortTitle: "大豆生产", pageNumber: 2, layoutOrder: 1, groupId: "soybean-system", groupPageNumber: 2 },
+    { slideId: "soybean-oil-balance", shortTitle: "豆油供需", pageNumber: 3, layoutOrder: 2, groupId: "soybean-system", groupPageNumber: 3 },
+    { slideId: "soybean-meal-balance", shortTitle: "豆粕供需", pageNumber: 4, layoutOrder: 3, groupId: "soybean-system", groupPageNumber: 4 },
+    { slideId: "rapeseed-canola-balance", shortTitle: "菜籽供需", pageNumber: 5, layoutOrder: 4, groupId: "rapeseed-system", groupPageNumber: 1 },
+    { slideId: "rapeseed-canola-production-conditions", shortTitle: "菜籽生产", pageNumber: 6, layoutOrder: 5, groupId: "rapeseed-system", groupPageNumber: 2 },
+    { slideId: "rapeseed-oil-balance", shortTitle: "菜油供需", pageNumber: 7, layoutOrder: 6, groupId: "rapeseed-system", groupPageNumber: 3 },
+    { slideId: "rapeseed-meal-balance", shortTitle: "菜粕供需", pageNumber: 8, layoutOrder: 7, groupId: "rapeseed-system", groupPageNumber: 4 },
   ]);
 });
 
@@ -531,11 +533,13 @@ test("年度列继续来自正式数据而非写死", () => {
   assert.deepEqual(june, ["2026/27", "2025/26", "2024/25"]);
 });
 
-test("顶部同时显示配置驱动的年度供需和生产条件标签", () => {
+test("顶部第二级页面标签读取当前体系配置", () => {
   assert.match(slideTabsSource, /slide\.shortTitle/);
   assert.deepEqual(PRESENTATION_SLIDES.map((slide) => slide.shortTitle), ["大豆供需", "大豆生产", "豆油供需", "豆粕供需", "菜籽供需", "菜籽生产", "菜油供需", "菜粕供需"]);
-  assert.match(slideTabsSource, /onClick=\{\(\) => onPage\(index\)\}/);
-  assert.match(slideTabsSource, /ordered\.length/);
+  assert.match(slideTabsSource, /groupSlides = ordered\.filter/);
+  assert.match(slideTabsSource, /onClick=\{\(\) => onPage\(pageIndex\)\}/);
+  assert.match(slideTabsSource, /slide\.groupPageNumber/);
+  assert.match(slideTabsSource, /groupSlides\.length/);
 });
 
 test("顶部当前页具有深绿色激活样式", () => {
@@ -685,7 +689,9 @@ test("菜籽体系四页使用固定七地区和两列四行说明卡布局", ()
   const rapeseedSlides = PRESENTATION_SLIDES.slice(4);
   assert.equal(rapeseedSlides.length, 4);
   for (const slide of rapeseedSlides) {
-    assert.equal(slide.navigationGroup, "菜籽体系");
+    assert.equal(slide.groupId, "rapeseed-system");
+    assert.equal(slide.groupTitle, "菜籽体系");
+    assert.equal(slide.groupOrder, 2);
     assert.equal(slide.layoutMode, "two-by-four-notes");
     assert.deepEqual(slide.regions.map((region) => region.region), expectedRapeseedRegions);
     assert.deepEqual(slide.regions.map((region) => region.layoutOrder), [0, 1, 2, 3, 4, 5, 6]);
@@ -711,10 +717,29 @@ test("年度变化和季度修正文案由共享常量统一定义", () => {
   assert.doesNotMatch(`${headerSource}\n${notesCardSource}`, /最新年度 − 上一年度|季度修正＝当前发布期−上一发布期/);
 });
 
-test("顶部导航按大豆体系和菜籽体系读取同一份配置分组", () => {
-  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.navigationGroup))], ["大豆体系", "菜籽体系"]);
-  assert.match(slideTabsSource, /slide\.navigationGroup/);
-  assert.match(slideTabsSource, /presentation-slide-tab-group/);
+test("两级顶部导航完全由可扩展体系配置生成", () => {
+  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupId))], ["soybean-system", "rapeseed-system"]);
+  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupTitle))], ["大豆体系", "菜籽体系"]);
+  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupOrder))], [1, 2]);
+  assert.match(slideTabsSource, /groupsFromSlides/);
+  assert.match(slideTabsSource, /slide\.groupId/);
+  assert.match(slideTabsSource, /group\.groupTitle/);
+  assert.match(slideTabsSource, /onClick=\{\(\) => onPage\(firstPage\)\}/);
+  assert.match(slideTabsSource, /presentation-system-tabs/);
+  assert.match(slideTabsSource, /presentation-group-slide-tabs/);
+  assert.doesNotMatch(slideTabsSource, /soybean-system.*rapeseed-system|大豆体系.*菜籽体系/);
+  const css = fs.readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
+  assert.doesNotMatch(css, /writing-mode:\s*vertical/);
+});
+
+test("浏览器历史和跨体系全局翻页保持URL与体系一致", () => {
+  const appSource = fs.readFileSync(fileURLToPath(new URL("./presentation/PresentationApp.tsx", import.meta.url)), "utf8");
+  assert.match(appSource, /window\.history\.pushState/);
+  assert.match(appSource, /window\.addEventListener\("popstate", onPopState\)/);
+  assert.match(appSource, /pageFromSearch\(window\.location\.search, PRESENTATION_SLIDES\)/);
+  assert.match(appSource, /event\.altKey \|\| event\.ctrlKey \|\| event\.metaKey/);
+  assert.equal(pageIndexForKey("ArrowRight", 3, 8), 4);
+  assert.equal(pageIndexForKey("ArrowLeft", 4, 8), 3);
 });
 
 test("第5页菜籽供需使用正式指标且不新增网页比率", () => {

@@ -124,8 +124,40 @@ export default function PresentationApp() {
   }, [index, release, releases, slide]);
 
   useEffect(() => {
+    if (!releases || !release) return;
+    let active = true;
+    const onPopState = () => {
+      const available = releases.releases.filter((item) => item.available).map((item) => item.release);
+      const requestedRelease = releaseFromSearch(window.location.search, available, release);
+      setPage(pageFromSearch(window.location.search, PRESENTATION_SLIDES));
+      if (requestedRelease === release) return;
+      setLoading(true);
+      setError("");
+      loadReleaseIndex(BASE_URL, requestedRelease)
+        .then((nextIndex) => {
+          if (!active) return;
+          setRegionData(new Map());
+          setRelease(requestedRelease);
+          setIndex(nextIndex);
+        })
+        .catch((reason) => {
+          if (!active) return;
+          console.error("Oil World presentation history restore failed", reason);
+          setError(errorMessage(reason));
+          setLoading(false);
+        });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      active = false;
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [release, releases]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
       const next = pageIndexForKey(event.key, page, PRESENTATION_SLIDES.length);
       if (next !== page) {
         event.preventDefault();
@@ -170,9 +202,10 @@ export default function PresentationApp() {
 
   function changePage(nextPage: number) {
     const bounded = Math.max(0, Math.min(PRESENTATION_SLIDES.length - 1, nextPage));
+    if (bounded === page) return;
     setPage(bounded);
     const nextSearch = searchForSlide(window.location.search, PRESENTATION_SLIDES[bounded].slideId);
-    window.history.replaceState(null, "", `${window.location.pathname}${nextSearch}`);
+    window.history.pushState(null, "", `${window.location.pathname}${nextSearch}`);
   }
 
   async function toggleFullscreen() {

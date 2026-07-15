@@ -445,28 +445,20 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 .presentation-slide-tabs {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .45em;
-  margin-top: .1em;
+  grid-template-rows: auto auto;
+  gap: .26em;
+  margin-top: .08em;
 }
-.presentation-slide-tab-group {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+.presentation-system-tabs {
+  display: flex;
   align-items: center;
-  gap: .42em;
+  gap: .36em;
   min-width: 0;
 }
-.presentation-slide-tab-group > strong {
-  color: #6b655d;
-  font-size: clamp(7px, .46vw, 9px);
-  letter-spacing: .04em;
-  white-space: nowrap;
-  writing-mode: vertical-rl;
-}
-.presentation-slide-tab-group > div {
+.presentation-group-slide-tabs {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: .32em;
+  gap: .3em;
   min-width: 0;
 }
 .presentation-slide-tabs button {
@@ -476,8 +468,8 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
   gap: .7em;
   width: 100%;
   min-width: 0;
-  min-height: 2.35em;
-  padding: .38em .72em;
+  min-height: 2.05em;
+  padding: .28em .68em;
   color: #164f3f;
   background: #eef5f1;
   border: 1px solid #9ab8ad;
@@ -485,6 +477,16 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
   font-size: clamp(9px, .58vw, 12px);
   font-weight: 800;
   cursor: pointer;
+}
+.presentation-system-tabs button {
+  width: auto;
+  min-width: 8.6em;
+  min-height: 1.9em;
+  justify-content: center;
+  padding: .24em 1.15em;
+  background: #f4f7f5;
+  border-color: #7fa698;
+  font-size: clamp(9px, .61vw, 12px);
 }
 .presentation-slide-tabs button.is-active {
   color: #fff;
@@ -595,7 +597,8 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 
 @media (max-width: 1400px) {
   .presentation-slide-tabs { gap: .28em; }
-  .presentation-slide-tab-group { gap: .22em; }
-  .presentation-slide-tab-group > div { gap: .2em; }
+  .presentation-system-tabs { gap: .24em; }
+  .presentation-group-slide-tabs { gap: .2em; }
   .presentation-slide-tabs button { padding-right: .4em; padding-left: .4em; }
+  .presentation-system-tabs button { min-width: 7.8em; }
 }
