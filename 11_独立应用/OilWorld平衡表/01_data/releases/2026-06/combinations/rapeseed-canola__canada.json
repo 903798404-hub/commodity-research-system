@@ -1,0 +1,872 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "菜籽体系",
+  "product": "Rapeseed / Canola",
+  "region": "Canada",
+  "market_year_basis": [
+    "Aug–July",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2026/27",
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2026/27": "explicit_forecast",
+    "2025/26": "historical",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2026/27": 2200.0,
+        "2025/26": 1597.0,
+        "2024/25": 3420.0,
+        "2023/24": 1863.0,
+        "2022/23": 1484.0,
+        "2021/22": 1600.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 603.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B3"
+        ],
+        "2025/26": [
+          "AN40001!C3"
+        ],
+        "2024/25": [
+          "AN40001!D3"
+        ],
+        "2023/24": [
+          "AN40001!E3"
+        ],
+        "2022/23": [
+          "AN40001!F3"
+        ],
+        "2021/22": [
+          "AN40001!G3"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B3:G3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2026/27": 21500.0,
+        "2025/26": 21804.0,
+        "2024/25": 19400.0,
+        "2023/24": 19700.0,
+        "2022/23": 18850.0,
+        "2021/22": 14248.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -304.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B4"
+        ],
+        "2025/26": [
+          "AN40001!C4"
+        ],
+        "2024/25": [
+          "AN40001!D4"
+        ],
+        "2023/24": [
+          "AN40001!E4"
+        ],
+        "2022/23": [
+          "AN40001!F4"
+        ],
+        "2021/22": [
+          "AN40001!G4"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2026/27": 130.0,
+        "2025/26": 120.0,
+        "2024/25": 131.0,
+        "2023/24": 276.0,
+        "2022/23": 151.0,
+        "2021/22": 104.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 10.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B5"
+        ],
+        "2025/26": [
+          "AN40001!C5"
+        ],
+        "2024/25": [
+          "AN40001!D5"
+        ],
+        "2023/24": [
+          "AN40001!E5"
+        ],
+        "2022/23": [
+          "AN40001!F5"
+        ],
+        "2021/22": [
+          "AN40001!G5"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B5:G5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2026/27": 7300.0,
+        "2025/26": 8350.0,
+        "2024/25": 9382.0,
+        "2023/24": 6732.0,
+        "2022/23": 7951.0,
+        "2021/22": 5287.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -1050.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B6"
+        ],
+        "2025/26": [
+          "AN40001!C6"
+        ],
+        "2024/25": [
+          "AN40001!D6"
+        ],
+        "2023/24": [
+          "AN40001!E6"
+        ],
+        "2022/23": [
+          "AN40001!F6"
+        ],
+        "2021/22": [
+          "AN40001!G6"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2026/27": 13800.0,
+        "2025/26": 12300.0,
+        "2024/25": 11412.0,
+        "2023/24": 11033.0,
+        "2022/23": 9961.0,
+        "2021/22": 8555.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 1500.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B7"
+        ],
+        "2025/26": [
+          "AN40001!C7"
+        ],
+        "2024/25": [
+          "AN40001!D7"
+        ],
+        "2023/24": [
+          "AN40001!E7"
+        ],
+        "2022/23": [
+          "AN40001!F7"
+        ],
+        "2021/22": [
+          "AN40001!G7"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B7:G7",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2026/27": 14430.0,
+        "2025/26": 12971.0,
+        "2024/25": 11971.0,
+        "2023/24": 11687.0,
+        "2022/23": 10672.0,
+        "2021/22": 9180.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 1459.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B7",
+          "AN40001!B8"
+        ],
+        "2025/26": [
+          "AN40001!C7",
+          "AN40001!C8"
+        ],
+        "2024/25": [
+          "AN40001!D7",
+          "AN40001!D8"
+        ],
+        "2023/24": [
+          "AN40001!E7",
+          "AN40001!E8"
+        ],
+        "2022/23": [
+          "AN40001!F7",
+          "AN40001!F8"
+        ],
+        "2021/22": [
+          "AN40001!G7",
+          "AN40001!G8"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B7:G7 + AN40001!B8:G8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN40001 row 7 + row 8",
+      "quality_note": "只在同一国家平衡表、同一年度和单位下派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2026/27": 2100.0,
+        "2025/26": 2200.0,
+        "2024/25": 1597.0,
+        "2023/24": 3420.0,
+        "2022/23": 1863.0,
+        "2021/22": 1484.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -100.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B9"
+        ],
+        "2025/26": [
+          "AN40001!C9"
+        ],
+        "2024/25": [
+          "AN40001!D9"
+        ],
+        "2023/24": [
+          "AN40001!E9"
+        ],
+        "2022/23": [
+          "AN40001!F9"
+        ],
+        "2021/22": [
+          "AN40001!G9"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B9:G9",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "derived",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Aug July 26/27F",
+        "2025/26": "Aug July 25/26",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2026/27": 14.55301455,
+        "2025/26": 16.96091281,
+        "2024/25": 13.34057305,
+        "2023/24": 29.26328399,
+        "2022/23": 17.45689655,
+        "2021/22": 16.16557734
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -2.40789826,
+        "unit": "percentage points"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN40001"
+      ],
+      "source_report_title": [
+        "CANADA : Rapeseed/Canola Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN40001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN40001!B9",
+          "AN40001!B7",
+          "AN40001!B8"
+        ],
+        "2025/26": [
+          "AN40001!C9",
+          "AN40001!C7",
+          "AN40001!C8"
+        ],
+        "2024/25": [
+          "AN40001!D9",
+          "AN40001!D7",
+          "AN40001!D8"
+        ],
+        "2023/24": [
+          "AN40001!E9",
+          "AN40001!E7",
+          "AN40001!E8"
+        ],
+        "2022/23": [
+          "AN40001!F9",
+          "AN40001!F7",
+          "AN40001!F8"
+        ],
+        "2021/22": [
+          "AN40001!G9",
+          "AN40001!G7",
+          "AN40001!G8"
+        ]
+      },
+      "source_cell_or_range": "AN40001!B9:G9 / (AN40001!B7:G7 + AN40001!B8:G8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN40001 rows 7, 8, 9",
+      "quality_note": "分母口径由同商品世界表直接公布的Stocks/usage关系验证；变化单位为百分点。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "HARVEST'D AREA",
+      "values": {
+        "2026/27": 9200.0,
+        "2025/26": 8699.0,
+        "2024/25": 8846.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 501.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN14993"
+      ],
+      "source_report_title": [
+        "RAPESEED / CANOLA : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN14993!K31"
+        ],
+        "2025/26": [
+          "AN14993!L31"
+        ],
+        "2024/25": [
+          "AN14993!M31"
+        ]
+      },
+      "source_cell_or_range": "AN14993!K31:M31",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Y I E L D",
+      "values": {
+        "2026/27": 2.34,
+        "2025/26": 2.51,
+        "2024/25": 2.19
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -0.17,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN14993"
+      ],
+      "source_report_title": [
+        "RAPESEED / CANOLA : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN14993!G31"
+        ],
+        "2025/26": [
+          "AN14993!H31"
+        ],
+        "2024/25": [
+          "AN14993!I31"
+        ]
+      },
+      "source_cell_or_range": "AN14993!G31:I31",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

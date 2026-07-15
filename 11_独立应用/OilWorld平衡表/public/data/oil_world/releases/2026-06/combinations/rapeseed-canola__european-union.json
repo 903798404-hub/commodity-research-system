@@ -1,0 +1,1073 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "菜籽体系",
+  "product": "Rapeseed / Canola",
+  "region": "European Union",
+  "market_year_basis": [
+    "July–June",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2026/27",
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2026/27": "explicit_forecast",
+    "2025/26": "historical",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2026/27": 1350.0,
+        "2025/26": 1011.0,
+        "2024/25": 1626.0,
+        "2023/24": 1992.0,
+        "2022/23": 886.0,
+        "2021/22": 941.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 339.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B3"
+        ],
+        "2025/26": [
+          "AN049104!C3"
+        ],
+        "2024/25": [
+          "AN049104!D3"
+        ],
+        "2023/24": [
+          "AN049104!E3"
+        ],
+        "2022/23": [
+          "AN049104!F3"
+        ],
+        "2021/22": [
+          "AN049104!G3"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B3:G3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2026/27": 20880.0,
+        "2025/26": 20513.0,
+        "2024/25": 17189.0,
+        "2023/24": 20157.0,
+        "2022/23": 19689.0,
+        "2021/22": 17234.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 367.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B4"
+        ],
+        "2025/26": [
+          "AN049104!C4"
+        ],
+        "2024/25": [
+          "AN049104!D4"
+        ],
+        "2023/24": [
+          "AN049104!E4"
+        ],
+        "2022/23": [
+          "AN049104!F4"
+        ],
+        "2021/22": [
+          "AN049104!G4"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2026/27": 6550.0,
+        "2025/26": 7030.0,
+        "2024/25": 8247.0,
+        "2023/24": 6184.0,
+        "2022/23": 6842.0,
+        "2021/22": 5870.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -480.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B5"
+        ],
+        "2025/26": [
+          "AN049104!C5"
+        ],
+        "2024/25": [
+          "AN049104!D5"
+        ],
+        "2023/24": [
+          "AN049104!E5"
+        ],
+        "2022/23": [
+          "AN049104!F5"
+        ],
+        "2021/22": [
+          "AN049104!G5"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B5:G5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2026/27": 650.0,
+        "2025/26": 640.0,
+        "2024/25": 503.0,
+        "2023/24": 724.0,
+        "2022/23": 577.0,
+        "2021/22": 456.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 10.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B6"
+        ],
+        "2025/26": [
+          "AN049104!C6"
+        ],
+        "2024/25": [
+          "AN049104!D6"
+        ],
+        "2023/24": [
+          "AN049104!E6"
+        ],
+        "2022/23": [
+          "AN049104!F6"
+        ],
+        "2021/22": [
+          "AN049104!G6"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2026/27": 26210.0,
+        "2025/26": 26030.0,
+        "2024/25": 25067.0,
+        "2023/24": 25518.0,
+        "2022/23": 24147.0,
+        "2021/22": 22188.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 180.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B7"
+        ],
+        "2025/26": [
+          "AN049104!C7"
+        ],
+        "2024/25": [
+          "AN049104!D7"
+        ],
+        "2023/24": [
+          "AN049104!E7"
+        ],
+        "2022/23": [
+          "AN049104!F7"
+        ],
+        "2021/22": [
+          "AN049104!G7"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B7:G7",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2026/27": 26760.0,
+        "2025/26": 26564.0,
+        "2024/25": 25548.0,
+        "2023/24": 25982.0,
+        "2022/23": 24848.0,
+        "2021/22": 22703.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 196.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B7",
+          "AN049104!B8"
+        ],
+        "2025/26": [
+          "AN049104!C7",
+          "AN049104!C8"
+        ],
+        "2024/25": [
+          "AN049104!D7",
+          "AN049104!D8"
+        ],
+        "2023/24": [
+          "AN049104!E7",
+          "AN049104!E8"
+        ],
+        "2022/23": [
+          "AN049104!F7",
+          "AN049104!F8"
+        ],
+        "2021/22": [
+          "AN049104!G7",
+          "AN049104!G8"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B7:G7 + AN049104!B8:G8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN049104 row 7 + row 8",
+      "quality_note": "只在同一国家平衡表、同一年度和单位下派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2026/27": 1370.0,
+        "2025/26": 1350.0,
+        "2024/25": 1011.0,
+        "2023/24": 1626.0,
+        "2022/23": 1992.0,
+        "2021/22": 886.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 20.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B9"
+        ],
+        "2025/26": [
+          "AN049104!C9"
+        ],
+        "2024/25": [
+          "AN049104!D9"
+        ],
+        "2023/24": [
+          "AN049104!E9"
+        ],
+        "2022/23": [
+          "AN049104!F9"
+        ],
+        "2021/22": [
+          "AN049104!G9"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B9:G9",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "derived",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2026/27": 5.11958146,
+        "2025/26": 5.08206595,
+        "2024/25": 3.95725693,
+        "2023/24": 6.25817874,
+        "2022/23": 8.01674179,
+        "2021/22": 3.90256794
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 0.03751551,
+        "unit": "percentage points"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN049104"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Rapeseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049104"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN049104!B9",
+          "AN049104!B7",
+          "AN049104!B8"
+        ],
+        "2025/26": [
+          "AN049104!C9",
+          "AN049104!C7",
+          "AN049104!C8"
+        ],
+        "2024/25": [
+          "AN049104!D9",
+          "AN049104!D7",
+          "AN049104!D8"
+        ],
+        "2023/24": [
+          "AN049104!E9",
+          "AN049104!E7",
+          "AN049104!E8"
+        ],
+        "2022/23": [
+          "AN049104!F9",
+          "AN049104!F7",
+          "AN049104!F8"
+        ],
+        "2021/22": [
+          "AN049104!G9",
+          "AN049104!G7",
+          "AN049104!G8"
+        ]
+      },
+      "source_cell_or_range": "AN049104!B9:G9 / (AN049104!B7:G7 + AN049104!B8:G8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN049104 rows 7, 8, 9",
+      "quality_note": "分母口径由同商品世界表直接公布的Stocks/usage关系验证；变化单位为百分点。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "derived",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Area Harvested",
+      "values": {
+        "2026/27": 6385.0,
+        "2025/26": 6128.0,
+        "2024/25": 5703.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 257.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN14993"
+      ],
+      "source_report_title": [
+        "RAPESEED / CANOLA : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN14993!K4",
+          "AN14993!K5",
+          "AN14993!K6",
+          "AN14993!K7",
+          "AN14993!K8",
+          "AN14993!K9",
+          "AN14993!K10",
+          "AN14993!K11",
+          "AN14993!K12",
+          "AN14993!K13",
+          "AN14993!K14",
+          "AN14993!K15",
+          "AN14993!K16",
+          "AN14993!K17",
+          "AN14993!K18",
+          "AN14993!K19",
+          "AN14993!K20",
+          "AN14993!K21",
+          "AN14993!K22",
+          "AN14993!K23",
+          "AN14993!K24",
+          "AN14993!K25",
+          "AN14993!K26"
+        ],
+        "2025/26": [
+          "AN14993!L4",
+          "AN14993!L5",
+          "AN14993!L6",
+          "AN14993!L7",
+          "AN14993!L8",
+          "AN14993!L9",
+          "AN14993!L10",
+          "AN14993!L11",
+          "AN14993!L12",
+          "AN14993!L13",
+          "AN14993!L14",
+          "AN14993!L15",
+          "AN14993!L16",
+          "AN14993!L17",
+          "AN14993!L18",
+          "AN14993!L19",
+          "AN14993!L20",
+          "AN14993!L21",
+          "AN14993!L22",
+          "AN14993!L23",
+          "AN14993!L24",
+          "AN14993!L25",
+          "AN14993!L26"
+        ],
+        "2024/25": [
+          "AN14993!M4",
+          "AN14993!M5",
+          "AN14993!M6",
+          "AN14993!M7",
+          "AN14993!M8",
+          "AN14993!M9",
+          "AN14993!M10",
+          "AN14993!M11",
+          "AN14993!M12",
+          "AN14993!M13",
+          "AN14993!M14",
+          "AN14993!M15",
+          "AN14993!M16",
+          "AN14993!M17",
+          "AN14993!M18",
+          "AN14993!M19",
+          "AN14993!M20",
+          "AN14993!M21",
+          "AN14993!M22",
+          "AN14993!M23",
+          "AN14993!M24",
+          "AN14993!M25",
+          "AN14993!M26"
+        ]
+      },
+      "source_cell_or_range": "sum(AN14993!K4:M26)",
+      "is_derived": true,
+      "derivation_method": "EU Area Harvested = sum of listed EU member rows",
+      "derivation_components": "listed EU member rows AN14993!4:26",
+      "quality_note": "成员行合计与EU国家平衡表Production存在0–1千吨四舍五入差；季度更新需检查成员覆盖变化。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "derived",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Yield",
+      "values": {
+        "2026/27": 3.27032106,
+        "2025/26": 3.34758486,
+        "2024/25": 3.0140277
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -0.0772638,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN14993"
+      ],
+      "source_report_title": [
+        "RAPESEED / CANOLA : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN14993!C4",
+          "AN14993!C5",
+          "AN14993!C6",
+          "AN14993!C7",
+          "AN14993!C8",
+          "AN14993!C9",
+          "AN14993!C10",
+          "AN14993!C11",
+          "AN14993!C12",
+          "AN14993!C13",
+          "AN14993!C14",
+          "AN14993!C15",
+          "AN14993!C16",
+          "AN14993!C17",
+          "AN14993!C18",
+          "AN14993!C19",
+          "AN14993!C20",
+          "AN14993!C21",
+          "AN14993!C22",
+          "AN14993!C23",
+          "AN14993!C24",
+          "AN14993!C25",
+          "AN14993!C26",
+          "AN14993!K4",
+          "AN14993!K5",
+          "AN14993!K6",
+          "AN14993!K7",
+          "AN14993!K8",
+          "AN14993!K9",
+          "AN14993!K10",
+          "AN14993!K11",
+          "AN14993!K12",
+          "AN14993!K13",
+          "AN14993!K14",
+          "AN14993!K15",
+          "AN14993!K16",
+          "AN14993!K17",
+          "AN14993!K18",
+          "AN14993!K19",
+          "AN14993!K20",
+          "AN14993!K21",
+          "AN14993!K22",
+          "AN14993!K23",
+          "AN14993!K24",
+          "AN14993!K25",
+          "AN14993!K26"
+        ],
+        "2025/26": [
+          "AN14993!D4",
+          "AN14993!D5",
+          "AN14993!D6",
+          "AN14993!D7",
+          "AN14993!D8",
+          "AN14993!D9",
+          "AN14993!D10",
+          "AN14993!D11",
+          "AN14993!D12",
+          "AN14993!D13",
+          "AN14993!D14",
+          "AN14993!D15",
+          "AN14993!D16",
+          "AN14993!D17",
+          "AN14993!D18",
+          "AN14993!D19",
+          "AN14993!D20",
+          "AN14993!D21",
+          "AN14993!D22",
+          "AN14993!D23",
+          "AN14993!D24",
+          "AN14993!D25",
+          "AN14993!D26",
+          "AN14993!L4",
+          "AN14993!L5",
+          "AN14993!L6",
+          "AN14993!L7",
+          "AN14993!L8",
+          "AN14993!L9",
+          "AN14993!L10",
+          "AN14993!L11",
+          "AN14993!L12",
+          "AN14993!L13",
+          "AN14993!L14",
+          "AN14993!L15",
+          "AN14993!L16",
+          "AN14993!L17",
+          "AN14993!L18",
+          "AN14993!L19",
+          "AN14993!L20",
+          "AN14993!L21",
+          "AN14993!L22",
+          "AN14993!L23",
+          "AN14993!L24",
+          "AN14993!L25",
+          "AN14993!L26"
+        ],
+        "2024/25": [
+          "AN14993!E4",
+          "AN14993!E5",
+          "AN14993!E6",
+          "AN14993!E7",
+          "AN14993!E8",
+          "AN14993!E9",
+          "AN14993!E10",
+          "AN14993!E11",
+          "AN14993!E12",
+          "AN14993!E13",
+          "AN14993!E14",
+          "AN14993!E15",
+          "AN14993!E16",
+          "AN14993!E17",
+          "AN14993!E18",
+          "AN14993!E19",
+          "AN14993!E20",
+          "AN14993!E21",
+          "AN14993!E22",
+          "AN14993!E23",
+          "AN14993!E24",
+          "AN14993!E25",
+          "AN14993!E26",
+          "AN14993!M4",
+          "AN14993!M5",
+          "AN14993!M6",
+          "AN14993!M7",
+          "AN14993!M8",
+          "AN14993!M9",
+          "AN14993!M10",
+          "AN14993!M11",
+          "AN14993!M12",
+          "AN14993!M13",
+          "AN14993!M14",
+          "AN14993!M15",
+          "AN14993!M16",
+          "AN14993!M17",
+          "AN14993!M18",
+          "AN14993!M19",
+          "AN14993!M20",
+          "AN14993!M21",
+          "AN14993!M22",
+          "AN14993!M23",
+          "AN14993!M24",
+          "AN14993!M25",
+          "AN14993!M26"
+        ]
+      },
+      "source_cell_or_range": "sum(AN14993!C4:E26) / sum(AN14993!K4:M26)",
+      "is_derived": true,
+      "derivation_method": "EU Yield = EU member Production sum / EU member Area sum",
+      "derivation_components": "listed EU member rows AN14993!4:26",
+      "quality_note": "成员行合计与EU国家平衡表Production存在0–1千吨四舍五入差；季度更新需检查成员覆盖变化。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

@@ -1,0 +1,535 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "葵花体系",
+  "product": "Sunflower Meal",
+  "region": "European Union",
+  "market_year_basis": [
+    "Oct–Sept"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "missing",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Ending Stocks章节没有该国家完整行，不能顺延Beginning Stocks。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕统一使用Product Output；Production避免重复。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunflowermeal Imports",
+      "values": {
+        "2025/26": 2788.0,
+        "2024/25": 2621.0,
+        "2023/24": 3204.0,
+        "2022/23": 2977.0,
+        "2021/22": 2875.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 167.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN34792!B26"
+        ],
+        "2024/25": [
+          "AN34792!C26"
+        ],
+        "2023/24": [
+          "AN34792!D26"
+        ],
+        "2022/23": [
+          "AN34792!E26"
+        ],
+        "2021/22": [
+          "AN34792!F26"
+        ]
+      },
+      "source_cell_or_range": "AN34792!B26:F26",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunflowermeal Exports",
+      "values": {
+        "2025/26": 516.0,
+        "2024/25": 477.0,
+        "2023/24": 942.0,
+        "2022/23": 950.0,
+        "2021/22": 954.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 39.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN34792!B46"
+        ],
+        "2024/25": [
+          "AN34792!C46"
+        ],
+        "2023/24": [
+          "AN34792!D46"
+        ],
+        "2022/23": [
+          "AN34792!E46"
+        ],
+        "2021/22": [
+          "AN34792!F46"
+        ]
+      },
+      "source_cell_or_range": "AN34792!B46:F46",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕不使用Crush；Crush属于上游油籽。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Meal Output",
+      "values": {
+        "2025/26": 4057.0,
+        "2024/25": 3950.0,
+        "2023/24": 4882.0,
+        "2022/23": 4901.0,
+        "2021/22": 5024.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 107.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN34792!B5"
+        ],
+        "2024/25": [
+          "AN34792!C5"
+        ],
+        "2023/24": [
+          "AN34792!D5"
+        ],
+        "2022/23": [
+          "AN34792!E5"
+        ],
+        "2021/22": [
+          "AN34792!F5"
+        ]
+      },
+      "source_cell_or_range": "AN34792!B5:F5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunflowermeal Disappear.(a)",
+      "values": {
+        "2025/26": 6329.0,
+        "2024/25": 6090.0,
+        "2023/24": 7147.0,
+        "2022/23": 6919.0,
+        "2021/22": 6944.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 239.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN34792!B61"
+        ],
+        "2024/25": [
+          "AN34792!C61"
+        ],
+        "2023/24": [
+          "AN34792!D61"
+        ],
+        "2022/23": [
+          "AN34792!E61"
+        ],
+        "2021/22": [
+          "AN34792!F61"
+        ]
+      },
+      "source_cell_or_range": "AN34792!B61:F61",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Disappearance经同表平衡关系核对后映射Domestic Consumption。",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "missing",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该指标章节没有该国家行；不得把缺行解释为0。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "missing",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "",
+      "source_report_id": [
+        "AN34792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN34792"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Ending Stocks或Disappearance缺行，比例无法构建。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

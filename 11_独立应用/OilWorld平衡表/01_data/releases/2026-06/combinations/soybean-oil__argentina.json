@@ -1,0 +1,618 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybean Oil",
+  "region": "Argentina",
+  "market_year_basis": [
+    "Oct–Sept"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "prior-year Ending stocks",
+      "values": {
+        "2025/26": 256.0,
+        "2024/25": 370.0,
+        "2023/24": 334.0,
+        "2022/23": 495.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -114.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN23992!C145"
+        ],
+        "2024/25": [
+          "AN23992!D145"
+        ],
+        "2023/24": [
+          "AN23992!E145"
+        ],
+        "2022/23": [
+          "AN23992!F145"
+        ]
+      },
+      "source_cell_or_range": "AN23992!C145:F145",
+      "is_derived": true,
+      "derivation_method": "Beginning Stocks(t) = Ending Stocks(t-1)",
+      "derivation_components": "AN23992 Ending Stocks row 145",
+      "quality_note": "仅对同一Oct–Sept序列顺延；不使用Jan–Dec国家表。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕统一使用Product Output；Production避免重复。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean oil Imports",
+      "values": {
+        "2025/26": 152.0,
+        "2024/25": 107.0,
+        "2023/24": 2.0,
+        "2022/23": null,
+        "2021/22": 93.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 45.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN23992!B49"
+        ],
+        "2024/25": [
+          "AN23992!C49"
+        ],
+        "2023/24": [
+          "AN23992!D49"
+        ],
+        "2022/23": [
+          "AN23992!E49"
+        ],
+        "2021/22": [
+          "AN23992!F49"
+        ]
+      },
+      "source_cell_or_range": "AN23992!B49:F49",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean oil Exports",
+      "values": {
+        "2025/26": 6750.0,
+        "2024/25": 7314.0,
+        "2023/24": 5681.0,
+        "2022/23": 4392.0,
+        "2021/22": 5065.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -564.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN23992!B89"
+        ],
+        "2024/25": [
+          "AN23992!C89"
+        ],
+        "2023/24": [
+          "AN23992!D89"
+        ],
+        "2022/23": [
+          "AN23992!E89"
+        ],
+        "2021/22": [
+          "AN23992!F89"
+        ]
+      },
+      "source_cell_or_range": "AN23992!B89:F89",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕不使用Crush；Crush属于上游油籽。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Production",
+      "values": {
+        "2025/26": 8164.0,
+        "2024/25": 8524.0,
+        "2023/24": 7266.0,
+        "2022/23": 5881.0,
+        "2021/22": 7549.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -360.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN23992!B14"
+        ],
+        "2024/25": [
+          "AN23992!C14"
+        ],
+        "2023/24": [
+          "AN23992!D14"
+        ],
+        "2022/23": [
+          "AN23992!E14"
+        ],
+        "2021/22": [
+          "AN23992!F14"
+        ]
+      },
+      "source_cell_or_range": "AN23992!B14:F14",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean oil Disappear.(a)",
+      "values": {
+        "2025/26": 1532.0,
+        "2024/25": 1431.0,
+        "2023/24": 1551.0,
+        "2022/23": 1650.0,
+        "2021/22": 2432.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 101.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN23992!B117"
+        ],
+        "2024/25": [
+          "AN23992!C117"
+        ],
+        "2023/24": [
+          "AN23992!D117"
+        ],
+        "2022/23": [
+          "AN23992!E117"
+        ],
+        "2021/22": [
+          "AN23992!F117"
+        ]
+      },
+      "source_cell_or_range": "AN23992!B117:F117",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Disappearance经同表平衡关系核对后映射Domestic Consumption。",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean oil Ending stocks",
+      "values": {
+        "2025/26": 290.0,
+        "2024/25": 256.0,
+        "2023/24": 370.0,
+        "2022/23": 334.0,
+        "2021/22": 495.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 34.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN23992!B145"
+        ],
+        "2024/25": [
+          "AN23992!C145"
+        ],
+        "2023/24": [
+          "AN23992!D145"
+        ],
+        "2022/23": [
+          "AN23992!E145"
+        ],
+        "2021/22": [
+          "AN23992!F145"
+        ]
+      },
+      "source_cell_or_range": "AN23992!B145:F145",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "conflict",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "",
+      "source_report_id": [
+        "AN23992"
+      ],
+      "source_report_title": [
+        "SOYBEAN OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN23992"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 原表未直接公布比例；Disappearance脚注(a)定义未在现有文件中完整找到，暂不建议派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

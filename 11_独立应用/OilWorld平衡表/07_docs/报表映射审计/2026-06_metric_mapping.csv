@@ -1,0 +1,15 @@
+﻿original_metric,standard_metric,mapping_rule,applicable_commodities,risk
+Opening Stocks / Open'g stocks / Open’g stocks / Carry-in,Beginning Stocks,同一完整年度口径下同义；产品国家行可由上年Ending Stocks顺延。,all,顺延仅限同一市场年度序列。
+Crop,Production,上游油籽国家平衡表直接映射，保留原始名称。,Soybeans; Rapeseed / Canola; Sunflowerseed,不得与Jan–Dec自然年混用。
+Production (oil tables),Product Output,油脂产品表统一映射Product Output，避免与上游作物Production重复。,oils,原始名称仍需保留。
+Meal Output,Product Output,油粕统一使用Product Output。,meals,不再同时生成重复Production。
+Imports,Imports,仅原表明确国家行或Total可直接映射。,all,空白或缺行不是0；不由Net Exports反推。
+Exports,Exports,仅原表明确国家行或Total可直接映射。,all,空白或缺行不是0。
+Crush / Crushings / Crush (Sept/Aug),Crush,油籽直接映射，原市场年度月份必须保留。,oilseeds,不同国家年度不可无说明相加。
+Crushings + Other use,Domestic Consumption,仅同一国家平衡表、同年度、同单位安全派生。,oilseeds,Other use不得单独映射国内消费。
+Disappearance / Dom.Disappear(a),Domestic Consumption,经同表供需恒等式验证后直接映射。,oils; meals; Palm Oil,脚注(a)定义未在现有文件中完整找到，需保留质量说明。
+Ending Stocks / End'g stocks / End’g stocks / Carry-out,Ending Stocks,同一完整年度口径下同义。,all,章节国家覆盖可能不同。
+Stocks/usage,Stocks/Use Ratio,世界油籽表直接映射；国家油籽可用Ending/(Crush+Other use)派生。,oilseeds,油脂油粕脚注分母未确认时标记conflict。
+HARVEST'D AREA / Area (1000 ha),Area Harvested,仅上游油籽作物使用。,oilseeds,EU需按成员行聚合并检查成员覆盖。
+Y I E L D / Yields(T per ha),Yield,国家直接；聚合区用总Production/总Area加权。,oilseeds,不能简单相加国家单产。
+Exp - Imp,not in scope,只能表示Net Exports，本次标准指标不采用。,all,不得拆分为Imports与Exports。

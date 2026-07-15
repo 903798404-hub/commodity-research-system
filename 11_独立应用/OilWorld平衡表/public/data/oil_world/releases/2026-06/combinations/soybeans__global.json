@@ -1,0 +1,798 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybeans",
+  "region": "Global",
+  "market_year_basis": [
+    "Oct–Sept",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2026/27",
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2026/27": "explicit_forecast",
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2026/27": "26/27F",
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "Opening stocks",
+      "values": {
+        "2026/27": 122710.0,
+        "2025/26": 121810.0,
+        "2024/25": 110850.0,
+        "2023/24": 98910.0,
+        "2022/23": 92640.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 900.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN139900"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Supply and Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN139900"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN139900!C4"
+        ],
+        "2025/26": [
+          "AN139900!D4"
+        ],
+        "2024/25": [
+          "AN139900!E4"
+        ],
+        "2023/24": [
+          "AN139900!F4"
+        ],
+        "2022/23": [
+          "AN139900!G4"
+        ]
+      },
+      "source_cell_or_range": "AN139900!C4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2026/27": "26/27F",
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "Production",
+      "values": {
+        "2026/27": 441180.0,
+        "2025/26": 429210.0,
+        "2024/25": 425440.0,
+        "2023/24": 395780.0,
+        "2022/23": 372660.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 11970.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN139900"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Supply and Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN139900"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN139900!C6"
+        ],
+        "2025/26": [
+          "AN139900!D6"
+        ],
+        "2024/25": [
+          "AN139900!E6"
+        ],
+        "2023/24": [
+          "AN139900!F6"
+        ],
+        "2022/23": [
+          "AN139900!G6"
+        ]
+      },
+      "source_cell_or_range": "AN139900!C6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Total Imports",
+      "values": {
+        "2025/26": 186605.0,
+        "2024/25": 181170.0,
+        "2023/24": 175624.0,
+        "2022/23": 167347.0,
+        "2021/22": 158352.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 5435.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN13992"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Crushings, Exports and Imports (1000 T)"
+      ],
+      "source_sheet": [
+        "AN13992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN13992!B107"
+        ],
+        "2024/25": [
+          "AN13992!C107"
+        ],
+        "2023/24": [
+          "AN13992!D107"
+        ],
+        "2022/23": [
+          "AN13992!E107"
+        ],
+        "2021/22": [
+          "AN13992!F107"
+        ]
+      },
+      "source_cell_or_range": "AN13992!B107:F107",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Total Exports",
+      "values": {
+        "2025/26": 185700.0,
+        "2024/25": 183786.0,
+        "2023/24": 180057.0,
+        "2022/23": 172009.0,
+        "2021/22": 155907.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 1914.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN13992"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Crushings, Exports and Imports (1000 T)"
+      ],
+      "source_sheet": [
+        "AN13992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN13992!B73"
+        ],
+        "2024/25": [
+          "AN13992!C73"
+        ],
+        "2023/24": [
+          "AN13992!D73"
+        ],
+        "2022/23": [
+          "AN13992!E73"
+        ],
+        "2021/22": [
+          "AN13992!F73"
+        ]
+      },
+      "source_cell_or_range": "AN13992!B73:F73",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2026/27": "26/27F",
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "Crush (Sept/Aug)",
+      "values": {
+        "2026/27": 382000.0,
+        "2025/26": 372330.0,
+        "2024/25": 358470.0,
+        "2023/24": 330840.0,
+        "2022/23": 315920.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 9670.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN139900"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Supply and Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN139900"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN139900!C23"
+        ],
+        "2025/26": [
+          "AN139900!D23"
+        ],
+        "2024/25": [
+          "AN139900!E23"
+        ],
+        "2023/24": [
+          "AN139900!F23"
+        ],
+        "2022/23": [
+          "AN139900!G23"
+        ]
+      },
+      "source_cell_or_range": "AN139900!C23:G23",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2026/27": "26/27F",
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "Crush + Other use",
+      "values": {
+        "2026/27": 440590.0,
+        "2025/26": 429310.0,
+        "2024/25": 413480.0,
+        "2023/24": 383840.0,
+        "2022/23": 366390.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 11280.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN139900"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Supply and Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN139900"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN139900!C23",
+          "AN139900!C25"
+        ],
+        "2025/26": [
+          "AN139900!D23",
+          "AN139900!D25"
+        ],
+        "2024/25": [
+          "AN139900!E23",
+          "AN139900!E25"
+        ],
+        "2023/24": [
+          "AN139900!F23",
+          "AN139900!F25"
+        ],
+        "2022/23": [
+          "AN139900!G23",
+          "AN139900!G25"
+        ]
+      },
+      "source_cell_or_range": "AN139900!C23:G23 + AN139900!C25:G25",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crush + Other use",
+      "derivation_components": "AN139900: Crush row 23; Other use row 25",
+      "quality_note": "Oil World世界平衡式确认该两项合计为总国内使用；保留原始指标名。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2026/27": "26/27F",
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2026/27": 123300.0,
+        "2025/26": 122710.0,
+        "2024/25": 122810.0,
+        "2023/24": 110850.0,
+        "2022/23": 98910.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 590.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN139900"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Supply and Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN139900"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN139900!C27"
+        ],
+        "2025/26": [
+          "AN139900!D27"
+        ],
+        "2024/25": [
+          "AN139900!E27"
+        ],
+        "2023/24": [
+          "AN139900!F27"
+        ],
+        "2022/23": [
+          "AN139900!G27"
+        ]
+      },
+      "source_cell_or_range": "AN139900!C27:G27",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2026/27": "26/27F",
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "Stocks/usage",
+      "values": {
+        "2026/27": 28.0,
+        "2025/26": 28.6,
+        "2024/25": 29.7,
+        "2023/24": 28.9,
+        "2022/23": 27.0
+      },
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN139900"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Supply and Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN139900"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN139900!C32"
+        ],
+        "2025/26": [
+          "AN139900!D32"
+        ],
+        "2024/25": [
+          "AN139900!E32"
+        ],
+        "2023/24": [
+          "AN139900!F32"
+        ],
+        "2022/23": [
+          "AN139900!G32"
+        ]
+      },
+      "source_cell_or_range": "AN139900!C32:G32",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "HARVEST'D AREA",
+      "values": {
+        "2026/27": 149398.0,
+        "2025/26": 144786.0,
+        "2024/25": 146734.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 4612.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!K20"
+        ],
+        "2025/26": [
+          "AN13993!L20"
+        ],
+        "2024/25": [
+          "AN13993!M20"
+        ]
+      },
+      "source_cell_or_range": "AN13993!K20:M20",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Y I E L D",
+      "values": {
+        "2026/27": 2.95,
+        "2025/26": 2.96,
+        "2024/25": 2.9
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -0.01,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!G20"
+        ],
+        "2025/26": [
+          "AN13993!H20"
+        ],
+        "2024/25": [
+          "AN13993!I20"
+        ]
+      },
+      "source_cell_or_range": "AN13993!G20:I20",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

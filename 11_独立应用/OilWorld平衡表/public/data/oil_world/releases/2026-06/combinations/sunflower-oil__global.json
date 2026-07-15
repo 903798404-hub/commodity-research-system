@@ -1,0 +1,625 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "葵花体系",
+  "product": "Sunflower Oil",
+  "region": "Global",
+  "market_year_basis": [
+    "Oct–Sept"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2025/26": 3170.0,
+        "2024/25": 4212.0,
+        "2023/24": 4572.0,
+        "2022/23": 3475.0,
+        "2021/22": 2463.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -1042.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24792!B3"
+        ],
+        "2024/25": [
+          "AN24792!C3"
+        ],
+        "2023/24": [
+          "AN24792!D3"
+        ],
+        "2022/23": [
+          "AN24792!E3"
+        ],
+        "2021/22": [
+          "AN24792!F3"
+        ]
+      },
+      "source_cell_or_range": "AN24792!B3:F3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕统一使用Product Output；Production避免重复。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunfloweroil Imports",
+      "values": {
+        "2025/26": 14800.0,
+        "2024/25": 14067.0,
+        "2023/24": 15879.0,
+        "2022/23": 14175.0,
+        "2021/22": 11232.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 733.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24792!B66"
+        ],
+        "2024/25": [
+          "AN24792!C66"
+        ],
+        "2023/24": [
+          "AN24792!D66"
+        ],
+        "2022/23": [
+          "AN24792!E66"
+        ],
+        "2021/22": [
+          "AN24792!F66"
+        ]
+      },
+      "source_cell_or_range": "AN24792!B66:F66",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunfloweroil Exports",
+      "values": {
+        "2025/26": 14803.0,
+        "2024/25": 14027.0,
+        "2023/24": 16045.0,
+        "2022/23": 13921.0,
+        "2021/22": 11415.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 776.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24792!B99"
+        ],
+        "2024/25": [
+          "AN24792!C99"
+        ],
+        "2023/24": [
+          "AN24792!D99"
+        ],
+        "2022/23": [
+          "AN24792!E99"
+        ],
+        "2021/22": [
+          "AN24792!F99"
+        ]
+      },
+      "source_cell_or_range": "AN24792!B99:F99",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕不使用Crush；Crush属于上游油籽。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Production",
+      "values": {
+        "2025/26": 22286.0,
+        "2024/25": 21080.0,
+        "2023/24": 23693.0,
+        "2022/23": 22102.0,
+        "2021/22": 20470.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 1206.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24792!B21"
+        ],
+        "2024/25": [
+          "AN24792!C21"
+        ],
+        "2023/24": [
+          "AN24792!D21"
+        ],
+        "2022/23": [
+          "AN24792!E21"
+        ],
+        "2021/22": [
+          "AN24792!F21"
+        ]
+      },
+      "source_cell_or_range": "AN24792!B21:F21",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunfloweroil Disappear.(a)",
+      "values": {
+        "2025/26": 22103.0,
+        "2024/25": 22161.0,
+        "2023/24": 23886.0,
+        "2022/23": 21258.0,
+        "2021/22": 19276.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -58.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24792!B132"
+        ],
+        "2024/25": [
+          "AN24792!C132"
+        ],
+        "2023/24": [
+          "AN24792!D132"
+        ],
+        "2022/23": [
+          "AN24792!E132"
+        ],
+        "2021/22": [
+          "AN24792!F132"
+        ]
+      },
+      "source_cell_or_range": "AN24792!B132:F132",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Disappearance通过同表总量平衡式核对后映射Domestic Consumption。",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Sunfloweroil Ending stocks",
+      "values": {
+        "2025/26": 3349.0,
+        "2024/25": 3170.0,
+        "2023/24": 4212.0,
+        "2022/23": 4572.0,
+        "2021/22": 3475.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 179.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24792!B150"
+        ],
+        "2024/25": [
+          "AN24792!C150"
+        ],
+        "2023/24": [
+          "AN24792!D150"
+        ],
+        "2022/23": [
+          "AN24792!E150"
+        ],
+        "2021/22": [
+          "AN24792!F150"
+        ]
+      },
+      "source_cell_or_range": "AN24792!B150:F150",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "conflict",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "",
+      "source_report_id": [
+        "AN24792"
+      ],
+      "source_report_title": [
+        "SUNFLOWER OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24792"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 原表未直接公布Stocks/Use；Disappearance带脚注(a)，现有文件未提供完整分母定义，暂不派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

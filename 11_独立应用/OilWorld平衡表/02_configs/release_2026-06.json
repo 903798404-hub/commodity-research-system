@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "release_label": "June 2026",
+  "source_workbook": "01_原始资料/2026-06/油世界季度表-June 2026.xlsx",
+  "source_workbook_sha256": "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e",
+  "audit_directory": "07_docs/报表映射审计",
+  "audit_files": {
+    "mapping_audit": "2026-06_report_mapping_audit.json",
+    "coverage_matrix": "2026-06_coverage_matrix.csv",
+    "report_catalog": "2026-06_report_catalog.csv",
+    "metric_mapping": "2026-06_metric_mapping.csv"
+  },
+  "expected_mapping_count": 649,
+  "expected_combination_count": 59,
+  "expected_numeric_source_report_count": 28,
+  "expected_adopted_report_count": 30,
+  "expected_annual_change_count": 358,
+  "expected_status_counts": {
+    "direct": 286,
+    "derived": 75,
+    "missing": 55,
+    "not_applicable": 182,
+    "conflict": 51
+  },
+  "metric_order": [
+    "Beginning Stocks",
+    "Production",
+    "Imports",
+    "Exports",
+    "Crush",
+    "Product Output",
+    "Domestic Consumption",
+    "Ending Stocks",
+    "Stocks/Use Ratio",
+    "Area Harvested",
+    "Yield"
+  ],
+  "systems": {
+    "大豆体系": {
+      "commodities": ["Soybeans", "Soybean Oil", "Soybean Meal"],
+      "countries": ["Global", "United States", "Brazil", "Argentina", "China", "G3"]
+    },
+    "菜籽体系": {
+      "commodities": ["Rapeseed / Canola", "Rapeseed Oil", "Rapeseed Meal"],
+      "countries": ["Global", "Canada", "European Union", "Australia", "China", "Russia", "Ukraine"]
+    },
+    "葵花体系": {
+      "commodities": ["Sunflowerseed", "Sunflower Oil", "Sunflower Meal"],
+      "countries": ["Global", "Russia", "Ukraine", "European Union", "Argentina"]
+    },
+    "棕榈油体系": {
+      "commodities": ["Palm Oil"],
+      "countries": ["Global", "Indonesia", "Malaysia", "G2", "India"]
+    }
+  },
+  "conflict_basis_overrides": {
+    "Soybeans|Brazil": "Jan–Dec（自然年，审计冲突，数值不展示）",
+    "Sunflowerseed|Argentina": "Jan–Dec（自然年，审计冲突，数值不展示）"
+  },
+  "conflict_message": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。",
+  "quantity_standard_unit": "1000 T",
+  "spot_check_count": 30,
+  "spot_check_seed": 202606
+}

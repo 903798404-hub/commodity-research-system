@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oil-world-research-dashboard-data"
+version = "1.0.0"
+description = "Audit-driven Oil World annual research data pipeline"
+requires-python = ">=3.11"
+dependencies = [
+  "openpyxl>=3.1,<4"
+]
+
+[tool.setuptools.packages.find]
+where = ["03_src"]
+
+[tool.unittest]
+start-directory = "08_tests"

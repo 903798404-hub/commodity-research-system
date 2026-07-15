@@ -1,0 +1,872 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybeans",
+  "region": "Argentina",
+  "market_year_basis": [
+    "Apr–Mar",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2026/27",
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2026/27": "explicit_forecast",
+    "2025/26": "historical",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2026/27": 2600.0,
+        "2025/26": 6300.0,
+        "2024/25": 4300.0,
+        "2023/24": 7500.0,
+        "2022/23": 8400.0,
+        "2021/22": 11500.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -3700.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B3"
+        ],
+        "2025/26": [
+          "AN50001!C3"
+        ],
+        "2024/25": [
+          "AN50001!D3"
+        ],
+        "2023/24": [
+          "AN50001!E3"
+        ],
+        "2022/23": [
+          "AN50001!F3"
+        ],
+        "2021/22": [
+          "AN50001!G3"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B3:G3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2026/27": 50000.0,
+        "2025/26": 50500.0,
+        "2024/25": 48700.0,
+        "2023/24": 22600.0,
+        "2022/23": 41600.0,
+        "2021/22": 43800.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -500.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B4"
+        ],
+        "2025/26": [
+          "AN50001!C4"
+        ],
+        "2024/25": [
+          "AN50001!D4"
+        ],
+        "2023/24": [
+          "AN50001!E4"
+        ],
+        "2022/23": [
+          "AN50001!F4"
+        ],
+        "2021/22": [
+          "AN50001!G4"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2026/27": 7000.0,
+        "2025/26": 5950.0,
+        "2024/25": 7196.0,
+        "2023/24": 10394.0,
+        "2022/23": 4572.0,
+        "2021/22": 4439.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 1050.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B5"
+        ],
+        "2025/26": [
+          "AN50001!C5"
+        ],
+        "2024/25": [
+          "AN50001!D5"
+        ],
+        "2023/24": [
+          "AN50001!E5"
+        ],
+        "2022/23": [
+          "AN50001!F5"
+        ],
+        "2021/22": [
+          "AN50001!G5"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B5:G5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2026/27": 4200.0,
+        "2025/26": 12405.0,
+        "2024/25": 4572.0,
+        "2023/24": 1892.0,
+        "2022/23": 5553.0,
+        "2021/22": 5377.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -8205.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B6"
+        ],
+        "2025/26": [
+          "AN50001!C6"
+        ],
+        "2024/25": [
+          "AN50001!D6"
+        ],
+        "2023/24": [
+          "AN50001!E6"
+        ],
+        "2022/23": [
+          "AN50001!F6"
+        ],
+        "2021/22": [
+          "AN50001!G6"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2026/27": 42700.0,
+        "2025/26": 41821.0,
+        "2024/25": 43550.0,
+        "2023/24": 28990.0,
+        "2022/23": 35915.0,
+        "2021/22": 41053.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 879.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B7"
+        ],
+        "2025/26": [
+          "AN50001!C7"
+        ],
+        "2024/25": [
+          "AN50001!D7"
+        ],
+        "2023/24": [
+          "AN50001!E7"
+        ],
+        "2022/23": [
+          "AN50001!F7"
+        ],
+        "2021/22": [
+          "AN50001!G7"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B7:G7",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2026/27": 48700.0,
+        "2025/26": 47744.0,
+        "2024/25": 49324.0,
+        "2023/24": 34302.0,
+        "2022/23": 41519.0,
+        "2021/22": 45961.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 956.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B7",
+          "AN50001!B8"
+        ],
+        "2025/26": [
+          "AN50001!C7",
+          "AN50001!C8"
+        ],
+        "2024/25": [
+          "AN50001!D7",
+          "AN50001!D8"
+        ],
+        "2023/24": [
+          "AN50001!E7",
+          "AN50001!E8"
+        ],
+        "2022/23": [
+          "AN50001!F7",
+          "AN50001!F8"
+        ],
+        "2021/22": [
+          "AN50001!G7",
+          "AN50001!G8"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B7:G7 + AN50001!B8:G8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN50001 row 7 + row 8",
+      "quality_note": "只在同一国家平衡表、同一年度和单位下派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2026/27": 6700.0,
+        "2025/26": 2600.0,
+        "2024/25": 6300.0,
+        "2023/24": 4300.0,
+        "2022/23": 7500.0,
+        "2021/22": 8400.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 4100.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B9"
+        ],
+        "2025/26": [
+          "AN50001!C9"
+        ],
+        "2024/25": [
+          "AN50001!D9"
+        ],
+        "2023/24": [
+          "AN50001!E9"
+        ],
+        "2022/23": [
+          "AN50001!F9"
+        ],
+        "2021/22": [
+          "AN50001!G9"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B9:G9",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "derived",
+      "market_year_basis": "Apr–Mar",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "Apr Mar 26/27F",
+        "2025/26": "Apr Mar 25/26",
+        "2024/25": "Apr Mar 24/25",
+        "2023/24": "Apr Mar 23/24",
+        "2022/23": "Apr Mar 22/23",
+        "2021/22": "Apr Mar 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2026/27": 13.75770021,
+        "2025/26": 5.44571046,
+        "2024/25": 12.77268672,
+        "2023/24": 12.5357122,
+        "2022/23": 18.06401888,
+        "2021/22": 18.27636474
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 8.31198975,
+        "unit": "percentage points"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN50001"
+      ],
+      "source_report_title": [
+        "ARGENTINA : Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN50001"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN50001!B9",
+          "AN50001!B7",
+          "AN50001!B8"
+        ],
+        "2025/26": [
+          "AN50001!C9",
+          "AN50001!C7",
+          "AN50001!C8"
+        ],
+        "2024/25": [
+          "AN50001!D9",
+          "AN50001!D7",
+          "AN50001!D8"
+        ],
+        "2023/24": [
+          "AN50001!E9",
+          "AN50001!E7",
+          "AN50001!E8"
+        ],
+        "2022/23": [
+          "AN50001!F9",
+          "AN50001!F7",
+          "AN50001!F8"
+        ],
+        "2021/22": [
+          "AN50001!G9",
+          "AN50001!G7",
+          "AN50001!G8"
+        ]
+      },
+      "source_cell_or_range": "AN50001!B9:G9 / (AN50001!B7:G7 + AN50001!B8:G8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN50001 rows 7, 8, 9",
+      "quality_note": "分母口径由同商品世界表直接公布的Stocks/usage关系验证；变化单位为百分点。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "HARVEST'D AREA",
+      "values": {
+        "2026/27": 16800.0,
+        "2025/26": 16200.0,
+        "2024/25": 17130.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 600.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!K10"
+        ],
+        "2025/26": [
+          "AN13993!L10"
+        ],
+        "2024/25": [
+          "AN13993!M10"
+        ]
+      },
+      "source_cell_or_range": "AN13993!K10:M10",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Y I E L D",
+      "values": {
+        "2026/27": 3.07,
+        "2025/26": 3.09,
+        "2024/25": 2.95
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -0.02,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!G10"
+        ],
+        "2025/26": [
+          "AN13993!H10"
+        ],
+        "2024/25": [
+          "AN13993!I10"
+        ]
+      },
+      "source_cell_or_range": "AN13993!G10:I10",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

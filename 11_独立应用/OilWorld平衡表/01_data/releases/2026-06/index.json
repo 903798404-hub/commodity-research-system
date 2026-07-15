@@ -1,0 +1,532 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "release_label": "June 2026",
+  "source": "Oil World",
+  "systems": [
+    {
+      "id": "soy",
+      "label": "大豆体系",
+      "products": [
+        {
+          "id": "soybeans",
+          "label": "Soybeans",
+          "regions": [
+            "Global",
+            "United States",
+            "Brazil",
+            "Argentina",
+            "China",
+            "G3"
+          ]
+        },
+        {
+          "id": "soybean-oil",
+          "label": "Soybean Oil",
+          "regions": [
+            "Global",
+            "United States",
+            "Brazil",
+            "Argentina",
+            "China",
+            "G3"
+          ]
+        },
+        {
+          "id": "soybean-meal",
+          "label": "Soybean Meal",
+          "regions": [
+            "Global",
+            "United States",
+            "Brazil",
+            "Argentina",
+            "China",
+            "G3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapeseed",
+      "label": "菜籽体系",
+      "products": [
+        {
+          "id": "rapeseed-canola",
+          "label": "Rapeseed / Canola",
+          "regions": [
+            "Global",
+            "Canada",
+            "European Union",
+            "Australia",
+            "China",
+            "Russia",
+            "Ukraine"
+          ]
+        },
+        {
+          "id": "rapeseed-oil",
+          "label": "Rapeseed Oil",
+          "regions": [
+            "Global",
+            "Canada",
+            "European Union",
+            "Australia",
+            "China",
+            "Russia",
+            "Ukraine"
+          ]
+        },
+        {
+          "id": "rapeseed-meal",
+          "label": "Rapeseed Meal",
+          "regions": [
+            "Global",
+            "Canada",
+            "European Union",
+            "Australia",
+            "China",
+            "Russia",
+            "Ukraine"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sunflower",
+      "label": "葵花体系",
+      "products": [
+        {
+          "id": "sunflowerseed",
+          "label": "Sunflowerseed",
+          "regions": [
+            "Global",
+            "Russia",
+            "Ukraine",
+            "European Union",
+            "Argentina"
+          ]
+        },
+        {
+          "id": "sunflower-oil",
+          "label": "Sunflower Oil",
+          "regions": [
+            "Global",
+            "Russia",
+            "Ukraine",
+            "European Union",
+            "Argentina"
+          ]
+        },
+        {
+          "id": "sunflower-meal",
+          "label": "Sunflower Meal",
+          "regions": [
+            "Global",
+            "Russia",
+            "Ukraine",
+            "European Union",
+            "Argentina"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "palm",
+      "label": "棕榈油体系",
+      "products": [
+        {
+          "id": "palm-oil",
+          "label": "Palm Oil",
+          "regions": [
+            "Global",
+            "Indonesia",
+            "Malaysia",
+            "G2",
+            "India"
+          ]
+        }
+      ]
+    }
+  ],
+  "metric_order": [
+    "Beginning Stocks",
+    "Production",
+    "Imports",
+    "Exports",
+    "Crush",
+    "Product Output",
+    "Domestic Consumption",
+    "Ending Stocks",
+    "Stocks/Use Ratio",
+    "Area Harvested",
+    "Yield"
+  ],
+  "files": [
+    {
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Global",
+      "path": "combinations/soybeans__global.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "United States",
+      "path": "combinations/soybeans__united-states.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "path": "combinations/soybeans__brazil.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Argentina",
+      "path": "combinations/soybeans__argentina.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "China",
+      "path": "combinations/soybeans__china.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "path": "combinations/soybeans__g3.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "Global",
+      "path": "combinations/soybean-oil__global.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "United States",
+      "path": "combinations/soybean-oil__united-states.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "Brazil",
+      "path": "combinations/soybean-oil__brazil.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "Argentina",
+      "path": "combinations/soybean-oil__argentina.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "China",
+      "path": "combinations/soybean-oil__china.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "path": "combinations/soybean-oil__g3.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "path": "combinations/soybean-meal__global.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "United States",
+      "path": "combinations/soybean-meal__united-states.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "path": "combinations/soybean-meal__brazil.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Argentina",
+      "path": "combinations/soybean-meal__argentina.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "China",
+      "path": "combinations/soybean-meal__china.json"
+    },
+    {
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "G3",
+      "path": "combinations/soybean-meal__g3.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "Global",
+      "path": "combinations/rapeseed-canola__global.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "Canada",
+      "path": "combinations/rapeseed-canola__canada.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "European Union",
+      "path": "combinations/rapeseed-canola__european-union.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "Australia",
+      "path": "combinations/rapeseed-canola__australia.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "path": "combinations/rapeseed-canola__china.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "Russia",
+      "path": "combinations/rapeseed-canola__russia.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "Ukraine",
+      "path": "combinations/rapeseed-canola__ukraine.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "Global",
+      "path": "combinations/rapeseed-oil__global.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "Canada",
+      "path": "combinations/rapeseed-oil__canada.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "European Union",
+      "path": "combinations/rapeseed-oil__european-union.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "Australia",
+      "path": "combinations/rapeseed-oil__australia.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "China",
+      "path": "combinations/rapeseed-oil__china.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "Russia",
+      "path": "combinations/rapeseed-oil__russia.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Oil",
+      "region": "Ukraine",
+      "path": "combinations/rapeseed-oil__ukraine.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "path": "combinations/rapeseed-meal__global.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Canada",
+      "path": "combinations/rapeseed-meal__canada.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "path": "combinations/rapeseed-meal__european-union.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Australia",
+      "path": "combinations/rapeseed-meal__australia.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "China",
+      "path": "combinations/rapeseed-meal__china.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Russia",
+      "path": "combinations/rapeseed-meal__russia.json"
+    },
+    {
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Ukraine",
+      "path": "combinations/rapeseed-meal__ukraine.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Global",
+      "path": "combinations/sunflowerseed__global.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "path": "combinations/sunflowerseed__russia.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Ukraine",
+      "path": "combinations/sunflowerseed__ukraine.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "European Union",
+      "path": "combinations/sunflowerseed__european-union.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "path": "combinations/sunflowerseed__argentina.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Oil",
+      "region": "Global",
+      "path": "combinations/sunflower-oil__global.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Oil",
+      "region": "Russia",
+      "path": "combinations/sunflower-oil__russia.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Oil",
+      "region": "Ukraine",
+      "path": "combinations/sunflower-oil__ukraine.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Oil",
+      "region": "European Union",
+      "path": "combinations/sunflower-oil__european-union.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Oil",
+      "region": "Argentina",
+      "path": "combinations/sunflower-oil__argentina.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Global",
+      "path": "combinations/sunflower-meal__global.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "path": "combinations/sunflower-meal__russia.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Ukraine",
+      "path": "combinations/sunflower-meal__ukraine.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "European Union",
+      "path": "combinations/sunflower-meal__european-union.json"
+    },
+    {
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Argentina",
+      "path": "combinations/sunflower-meal__argentina.json"
+    },
+    {
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "path": "combinations/palm-oil__global.json"
+    },
+    {
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Indonesia",
+      "path": "combinations/palm-oil__indonesia.json"
+    },
+    {
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Malaysia",
+      "path": "combinations/palm-oil__malaysia.json"
+    },
+    {
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "G2",
+      "path": "combinations/palm-oil__g2.json"
+    },
+    {
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "India",
+      "path": "combinations/palm-oil__india.json"
+    }
+  ],
+  "combination_count": 59,
+  "mapping_record_count": 649,
+  "numeric_observation_count": 1791,
+  "annual_change_count": 358,
+  "status_counts": {
+    "direct": 286,
+    "not_applicable": 182,
+    "derived": 75,
+    "conflict": 51,
+    "missing": 55
+  },
+  "quarter_revision_available": false
+}

@@ -1,0 +1,872 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "菜籽体系",
+  "product": "Rapeseed / Canola",
+  "region": "Ukraine",
+  "market_year_basis": [
+    "July–June",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2026/27",
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2026/27": "explicit_forecast",
+    "2025/26": "historical",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2026/27": 100.0,
+        "2025/26": 45.0,
+        "2024/25": 6.0,
+        "2023/24": 100.0,
+        "2022/23": 32.0,
+        "2021/22": 6.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 55.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B3"
+        ],
+        "2025/26": [
+          "AN18103!C3"
+        ],
+        "2024/25": [
+          "AN18103!D3"
+        ],
+        "2023/24": [
+          "AN18103!E3"
+        ],
+        "2022/23": [
+          "AN18103!F3"
+        ],
+        "2021/22": [
+          "AN18103!G3"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B3:G3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2026/27": 3370.0,
+        "2025/26": 3270.0,
+        "2024/25": 3700.0,
+        "2023/24": 4630.0,
+        "2022/23": 3730.0,
+        "2021/22": 3170.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 100.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B4"
+        ],
+        "2025/26": [
+          "AN18103!C4"
+        ],
+        "2024/25": [
+          "AN18103!D4"
+        ],
+        "2023/24": [
+          "AN18103!E4"
+        ],
+        "2022/23": [
+          "AN18103!F4"
+        ],
+        "2021/22": [
+          "AN18103!G4"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2026/27": 5.0,
+        "2025/26": 2.0,
+        "2024/25": 5.0,
+        "2023/24": 7.0,
+        "2022/23": 40.0,
+        "2021/22": 12.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 3.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B5"
+        ],
+        "2025/26": [
+          "AN18103!C5"
+        ],
+        "2024/25": [
+          "AN18103!D5"
+        ],
+        "2023/24": [
+          "AN18103!E5"
+        ],
+        "2022/23": [
+          "AN18103!F5"
+        ],
+        "2021/22": [
+          "AN18103!G5"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B5:G5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2026/27": 1970.0,
+        "2025/26": 1900.0,
+        "2024/25": 3097.0,
+        "2023/24": 3684.0,
+        "2022/23": 3433.0,
+        "2021/22": 2706.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 70.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B6"
+        ],
+        "2025/26": [
+          "AN18103!C6"
+        ],
+        "2024/25": [
+          "AN18103!D6"
+        ],
+        "2023/24": [
+          "AN18103!E6"
+        ],
+        "2022/23": [
+          "AN18103!F6"
+        ],
+        "2021/22": [
+          "AN18103!G6"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2026/27": 1400.0,
+        "2025/26": 1280.0,
+        "2024/25": 535.0,
+        "2023/24": 1013.0,
+        "2022/23": 236.0,
+        "2021/22": 421.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 120.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B7"
+        ],
+        "2025/26": [
+          "AN18103!C7"
+        ],
+        "2024/25": [
+          "AN18103!D7"
+        ],
+        "2023/24": [
+          "AN18103!E7"
+        ],
+        "2022/23": [
+          "AN18103!F7"
+        ],
+        "2021/22": [
+          "AN18103!G7"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B7:G7",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2026/27": 1435.0,
+        "2025/26": 1317.0,
+        "2024/25": 568.0,
+        "2023/24": 1047.0,
+        "2022/23": 269.0,
+        "2021/22": 450.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 118.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B7",
+          "AN18103!B8"
+        ],
+        "2025/26": [
+          "AN18103!C7",
+          "AN18103!C8"
+        ],
+        "2024/25": [
+          "AN18103!D7",
+          "AN18103!D8"
+        ],
+        "2023/24": [
+          "AN18103!E7",
+          "AN18103!E8"
+        ],
+        "2022/23": [
+          "AN18103!F7",
+          "AN18103!F8"
+        ],
+        "2021/22": [
+          "AN18103!G7",
+          "AN18103!G8"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B7:G7 + AN18103!B8:G8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN18103 row 7 + row 8",
+      "quality_note": "只在同一国家平衡表、同一年度和单位下派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2026/27": 70.0,
+        "2025/26": 100.0,
+        "2024/25": 45.0,
+        "2023/24": 6.0,
+        "2022/23": 100.0,
+        "2021/22": 32.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -30.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B9"
+        ],
+        "2025/26": [
+          "AN18103!C9"
+        ],
+        "2024/25": [
+          "AN18103!D9"
+        ],
+        "2023/24": [
+          "AN18103!E9"
+        ],
+        "2022/23": [
+          "AN18103!F9"
+        ],
+        "2021/22": [
+          "AN18103!G9"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B9:G9",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "derived",
+      "market_year_basis": "July–June",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2026/27": "July June 26/27F",
+        "2025/26": "July June 25/26",
+        "2024/25": "July June 24/25",
+        "2023/24": "July June 23/24",
+        "2022/23": "July June 22/23",
+        "2021/22": "July June 21/22"
+      },
+      "forecast_status": {
+        "2026/27": "explicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2026/27": 4.87804878,
+        "2025/26": 7.59301443,
+        "2024/25": 7.92253521,
+        "2023/24": 0.5730659,
+        "2022/23": 37.17472119,
+        "2021/22": 7.11111111
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -2.71496565,
+        "unit": "percentage points"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN18103"
+      ],
+      "source_report_title": [
+        "UKRAINE : Rapeseed Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN18103"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN18103!B9",
+          "AN18103!B7",
+          "AN18103!B8"
+        ],
+        "2025/26": [
+          "AN18103!C9",
+          "AN18103!C7",
+          "AN18103!C8"
+        ],
+        "2024/25": [
+          "AN18103!D9",
+          "AN18103!D7",
+          "AN18103!D8"
+        ],
+        "2023/24": [
+          "AN18103!E9",
+          "AN18103!E7",
+          "AN18103!E8"
+        ],
+        "2022/23": [
+          "AN18103!F9",
+          "AN18103!F7",
+          "AN18103!F8"
+        ],
+        "2021/22": [
+          "AN18103!G9",
+          "AN18103!G7",
+          "AN18103!G8"
+        ]
+      },
+      "source_cell_or_range": "AN18103!B9:G9 / (AN18103!B7:G7 + AN18103!B8:G8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN18103 rows 7, 8, 9",
+      "quality_note": "分母口径由同商品世界表直接公布的Stocks/usage关系验证；变化单位为百分点。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "HARVEST'D AREA",
+      "values": {
+        "2026/27": 1200.0,
+        "2025/26": 1220.0,
+        "2024/25": 1360.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -20.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN14993"
+      ],
+      "source_report_title": [
+        "RAPESEED / CANOLA : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN14993!K30"
+        ],
+        "2025/26": [
+          "AN14993!L30"
+        ],
+        "2024/25": [
+          "AN14993!M30"
+        ]
+      },
+      "source_cell_or_range": "AN14993!K30:M30",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Y I E L D",
+      "values": {
+        "2026/27": 2.81,
+        "2025/26": 2.68,
+        "2024/25": 2.72
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 0.13,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN14993"
+      ],
+      "source_report_title": [
+        "RAPESEED / CANOLA : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN14993!G30"
+        ],
+        "2025/26": [
+          "AN14993!H30"
+        ],
+        "2024/25": [
+          "AN14993!I30"
+        ]
+      },
+      "source_cell_or_range": "AN14993!G30:I30",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

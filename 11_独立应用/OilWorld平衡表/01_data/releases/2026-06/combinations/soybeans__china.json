@@ -1,0 +1,874 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybeans",
+  "region": "China",
+  "market_year_basis": [
+    "Oil World作物年度",
+    "Sept–Aug"
+  ],
+  "periods": [
+    "2026/27",
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22",
+    "2020/21"
+  ],
+  "forecast_status": {
+    "2026/27": "implicit_forecast",
+    "2025/26": "historical",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical",
+    "2020/21": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2025/26": 17300.0,
+        "2024/25": 18100.0,
+        "2023/24": 16900.0,
+        "2022/23": 13000.0,
+        "2021/22": 18500.0,
+        "2020/21": 11600.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -800.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B3"
+        ],
+        "2024/25": [
+          "AN62801!C3"
+        ],
+        "2023/24": [
+          "AN62801!D3"
+        ],
+        "2022/23": [
+          "AN62801!E3"
+        ],
+        "2021/22": [
+          "AN62801!F3"
+        ],
+        "2020/21": [
+          "AN62801!G3"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B3:G3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2025/26": 21000.0,
+        "2024/25": 20460.0,
+        "2023/24": 19800.0,
+        "2022/23": 19000.0,
+        "2021/22": 16400.0,
+        "2020/21": 17847.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 540.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B4"
+        ],
+        "2024/25": [
+          "AN62801!C4"
+        ],
+        "2023/24": [
+          "AN62801!D4"
+        ],
+        "2022/23": [
+          "AN62801!E4"
+        ],
+        "2021/22": [
+          "AN62801!F4"
+        ],
+        "2020/21": [
+          "AN62801!G4"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2025/26": 112300.0,
+        "2024/25": 107871.0,
+        "2023/24": 105029.0,
+        "2022/23": 101816.0,
+        "2021/22": 90769.0,
+        "2020/21": 102690.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 4429.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B5"
+        ],
+        "2024/25": [
+          "AN62801!C5"
+        ],
+        "2023/24": [
+          "AN62801!D5"
+        ],
+        "2022/23": [
+          "AN62801!E5"
+        ],
+        "2021/22": [
+          "AN62801!F5"
+        ],
+        "2020/21": [
+          "AN62801!G5"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B5:G5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2025/26": 125.0,
+        "2024/25": 71.0,
+        "2023/24": 70.0,
+        "2022/23": 104.0,
+        "2021/22": 87.0,
+        "2020/21": 71.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 54.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B6"
+        ],
+        "2024/25": [
+          "AN62801!C6"
+        ],
+        "2023/24": [
+          "AN62801!D6"
+        ],
+        "2022/23": [
+          "AN62801!E6"
+        ],
+        "2021/22": [
+          "AN62801!F6"
+        ],
+        "2020/21": [
+          "AN62801!G6"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2025/26": 109500.0,
+        "2024/25": 105830.0,
+        "2023/24": 100660.0,
+        "2022/23": 94510.0,
+        "2021/22": 91610.0,
+        "2020/21": 93910.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 3670.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B7"
+        ],
+        "2024/25": [
+          "AN62801!C7"
+        ],
+        "2023/24": [
+          "AN62801!D7"
+        ],
+        "2022/23": [
+          "AN62801!E7"
+        ],
+        "2021/22": [
+          "AN62801!F7"
+        ],
+        "2020/21": [
+          "AN62801!G7"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B7:G7",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2025/26": 133075.0,
+        "2024/25": 129060.0,
+        "2023/24": 123559.0,
+        "2022/23": 116812.0,
+        "2021/22": 112581.0,
+        "2020/21": 113566.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 4015.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B7",
+          "AN62801!B8"
+        ],
+        "2024/25": [
+          "AN62801!C7",
+          "AN62801!C8"
+        ],
+        "2023/24": [
+          "AN62801!D7",
+          "AN62801!D8"
+        ],
+        "2022/23": [
+          "AN62801!E7",
+          "AN62801!E8"
+        ],
+        "2021/22": [
+          "AN62801!F7",
+          "AN62801!F8"
+        ],
+        "2020/21": [
+          "AN62801!G7",
+          "AN62801!G8"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B7:G7 + AN62801!B8:G8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN62801 row 7 + row 8",
+      "quality_note": "只在同一国家平衡表、同一年度和单位下派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2025/26": 17400.0,
+        "2024/25": 17300.0,
+        "2023/24": 18100.0,
+        "2022/23": 16900.0,
+        "2021/22": 13000.0,
+        "2020/21": 18500.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 100.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B9"
+        ],
+        "2024/25": [
+          "AN62801!C9"
+        ],
+        "2023/24": [
+          "AN62801!D9"
+        ],
+        "2022/23": [
+          "AN62801!E9"
+        ],
+        "2021/22": [
+          "AN62801!F9"
+        ],
+        "2020/21": [
+          "AN62801!G9"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B9:G9",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "derived",
+      "market_year_basis": "Sept–Aug",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22",
+        "2020/21"
+      ],
+      "original_periods": {
+        "2025/26": "Sept Aug 25/26",
+        "2024/25": "Sept Aug 24/25",
+        "2023/24": "Sept Aug 23/24",
+        "2022/23": "Sept Aug 22/23",
+        "2021/22": "Sept Aug 21/22",
+        "2020/21": "Sept Aug 20/21"
+      },
+      "forecast_status": {
+        "2025/26": "historical",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical",
+        "2020/21": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2025/26": 13.07533346,
+        "2024/25": 13.40461801,
+        "2023/24": 14.6488722,
+        "2022/23": 14.46769168,
+        "2021/22": 11.54724154,
+        "2020/21": 16.29008682
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -0.32928455,
+        "unit": "percentage points"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN62801"
+      ],
+      "source_report_title": [
+        "CHINA,PR: Soybean Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN62801"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN62801!B9",
+          "AN62801!B7",
+          "AN62801!B8"
+        ],
+        "2024/25": [
+          "AN62801!C9",
+          "AN62801!C7",
+          "AN62801!C8"
+        ],
+        "2023/24": [
+          "AN62801!D9",
+          "AN62801!D7",
+          "AN62801!D8"
+        ],
+        "2022/23": [
+          "AN62801!E9",
+          "AN62801!E7",
+          "AN62801!E8"
+        ],
+        "2021/22": [
+          "AN62801!F9",
+          "AN62801!F7",
+          "AN62801!F8"
+        ],
+        "2020/21": [
+          "AN62801!G9",
+          "AN62801!G7",
+          "AN62801!G8"
+        ]
+      },
+      "source_cell_or_range": "AN62801!B9:G9 / (AN62801!B7:G7 + AN62801!B8:G8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN62801 rows 7, 8, 9",
+      "quality_note": "分母口径由同商品世界表直接公布的Stocks/usage关系验证；变化单位为百分点。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "HARVEST'D AREA",
+      "values": {
+        "2026/27": 9900.0,
+        "2025/26": 9700.0,
+        "2024/25": 9580.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 200.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!K14"
+        ],
+        "2025/26": [
+          "AN13993!L14"
+        ],
+        "2024/25": [
+          "AN13993!M14"
+        ]
+      },
+      "source_cell_or_range": "AN13993!K14:M14",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "Y I E L D",
+      "values": {
+        "2026/27": 2.14,
+        "2025/26": 2.16,
+        "2024/25": 2.14
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": -0.02,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!G14"
+        ],
+        "2025/26": [
+          "AN13993!H14"
+        ],
+        "2024/25": [
+          "AN13993!I14"
+        ]
+      },
+      "source_cell_or_range": "AN13993!G14:I14",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

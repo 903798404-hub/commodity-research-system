@@ -1,0 +1,196 @@
+{
+  "audit_type": "oil_world_balance_warning_audit",
+  "release": "2026-06",
+  "source_workbook": "C:\\Users\\xx202\\Desktop\\codex自动更新\\codex-projects\\油世界季度表\\2026-6\\油世界季度表-June 2026.xlsx",
+  "warning_source": "C:\\Users\\xx202\\Desktop\\codex自动更新\\codex-projects\\油世界季度表\\output\\balance_check_results.json",
+  "warning_count": 26,
+  "unit": "1000 T",
+  "balance_formula": "Beginning Stocks + Production + Imports - Exports - Domestic Consumption - Ending Stocks",
+  "method_notes": [
+    "All 26 warnings were traced to the original worksheet, section, country row, period column and source cells.",
+    "The original unit in all six relevant reports is 1000 T, so no unit conversion was applied.",
+    "Beginning Stocks is traced to the prior-period Ending Stocks cell.",
+    "No source or existing release file was changed."
+  ],
+  "summary": {
+    "original_report_scope_issue_count": 24,
+    "aggregation_scope_mismatch_count": 24,
+    "parser_error_count": 2,
+    "rounding_primary_cause_count": 0,
+    "unexplained_count": 0,
+    "other_error_counts": {
+      "period_column_identification": 0,
+      "unit_conversion": 0,
+      "section_boundary": 0,
+      "other_countries_row_identification": 0,
+      "duplicate_total_inclusion": 0,
+      "derived_metric": 0
+    },
+    "incidental_rounding_note": "Visible section sums can differ from Total by 0-3 thousand tonnes, but rounding is not the primary cause of any of the 26 warnings."
+  },
+  "chapter_profiles": {
+    "AN34992": {
+      "production": {"section": "Meal Output", "original_metric": "Meal Output"},
+      "imports": {"section": "Rapeseed meal Imports", "original_metric": "Imports"},
+      "exports": {"section": "Rapeseed meal Exports", "original_metric": "Exports"},
+      "domestic_consumption": {"section": "Rapeseed meal Disappear.(a)", "original_metric": "Disappear."},
+      "ending_stocks": {"section": "Rapeseed meal Ending stocks", "original_metric": "Ending Stocks"},
+      "beginning_stocks": {"section": "Prior-period Rapeseed meal Ending stocks", "original_metric": "Ending Stocks"}
+    },
+    "AN33992": {
+      "production": {"section": "Meal Output", "original_metric": "Meal Output"},
+      "imports": {"section": "Soybean meal Imports", "original_metric": "Imports"},
+      "exports": {"section": "Soybean meal Exports", "original_metric": "Exports"},
+      "domestic_consumption": {"section": "Soybean meal Disappear.(a)", "original_metric": "Disappear."},
+      "ending_stocks": {"section": "Soybean meal Ending stocks", "original_metric": "Ending Stocks"},
+      "beginning_stocks": {"section": "Prior-period Soybean meal Ending stocks", "original_metric": "Ending Stocks"}
+    },
+    "AN34792": {
+      "production": {"section": "Meal Output", "original_metric": "Meal Output"},
+      "imports": {"section": "Sunflowermeal Imports", "original_metric": "Imports"},
+      "exports": {"section": "Sunflowermeal Exports", "original_metric": "Exports"},
+      "domestic_consumption": {"section": "Sunflowermeal Disappear.(a)", "original_metric": "Disappear."},
+      "ending_stocks": {"section": "Sunflowermeal Ending stocks", "original_metric": "Ending Stocks"},
+      "beginning_stocks": {"section": "Prior-period Sunflowermeal Ending stocks", "original_metric": "Ending Stocks"}
+    },
+    "AN24992": {
+      "production": {"section": "Production", "original_metric": "Production"},
+      "imports": {"section": "Rapeseed oil Imports", "original_metric": "Imports"},
+      "exports": {"section": "Rapeseed oil Exports", "original_metric": "Exports"},
+      "domestic_consumption": {"section": "Rapeseed oil Disappear.(a)", "original_metric": "Disappear."},
+      "ending_stocks": {"section": "Rapeseed oil Ending stocks", "original_metric": "Ending Stocks"},
+      "beginning_stocks": {"section": "Prior-period Rapeseed oil Ending stocks", "original_metric": "Ending Stocks"}
+    },
+    "AN23992": {
+      "production": {"section": "Production", "original_metric": "Production"},
+      "imports": {"section": "Soybean oil Imports", "original_metric": "Imports"},
+      "exports": {"section": "Soybean oil Exports", "original_metric": "Exports"},
+      "domestic_consumption": {"section": "Soybean oil Disappear.(a)", "original_metric": "Disappear."},
+      "ending_stocks": {"section": "Soybean oil Ending stocks", "original_metric": "Ending Stocks"},
+      "beginning_stocks": {"section": "Prior-period Soybean oil Ending stocks", "original_metric": "Ending Stocks"}
+    },
+    "AN24792": {
+      "production": {"section": "Production", "original_metric": "Production"},
+      "imports": {"section": "Sunfloweroil Imports", "original_metric": "Imports"},
+      "exports": {"section": "Sunfloweroil Exports", "original_metric": "Exports"},
+      "domestic_consumption": {"section": "Sunfloweroil Disappear.(a)", "original_metric": "Disappear."},
+      "ending_stocks": {"section": "Sunfloweroil Ending stocks", "original_metric": "Ending Stocks"},
+      "beginning_stocks": {"section": "Prior-period Sunfloweroil Ending stocks", "original_metric": "Ending Stocks"}
+    }
+  },
+  "decision_profiles": {
+    "OC": {
+      "primary_cause": "Different metric sections use different Other Countries aggregation scopes",
+      "cause_categories": [
+        "不同指标章节中的Other Countries或EU等聚合范围不一致",
+        "原始Oil World数据本身不满足标准平衡关系"
+      ],
+      "is_parser_error": false,
+      "is_original_report_scope_issue": true,
+      "usda_comparison_impact": "Individual metrics remain traceable, but they must not be treated as one closed balance for a fixed geography.",
+      "continue_display": true,
+      "display_condition": "Display individual metrics only; do not label as a closed USDA-style balance.",
+      "page_quality_warning_required": true,
+      "page_quality_warning_level": "medium-high",
+      "parser_or_config_change_required": false,
+      "recommended_action": "Keep source values unchanged and attach a scope_mismatch quality flag."
+    },
+    "EU": {
+      "primary_cause": "AN24992 Ending Stocks chapter splits Spain and EU-27, but only the EU-27 component row was mapped as the full European Union",
+      "cause_categories": ["国家行识别错误"],
+      "is_parser_error": true,
+      "is_original_report_scope_issue": false,
+      "usda_comparison_impact": "European Union Beginning Stocks, Ending Stocks and dependent balance results are incomplete; direct flow metrics are unaffected.",
+      "continue_display": false,
+      "display_condition": "Do not present current EU stock values as complete EU totals before a correction release; unaffected flow metrics may remain.",
+      "page_quality_warning_required": true,
+      "page_quality_warning_level": "severe",
+      "parser_or_config_change_required": true,
+      "recommended_action": "In a future correction, derive EU Ending Stocks as Spain plus the EU-27 component and derive the next Beginning Stocks from that corrected total, retaining both source cells."
+    }
+  },
+  "section_country_scope_check": {
+    "all_five_sections_identical_in_any_report": false,
+    "counts_order": ["Production", "Imports", "Exports", "Domestic Consumption", "Ending Stocks"],
+    "reports": {
+      "AN34992": {"counts": [12, 12, 8, 14, 4], "identical": false},
+      "AN33992": {"counts": [26, 33, 15, 31, 10], "identical": false},
+      "AN34792": {"counts": [10, 14, 9, 10, 3], "identical": false},
+      "AN24992": {"counts": [20, 18, 16, 14, 8], "identical": false},
+      "AN23992": {"counts": [25, 31, 20, 28, 14], "identical": false},
+      "AN24792": {"counts": [15, 39, 18, 27, 12], "identical": false}
+    }
+  },
+  "eu_scope_check": {
+    "exports_member_rows_duplicate_in_normalized_data": false,
+    "exports_eu_row": 63,
+    "exports_member_rows": "55:62",
+    "ending_stocks_spain_row": 105,
+    "ending_stocks_eu27_component_row": 106,
+    "corrected_balances": [
+      {
+        "period": "2024/25",
+        "correct_beginning_stocks": {"value": 637, "source_cells": ["D105", "D106"], "expression": "15+622"},
+        "correct_ending_stocks": {"value": 597, "source_cells": ["C105", "C106"], "expression": "9+588"},
+        "corrected_difference": 0
+      },
+      {
+        "period": "2025/26",
+        "correct_beginning_stocks": {"value": 597, "source_cells": ["C105", "C106"], "expression": "9+588"},
+        "correct_ending_stocks": {"value": 642, "source_cells": ["B105", "B106"], "expression": "20+622"},
+        "corrected_difference": 0
+      }
+    ],
+    "broader_impact": "AN24992 Rapeseed Oil European Union Ending Stocks 2021/22-2025/26 and Beginning Stocks 2022/23-2025/26 omit the Spain component, including years that did not exceed the current warning tolerance."
+  },
+  "warnings": [
+    {"id":1,"report_id":"AN34992","commodity":"Rapeseed Meal","country":"Other Countries","period":"2022/23","chapter_profile":"AN34992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":81,"cell":"F79"},"production":{"value":2977,"cell":"E17"},"imports":{"value":403,"cell":"E35"},"exports":{"value":232,"cell":"E49"},"domestic_consumption":{"value":2489,"cell":"E69"},"ending_stocks":{"value":136,"cell":"E79"}},"calculation":"81+2977+403-232-2489-136","difference":604},
+    {"id":2,"report_id":"AN34992","commodity":"Rapeseed Meal","country":"Other Countries","period":"2023/24","chapter_profile":"AN34992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":136,"cell":"E79"},"production":{"value":3185,"cell":"D17"},"imports":{"value":333,"cell":"D35"},"exports":{"value":181,"cell":"D49"},"domestic_consumption":{"value":2457,"cell":"D69"},"ending_stocks":{"value":143,"cell":"D79"}},"calculation":"136+3185+333-181-2457-143","difference":873},
+    {"id":3,"report_id":"AN34992","commodity":"Rapeseed Meal","country":"Other Countries","period":"2024/25","chapter_profile":"AN34992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":143,"cell":"D79"},"production":{"value":3251,"cell":"C17"},"imports":{"value":365,"cell":"C35"},"exports":{"value":267,"cell":"C49"},"domestic_consumption":{"value":2803,"cell":"C69"},"ending_stocks":{"value":140,"cell":"C79"}},"calculation":"143+3251+365-267-2803-140","difference":549},
+    {"id":4,"report_id":"AN34992","commodity":"Rapeseed Meal","country":"Other Countries","period":"2025/26","chapter_profile":"AN34992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":140,"cell":"C79"},"production":{"value":3932,"cell":"B17"},"imports":{"value":440,"cell":"B35"},"exports":{"value":606,"cell":"B49"},"domestic_consumption":{"value":3201,"cell":"B69"},"ending_stocks":{"value":154,"cell":"B79"}},"calculation":"140+3932+440-606-3201-154","difference":551},
+    {"id":5,"report_id":"AN33992","commodity":"Soybean Meal","country":"Other Countries","period":"2022/23","chapter_profile":"AN33992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":2803,"cell":"F144"},"production":{"value":9172,"cell":"E31"},"imports":{"value":9086,"cell":"E70"},"exports":{"value":1935,"cell":"E91"},"domestic_consumption":{"value":26039,"cell":"E128"},"ending_stocks":{"value":2602,"cell":"E144"}},"calculation":"2803+9172+9086-1935-26039-2602","difference":-9515},
+    {"id":6,"report_id":"AN33992","commodity":"Soybean Meal","country":"Other Countries","period":"2023/24","chapter_profile":"AN33992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":2602,"cell":"E144"},"production":{"value":10083,"cell":"D31"},"imports":{"value":11904,"cell":"D70"},"exports":{"value":2508,"cell":"D91"},"domestic_consumption":{"value":28700,"cell":"D128"},"ending_stocks":{"value":3137,"cell":"D144"}},"calculation":"2602+10083+11904-2508-28700-3137","difference":-9756},
+    {"id":7,"report_id":"AN33992","commodity":"Soybean Meal","country":"Other Countries","period":"2024/25","chapter_profile":"AN33992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":3137,"cell":"D144"},"production":{"value":12012,"cell":"C31"},"imports":{"value":11967,"cell":"C70"},"exports":{"value":2072,"cell":"C91"},"domestic_consumption":{"value":31830,"cell":"C128"},"ending_stocks":{"value":3560,"cell":"C144"}},"calculation":"3137+12012+11967-2072-31830-3560","difference":-10346},
+    {"id":8,"report_id":"AN33992","commodity":"Soybean Meal","country":"Other Countries","period":"2025/26","chapter_profile":"AN33992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":3560,"cell":"C144"},"production":{"value":13775,"cell":"B31"},"imports":{"value":13335,"cell":"B70"},"exports":{"value":2266,"cell":"B91"},"domestic_consumption":{"value":33259,"cell":"B128"},"ending_stocks":{"value":3822,"cell":"B144"}},"calculation":"3560+13775+13335-2266-33259-3822","difference":-8677},
+    {"id":9,"report_id":"AN34792","commodity":"Sunflower Meal","country":"Other Countries","period":"2022/23","chapter_profile":"AN34792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":23,"cell":"F80"},"production":{"value":2182,"cell":"E15"},"imports":{"value":530,"cell":"E40"},"exports":{"value":192,"cell":"E55"},"domestic_consumption":{"value":3453,"cell":"E71"},"ending_stocks":{"value":38,"cell":"E80"}},"calculation":"23+2182+530-192-3453-38","difference":-948},
+    {"id":10,"report_id":"AN34792","commodity":"Sunflower Meal","country":"Other Countries","period":"2023/24","chapter_profile":"AN34792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":38,"cell":"E80"},"production":{"value":2225,"cell":"D15"},"imports":{"value":676,"cell":"D40"},"exports":{"value":219,"cell":"D55"},"domestic_consumption":{"value":3649,"cell":"D71"},"ending_stocks":{"value":33,"cell":"D80"}},"calculation":"38+2225+676-219-3649-33","difference":-962},
+    {"id":11,"report_id":"AN34792","commodity":"Sunflower Meal","country":"Other Countries","period":"2024/25","chapter_profile":"AN34792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":33,"cell":"D80"},"production":{"value":2172,"cell":"C15"},"imports":{"value":701,"cell":"C40"},"exports":{"value":210,"cell":"C55"},"domestic_consumption":{"value":3748,"cell":"C71"},"ending_stocks":{"value":33,"cell":"C80"}},"calculation":"33+2172+701-210-3748-33","difference":-1085},
+    {"id":12,"report_id":"AN34792","commodity":"Sunflower Meal","country":"Other Countries","period":"2025/26","chapter_profile":"AN34792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":33,"cell":"C80"},"production":{"value":2509,"cell":"B15"},"imports":{"value":798,"cell":"B40"},"exports":{"value":255,"cell":"B55"},"domestic_consumption":{"value":3916,"cell":"B71"},"ending_stocks":{"value":40,"cell":"B80"}},"calculation":"33+2509+798-255-3916-40","difference":-871},
+    {"id":13,"report_id":"AN24992","commodity":"Rapeseed Oil","country":"European Union","period":"2024/25","chapter_profile":"AN24992","decision_profile":"EU","inputs":{"beginning_stocks":{"value":622,"cell":"D106"},"production":{"value":10651,"cell":"C5"},"imports":{"value":291,"cell":"C31"},"exports":{"value":579,"cell":"C63"},"domestic_consumption":{"value":10403,"cell":"C85"},"ending_stocks":{"value":588,"cell":"C106"}},"calculation":"622+10651+291-579-10403-588","difference":-6},
+    {"id":14,"report_id":"AN24992","commodity":"Rapeseed Oil","country":"European Union","period":"2025/26","chapter_profile":"AN24992","decision_profile":"EU","inputs":{"beginning_stocks":{"value":588,"cell":"C106"},"production":{"value":11038,"cell":"B5"},"imports":{"value":710,"cell":"B31"},"exports":{"value":543,"cell":"B63"},"domestic_consumption":{"value":11160,"cell":"B85"},"ending_stocks":{"value":622,"cell":"B106"}},"calculation":"588+11038+710-543-11160-622","difference":11},
+    {"id":15,"report_id":"AN24992","commodity":"Rapeseed Oil","country":"Other Countries","period":"2022/23","chapter_profile":"AN24992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":453,"cell":"F114"},"production":{"value":847,"cell":"E25"},"imports":{"value":441,"cell":"E49"},"exports":{"value":552,"cell":"E79"},"domestic_consumption":{"value":1232,"cell":"E99"},"ending_stocks":{"value":581,"cell":"E114"}},"calculation":"453+847+441-552-1232-581","difference":-624},
+    {"id":16,"report_id":"AN24992","commodity":"Rapeseed Oil","country":"Other Countries","period":"2023/24","chapter_profile":"AN24992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":581,"cell":"E114"},"production":{"value":916,"cell":"D25"},"imports":{"value":342,"cell":"D49"},"exports":{"value":628,"cell":"D79"},"domestic_consumption":{"value":1203,"cell":"D99"},"ending_stocks":{"value":550,"cell":"D114"}},"calculation":"581+916+342-628-1203-550","difference":-542},
+    {"id":17,"report_id":"AN24992","commodity":"Rapeseed Oil","country":"Other Countries","period":"2024/25","chapter_profile":"AN24992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":550,"cell":"D114"},"production":{"value":1073,"cell":"C25"},"imports":{"value":596,"cell":"C49"},"exports":{"value":738,"cell":"C79"},"domestic_consumption":{"value":1401,"cell":"C99"},"ending_stocks":{"value":514,"cell":"C114"}},"calculation":"550+1073+596-738-1401-514","difference":-434},
+    {"id":18,"report_id":"AN24992","commodity":"Rapeseed Oil","country":"Other Countries","period":"2025/26","chapter_profile":"AN24992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":514,"cell":"C114"},"production":{"value":1156,"cell":"B25"},"imports":{"value":584,"cell":"B49"},"exports":{"value":773,"cell":"B79"},"domestic_consumption":{"value":1525,"cell":"B99"},"ending_stocks":{"value":604,"cell":"B114"}},"calculation":"514+1156+584-773-1525-604","difference":-648},
+    {"id":19,"report_id":"AN23992","commodity":"Soybean Oil","country":"Other Countries","period":"2022/23","chapter_profile":"AN23992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":1329,"cell":"F155"},"production":{"value":1693,"cell":"E30"},"imports":{"value":1418,"cell":"E67"},"exports":{"value":965,"cell":"E101"},"domestic_consumption":{"value":3303,"cell":"E135"},"ending_stocks":{"value":1143,"cell":"E155"}},"calculation":"1329+1693+1418-965-3303-1143","difference":-971},
+    {"id":20,"report_id":"AN23992","commodity":"Soybean Oil","country":"Other Countries","period":"2023/24","chapter_profile":"AN23992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":1143,"cell":"E155"},"production":{"value":1830,"cell":"D30"},"imports":{"value":1404,"cell":"D67"},"exports":{"value":1213,"cell":"D101"},"domestic_consumption":{"value":3274,"cell":"D135"},"ending_stocks":{"value":1246,"cell":"D155"}},"calculation":"1143+1830+1404-1213-3274-1246","difference":-1356},
+    {"id":21,"report_id":"AN23992","commodity":"Soybean Oil","country":"Other Countries","period":"2024/25","chapter_profile":"AN23992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":1246,"cell":"D155"},"production":{"value":2067,"cell":"C30"},"imports":{"value":1921,"cell":"C67"},"exports":{"value":1289,"cell":"C101"},"domestic_consumption":{"value":3764,"cell":"C135"},"ending_stocks":{"value":1673,"cell":"C155"}},"calculation":"1246+2067+1921-1289-3764-1673","difference":-1492},
+    {"id":22,"report_id":"AN23992","commodity":"Soybean Oil","country":"Other Countries","period":"2025/26","chapter_profile":"AN23992","decision_profile":"OC","inputs":{"beginning_stocks":{"value":1673,"cell":"C155"},"production":{"value":2391,"cell":"B30"},"imports":{"value":1839,"cell":"B67"},"exports":{"value":1229,"cell":"B101"},"domestic_consumption":{"value":3899,"cell":"B135"},"ending_stocks":{"value":1728,"cell":"B155"}},"calculation":"1673+2391+1839-1229-3899-1728","difference":-953},
+    {"id":23,"report_id":"AN24792","commodity":"Sunflower Oil","country":"Other Countries","period":"2022/23","chapter_profile":"AN24792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":868,"cell":"F149"},"production":{"value":1224,"cell":"E20"},"imports":{"value":2090,"cell":"E65"},"exports":{"value":773,"cell":"E98"},"domestic_consumption":{"value":3640,"cell":"E131"},"ending_stocks":{"value":1024,"cell":"E149"}},"calculation":"868+1224+2090-773-3640-1024","difference":-1255},
+    {"id":24,"report_id":"AN24792","commodity":"Sunflower Oil","country":"Other Countries","period":"2023/24","chapter_profile":"AN24792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":1024,"cell":"E149"},"production":{"value":1175,"cell":"D20"},"imports":{"value":2577,"cell":"D65"},"exports":{"value":851,"cell":"D98"},"domestic_consumption":{"value":4170,"cell":"D131"},"ending_stocks":{"value":982,"cell":"D149"}},"calculation":"1024+1175+2577-851-4170-982","difference":-1227},
+    {"id":25,"report_id":"AN24792","commodity":"Sunflower Oil","country":"Other Countries","period":"2024/25","chapter_profile":"AN24792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":982,"cell":"D149"},"production":{"value":1019,"cell":"C20"},"imports":{"value":2469,"cell":"C65"},"exports":{"value":967,"cell":"C98"},"domestic_consumption":{"value":4407,"cell":"C131"},"ending_stocks":{"value":1011,"cell":"C149"}},"calculation":"982+1019+2469-967-4407-1011","difference":-1915},
+    {"id":26,"report_id":"AN24792","commodity":"Sunflower Oil","country":"Other Countries","period":"2025/26","chapter_profile":"AN24792","decision_profile":"OC","inputs":{"beginning_stocks":{"value":1011,"cell":"C149"},"production":{"value":1162,"cell":"B20"},"imports":{"value":2570,"cell":"B65"},"exports":{"value":1252,"cell":"B98"},"domestic_consumption":{"value":4391,"cell":"B131"},"ending_stocks":{"value":1002,"cell":"B149"}},"calculation":"1011+1162+2570-1252-4391-1002","difference":-1902}
+  ],
+  "affected_usda_comparison_combinations": [
+    "Other Countries in AN34992, AN33992, AN34792, AN24992, AN23992 and AN24792 for 2022/23-2025/26: individual metrics may be shown, but not as a closed balance.",
+    "AN24992 Rapeseed Oil European Union Ending Stocks 2021/22-2025/26 and Beginning Stocks 2022/23-2025/26, plus dependent balance results."
+  ],
+  "required_future_parser_or_config_change": [
+    "AN24992 Ending Stocks European Union aggregation must combine Spain row 105 with EU-27 component row 106 and retain both source cells.",
+    "The following Beginning Stocks must be derived from the corrected full-EU Ending Stocks."
+  ],
+  "page_warning_only_items": [
+    "All 24 Other Countries warnings across the six sectioned_global_balance reports."
+  ],
+  "immutable_snapshot_correction_strategy": {
+    "overwrite_2026_06": false,
+    "suggested_revision_path": "data/release-corrections/2026-06/r1",
+    "requirements": [
+      "Record revision=1 and supersedes_release=2026-06.",
+      "Record original snapshot and source-file hashes, affected keys, reason and full test results.",
+      "Correct only AN24992 European Union Beginning/Ending Stocks and dependent products.",
+      "Keep all 24 Other Countries source values unchanged and attach scope warnings.",
+      "Update latest.json only after the correction revision passes the full release gate; never rewrite the original 2026-06 snapshot."
+    ]
+  }
+}

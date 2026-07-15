@@ -1,0 +1,6 @@
+OPEN=Autorun\ShelExec __June 2026 START.htm
+label=DataBase June 2026
+
+[autorun.x86]
+OPEN=Autorun\ShelExec __June 2026 START.htm
+label=DataBase June 2026

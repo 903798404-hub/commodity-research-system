@@ -38,6 +38,17 @@
     "enabled": true
   },
   {
+    "title": "Oil World 供需平衡表",
+    "category": "供需",
+    "commodities": "大豆/菜籽/葵花籽/棕榈油",
+    "region": "全球",
+    "description": "Oil World 大豆、菜籽、葵花籽及棕榈油市场年度供需数据",
+    "type": "external_app",
+    "url": "http://127.0.0.1:5175/",
+    "url_env": "OIL_WORLD_DASHBOARD_URL",
+    "enabled": true
+  },
+  {
     "title": "主力席位动向",
     "category": "席位",
     "commodities": "油脂油料",

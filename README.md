@@ -2,7 +2,7 @@
 
 ## 项目用途
 
-本项目是农产品研究系统的唯一 Git 仓库，用于构建市场研究 Agent，并在同一仓库内维护 USDA 平衡表等独立应用。
+本项目是农产品研究系统的唯一 Git 仓库，用于构建市场研究 Agent，并在同一仓库内维护 USDA 平衡表、Oil World 供需平衡表等独立应用。
 
 当前已实现国内现货基差、现货一口价、内盘期货收盘价和国内现货价差的读取与标准化。
 
@@ -19,7 +19,7 @@
 - `08_tests/`：测试层
 - `09_deploy/`：部署层
 - `10_logs/`：日志层
-- `11_独立应用/`：保持独立技术栈的应用；当前包含 `USDA平衡表/`
+- `11_独立应用/`：保持独立技术栈的应用；当前包含 `USDA平衡表/` 和 `OilWorld平衡表/`
 
 ## 快速入口
 
@@ -56,5 +56,13 @@ streamlit run 05_apps/streamlit_app.py
 ```
 
 USDA 子项目位于 `11_独立应用/USDA平衡表/`。本地开发在该目录运行 `pnpm run dev`，测试和生产构建分别运行 `pnpm run test`、`pnpm exec tsc -b --pretty false` 和 `pnpm run build`。
+
+Oil World 子项目位于 `11_独立应用/OilWorld平衡表/`。本地启动命令为：
+
+```bash
+pnpm --dir 05_apps/oil_world_dashboard dev --host 127.0.0.1 --port 5175
+```
+
+主工作台通过 `OIL_WORLD_DASHBOARD_URL` 读取 Oil World 地址，本地默认值为 `http://127.0.0.1:5175/`。Oil World 保持独立运行，数据不会复制到 Streamlit 项目中。
 
 整套服务使用根目录 `docker-compose.yml` 管理：`spread-dashboard` 提供 Streamlit 看板，`usda-dashboard` 从仓库内 USDA 子项目构建静态站点。服务器只需要部署一个 `market-data` 项目目录。

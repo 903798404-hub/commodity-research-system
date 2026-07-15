@@ -45,9 +45,14 @@ def test_report_catalog_cards_and_disabled_state() -> None:
     assert len(enabled_buttons) == len(internal_enabled_cards)
     assert all(button.disabled for button in disabled_buttons)
     assert all(not button.disabled for button in enabled_buttons)
-    assert len(external_cards) == 1
-    assert external_cards[0]["title"] == "USDA 平衡表"
-    assert external_cards[0]["url"] == "http://127.0.0.1:5173"
+    assert len(external_cards) == 2
+    external_cards_by_title = {card["title"]: card for card in external_cards}
+    assert external_cards_by_title["USDA 平衡表"]["url"] == "http://127.0.0.1:5173"
+    oil_world_card = external_cards_by_title["Oil World 供需平衡表"]
+    assert oil_world_card["description"] == "Oil World 大豆、菜籽、葵花籽及棕榈油市场年度供需数据"
+    assert oil_world_card["url"] == "http://127.0.0.1:5175/"
+    assert oil_world_card["url_env"] == "OIL_WORLD_DASHBOARD_URL"
+    assert oil_world_card["enabled"] is True
 
 
 def test_usda_dashboard_card_supports_environment_url_override(monkeypatch) -> None:
@@ -68,6 +73,30 @@ def test_usda_dashboard_card_supports_environment_url_override(monkeypatch) -> N
 
     monkeypatch.setenv("USDA_DASHBOARD_URL", "http://127.0.0.1:5199")
     assert get_external_url(card) == "http://127.0.0.1:5199"
+
+
+def test_oil_world_dashboard_card_supports_environment_url_override(monkeypatch) -> None:
+    import sys
+
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+
+    from home import get_external_app_url, get_external_url
+
+    card = {
+        "type": "external_app",
+        "url": "http://127.0.0.1:5175/",
+        "url_env": "OIL_WORLD_DASHBOARD_URL",
+    }
+    assert get_external_url(card) == "http://127.0.0.1:5175/"
+    assert (
+        get_external_app_url(CATALOG_FILE, "Oil World 供需平衡表")
+        == "http://127.0.0.1:5175/"
+    )
+
+    monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", "http://127.0.0.1:5198/oil-world/")
+    assert get_external_url(card) == "http://127.0.0.1:5198/oil-world/"
 
 
 def test_workspace_navigation_includes_usda_entry_in_requested_order() -> None:
@@ -94,6 +123,7 @@ def test_workspace_navigation_includes_usda_entry_in_requested_order() -> None:
     assert not app.exception
     assert any(title.value == "USDA平衡表" for title in app.title)
     assert get_external_app_url(CATALOG_FILE, "USDA平衡表") == "http://127.0.0.1:5173"
+    assert "Oil World 供需平衡表" not in app.radio[0].options
 
 
 def test_basis_page_reads_three_rows_and_formulas_are_correct() -> None:

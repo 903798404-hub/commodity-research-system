@@ -1,0 +1,621 @@
+{
+  "schema_version": 1,
+  "release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybean Meal",
+  "region": "G3",
+  "market_year_basis": [
+    "Oct–Sept"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "prior-year Ending stocks",
+      "values": {
+        "2025/26": 2582.0,
+        "2024/25": 2390.0,
+        "2023/24": 2826.0,
+        "2022/23": 3291.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 192.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN33992!C135",
+          "AN33992!C137",
+          "AN33992!C136"
+        ],
+        "2024/25": [
+          "AN33992!D135",
+          "AN33992!D137",
+          "AN33992!D136"
+        ],
+        "2023/24": [
+          "AN33992!E135",
+          "AN33992!E137",
+          "AN33992!E136"
+        ],
+        "2022/23": [
+          "AN33992!F135",
+          "AN33992!F137",
+          "AN33992!F136"
+        ]
+      },
+      "source_cell_or_range": "AN33992!C135:F135 + AN33992!C137:F137 + AN33992!C136:F136",
+      "is_derived": true,
+      "derivation_method": "G3 Beginning Stocks(t) = sum of member Ending Stocks(t-1)",
+      "derivation_components": "United States: row 135; Brazil: row 137; Argentina: row 136",
+      "quality_note": "只发布组成国在相同Oct–Sept年度均有Ending Stocks的重叠年度。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕统一使用Product Output；Production避免重复。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "missing",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "G3至少一个组成国在该章节缺行或缺值，不能补0。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean meal Exports",
+      "values": {
+        "2025/26": 71880.0,
+        "2024/25": 69862.0,
+        "2023/24": 62227.0,
+        "2022/23": 55400.0,
+        "2021/22": 59219.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 2018.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN33992!B82",
+          "AN33992!B85",
+          "AN33992!B83"
+        ],
+        "2024/25": [
+          "AN33992!C82",
+          "AN33992!C85",
+          "AN33992!C83"
+        ],
+        "2023/24": [
+          "AN33992!D82",
+          "AN33992!D85",
+          "AN33992!D83"
+        ],
+        "2022/23": [
+          "AN33992!E82",
+          "AN33992!E85",
+          "AN33992!E83"
+        ],
+        "2021/22": [
+          "AN33992!F82",
+          "AN33992!F85",
+          "AN33992!F83"
+        ]
+      },
+      "source_cell_or_range": "AN33992!B82:F82 + AN33992!B85:F85 + AN33992!B83:F83",
+      "is_derived": true,
+      "derivation_method": "G3 = United States + Brazil + Argentina",
+      "derivation_components": "United States: row 82; Brazil: row 85; Argentina: row 83",
+      "quality_note": "只发布所有组成国同年、同指标、同单位均有效的年度；空白不得按0。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕不使用Crush；Crush属于上游油籽。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Meal Output",
+      "values": {
+        "2025/26": 135955.0,
+        "2024/25": 130406.0,
+        "2023/24": 118920.0,
+        "2022/23": 112230.0,
+        "2021/22": 115160.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 5549.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN33992!B13",
+          "AN33992!B17",
+          "AN33992!B15"
+        ],
+        "2024/25": [
+          "AN33992!C13",
+          "AN33992!C17",
+          "AN33992!C15"
+        ],
+        "2023/24": [
+          "AN33992!D13",
+          "AN33992!D17",
+          "AN33992!D15"
+        ],
+        "2022/23": [
+          "AN33992!E13",
+          "AN33992!E17",
+          "AN33992!E15"
+        ],
+        "2021/22": [
+          "AN33992!F13",
+          "AN33992!F17",
+          "AN33992!F15"
+        ]
+      },
+      "source_cell_or_range": "AN33992!B13:F13 + AN33992!B17:F17 + AN33992!B15:F15",
+      "is_derived": true,
+      "derivation_method": "G3 = United States + Brazil + Argentina",
+      "derivation_components": "United States: row 13; Brazil: row 17; Argentina: row 15",
+      "quality_note": "只发布所有组成国同年、同指标、同单位均有效的年度；空白不得按0。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean meal Disappear.(a)",
+      "values": {
+        "2025/26": 64865.0,
+        "2024/25": 61365.0,
+        "2023/24": 57773.0,
+        "2022/23": 57945.0,
+        "2021/22": 56575.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 3500.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN33992!B105",
+          "AN33992!B109",
+          "AN33992!B108"
+        ],
+        "2024/25": [
+          "AN33992!C105",
+          "AN33992!C109",
+          "AN33992!C108"
+        ],
+        "2023/24": [
+          "AN33992!D105",
+          "AN33992!D109",
+          "AN33992!D108"
+        ],
+        "2022/23": [
+          "AN33992!E105",
+          "AN33992!E109",
+          "AN33992!E108"
+        ],
+        "2021/22": [
+          "AN33992!F105",
+          "AN33992!F109",
+          "AN33992!F108"
+        ]
+      },
+      "source_cell_or_range": "AN33992!B105:F105 + AN33992!B109:F109 + AN33992!B108:F108",
+      "is_derived": true,
+      "derivation_method": "G3 = United States + Brazil + Argentina",
+      "derivation_components": "United States: row 105; Brazil: row 109; Argentina: row 108",
+      "quality_note": "只发布所有组成国同年、同指标、同单位均有效的年度；空白不得按0。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Soybean meal Ending stocks",
+      "values": {
+        "2025/26": 2840.0,
+        "2024/25": 2582.0,
+        "2023/24": 2390.0,
+        "2022/23": 2826.0,
+        "2021/22": 3291.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 258.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN33992!B135",
+          "AN33992!B137",
+          "AN33992!B136"
+        ],
+        "2024/25": [
+          "AN33992!C135",
+          "AN33992!C137",
+          "AN33992!C136"
+        ],
+        "2023/24": [
+          "AN33992!D135",
+          "AN33992!D137",
+          "AN33992!D136"
+        ],
+        "2022/23": [
+          "AN33992!E135",
+          "AN33992!E137",
+          "AN33992!E136"
+        ],
+        "2021/22": [
+          "AN33992!F135",
+          "AN33992!F137",
+          "AN33992!F136"
+        ]
+      },
+      "source_cell_or_range": "AN33992!B135:F135 + AN33992!B137:F137 + AN33992!B136:F136",
+      "is_derived": true,
+      "derivation_method": "G3 = United States + Brazil + Argentina",
+      "derivation_components": "United States: row 135; Brazil: row 137; Argentina: row 136",
+      "quality_note": "只发布所有组成国同年、同指标、同单位均有效的年度；空白不得按0。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "conflict",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "",
+      "source_report_id": [
+        "AN33992"
+      ],
+      "source_report_title": [
+        "SOYBEAN MEAL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN33992"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 聚合Ending Stocks与Disappearance虽可求和，但脚注分母定义未从现有文件确认，暂不派生比例。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": "G3/G2仅包含映射审计确认安全的指标。"
+}

@@ -29,6 +29,7 @@ data/snapshots/
 # Build artifacts, dependencies, and temporary files
 node_modules/
 dist/
+*.tsbuildinfo
 *.tmp
 *.temp
 *.bak
@@ -48,3 +49,8 @@ Thumbs.db
 !/11_独立应用/USDA平衡表/.env.example
 !/11_独立应用/USDA平衡表/public/data/
 !/11_独立应用/USDA平衡表/public/data/**
+
+# Oil World audited release snapshots are formal project data.
+!/11_独立应用/OilWorld平衡表/01_data/
+!/11_独立应用/OilWorld平衡表/01_data/releases/
+!/11_独立应用/OilWorld平衡表/01_data/releases/**

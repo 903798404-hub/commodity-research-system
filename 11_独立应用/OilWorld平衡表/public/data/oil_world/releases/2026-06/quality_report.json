@@ -1,0 +1,60 @@
+{
+  "release": "2026-06",
+  "passed": true,
+  "source_workbook_sha256": "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e",
+  "audit_file_sha256": {
+    "mapping_audit": "c1508fa436db79b4cc6d0e9c83b7990daefdfae7c0648e1ae1d119ef3fc7e0ed",
+    "coverage_matrix": "ca624cada6f969785a2091c8d4e7b433d6415c43ed3bbbd8c6888163fdf36f15",
+    "report_catalog": "f1ebfa847f77c4e8c4ab53f97d05c3d8dda30fff5e3f96598911ae3ee34329af",
+    "metric_mapping": "affb4a90552d9f35105129ef64d99765bdb4ccea01b328eafdae2eb0be47da8e"
+  },
+  "validated_source_reports": [
+    "AN049104",
+    "AN049106",
+    "AN139900",
+    "AN13992",
+    "AN13993",
+    "AN147900",
+    "AN14792",
+    "AN14793",
+    "AN149900",
+    "AN14992",
+    "AN14993",
+    "AN17501",
+    "AN17503",
+    "AN18101",
+    "AN18103",
+    "AN23992",
+    "AN24792",
+    "AN24992",
+    "AN26392",
+    "AN33992",
+    "AN34792",
+    "AN34992",
+    "AN40001",
+    "AN40502B",
+    "AN50001",
+    "AN62801",
+    "AN62802",
+    "AN80501"
+  ],
+  "validated_source_report_count": 28,
+  "mapping_status_counts": {
+    "direct": 286,
+    "not_applicable": 182,
+    "derived": 75,
+    "conflict": 51,
+    "missing": 55
+  },
+  "combination_count": 59,
+  "numeric_observation_count": 1791,
+  "annual_change_count": 358,
+  "spot_check_count": 30,
+  "spot_checks_passed": 30,
+  "quarter_revision": "暂无上一期",
+  "warnings": [
+    "Brazil Soybeans与Argentina Sunflowerseed保留Jan–Dec自然年冲突说明，数值不展示。",
+    "油脂、油粕与Palm Oil的Stocks/Use Ratio按审计保持conflict或missing。",
+    "Other Countries口径风险仅保留在审计说明，不扩展普通前端范围。"
+  ]
+}
