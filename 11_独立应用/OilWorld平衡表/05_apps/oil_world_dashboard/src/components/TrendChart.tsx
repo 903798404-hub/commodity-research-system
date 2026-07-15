@@ -1,7 +1,7 @@
 import type { MetricData } from "../model";
 import { displayUnit, displayValue, formatNumber } from "../selectors";
 
-export function TrendChart({ metric }: { metric: MetricData }) {
+export function TrendChart({ metric, axis }: { metric: MetricData; axis: string }) {
   const periods = [...metric.periods].reverse();
   const values = periods.map((period) => displayValue(metric.values[period], metric.unit));
   const numeric = values.filter((value): value is number => value !== null);
@@ -34,7 +34,7 @@ export function TrendChart({ metric }: { metric: MetricData }) {
 
   return (
     <div className="trend-wrap">
-      <svg className="trend-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${metric.metric}趋势图`}>
+      <svg className="trend-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${metric.metric}${axis}趋势图`}>
         <text x={margin.left} y={17} className="axis-title">{displayUnit(metric.unit)}</text>
         {ticks.map((tick) => (
           <g key={tick}>
@@ -60,6 +60,7 @@ export function TrendChart({ metric }: { metric: MetricData }) {
           );
         })}
       </svg>
+      <div className="trend-axis-note">横轴：{axis}</div>
       <div className="trend-legend"><span><i />历史</span><span><i className="forecast-key" />预测/前瞻</span></div>
     </div>
   );

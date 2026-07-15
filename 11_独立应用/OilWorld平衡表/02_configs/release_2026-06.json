@@ -11,17 +11,18 @@
     "report_catalog": "2026-06_report_catalog.csv",
     "metric_mapping": "2026-06_metric_mapping.csv"
   },
-  "expected_mapping_count": 649,
+  "expected_base_mapping_count": 649,
+  "expected_mapping_count": 651,
   "expected_combination_count": 59,
-  "expected_numeric_source_report_count": 28,
+  "expected_numeric_source_report_count": 30,
   "expected_adopted_report_count": 30,
-  "expected_annual_change_count": 358,
+  "expected_annual_change_count": 376,
   "expected_status_counts": {
-    "direct": 286,
-    "derived": 75,
+    "direct": 300,
+    "derived": 79,
     "missing": 55,
     "not_applicable": 182,
-    "conflict": 51
+    "conflict": 35
   },
   "metric_order": [
     "Beginning Stocks",

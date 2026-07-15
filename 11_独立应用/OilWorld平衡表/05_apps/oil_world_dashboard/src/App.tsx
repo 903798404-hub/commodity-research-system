@@ -9,13 +9,19 @@ import {
 import { applyQuarterRevisions } from "./comparison";
 import type { CombinationData, MetricData, ReleaseIndex, ReleaseList } from "./model";
 import {
+  axisLabel,
+  calendarBalanceMetrics,
   cardMetrics,
+  cropProductionMetrics,
   displayUnit,
   displayValue,
   fileFor,
   formatNumber,
-  formatSignedChange,
+  hasDualTimeAxes,
   marketYearBasisLabel,
+  metricDisplayLabel,
+  metricStableKey,
+  periodsForMetrics,
   productsFor,
   quarterRevisionDisplay,
   regionsFor,
@@ -24,20 +30,13 @@ import {
   type Selection,
 } from "./selectors";
 import { TrendChart } from "./components/TrendChart";
+import { MetricMatrix } from "./components/MetricMatrix";
 
 const BASE_URL = import.meta.env.BASE_URL;
 
 function forecastLabel(status: string | undefined) {
   if (status === "explicit_forecast") return "预测";
   if (status === "implicit_forecast") return "前瞻期";
-  return "";
-}
-
-function columnForecastLabel(metrics: MetricData[], period: string) {
-  const statuses = new Set(metrics.map((metric) => metric.forecast_status[period]).filter(Boolean));
-  const hasHistorical = statuses.has("historical");
-  if (statuses.has("explicit_forecast")) return hasHistorical ? "含预测" : "预测";
-  if (statuses.has("implicit_forecast")) return hasHistorical ? "含前瞻" : "前瞻期";
   return "";
 }
 
@@ -110,7 +109,7 @@ export default function App() {
         setData(enrichedPayload);
         const firstChart = cardMetrics(enrichedPayload)[0]
           ?? visibleMetrics(enrichedPayload).find((metric) => metric.periods.length);
-        setChartMetric(firstChart?.metric ?? "");
+        setChartMetric(firstChart ? metricStableKey(firstChart) : "");
         setError("");
       })
       .catch((reason) => {
@@ -158,7 +157,12 @@ export default function App() {
 
   const rows = useMemo(() => (data ? visibleMetrics(data) : []), [data]);
   const cards = useMemo(() => (data ? cardMetrics(data) : []), [data]);
-  const selectedChartMetric = rows.find((metric) => metric.metric === chartMetric && metric.periods.length);
+  const dualTimeAxes = useMemo(() => Boolean(data && hasDualTimeAxes(data)), [data]);
+  const calendarRows = useMemo(() => (data && dualTimeAxes ? calendarBalanceMetrics(data) : []), [data, dualTimeAxes]);
+  const cropRows = useMemo(() => (data && dualTimeAxes ? cropProductionMetrics(data) : []), [data, dualTimeAxes]);
+  const selectedChartMetric = rows.find(
+    (metric) => metricStableKey(metric) === chartMetric && metric.periods.length,
+  );
 
   return (
     <main className="app-shell">
@@ -216,6 +220,13 @@ export default function App() {
             <div>
               <strong>{data.product}</strong><span> · {data.region}</span>
             </div>
+            {dualTimeAxes && (
+              <div className="dual-basis-summary" aria-label="双时间轴说明">
+                <span>供需口径：Jan–Dec自然年</span>
+                <span>生产口径：Oil World作物年度</span>
+                <small>两组时间轴独立展示，不进行年度转换</small>
+              </div>
+            )}
           </section>
 
           <section className="cards" aria-label="最新状态">
@@ -227,12 +238,18 @@ export default function App() {
                 : null;
               const revision = quarterRevisionDisplay(metric);
               return (
-                <article className="metric-card" key={metric.metric}>
+                <article className="metric-card" key={metricStableKey(metric)}>
                   <div className="metric-card__title">
-                    <span>{metric.metric}</span>
+                    <span>{metricDisplayLabel(metric, dualTimeAxes)}</span>
                     {metric.is_derived && <em>派生</em>}
                   </div>
-                  <div className="metric-card__period">{point?.period ?? "—"} {point && forecastLabel(metric.forecast_status[point.period])}</div>
+                  <div className="metric-card__period">
+                    {point
+                      ? dualTimeAxes && metric.period_family === "calendar_year"
+                        ? `自然年${point.period}F`
+                        : `${point.period} ${forecastLabel(metric.forecast_status[point.period])}`
+                      : "—"}
+                  </div>
                   <div className="metric-card__value">{formatNumber(shown, metric.unit)} <small>{displayUnit(metric.unit)}</small></div>
                   <dl>
                     <div><dt>年度变化</dt><dd>{change === null ? "—" : formatNumber(change, metric.annual_change?.unit ?? metric.unit)} {change === null ? "" : displayUnit(metric.annual_change?.unit ?? metric.unit)}</dd></div>
@@ -243,90 +260,72 @@ export default function App() {
             })}
           </section>
 
-          <section className="panel matrix-panel">
-            <div className="section-heading matrix-heading">
-              <div><span>MARKET YEAR MATRIX</span><h2>完整市场年度平衡表</h2></div>
-              <div className="matrix-heading__meta">
-                <span className="market-year-basis">{marketYearBasisLabel(data.market_year_basis)}</span>
-                <p>数量底层单位为1000 T，页面换算为万吨；空白与0严格区分。</p>
-              </div>
+          {dualTimeAxes ? (
+            <div className="dual-axis-layout">
+              <MetricMatrix
+                eyebrow="CALENDAR YEAR BALANCE"
+                title="自然年供需平衡表"
+                basisLabel="供需口径：Jan–Dec自然年｜Oil World国家平衡表"
+                note="自然年数据保持原始年度，不转换为作物年度。"
+                rows={calendarRows}
+                periods={periodsForMetrics(calendarRows)}
+                dualTimeAxes
+                calendarAxis
+              />
+              <MetricMatrix
+                eyebrow="CROP YEAR PRODUCTION"
+                title="作物年度生产指标"
+                basisLabel="生产口径：Oil World作物年度｜世界生产表"
+                note="Production、Area Harvested与Yield使用原始作物年度表头。"
+                rows={cropRows}
+                periods={periodsForMetrics(cropRows)}
+                dualTimeAxes
+              />
             </div>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>指标</th>
-                    <th>单位</th>
-                    <th className="change-header">季度修正</th>
-                    <th className="change-header">年度变化</th>
-                    {data.periods.map((period) => {
-                      const label = columnForecastLabel(rows, period);
-                      return (
-                        <th className={label ? "forecast-col" : ""} key={period}>
-                          {period}<small>{label}</small>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((metric) => {
-                    const revision = quarterRevisionDisplay(metric);
-                    return <tr key={metric.metric} className={metric.mapping_status === "conflict" ? "conflict-row" : ""}>
-                      <th>
-                        <span>{metric.metric}</span>
-                        {metric.is_derived && <em className="tag">派生</em>}
-                        {metric.mapping_status === "conflict" && <span className="warning-dot" title={metric.quality_note}>!</span>}
-                      </th>
-                      <td>{displayUnit(metric.unit)}</td>
-                      <td className={`change-cell ${revision.hasValue ? "change-cell--value" : "change-cell--muted"}`}>
-                        {revision.text}
-                      </td>
-                      <td className={`change-cell ${metric.annual_change ? "change-cell--value" : "change-cell--muted"}`}>
-                        {metric.annual_change
-                          ? `${formatSignedChange(displayValue(metric.annual_change.value, metric.annual_change.unit === "1000 T" ? "1000 T" : metric.unit), metric.annual_change.unit)} ${displayUnit(metric.annual_change.unit)}`
-                          : "—"}
-                      </td>
-                      {data.periods.map((period) => {
-                        const value = ["direct", "derived"].includes(metric.mapping_status)
-                          ? displayValue(metric.values[period], metric.unit)
-                          : null;
-                        const forecast = metric.forecast_status[period] && metric.forecast_status[period] !== "historical";
-                        return <td className={forecast ? "forecast-cell" : ""} key={period}>{formatNumber(value, metric.unit)}</td>;
-                      })}
-                    </tr>;
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {rows.some((metric) => metric.mapping_status === "conflict") && (
-              <div className="quality-banner">原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示相关数值。</div>
-            )}
-          </section>
+          ) : (
+            <MetricMatrix
+              eyebrow="MARKET YEAR MATRIX"
+              title="完整市场年度平衡表"
+              basisLabel={marketYearBasisLabel(data.market_year_basis)}
+              note="数量底层单位为1000 T，页面换算为万吨；空白与0严格区分。"
+              rows={rows}
+              periods={data.periods}
+            />
+          )}
 
           <section className="panel chart-panel">
             <div className="section-heading">
-              <div><span>TREND</span><h2>指标趋势</h2></div>
+              <div>
+                <span>TREND</span>
+                <h2>指标趋势{selectedChartMetric && dualTimeAxes ? ` · ${axisLabel(selectedChartMetric)}` : ""}</h2>
+              </div>
               <label className="chart-select">指标
                 <select value={chartMetric} onChange={(event) => setChartMetric(event.target.value)}>
                   {rows.filter((metric) => metric.periods.length && ["direct", "derived"].includes(metric.mapping_status)).map((metric) => (
-                    <option key={metric.metric}>{metric.metric}</option>
+                    <option key={metricStableKey(metric)} value={metricStableKey(metric)}>
+                      {metricDisplayLabel(metric, dualTimeAxes)}
+                    </option>
                   ))}
                 </select>
               </label>
             </div>
-            {selectedChartMetric ? <TrendChart metric={selectedChartMetric} /> : <div className="empty-chart">当前组合没有可绘制指标。</div>}
+            {selectedChartMetric
+              ? <TrendChart metric={selectedChartMetric} axis={axisLabel(selectedChartMetric)} />
+              : <div className="empty-chart">当前组合没有可绘制指标。</div>}
           </section>
 
           <details className="panel sources-panel">
             <summary>数据来源与口径 <span>展开查看原始报表、单元格和质量状态</span></summary>
             <div className="source-grid">
               {rows.map((metric) => (
-                <article key={metric.metric}>
-                  <h3>{metric.metric} {metric.is_derived && <em className="tag">派生</em>}</h3>
+                <article key={metricStableKey(metric)}>
+                  <h3>{metricDisplayLabel(metric, dualTimeAxes)} {metric.is_derived && <em className="tag">派生</em>}</h3>
                   <dl>
                     <div><dt>映射状态</dt><dd>{metric.mapping_status}</dd></div>
                     <div><dt>市场年度口径</dt><dd>{metric.market_year_basis}</dd></div>
+                    {metric.period_family && <div><dt>时间轴类型</dt><dd>{metric.period_family}</dd></div>}
+                    {metric.period_basis && <div><dt>周期基础</dt><dd>{metric.period_basis}</dd></div>}
+                    {metric.source_role && <div><dt>来源角色</dt><dd>{metric.source_role}</dd></div>}
                     <div><dt>原始指标</dt><dd>{metric.original_metric || "—"}</dd></div>
                     <div><dt>原始单位</dt><dd>{metric.original_unit || "—"}</dd></div>
                     <div><dt>报表编号</dt><dd>{metric.source_report_id.join("；") || "—"}</dd></div>

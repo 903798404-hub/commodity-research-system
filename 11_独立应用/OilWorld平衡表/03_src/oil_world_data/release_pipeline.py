@@ -460,8 +460,11 @@ def _release_files(index: dict[str, Any]) -> dict[tuple[str, str, str], str]:
     }
 
 
-def _metric_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {metric["metric"]: metric for metric in payload.get("metrics", [])}
+def _metric_map(payload: dict[str, Any]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    return {
+        (metric["metric"], metric.get("period_family", "marketing_year"), metric.get("source_role", "balance")): metric
+        for metric in payload.get("metrics", [])
+    }
 
 
 def _report_id(metric: dict[str, Any] | None) -> list[str]:
@@ -476,6 +479,8 @@ def _comparison_record(
     period: str,
     previous_metric: dict[str, Any] | None,
     current_metric: dict[str, Any] | None,
+    period_family: str = "marketing_year",
+    source_role: str = "balance",
 ) -> dict[str, Any]:
     previous_status = (previous_metric or {}).get("mapping_status")
     current_status = (current_metric or {}).get("mapping_status")
@@ -514,6 +519,8 @@ def _comparison_record(
         "region": region,
         "metric": metric_name,
         "period": period,
+        "period_family": period_family,
+        "source_role": source_role,
         "unit": revision_unit,
         "previous_value": previous_value,
         "current_value": current_value,
@@ -549,9 +556,10 @@ def build_comparison(
         current_metrics = _metric_map(current_payload)
         metric_order = list(dict.fromkeys([*current_metrics, *previous_metrics]))
         records: list[dict[str, Any]] = []
-        for metric_name in metric_order:
-            previous_metric = previous_metrics.get(metric_name)
-            current_metric = current_metrics.get(metric_name)
+        for metric_name, period_family, source_role in metric_order:
+            metric_key = (metric_name, period_family, source_role)
+            previous_metric = previous_metrics.get(metric_key)
+            current_metric = current_metrics.get(metric_key)
             periods = sorted(
                 set((previous_metric or {}).get("periods", [])) | set((current_metric or {}).get("periods", [])),
                 reverse=True,
@@ -565,6 +573,8 @@ def build_comparison(
                     period,
                     previous_metric,
                     current_metric,
+                    period_family,
+                    source_role,
                 )
                 records.append(record)
                 total += 1
@@ -646,7 +656,7 @@ def _validate_snapshot(snapshot: Path, release: str) -> dict[str, Any]:
         raise ReleasePipelineError("暂存快照发布期标识不一致")
     if not quality.get("passed"):
         raise ReleasePipelineError("数据质量检查未通过")
-    stable_keys: set[tuple[str, str, str, str, str, str]] = set()
+    stable_keys: set[tuple[str, str, str, str, str, str, str, str]] = set()
     for item in index.get("files", []):
         payload = _read_json(snapshot / item["path"])
         for metric in payload.get("metrics", []):
@@ -656,6 +666,7 @@ def _validate_snapshot(snapshot: Path, release: str) -> dict[str, Any]:
                 key = (
                     payload["system"], payload["product"], payload["region"],
                     metric["metric"], period, metric["unit"],
+                    metric.get("period_family", "marketing_year"), metric.get("source_role", "balance"),
                 )
                 if key in stable_keys:
                     raise ReleasePipelineError(f"重复稳定键：{key}")

@@ -1,17 +1,26 @@
 import type { CombinationComparison, CombinationData } from "./model";
 
+function comparisonKey(metric: string, period: string, periodFamily?: string, sourceRole?: string) {
+  return [metric, periodFamily ?? "legacy", sourceRole ?? "legacy", period].join("\u0000");
+}
+
 export function applyQuarterRevisions(
   data: CombinationData,
   comparison: CombinationComparison | null,
 ): CombinationData {
   const records = new Map(
-    (comparison?.records ?? []).map((record) => [`${record.metric}\u0000${record.period}`, record]),
+    (comparison?.records ?? []).map((record) => [
+      comparisonKey(record.metric, record.period, record.period_family, record.source_role),
+      record,
+    ]),
   );
   return {
     ...data,
     metrics: data.metrics.map((metric) => {
       const latestPeriod = metric.periods.find((period) => metric.values[period] !== null) ?? metric.periods[0];
-      const record = latestPeriod ? records.get(`${metric.metric}\u0000${latestPeriod}`) : undefined;
+      const record = latestPeriod
+        ? records.get(comparisonKey(metric.metric, latestPeriod, metric.period_family, metric.source_role))
+        : undefined;
       if (!record || record.quarter_revision === null) {
         return {
           ...metric,

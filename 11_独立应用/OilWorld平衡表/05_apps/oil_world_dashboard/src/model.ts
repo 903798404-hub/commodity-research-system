@@ -1,10 +1,16 @@
 export type MappingStatus = "direct" | "derived" | "missing" | "not_applicable" | "conflict";
 export type ForecastStatus = "historical" | "explicit_forecast" | "implicit_forecast";
+export type PeriodFamily = "calendar_year" | "crop_year" | "marketing_year" | string;
+export type SourceRole = "balance" | "production_table" | string;
 
 export interface MetricData {
   metric: string;
   mapping_status: MappingStatus;
   market_year_basis: string;
+  period_family?: PeriodFamily;
+  period_basis?: string;
+  source_role?: SourceRole;
+  source_period_label?: string | Record<string, string>;
   periods: string[];
   original_periods: Record<string, string>;
   forecast_status: Record<string, ForecastStatus>;
@@ -102,6 +108,8 @@ export interface ComparisonRecord {
   region: string;
   metric: string;
   period: string;
+  period_family?: PeriodFamily;
+  source_role?: SourceRole;
   unit: string;
   previous_value: number | null;
   current_value: number | null;

@@ -7,6 +7,7 @@ import math
 import random
 import re
 import shutil
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +20,17 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 
 class BuildError(RuntimeError):
     """Raised when the audited source structure cannot be confirmed."""
+
+
+def _remove_tree(path: Path, attempts: int = 5) -> None:
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError:
+            if attempt + 1 == attempts:
+                raise
+            time.sleep(0.1 * (attempt + 1))
 
 
 @dataclass(frozen=True)
@@ -332,6 +344,14 @@ def _source_titles(row: dict[str, Any], catalog: dict[str, dict[str, Any]]) -> l
     return [str(catalog.get(report_id, {}).get("report_title") or row.get("report_title") or "") for report_id in report_ids]
 
 
+def _period_family_and_role(row: dict[str, Any]) -> tuple[str, str]:
+    if row.get("period_family") and row.get("source_role"):
+        return str(row["period_family"]), str(row["source_role"])
+    report_ids = [item for item in str(row.get("primary_report_id") or "").split(";") if item]
+    crop_table = any(REPORT_BASIS.get(item) == "Oil World作物年度" for item in report_ids)
+    return ("crop_year", "production_table") if crop_table else ("marketing_year", "balance")
+
+
 def _build_metric(
     workbook: Any,
     row: dict[str, Any],
@@ -402,10 +422,14 @@ def _build_metric(
         quality_note = "原始Oil World报表没有可确认的该指标数值，保持缺失。"
 
     report_ids = [item for item in str(row.get("primary_report_id") or "").split(";") if item]
+    period_family, source_role = _period_family_and_role(row)
     return {
         "metric": metric,
         "mapping_status": status,
-        "market_year_basis": basis,
+        "market_year_basis": str(row.get("basis_label") or basis),
+        "period_family": period_family,
+        "period_basis": str(row.get("period_basis") or basis),
+        "source_role": source_role,
         "periods": ordered_periods,
         "original_periods": original_periods,
         "forecast_status": forecast_status,
@@ -448,9 +472,10 @@ def _validate_audit_sources(
     metric_csv: list[dict[str, str]],
     config: dict[str, Any],
 ) -> None:
-    if len(audit["coverage_matrix"]) != config["expected_mapping_count"]:
+    expected_base_count = config.get("expected_base_mapping_count", config["expected_mapping_count"])
+    if len(audit["coverage_matrix"]) != expected_base_count:
         raise BuildError("Mapping audit JSON count drifted")
-    if len(coverage_csv) != config["expected_mapping_count"]:
+    if len(coverage_csv) != expected_base_count:
         raise BuildError("Coverage CSV count drifted")
     json_keys = {
         (row["system"], row["commodity"], row["country_or_region"], row["metric"], row["mapping_status"])
@@ -471,9 +496,75 @@ def _validate_audit_sources(
     mapped_metrics = {row["standard_metric"] for row in metric_csv if row["standard_metric"] != "not in scope"}
     if not set(config["metric_order"]).issubset(mapped_metrics):
         raise BuildError("Metric mapping CSV is missing a configured standard metric")
-    status_counts = Counter(row["mapping_status"] for row in audit["coverage_matrix"])
-    if dict(status_counts) != config["expected_status_counts"]:
-        raise BuildError(f"Audit status counts changed: {dict(status_counts)}")
+
+
+SPECIAL_TIME_AXES = {
+    ("Soybeans", "Brazil"): {
+        "report_id": "AN51000A", "production_report_id": "AN13993", "production_row": 11,
+        "title": "BRAZIL: Soybean Balance (1000 T)",
+    },
+    ("Sunflowerseed", "Argentina"): {
+        "report_id": "AN50002", "production_report_id": "AN14793", "production_row": 25,
+        "title": "ARGENTINA : Sunflowerseed Balance (1000 T)",
+    },
+}
+
+
+def _apply_special_time_axes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Restore audited Jan-Dec balances without merging them into crop-year data."""
+    result: list[dict[str, Any]] = []
+    additions: list[dict[str, Any]] = []
+    direct_rows = {"Beginning Stocks": 3, "Production": 4, "Imports": 5, "Exports": 6, "Crush": 7, "Ending Stocks": 9}
+    for row in rows:
+        key = (row["commodity"], row["country_or_region"])
+        special = SPECIAL_TIME_AXES.get(key)
+        if special and row["metric"] in {"Area Harvested", "Yield"}:
+            updated = dict(row)
+            updated.update({
+                "period_family": "crop_year", "period_basis": "Oil World crop year",
+                "source_role": "production_table", "basis_label": "Oil World作物年度｜世界生产表",
+            })
+            result.append(updated)
+            continue
+        if not special or row["metric"] not in {*direct_rows, "Domestic Consumption", "Stocks/Use Ratio"}:
+            result.append(row)
+            continue
+        metric = row["metric"]
+        updated = dict(row)
+        updated.update({
+            "mapping_status": "direct" if metric in direct_rows else "derived",
+            "primary_report_id": special["report_id"], "source_sheet": special["report_id"],
+            "report_title": special["title"], "toc_section": "Country Section",
+            "title_row": 1, "header_row": 2, "market_years": "",
+            "market_year_columns": "B:D", "excluded_period_columns": "partial-period columns excluded",
+            "original_unit": "1000 T", "standard_unit": "%" if metric == "Stocks/Use Ratio" else "1000 T",
+            "forecast_status": "header F marker", "latest_annual_change_ready": True,
+            "quarter_revision_ready": True, "period_family": "calendar_year", "period_basis": "Jan–Dec",
+            "source_role": "balance", "basis_label": "Jan–Dec自然年｜Oil World国家平衡表",
+            "main_risk": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
+        })
+        if metric in direct_rows:
+            r = direct_rows[metric]
+            updated.update({"original_metric": {3: "Open'g stocks", 4: "Crop", 5: "Imports", 6: "Exports", 7: "Crushings", 9: "Ending stocks"}[r], "data_row": r, "source_cell_or_range": f"{special['report_id']}!B{r}:D{r}", "is_derived": False, "derivation_formula": "", "derivation_components": ""})
+        elif metric == "Domestic Consumption":
+            updated.update({"original_metric": "Crushings + Other use", "data_row": "7+8", "source_cell_or_range": f"{special['report_id']}!B7:D7 + {special['report_id']}!B8:D8", "is_derived": True, "derivation_formula": "Domestic Consumption = Crushings + Other use", "derivation_components": f"{special['report_id']} rows 7 + 8"})
+        else:
+            updated.update({"original_metric": "Ending stocks / (Crushings + Other use)", "data_row": "9/(7+8)", "source_cell_or_range": f"{special['report_id']}!B9:D9 / ({special['report_id']}!B7:D7 + {special['report_id']}!B8:D8)", "is_derived": True, "derivation_formula": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100", "derivation_components": f"{special['report_id']} rows 7, 8, 9"})
+        result.append(updated)
+    for key, special in SPECIAL_TIME_AXES.items():
+        template = next(row for row in rows if (row["commodity"], row["country_or_region"], row["metric"]) == (*key, "Area Harvested"))
+        production = dict(template)
+        production.update({
+            "metric": "Production", "mapping_status": "direct", "primary_report_id": special["production_report_id"],
+            "source_sheet": special["production_report_id"], "original_metric": "PRODUCTION", "data_row": special["production_row"],
+            "market_year_columns": "C:E", "source_cell_or_range": f"{special['production_report_id']}!C{special['production_row']}:E{special['production_row']}",
+            "original_unit": "1000 T", "standard_unit": "1000 T", "period_family": "crop_year",
+            "period_basis": "Oil World crop year", "source_role": "production_table",
+            "basis_label": "Oil World作物年度｜世界生产表", "is_derived": False,
+            "derivation_formula": "", "derivation_components": "", "main_risk": "",
+        })
+        additions.append(production)
+    return result + additions
 
 
 def _copy_release(source: Path, destination: Path) -> None:
@@ -504,6 +595,13 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
     catalog_csv = _read_csv(audit_paths["report_catalog"])
     metric_csv = _read_csv(audit_paths["metric_mapping"])
     _validate_audit_sources(audit, coverage_csv, catalog_csv, metric_csv, config)
+    audit = dict(audit)
+    audit["coverage_matrix"] = _apply_special_time_axes(list(audit["coverage_matrix"]))
+    if len(audit["coverage_matrix"]) != config["expected_mapping_count"]:
+        raise BuildError("Transformed mapping count drifted")
+    transformed_status_counts = Counter(row["mapping_status"] for row in audit["coverage_matrix"])
+    if dict(transformed_status_counts) != config["expected_status_counts"]:
+        raise BuildError(f"Transformed mapping status counts changed: {dict(transformed_status_counts)}")
     catalog = {row["report_id"]: row for row in audit["report_catalog"]}
     adopted = {report_id for report_id, row in catalog.items() if row["decision"] == "adopted"}
     if len(adopted) != config["expected_adopted_report_count"]:
@@ -533,7 +631,7 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
 
     temp_root = project_root / ".oil_world_build_tmp"
     if temp_root.exists():
-        shutil.rmtree(temp_root)
+        _remove_tree(temp_root)
     release_root = temp_root / "release"
     combo_root = release_root / "combinations"
     combo_root.mkdir(parents=True, exist_ok=True)
@@ -554,13 +652,11 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
             system_entry["products"].append(product_entry)
             for region in system_scope["countries"]:
                 rows = grouped[(system, product, region)]
-                row_by_metric = {row["metric"]: row for row in rows}
-                if set(row_by_metric) != set(config["metric_order"]):
+                if set(row["metric"] for row in rows) != set(config["metric_order"]):
                     raise BuildError(f"Metric scope mismatch for {product} / {region}")
-                metrics = [
-                    _build_metric(workbook, row_by_metric[metric], catalog, config)
-                    for metric in config["metric_order"]
-                ]
+                metric_rank = {metric: position for position, metric in enumerate(config["metric_order"])}
+                rows.sort(key=lambda row: (metric_rank[row["metric"]], row.get("source_role", "balance")))
+                metrics = [_build_metric(workbook, row, catalog, config) for row in rows]
                 for metric_payload in metrics:
                     status_counts[metric_payload["mapping_status"]] += 1
                     numeric_observation_count += sum(value is not None for value in metric_payload["values"].values())
@@ -729,7 +825,7 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
         project_root / "public" / "data" / "oil_world" / "releases.json",
         {"releases": [{"release": release, "label": config["release_label"], "available": True}]},
     )
-    shutil.rmtree(temp_root)
+    _remove_tree(temp_root)
     return {
         "release": release,
         "combination_count": len(index_files),

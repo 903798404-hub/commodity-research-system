@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const appSource = fs.readFileSync(fileURLToPath(new URL("./App.tsx", import.meta.url)), "utf8");
+const matrixSource = fs.readFileSync(fileURLToPath(new URL("./components/MetricMatrix.tsx", import.meta.url)), "utf8");
 const cssSource = fs.readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -34,20 +35,20 @@ function treeHash(root: string) {
 }
 
 test("表格列顺序为指标、单位、季度修正、年度变化、市场年度", () => {
-  const header = appSource.slice(appSource.indexOf("<thead>"), appSource.indexOf("</thead>"));
+  const header = matrixSource.slice(matrixSource.indexOf("<thead>"), matrixSource.indexOf("</thead>"));
   const indicator = header.indexOf("<th>指标</th>");
   const unit = header.indexOf("<th>单位</th>");
   const quarter = header.indexOf("季度修正");
   const annual = header.indexOf("年度变化");
-  const periods = header.indexOf("data.periods.map");
+  const periods = header.indexOf("periods.map");
   assert.ok(indicator < unit && unit < quarter && quarter < annual && annual < periods);
 });
 
 test("变化列具有统一深红强调且空值使用弱样式", () => {
-  assert.match(appSource, /className="change-header">季度修正/);
-  assert.match(appSource, /className="change-header">年度变化/);
-  assert.match(appSource, /change-cell--value/);
-  assert.match(appSource, /change-cell--muted/);
+  assert.match(matrixSource, /className="change-header">季度修正/);
+  assert.match(matrixSource, /className="change-header">年度变化/);
+  assert.match(matrixSource, /change-cell--value/);
+  assert.match(matrixSource, /change-cell--muted/);
   assert.match(cssSource, /--change-accent:\s*#8b3f48/);
   assert.match(cssSource, /\.change-cell--value\s*\{\s*color:\s*var\(--change-accent\)/);
   assert.match(cssSource, /\.change-cell--muted\s*\{\s*color:\s*var\(--change-muted\)/);
@@ -56,7 +57,7 @@ test("变化列具有统一深红强调且空值使用弱样式", () => {
 });
 
 test("正负变化共用同一颜色类且无方向色切换", () => {
-  const annualCell = appSource.slice(appSource.indexOf("metric.annual_change ? \"change-cell--value\""), appSource.indexOf("data.periods.map", appSource.indexOf("metric.annual_change ? \"change-cell--value\"")));
+  const annualCell = matrixSource.slice(matrixSource.indexOf("metric.annual_change ? \"change-cell--value\""), matrixSource.indexOf("periods.map", matrixSource.indexOf("metric.annual_change ? \"change-cell--value\"")));
   assert.match(annualCell, /formatSignedChange/);
   assert.doesNotMatch(annualCell, /positive|negative|green|red/);
 });
@@ -80,13 +81,13 @@ test("季度修正空值不再渲染详细原因文字", () => {
 
 test("年度口径位于平衡表卡片头部且原外部位置不重复", () => {
   const context = appSource.slice(appSource.indexOf('className="context-line"'), appSource.indexOf('className="cards"'));
-  const matrixHeading = appSource.slice(appSource.indexOf('className="section-heading matrix-heading"'), appSource.indexOf('className="table-scroll"'));
+  const matrixHeading = matrixSource.slice(matrixSource.indexOf('className="section-heading matrix-heading"'), matrixSource.indexOf('className="table-scroll"'));
   assert.doesNotMatch(context, /market_year_basis|年度口径/);
   assert.match(matrixHeading, /className="market-year-basis"/);
-  assert.match(matrixHeading, /marketYearBasisLabel\(data\.market_year_basis\)/);
+  assert.match(appSource, /marketYearBasisLabel\(data\.market_year_basis\)/);
 });
 
 test("平衡表头部在窄屏换行且不改变表格滚动容器", () => {
   assert.match(cssSource, /@media \(max-width: 900px\)[\s\S]*\.matrix-heading__meta\s*\{[^}]*flex-basis:\s*100%/);
-  assert.match(cssSource, /\.table-scroll\s*\{\s*overflow-x:\s*auto/);
+  assert.match(cssSource, /\.table-scroll\s*\{[^}]*overflow-x:\s*auto/);
 });
