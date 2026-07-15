@@ -38,7 +38,7 @@ export function ResearchTableSlide({
             ? <RegionResearchTable key={region.region} data={data} region={region} slide={slide} />
             : <div className="presentation-region-loading" key={region.region}>{slide.productLabel}－{region.label}<span>读取中…</span></div>;
         })}
-        {slide.layoutMode === "two-by-four-notes" && (
+        {(slide.layoutMode === "two-by-three-notes" || slide.layoutMode === "two-by-four-notes") && (
           <PresentationNotesCard slide={slide} regionData={regionData} />
         )}
       </section>

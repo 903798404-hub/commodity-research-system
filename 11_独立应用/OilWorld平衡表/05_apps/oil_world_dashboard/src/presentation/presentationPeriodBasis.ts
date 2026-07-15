@@ -225,6 +225,74 @@ export const PRESENTATION_PERIOD_BASIS: readonly PresentationPeriodBasisConfig[]
       prefer_formal_basis: true,
     } satisfies PresentationPeriodBasisConfig)),
   ),
+  ...[
+    {
+      region: "Global", start: null, end: null,
+      label: "混合口径｜供需作物年度 · 压榨Sep–Aug · 贸易Oct–Sep",
+      family: "mixed", role: "mixed", reports: ["AN147900", "AN14792"],
+      note: "AN147900世界供需表以作物年度列示，Crush行明确Sept/Aug，成员库存日期不一致；AN14792贸易表完整年度明确Oct/Sept。",
+    },
+    {
+      region: "Russia", start: "Sep", end: "Aug", label: "Sep–Aug｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN17501"], note: "《RUSSIA : Sunflowerseed Balance》表头明确为Sept Aug。",
+    },
+    {
+      region: "Ukraine", start: "Sep", end: "Aug", label: "Sep–Aug｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN18101"], note: "《UKRAINE : Sunflowerseed Balance》表头明确为Sept Aug。",
+    },
+    {
+      region: "European Union", start: "Aug", end: "Jul", label: "Aug–Jul｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN049106"], note: "《EU-27 : Summary of Sunflowerseed Supply & Demand》正式序列表头明确为Aug July。",
+    },
+    {
+      region: "Argentina", start: "Jan", end: "Dec", label: "Jan–Dec｜自然年",
+      family: "calendar_year", role: "balance", reports: ["AN50002"], note: "《ARGENTINA : Sunflowerseed Balance》表头明确为Jan Dec自然年。",
+    },
+  ].map(({ region, start, end, label, family, role, reports, note }) => ({
+    product: "Sunflowerseed",
+    region,
+    period_family: family,
+    source_role: role,
+    start_month: start,
+    end_month: end,
+    display_label: label,
+    source_report_id: reports,
+    source_note: note,
+    footer_detail: region === "Global"
+      ? "葵花籽Global：世界供需按作物年度、压榨按Sep–Aug、贸易按Oct–Sep，原表没有统一月份。"
+      : undefined,
+    prefer_formal_basis: region !== "Global",
+  } satisfies PresentationPeriodBasisConfig)),
+  ...["Global", "Russia", "Ukraine", "European Union", "Argentina"].map((region) => ({
+    product: "Sunflowerseed",
+    region,
+    period_family: "crop_year",
+    source_role: "production_table",
+    start_month: null,
+    end_month: null,
+    display_label: "起止月原表未注明｜Oil World作物年度",
+    source_report_id: ["AN14793"],
+    source_note: "《SUNFLOWERSEED : World Production, Yields and Harvested Area》仅列HARVEST主要收获月份，不提供作物年度起止月。",
+    footer_detail: "葵花籽生产：AN14793只列主要收获月份，不能作为作物年度起止月份。",
+  } satisfies PresentationPeriodBasisConfig)),
+  ...[
+    { product: "Sunflower Oil", report: "AN24792", title: "SUNFLOWER OIL : World Supply and Demand Balance" },
+    { product: "Sunflower Meal", report: "AN34792", title: "SUNFLOWER MEAL : World Supply and Demand Balance" },
+  ].flatMap(({ product, report, title }) =>
+    ["Global", "Russia", "Ukraine", "European Union", "Argentina"].map((region) => ({
+      product,
+      region,
+      period_family: "marketing_year",
+      source_role: "balance",
+      start_month: "Oct",
+      end_month: "Sep",
+      display_label: "Oct–Sep｜Oil World作物年度",
+      source_report_id: [report],
+      source_note: `《${title}》各完整年度区块表头均明确为Oct Sept。`,
+      footer_detail: `${product === "Sunflower Oil" ? "葵油" : "葵粕"}：${report}完整年度供需区块按Oct–Sep列示。`,
+      prefer_formal_basis: true,
+    } satisfies PresentationPeriodBasisConfig)),
+  ),
 ] as const;
 
 function basisConfig(slide: PresentationSlideConfig, region: PresentationRegionConfig): PresentationPeriodBasisConfig {

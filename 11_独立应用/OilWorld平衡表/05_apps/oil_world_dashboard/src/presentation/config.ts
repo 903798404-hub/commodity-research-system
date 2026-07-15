@@ -28,7 +28,7 @@ export interface PresentationSlideConfig {
   subtitle: string;
   metrics: string[];
   regions: PresentationRegionConfig[];
-  layoutMode: "two-by-three" | "two-by-four-notes";
+  layoutMode: "two-by-three" | "two-by-three-notes" | "two-by-four-notes";
   derivePresentationStockUsageRatio: boolean;
   euStockUsageRatio: "not-applicable" | "external-exports-confirmed" | "exports-scope-unconfirmed";
 }
@@ -43,6 +43,12 @@ const RAPESEED_SYSTEM_GROUP = {
   groupId: "rapeseed-system",
   groupTitle: "菜籽体系",
   groupOrder: 2,
+} as const;
+
+const SUNFLOWER_SYSTEM_GROUP = {
+  groupId: "sunflower-system",
+  groupTitle: "葵花体系",
+  groupOrder: 3,
 } as const;
 
 const RESEARCH_REGIONS = [
@@ -98,6 +104,14 @@ const RAPESEED_REGIONS = [
   { region: "Ukraine", label: "乌克兰" },
 ] as const;
 
+const SUNFLOWER_REGIONS = [
+  { region: "Global", label: "全球" },
+  { region: "Russia", label: "俄罗斯" },
+  { region: "Ukraine", label: "乌克兰" },
+  { region: "European Union", label: "欧盟" },
+  { region: "Argentina", label: "阿根廷" },
+] as const;
+
 function productBalanceRegions(): PresentationRegionConfig[] {
   return RESEARCH_REGIONS.map((item, layoutOrder) => ({
     ...item,
@@ -129,6 +143,41 @@ function rapeseedProductionRegions(): PresentationRegionConfig[] {
 
 function rapeseedProductRegions(euConfirmed: boolean): PresentationRegionConfig[] {
   return RAPESEED_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    periodFamily: "marketing_year",
+    sourceRole: "balance",
+    stockUsageScope: item.region === "Global"
+      ? "global"
+      : item.region === "European Union"
+        ? euConfirmed ? "external_region" : "aggregate"
+        : "country",
+  }));
+}
+
+function sunflowerseedBalanceRegions(): PresentationRegionConfig[] {
+  return SUNFLOWER_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    ...(item.region === "Global"
+      ? {}
+      : item.region === "Argentina"
+        ? { periodFamily: "calendar_year", sourceRole: "balance" }
+        : { periodFamily: "marketing_year", sourceRole: "balance" }),
+  }));
+}
+
+function sunflowerseedProductionRegions(): PresentationRegionConfig[] {
+  return SUNFLOWER_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    periodFamily: "crop_year",
+    sourceRole: "production_table",
+  }));
+}
+
+function sunflowerProductRegions(euConfirmed: boolean): PresentationRegionConfig[] {
+  return SUNFLOWER_REGIONS.map((item, layoutOrder) => ({
     ...item,
     layoutOrder,
     periodFamily: "marketing_year",
@@ -308,6 +357,82 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "exports-scope-unconfirmed",
     regions: rapeseedProductRegions(false),
+  },
+  {
+    slideId: "sunflowerseed-balance",
+    slideType: "balance",
+    shortTitle: "葵花籽供需",
+    pageNumber: 9,
+    layoutOrder: 8,
+    ...SUNFLOWER_SYSTEM_GROUP,
+    groupPageNumber: 1,
+    system: "葵花体系",
+    product: "Sunflowerseed",
+    productLabel: "葵花籽",
+    title: "Oil World 葵花籽年度供需",
+    subtitle: "高密度季度研究演示 · Sunflowerseed · 五地区",
+    metrics: RAPESEED_BALANCE_METRICS,
+    layoutMode: "two-by-three-notes",
+    derivePresentationStockUsageRatio: false,
+    euStockUsageRatio: "not-applicable",
+    regions: sunflowerseedBalanceRegions(),
+  },
+  {
+    slideId: "sunflowerseed-production-conditions",
+    slideType: "production-conditions",
+    shortTitle: "葵花籽生产",
+    pageNumber: 10,
+    layoutOrder: 9,
+    ...SUNFLOWER_SYSTEM_GROUP,
+    groupPageNumber: 2,
+    system: "葵花体系",
+    product: "Sunflowerseed",
+    productLabel: "葵花籽",
+    title: "Oil World 葵花籽生产条件",
+    subtitle: "高密度季度研究演示 · Sunflowerseed · 五地区",
+    metrics: PRODUCTION_METRICS,
+    layoutMode: "two-by-three-notes",
+    derivePresentationStockUsageRatio: false,
+    euStockUsageRatio: "not-applicable",
+    regions: sunflowerseedProductionRegions(),
+  },
+  {
+    slideId: "sunflower-oil-balance",
+    slideType: "balance",
+    shortTitle: "葵油供需",
+    pageNumber: 11,
+    layoutOrder: 10,
+    ...SUNFLOWER_SYSTEM_GROUP,
+    groupPageNumber: 3,
+    system: "葵花体系",
+    product: "Sunflower Oil",
+    productLabel: "葵油",
+    title: "Oil World 葵油年度供需",
+    subtitle: "高密度季度研究演示 · Sunflower Oil · 五地区",
+    metrics: PRODUCT_BALANCE_METRICS,
+    layoutMode: "two-by-three-notes",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "external-exports-confirmed",
+    regions: sunflowerProductRegions(true),
+  },
+  {
+    slideId: "sunflower-meal-balance",
+    slideType: "balance",
+    shortTitle: "葵粕供需",
+    pageNumber: 12,
+    layoutOrder: 11,
+    ...SUNFLOWER_SYSTEM_GROUP,
+    groupPageNumber: 4,
+    system: "葵花体系",
+    product: "Sunflower Meal",
+    productLabel: "葵粕",
+    title: "Oil World 葵粕年度供需",
+    subtitle: "高密度季度研究演示 · Sunflower Meal · 五地区",
+    metrics: PRODUCT_BALANCE_METRICS,
+    layoutMode: "two-by-three-notes",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "exports-scope-unconfirmed",
+    regions: sunflowerProductRegions(false),
   },
 ] as const;
 

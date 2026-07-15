@@ -55,6 +55,9 @@ export function PresentationNotesCard({
   const basisSummary = slide.slideType === "production-conditions"
     ? "生产指标只读取crop_year＋production_table序列。"
     : "供需指标按各地区正式平衡表口径；Global如含多序列则标记混合口径。";
+  const hasCalendarBalance = slide.regions.some((region) =>
+    region.periodFamily === "calendar_year" && region.sourceRole === "balance",
+  );
 
   return (
     <aside className="presentation-notes-card" aria-label={`${slide.productLabel}本页说明`}>
@@ -64,6 +67,7 @@ export function PresentationNotesCard({
       </div>
       <div className="presentation-notes-body">
         <p>{basisSummary}</p>
+        {hasCalendarBalance && <p>自然年供需与作物年度生产独立展示，不做年度转换或跨时间轴修正。</p>}
         <dl>
           {bases.map(({ region, basis }) => (
             <div key={region.region}><dt>{region.label}</dt><dd>{basis.resolved_label}</dd></div>
