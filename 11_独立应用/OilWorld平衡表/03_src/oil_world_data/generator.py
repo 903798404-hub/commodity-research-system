@@ -620,7 +620,8 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
         for payload in combination_payloads
         for metric in payload["metrics"]
     )
-    if annual_change_count != config["expected_annual_change_count"]:
+    expected_annual_change_count = config.get("expected_annual_change_count")
+    if expected_annual_change_count is not None and annual_change_count != expected_annual_change_count:
         raise BuildError(f"Unexpected annual change count: {annual_change_count}")
 
     randomizer = random.Random(config["spot_check_seed"])
@@ -712,6 +713,7 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
         "组合文件保留direct、derived、missing、not_applicable和conflict状态；不得人工补0或改写冲突值。",
     )
 
+    workbook.close()
     source_hash_after = _sha256(workbook_path)
     if source_hash_after != source_hash_before:
         raise BuildError("Source workbook changed during the read-only build")

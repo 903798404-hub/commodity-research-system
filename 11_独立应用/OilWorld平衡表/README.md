@@ -4,7 +4,7 @@
 
 ## 当前范围
 
-- 发布期：`2026-06`
+- 当前正式发布期：`2026-06`
 - 固定组合：59个商品—地区组合
 - 固定指标：11项
 - 映射状态：`direct`、`derived`、`missing`、`not_applicable`、`conflict`
@@ -18,9 +18,11 @@ Brazil Soybeans和Argentina Sunflowerseed保留Jan–Dec自然年口径说明，
 - 映射依据：`07_docs/报表映射审计/`
 - 发布配置：`02_configs/release_2026-06.json`
 - 数据核心：`03_src/oil_world_data/`
-- 构建入口：`04_scripts/build_release.py`
+- 基线构建入口：`04_scripts/build_release.py`
+- 季度发布入口：`04_scripts/update_oil_world.py`
 - 内部发布：`01_data/releases/2026-06/`
 - 前端发布：`public/data/oil_world/releases/2026-06/`
+- 相邻比较：`01_data/comparisons/`和`public/data/oil_world/comparisons/`
 - 看板源码：`05_apps/oil_world_dashboard/`
 - 数据测试：`08_tests/`
 
@@ -30,12 +32,18 @@ Brazil Soybeans和Argentina Sunflowerseed保留Jan–Dec自然年口径说明，
 
 ```powershell
 python 04_scripts/build_release.py
+python 04_scripts/update_oil_world.py --release 2026-09 --validate-only
+python 04_scripts/update_oil_world.py --release 2026-09
+python 04_scripts/update_oil_world.py --release 2026-03 --backfill --validate-only
+python 04_scripts/update_oil_world.py --release 2026-03 --backfill
 python -m unittest discover -s 08_tests -p "test_*.py" -v
 pnpm --dir 05_apps/oil_world_dashboard test
 pnpm --dir 05_apps/oil_world_dashboard dev
 ```
 
-首次发布已经生成。生成器默认拒绝覆盖现有`2026-06`目录；`--replace`只用于第一版本地开发，不得用于正常季度发布。
+首次发布已经生成。季度更新器默认拒绝覆盖任何既有发布目录，正式发布先在临时目录完成解析和质量检查，再安装为不可变快照。普通模式只接受晚于当前`latest`的发布期；`--backfill`用于历史回补，且不会让`latest`倒退。`--validate-only`完成解析、质量检查和相邻比较预览，但不写正式发布、比较目录或指针。
+
+季度修正独立存放在相邻发布期比较目录中，以`system + product + region + metric + period + unit`匹配。只有口径一致的`direct`或`derived`有效数字参与计算；空值、`missing`、`not_applicable`和`conflict`保持空值。`Stocks/Use Ratio`修正单位为百分点。前端根据`releases.json`中的直接上一发布期加载比较文件，不把修正写回历史快照。
 
 前端通过`import.meta.env.BASE_URL`读取`latest.json`、`releases.json`、发布索引和组合文件，不写死服务器地址。
 

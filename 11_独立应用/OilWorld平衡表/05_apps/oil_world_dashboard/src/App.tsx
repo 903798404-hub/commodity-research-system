@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { DataLoadError, loadBootstrap, loadCombination, loadReleaseIndex } from "./api";
+import {
+  DataLoadError,
+  loadBootstrap,
+  loadCombination,
+  loadCombinationComparison,
+  loadReleaseIndex,
+} from "./api";
+import { applyQuarterRevisions } from "./comparison";
 import type { CombinationData, MetricData, ReleaseIndex, ReleaseList } from "./model";
 import {
   cardMetrics,
@@ -81,11 +88,26 @@ export default function App() {
     }
     let active = true;
     setLoading(true);
-    loadCombination(BASE_URL, release, file.path)
-      .then((payload) => {
+    const previousRelease = releases?.releases.find((item) => item.release === release)?.previous_release ?? null;
+    Promise.all([
+      loadCombination(BASE_URL, release, file.path),
+      previousRelease
+        ? loadCombinationComparison(
+            BASE_URL,
+            previousRelease,
+            release,
+            selection.system,
+            selection.product,
+            selection.region,
+          )
+        : Promise.resolve(null),
+    ])
+      .then(([payload, comparison]) => {
         if (!active) return;
-        setData(payload);
-        const firstChart = cardMetrics(payload)[0] ?? visibleMetrics(payload).find((metric) => metric.periods.length);
+        const enrichedPayload = applyQuarterRevisions(payload, comparison);
+        setData(enrichedPayload);
+        const firstChart = cardMetrics(enrichedPayload)[0]
+          ?? visibleMetrics(enrichedPayload).find((metric) => metric.periods.length);
         setChartMetric(firstChart?.metric ?? "");
         setError("");
       })
@@ -99,7 +121,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [index, release, selection]);
+  }, [index, release, releases, selection]);
 
   async function changeRelease(nextRelease: string) {
     setLoading(true);
@@ -202,6 +224,9 @@ export default function App() {
               const change = metric.annual_change
                 ? displayValue(metric.annual_change.value, metric.annual_change.unit === "1000 T" ? "1000 T" : metric.unit)
                 : null;
+              const revision = metric.quarter_revision
+                ? displayValue(metric.quarter_revision.value, metric.quarter_revision.unit)
+                : null;
               return (
                 <article className="metric-card" key={metric.metric}>
                   <div className="metric-card__title">
@@ -212,7 +237,9 @@ export default function App() {
                   <div className="metric-card__value">{formatNumber(shown, metric.unit)} <small>{displayUnit(metric.unit)}</small></div>
                   <dl>
                     <div><dt>年度变化</dt><dd>{change === null ? "—" : formatNumber(change, metric.annual_change?.unit ?? metric.unit)} {change === null ? "" : displayUnit(metric.annual_change?.unit ?? metric.unit)}</dd></div>
-                    <div><dt>季度修正</dt><dd>暂无上一期</dd></div>
+                    <div><dt>季度修正</dt><dd>{revision === null
+                      ? metric.quarter_revision_note
+                      : `${formatSignedChange(revision, metric.quarter_revision!.unit)} ${displayUnit(metric.quarter_revision!.unit)}`}</dd></div>
                   </dl>
                 </article>
               );
@@ -251,7 +278,14 @@ export default function App() {
                         {metric.mapping_status === "conflict" && <span className="warning-dot" title={metric.quality_note}>!</span>}
                       </th>
                       <td>{displayUnit(metric.unit)}</td>
-                      <td className="change-cell change-cell--muted">暂无上一期</td>
+                      <td className={`change-cell ${metric.quarter_revision ? "change-cell--value" : "change-cell--muted"}`}>
+                        {metric.quarter_revision
+                          ? `${formatSignedChange(
+                              displayValue(metric.quarter_revision.value, metric.quarter_revision.unit),
+                              metric.quarter_revision.unit,
+                            )} ${displayUnit(metric.quarter_revision.unit)}`
+                          : metric.quarter_revision_note}
+                      </td>
                       <td className={`change-cell ${metric.annual_change ? "change-cell--value" : "change-cell--muted"}`}>
                         {metric.annual_change
                           ? `${formatSignedChange(displayValue(metric.annual_change.value, metric.annual_change.unit === "1000 T" ? "1000 T" : metric.unit), metric.annual_change.unit)} ${displayUnit(metric.annual_change.unit)}`

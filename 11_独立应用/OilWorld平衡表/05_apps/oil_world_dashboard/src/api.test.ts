@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DataLoadError, fetchJsonWithRetry, loadBootstrap, resolveAssetPath } from "./api";
+import {
+  DataLoadError,
+  fetchJsonWithRetry,
+  loadBootstrap,
+  loadCombinationComparison,
+  resolveAssetPath,
+} from "./api";
 
 test("根路径和子路径使用同一资源拼接规则", () => {
   assert.equal(resolveAssetPath("data/oil_world/latest.json", "/"), "/data/oil_world/latest.json");
@@ -54,4 +60,31 @@ test("HTML回退返回明确格式错误且不重试", async () => {
 test("非法JSON返回明确错误", async () => {
   const fetcher: typeof fetch = async () => new Response("{broken", { status: 200, headers: { "content-type": "application/json" } });
   await assert.rejects(fetchJsonWithRetry("/broken.json", { fetcher, delays: [] }), /不是有效JSON/);
+});
+
+test("相邻比较的index和组合文件使用同一BASE_URL规则", async () => {
+  const urls: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.endsWith("index.json")) {
+      return Response.json({
+        files: [{ system: "Soybean System", product: "Soybeans", region: "Global", path: "combinations/soybeans__global.json" }],
+      });
+    }
+    return Response.json({ previous_release: "2026-03", current_release: "2026-06", records: [] });
+  };
+  await loadCombinationComparison(
+    "/research/oil-world/",
+    "2026-03",
+    "2026-06",
+    "Soybean System",
+    "Soybeans",
+    "Global",
+    { fetcher, delays: [] },
+  );
+  assert.deepEqual(urls, [
+    "/research/oil-world/data/oil_world/comparisons/2026-03_to_2026-06/index.json",
+    "/research/oil-world/data/oil_world/comparisons/2026-03_to_2026-06/combinations/soybeans__global.json",
+  ]);
 });

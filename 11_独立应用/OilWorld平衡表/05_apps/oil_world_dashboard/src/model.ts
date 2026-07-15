@@ -16,7 +16,11 @@ export interface MetricData {
     value: number;
     unit: string;
   };
-  quarter_revision: null;
+  quarter_revision: null | {
+    period: string;
+    value: number;
+    unit: string;
+  };
   quarter_revision_note: string;
   unit: string;
   original_unit: string;
@@ -81,5 +85,46 @@ export interface ReleaseIndex {
 }
 
 export interface ReleaseList {
-  releases: Array<{ release: string; label: string; available: boolean }>;
+  releases: Array<{
+    release: string;
+    label: string;
+    available: boolean;
+    previous_release?: string | null;
+    next_release?: string | null;
+  }>;
+}
+
+export interface ComparisonRecord {
+  previous_release: string;
+  current_release: string;
+  system: string;
+  product: string;
+  region: string;
+  metric: string;
+  period: string;
+  unit: string;
+  previous_value: number | null;
+  current_value: number | null;
+  quarter_revision: number | null;
+  previous_mapping_status: MappingStatus | null;
+  current_mapping_status: MappingStatus | null;
+  comparison_status: string;
+  quality_note: string;
+}
+
+export interface CombinationComparison {
+  schema_version: number;
+  previous_release: string;
+  current_release: string;
+  system: string;
+  product: string;
+  region: string;
+  records: ComparisonRecord[];
+}
+
+export interface ComparisonIndex {
+  schema_version: number;
+  previous_release: string;
+  current_release: string;
+  files: RegionFile[];
 }

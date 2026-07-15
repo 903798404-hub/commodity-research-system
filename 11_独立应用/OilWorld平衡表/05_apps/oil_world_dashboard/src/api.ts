@@ -1,4 +1,10 @@
-import type { CombinationData, ReleaseIndex, ReleaseList } from "./model";
+import type {
+  CombinationComparison,
+  CombinationData,
+  ComparisonIndex,
+  ReleaseIndex,
+  ReleaseList,
+} from "./model";
 
 export class DataLoadError extends Error {
   constructor(message: string, readonly detail?: string) {
@@ -85,6 +91,32 @@ export function loadCombination(
 ) {
   return fetchJsonWithRetry<CombinationData>(
     resolveAssetPath(`data/oil_world/releases/${release}/${path}`, baseUrl),
+    options,
+  );
+}
+
+export async function loadCombinationComparison(
+  baseUrl: string,
+  previousRelease: string,
+  currentRelease: string,
+  system: string,
+  product: string,
+  region: string,
+  options: RetryOptions = {},
+) {
+  const pair = `${previousRelease}_to_${currentRelease}`;
+  const index = await fetchJsonWithRetry<ComparisonIndex>(
+    resolveAssetPath(`data/oil_world/comparisons/${pair}/index.json`, baseUrl),
+    options,
+  );
+  const file = index.files.find(
+    (item) => item.system === system && item.product === product && item.region === region,
+  );
+  if (!file) {
+    throw new DataLoadError("相邻发布期比较清单中没有当前商品和地区。", pair);
+  }
+  return fetchJsonWithRetry<CombinationComparison>(
+    resolveAssetPath(`data/oil_world/comparisons/${pair}/${file.path}`, baseUrl),
     options,
   );
 }
