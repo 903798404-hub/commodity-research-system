@@ -1,0 +1,700 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "棕榈油体系",
+  "product": "Palm Oil",
+  "region": "Global",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 14051.0,
+      "current_value": 14177.0,
+      "quarter_revision": 126.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 12949.0,
+      "current_value": 13075.0,
+      "quarter_revision": 126.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 14573.0,
+      "current_value": 14592.0,
+      "quarter_revision": 19.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 14623.0,
+      "current_value": 14622.0,
+      "quarter_revision": -1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 12517.0,
+      "current_value": 12511.0,
+      "quarter_revision": -6.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 50189.0,
+      "current_value": 49361.0,
+      "quarter_revision": -828.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 48450.0,
+      "current_value": 48276.0,
+      "quarter_revision": -174.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 48641.0,
+      "current_value": 48824.0,
+      "quarter_revision": 183.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 53301.0,
+      "current_value": 53366.0,
+      "quarter_revision": 65.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 47650.0,
+      "current_value": 47666.0,
+      "quarter_revision": 16.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 50386.0,
+      "current_value": 50022.0,
+      "quarter_revision": -364.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 49265.0,
+      "current_value": 49248.0,
+      "quarter_revision": -17.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 48466.0,
+      "current_value": 48492.0,
+      "quarter_revision": 26.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 53504.0,
+      "current_value": 53580.0,
+      "quarter_revision": 76.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 47830.0,
+      "current_value": 47868.0,
+      "quarter_revision": 38.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 85067.0,
+      "current_value": 85815.0,
+      "quarter_revision": 748.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 83567.0,
+      "current_value": 83702.0,
+      "quarter_revision": 135.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 80361.0,
+      "current_value": 80543.0,
+      "quarter_revision": 182.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 81782.0,
+      "current_value": 81851.0,
+      "quarter_revision": 69.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 77620.0,
+      "current_value": 77671.0,
+      "quarter_revision": 51.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 84973.0,
+      "current_value": 85196.0,
+      "quarter_revision": 223.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 81651.0,
+      "current_value": 81628.0,
+      "quarter_revision": -23.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 82160.0,
+      "current_value": 82392.0,
+      "quarter_revision": 232.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 81628.0,
+      "current_value": 81667.0,
+      "quarter_revision": 39.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 75333.0,
+      "current_value": 75358.0,
+      "quarter_revision": 25.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 13947.0,
+      "current_value": 14135.0,
+      "quarter_revision": 188.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 14051.0,
+      "current_value": 14177.0,
+      "quarter_revision": 126.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 12949.0,
+      "current_value": 13075.0,
+      "quarter_revision": 126.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 14573.0,
+      "current_value": 14592.0,
+      "quarter_revision": 19.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "棕榈油体系",
+      "product": "Palm Oil",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 14623.0,
+      "current_value": 14622.0,
+      "quarter_revision": -1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN26392"
+      ],
+      "current_report_id": [
+        "AN26392"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

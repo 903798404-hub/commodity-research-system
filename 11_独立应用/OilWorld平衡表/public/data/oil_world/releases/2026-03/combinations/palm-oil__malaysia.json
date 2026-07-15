@@ -1,0 +1,618 @@
+{
+  "schema_version": 1,
+  "release": "2026-03",
+  "system": "棕榈油体系",
+  "product": "Palm Oil",
+  "region": "Malaysia",
+  "market_year_basis": [
+    "Oct–Sept"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "prior-year Ending stocks",
+      "values": {
+        "2025/26": 2360.0,
+        "2024/25": 2012.0,
+        "2023/24": 2312.0,
+        "2022/23": 2318.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 348.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN26392!C149"
+        ],
+        "2024/25": [
+          "AN26392!D149"
+        ],
+        "2023/24": [
+          "AN26392!E149"
+        ],
+        "2022/23": [
+          "AN26392!F149"
+        ]
+      },
+      "source_cell_or_range": "AN26392!C149:F149",
+      "is_derived": true,
+      "derivation_method": "Beginning Stocks(t) = Ending Stocks(t-1)",
+      "derivation_components": "AN26392 Ending Stocks row 149",
+      "quality_note": "仅对同一Oct–Sept序列顺延；不使用Jan–Dec国家表。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕统一使用Product Output；Production避免重复。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Palm oil Imports",
+      "values": {
+        "2025/26": 457.0,
+        "2024/25": 748.0,
+        "2023/24": 304.0,
+        "2022/23": 950.0,
+        "2021/22": 1211.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -291.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN26392!B56"
+        ],
+        "2024/25": [
+          "AN26392!C56"
+        ],
+        "2023/24": [
+          "AN26392!D56"
+        ],
+        "2022/23": [
+          "AN26392!E56"
+        ],
+        "2021/22": [
+          "AN26392!F56"
+        ]
+      },
+      "source_cell_or_range": "AN26392!B56:F56",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Palm oil Exports",
+      "values": {
+        "2025/26": 16540.0,
+        "2024/25": 15617.0,
+        "2023/24": 16576.0,
+        "2022/23": 15382.0,
+        "2021/22": 15539.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 923.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN26392!B88"
+        ],
+        "2024/25": [
+          "AN26392!C88"
+        ],
+        "2023/24": [
+          "AN26392!D88"
+        ],
+        "2022/23": [
+          "AN26392!E88"
+        ],
+        "2021/22": [
+          "AN26392!F88"
+        ]
+      },
+      "source_cell_or_range": "AN26392!B88:F88",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕不使用Crush；Crush属于上游油籽。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Production",
+      "values": {
+        "2025/26": 20403.0,
+        "2024/25": 19380.0,
+        "2023/24": 19710.0,
+        "2022/23": 18388.0,
+        "2021/22": 18151.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 1023.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN26392!B20"
+        ],
+        "2024/25": [
+          "AN26392!C20"
+        ],
+        "2023/24": [
+          "AN26392!D20"
+        ],
+        "2022/23": [
+          "AN26392!E20"
+        ],
+        "2021/22": [
+          "AN26392!F20"
+        ]
+      },
+      "source_cell_or_range": "AN26392!B20:F20",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Palm oil Disappear.(a)",
+      "values": {
+        "2025/26": 4250.0,
+        "2024/25": 4165.0,
+        "2023/24": 3739.0,
+        "2022/23": 3961.0,
+        "2021/22": 3260.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 85.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN26392!B127"
+        ],
+        "2024/25": [
+          "AN26392!C127"
+        ],
+        "2023/24": [
+          "AN26392!D127"
+        ],
+        "2022/23": [
+          "AN26392!E127"
+        ],
+        "2021/22": [
+          "AN26392!F127"
+        ]
+      },
+      "source_cell_or_range": "AN26392!B127:F127",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Disappearance经同表平衡关系核对后映射Domestic Consumption。",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Palm oil Ending stocks",
+      "values": {
+        "2025/26": 2430.0,
+        "2024/25": 2360.0,
+        "2023/24": 2012.0,
+        "2022/23": 2312.0,
+        "2021/22": 2318.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 70.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN26392!B149"
+        ],
+        "2024/25": [
+          "AN26392!C149"
+        ],
+        "2023/24": [
+          "AN26392!D149"
+        ],
+        "2022/23": [
+          "AN26392!E149"
+        ],
+        "2021/22": [
+          "AN26392!F149"
+        ]
+      },
+      "source_cell_or_range": "AN26392!B149:F149",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "conflict",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "",
+      "source_report_id": [
+        "AN26392"
+      ],
+      "source_report_title": [
+        "PALM OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN26392"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 原表未直接公布比例；Disappearance脚注(a)定义未在现有文件中完整找到，暂不建议派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

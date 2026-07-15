@@ -1,0 +1,700 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "菜籽体系",
+  "product": "Rapeseed Meal",
+  "region": "Global",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 492.0,
+      "current_value": 492.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 427.0,
+      "current_value": 427.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 434.0,
+      "current_value": 434.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 269.0,
+      "current_value": 269.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 366.0,
+      "current_value": 366.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 11441.0,
+      "current_value": 11781.0,
+      "quarter_revision": 340.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 10443.0,
+      "current_value": 10449.0,
+      "quarter_revision": 6.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 10035.0,
+      "current_value": 10035.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 9950.0,
+      "current_value": 9950.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 7858.0,
+      "current_value": 7858.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 11518.0,
+      "current_value": 11768.0,
+      "quarter_revision": 250.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 10692.0,
+      "current_value": 10586.0,
+      "quarter_revision": -106.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 10033.0,
+      "current_value": 10033.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 10238.0,
+      "current_value": 10238.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 7828.0,
+      "current_value": 7828.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 47112.0,
+      "current_value": 47240.0,
+      "quarter_revision": 128.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 45486.0,
+      "current_value": 45459.0,
+      "quarter_revision": -27.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 45275.0,
+      "current_value": 45273.0,
+      "quarter_revision": -2.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 42980.0,
+      "current_value": 42980.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 37670.0,
+      "current_value": 37670.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 47009.0,
+      "current_value": 47228.0,
+      "quarter_revision": 219.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 45172.0,
+      "current_value": 45257.0,
+      "quarter_revision": 85.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 45284.0,
+      "current_value": 45282.0,
+      "quarter_revision": -2.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 42527.0,
+      "current_value": 42527.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 37798.0,
+      "current_value": 37798.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 518.0,
+      "current_value": 517.0,
+      "quarter_revision": -1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 492.0,
+      "current_value": 492.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 427.0,
+      "current_value": 427.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 434.0,
+      "current_value": 434.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 269.0,
+      "current_value": 269.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

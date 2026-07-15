@@ -1,0 +1,562 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "葵花体系",
+  "product": "Sunflower Meal",
+  "region": "Russia",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 350.0,
+      "current_value": 350.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 457.0,
+      "current_value": 457.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 290.0,
+      "current_value": 290.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 108.0,
+      "current_value": 108.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 2820.0,
+      "current_value": 2900.0,
+      "quarter_revision": 80.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 2870.0,
+      "current_value": 2870.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 3210.0,
+      "current_value": 3210.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 2620.0,
+      "current_value": 2620.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 2159.0,
+      "current_value": 2159.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 6887.0,
+      "current_value": 7071.0,
+      "quarter_revision": 184.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 6871.0,
+      "current_value": 6870.0,
+      "quarter_revision": -1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 7416.0,
+      "current_value": 7416.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 6442.0,
+      "current_value": 6442.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 5661.0,
+      "current_value": 5661.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 4047.0,
+      "current_value": 4151.0,
+      "quarter_revision": 104.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 4108.0,
+      "current_value": 4107.0,
+      "quarter_revision": -1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 4039.0,
+      "current_value": 4039.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 3643.0,
+      "current_value": 3643.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 3457.0,
+      "current_value": 3457.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 370.0,
+      "current_value": 370.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 350.0,
+      "current_value": 350.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 457.0,
+      "current_value": 457.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 290.0,
+      "current_value": 290.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflower Meal",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 108.0,
+      "current_value": 108.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34792"
+      ],
+      "current_report_id": [
+        "AN34792"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

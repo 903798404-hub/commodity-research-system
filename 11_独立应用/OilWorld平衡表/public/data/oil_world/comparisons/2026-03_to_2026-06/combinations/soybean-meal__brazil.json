@@ -1,0 +1,562 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybean Meal",
+  "region": "Brazil",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 1230.0,
+      "current_value": 1230.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 1040.0,
+      "current_value": 1040.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 1650.0,
+      "current_value": 1650.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1666.0,
+      "current_value": 1666.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 24300.0,
+      "current_value": 24400.0,
+      "quarter_revision": 100.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 23394.0,
+      "current_value": 23394.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 22722.0,
+      "current_value": 22722.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 21334.0,
+      "current_value": 21334.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 20275.0,
+      "current_value": 20275.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 46841.0,
+      "current_value": 46900.0,
+      "quarter_revision": 59.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 44386.0,
+      "current_value": 44386.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 41858.0,
+      "current_value": 41858.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 41486.0,
+      "current_value": 41486.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 39090.0,
+      "current_value": 39090.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 22430.0,
+      "current_value": 22395.0,
+      "quarter_revision": -35.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 20807.0,
+      "current_value": 20807.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 19764.0,
+      "current_value": 19764.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 20174.0,
+      "current_value": 20174.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 19012.0,
+      "current_value": 19012.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 1350.0,
+      "current_value": 1340.0,
+      "quarter_revision": -10.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 1230.0,
+      "current_value": 1230.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 1040.0,
+      "current_value": 1040.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1650.0,
+      "current_value": 1650.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 1666.0,
+      "current_value": 1666.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

@@ -1,0 +1,631 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybeans",
+  "region": "G3",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Production",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 356500.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Production",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 341989.0,
+      "current_value": 346789.0,
+      "quarter_revision": 4800.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Production",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 341547.0,
+      "current_value": 341547.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Production",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 316873.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 9010.0,
+      "current_value": 8880.0,
+      "quarter_revision": -130.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 7818.0,
+      "current_value": 7818.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 9282.0,
+      "current_value": 9282.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 9896.0,
+      "current_value": 9896.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 4833.0,
+      "current_value": 4833.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 163500.0,
+      "current_value": 164800.0,
+      "quarter_revision": 1300.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 161969.0,
+      "current_value": 161969.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 156254.0,
+      "current_value": 156254.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 154036.0,
+      "current_value": 154036.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 140612.0,
+      "current_value": 140612.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Crush",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 173930.0,
+      "current_value": 175410.0,
+      "quarter_revision": 1480.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Crush",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 168449.0,
+      "current_value": 168449.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Crush",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 153505.0,
+      "current_value": 153505.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Crush",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 144143.0,
+      "current_value": 144143.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Crush",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 149655.0,
+      "current_value": 149655.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13992"
+      ],
+      "current_report_id": [
+        "AN13992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Area Harvested",
+      "period": "2026/27",
+      "unit": "1000 ha",
+      "previous_value": null,
+      "current_value": 103100.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Area Harvested",
+      "period": "2025/26",
+      "unit": "1000 ha",
+      "previous_value": 99252.0,
+      "current_value": 99252.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Area Harvested",
+      "period": "2024/25",
+      "unit": "1000 ha",
+      "previous_value": 100818.0,
+      "current_value": 100918.0,
+      "quarter_revision": 100.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Area Harvested",
+      "period": "2023/24",
+      "unit": "1000 ha",
+      "previous_value": 96594.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Yield",
+      "period": "2026/27",
+      "unit": "T/ha",
+      "previous_value": null,
+      "current_value": 3.45780795,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Yield",
+      "period": "2025/26",
+      "unit": "T/ha",
+      "previous_value": 3.44566356,
+      "current_value": 3.49402531,
+      "quarter_revision": 0.04836175,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Yield",
+      "period": "2024/25",
+      "unit": "T/ha",
+      "previous_value": 3.38775814,
+      "current_value": 3.3844012,
+      "quarter_revision": -0.00335694,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "G3",
+      "metric": "Yield",
+      "period": "2023/24",
+      "unit": "T/ha",
+      "previous_value": 3.28046255,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    }
+  ]
+}

@@ -1,0 +1,677 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybean Oil",
+  "region": "G3",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 1538.0,
+      "current_value": 1538.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 1573.0,
+      "current_value": 1573.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 1483.0,
+      "current_value": 1483.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1868.0,
+      "current_value": 1868.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 356.0,
+      "current_value": 466.0,
+      "quarter_revision": 110.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 357.0,
+      "current_value": 357.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 364.0,
+      "current_value": 364.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 263.0,
+      "current_value": 263.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 8600.0,
+      "current_value": 8710.0,
+      "quarter_revision": 110.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 9933.0,
+      "current_value": 9933.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 7314.0,
+      "current_value": 7314.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 7250.0,
+      "current_value": 7250.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 8281.0,
+      "current_value": 8281.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 34378.0,
+      "current_value": 34630.0,
+      "quarter_revision": 252.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 33619.0,
+      "current_value": 33619.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 30539.0,
+      "current_value": 30539.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 28358.0,
+      "current_value": 28358.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 29360.0,
+      "current_value": 29360.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 25970.0,
+      "current_value": 26223.0,
+      "quarter_revision": 253.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 24078.0,
+      "current_value": 24078.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 23499.0,
+      "current_value": 23499.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 21692.0,
+      "current_value": 21692.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 21241.0,
+      "current_value": 21241.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 1703.0,
+      "current_value": 1700.0,
+      "quarter_revision": -3.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 1538.0,
+      "current_value": 1538.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 1573.0,
+      "current_value": 1573.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1483.0,
+      "current_value": 1483.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Oil",
+      "region": "G3",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 1868.0,
+      "current_value": 1868.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN23992"
+      ],
+      "current_report_id": [
+        "AN23992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

@@ -1,0 +1,700 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybean Meal",
+  "region": "Global",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 9529.0,
+      "current_value": 9633.0,
+      "quarter_revision": 104.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 8155.0,
+      "current_value": 8207.0,
+      "quarter_revision": 52.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 8324.0,
+      "current_value": 8354.0,
+      "quarter_revision": 30.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 8343.0,
+      "current_value": 8407.0,
+      "quarter_revision": 64.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Beginning Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 8657.0,
+      "current_value": 8531.0,
+      "quarter_revision": -126.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 83867.0,
+      "current_value": 83690.0,
+      "quarter_revision": -177.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 80755.0,
+      "current_value": 80948.0,
+      "quarter_revision": 193.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 73473.0,
+      "current_value": 73468.0,
+      "quarter_revision": -5.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 67147.0,
+      "current_value": 67147.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 69399.0,
+      "current_value": 69399.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 83660.0,
+      "current_value": 83669.0,
+      "quarter_revision": 9.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 81890.0,
+      "current_value": 81787.0,
+      "quarter_revision": -103.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 75056.0,
+      "current_value": 75046.0,
+      "quarter_revision": -10.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 66465.0,
+      "current_value": 66468.0,
+      "quarter_revision": 3.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 69209.0,
+      "current_value": 69209.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 290490.0,
+      "current_value": 291844.0,
+      "quarter_revision": 1354.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 282602.0,
+      "current_value": 282984.0,
+      "quarter_revision": 382.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 261448.0,
+      "current_value": 261542.0,
+      "quarter_revision": 94.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 248730.0,
+      "current_value": 248636.0,
+      "quarter_revision": -94.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 249309.0,
+      "current_value": 249480.0,
+      "quarter_revision": 171.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 290177.0,
+      "current_value": 291419.0,
+      "quarter_revision": 1242.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 280094.0,
+      "current_value": 280720.0,
+      "quarter_revision": 626.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 260034.0,
+      "current_value": 260111.0,
+      "quarter_revision": 77.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 249431.0,
+      "current_value": 249368.0,
+      "quarter_revision": -63.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 249813.0,
+      "current_value": 249794.0,
+      "quarter_revision": -19.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 10048.0,
+      "current_value": 10078.0,
+      "quarter_revision": 30.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 9529.0,
+      "current_value": 9633.0,
+      "quarter_revision": 104.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 8155.0,
+      "current_value": 8207.0,
+      "quarter_revision": 52.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 8324.0,
+      "current_value": 8354.0,
+      "quarter_revision": 30.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybean Meal",
+      "region": "Global",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 8343.0,
+      "current_value": 8407.0,
+      "quarter_revision": 64.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN33992"
+      ],
+      "current_report_id": [
+        "AN33992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

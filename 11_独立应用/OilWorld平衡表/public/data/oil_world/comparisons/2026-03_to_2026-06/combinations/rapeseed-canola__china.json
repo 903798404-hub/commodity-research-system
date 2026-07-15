@@ -1,0 +1,1321 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "菜籽体系",
+  "product": "Rapeseed / Canola",
+  "region": "China",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 280.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 940.0,
+      "current_value": 960.0,
+      "quarter_revision": 20.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 300.0,
+      "current_value": 300.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 710.0,
+      "current_value": 710.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 390.0,
+      "current_value": 390.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 550.0,
+      "current_value": 550.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Beginning Stocks",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 410.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 6900.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 6800.0,
+      "current_value": 6800.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 6200.0,
+      "current_value": 6200.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 6500.0,
+      "current_value": 6500.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 6700.0,
+      "current_value": 6700.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 6500.0,
+      "current_value": 6500.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Production",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 6000.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 4200.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 2900.0,
+      "current_value": 2250.0,
+      "quarter_revision": -650.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 6294.0,
+      "current_value": 6294.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 4357.0,
+      "current_value": 4357.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 4326.0,
+      "current_value": 4326.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 2233.0,
+      "current_value": 2233.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Imports",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 2833.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 10600.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 9900.0,
+      "current_value": 9440.0,
+      "quarter_revision": -460.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 11540.0,
+      "current_value": 11540.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 10960.0,
+      "current_value": 10960.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 10400.0,
+      "current_value": 10400.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 8600.0,
+      "current_value": 8600.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Crush",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 8420.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 10900.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 10210.0,
+      "current_value": 9730.0,
+      "quarter_revision": -480.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 11854.0,
+      "current_value": 11834.0,
+      "quarter_revision": -20.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 11267.0,
+      "current_value": 11267.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 10706.0,
+      "current_value": 10706.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 8893.0,
+      "current_value": 8893.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Domestic Consumption",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 8693.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 480.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 430.0,
+      "current_value": 280.0,
+      "quarter_revision": -150.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 940.0,
+      "current_value": 960.0,
+      "quarter_revision": 20.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 300.0,
+      "current_value": 300.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 710.0,
+      "current_value": 710.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 390.0,
+      "current_value": 390.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Ending Stocks",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 550.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2026/27",
+      "unit": "percentage points",
+      "previous_value": null,
+      "current_value": 4.40366972,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2025/26",
+      "unit": "percentage points",
+      "previous_value": 4.2115573,
+      "current_value": 2.87769784,
+      "quarter_revision": -1.33385946,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2024/25",
+      "unit": "percentage points",
+      "previous_value": 7.92981272,
+      "current_value": 8.11221903,
+      "quarter_revision": 0.18240631,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2023/24",
+      "unit": "percentage points",
+      "previous_value": 2.66264312,
+      "current_value": 2.66264312,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2022/23",
+      "unit": "percentage points",
+      "previous_value": 6.63179525,
+      "current_value": 6.63179525,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2021/22",
+      "unit": "percentage points",
+      "previous_value": 4.38547172,
+      "current_value": 4.38547172,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Stocks/Use Ratio",
+      "period": "2020/21",
+      "unit": "percentage points",
+      "previous_value": 6.32692971,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN62802"
+      ],
+      "current_report_id": [
+        "AN62802"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Area Harvested",
+      "period": "2026/27",
+      "unit": "1000 ha",
+      "previous_value": null,
+      "current_value": 4000.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Area Harvested",
+      "period": "2025/26",
+      "unit": "1000 ha",
+      "previous_value": 3950.0,
+      "current_value": 3950.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Area Harvested",
+      "period": "2024/25",
+      "unit": "1000 ha",
+      "previous_value": 3810.0,
+      "current_value": 3810.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Area Harvested",
+      "period": "2023/24",
+      "unit": "1000 ha",
+      "previous_value": 3900.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Yield",
+      "period": "2026/27",
+      "unit": "T/ha",
+      "previous_value": null,
+      "current_value": 1.73,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Yield",
+      "period": "2025/26",
+      "unit": "T/ha",
+      "previous_value": 1.72,
+      "current_value": 1.72,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Yield",
+      "period": "2024/25",
+      "unit": "T/ha",
+      "previous_value": 1.63,
+      "current_value": 1.63,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed / Canola",
+      "region": "China",
+      "metric": "Yield",
+      "period": "2023/24",
+      "unit": "T/ha",
+      "previous_value": 1.67,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14993"
+      ],
+      "current_report_id": [
+        "AN14993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    }
+  ]
+}

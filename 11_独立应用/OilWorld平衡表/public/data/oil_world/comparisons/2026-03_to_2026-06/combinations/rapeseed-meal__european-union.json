@@ -1,0 +1,470 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "菜籽体系",
+  "product": "Rapeseed Meal",
+  "region": "European Union",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 1160.0,
+      "current_value": 1110.0,
+      "quarter_revision": -50.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 528.0,
+      "current_value": 529.0,
+      "quarter_revision": 1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 718.0,
+      "current_value": 718.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1136.0,
+      "current_value": 1136.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 517.0,
+      "current_value": 517.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 780.0,
+      "current_value": 790.0,
+      "quarter_revision": 10.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 864.0,
+      "current_value": 865.0,
+      "quarter_revision": 1.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 830.0,
+      "current_value": 830.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 773.0,
+      "current_value": 773.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 633.0,
+      "current_value": 633.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Product Output",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 14669.0,
+      "current_value": 14764.0,
+      "quarter_revision": 95.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Product Output",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 14216.0,
+      "current_value": 14223.0,
+      "quarter_revision": 7.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Product Output",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 14638.0,
+      "current_value": 14638.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Product Output",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 13867.0,
+      "current_value": 13867.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Product Output",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 12682.0,
+      "current_value": 12682.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 15061.0,
+      "current_value": 15092.0,
+      "quarter_revision": 31.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 13852.0,
+      "current_value": 13860.0,
+      "quarter_revision": 8.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 14546.0,
+      "current_value": 14546.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 14185.0,
+      "current_value": 14185.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "菜籽体系",
+      "product": "Rapeseed Meal",
+      "region": "European Union",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 12573.0,
+      "current_value": 12573.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN34992"
+      ],
+      "current_report_id": [
+        "AN34992"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    }
+  ]
+}

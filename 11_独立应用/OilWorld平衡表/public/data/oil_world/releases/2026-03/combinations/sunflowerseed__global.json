@@ -1,0 +1,796 @@
+{
+  "schema_version": 1,
+  "release": "2026-03",
+  "system": "葵花体系",
+  "product": "Sunflowerseed",
+  "region": "Global",
+  "market_year_basis": [
+    "Oct–Sept",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23",
+        "2021/22": "21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open’g stocks",
+      "values": {
+        "2025/26": 4610.0,
+        "2024/25": 4820.0,
+        "2023/24": 6560.0,
+        "2022/23": 7970.0,
+        "2021/22": 2870.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -210.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN147900"
+      ],
+      "source_report_title": [
+        "SUNSEED : World Supply & Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN147900"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN147900!C4"
+        ],
+        "2024/25": [
+          "AN147900!D4"
+        ],
+        "2023/24": [
+          "AN147900!E4"
+        ],
+        "2022/23": [
+          "AN147900!F4"
+        ],
+        "2021/22": [
+          "AN147900!G4"
+        ]
+      },
+      "source_cell_or_range": "AN147900!C4:G4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23",
+        "2021/22": "21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Production",
+      "values": {
+        "2025/26": 56860.0,
+        "2024/25": 55440.0,
+        "2023/24": 59400.0,
+        "2022/23": 56140.0,
+        "2021/22": 58330.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 1420.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN147900"
+      ],
+      "source_report_title": [
+        "SUNSEED : World Supply & Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN147900"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN147900!C6"
+        ],
+        "2024/25": [
+          "AN147900!D6"
+        ],
+        "2023/24": [
+          "AN147900!E6"
+        ],
+        "2022/23": [
+          "AN147900!F6"
+        ],
+        "2021/22": [
+          "AN147900!G6"
+        ]
+      },
+      "source_cell_or_range": "AN147900!C6:G6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Total Imports",
+      "values": {
+        "2025/26": 3893.0,
+        "2024/25": 2725.0,
+        "2023/24": 2615.0,
+        "2022/23": 3939.0,
+        "2021/22": 4116.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 1168.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN14792"
+      ],
+      "source_report_title": [
+        "SUNFLOWERSEED : World Crushings, Exports and Imports (1000 T)"
+      ],
+      "source_sheet": [
+        "AN14792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN14792!B52"
+        ],
+        "2024/25": [
+          "AN14792!C52"
+        ],
+        "2023/24": [
+          "AN14792!D52"
+        ],
+        "2022/23": [
+          "AN14792!E52"
+        ],
+        "2021/22": [
+          "AN14792!F52"
+        ]
+      },
+      "source_cell_or_range": "AN14792!B52:F52",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Total Exports",
+      "values": {
+        "2025/26": 3949.0,
+        "2024/25": 2953.0,
+        "2023/24": 2717.0,
+        "2022/23": 3886.0,
+        "2021/22": 4175.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 996.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN14792"
+      ],
+      "source_report_title": [
+        "SUNFLOWERSEED : World Crushings, Exports and Imports (1000 T)"
+      ],
+      "source_sheet": [
+        "AN14792"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN14792!B33"
+        ],
+        "2024/25": [
+          "AN14792!C33"
+        ],
+        "2023/24": [
+          "AN14792!D33"
+        ],
+        "2022/23": [
+          "AN14792!E33"
+        ],
+        "2021/22": [
+          "AN14792!F33"
+        ]
+      },
+      "source_cell_or_range": "AN14792!B33:F33",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23",
+        "2021/22": "21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crush (Sept/Aug)",
+      "values": {
+        "2025/26": 51060.0,
+        "2024/25": 50140.0,
+        "2023/24": 55510.0,
+        "2022/23": 51970.0,
+        "2021/22": 47770.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 920.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN147900"
+      ],
+      "source_report_title": [
+        "SUNSEED : World Supply & Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN147900"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN147900!C17"
+        ],
+        "2024/25": [
+          "AN147900!D17"
+        ],
+        "2023/24": [
+          "AN147900!E17"
+        ],
+        "2022/23": [
+          "AN147900!F17"
+        ],
+        "2021/22": [
+          "AN147900!G17"
+        ]
+      },
+      "source_cell_or_range": "AN147900!C17:G17",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23",
+        "2021/22": "21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crush + Other use",
+      "values": {
+        "2025/26": 56820.0,
+        "2024/25": 55650.0,
+        "2023/24": 61140.0,
+        "2022/23": 57550.0,
+        "2021/22": 53230.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 1170.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN147900"
+      ],
+      "source_report_title": [
+        "SUNSEED : World Supply & Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN147900"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN147900!C17",
+          "AN147900!C19"
+        ],
+        "2024/25": [
+          "AN147900!D17",
+          "AN147900!D19"
+        ],
+        "2023/24": [
+          "AN147900!E17",
+          "AN147900!E19"
+        ],
+        "2022/23": [
+          "AN147900!F17",
+          "AN147900!F19"
+        ],
+        "2021/22": [
+          "AN147900!G17",
+          "AN147900!G19"
+        ]
+      },
+      "source_cell_or_range": "AN147900!C17:G17 + AN147900!C19:G19",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crush + Other use",
+      "derivation_components": "AN147900: Crush row 17; Other use row 19",
+      "quality_note": "Oil World世界平衡式确认该两项合计为总国内使用；保留原始指标名。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23",
+        "2021/22": "21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "End’g stocks",
+      "values": {
+        "2025/26": 4650.0,
+        "2024/25": 4610.0,
+        "2023/24": 4820.0,
+        "2022/23": 6560.0,
+        "2021/22": 7970.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 40.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "Mn T",
+      "source_report_id": [
+        "AN147900"
+      ],
+      "source_report_title": [
+        "SUNSEED : World Supply & Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN147900"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN147900!C21"
+        ],
+        "2024/25": [
+          "AN147900!D21"
+        ],
+        "2023/24": [
+          "AN147900!E21"
+        ],
+        "2022/23": [
+          "AN147900!F21"
+        ],
+        "2021/22": [
+          "AN147900!G21"
+        ]
+      },
+      "source_cell_or_range": "AN147900!C21:G21",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23",
+        "2021/22": "21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Stocks/usage",
+      "values": {
+        "2025/26": 8.2,
+        "2024/25": 8.3,
+        "2023/24": 7.9,
+        "2022/23": 11.4,
+        "2021/22": 15.0
+      },
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN147900"
+      ],
+      "source_report_title": [
+        "SUNSEED : World Supply & Demand ( Mn T )"
+      ],
+      "source_sheet": [
+        "AN147900"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN147900!C28"
+        ],
+        "2024/25": [
+          "AN147900!D28"
+        ],
+        "2023/24": [
+          "AN147900!E28"
+        ],
+        "2022/23": [
+          "AN147900!F28"
+        ],
+        "2021/22": [
+          "AN147900!G28"
+        ]
+      },
+      "source_cell_or_range": "AN147900!C28:G28",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24"
+      ],
+      "original_periods": {
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24"
+      },
+      "forecast_status": {
+        "2025/26": "implicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical"
+      },
+      "original_metric": "HARVEST'D AREA",
+      "values": {
+        "2025/26": 32757.0,
+        "2024/25": 30372.0,
+        "2023/24": 29822.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 2385.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN14793"
+      ],
+      "source_report_title": [
+        "SUNFLOWERSEED : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14793"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN14793!K30"
+        ],
+        "2024/25": [
+          "AN14793!L30"
+        ],
+        "2023/24": [
+          "AN14793!M30"
+        ]
+      },
+      "source_cell_or_range": "AN14793!K30:M30",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24"
+      ],
+      "original_periods": {
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24"
+      },
+      "forecast_status": {
+        "2025/26": "implicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical"
+      },
+      "original_metric": "Y I E L D",
+      "values": {
+        "2025/26": 1.74,
+        "2024/25": 1.83,
+        "2023/24": 1.99
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -0.09,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN14793"
+      ],
+      "source_report_title": [
+        "SUNFLOWERSEED : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14793"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN14793!G30"
+        ],
+        "2024/25": [
+          "AN14793!H30"
+        ],
+        "2023/24": [
+          "AN14793!I30"
+        ]
+      },
+      "source_cell_or_range": "AN14793!G30:I30",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

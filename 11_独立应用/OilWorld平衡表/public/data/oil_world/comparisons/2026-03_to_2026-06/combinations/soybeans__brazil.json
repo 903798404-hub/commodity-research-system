@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "大豆体系",
+  "product": "Soybeans",
+  "region": "Brazil",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Area Harvested",
+      "period": "2026/27",
+      "unit": "1000 ha",
+      "previous_value": null,
+      "current_value": 51800.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Area Harvested",
+      "period": "2025/26",
+      "unit": "1000 ha",
+      "previous_value": 50500.0,
+      "current_value": 50500.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Area Harvested",
+      "period": "2024/25",
+      "unit": "1000 ha",
+      "previous_value": 48800.0,
+      "current_value": 48900.0,
+      "quarter_revision": 100.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Area Harvested",
+      "period": "2023/24",
+      "unit": "1000 ha",
+      "previous_value": 47000.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Yield",
+      "period": "2026/27",
+      "unit": "T/ha",
+      "previous_value": null,
+      "current_value": 3.55,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Yield",
+      "period": "2025/26",
+      "unit": "T/ha",
+      "previous_value": 3.54,
+      "current_value": 3.58,
+      "quarter_revision": 0.04,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Yield",
+      "period": "2024/25",
+      "unit": "T/ha",
+      "previous_value": 3.52,
+      "current_value": 3.52,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Yield",
+      "period": "2023/24",
+      "unit": "T/ha",
+      "previous_value": 3.29,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    }
+  ]
+}

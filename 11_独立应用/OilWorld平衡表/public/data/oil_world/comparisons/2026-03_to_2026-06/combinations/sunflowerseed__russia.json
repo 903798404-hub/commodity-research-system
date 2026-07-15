@@ -1,0 +1,1482 @@
+{
+  "schema_version": 1,
+  "previous_release": "2026-03",
+  "current_release": "2026-06",
+  "system": "葵花体系",
+  "product": "Sunflowerseed",
+  "region": "Russia",
+  "records": [
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 530.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 920.0,
+      "current_value": 920.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 1388.0,
+      "current_value": 1388.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 1950.0,
+      "current_value": 1950.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1310.0,
+      "current_value": 1310.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 150.0,
+      "current_value": 150.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Beginning Stocks",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 390.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 20200.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 17800.0,
+      "current_value": 17900.0,
+      "quarter_revision": 100.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 17500.0,
+      "current_value": 17500.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 18600.0,
+      "current_value": 18600.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 17100.0,
+      "current_value": 17100.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 15660.0,
+      "current_value": 15660.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Production",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 13374.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 70.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 80.0,
+      "current_value": 70.0,
+      "quarter_revision": -10.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 81.0,
+      "current_value": 81.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 64.0,
+      "current_value": 64.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 77.0,
+      "current_value": 77.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 72.0,
+      "current_value": 72.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Imports",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 70.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 240.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 240.0,
+      "current_value": 220.0,
+      "quarter_revision": -20.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 238.0,
+      "current_value": 238.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 349.0,
+      "current_value": 349.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 259.0,
+      "current_value": 259.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 276.0,
+      "current_value": 276.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Exports",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 556.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 18700.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 17000.0,
+      "current_value": 17500.0,
+      "quarter_revision": 500.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 17170.0,
+      "current_value": 17170.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 18240.0,
+      "current_value": 18240.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 15680.0,
+      "current_value": 15680.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 13730.0,
+      "current_value": 13730.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Crush",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 12640.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 19460.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 17660.0,
+      "current_value": 18140.0,
+      "quarter_revision": 480.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 17810.0,
+      "current_value": 17810.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 18877.0,
+      "current_value": 18877.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 16278.0,
+      "current_value": 16278.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 14296.0,
+      "current_value": 14296.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Domestic Consumption",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 13128.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2026/27",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 1100.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2025/26",
+      "unit": "1000 T",
+      "previous_value": 900.0,
+      "current_value": 530.0,
+      "quarter_revision": -370.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2024/25",
+      "unit": "1000 T",
+      "previous_value": 920.0,
+      "current_value": 920.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2023/24",
+      "unit": "1000 T",
+      "previous_value": 1388.0,
+      "current_value": 1388.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2022/23",
+      "unit": "1000 T",
+      "previous_value": 1950.0,
+      "current_value": 1950.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2021/22",
+      "unit": "1000 T",
+      "previous_value": 1310.0,
+      "current_value": 1310.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Ending Stocks",
+      "period": "2020/21",
+      "unit": "1000 T",
+      "previous_value": 150.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2026/27",
+      "unit": "percentage points",
+      "previous_value": null,
+      "current_value": 5.65262076,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2025/26",
+      "unit": "percentage points",
+      "previous_value": 5.09626274,
+      "current_value": 2.92171996,
+      "quarter_revision": -2.17454278,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2024/25",
+      "unit": "percentage points",
+      "previous_value": 5.16563728,
+      "current_value": 5.16563728,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2023/24",
+      "unit": "percentage points",
+      "previous_value": 7.35286327,
+      "current_value": 7.35286327,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2022/23",
+      "unit": "percentage points",
+      "previous_value": 11.97935864,
+      "current_value": 11.97935864,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2021/22",
+      "unit": "percentage points",
+      "previous_value": 9.16340235,
+      "current_value": 9.16340235,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Stocks/Use Ratio",
+      "period": "2020/21",
+      "unit": "percentage points",
+      "previous_value": 1.14259598,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN17501"
+      ],
+      "current_report_id": [
+        "AN17501"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Area Harvested",
+      "period": "2026/27",
+      "unit": "1000 ha",
+      "previous_value": null,
+      "current_value": 11900.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Area Harvested",
+      "period": "2025/26",
+      "unit": "1000 ha",
+      "previous_value": 11200.0,
+      "current_value": 11200.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Area Harvested",
+      "period": "2024/25",
+      "unit": "1000 ha",
+      "previous_value": 10230.0,
+      "current_value": 10230.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Area Harvested",
+      "period": "2023/24",
+      "unit": "1000 ha",
+      "previous_value": 9900.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Yield",
+      "period": "2026/27",
+      "unit": "T/ha",
+      "previous_value": null,
+      "current_value": 1.7,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Yield",
+      "period": "2025/26",
+      "unit": "T/ha",
+      "previous_value": 1.59,
+      "current_value": 1.6,
+      "quarter_revision": 0.01,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Yield",
+      "period": "2024/25",
+      "unit": "T/ha",
+      "previous_value": 1.71,
+      "current_value": 1.71,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Russia",
+      "metric": "Yield",
+      "period": "2023/24",
+      "unit": "T/ha",
+      "previous_value": 1.88,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    }
+  ]
+}

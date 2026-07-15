@@ -1,0 +1,39 @@
+{
+  "release": "2026-03",
+  "mode": "backfill",
+  "validate_only": false,
+  "source_file": "C:\\Users\\xx202\\Desktop\\codex自动更新\\codex-projects\\market-data\\11_独立应用\\OilWorld平衡表\\01_原始资料\\2026-03\\油世界季度表-March 2026.xlsx",
+  "source_file_hash": "e4e59a0730adc2ca21e5e3c31ba8683d9952aa0d9b8c1e5fc654ed9b3db257a0",
+  "latest_before": "2026-06",
+  "latest_after": "2026-06",
+  "previous_release": null,
+  "next_release": "2026-06",
+  "release_count": 2,
+  "comparison_pairs": [
+    "2026-03_to_2026-06"
+  ],
+  "mapping_record_count": 649,
+  "numeric_value_count": 1777,
+  "annual_change_count": 358,
+  "quality_status": "passed",
+  "build_result": {
+    "release": "2026-03",
+    "combination_count": 59,
+    "mapping_record_count": 649,
+    "numeric_observation_count": 1777,
+    "annual_change_count": 358,
+    "status_counts": {
+      "direct": 286,
+      "not_applicable": 182,
+      "derived": 75,
+      "conflict": 51,
+      "missing": 55
+    },
+    "adopted_report_count": 30,
+    "numeric_source_report_count": 28,
+    "spot_check_count": 30,
+    "source_workbook_sha256": "e4e59a0730adc2ca21e5e3c31ba8683d9952aa0d9b8c1e5fc654ed9b3db257a0",
+    "data_directory": "C:\\Users\\xx202\\AppData\\Local\\Temp\\oil_world_2026-03_qr8041g5\\builder\\01_data\\releases\\2026-03",
+    "public_directory": "C:\\Users\\xx202\\AppData\\Local\\Temp\\oil_world_2026-03_qr8041g5\\builder\\public\\data\\oil_world\\releases\\2026-03"
+  }
+}

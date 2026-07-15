@@ -1,0 +1,618 @@
+{
+  "schema_version": 1,
+  "release": "2026-03",
+  "system": "菜籽体系",
+  "product": "Rapeseed Oil",
+  "region": "Canada",
+  "market_year_basis": [
+    "Oct–Sept"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "derived",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23"
+      ],
+      "original_periods": {
+        "2025/26": "25/26F",
+        "2024/25": "24/25",
+        "2023/24": "23/24",
+        "2022/23": "22/23"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical"
+      },
+      "original_metric": "prior-year Ending stocks",
+      "values": {
+        "2025/26": 230.0,
+        "2024/25": 175.0,
+        "2023/24": 148.0,
+        "2022/23": 130.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 55.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24992!C108"
+        ],
+        "2024/25": [
+          "AN24992!D108"
+        ],
+        "2023/24": [
+          "AN24992!E108"
+        ],
+        "2022/23": [
+          "AN24992!F108"
+        ]
+      },
+      "source_cell_or_range": "AN24992!C108:F108",
+      "is_derived": true,
+      "derivation_method": "Beginning Stocks(t) = Ending Stocks(t-1)",
+      "derivation_components": "AN24992 Ending Stocks row 108",
+      "quality_note": "仅对同一Oct–Sept序列顺延；不使用Jan–Dec国家表。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕统一使用Product Output；Production避免重复。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Rapeseed oil Imports",
+      "values": {
+        "2025/26": 42.0,
+        "2024/25": 39.0,
+        "2023/24": 43.0,
+        "2022/23": 48.0,
+        "2021/22": 42.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 3.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24992!B34"
+        ],
+        "2024/25": [
+          "AN24992!C34"
+        ],
+        "2023/24": [
+          "AN24992!D34"
+        ],
+        "2022/23": [
+          "AN24992!E34"
+        ],
+        "2021/22": [
+          "AN24992!F34"
+        ]
+      },
+      "source_cell_or_range": "AN24992!B34:F34",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Rapeseed oil Exports",
+      "values": {
+        "2025/26": 3530.0,
+        "2024/25": 3352.0,
+        "2023/24": 3390.0,
+        "2022/23": 3191.0,
+        "2021/22": 2566.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 178.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24992!B70"
+        ],
+        "2024/25": [
+          "AN24992!C70"
+        ],
+        "2023/24": [
+          "AN24992!D70"
+        ],
+        "2022/23": [
+          "AN24992!E70"
+        ],
+        "2021/22": [
+          "AN24992!F70"
+        ]
+      },
+      "source_cell_or_range": "AN24992!B70:F70",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "油脂/油粕不使用Crush；Crush属于上游油籽。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Production",
+      "values": {
+        "2025/26": 5148.0,
+        "2024/25": 4856.0,
+        "2023/24": 4726.0,
+        "2022/23": 4295.0,
+        "2021/22": 3558.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 292.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24992!B10"
+        ],
+        "2024/25": [
+          "AN24992!C10"
+        ],
+        "2023/24": [
+          "AN24992!D10"
+        ],
+        "2022/23": [
+          "AN24992!E10"
+        ],
+        "2021/22": [
+          "AN24992!F10"
+        ]
+      },
+      "source_cell_or_range": "AN24992!B10:F10",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Rapeseed oil Disappear.(a)",
+      "values": {
+        "2025/26": 1690.0,
+        "2024/25": 1488.0,
+        "2023/24": 1353.0,
+        "2022/23": 1135.0,
+        "2021/22": 1031.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 202.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24992!B89"
+        ],
+        "2024/25": [
+          "AN24992!C89"
+        ],
+        "2023/24": [
+          "AN24992!D89"
+        ],
+        "2022/23": [
+          "AN24992!E89"
+        ],
+        "2021/22": [
+          "AN24992!F89"
+        ]
+      },
+      "source_cell_or_range": "AN24992!B89:F89",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "Disappearance经同表平衡关系核对后映射Domestic Consumption。",
+      "has_footnote": true,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Oct–Sept",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Oct Sept 25/26F",
+        "2024/25": "Oct Sept 24/25",
+        "2023/24": "Oct Sept 23/24",
+        "2022/23": "Oct Sept 22/23",
+        "2021/22": "Oct Sept 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Rapeseed oil Ending stocks",
+      "values": {
+        "2025/26": 200.0,
+        "2024/25": 230.0,
+        "2023/24": 175.0,
+        "2022/23": 148.0,
+        "2021/22": 130.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -30.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN24992!B108"
+        ],
+        "2024/25": [
+          "AN24992!C108"
+        ],
+        "2023/24": [
+          "AN24992!D108"
+        ],
+        "2022/23": [
+          "AN24992!E108"
+        ],
+        "2021/22": [
+          "AN24992!F108"
+        ]
+      },
+      "source_cell_or_range": "AN24992!B108:F108",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "conflict",
+      "market_year_basis": "Oct–Sept",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "",
+      "source_report_id": [
+        "AN24992"
+      ],
+      "source_report_title": [
+        "RAPESEED OIL : World Supply and Demand Balance (1000 T)"
+      ],
+      "source_sheet": [
+        "AN24992"
+      ],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 原表未直接公布比例；Disappearance脚注(a)定义未在现有文件中完整找到，暂不建议派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "该产品不适用上游作物的Area Harvested或Yield。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

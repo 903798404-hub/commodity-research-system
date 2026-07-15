@@ -1,0 +1,940 @@
+{
+  "schema_version": 1,
+  "release": "2026-03",
+  "system": "葵花体系",
+  "product": "Sunflowerseed",
+  "region": "European Union",
+  "market_year_basis": [
+    "Aug–July",
+    "Oil World作物年度"
+  ],
+  "periods": [
+    "2025/26",
+    "2024/25",
+    "2023/24",
+    "2022/23",
+    "2021/22"
+  ],
+  "forecast_status": {
+    "2025/26": "explicit_forecast",
+    "2024/25": "historical",
+    "2023/24": "historical",
+    "2022/23": "historical",
+    "2021/22": "historical"
+  },
+  "metrics": [
+    {
+      "metric": "Beginning Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2025/26": 943.0,
+        "2024/25": 1181.0,
+        "2023/24": 1528.0,
+        "2022/23": 1510.0,
+        "2021/22": 695.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -238.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B3"
+        ],
+        "2024/25": [
+          "AN049106!C3"
+        ],
+        "2023/24": [
+          "AN049106!D3"
+        ],
+        "2022/23": [
+          "AN049106!E3"
+        ],
+        "2021/22": [
+          "AN049106!F3"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B3:F3",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2025/26": 8656.0,
+        "2024/25": 8730.0,
+        "2023/24": 9951.0,
+        "2022/23": 9545.0,
+        "2021/22": 10397.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -74.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B4"
+        ],
+        "2024/25": [
+          "AN049106!C4"
+        ],
+        "2023/24": [
+          "AN049106!D4"
+        ],
+        "2022/23": [
+          "AN049106!E4"
+        ],
+        "2021/22": [
+          "AN049106!F4"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B4:F4",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Imports",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2025/26": 1220.0,
+        "2024/25": 629.0,
+        "2023/24": 778.0,
+        "2022/23": 1805.0,
+        "2021/22": 1472.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 591.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B5"
+        ],
+        "2024/25": [
+          "AN049106!C5"
+        ],
+        "2023/24": [
+          "AN049106!D5"
+        ],
+        "2022/23": [
+          "AN049106!E5"
+        ],
+        "2021/22": [
+          "AN049106!F5"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B5:F5",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Exports",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2025/26": 942.0,
+        "2024/25": 723.0,
+        "2023/24": 457.0,
+        "2022/23": 576.0,
+        "2021/22": 398.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 219.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B6"
+        ],
+        "2024/25": [
+          "AN049106!C6"
+        ],
+        "2023/24": [
+          "AN049106!D6"
+        ],
+        "2022/23": [
+          "AN049106!E6"
+        ],
+        "2021/22": [
+          "AN049106!F6"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B6:F6",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Crush",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2025/26": 7654.0,
+        "2024/25": 7595.0,
+        "2023/24": 9356.0,
+        "2022/23": 9471.0,
+        "2021/22": 9392.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 59.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B7"
+        ],
+        "2024/25": [
+          "AN049106!C7"
+        ],
+        "2023/24": [
+          "AN049106!D7"
+        ],
+        "2022/23": [
+          "AN049106!E7"
+        ],
+        "2021/22": [
+          "AN049106!F7"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B7:F7",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Product Output",
+      "mapping_status": "not_applicable",
+      "market_year_basis": "未提供（该指标无可展示数值）",
+      "periods": [],
+      "original_periods": {},
+      "forecast_status": {},
+      "original_metric": "",
+      "values": {},
+      "annual_change": null,
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "",
+      "source_report_id": [],
+      "source_report_title": [],
+      "source_sheet": [],
+      "source_cells": {},
+      "source_cell_or_range": "",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "上游油籽使用 Production 与 Crush；Product Output 不适用。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Domestic Consumption",
+      "mapping_status": "derived",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2025/26": 8955.0,
+        "2024/25": 8873.0,
+        "2023/24": 10619.0,
+        "2022/23": 10755.0,
+        "2021/22": 10657.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 82.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B7",
+          "AN049106!B8"
+        ],
+        "2024/25": [
+          "AN049106!C7",
+          "AN049106!C8"
+        ],
+        "2023/24": [
+          "AN049106!D7",
+          "AN049106!D8"
+        ],
+        "2022/23": [
+          "AN049106!E7",
+          "AN049106!E8"
+        ],
+        "2021/22": [
+          "AN049106!F7",
+          "AN049106!F8"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B7:F7 + AN049106!B8:F8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN049106 row 7 + row 8",
+      "quality_note": "只在同一国家平衡表、同一年度和单位下派生。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Ending Stocks",
+      "mapping_status": "direct",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2025/26": 923.0,
+        "2024/25": 943.0,
+        "2023/24": 1181.0,
+        "2022/23": 1528.0,
+        "2021/22": 1510.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -20.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B9"
+        ],
+        "2024/25": [
+          "AN049106!C9"
+        ],
+        "2023/24": [
+          "AN049106!D9"
+        ],
+        "2022/23": [
+          "AN049106!E9"
+        ],
+        "2021/22": [
+          "AN049106!F9"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B9:F9",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Stocks/Use Ratio",
+      "mapping_status": "derived",
+      "market_year_basis": "Aug–July",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24",
+        "2022/23",
+        "2021/22"
+      ],
+      "original_periods": {
+        "2025/26": "Aug July 25/26F",
+        "2024/25": "Aug July 24/25",
+        "2023/24": "Aug July 23/24",
+        "2022/23": "Aug July 22/23",
+        "2021/22": "Aug July 21/22"
+      },
+      "forecast_status": {
+        "2025/26": "explicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical",
+        "2022/23": "historical",
+        "2021/22": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2025/26": 10.30709101,
+        "2024/25": 10.6277471,
+        "2023/24": 11.12157454,
+        "2022/23": 14.20734542,
+        "2021/22": 14.16909074
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -0.32065609,
+        "unit": "percentage points"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "%",
+      "original_unit": "%",
+      "source_report_id": [
+        "AN049106"
+      ],
+      "source_report_title": [
+        "EU - 27 : Summary of Sunseed Supply & Demand (1000 T)"
+      ],
+      "source_sheet": [
+        "AN049106"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN049106!B9",
+          "AN049106!B7",
+          "AN049106!B8"
+        ],
+        "2024/25": [
+          "AN049106!C9",
+          "AN049106!C7",
+          "AN049106!C8"
+        ],
+        "2023/24": [
+          "AN049106!D9",
+          "AN049106!D7",
+          "AN049106!D8"
+        ],
+        "2022/23": [
+          "AN049106!E9",
+          "AN049106!E7",
+          "AN049106!E8"
+        ],
+        "2021/22": [
+          "AN049106!F9",
+          "AN049106!F7",
+          "AN049106!F8"
+        ]
+      },
+      "source_cell_or_range": "AN049106!B9:F9 / (AN049106!B7:F7 + AN049106!B8:F8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN049106 rows 7, 8, 9",
+      "quality_note": "分母口径由同商品世界表直接公布的Stocks/usage关系验证；变化单位为百分点。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Area Harvested",
+      "mapping_status": "derived",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24"
+      ],
+      "original_periods": {
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24"
+      },
+      "forecast_status": {
+        "2025/26": "implicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical"
+      },
+      "original_metric": "Area Harvested",
+      "values": {
+        "2025/26": 4683.0,
+        "2024/25": 4742.0,
+        "2023/24": 4817.0
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": -59.0,
+        "unit": "1000 ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 ha",
+      "original_unit": "1000 ha",
+      "source_report_id": [
+        "AN14793"
+      ],
+      "source_report_title": [
+        "SUNFLOWERSEED : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14793"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN14793!K4",
+          "AN14793!K5",
+          "AN14793!K6",
+          "AN14793!K7",
+          "AN14793!K8",
+          "AN14793!K9",
+          "AN14793!K10",
+          "AN14793!K11",
+          "AN14793!K12",
+          "AN14793!K13",
+          "AN14793!K14",
+          "AN14793!K15",
+          "AN14793!K16",
+          "AN14793!K17",
+          "AN14793!K18"
+        ],
+        "2024/25": [
+          "AN14793!L4",
+          "AN14793!L5",
+          "AN14793!L6",
+          "AN14793!L7",
+          "AN14793!L8",
+          "AN14793!L9",
+          "AN14793!L10",
+          "AN14793!L11",
+          "AN14793!L12",
+          "AN14793!L13",
+          "AN14793!L14",
+          "AN14793!L15",
+          "AN14793!L16",
+          "AN14793!L17",
+          "AN14793!L18"
+        ],
+        "2023/24": [
+          "AN14793!M4",
+          "AN14793!M5",
+          "AN14793!M6",
+          "AN14793!M7",
+          "AN14793!M8",
+          "AN14793!M9",
+          "AN14793!M10",
+          "AN14793!M11",
+          "AN14793!M12",
+          "AN14793!M13",
+          "AN14793!M14",
+          "AN14793!M15",
+          "AN14793!M16",
+          "AN14793!M17",
+          "AN14793!M18"
+        ]
+      },
+      "source_cell_or_range": "sum(AN14793!K4:M18)",
+      "is_derived": true,
+      "derivation_method": "EU Area Harvested = sum of listed EU member rows",
+      "derivation_components": "listed EU member rows AN14793!4:18",
+      "quality_note": "成员行合计与EU国家平衡表Production存在0–1千吨四舍五入差；季度更新需检查成员覆盖变化。",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Yield",
+      "mapping_status": "derived",
+      "market_year_basis": "Oil World作物年度",
+      "periods": [
+        "2025/26",
+        "2024/25",
+        "2023/24"
+      ],
+      "original_periods": {
+        "2025/26": "25/26",
+        "2024/25": "24/25",
+        "2023/24": "23/24"
+      },
+      "forecast_status": {
+        "2025/26": "implicit_forecast",
+        "2024/25": "historical",
+        "2023/24": "historical"
+      },
+      "original_metric": "Yield",
+      "values": {
+        "2025/26": 1.84860132,
+        "2024/25": 1.84078448,
+        "2023/24": 2.0653934
+      },
+      "annual_change": {
+        "current_period": "2025/26",
+        "previous_period": "2024/25",
+        "value": 0.00781684,
+        "unit": "T/ha"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "T/ha",
+      "original_unit": "T/ha",
+      "source_report_id": [
+        "AN14793"
+      ],
+      "source_report_title": [
+        "SUNFLOWERSEED : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN14793"
+      ],
+      "source_cells": {
+        "2025/26": [
+          "AN14793!C4",
+          "AN14793!C5",
+          "AN14793!C6",
+          "AN14793!C7",
+          "AN14793!C8",
+          "AN14793!C9",
+          "AN14793!C10",
+          "AN14793!C11",
+          "AN14793!C12",
+          "AN14793!C13",
+          "AN14793!C14",
+          "AN14793!C15",
+          "AN14793!C16",
+          "AN14793!C17",
+          "AN14793!C18",
+          "AN14793!K4",
+          "AN14793!K5",
+          "AN14793!K6",
+          "AN14793!K7",
+          "AN14793!K8",
+          "AN14793!K9",
+          "AN14793!K10",
+          "AN14793!K11",
+          "AN14793!K12",
+          "AN14793!K13",
+          "AN14793!K14",
+          "AN14793!K15",
+          "AN14793!K16",
+          "AN14793!K17",
+          "AN14793!K18"
+        ],
+        "2024/25": [
+          "AN14793!D4",
+          "AN14793!D5",
+          "AN14793!D6",
+          "AN14793!D7",
+          "AN14793!D8",
+          "AN14793!D9",
+          "AN14793!D10",
+          "AN14793!D11",
+          "AN14793!D12",
+          "AN14793!D13",
+          "AN14793!D14",
+          "AN14793!D15",
+          "AN14793!D16",
+          "AN14793!D17",
+          "AN14793!D18",
+          "AN14793!L4",
+          "AN14793!L5",
+          "AN14793!L6",
+          "AN14793!L7",
+          "AN14793!L8",
+          "AN14793!L9",
+          "AN14793!L10",
+          "AN14793!L11",
+          "AN14793!L12",
+          "AN14793!L13",
+          "AN14793!L14",
+          "AN14793!L15",
+          "AN14793!L16",
+          "AN14793!L17",
+          "AN14793!L18"
+        ],
+        "2023/24": [
+          "AN14793!E4",
+          "AN14793!E5",
+          "AN14793!E6",
+          "AN14793!E7",
+          "AN14793!E8",
+          "AN14793!E9",
+          "AN14793!E10",
+          "AN14793!E11",
+          "AN14793!E12",
+          "AN14793!E13",
+          "AN14793!E14",
+          "AN14793!E15",
+          "AN14793!E16",
+          "AN14793!E17",
+          "AN14793!E18",
+          "AN14793!M4",
+          "AN14793!M5",
+          "AN14793!M6",
+          "AN14793!M7",
+          "AN14793!M8",
+          "AN14793!M9",
+          "AN14793!M10",
+          "AN14793!M11",
+          "AN14793!M12",
+          "AN14793!M13",
+          "AN14793!M14",
+          "AN14793!M15",
+          "AN14793!M16",
+          "AN14793!M17",
+          "AN14793!M18"
+        ]
+      },
+      "source_cell_or_range": "sum(AN14793!C4:E18) / sum(AN14793!K4:M18)",
+      "is_derived": true,
+      "derivation_method": "EU Yield = EU member Production sum / EU member Area sum",
+      "derivation_components": "listed EU member rows AN14793!4:18",
+      "quality_note": "成员行合计与EU国家平衡表Production存在0–1千吨四舍五入差；季度更新需检查成员覆盖变化。",
+      "has_footnote": false,
+      "has_star": false
+    }
+  ],
+  "quality_note": ""
+}

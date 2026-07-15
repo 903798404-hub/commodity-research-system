@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "release": "2026-03",
+  "release_label": "March 2026",
+  "generated_at": "2026-07-15T06:09:57.056191+00:00",
+  "source_workbook": "01_原始资料/2026-03/油世界季度表-March 2026.xlsx",
+  "source_workbook_sha256": "e4e59a0730adc2ca21e5e3c31ba8683d9952aa0d9b8c1e5fc654ed9b3db257a0",
+  "mapping_audit": {
+    "mapping_audit": "2026-06_report_mapping_audit.json",
+    "coverage_matrix": "2026-06_coverage_matrix.csv",
+    "report_catalog": "2026-06_report_catalog.csv",
+    "metric_mapping": "2026-06_metric_mapping.csv"
+  },
+  "combination_count": 59,
+  "mapping_record_count": 649,
+  "numeric_observation_count": 1777,
+  "annual_change_count": 358,
+  "adopted_report_count": 30,
+  "numeric_source_report_count": 28,
+  "status_counts": {
+    "direct": 286,
+    "not_applicable": 182,
+    "derived": 75,
+    "conflict": 51,
+    "missing": 55
+  },
+  "available": true,
+  "release_type": "backfill",
+  "import_time": "2026-07-15T06:09:57.298970+00:00",
+  "previous_release": null,
+  "next_release": "2026-06",
+  "quality_status": "passed"
+}

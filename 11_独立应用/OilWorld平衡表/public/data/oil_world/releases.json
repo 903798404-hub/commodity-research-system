@@ -1,8 +1,34 @@
 {
+  "schema_version": 2,
   "releases": [
+    {
+      "release": "2026-03",
+      "label": "March 2026",
+      "source_file": "01_原始资料/2026-03/油世界季度表-March 2026.xlsx",
+      "source_file_hash": "e4e59a0730adc2ca21e5e3c31ba8683d9952aa0d9b8c1e5fc654ed9b3db257a0",
+      "release_type": "backfill",
+      "import_time": "2026-07-15T06:09:57.298970+00:00",
+      "previous_release": null,
+      "next_release": "2026-06",
+      "quality_status": "passed",
+      "mapping_record_count": 649,
+      "numeric_value_count": 1777,
+      "annual_change_count": 358,
+      "available": true
+    },
     {
       "release": "2026-06",
       "label": "June 2026",
+      "source_file": "01_原始资料/2026-06/油世界季度表-June 2026.xlsx",
+      "source_file_hash": "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e",
+      "release_type": "baseline",
+      "import_time": "2026-07-14T15:29:04.493664+00:00",
+      "previous_release": "2026-03",
+      "next_release": null,
+      "quality_status": "passed",
+      "mapping_record_count": 649,
+      "numeric_value_count": 1791,
+      "annual_change_count": 358,
       "available": true
     }
   ]
