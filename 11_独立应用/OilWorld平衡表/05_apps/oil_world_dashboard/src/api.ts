@@ -16,6 +16,7 @@ export class DataLoadError extends Error {
 interface RetryOptions {
   delays?: number[];
   fetcher?: typeof fetch;
+  cache?: RequestCache;
 }
 
 const RETRYABLE_STATUS = new Set([404, 502, 503, 504]);
@@ -32,7 +33,7 @@ export async function fetchJsonWithRetry<T>(url: string, options: RetryOptions =
   let lastError: unknown;
   for (let attempt = 0; attempt <= delays.length; attempt += 1) {
     try {
-      const response = await fetcher(url, { cache: "no-store" });
+      const response = await fetcher(url, { cache: options.cache ?? "default" });
       const body = await response.text();
       if (!response.ok) {
         const error = new DataLoadError(`数据请求失败（HTTP ${response.status}）`, `${url}: ${body.slice(0, 200)}`);
@@ -66,11 +67,11 @@ export async function fetchJsonWithRetry<T>(url: string, options: RetryOptions =
 export async function loadBootstrap(baseUrl: string, options: RetryOptions = {}) {
   const latest = await fetchJsonWithRetry<{ release: string }>(
     resolveAssetPath("data/oil_world/latest.json", baseUrl),
-    options,
+    { ...options, cache: "no-store" },
   );
   const releases = await fetchJsonWithRetry<ReleaseList>(
     resolveAssetPath("data/oil_world/releases.json", baseUrl),
-    options,
+    { ...options, cache: "no-cache" },
   );
   const index = await loadReleaseIndex(baseUrl, latest.release, options);
   return { latest, releases, index };
