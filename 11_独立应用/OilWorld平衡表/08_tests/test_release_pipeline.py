@@ -6,7 +6,9 @@ import shutil
 import sys
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +17,9 @@ sys.path.insert(0, str(ROOT / "03_src"))
 from oil_world_data.release_pipeline import (  # noqa: E402
     ReleasePipelineError,
     _annual_column_run,
+    _atomic_replace,
     _comparison_record,
+    _rebase_audit_for_workbook,
     update_release,
 )
 import openpyxl  # noqa: E402
@@ -84,8 +88,15 @@ class OilWorldReleasePipelineTests(unittest.TestCase):
         ]:
             shutil.copytree(ROOT / relative, self.root / relative)
         public_root = self.root / "public/data/oil_world"
-        shutil.copy2(ROOT / "public/data/oil_world/latest.json", public_root / "latest.json")
-        shutil.copy2(ROOT / "public/data/oil_world/releases.json", public_root / "releases.json")
+        write_json(public_root / "latest.json", {"release": "2026-06"})
+        write_json(
+            public_root / "releases.json",
+            {
+                "releases": [
+                    {"release": "2026-06", "label": "June 2026", "available": True}
+                ]
+            },
+        )
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -243,6 +254,125 @@ class OilWorldReleasePipelineTests(unittest.TestCase):
         )
         self.assertEqual(columns, [4, 5, 6, 7, 8])
         self.assertEqual(labels[-1], "Sept Aug 21/22")
+
+    def test_three_repeated_annual_groups_are_resolved_inside_the_metric_block(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "AN13993"
+        blocks = ((3, "PRODUCTION"), (7, "Y I E L D"), (11, "HARVEST'D AREA"))
+        for start, block in blocks:
+            sheet.cell(2, start, block)
+            for offset, label in enumerate(("25/26", "24/25", "23/24")):
+                sheet.cell(3, start + offset, label)
+            sheet.cell(3, start + 3, "20/21- 24/25")
+
+        expectations = {
+            "Production": ([3, 4, 5], "PRODUCTION"),
+            "Yield": ([7, 8, 9], "Y I E L D"),
+            "Area Harvested": ([11, 12, 13], "HARVEST'D AREA"),
+        }
+        for metric, (expected_columns, block) in expectations.items():
+            columns, labels = _annual_column_run(
+                sheet,
+                header_row=3,
+                old_start=expected_columns[0],
+                old_end=expected_columns[-1],
+                expected_labels=["26/27", "25/26", "24/25"],
+                report_id="AN13993",
+                metric=metric,
+                region="Global",
+                expected_block=block,
+            )
+            self.assertEqual(columns, expected_columns)
+            self.assertEqual(labels, ["25/26", "24/25", "23/24"])
+
+    def test_metric_block_can_move_and_have_one_fewer_year(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "AN13993"
+        sheet["D2"] = "PRODUCTION"
+        sheet["D3"] = "25/26"
+        sheet["E3"] = "24/25"
+        columns, labels = _annual_column_run(
+            sheet,
+            header_row=3,
+            old_start=3,
+            old_end=5,
+            expected_labels=["26/27", "25/26", "24/25"],
+            report_id="AN13993",
+            metric="Production",
+            region="Global",
+            unit="1000 T",
+            expected_block="PRODUCTION",
+        )
+        self.assertEqual(columns, [4, 5])
+        self.assertEqual(labels, ["25/26", "24/25"])
+
+    def test_ambiguous_annual_groups_fail_with_candidate_coordinates(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "AN13993"
+        for cell, label in (("B3", "25/26"), ("C3", "24/25"), ("F3", "25/26"), ("G3", "24/25")):
+            sheet[cell] = label
+        with self.assertRaisesRegex(ReleasePipelineError, r"B3:C3.*F3:G3"):
+            _annual_column_run(
+                sheet,
+                header_row=3,
+                old_start=4,
+                old_end=5,
+                expected_labels=["26/27", "25/26", "24/25"],
+                report_id="AN13993",
+                metric="Production",
+                region="Global",
+                unit="1000 T",
+            )
+
+    def test_real_june_rebase_preserves_all_649_mappings_and_other_reports(self):
+        audit_path = ROOT / "07_docs" / "报表映射审计" / "2026-06_report_mapping_audit.json"
+        workbook_path = ROOT / "01_原始资料" / "2026-06" / "油世界季度表-June 2026.xlsx"
+        audit = read_json(audit_path)
+        original = deepcopy(audit["coverage_matrix"])
+        rebased = _rebase_audit_for_workbook(deepcopy(audit), workbook_path)["coverage_matrix"]
+        self.assertEqual(len(rebased), 649)
+        self.assertEqual(
+            [row["mapping_status"] for row in rebased],
+            [row["mapping_status"] for row in original],
+        )
+        self.assertEqual(
+            [row["source_cell_or_range"] for row in rebased],
+            [row["source_cell_or_range"] for row in original],
+        )
+        other_reports = {
+            row["report_id"]
+            for row in audit["report_catalog"]
+            if row["decision"] == "adopted" and row["report_id"] != "AN13993"
+        }
+        self.assertEqual(len(other_reports), 29)
+
+    def test_atomic_directory_install_retries_transient_permission_error(self):
+        with (
+            patch(
+                "oil_world_data.release_pipeline.os.replace",
+                side_effect=[PermissionError("transient lock"), None],
+            ) as replace,
+            patch("oil_world_data.release_pipeline.time.sleep") as sleep,
+        ):
+            _atomic_replace(Path("source"), Path("destination"), attempts=3)
+        self.assertEqual(replace.call_count, 2)
+        sleep.assert_called_once_with(0.1)
+
+    def test_atomic_directory_install_does_not_mask_persistent_failure(self):
+        with (
+            patch(
+                "oil_world_data.release_pipeline.os.replace",
+                side_effect=PermissionError("persistent lock"),
+            ) as replace,
+            patch("oil_world_data.release_pipeline.time.sleep") as sleep,
+            self.assertRaises(PermissionError),
+        ):
+            _atomic_replace(Path("source"), Path("destination"), attempts=3)
+        self.assertEqual(replace.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "builder_version": "1.0.0",
+  "start_pattern": "__* START.htm",
+  "stats_directory": "stats",
+  "excel_engine": "openpyxl",
+  "metadata_sheet": "__cell_metadata",
+  "footnotes_sheet": "__footnotes",
+  "report_id_aliases": {
+    "2026-03": {
+      "AN51001": "AN51000A"
+    }
+  },
+  "required_report_ids": [
+    "AN139900",
+    "AN13992",
+    "AN13993",
+    "AN147900",
+    "AN14792",
+    "AN14793",
+    "AN149900",
+    "AN14992",
+    "AN14993",
+    "AN23992",
+    "AN24792",
+    "AN24992",
+    "AN26392",
+    "AN33992",
+    "AN34792",
+    "AN34992",
+    "AN049104",
+    "AN049106",
+    "AN17501",
+    "AN17503",
+    "AN18101",
+    "AN18103",
+    "AN40001",
+    "AN40502B",
+    "AN50001",
+    "AN50002",
+    "AN51000A",
+    "AN62801",
+    "AN62802",
+    "AN80501"
+  ]
+}

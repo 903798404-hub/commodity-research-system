@@ -17,7 +17,9 @@ function readCombination(product: string, region: string): CombinationData {
 
 test("默认发布期来自latest且发布清单包含2026-06", () => {
   assert.equal(latest.release, "2026-06");
-  assert.deepEqual(releases.releases.map((item: { release: string }) => item.release), ["2026-06"]);
+  const releaseIds = releases.releases.map((item: { release: string }) => item.release);
+  assert.deepEqual(releaseIds, [...releaseIds].sort());
+  assert.equal(releaseIds.at(-1), latest.release);
 });
 
 test("59个组合入口全部可解析", () => {

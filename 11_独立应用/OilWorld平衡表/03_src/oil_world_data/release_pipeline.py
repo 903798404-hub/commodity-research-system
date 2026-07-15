@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,9 +98,12 @@ def find_source_workbook(project_root: Path, release: str) -> Path:
 
 def _canonical_period(value: Any) -> str | None:
     text = str(value or "").strip()
-    match = re.search(r"(?<!\d)(20)?(\d{2})\s*/\s*(\d{2})(?!\d)", text)
-    if not match:
+    matches = list(re.finditer(r"(?<!\d)(20)?(\d{2})\s*/\s*(\d{2})(?!\d)", text))
+    # A complete annual column has exactly one market-year token. Labels such as
+    # ``20/21-24/25`` are multi-year averages and delimit adjacent annual blocks.
+    if len(matches) != 1:
         return None
+    match = matches[0]
     start = int(match.group(2))
     start_year = int(f"20{start:02d}")
     return f"{start_year}/{match.group(3)}"
@@ -113,12 +117,103 @@ def _basis(value: str) -> str:
     ).strip(" -–/")
 
 
+def _normalized_block_label(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _block_label_for_columns(sheet: Any, header_row: int, start: int, end: int) -> str:
+    """Return the unique section label immediately above an annual column group."""
+    if header_row <= 1:
+        return ""
+    labels: list[str] = []
+    normalized: set[str] = set()
+    for column in range(start, end + 1):
+        label = str(sheet.cell(header_row - 1, column).value or "").strip()
+        key = _normalized_block_label(label)
+        if label and key not in normalized:
+            labels.append(label)
+            normalized.add(key)
+    return labels[0] if len(labels) == 1 else ""
+
+
+def _candidate_description(
+    sheet: Any,
+    header_row: int,
+    group: list[tuple[int, str]],
+) -> str:
+    start, end = group[0][0], group[-1][0]
+    coordinates = f"{get_column_letter(start)}{header_row}:{get_column_letter(end)}{header_row}"
+    block = _block_label_for_columns(sheet, header_row, start, end) or "<unlabelled>"
+    years = " | ".join(item[1] for item in group)
+    return f"{coordinates} [{block}] ({years})"
+
+
+def _unconfigured_annual_group(
+    sheet: Any,
+    configured_header_row: int,
+    old_start: int,
+    old_end: int,
+    context: str,
+) -> tuple[int, list[int], list[str]]:
+    """Locate an annual group when the baseline audit contains blank merged headers."""
+    candidates: list[tuple[int, list[tuple[int, str]]]] = []
+    first_row = max(1, configured_header_row - 2)
+    last_row = min(sheet.max_row, configured_header_row + 5)
+    for header_row in range(first_row, last_row + 1):
+        annual_cells = [
+            (column, str(sheet.cell(header_row, column).value or "").strip())
+            for column in range(1, sheet.max_column + 1)
+            if _canonical_period(sheet.cell(header_row, column).value) is not None
+        ]
+        groups: list[list[tuple[int, str]]] = []
+        for annual_cell in annual_cells:
+            basis = _basis(annual_cell[1]).casefold()
+            previous_basis = _basis(groups[-1][-1][1]).casefold() if groups else ""
+            if (
+                not groups
+                or annual_cell[0] != groups[-1][-1][0] + 1
+                or basis != previous_basis
+            ):
+                groups.append([annual_cell])
+            else:
+                groups[-1].append(annual_cell)
+        candidates.extend((header_row, group) for group in groups if len(group) >= 2)
+    if not candidates:
+        raise ReleasePipelineError(f"{context}: no complete annual group near header row")
+
+    def score(candidate: tuple[int, list[tuple[int, str]]]) -> tuple[int, int, int]:
+        header_row, group = candidate
+        overlap = max(0, min(old_end, group[-1][0]) - max(old_start, group[0][0]) + 1)
+        row_distance = abs(header_row - configured_header_row)
+        column_distance = abs(group[0][0] - old_start)
+        return overlap, -row_distance, -column_distance
+
+    best_score = max(score(candidate) for candidate in candidates)
+    best = [candidate for candidate in candidates if score(candidate) == best_score]
+    if len(best) != 1:
+        descriptions = "; ".join(
+            _candidate_description(sheet, row, group) for row, group in best
+        )
+        raise ReleasePipelineError(
+            f"{context}: annual column group is ambiguous; candidates: {descriptions}"
+        )
+    header_row, group = best[0]
+    return header_row, [item[0] for item in group], [item[1] for item in group]
+
+
 def _annual_column_run(
     sheet: Any,
     header_row: int,
     old_start: int,
     old_end: int,
     expected_labels: list[str],
+    *,
+    report_id: str = "",
+    metric: str = "",
+    region: str = "",
+    unit: str = "",
+    expected_block: str = "",
+    preserve_expected_labels: bool = False,
 ) -> tuple[list[int], list[str]]:
     expected_basis = _basis(expected_labels[0]) if expected_labels else ""
     candidates: list[tuple[int, str]] = []
@@ -130,29 +225,69 @@ def _annual_column_run(
         label_basis = _basis(label)
         if expected_basis and label_basis and label_basis.casefold() != expected_basis.casefold():
             continue
-        if not expected_basis and label_basis:
-            continue
         candidates.append((column, label))
 
     groups: list[list[tuple[int, str]]] = []
     for candidate in candidates:
-        if not groups or candidate[0] != groups[-1][-1][0] + 1:
+        previous_basis = _basis(groups[-1][-1][1]).casefold() if groups else ""
+        candidate_basis = _basis(candidate[1]).casefold()
+        if (
+            not groups
+            or candidate[0] != groups[-1][-1][0] + 1
+            or candidate_basis != previous_basis
+        ):
             groups.append([candidate])
         else:
             groups[-1].append(candidate)
     groups = [group for group in groups if len(group) >= 2]
+    target_width = len(expected_labels)
+    if target_width:
+        windowed_groups: list[list[tuple[int, str]]] = []
+        for group in groups:
+            if len(group) > target_width:
+                windowed_groups.extend(
+                    group[offset : offset + target_width]
+                    for offset in range(len(group) - target_width + 1)
+                )
+            else:
+                windowed_groups.append(group)
+        groups = windowed_groups
     if not groups:
         raise ReleasePipelineError(
             f"{sheet.title} 第 {header_row} 行无法识别完整年度列，拒绝继续发布"
         )
 
-    def score(group: list[tuple[int, str]]) -> tuple[int, int, int]:
+    source_block = expected_block or _block_label_for_columns(
+        sheet, header_row, old_start, old_end
+    )
+    normalized_source_block = _normalized_block_label(source_block)
+
+    def score(group: list[tuple[int, str]]) -> tuple[int, int, int, int]:
+        group_block = _block_label_for_columns(
+            sheet, header_row, group[0][0], group[-1][0]
+        )
+        block_match = int(
+            bool(normalized_source_block)
+            and _normalized_block_label(group_block) == normalized_source_block
+        )
         overlap = max(0, min(old_end, group[-1][0]) - max(old_start, group[0][0]) + 1)
         distance = abs(group[0][0] - old_start)
         width_delta = abs(len(group) - len(expected_labels))
-        return overlap, -distance, -width_delta
+        return block_match, overlap, -distance, -width_delta
 
-    selected = max(groups, key=score)
+    best_score = max(score(group) for group in groups)
+    best_groups = [group for group in groups if score(group) == best_score]
+    if len(best_groups) != 1:
+        context = " / ".join(
+            item for item in (report_id or sheet.title, metric, region, unit) if item
+        )
+        candidates_text = "; ".join(
+            _candidate_description(sheet, header_row, group) for group in best_groups
+        )
+        raise ReleasePipelineError(
+            f"{context}: annual column group is ambiguous; candidates: {candidates_text}"
+        )
+    selected = best_groups[0]
     columns = [item[0] for item in selected]
     labels = [item[1] for item in selected]
     canonical = [_canonical_period(label) for label in labels]
@@ -165,13 +300,16 @@ def _annual_column_run(
         raise ReleasePipelineError(
             f"{sheet.title} 完整年度列数量变化超过安全范围：{len(expected_labels)} -> {len(columns)}"
         )
-    return columns, labels
+    return columns, list(expected_labels) if preserve_expected_labels else labels
 
 
 def _rebase_audit_for_workbook(audit: dict[str, Any], workbook_path: Path) -> dict[str, Any]:
     """Re-anchor audited annual columns while keeping every audited data row unchanged."""
     workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
-    cache: dict[tuple[str, int, int, int, tuple[str, ...]], tuple[list[int], list[str]]] = {}
+    cache: dict[
+        tuple[str, int, int, int, tuple[str, ...], str, str, str, str, bool],
+        tuple[list[int], list[str]],
+    ] = {}
     try:
         for row in audit["coverage_matrix"]:
             if row.get("mapping_status") not in ELIGIBLE_MAPPING_STATUSES:
@@ -183,9 +321,6 @@ def _rebase_audit_for_workbook(audit: dict[str, Any], workbook_path: Path) -> di
                     f"{row.get('commodity')} / {row.get('country_or_region')} / {row.get('metric')} 缺少可追溯来源单元格"
                 )
             expected_labels = [part.strip() for part in str(row.get("market_years") or "").split("|") if part.strip()]
-            if not expected_labels:
-                # Some global balances have merged/blank audit headers; the existing generator safely reads them.
-                continue
             header_row = int(row.get("header_row") or 0)
             if header_row < 1:
                 raise ReleasePipelineError(f"{row.get('primary_report_id')} 缺少有效表头行")
@@ -198,11 +333,59 @@ def _rebase_audit_for_workbook(audit: dict[str, Any], workbook_path: Path) -> di
                     raise ReleasePipelineError(f"必需工作表缺失：{sheet_name}")
                 old_start = column_index_from_string(match.group("start_col"))
                 old_end = column_index_from_string(match.group("end_col"))
-                key = (sheet_name, header_row, old_start, old_end, tuple(expected_labels))
+                report_id = str(row.get("primary_report_id") or sheet_name)
+                metric = str(row.get("metric") or "")
+                region = str(row.get("country_or_region") or "")
+                unit = str(row.get("original_unit") or row.get("standard_unit") or "")
+                derivation_text = " ".join(
+                    str(row.get(field) or "")
+                    for field in ("original_metric", "derivation_formula", "derivation_components")
+                ).casefold()
+                preserve_expected_labels = (
+                    "prior-year" in derivation_text or "t-1" in derivation_text
+                )
+                expected_block = _block_label_for_columns(
+                    workbook[sheet_name], header_row, old_start, old_end
+                )
+                key = (
+                    sheet_name,
+                    header_row,
+                    old_start,
+                    old_end,
+                    tuple(expected_labels),
+                    report_id,
+                    metric,
+                    region,
+                    unit,
+                    preserve_expected_labels,
+                )
                 if key not in cache:
-                    cache[key] = _annual_column_run(
-                        workbook[sheet_name], header_row, old_start, old_end, expected_labels
-                    )
+                    if expected_labels:
+                        cache[key] = _annual_column_run(
+                            workbook[sheet_name],
+                            header_row,
+                            old_start,
+                            old_end,
+                            expected_labels,
+                            report_id=report_id,
+                            metric=metric,
+                            region=region,
+                            unit=unit,
+                            expected_block=expected_block,
+                            preserve_expected_labels=preserve_expected_labels,
+                        )
+                    else:
+                        context = " / ".join(
+                            item for item in (report_id, metric, region, unit) if item
+                        )
+                        _, columns, labels = _unconfigured_annual_group(
+                            workbook[sheet_name],
+                            header_row,
+                            old_start,
+                            old_end,
+                            context,
+                        )
+                        cache[key] = columns, labels
                 columns, labels = cache[key]
                 displayed_labels = displayed_labels or labels
                 canonical_sequences.append([_canonical_period(label) for label in labels])
@@ -490,7 +673,19 @@ def _copy_new_directory(source: Path, destination: Path) -> None:
     if temporary.exists():
         shutil.rmtree(temporary)
     shutil.copytree(source, temporary)
-    os.replace(temporary, destination)
+    _atomic_replace(temporary, destination)
+
+
+def _atomic_replace(source: Path, destination: Path, attempts: int = 5) -> None:
+    """Retry transient Windows/OneDrive directory locks without masking persistent failures."""
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt + 1 == attempts:
+                raise
+            time.sleep(0.1 * (2**attempt))
 
 
 def _replace_comparison_root(source: Path, destination: Path) -> None:
@@ -502,12 +697,12 @@ def _replace_comparison_root(source: Path, destination: Path) -> None:
             shutil.rmtree(path)
     shutil.copytree(source, temporary)
     if destination.exists():
-        os.replace(destination, backup)
+        _atomic_replace(destination, backup)
     try:
-        os.replace(temporary, destination)
+        _atomic_replace(temporary, destination)
     except Exception:
         if backup.exists():
-            os.replace(backup, destination)
+            _atomic_replace(backup, destination)
         raise
     if backup.exists():
         shutil.rmtree(backup)

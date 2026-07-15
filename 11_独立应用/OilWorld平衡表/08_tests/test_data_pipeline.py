@@ -178,11 +178,16 @@ class OilWorldDataTests(unittest.TestCase):
             self.assertTrue((PUBLIC_RELEASE / item["path"]).exists())
             self.assertEqual(sha256(RELEASE / item["path"]), sha256(PUBLIC_RELEASE / item["path"]))
 
-    def test_17_latest_and_release_list_point_to_baseline(self):
+    def test_17_latest_and_release_list_include_backfill_without_moving_latest(self):
         latest = load_json(ROOT / "public" / "data" / "oil_world" / "latest.json")
         releases = load_json(ROOT / "public" / "data" / "oil_world" / "releases.json")
         self.assertEqual(latest["release"], "2026-06")
-        self.assertEqual([item["release"] for item in releases["releases"]], ["2026-06"])
+        self.assertEqual(
+            [item["release"] for item in releases["releases"]],
+            ["2026-03", "2026-06"],
+        )
+        self.assertEqual(releases["releases"][0]["next_release"], "2026-06")
+        self.assertEqual(releases["releases"][1]["previous_release"], "2026-03")
 
     def test_18_all_index_files_exist_and_are_valid(self):
         self.assertEqual(len(self.index["files"]), 59)
