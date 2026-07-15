@@ -37,10 +37,15 @@ select:focus { border-color: #3b8b75; box-shadow: 0 0 0 3px rgba(59,139,117,.12)
 .metric-card dl { display: grid; gap: 7px; margin: 0; font-size: 12px; }
 .metric-card dl div { display: flex; justify-content: space-between; gap: 8px; }
 .metric-card dt { color: #87968f; } .metric-card dd { margin: 0; color: #41564e; font-weight: 600; }
+.metric-card dd.metric-card__revision--value { padding: 1px 6px; color: var(--change-accent); background: var(--change-bg); border-radius: 5px; }
+.metric-card dd.metric-card__revision--muted { color: var(--change-muted); font-weight: 500; }
 .matrix-panel, .chart-panel, .sources-panel { padding: 26px 28px; margin-top: 22px; }
 .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .section-heading h2 { margin: 5px 0 0; font-family: Georgia, "Microsoft YaHei", serif; color: #163e33; font-size: 24px; }
 .section-heading p { max-width: 520px; margin: 0; color: #798982; font-size: 12px; text-align: right; }
+.matrix-heading { align-items: flex-start; flex-wrap: wrap; }
+.matrix-heading__meta { display: flex; flex: 1 1 420px; flex-direction: column; align-items: flex-end; gap: 8px; }
+.section-heading .market-year-basis { display: inline-flex; padding: 6px 10px; color: #49675d; background: #edf5f1; border: 1px solid #d6e6df; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0; }
 .table-scroll { overflow-x: auto; border: 1px solid #dfe8e3; border-radius: 14px; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; font-size: 13px; }
 th, td { min-width: 116px; padding: 13px 14px; border-bottom: 1px solid #e7edea; text-align: right; white-space: nowrap; }
@@ -90,3 +95,7 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 .error-card { display: flex; align-items: center; gap: 14px; margin: 22px 0; padding: 16px 20px; color: #772f25; background: #fff0ed; border: 1px solid #f3c5bc; border-radius: 14px; }
 .error-card span { flex: 1; }.error-card button { padding: 8px 13px; color: #fff; background: #9f493a; border: 0; border-radius: 8px; cursor: pointer; }
 @media (max-width: 1280px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px) {
+  .matrix-heading__meta { flex-basis: 100%; align-items: flex-start; }
+  .matrix-heading__meta p { text-align: left; }
+}

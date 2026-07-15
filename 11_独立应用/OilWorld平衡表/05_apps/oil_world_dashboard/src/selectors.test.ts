@@ -3,7 +3,17 @@ import test from "node:test";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { CombinationData, ReleaseIndex } from "./model";
-import { cardMetrics, displayUnit, displayValue, formatSignedChange, regionsFor, validSelection, visibleMetrics } from "./selectors";
+import {
+  cardMetrics,
+  displayUnit,
+  displayValue,
+  formatSignedChange,
+  marketYearBasisLabel,
+  quarterRevisionDisplay,
+  regionsFor,
+  validSelection,
+  visibleMetrics,
+} from "./selectors";
 
 const publicRoot = fileURLToPath(new URL("../../../public/data/oil_world/", import.meta.url));
 const index = JSON.parse(fs.readFileSync(`${publicRoot}/releases/2026-06/index.json`, "utf8")) as ReleaseIndex;
@@ -53,4 +63,22 @@ test("变化值保留统一的正负号格式", () => {
   assert.equal(formatSignedChange(-12.5, "1000 T"), "−12.5");
   assert.equal(formatSignedChange(0, "1000 T"), "0");
   assert.equal(formatSignedChange(null, "1000 T"), "—");
+});
+
+test("季度修正无值统一显示短横线且有效值保留正负号", () => {
+  assert.deepEqual(quarterRevisionDisplay({ quarter_revision: null }), { text: "—", hasValue: false });
+  assert.deepEqual(
+    quarterRevisionDisplay({ quarter_revision: { period: "2025/26", value: 490, unit: "1000 T" } }),
+    { text: "+49 万吨", hasValue: true },
+  );
+  assert.deepEqual(
+    quarterRevisionDisplay({ quarter_revision: { period: "2025/26", value: -120, unit: "1000 T" } }),
+    { text: "−12 万吨", hasValue: true },
+  );
+});
+
+test("年度口径标签随当前组合动态变化且缺失时回退", () => {
+  assert.equal(marketYearBasisLabel(["Oct–Sept", "Oil World作物年度"]), "年度口径：Oct–Sept｜Oil World作物年度");
+  assert.equal(marketYearBasisLabel(["Jan–Dec"]), "年度口径：Jan–Dec");
+  assert.equal(marketYearBasisLabel([]), "年度口径：—");
 });

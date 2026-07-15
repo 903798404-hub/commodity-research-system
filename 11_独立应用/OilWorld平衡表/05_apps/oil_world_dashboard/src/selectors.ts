@@ -64,6 +64,24 @@ export function formatSignedChange(value: number | null, unit: string): string {
   return magnitude;
 }
 
+export function quarterRevisionDisplay(metric: Pick<MetricData, "quarter_revision">): {
+  text: string;
+  hasValue: boolean;
+} {
+  const revision = metric.quarter_revision;
+  if (!revision) return { text: "—", hasValue: false };
+  const value = displayValue(revision.value, revision.unit);
+  return {
+    text: `${formatSignedChange(value, revision.unit)} ${displayUnit(revision.unit)}`,
+    hasValue: true,
+  };
+}
+
+export function marketYearBasisLabel(basis: readonly string[] | null | undefined): string {
+  const labels = [...new Set((basis ?? []).map((item) => item.trim()).filter(Boolean))];
+  return `年度口径：${labels.length ? labels.join("｜") : "—"}`;
+}
+
 export function cardMetrics(data: CombinationData): MetricData[] {
   const isUpstream = ["Soybeans", "Rapeseed / Canola", "Sunflowerseed"].includes(data.product);
   const priority = isUpstream

@@ -15,7 +15,9 @@ import {
   fileFor,
   formatNumber,
   formatSignedChange,
+  marketYearBasisLabel,
   productsFor,
+  quarterRevisionDisplay,
   regionsFor,
   validSelection,
   visibleMetrics,
@@ -214,7 +216,6 @@ export default function App() {
             <div>
               <strong>{data.product}</strong><span> · {data.region}</span>
             </div>
-            <div>原始年度口径：{data.market_year_basis.join("；")}</div>
           </section>
 
           <section className="cards" aria-label="最新状态">
@@ -224,9 +225,7 @@ export default function App() {
               const change = metric.annual_change
                 ? displayValue(metric.annual_change.value, metric.annual_change.unit === "1000 T" ? "1000 T" : metric.unit)
                 : null;
-              const revision = metric.quarter_revision
-                ? displayValue(metric.quarter_revision.value, metric.quarter_revision.unit)
-                : null;
+              const revision = quarterRevisionDisplay(metric);
               return (
                 <article className="metric-card" key={metric.metric}>
                   <div className="metric-card__title">
@@ -237,9 +236,7 @@ export default function App() {
                   <div className="metric-card__value">{formatNumber(shown, metric.unit)} <small>{displayUnit(metric.unit)}</small></div>
                   <dl>
                     <div><dt>年度变化</dt><dd>{change === null ? "—" : formatNumber(change, metric.annual_change?.unit ?? metric.unit)} {change === null ? "" : displayUnit(metric.annual_change?.unit ?? metric.unit)}</dd></div>
-                    <div><dt>季度修正</dt><dd>{revision === null
-                      ? metric.quarter_revision_note
-                      : `${formatSignedChange(revision, metric.quarter_revision!.unit)} ${displayUnit(metric.quarter_revision!.unit)}`}</dd></div>
+                    <div><dt>季度修正</dt><dd className={revision.hasValue ? "metric-card__revision--value" : "metric-card__revision--muted"}>{revision.text}</dd></div>
                   </dl>
                 </article>
               );
@@ -247,9 +244,12 @@ export default function App() {
           </section>
 
           <section className="panel matrix-panel">
-            <div className="section-heading">
+            <div className="section-heading matrix-heading">
               <div><span>MARKET YEAR MATRIX</span><h2>完整市场年度平衡表</h2></div>
-              <p>数量底层单位为1000 T，页面换算为万吨；空白与0严格区分。</p>
+              <div className="matrix-heading__meta">
+                <span className="market-year-basis">{marketYearBasisLabel(data.market_year_basis)}</span>
+                <p>数量底层单位为1000 T，页面换算为万吨；空白与0严格区分。</p>
+              </div>
             </div>
             <div className="table-scroll">
               <table>
@@ -270,21 +270,17 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((metric) => (
-                    <tr key={metric.metric} className={metric.mapping_status === "conflict" ? "conflict-row" : ""}>
+                  {rows.map((metric) => {
+                    const revision = quarterRevisionDisplay(metric);
+                    return <tr key={metric.metric} className={metric.mapping_status === "conflict" ? "conflict-row" : ""}>
                       <th>
                         <span>{metric.metric}</span>
                         {metric.is_derived && <em className="tag">派生</em>}
                         {metric.mapping_status === "conflict" && <span className="warning-dot" title={metric.quality_note}>!</span>}
                       </th>
                       <td>{displayUnit(metric.unit)}</td>
-                      <td className={`change-cell ${metric.quarter_revision ? "change-cell--value" : "change-cell--muted"}`}>
-                        {metric.quarter_revision
-                          ? `${formatSignedChange(
-                              displayValue(metric.quarter_revision.value, metric.quarter_revision.unit),
-                              metric.quarter_revision.unit,
-                            )} ${displayUnit(metric.quarter_revision.unit)}`
-                          : metric.quarter_revision_note}
+                      <td className={`change-cell ${revision.hasValue ? "change-cell--value" : "change-cell--muted"}`}>
+                        {revision.text}
                       </td>
                       <td className={`change-cell ${metric.annual_change ? "change-cell--value" : "change-cell--muted"}`}>
                         {metric.annual_change
@@ -298,8 +294,8 @@ export default function App() {
                         const forecast = metric.forecast_status[period] && metric.forecast_status[period] !== "historical";
                         return <td className={forecast ? "forecast-cell" : ""} key={period}>{formatNumber(value, metric.unit)}</td>;
                       })}
-                    </tr>
-                  ))}
+                    </tr>;
+                  })}
                 </tbody>
               </table>
             </div>
