@@ -3,8 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadBootstrap } from "./api";
-import { applyQuarterRevisions } from "./comparison";
-import type { CombinationComparison, CombinationData, ComparisonIndex, ReleaseIndex } from "./model";
+import type { CombinationData, ReleaseIndex } from "./model";
 import {
   PRESENTATION_SLIDES,
   isPresentationRoute,
@@ -17,6 +16,7 @@ import {
 import {
   metricsInOrder,
   presentationCellValue,
+  presentationMetricLabel,
   recentAvailablePeriods,
 } from "./presentation/selectors";
 import {
@@ -24,6 +24,11 @@ import {
   presentationPeriodBasis,
   presentationPeriodFooterDetails,
 } from "./presentation/presentationPeriodBasis";
+import {
+  applyPresentationStockUsageRatio,
+  PRESENTATION_STOCK_USAGE_FOOTER_NOTE,
+  PRESENTATION_STOCK_USAGE_RATIO,
+} from "./presentation/presentationStockUsageRatio";
 import {
   displayUnit,
   displayValue,
@@ -47,18 +52,36 @@ function releaseIndex(release: string): ReleaseIndex {
 }
 
 function combination(release: string, region: string): CombinationData {
+  return productCombination(release, "Soybeans", region);
+}
+
+function productCombination(release: string, product: string, region: string): CombinationData {
   const index = releaseIndex(release);
-  const file = index.files.find((item) => item.product === "Soybeans" && item.region === region);
+  const file = index.files.find((item) => item.product === product && item.region === region);
   assert.ok(file);
   return readJson(`${publicRoot}/releases/${release}/${file.path}`);
 }
 
-function comparison(region: string): CombinationComparison {
-  const root = `${publicRoot}/comparisons/2026-03_to_2026-06`;
-  const index = readJson<ComparisonIndex>(`${root}/index.json`);
-  const file = index.files.find((item) => item.product === "Soybeans" && item.region === region);
-  assert.ok(file);
-  return readJson(`${root}/${file.path}`);
+function presentationProductCombination(
+  release: string,
+  product: string,
+  region: string,
+  periodFamily?: string,
+  sourceRole?: string,
+): CombinationData {
+  const current = productCombination(release, product, region);
+  const previous = release === "2026-06" ? productCombination("2026-03", product, region) : null;
+  return applyPresentationStockUsageRatio(current, previous, { periodFamily, sourceRole });
+}
+
+function presentationRatio(data: CombinationData) {
+  const ratio = data.metrics.find((metric) => metric.metric === PRESENTATION_STOCK_USAGE_RATIO);
+  assert.ok(ratio);
+  return ratio;
+}
+
+function roundedPercent(value: number | null | undefined): number | null {
+  return typeof value === "number" ? Number(value.toFixed(2)) : null;
 }
 
 test("/presentation可访问且根路由仍属于详细看板", () => {
@@ -89,6 +112,8 @@ test("发布期可通过release查询参数切换", () => {
 
 test("页面状态可由同一查询参数恢复且默认回到第1页", () => {
   assert.equal(pageFromSearch("?slide=soybeans-production-conditions", PRESENTATION_SLIDES), 1);
+  assert.equal(pageFromSearch("?slide=soybean-oil-balance", PRESENTATION_SLIDES), 2);
+  assert.equal(pageFromSearch("?slide=soybean-meal-balance", PRESENTATION_SLIDES), 3);
   assert.equal(pageFromSearch("", PRESENTATION_SLIDES), 0);
   assert.equal(searchForSlide("?release=2026-06", "soybeans-balance"), "?release=2026-06&slide=soybeans-balance");
 });
@@ -110,7 +135,7 @@ test("第1页为Oil World大豆年度供需", () => {
   assert.equal(PRESENTATION_SLIDES[0].slideId, "soybeans-balance");
   assert.equal(PRESENTATION_SLIDES[0].slideType, "balance");
   assert.equal(PRESENTATION_SLIDES[0].title, "Oil World 大豆年度供需");
-  assert.equal(PRESENTATION_SLIDES[0].shortTitle, "年度供需");
+  assert.equal(PRESENTATION_SLIDES[0].shortTitle, "大豆供需");
   assert.equal(PRESENTATION_SLIDES[0].pageNumber, 1);
   assert.equal(PRESENTATION_SLIDES[0].layoutOrder, 0);
 });
@@ -118,13 +143,76 @@ test("第1页为Oil World大豆年度供需", () => {
 test("第2页为Oil World大豆生产条件", () => {
   assert.equal(PRESENTATION_SLIDES[1].slideId, "soybeans-production-conditions");
   assert.equal(PRESENTATION_SLIDES[1].slideType, "production-conditions");
-  assert.equal(PRESENTATION_SLIDES[1].shortTitle, "生产条件");
+  assert.equal(PRESENTATION_SLIDES[1].shortTitle, "大豆生产");
   assert.equal(PRESENTATION_SLIDES[1].pageNumber, 2);
   assert.equal(PRESENTATION_SLIDES[1].layoutOrder, 1);
   assert.deepEqual(PRESENTATION_SLIDES[1].metrics, ["Production", "Area Harvested", "Yield"]);
 });
 
-test("每页包含六个地区", () => {
+test("四页配置顺序和页码固定", () => {
+  assert.deepEqual(PRESENTATION_SLIDES.map((slide) => ({
+    slideId: slide.slideId,
+    shortTitle: slide.shortTitle,
+    pageNumber: slide.pageNumber,
+    layoutOrder: slide.layoutOrder,
+  })), [
+    { slideId: "soybeans-balance", shortTitle: "大豆供需", pageNumber: 1, layoutOrder: 0 },
+    { slideId: "soybeans-production-conditions", shortTitle: "大豆生产", pageNumber: 2, layoutOrder: 1 },
+    { slideId: "soybean-oil-balance", shortTitle: "豆油供需", pageNumber: 3, layoutOrder: 2 },
+    { slideId: "soybean-meal-balance", shortTitle: "豆粕供需", pageNumber: 4, layoutOrder: 3 },
+  ]);
+});
+
+test("第3页和第4页使用共享供需模板及指定标题", () => {
+  const expectedMetrics = [
+    "Beginning Stocks",
+    "Product Output",
+    "Imports",
+    "Exports",
+    "Domestic Consumption",
+    "Ending Stocks",
+    PRESENTATION_STOCK_USAGE_RATIO,
+  ];
+  const oil = PRESENTATION_SLIDES[2];
+  const meal = PRESENTATION_SLIDES[3];
+  assert.equal(oil.slideType, "balance");
+  assert.equal(oil.product, "Soybean Oil");
+  assert.equal(oil.productLabel, "豆油");
+  assert.equal(oil.title, "Oil World 豆油年度供需");
+  assert.equal(oil.subtitle, "高密度季度研究演示 · Soybean Oil · 六地区");
+  assert.deepEqual(oil.metrics, expectedMetrics);
+  assert.equal(meal.slideType, "balance");
+  assert.equal(meal.product, "Soybean Meal");
+  assert.equal(meal.productLabel, "豆粕");
+  assert.equal(meal.title, "Oil World 豆粕年度供需");
+  assert.equal(meal.subtitle, "高密度季度研究演示 · Soybean Meal · 六地区");
+  assert.deepEqual(meal.metrics, expectedMetrics);
+});
+
+test("豆油豆粕六地区明确选择marketing_year加balance", () => {
+  for (const slide of PRESENTATION_SLIDES.slice(2)) {
+    assert.deepEqual(slide.regions.map((region) => region.region), expectedRegions);
+    assert.ok(slide.regions.every((region) => region.periodFamily === "marketing_year" && region.sourceRole === "balance"));
+    for (const region of slide.regions) {
+      const data = presentationProductCombination("2026-06", slide.product, region.region, region.periodFamily, region.sourceRole);
+      const rows = metricsInOrder(data, slide.metrics, region.periodFamily, region.sourceRole);
+      assert.equal(rows.length, 7);
+      assert.ok(rows.every((metric) => metric.period_family === "marketing_year" && metric.source_role === "balance"));
+    }
+  }
+});
+
+test("Product Output仅在演示文案显示为产量且内部指标不变", () => {
+  assert.equal(presentationMetricLabel("Product Output"), "产量");
+  for (const product of ["Soybean Oil", "Soybean Meal"]) {
+    const metric = productCombination("2026-06", product, "Global").metrics.find((item) => item.metric === "Product Output");
+    assert.ok(metric);
+    assert.equal(metric.metric, "Product Output");
+  }
+});
+
+test("四个演示页均包含六个地区", () => {
+  assert.equal(PRESENTATION_SLIDES.length, 4);
   assert.ok(PRESENTATION_SLIDES.every((slide) => slide.regions.length === 6));
 });
 
@@ -150,9 +238,9 @@ test("Brazil第1页只使用calendar_year加balance", () => {
 });
 
 test("月份口径配置具有可追溯身份和来源", () => {
-  assert.equal(PRESENTATION_PERIOD_BASIS.length, 12);
+  assert.equal(PRESENTATION_PERIOD_BASIS.length, 24);
   for (const basis of PRESENTATION_PERIOD_BASIS) {
-    assert.equal(basis.product, "Soybeans");
+    assert.ok(["Soybeans", "Soybean Oil", "Soybean Meal"].includes(basis.product));
     assert.ok(basis.region);
     assert.ok(basis.period_family);
     assert.ok(basis.source_role);
@@ -162,7 +250,7 @@ test("月份口径配置具有可追溯身份和来源", () => {
   }
 });
 
-test("两页每张地区表均显示具体月份、未注明或混合口径", () => {
+test("四页每张地区表均显示具体月份、未注明或混合口径", () => {
   for (const release of ["2026-03", "2026-06"]) {
     for (const slide of PRESENTATION_SLIDES) {
       for (const region of slide.regions) {
@@ -228,6 +316,47 @@ test("生产表收获期不会被当作年度起止月", () => {
   assert.match(presentationPeriodFooterDetails(slide, slide.regions).join(" "), /收获期：US Sep–Nov · BR Jan–Mar · AR Apr–May/);
 });
 
+test("豆油豆粕六地区月份口径来自集中配置且与正式字段一致", () => {
+  for (const release of ["2026-03", "2026-06"]) {
+    for (const slide of PRESENTATION_SLIDES.slice(2)) {
+      for (const region of slide.regions) {
+        const data = presentationProductCombination(release, slide.product, region.region, region.periodFamily, region.sourceRole);
+        const rows = metricsInOrder(data, slide.metrics, region.periodFamily, region.sourceRole);
+        const basis = presentationPeriodBasis(slide, region, rows);
+        assert.equal(basis.resolved_label, "Oct–Sep｜Oil World作物年度");
+        assert.equal(basis.start_month, "Oct");
+        assert.equal(basis.end_month, "Sep");
+        assert.ok(rows.every((metric) => metric.period_basis === "Oct–Sept"));
+      }
+    }
+  }
+});
+
+test("豆油豆粕March无网页计算季度修正且June读取上一发布期组成项", () => {
+  for (const product of ["Soybean Oil", "Soybean Meal"]) {
+    const march = presentationProductCombination("2026-03", product, "Global", "marketing_year", "balance");
+    const june = presentationProductCombination("2026-06", product, "Global", "marketing_year", "balance");
+    assert.equal(quarterRevisionDisplay(march.metrics.find((metric) => metric.metric === PRESENTATION_STOCK_USAGE_RATIO)!).text, "—");
+    assert.equal(june.metrics.find((metric) => metric.metric === PRESENTATION_STOCK_USAGE_RATIO)?.quarter_revision?.unit, "percentage points");
+  }
+});
+
+test("豆粕G3缺失和冲突指标保持—且不补0", () => {
+  const g3 = presentationProductCombination("2026-06", "Soybean Meal", "G3", "marketing_year", "balance");
+  for (const name of ["Imports", PRESENTATION_STOCK_USAGE_RATIO]) {
+    const metric = g3.metrics.find((item) => item.metric === name)!;
+    assert.ok(["missing", "conflict"].includes(metric.mapping_status));
+    const period = metric.periods[0] ?? "2025/26";
+    assert.equal(presentationCellValue(metric, period), "—");
+    assert.notEqual(presentationCellValue(metric, period), "0");
+  }
+});
+
+test("发布期切换保留第3页和第4页slide状态", () => {
+  assert.equal(searchForRelease("?release=2026-06&slide=soybean-oil-balance", "2026-03"), "?release=2026-03&slide=soybean-oil-balance");
+  assert.equal(searchForRelease("?release=2026-06&slide=soybean-meal-balance", "2026-03"), "?release=2026-03&slide=soybean-meal-balance");
+});
+
 test("顶部显示年度口径审计说明", () => {
   const header = fs.readFileSync(fileURLToPath(new URL("./presentation/components/PresentationHeader.tsx", import.meta.url)), "utf8");
   assert.match(header, /年度口径：各地区按原始Oil World报表口径，详见地区标题。/);
@@ -279,9 +408,9 @@ test("Yield单位为吨每公顷", () => {
   assert.equal(displayUnit("T/ha"), "吨/公顷");
 });
 
-test("Stocks/Use Ratio年度变化和季度修正使用百分点", () => {
-  const data = applyQuarterRevisions(combination("2026-06", "Brazil"), comparison("Brazil"));
-  const ratio = metricsInOrder(data, ["Stocks/Use Ratio"], "calendar_year", "balance")[0];
+test("网页计算库存使用比年度变化和季度修正使用百分点", () => {
+  const data = presentationProductCombination("2026-06", "Soybeans", "Brazil", "calendar_year", "balance");
+  const ratio = metricsInOrder(data, [PRESENTATION_STOCK_USAGE_RATIO], "calendar_year", "balance")[0];
   assert.equal(ratio.annual_change?.unit, "percentage points");
   assert.equal(ratio.quarter_revision?.unit, "percentage points");
   assert.match(quarterRevisionDisplay(ratio).text, /百分点$/);
@@ -294,9 +423,12 @@ test("缺失值显示—而不补0", () => {
 });
 
 test("左右方向键翻页正常且不越界", () => {
-  assert.equal(pageIndexForKey("ArrowRight", 0, 2), 1);
-  assert.equal(pageIndexForKey("ArrowLeft", 1, 2), 0);
-  assert.equal(pageIndexForKey("ArrowRight", 1, 2), 1);
+  assert.equal(pageIndexForKey("ArrowRight", 0, 4), 1);
+  assert.equal(pageIndexForKey("ArrowRight", 1, 4), 2);
+  assert.equal(pageIndexForKey("ArrowRight", 2, 4), 3);
+  assert.equal(pageIndexForKey("ArrowLeft", 3, 4), 2);
+  assert.equal(pageIndexForKey("ArrowLeft", 1, 4), 0);
+  assert.equal(pageIndexForKey("ArrowRight", 3, 4), 3);
 });
 
 test("全屏按钮和Fullscreen API存在", () => {
@@ -387,8 +519,9 @@ test("年度列继续来自正式数据而非写死", () => {
 
 test("顶部同时显示配置驱动的年度供需和生产条件标签", () => {
   assert.match(slideTabsSource, /slide\.shortTitle/);
-  assert.deepEqual(PRESENTATION_SLIDES.map((slide) => slide.shortTitle), ["年度供需", "生产条件"]);
+  assert.deepEqual(PRESENTATION_SLIDES.map((slide) => slide.shortTitle), ["大豆供需", "大豆生产", "豆油供需", "豆粕供需"]);
   assert.match(slideTabsSource, /onClick=\{\(\) => onPage\(index\)\}/);
+  assert.match(slideTabsSource, /ordered\.length/);
 });
 
 test("顶部当前页具有深绿色激活样式", () => {
@@ -402,6 +535,8 @@ test("底部导航使用文字按钮和键盘提示", () => {
   assert.match(navigationSource, /下一页 →/);
   assert.match(navigationSource, /键盘 ← → 可翻页/);
   assert.match(navigationSource, /current\.pageNumber/);
+  assert.match(navigationSource, /ordered\.length/);
+  assert.deepEqual(PRESENTATION_SLIDES.map((slide) => `${slide.pageNumber} / ${PRESENTATION_SLIDES.length}`), ["1 / 4", "2 / 4", "3 / 4", "4 / 4"]);
 });
 
 test("顶部页面标签不随全屏工具栏隐藏", () => {
@@ -409,4 +544,138 @@ test("顶部页面标签不随全屏工具栏隐藏", () => {
   assert.match(app, /<PresentationHeader[\s\S]*?<PresentationNavigation/);
   assert.match(app, /visible=\{showControls\}/);
   assert.doesNotMatch(slideTabsSource, /controlsVisible|showControls/);
+});
+
+test("库存使用比中文名称统一且不保留旧名称", () => {
+  const selectorSource = fs.readFileSync(fileURLToPath(new URL("./presentation/selectors.ts", import.meta.url)), "utf8");
+  const headerSource = fs.readFileSync(fileURLToPath(new URL("./presentation/components/PresentationHeader.tsx", import.meta.url)), "utf8");
+  assert.equal(presentationMetricLabel("Stocks/Use Ratio"), "库存/使用比");
+  assert.equal(presentationMetricLabel(PRESENTATION_STOCK_USAGE_RATIO), "库存/使用比");
+  assert.doesNotMatch(`${selectorSource}\n${headerSource}`, /库存\/消费比|库销比/);
+});
+
+test("网页计算标识与scope公式说明由共享组件显示", () => {
+  const footerSource = fs.readFileSync(fileURLToPath(new URL("./presentation/components/SourceFooter.tsx", import.meta.url)), "utf8");
+  assert.match(regionTableSource, /presentation-derived-tag/);
+  assert.match(regionTableSource, /网页计算/);
+  assert.match(footerSource, /ratioNote/);
+  assert.match(PRESENTATION_STOCK_USAGE_FOOTER_NOTE, /Global＝期末库存÷国内消费/);
+  assert.match(PRESENTATION_STOCK_USAGE_FOOTER_NOTE, /单个国家＝期末库存÷（国内消费＋出口）/);
+  assert.match(PRESENTATION_STOCK_USAGE_FOOTER_NOTE, /G2\/G3因组内贸易无法安全剔除/);
+});
+
+test("2026-06豆油按Global、国家和聚合区scope计算", () => {
+  const expected: Record<string, number | null> = {
+    Global: 10.93,
+    "United States": 6.44,
+    Brazil: 3.99,
+    Argentina: 3.50,
+    China: 14.64,
+    G3: null,
+  };
+  for (const region of expectedRegions) {
+    const data = presentationProductCombination("2026-06", "Soybean Oil", region, "marketing_year", "balance");
+    const ratio = presentationRatio(data);
+    const latest = ratio.periods.find((period) => ratio.values[period] !== null);
+    assert.equal(roundedPercent(latest ? ratio.values[latest] : null), expected[region]);
+    assert.equal(latest ? presentationCellValue(ratio, latest) : "—", expected[region] === null ? "—" : expected[region]!.toFixed(2));
+  }
+});
+
+test("2026-06豆粕恢复网页计算比率且G3保持空", () => {
+  const expected: Record<string, number | null> = {
+    Global: 3.46,
+    "United States": 0.87,
+    Brazil: 2.86,
+    Argentina: 3.11,
+    China: 2.50,
+    G3: null,
+  };
+  for (const region of expectedRegions) {
+    const ratio = presentationRatio(presentationProductCombination("2026-06", "Soybean Meal", region, "marketing_year", "balance"));
+    const latest = ratio.periods.find((period) => ratio.values[period] !== null);
+    assert.equal(roundedPercent(latest ? ratio.values[latest] : null), expected[region]);
+  }
+});
+
+test("Global分母不含Exports而国家分母包含Exports", () => {
+  const globalData = productCombination("2026-06", "Soybean Oil", "Global");
+  const globalRatio = presentationRatio(applyPresentationStockUsageRatio(globalData, null, { periodFamily: "marketing_year", sourceRole: "balance" }));
+  const globalPeriod = globalRatio.periods.find((period) => globalRatio.values[period] !== null)!;
+  const globalEnding = globalData.metrics.find((metric) => metric.metric === "Ending Stocks")!;
+  const globalConsumption = globalData.metrics.find((metric) => metric.metric === "Domestic Consumption")!;
+  const globalExports = globalData.metrics.find((metric) => metric.metric === "Exports")!;
+  assert.equal(globalRatio.values[globalPeriod], globalEnding.values[globalPeriod]! / globalConsumption.values[globalPeriod]! * 100);
+  assert.notEqual(globalRatio.values[globalPeriod], globalEnding.values[globalPeriod]! / (globalConsumption.values[globalPeriod]! + globalExports.values[globalPeriod]!) * 100);
+
+  const countryData = productCombination("2026-06", "Soybean Oil", "United States");
+  const countryRatio = presentationRatio(applyPresentationStockUsageRatio(countryData, null, { periodFamily: "marketing_year", sourceRole: "balance" }));
+  const countryPeriod = countryRatio.periods.find((period) => countryRatio.values[period] !== null)!;
+  const countryEnding = countryData.metrics.find((metric) => metric.metric === "Ending Stocks")!;
+  const countryConsumption = countryData.metrics.find((metric) => metric.metric === "Domestic Consumption")!;
+  const countryExports = countryData.metrics.find((metric) => metric.metric === "Exports")!;
+  assert.equal(countryRatio.values[countryPeriod], countryEnding.values[countryPeriod]! / (countryConsumption.values[countryPeriod]! + countryExports.values[countryPeriod]!) * 100);
+});
+
+test("网页计算严格要求同期间、时间轴、来源角色和有效组成项", () => {
+  const mismatched = structuredClone(productCombination("2026-06", "Soybean Oil", "United States"));
+  mismatched.metrics.find((metric) => metric.metric === "Exports")!.source_role = "production_table";
+  const mismatchRatio = presentationRatio(applyPresentationStockUsageRatio(mismatched, null, { periodFamily: "marketing_year", sourceRole: "balance" }));
+  assert.equal(mismatchRatio.mapping_status, "missing");
+  assert.ok(Object.values(mismatchRatio.values).every((value) => value === null));
+
+  const zero = structuredClone(productCombination("2026-06", "Soybean Oil", "United States"));
+  const ending = zero.metrics.find((metric) => metric.metric === "Ending Stocks")!;
+  const period = ending.periods[0];
+  zero.metrics.find((metric) => metric.metric === "Domestic Consumption")!.values[period] = 0;
+  zero.metrics.find((metric) => metric.metric === "Exports")!.values[period] = 0;
+  const zeroRatio = presentationRatio(applyPresentationStockUsageRatio(zero, null, { periodFamily: "marketing_year", sourceRole: "balance" }));
+  assert.equal(zeroRatio.values[period], null);
+
+  const conflict = structuredClone(productCombination("2026-06", "Soybean Oil", "United States"));
+  conflict.metrics.find((metric) => metric.metric === "Domestic Consumption")!.mapping_status = "conflict";
+  const conflictRatio = presentationRatio(applyPresentationStockUsageRatio(conflict, null, { periodFamily: "marketing_year", sourceRole: "balance" }));
+  assert.ok(Object.values(conflictRatio.values).every((value) => value === null));
+});
+
+test("网页计算保留独立键且不覆盖正式Stocks/Use Ratio", () => {
+  const formal = productCombination("2026-06", "Soybean Oil", "Global");
+  const formalRatio = formal.metrics.find((metric) => metric.metric === "Stocks/Use Ratio");
+  const transformed = applyPresentationStockUsageRatio(formal, productCombination("2026-03", "Soybean Oil", "Global"), {
+    periodFamily: "marketing_year",
+    sourceRole: "balance",
+  });
+  assert.strictEqual(transformed.metrics.find((metric) => metric.metric === "Stocks/Use Ratio"), formalRatio);
+  assert.equal(presentationRatio(transformed).metric, PRESENTATION_STOCK_USAGE_RATIO);
+  assert.equal(metricStableKey(presentationRatio(transformed)), "presentation_stock_usage_ratio::marketing_year::balance");
+});
+
+test("年度变化和季度修正均由同一scope公式的未四舍五入值计算", () => {
+  const march = presentationRatio(presentationProductCombination("2026-03", "Soybean Meal", "Argentina", "marketing_year", "balance"));
+  const june = presentationRatio(presentationProductCombination("2026-06", "Soybean Meal", "Argentina", "marketing_year", "balance"));
+  const numericPeriods = june.periods.filter((period) => june.values[period] !== null);
+  assert.equal(june.annual_change?.value, june.values[numericPeriods[0]]! - june.values[numericPeriods[1]]!);
+  assert.equal(june.annual_change?.unit, "percentage points");
+  assert.equal(june.quarter_revision?.value, june.values[numericPeriods[0]]! - march.values[numericPeriods[0]]!);
+  assert.equal(june.quarter_revision?.unit, "percentage points");
+});
+
+test("豆粕页恢复独立网页计算库存使用比行", () => {
+  const slide = PRESENTATION_SLIDES.find((item) => item.slideId === "soybean-meal-balance")!;
+  const slideSource = fs.readFileSync(fileURLToPath(new URL("./presentation/components/ResearchTableSlide.tsx", import.meta.url)), "utf8");
+  assert.ok(slide.metrics.includes(PRESENTATION_STOCK_USAGE_RATIO));
+  assert.doesNotMatch(slideSource, /hiddenWhenUnavailable|本页暂不展示/);
+});
+
+test("详细看板保留原结构且不接入演示层网页计算", () => {
+  const appSource = fs.readFileSync(fileURLToPath(new URL("./App.tsx", import.meta.url)), "utf8");
+  assert.match(appSource, /完整市场年度平衡表/);
+  assert.doesNotMatch(appSource, /presentation_stock_usage_ratio|网页计算/);
+});
+
+test("临时数据路径只在开发服务器启用", () => {
+  const viteSource = fs.readFileSync(fileURLToPath(new URL("../vite.config.ts", import.meta.url)), "utf8");
+  assert.match(viteSource, /process\.env\.OIL_WORLD_PREVIEW_DATA_ROOT/);
+  assert.match(viteSource, /apply:\s*"serve"/);
+  assert.doesNotMatch(viteSource, /stocks_usage_revision_preview/);
 });

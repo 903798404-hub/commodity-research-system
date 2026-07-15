@@ -12,13 +12,22 @@ import { presentationPeriodBasis } from "../presentationPeriodBasis";
 import {
   directionClass,
   metricByIdentity,
+  PRESENTATION_STOCK_USAGE_RATIO,
   presentationCellValue,
   presentationMetricLabel,
   recentAvailablePeriods,
 } from "../selectors";
 
+function formatPresentationRatioChange(value: number): string {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  const magnitude = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(rounded));
+  if (rounded > 0) return `+${magnitude}`;
+  if (rounded < 0) return `−${magnitude}`;
+  return magnitude;
+}
+
 function metricUnit(metricName: string): string {
-  if (metricName === "Stocks/Use Ratio") return "%";
+  if (metricName === "Stocks/Use Ratio" || metricName === PRESENTATION_STOCK_USAGE_RATIO) return "%";
   if (metricName === "Area Harvested") return "1000 ha";
   if (metricName === "Yield") return "T/ha";
   return "1000 T";
@@ -31,7 +40,7 @@ function annualChange(metric: MetricData | undefined) {
   const change = metric.annual_change;
   const value = displayValue(change.value, change.unit === "1000 T" ? "1000 T" : metric.unit);
   return {
-    text: `${formatSignedChange(value, change.unit)} ${displayUnit(change.unit)}`,
+    text: `${metric.metric === PRESENTATION_STOCK_USAGE_RATIO && value !== null ? formatPresentationRatioChange(value) : formatSignedChange(value, change.unit)} ${displayUnit(change.unit)}`,
     className: directionClass(value),
   };
 }
@@ -41,8 +50,11 @@ function quarterChange(metric: MetricData | undefined) {
     return { text: "—", className: "is-missing" };
   }
   const revision = quarterRevisionDisplay(metric);
+  const value = metric.quarter_revision?.value;
   return {
-    text: revision.text,
+    text: metric.metric === PRESENTATION_STOCK_USAGE_RATIO && typeof value === "number"
+      ? `${formatPresentationRatioChange(value)} ${displayUnit("percentage points")}`
+      : revision.text,
     className: revision.hasValue ? directionClass(metric.quarter_revision?.value) : "is-missing",
   };
 }
@@ -51,12 +63,14 @@ export function RegionResearchTable({
   data,
   region,
   slide,
+  metricNames = slide.metrics,
 }: {
   data: CombinationData;
   region: PresentationRegionConfig;
   slide: PresentationSlideConfig;
+  metricNames?: readonly string[];
 }) {
-  const rows = slide.metrics.map((metric) => metricByIdentity(data, {
+  const rows = metricNames.map((metric) => metricByIdentity(data, {
     metric,
     periodFamily: region.periodFamily,
     sourceRole: region.sourceRole,
@@ -70,10 +84,10 @@ export function RegionResearchTable({
   return (
     <article className="presentation-region-table" data-region={region.region}>
       <div className="presentation-region-title">
-        <strong>大豆－{region.label}</strong>
+        <strong>{slide.productLabel}－{region.label}</strong>
         <span>{periodBasis.resolved_label}</span>
       </div>
-      <table aria-label={`大豆－${region.label}`}>
+      <table aria-label={`${slide.productLabel}－${region.label}`}>
         <thead>
           <tr>
             <th>指标</th>
@@ -83,7 +97,7 @@ export function RegionResearchTable({
           </tr>
         </thead>
         <tbody>
-          {slide.metrics.map((metricName, rowIndex) => {
+          {metricNames.map((metricName, rowIndex) => {
             const metric = rows[rowIndex];
             const annual = annualChange(metric);
             const revision = quarterChange(metric);
@@ -96,6 +110,7 @@ export function RegionResearchTable({
               >
                 <th>
                   <span>{presentationMetricLabel(metricName, productionConditions)}</span>
+                  {metricName === PRESENTATION_STOCK_USAGE_RATIO && <em className="presentation-derived-tag">网页计算</em>}
                   <small>{displayUnit(unit)}</small>
                 </th>
                 <td className={`presentation-change is-revision ${revision.className}`}>{revision.text}</td>

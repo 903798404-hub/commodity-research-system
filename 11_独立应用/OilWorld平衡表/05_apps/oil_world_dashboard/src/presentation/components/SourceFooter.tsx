@@ -4,10 +4,12 @@ export function SourceFooter({
   metrics,
   note,
   periodDetails = [],
+  ratioNote,
 }: {
   metrics: readonly MetricData[];
   note?: string;
   periodDetails?: readonly string[];
+  ratioNote?: string;
 }) {
   const reportCount = new Set(metrics.flatMap((metric) => metric.source_report_id).filter(Boolean)).size;
   return (
@@ -17,6 +19,7 @@ export function SourceFooter({
         <span>{note ?? "正式发布数据；缺失、冲突或不可比值统一显示为—"}</span>
       </div>
       {periodDetails.length > 0 && <p><strong>口径审计：</strong>{periodDetails.join(" ")}</p>}
+      {ratioNote && <p><strong>库存/使用比：</strong>{ratioNote}</p>}
     </footer>
   );
 }

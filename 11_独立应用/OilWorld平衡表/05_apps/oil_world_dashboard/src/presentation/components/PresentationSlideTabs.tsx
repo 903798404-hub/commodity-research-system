@@ -11,7 +11,11 @@ export function PresentationSlideTabs({
 }) {
   const ordered = [...slides].sort((left, right) => left.layoutOrder - right.layoutOrder);
   return (
-    <nav className="presentation-slide-tabs" aria-label="演示页面切换">
+    <nav
+      className="presentation-slide-tabs"
+      aria-label="演示页面切换"
+      style={{ gridTemplateColumns: `repeat(${ordered.length}, minmax(0, 1fr))` }}
+    >
       {ordered.map((slide, index) => {
         const active = index === currentPage;
         return (

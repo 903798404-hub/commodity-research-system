@@ -21,6 +21,7 @@ import { PresentationHeader } from "./components/PresentationHeader";
 import { PresentationNavigation } from "./components/PresentationNavigation";
 import { PresentationShell } from "./components/PresentationShell";
 import { ResearchTableSlide } from "./components/ResearchTableSlide";
+import { applyPresentationStockUsageRatio } from "./presentationStockUsageRatio";
 
 const BASE_URL = import.meta.env.BASE_URL;
 
@@ -81,6 +82,7 @@ export default function PresentationApp() {
   useEffect(() => {
     if (!index || !release || !slide) return;
     const previousRelease = releases?.releases.find((item) => item.release === release)?.previous_release ?? null;
+    const previousIndexPromise = previousRelease ? loadReleaseIndex(BASE_URL, previousRelease) : Promise.resolve(null);
     let active = true;
     setLoading(true);
     setError("");
@@ -89,13 +91,25 @@ export default function PresentationApp() {
       const selection = { system: slide.system, product: slide.product, region: region.region };
       const file = fileFor(index, selection);
       if (!file) throw new DataLoadError(`${slide.product} / ${region.region}在${release}中没有正式发布数据。`);
-      const [payload, comparison] = await Promise.all([
+      const previousIndex = await previousIndexPromise;
+      const previousFile = previousIndex ? fileFor(previousIndex, selection) : undefined;
+      const [payload, comparison, previousPayload] = await Promise.all([
         loadCombination(BASE_URL, release, file.path),
         previousRelease
           ? loadCombinationComparison(BASE_URL, previousRelease, release, slide.system, slide.product, region.region)
           : Promise.resolve(null),
+        previousRelease && previousFile
+          ? loadCombination(BASE_URL, previousRelease, previousFile.path)
+          : Promise.resolve(null),
       ]);
-      return [region.region, applyQuarterRevisions(payload, comparison)] as const;
+      const enriched = applyQuarterRevisions(payload, comparison);
+      const presentationData = slide.slideType === "balance"
+        ? applyPresentationStockUsageRatio(enriched, previousPayload, {
+            periodFamily: region.periodFamily,
+            sourceRole: region.sourceRole,
+          })
+        : enriched;
+      return [region.region, presentationData] as const;
     }))
       .then((entries) => active && setRegionData(new Map(entries)))
       .catch((reason) => {

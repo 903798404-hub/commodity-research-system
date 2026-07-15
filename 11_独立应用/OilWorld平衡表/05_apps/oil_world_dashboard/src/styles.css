@@ -313,7 +313,7 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 /* USDA-style high-density Oil World research tables */
 .presentation-header {
   grid-template-columns: minmax(330px, 33%) minmax(0, 1fr);
-  min-height: 11.5%;
+  min-height: 16.5%;
   padding-bottom: .8%;
   border-bottom-color: #164f3f;
 }
@@ -321,6 +321,7 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 .presentation-brand > span { color: #164f3f; font-size: clamp(10px, .7vw, 14px); }
 .presentation-brand h1 { color: #153f34; font-size: clamp(24px, 1.72vw, 35px); }
 .presentation-brand p { font-size: clamp(9px, .62vw, 12px); }
+.presentation-brand .presentation-subtitle { margin-top: .16em; color: #7b7069; }
 .presentation-brand .presentation-period-guidance { margin-top: .18em; color: #655f58; font-weight: 650; }
 .presentation-identity {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -403,6 +404,17 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 .presentation-region-table tbody th { color: #3e413d; font-weight: 700; }
 .presentation-region-table tbody th span { display: inline; overflow: hidden; text-overflow: ellipsis; }
 .presentation-region-table tbody th small { display: inline; margin-left: .35em; color: #999992; font-size: .7em; font-weight: 500; }
+.presentation-derived-tag {
+  display: inline-block;
+  margin-left: .35em;
+  padding: .05em .35em;
+  color: #8b2d2f;
+  background: #fae8e6;
+  border-radius: .55em;
+  font-size: .66em;
+  font-style: normal;
+  font-weight: 800;
+}
 .presentation-region-table tbody td { color: #4c4d49; font-variant-numeric: tabular-nums; }
 .presentation-region-table tbody tr:last-child th,
 .presentation-region-table tbody tr:last-child td { border-bottom: 0; }
@@ -431,16 +443,18 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 }
 
 .presentation-slide-tabs {
-  display: flex;
+  display: grid;
+  grid-column: 1 / -1;
   gap: .45em;
-  margin-top: .42em;
+  margin-top: .1em;
 }
 .presentation-slide-tabs button {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: .7em;
-  min-width: 9.6em;
+  width: 100%;
+  min-width: 0;
   min-height: 2.35em;
   padding: .38em .72em;
   color: #164f3f;

@@ -117,6 +117,34 @@ export const PRESENTATION_PERIOD_BASIS: readonly PresentationPeriodBasisConfig[]
     source_note: "G3生产指标由AN13993成员行汇总；原表仅列US Sep–Nov、BR Jan–Mar、AR Apr–May收获期，不提供年度起止月。",
     footer_detail: G3_PRODUCTION_DETAIL,
   },
+  ...[
+    {
+      product: "Soybean Oil",
+      report: "AN23992",
+      title: "SOYBEAN OIL: World Supply and Demand Balance",
+      footer: "豆油：AN23992 的产量、进出口、消费和库存各区块均按 Oct–Sep 表头列示。",
+    },
+    {
+      product: "Soybean Meal",
+      report: "AN33992",
+      title: "SOYBEAN MEAL: World Supply and Demand Balance",
+      footer: "豆粕：AN33992 的产量、进出口、消费和库存各区块均按 Oct–Sep 表头列示。",
+    },
+  ].flatMap(({ product, report, title, footer }) =>
+    ["Global", "United States", "Brazil", "Argentina", "China", "G3"].map((region) => ({
+      product,
+      region,
+      period_family: "marketing_year",
+      source_role: "balance",
+      start_month: "Oct",
+      end_month: "Sep",
+      display_label: "Oct–Sep｜Oil World作物年度",
+      source_report_id: [report],
+      source_note: `《${title}》完整年度栏明确为 Oct/Sept；${region === "G3" ? "G3成员行也位于同一表头下。" : "正式发布字段与原表一致。"}`,
+      footer_detail: footer,
+      prefer_formal_basis: true,
+    } satisfies PresentationPeriodBasisConfig)),
+  ),
 ] as const;
 
 function basisConfig(slide: PresentationSlideConfig, region: PresentationRegionConfig): PresentationPeriodBasisConfig {
