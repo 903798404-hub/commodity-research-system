@@ -31,6 +31,7 @@ export interface PresentationSlideConfig {
   layoutMode: "two-by-three" | "two-by-three-notes" | "two-by-four-notes";
   derivePresentationStockUsageRatio: boolean;
   euStockUsageRatio: "not-applicable" | "external-exports-confirmed" | "exports-scope-unconfirmed";
+  notes?: readonly string[];
 }
 
 const SOYBEAN_SYSTEM_GROUP = {
@@ -49,6 +50,12 @@ const SUNFLOWER_SYSTEM_GROUP = {
   groupId: "sunflower-system",
   groupTitle: "葵花体系",
   groupOrder: 3,
+} as const;
+
+const PALM_SYSTEM_GROUP = {
+  groupId: "palm-system",
+  groupTitle: "棕榈体系",
+  groupOrder: 4,
 } as const;
 
 const RESEARCH_REGIONS = [
@@ -110,6 +117,14 @@ const SUNFLOWER_REGIONS = [
   { region: "Ukraine", label: "乌克兰" },
   { region: "European Union", label: "欧盟" },
   { region: "Argentina", label: "阿根廷" },
+] as const;
+
+const PALM_OIL_REGIONS = [
+  { region: "Global", label: "全球" },
+  { region: "Indonesia", label: "印度尼西亚" },
+  { region: "Malaysia", label: "马来西亚" },
+  { region: "G2", label: "G2" },
+  { region: "India", label: "印度" },
 ] as const;
 
 function productBalanceRegions(): PresentationRegionConfig[] {
@@ -187,6 +202,18 @@ function sunflowerProductRegions(euConfirmed: boolean): PresentationRegionConfig
       : item.region === "European Union"
         ? euConfirmed ? "external_region" : "aggregate"
         : "country",
+  }));
+}
+
+function palmOilRegions(): PresentationRegionConfig[] {
+  return PALM_OIL_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    periodFamily: "marketing_year",
+    sourceRole: "balance",
+    stockUsageScope: item.region === "Global"
+      ? "global"
+      : item.region === "G2" ? "aggregate" : "country",
   }));
 }
 
@@ -433,6 +460,29 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     derivePresentationStockUsageRatio: true,
     euStockUsageRatio: "exports-scope-unconfirmed",
     regions: sunflowerProductRegions(false),
+  },
+  {
+    slideId: "palm-oil-balance",
+    slideType: "balance",
+    shortTitle: "棕榈油供需",
+    pageNumber: 13,
+    layoutOrder: 12,
+    ...PALM_SYSTEM_GROUP,
+    groupPageNumber: 1,
+    system: "棕榈油体系",
+    product: "Palm Oil",
+    productLabel: "棕榈油",
+    title: "Oil World 棕榈油年度供需",
+    subtitle: "高密度季度研究演示 · Palm Oil · 五地区",
+    metrics: PRODUCT_BALANCE_METRICS,
+    layoutMode: "two-by-three-notes",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "not-applicable",
+    regions: palmOilRegions(),
+    notes: [
+      "G2由印度尼西亚和马来西亚组成，只展示正式快照已审计发布的期初库存、产量、出口、国内消费和期末库存。",
+      "G2进口不推算；组内贸易无法安全剔除，因此G2库存/使用比保持—。印度因出口缺失也不进行网页计算。",
+    ],
   },
 ] as const;
 

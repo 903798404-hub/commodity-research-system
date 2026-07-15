@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadBootstrap } from "./api";
-import type { CombinationData, ReleaseIndex } from "./model";
+import type { CombinationData, MetricData, ReleaseIndex } from "./model";
 import {
   PRESENTATION_SLIDES,
   isPresentationRoute,
@@ -47,6 +47,7 @@ const publicRoot = fileURLToPath(new URL("../../../public/data/oil_world/", impo
 const expectedRegions = ["Global", "United States", "Brazil", "Argentina", "China", "G3"];
 const expectedRapeseedRegions = ["Global", "Canada", "European Union", "China", "Australia", "Russia", "Ukraine"];
 const expectedSunflowerRegions = ["Global", "Russia", "Ukraine", "European Union", "Argentina"];
+const expectedPalmOilRegions = ["Global", "Indonesia", "Malaysia", "G2", "India"];
 const regionTableSource = fs.readFileSync(fileURLToPath(new URL("./presentation/components/RegionResearchTable.tsx", import.meta.url)), "utf8");
 const slideTabsSource = fs.readFileSync(fileURLToPath(new URL("./presentation/components/PresentationSlideTabs.tsx", import.meta.url)), "utf8");
 const navigationSource = fs.readFileSync(fileURLToPath(new URL("./presentation/components/PresentationNavigation.tsx", import.meta.url)), "utf8");
@@ -128,6 +129,7 @@ test("页面状态可由同一查询参数恢复且默认回到第1页", () => {
   assert.equal(pageFromSearch("?slide=rapeseed-meal-balance", PRESENTATION_SLIDES), 7);
   assert.equal(pageFromSearch("?slide=sunflower-oil-balance", PRESENTATION_SLIDES), 10);
   assert.equal(pageFromSearch("?slide=sunflower-meal-balance", PRESENTATION_SLIDES), 11);
+  assert.equal(pageFromSearch("?slide=palm-oil-balance", PRESENTATION_SLIDES), 12);
   assert.equal(pageFromSearch("", PRESENTATION_SLIDES), 0);
   assert.equal(searchForSlide("?release=2026-06", "soybeans-balance"), "?release=2026-06&slide=soybeans-balance");
 });
@@ -163,7 +165,7 @@ test("第2页为Oil World大豆生产条件", () => {
   assert.deepEqual(PRESENTATION_SLIDES[1].metrics, ["Production", "Area Harvested", "Yield"]);
 });
 
-test("十二页配置顺序和页码固定", () => {
+test("十三页配置顺序和页码固定", () => {
   assert.deepEqual(PRESENTATION_SLIDES.map((slide) => ({
     slideId: slide.slideId,
     shortTitle: slide.shortTitle,
@@ -184,6 +186,7 @@ test("十二页配置顺序和页码固定", () => {
     { slideId: "sunflowerseed-production-conditions", shortTitle: "葵花籽生产", pageNumber: 10, layoutOrder: 9, groupId: "sunflower-system", groupPageNumber: 2 },
     { slideId: "sunflower-oil-balance", shortTitle: "葵油供需", pageNumber: 11, layoutOrder: 10, groupId: "sunflower-system", groupPageNumber: 3 },
     { slideId: "sunflower-meal-balance", shortTitle: "葵粕供需", pageNumber: 12, layoutOrder: 11, groupId: "sunflower-system", groupPageNumber: 4 },
+    { slideId: "palm-oil-balance", shortTitle: "棕榈油供需", pageNumber: 13, layoutOrder: 12, groupId: "palm-system", groupPageNumber: 1 },
   ]);
 });
 
@@ -235,11 +238,12 @@ test("Product Output仅在演示文案显示为产量且内部指标不变", () 
   }
 });
 
-test("演示页总数为12且三套体系地区结构固定", () => {
-  assert.equal(PRESENTATION_SLIDES.length, 12);
+test("演示页总数为13且四套体系地区结构固定", () => {
+  assert.equal(PRESENTATION_SLIDES.length, 13);
   assert.ok(PRESENTATION_SLIDES.slice(0, 4).every((slide) => slide.regions.length === 6));
   assert.ok(PRESENTATION_SLIDES.slice(4, 8).every((slide) => slide.regions.length === 7));
-  assert.ok(PRESENTATION_SLIDES.slice(8).every((slide) => slide.regions.length === 5));
+  assert.ok(PRESENTATION_SLIDES.slice(8, 12).every((slide) => slide.regions.length === 5));
+  assert.equal(PRESENTATION_SLIDES[12].regions.length, 5);
 });
 
 test("六地区顺序固定", () => {
@@ -264,12 +268,13 @@ test("Brazil第1页只使用calendar_year加balance", () => {
 });
 
 test("月份口径配置具有可追溯身份和来源", () => {
-  assert.equal(PRESENTATION_PERIOD_BASIS.length, 72);
+  assert.equal(PRESENTATION_PERIOD_BASIS.length, 77);
   for (const basis of PRESENTATION_PERIOD_BASIS) {
     assert.ok([
       "Soybeans", "Soybean Oil", "Soybean Meal",
       "Rapeseed / Canola", "Rapeseed Oil", "Rapeseed Meal",
       "Sunflowerseed", "Sunflower Oil", "Sunflower Meal",
+      "Palm Oil",
     ].includes(basis.product));
     assert.ok(basis.region);
     assert.ok(basis.period_family);
@@ -453,9 +458,9 @@ test("缺失值显示—而不补0", () => {
 });
 
 test("左右方向键翻页正常且不越界", () => {
-  for (let page = 0; page < 11; page += 1) assert.equal(pageIndexForKey("ArrowRight", page, 12), page + 1);
-  for (let page = 11; page > 0; page -= 1) assert.equal(pageIndexForKey("ArrowLeft", page, 12), page - 1);
-  assert.equal(pageIndexForKey("ArrowRight", 11, 12), 11);
+  for (let page = 0; page < 12; page += 1) assert.equal(pageIndexForKey("ArrowRight", page, 13), page + 1);
+  for (let page = 12; page > 0; page -= 1) assert.equal(pageIndexForKey("ArrowLeft", page, 13), page - 1);
+  assert.equal(pageIndexForKey("ArrowRight", 12, 13), 12);
 });
 
 test("全屏按钮和Fullscreen API存在", () => {
@@ -477,6 +482,12 @@ test("1366×768等比例保持16比9", () => {
   const css = fs.readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
   assert.match(css, /aspect-ratio:\s*16 \/ 9/);
   assert.match(css, /width:\s*min\(100vw, calc\(100dvh \* 16 \/ 9\)\)/);
+});
+
+test("1280×720继续使用同一16比9缩放画布", () => {
+  const css = fs.readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
+  assert.match(css, /aspect-ratio:\s*16 \/ 9/);
+  assert.match(css, /overflow:\s*hidden/);
 });
 
 test("详细看板路由不受影响", () => {
@@ -551,6 +562,7 @@ test("顶部第二级页面标签读取当前体系配置", () => {
     "大豆供需", "大豆生产", "豆油供需", "豆粕供需",
     "菜籽供需", "菜籽生产", "菜油供需", "菜粕供需",
     "葵花籽供需", "葵花籽生产", "葵油供需", "葵粕供需",
+    "棕榈油供需",
   ]);
   assert.match(slideTabsSource, /groupSlides = ordered\.filter/);
   assert.match(slideTabsSource, /onClick=\{\(\) => onPage\(pageIndex\)\}/);
@@ -570,7 +582,7 @@ test("底部导航使用文字按钮和键盘提示", () => {
   assert.match(navigationSource, /键盘 ← → 可翻页/);
   assert.match(navigationSource, /current\.pageNumber/);
   assert.match(navigationSource, /ordered\.length/);
-  assert.deepEqual(PRESENTATION_SLIDES.map((slide) => `${slide.pageNumber} / ${PRESENTATION_SLIDES.length}`), ["1 / 12", "2 / 12", "3 / 12", "4 / 12", "5 / 12", "6 / 12", "7 / 12", "8 / 12", "9 / 12", "10 / 12", "11 / 12", "12 / 12"]);
+  assert.deepEqual(PRESENTATION_SLIDES.map((slide) => `${slide.pageNumber} / ${PRESENTATION_SLIDES.length}`), Array.from({ length: 13 }, (_, index) => `${index + 1} / 13`));
 });
 
 test("顶部页面标签不随全屏工具栏隐藏", () => {
@@ -734,9 +746,9 @@ test("年度变化和季度修正文案由共享常量统一定义", () => {
 });
 
 test("两级顶部导航完全由可扩展体系配置生成", () => {
-  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupId))], ["soybean-system", "rapeseed-system", "sunflower-system"]);
-  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupTitle))], ["大豆体系", "菜籽体系", "葵花体系"]);
-  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupOrder))], [1, 2, 3]);
+  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupId))], ["soybean-system", "rapeseed-system", "sunflower-system", "palm-system"]);
+  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupTitle))], ["大豆体系", "菜籽体系", "葵花体系", "棕榈体系"]);
+  assert.deepEqual([...new Set(PRESENTATION_SLIDES.map((slide) => slide.groupOrder))], [1, 2, 3, 4]);
   assert.match(slideTabsSource, /groupsFromSlides/);
   assert.match(slideTabsSource, /slide\.groupId/);
   assert.match(slideTabsSource, /group\.groupTitle/);
@@ -754,8 +766,8 @@ test("浏览器历史和跨体系全局翻页保持URL与体系一致", () => {
   assert.match(appSource, /window\.addEventListener\("popstate", onPopState\)/);
   assert.match(appSource, /pageFromSearch\(window\.location\.search, PRESENTATION_SLIDES\)/);
   assert.match(appSource, /event\.altKey \|\| event\.ctrlKey \|\| event\.metaKey/);
-  assert.equal(pageIndexForKey("ArrowRight", 7, 12), 8);
-  assert.equal(pageIndexForKey("ArrowLeft", 8, 12), 7);
+  assert.equal(pageIndexForKey("ArrowRight", 7, 13), 8);
+  assert.equal(pageIndexForKey("ArrowLeft", 8, 13), 7);
 });
 
 test("第5页菜籽供需使用正式指标且不新增网页比率", () => {
@@ -911,7 +923,7 @@ test("菜籽审计输出完整存在且正式页面不依赖审计目录", () =>
 });
 
 test("葵花体系四页使用固定五地区和两列三行说明卡布局", () => {
-  const slides = PRESENTATION_SLIDES.slice(8);
+  const slides = PRESENTATION_SLIDES.slice(8, 12);
   assert.equal(slides.length, 4);
   for (const slide of slides) {
     assert.equal(slide.groupId, "sunflower-system");
@@ -927,12 +939,12 @@ test("葵花体系四页使用固定五地区和两列三行说明卡布局", ()
 });
 
 test("葵花体系导航页码、跨体系翻页和URL恢复均由统一配置驱动", () => {
-  const slides = PRESENTATION_SLIDES.slice(8);
+  const slides = PRESENTATION_SLIDES.slice(8, 12);
   assert.deepEqual(slides.map((slide) => slide.groupPageNumber), [1, 2, 3, 4]);
   assert.deepEqual(slides.map((slide) => slide.pageNumber), [9, 10, 11, 12]);
   assert.equal(PRESENTATION_SLIDES.findIndex((slide) => slide.groupId === "sunflower-system"), 8);
-  assert.equal(pageIndexForKey("ArrowRight", 7, 12), 8);
-  assert.equal(pageIndexForKey("ArrowLeft", 8, 12), 7);
+  assert.equal(pageIndexForKey("ArrowRight", 7, 13), 8);
+  assert.equal(pageIndexForKey("ArrowLeft", 8, 13), 7);
   for (const slide of slides) {
     assert.equal(pageFromSearch(`?slide=${slide.slideId}`, PRESENTATION_SLIDES), slide.layoutOrder);
     assert.match(searchForRelease(`?release=2026-06&slide=${slide.slideId}`, "2026-03"), new RegExp(`slide=${slide.slideId}$`));
@@ -1007,7 +1019,7 @@ test("葵花五地区月份口径来自集中配置且供需与生产不串用",
 
 test("葵油葵粕保持Product Output身份且演示文案显示产量", () => {
   assert.equal(presentationMetricLabel("Product Output"), "产量");
-  for (const slide of PRESENTATION_SLIDES.slice(10)) {
+  for (const slide of PRESENTATION_SLIDES.slice(10, 12)) {
     assert.ok(slide.metrics.includes("Product Output"));
     for (const region of slide.regions) {
       const metric = productCombination("2026-06", slide.product, region.region).metrics.find((item) => item.metric === "Product Output");
@@ -1061,7 +1073,7 @@ test("2026-06葵粕仅完整输入地区计算且EU和Argentina保持—", () =>
 });
 
 test("葵油葵粕March网页季度修正为—且June使用同scope上一期", () => {
-  for (const slide of PRESENTATION_SLIDES.slice(10)) {
+  for (const slide of PRESENTATION_SLIDES.slice(10, 12)) {
     for (const region of slide.regions) {
       const march = presentationRatio(presentationProductCombination(
         "2026-03", slide.product, region.region, region.periodFamily, region.sourceRole, region.stockUsageScope,
@@ -1078,7 +1090,7 @@ test("葵油葵粕March网页季度修正为—且June使用同scope上一期", 
 
 test("葵花供需列顺序动态生成且2026-06正式季度修正可用", () => {
   for (const release of ["2026-03", "2026-06"]) {
-    for (const slide of PRESENTATION_SLIDES.slice(8)) {
+    for (const slide of PRESENTATION_SLIDES.slice(8, 12)) {
       const region = slide.regions[0];
       const data = slide.derivePresentationStockUsageRatio
         ? presentationProductCombination(release, slide.product, region.region, region.periodFamily, region.sourceRole, region.stockUsageScope)
@@ -1102,6 +1114,138 @@ test("葵花专项审计输出完整且生产构建不依赖审计目录", () =>
   }
   const appSource = fs.readFileSync(fileURLToPath(new URL("./presentation/PresentationApp.tsx", import.meta.url)), "utf8");
   assert.doesNotMatch(appSource, /sunflower_presentation_audit|06_outputs/);
+});
+
+test("棕榈体系由第13页配置自动生成且支持跨体系翻页和URL恢复", () => {
+  const slide = PRESENTATION_SLIDES[12];
+  assert.equal(slide.slideId, "palm-oil-balance");
+  assert.equal(slide.shortTitle, "棕榈油供需");
+  assert.equal(slide.pageNumber, 13);
+  assert.equal(slide.layoutOrder, 12);
+  assert.equal(slide.groupId, "palm-system");
+  assert.equal(slide.groupTitle, "棕榈体系");
+  assert.equal(slide.groupOrder, 4);
+  assert.equal(slide.groupPageNumber, 1);
+  assert.equal(PRESENTATION_SLIDES.filter((item) => item.groupId === "palm-system").length, 1);
+  assert.equal(pageIndexForKey("ArrowRight", 11, 13), 12);
+  assert.equal(pageIndexForKey("ArrowLeft", 12, 13), 11);
+  assert.equal(pageFromSearch("?slide=palm-oil-balance", PRESENTATION_SLIDES), 12);
+  assert.match(searchForRelease("?release=2026-06&slide=palm-oil-balance", "2026-03"), /slide=palm-oil-balance$/);
+});
+
+test("棕榈油页面使用固定五地区、说明卡和正式供需指标", () => {
+  const slide = PRESENTATION_SLIDES[12];
+  assert.equal(slide.product, "Palm Oil");
+  assert.equal(slide.system, "棕榈油体系");
+  assert.equal(slide.title, "Oil World 棕榈油年度供需");
+  assert.equal(slide.subtitle, "高密度季度研究演示 · Palm Oil · 五地区");
+  assert.equal(slide.layoutMode, "two-by-three-notes");
+  assert.deepEqual(slide.regions.map((region) => region.region), expectedPalmOilRegions);
+  assert.deepEqual(slide.regions.map((region) => region.layoutOrder), [0, 1, 2, 3, 4]);
+  assert.deepEqual(slide.metrics, [
+    "Beginning Stocks", "Product Output", "Imports", "Exports",
+    "Domestic Consumption", "Ending Stocks", PRESENTATION_STOCK_USAGE_RATIO,
+  ]);
+  assert.equal(presentationMetricLabel("Product Output"), "产量");
+  for (const region of slide.regions) {
+    assert.equal(region.periodFamily, "marketing_year");
+    assert.equal(region.sourceRole, "balance");
+    const formal: MetricData | undefined = productCombination("2026-06", slide.product, region.region).metrics.find((item) => item.metric === "Product Output");
+    assert.ok(formal);
+    assert.equal(formal.metric, "Product Output");
+  }
+});
+
+test("棕榈油五地区月份口径来自AN26392集中配置", () => {
+  const slide = PRESENTATION_SLIDES[12];
+  for (const release of ["2026-03", "2026-06"]) {
+    for (const region of slide.regions) {
+      const rows = metricsInOrder(productCombination(release, slide.product, region.region), slide.metrics, region.periodFamily, region.sourceRole);
+      const basis = presentationPeriodBasis(slide, region, rows);
+      assert.equal(basis.resolved_label, "Oct–Sep｜Oil World作物年度");
+      assert.deepEqual(basis.source_report_id, ["AN26392"]);
+      assert.match(basis.source_note, /Oct Sept/);
+    }
+  }
+  assert.deepEqual(recentAvailablePeriods(metricsInOrder(
+    productCombination("2026-06", slide.product, "Global"),
+    slide.metrics,
+    "marketing_year",
+    "balance",
+  )), ["2025/26", "2024/25", "2023/24"]);
+});
+
+test("2026-06棕榈油网页库存使用比遵循Global、国家和G2边界", () => {
+  const slide = PRESENTATION_SLIDES[12];
+  const expected: Record<string, number | null> = {
+    Global: 16.59,
+    Indonesia: 9.98,
+    Malaysia: 11.98,
+    G2: null,
+    India: null,
+  };
+  for (const region of slide.regions) {
+    const ratio = presentationRatio(presentationProductCombination(
+      "2026-06", slide.product, region.region, region.periodFamily, region.sourceRole, region.stockUsageScope,
+    ));
+    const latest = ratio.periods.find((period) => ratio.values[period] !== null);
+    assert.equal(roundedPercent(latest ? ratio.values[latest] : null), expected[region.region]);
+    if (expected[region.region] === null) {
+      assert.equal(ratio.mapping_status, "missing");
+      assert.equal(presentationCellValue(ratio, ratio.periods[0] ?? "2025/26"), "—");
+    } else {
+      assert.equal(ratio.mapping_status, "derived");
+      assert.equal(ratio.annual_change?.unit, "percentage points");
+      assert.equal(ratio.quarter_revision?.unit, "percentage points");
+    }
+  }
+  assert.equal(slide.regions.find((region) => region.region === "Global")?.stockUsageScope, "global");
+  assert.equal(slide.regions.find((region) => region.region === "Indonesia")?.stockUsageScope, "country");
+  assert.equal(slide.regions.find((region) => region.region === "Malaysia")?.stockUsageScope, "country");
+  assert.equal(slide.regions.find((region) => region.region === "India")?.stockUsageScope, "country");
+  assert.equal(slide.regions.find((region) => region.region === "G2")?.stockUsageScope, "aggregate");
+});
+
+test("棕榈油国家公式要求Exports有效且G2只展示正式审计指标", () => {
+  const slide = PRESENTATION_SLIDES[12];
+  const india = productCombination("2026-06", slide.product, "India");
+  assert.equal(metricByIdentity(india, { metric: "Exports", periodFamily: "marketing_year", sourceRole: "balance" })?.mapping_status, "missing");
+  const indiaRatio = presentationRatio(presentationProductCombination(
+    "2026-06", slide.product, "India", "marketing_year", "balance", "country",
+  ));
+  assert.equal(indiaRatio.values["2025/26"], undefined);
+  assert.equal(presentationCellValue(indiaRatio, "2025/26"), "—");
+
+  const g2 = productCombination("2026-06", slide.product, "G2");
+  const safe = ["Beginning Stocks", "Product Output", "Exports", "Domestic Consumption", "Ending Stocks"];
+  for (const name of safe) assert.equal(metricByIdentity(g2, { metric: name, periodFamily: "marketing_year", sourceRole: "balance" })?.mapping_status, "derived");
+  assert.equal(metricByIdentity(g2, { metric: "Imports", periodFamily: "marketing_year", sourceRole: "balance" })?.mapping_status, "missing");
+  assert.match(slide.notes?.join(" ") ?? "", /G2由印度尼西亚和马来西亚组成/);
+  assert.match(slide.notes?.join(" ") ?? "", /组内贸易/);
+});
+
+test("棕榈油March网页修正为—且June使用同scope上一发布期", () => {
+  const slide = PRESENTATION_SLIDES[12];
+  for (const region of slide.regions) {
+    const march = presentationRatio(presentationProductCombination(
+      "2026-03", slide.product, region.region, region.periodFamily, region.sourceRole, region.stockUsageScope,
+    ));
+    assert.equal(quarterRevisionDisplay(march).text, "—");
+  }
+  const juneGlobal = presentationRatio(presentationProductCombination(
+    "2026-06", slide.product, "Global", "marketing_year", "balance", "global",
+  ));
+  assert.equal(roundedPercent(juneGlobal.quarter_revision?.value), 0.18);
+  assert.equal(roundedPercent(juneGlobal.annual_change?.value), -0.78);
+});
+
+test("棕榈油专项审计输出完整且生产页面不依赖审计目录", () => {
+  const auditRoot = fileURLToPath(new URL("../../../06_outputs/palm_oil_presentation_audit/", import.meta.url));
+  for (const file of ["palm_oil_presentation_audit.md", "palm_oil_period_basis.json", "palm_oil_metric_coverage.csv", "palm_oil_g2_scope_review.md"]) {
+    assert.ok(fs.existsSync(`${auditRoot}/${file}`));
+  }
+  const appSource = fs.readFileSync(fileURLToPath(new URL("./presentation/PresentationApp.tsx", import.meta.url)), "utf8");
+  assert.doesNotMatch(appSource, /palm_oil_presentation_audit|06_outputs/);
 });
 
 test("详细看板保留原结构且不接入演示层网页计算", () => {

@@ -293,6 +293,19 @@ export const PRESENTATION_PERIOD_BASIS: readonly PresentationPeriodBasisConfig[]
       prefer_formal_basis: true,
     } satisfies PresentationPeriodBasisConfig)),
   ),
+  ...["Global", "Indonesia", "Malaysia", "G2", "India"].map((region) => ({
+    product: "Palm Oil",
+    region,
+    period_family: "marketing_year",
+    source_role: "balance",
+    start_month: "Oct",
+    end_month: "Sep",
+    display_label: "Oct–Sep｜Oil World作物年度",
+    source_report_id: ["AN26392"],
+    source_note: "《PALM OIL : World Supply and Demand Balance (1000 T)》第2行明确将完整年度列标为Oct Sept；Apr–Sept、Oct–Mar和Jan–Dec片段不进入演示页。",
+    footer_detail: "棕榈油：AN26392完整年度供需区块按Oct–Sep列示；演示页不读取半年或自然年片段。",
+    prefer_formal_basis: true,
+  } satisfies PresentationPeriodBasisConfig)),
 ] as const;
 
 function basisConfig(slide: PresentationSlideConfig, region: PresentationRegionConfig): PresentationPeriodBasisConfig {

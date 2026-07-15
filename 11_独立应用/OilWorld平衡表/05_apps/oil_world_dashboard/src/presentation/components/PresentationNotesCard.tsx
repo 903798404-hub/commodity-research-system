@@ -76,6 +76,7 @@ export function PresentationNotesCard({
         <p>{PRESENTATION_CHANGE_DEFINITIONS}</p>
         <p>“—”表示缺失、冲突、不适用、不可比或网页公式组成项不足。</p>
         <p>{ratioSummary(slide)}</p>
+        {slide.notes?.map((note) => <p key={note}>{note}</p>)}
         <p><strong>主要来源：</strong>{reports.length ? reports.join(" · ") : "Oil World正式发布数据"}</p>
       </div>
     </aside>
