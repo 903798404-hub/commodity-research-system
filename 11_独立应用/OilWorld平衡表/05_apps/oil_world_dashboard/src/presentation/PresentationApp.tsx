@@ -103,10 +103,11 @@ export default function PresentationApp() {
           : Promise.resolve(null),
       ]);
       const enriched = applyQuarterRevisions(payload, comparison);
-      const presentationData = slide.slideType === "balance"
+      const presentationData = slide.derivePresentationStockUsageRatio
         ? applyPresentationStockUsageRatio(enriched, previousPayload, {
             periodFamily: region.periodFamily,
             sourceRole: region.sourceRole,
+            scope: region.stockUsageScope,
           })
         : enriched;
       return [region.region, presentationData] as const;
@@ -222,7 +223,7 @@ export default function PresentationApp() {
         previousReleaseLabel={previousReleaseLabel}
       />
       <div className="presentation-content" aria-live="polite">
-        {loading && regionData.size === 0 && <div className="presentation-status">正在读取六个地区的正式发布数据…</div>}
+        {loading && regionData.size === 0 && <div className="presentation-status">正在读取{slide.regions.length}个地区的正式发布数据…</div>}
         {error && (
           <div className="presentation-status presentation-status--error" role="alert">
             <strong>演示页面暂时无法打开</strong><span>{error}</span>

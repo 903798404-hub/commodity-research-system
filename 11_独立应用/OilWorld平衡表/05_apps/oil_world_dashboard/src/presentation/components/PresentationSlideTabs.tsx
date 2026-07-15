@@ -10,27 +10,32 @@ export function PresentationSlideTabs({
   onPage: (page: number) => void;
 }) {
   const ordered = [...slides].sort((left, right) => left.layoutOrder - right.layoutOrder);
+  const groups = [...new Set(ordered.map((slide) => slide.navigationGroup))];
   return (
-    <nav
-      className="presentation-slide-tabs"
-      aria-label="演示页面切换"
-      style={{ gridTemplateColumns: `repeat(${ordered.length}, minmax(0, 1fr))` }}
-    >
-      {ordered.map((slide, index) => {
-        const active = index === currentPage;
-        return (
-          <button
-            type="button"
-            className={active ? "is-active" : ""}
-            aria-current={active ? "page" : undefined}
-            onClick={() => onPage(index)}
-            key={slide.slideId}
-          >
-            <span>{slide.shortTitle}</span>
-            <small>{slide.pageNumber} / {ordered.length}</small>
-          </button>
-        );
-      })}
+    <nav className="presentation-slide-tabs" aria-label="演示页面切换">
+      {groups.map((group) => (
+        <section className="presentation-slide-tab-group" aria-label={group} key={group}>
+          <strong>{group}</strong>
+          <div>
+            {ordered.map((slide, index) => {
+              if (slide.navigationGroup !== group) return null;
+              const active = index === currentPage;
+              return (
+                <button
+                  type="button"
+                  className={active ? "is-active" : ""}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => onPage(index)}
+                  key={slide.slideId}
+                >
+                  <span>{slide.shortTitle}</span>
+                  <small>{slide.pageNumber} / {ordered.length}</small>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </nav>
   );
 }

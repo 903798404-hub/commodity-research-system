@@ -445,8 +445,29 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 .presentation-slide-tabs {
   display: grid;
   grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: .45em;
   margin-top: .1em;
+}
+.presentation-slide-tab-group {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: .42em;
+  min-width: 0;
+}
+.presentation-slide-tab-group > strong {
+  color: #6b655d;
+  font-size: clamp(7px, .46vw, 9px);
+  letter-spacing: .04em;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+}
+.presentation-slide-tab-group > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .32em;
+  min-width: 0;
 }
 .presentation-slide-tabs button {
   display: flex;
@@ -489,4 +510,92 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
   color: #9b8d87;
   font-size: clamp(7px, .46vw, 9px);
   white-space: nowrap;
+}
+
+/* Rapeseed-system compact 2×4 research layout */
+.presentation-table-grid[data-layout="two-by-four-notes"] {
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: .42% .7%;
+}
+.presentation-research-slide[data-layout="two-by-four-notes"] {
+  gap: .28%;
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-title,
+.presentation-notes-title {
+  min-height: clamp(20px, 1.35vw, 27px);
+  padding: .12em .55em;
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-title strong {
+  font-size: clamp(8px, .59vw, 12px);
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-title span {
+  font-size: clamp(6px, .4vw, 8px);
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table table {
+  font-size: clamp(6.5px, .47vw, 9.5px);
+  line-height: 1.02;
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table th,
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table td {
+  padding: 0 clamp(2px, .26vw, 5px);
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table thead th:first-child,
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table tbody th {
+  width: 22%;
+}
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table thead th:nth-child(2),
+.presentation-table-grid[data-layout="two-by-four-notes"] .presentation-region-table thead th:nth-child(3) {
+  width: 16%;
+}
+.presentation-notes-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: #4d4d47;
+  background: #fffdf6;
+  border: 1px solid #d8d5cc;
+  border-radius: .28em;
+  box-shadow: 0 .16em .5em rgba(48, 55, 49, .05);
+}
+.presentation-notes-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #332f25;
+  background: #f2cf63;
+  border-bottom: 1px solid #d5af3d;
+}
+.presentation-notes-title strong { font-size: clamp(8px, .59vw, 12px); }
+.presentation-notes-title span { color: #6d581e; font-size: clamp(6px, .4vw, 8px); font-weight: 800; }
+.presentation-notes-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: .12em .65em;
+  min-height: 0;
+  padding: .3em .55em;
+  font-size: clamp(6px, .4vw, 8px);
+  line-height: 1.18;
+}
+.presentation-notes-body p { margin: 0; }
+.presentation-notes-body p:first-child,
+.presentation-notes-body p:last-child { grid-column: 1 / -1; }
+.presentation-notes-body dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-column: 1 / -1;
+  gap: .08em .55em;
+  margin: 0;
+}
+.presentation-notes-body dl div { display: flex; gap: .35em; min-width: 0; }
+.presentation-notes-body dt { flex: 0 0 auto; color: #174f40; font-weight: 800; }
+.presentation-notes-body dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 1400px) {
+  .presentation-slide-tabs { gap: .28em; }
+  .presentation-slide-tab-group { gap: .22em; }
+  .presentation-slide-tab-group > div { gap: .2em; }
+  .presentation-slide-tabs button { padding-right: .4em; padding-left: .4em; }
 }

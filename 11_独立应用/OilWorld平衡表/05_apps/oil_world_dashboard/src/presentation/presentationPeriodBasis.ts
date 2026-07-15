@@ -145,6 +145,86 @@ export const PRESENTATION_PERIOD_BASIS: readonly PresentationPeriodBasisConfig[]
       prefer_formal_basis: true,
     } satisfies PresentationPeriodBasisConfig)),
   ),
+  ...[
+    {
+      region: "Global",
+      start: null,
+      end: null,
+      label: "混合口径｜作物年度供需 · 贸易Oct–Sep",
+      family: "mixed",
+      role: "mixed",
+      reports: ["AN149900", "AN14992"],
+      note: "AN149900世界供需表以作物年度列示且Crush行注明July/June；AN14992贸易表明确为Oct/Sept，原表没有全表统一起止月。",
+    },
+    {
+      region: "Canada", start: "Aug", end: "Jul", label: "Aug–Jul｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN40001"], note: "《CANADA : Rapeseed/Canola Balance》表头明确为Aug July。",
+    },
+    {
+      region: "European Union", start: "Jul", end: "Jun", label: "Jul–Jun｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN049104"], note: "《EU-27 : Summary of Rapeseed Supply & Demand》表头明确为July June。",
+    },
+    {
+      region: "Australia", start: "Oct", end: "Sep", label: "Oct–Sep｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN80501"], note: "《AUSTRALIA : Rapeseed Balance》表头明确为Oct Sept。",
+    },
+    {
+      region: "China", start: "Jun", end: "May", label: "Jun–May｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN62802"], note: "《CHINA,PR : Rapeseed Balance》表头明确为June May。",
+    },
+    {
+      region: "Russia", start: "Jul", end: "Jun", label: "Jul–Jun｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN17503"], note: "《RUSSIA : Rapeseed Balance》表头明确为July June。",
+    },
+    {
+      region: "Ukraine", start: "Jul", end: "Jun", label: "Jul–Jun｜Oil World作物年度",
+      family: "marketing_year", role: "balance", reports: ["AN18103"], note: "《UKRAINE : Rapeseed Balance》表头明确为July June。",
+    },
+  ].map(({ region, start, end, label, family, role, reports, note }) => ({
+    product: "Rapeseed / Canola",
+    region,
+    period_family: family,
+    source_role: role,
+    start_month: start,
+    end_month: end,
+    display_label: label,
+    source_report_id: reports,
+    source_note: note,
+    footer_detail: region === "Global"
+      ? "菜籽Global：世界供需表为作物年度结构，贸易表按Oct–Sep，原表没有统一月份。"
+      : undefined,
+    prefer_formal_basis: region !== "Global",
+  } satisfies PresentationPeriodBasisConfig)),
+  ...["Global", "Canada", "European Union", "Australia", "China", "Russia", "Ukraine"].map((region) => ({
+    product: "Rapeseed / Canola",
+    region,
+    period_family: "crop_year",
+    source_role: "production_table",
+    start_month: null,
+    end_month: null,
+    display_label: "起止月原表未注明｜Oil World作物年度",
+    source_report_id: ["AN14993"],
+    source_note: "《RAPESEED / CANOLA : World Production, Yields and Harvested Area》仅列HARVEST主要收获月份，不提供作物年度起止月。",
+    footer_detail: "菜籽生产：AN14993只列主要收获月份，不能作为作物年度起止月份。",
+  } satisfies PresentationPeriodBasisConfig)),
+  ...[
+    { product: "Rapeseed Oil", report: "AN24992", title: "RAPESEED OIL : World Supply and Demand Balance" },
+    { product: "Rapeseed Meal", report: "AN34992", title: "RAPESEED MEAL : World Supply and Demand Balance" },
+  ].flatMap(({ product, report, title }) =>
+    ["Global", "Canada", "European Union", "Australia", "China", "Russia", "Ukraine"].map((region) => ({
+      product,
+      region,
+      period_family: "marketing_year",
+      source_role: "balance",
+      start_month: "Oct",
+      end_month: "Sep",
+      display_label: "Oct–Sep｜Oil World作物年度",
+      source_report_id: [report],
+      source_note: `《${title}》各完整年度区块表头均明确为Oct Sept。`,
+      footer_detail: `${product === "Rapeseed Oil" ? "菜油" : "菜粕"}：${report}完整年度供需区块按Oct–Sep列示。`,
+      prefer_formal_basis: true,
+    } satisfies PresentationPeriodBasisConfig)),
+  ),
 ] as const;
 
 function basisConfig(slide: PresentationSlideConfig, region: PresentationRegionConfig): PresentationPeriodBasisConfig {
@@ -167,6 +247,12 @@ const SPECIFIC_FORMAL_BASIS: Readonly<Record<string, string>> = {
   "Apr–Mar": "Apr–Mar",
   "Oct–Sept": "Oct–Sep",
   "Oct–Sep": "Oct–Sep",
+  "Aug–July": "Aug–Jul",
+  "Aug–Jul": "Aug–Jul",
+  "July–June": "Jul–Jun",
+  "Jul–Jun": "Jul–Jun",
+  "June–May": "Jun–May",
+  "Jun–May": "Jun–May",
 };
 
 export function presentationPeriodBasis(

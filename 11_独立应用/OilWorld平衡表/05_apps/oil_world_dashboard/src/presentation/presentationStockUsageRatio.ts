@@ -10,12 +10,21 @@ export { PRESENTATION_STOCK_USAGE_RATIO } from "./selectors";
 export const PRESENTATION_STOCK_USAGE_FOOTER_NOTE =
   "Global＝期末库存÷国内消费；单个国家＝期末库存÷（国内消费＋出口）；G2/G3因组内贸易无法安全剔除，暂不计算。";
 
-type ScopeType = "global" | "country" | "aggregate";
+export type PresentationStockUsageScope = "global" | "country" | "external_region" | "aggregate";
 
-const COUNTRY_REGIONS = new Set(["United States", "Brazil", "Argentina", "China"]);
+const COUNTRY_REGIONS = new Set([
+  "United States",
+  "Brazil",
+  "Argentina",
+  "China",
+  "Canada",
+  "Australia",
+  "Russia",
+  "Ukraine",
+]);
 const USABLE_STATUSES = new Set(["direct", "derived"]);
 
-function scopeType(region: string): ScopeType {
+function scopeType(region: string): PresentationStockUsageScope {
   if (region === "Global") return "global";
   if (COUNTRY_REGIONS.has(region)) return "country";
   return "aggregate";
@@ -81,7 +90,11 @@ function emptyMetric(identity: MetricIdentity): MetricData {
   };
 }
 
-function calculateMetric(data: CombinationData, requested: MetricIdentity): MetricData {
+function calculateMetric(
+  data: CombinationData,
+  requested: MetricIdentity,
+  requestedScope?: PresentationStockUsageScope,
+): MetricData {
   const identity = resolveIdentity(data, requested);
   const result = emptyMetric(identity);
   const ending = metricByIdentity(data, {
@@ -94,22 +107,23 @@ function calculateMetric(data: CombinationData, requested: MetricIdentity): Metr
     periodFamily: identity.periodFamily,
     sourceRole: identity.sourceRole,
   });
-  const scope = scopeType(data.region);
-  const exportsMetric = scope === "country" ? metricByIdentity(data, {
+  const scope = requestedScope ?? scopeType(data.region);
+  const requiresExports = scope === "country" || scope === "external_region";
+  const exportsMetric = requiresExports ? metricByIdentity(data, {
     metric: "Exports",
     periodFamily: identity.periodFamily,
     sourceRole: identity.sourceRole,
   }) : undefined;
 
-  if (!ending || !consumption || (scope === "country" && !exportsMetric)) return result;
-  const components = scope === "country" ? [ending, consumption, exportsMetric!] : [ending, consumption];
+  if (!ending || !consumption || (requiresExports && !exportsMetric)) return result;
+  const components = requiresExports ? [ending, consumption, exportsMetric!] : [ending, consumption];
   const sameUnit = components.every((metric) => metric.unit === ending.unit);
   const commonPeriods = ending.periods.filter((period) => components.every((metric) => metric.periods.includes(period)));
   const values = Object.fromEntries(commonPeriods.map((period) => {
     if (scope === "aggregate" || !sameUnit) return [period, null];
     const endingValue = componentValue(ending, period);
     const consumptionValue = componentValue(consumption, period);
-    const exportValue = scope === "country" ? componentValue(exportsMetric, period) : 0;
+    const exportValue = requiresExports ? componentValue(exportsMetric, period) : 0;
     if (endingValue === null || consumptionValue === null || exportValue === null) return [period, null];
     const denominator = consumptionValue + exportValue;
     return [period, denominator === 0 ? null : endingValue / denominator * 100];
@@ -125,7 +139,7 @@ function calculateMetric(data: CombinationData, requested: MetricIdentity): Metr
     : null;
   const formula = scope === "global"
     ? "Ending Stocks / Domestic Consumption × 100"
-    : scope === "country"
+    : requiresExports
       ? "Ending Stocks / (Domestic Consumption + Exports) × 100"
       : "G2/G3及其他聚合区域不进行网页计算";
   const sourceCells = Object.fromEntries(commonPeriods.map((period) => [
@@ -150,7 +164,7 @@ function calculateMetric(data: CombinationData, requested: MetricIdentity): Metr
     source_cells: sourceCells,
     source_cell_or_range: unique(Object.values(sourceCells).flat()).join(" + "),
     derivation_method: formula,
-    derivation_components: scope === "country"
+    derivation_components: requiresExports
       ? "Ending Stocks; Domestic Consumption; Exports"
       : scope === "global" ? "Ending Stocks; Domestic Consumption" : "",
     quality_note: scope === "aggregate"
@@ -164,17 +178,18 @@ function calculateMetric(data: CombinationData, requested: MetricIdentity): Metr
 export function applyPresentationStockUsageRatio(
   current: CombinationData,
   previous: CombinationData | null,
-  identity: Omit<MetricIdentity, "metric"> = {},
+  identity: Omit<MetricIdentity, "metric"> & { scope?: PresentationStockUsageScope } = {},
 ): CombinationData {
-  const requested = { metric: PRESENTATION_STOCK_USAGE_RATIO, ...identity };
-  const ratio = calculateMetric(current, requested);
+  const { scope, ...metricIdentity } = identity;
+  const requested = { metric: PRESENTATION_STOCK_USAGE_RATIO, ...metricIdentity };
+  const ratio = calculateMetric(current, requested, scope);
   const latestPeriod = ratio.periods.find((period) => ratio.values[period] !== null);
   const previousRatio = previous
     ? calculateMetric(previous, {
         metric: PRESENTATION_STOCK_USAGE_RATIO,
         periodFamily: ratio.period_family,
         sourceRole: ratio.source_role,
-      })
+      }, scope)
     : null;
   const previousValue = latestPeriod ? previousRatio?.values[latestPeriod] : null;
   const currentValue = latestPeriod ? ratio.values[latestPeriod] : null;

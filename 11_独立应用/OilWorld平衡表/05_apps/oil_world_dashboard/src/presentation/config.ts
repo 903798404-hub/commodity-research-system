@@ -8,6 +8,7 @@ export interface PresentationRegionConfig {
   layoutOrder: number;
   periodFamily?: string;
   sourceRole?: string;
+  stockUsageScope?: "global" | "country" | "external_region" | "aggregate";
 }
 
 export interface PresentationSlideConfig {
@@ -23,6 +24,10 @@ export interface PresentationSlideConfig {
   subtitle: string;
   metrics: string[];
   regions: PresentationRegionConfig[];
+  navigationGroup: string;
+  layoutMode: "two-by-three" | "two-by-four-notes";
+  derivePresentationStockUsageRatio: boolean;
+  euStockUsageRatio: "not-applicable" | "external-exports-confirmed" | "exports-scope-unconfirmed";
 }
 
 const RESEARCH_REGIONS = [
@@ -57,12 +62,67 @@ const PRODUCT_BALANCE_METRICS = [
   PRESENTATION_STOCK_USAGE_RATIO,
 ];
 
+const RAPESEED_BALANCE_METRICS = [
+  "Beginning Stocks",
+  "Production",
+  "Imports",
+  "Exports",
+  "Crush",
+  "Domestic Consumption",
+  "Ending Stocks",
+  "Stocks/Use Ratio",
+];
+
+const RAPESEED_REGIONS = [
+  { region: "Global", label: "全球" },
+  { region: "Canada", label: "加拿大" },
+  { region: "European Union", label: "欧盟" },
+  { region: "China", label: "中国" },
+  { region: "Australia", label: "澳大利亚" },
+  { region: "Russia", label: "俄罗斯" },
+  { region: "Ukraine", label: "乌克兰" },
+] as const;
+
 function productBalanceRegions(): PresentationRegionConfig[] {
   return RESEARCH_REGIONS.map((item, layoutOrder) => ({
     ...item,
     layoutOrder,
     periodFamily: "marketing_year",
     sourceRole: "balance",
+    stockUsageScope: item.region === "Global"
+      ? "global"
+      : item.region === "G3" ? "aggregate" : "country",
+  }));
+}
+
+function rapeseedBalanceRegions(): PresentationRegionConfig[] {
+  return RAPESEED_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    ...(item.region === "Global" ? {} : { periodFamily: "marketing_year", sourceRole: "balance" }),
+  }));
+}
+
+function rapeseedProductionRegions(): PresentationRegionConfig[] {
+  return RAPESEED_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    periodFamily: "crop_year",
+    sourceRole: "production_table",
+  }));
+}
+
+function rapeseedProductRegions(euConfirmed: boolean): PresentationRegionConfig[] {
+  return RAPESEED_REGIONS.map((item, layoutOrder) => ({
+    ...item,
+    layoutOrder,
+    periodFamily: "marketing_year",
+    sourceRole: "balance",
+    stockUsageScope: item.region === "Global"
+      ? "global"
+      : item.region === "European Union"
+        ? euConfirmed ? "external_region" : "aggregate"
+        : "country",
   }));
 }
 
@@ -79,6 +139,10 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     title: "Oil World 大豆年度供需",
     subtitle: "高密度季度研究演示 · Soybeans · 六地区",
     metrics: BALANCE_METRICS,
+    navigationGroup: "大豆体系",
+    layoutMode: "two-by-three",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "not-applicable",
     regions: RESEARCH_REGIONS.map((item, layoutOrder) => item.region === "Brazil"
       ? {
           ...item,
@@ -103,6 +167,10 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     title: "Oil World 大豆生产条件",
     subtitle: "高密度季度研究演示 · Soybeans · 六地区",
     metrics: PRODUCTION_METRICS,
+    navigationGroup: "大豆体系",
+    layoutMode: "two-by-three",
+    derivePresentationStockUsageRatio: false,
+    euStockUsageRatio: "not-applicable",
     regions: RESEARCH_REGIONS.map((item, layoutOrder) => ({
       ...item,
       layoutOrder,
@@ -122,6 +190,10 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     title: "Oil World 豆油年度供需",
     subtitle: "高密度季度研究演示 · Soybean Oil · 六地区",
     metrics: PRODUCT_BALANCE_METRICS,
+    navigationGroup: "大豆体系",
+    layoutMode: "two-by-three",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "not-applicable",
     regions: productBalanceRegions(),
   },
   {
@@ -136,7 +208,83 @@ export const PRESENTATION_SLIDES: readonly PresentationSlideConfig[] = [
     title: "Oil World 豆粕年度供需",
     subtitle: "高密度季度研究演示 · Soybean Meal · 六地区",
     metrics: PRODUCT_BALANCE_METRICS,
+    navigationGroup: "大豆体系",
+    layoutMode: "two-by-three",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "not-applicable",
     regions: productBalanceRegions(),
+  },
+  {
+    slideId: "rapeseed-canola-balance",
+    slideType: "balance",
+    shortTitle: "菜籽供需",
+    pageNumber: 5,
+    layoutOrder: 4,
+    system: "菜籽体系",
+    product: "Rapeseed / Canola",
+    productLabel: "菜籽",
+    title: "Oil World 菜籽年度供需",
+    subtitle: "高密度季度研究演示 · Rapeseed / Canola · 七地区",
+    metrics: RAPESEED_BALANCE_METRICS,
+    navigationGroup: "菜籽体系",
+    layoutMode: "two-by-four-notes",
+    derivePresentationStockUsageRatio: false,
+    euStockUsageRatio: "not-applicable",
+    regions: rapeseedBalanceRegions(),
+  },
+  {
+    slideId: "rapeseed-canola-production-conditions",
+    slideType: "production-conditions",
+    shortTitle: "菜籽生产",
+    pageNumber: 6,
+    layoutOrder: 5,
+    system: "菜籽体系",
+    product: "Rapeseed / Canola",
+    productLabel: "菜籽",
+    title: "Oil World 菜籽生产条件",
+    subtitle: "高密度季度研究演示 · Rapeseed / Canola · 七地区",
+    metrics: PRODUCTION_METRICS,
+    navigationGroup: "菜籽体系",
+    layoutMode: "two-by-four-notes",
+    derivePresentationStockUsageRatio: false,
+    euStockUsageRatio: "not-applicable",
+    regions: rapeseedProductionRegions(),
+  },
+  {
+    slideId: "rapeseed-oil-balance",
+    slideType: "balance",
+    shortTitle: "菜油供需",
+    pageNumber: 7,
+    layoutOrder: 6,
+    system: "菜籽体系",
+    product: "Rapeseed Oil",
+    productLabel: "菜油",
+    title: "Oil World 菜油年度供需",
+    subtitle: "高密度季度研究演示 · Rapeseed Oil · 七地区",
+    metrics: PRODUCT_BALANCE_METRICS,
+    navigationGroup: "菜籽体系",
+    layoutMode: "two-by-four-notes",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "external-exports-confirmed",
+    regions: rapeseedProductRegions(true),
+  },
+  {
+    slideId: "rapeseed-meal-balance",
+    slideType: "balance",
+    shortTitle: "菜粕供需",
+    pageNumber: 8,
+    layoutOrder: 7,
+    system: "菜籽体系",
+    product: "Rapeseed Meal",
+    productLabel: "菜粕",
+    title: "Oil World 菜粕年度供需",
+    subtitle: "高密度季度研究演示 · Rapeseed Meal · 七地区",
+    metrics: PRODUCT_BALANCE_METRICS,
+    navigationGroup: "菜籽体系",
+    layoutMode: "two-by-four-notes",
+    derivePresentationStockUsageRatio: true,
+    euStockUsageRatio: "exports-scope-unconfirmed",
+    regions: rapeseedProductRegions(false),
   },
 ] as const;
 

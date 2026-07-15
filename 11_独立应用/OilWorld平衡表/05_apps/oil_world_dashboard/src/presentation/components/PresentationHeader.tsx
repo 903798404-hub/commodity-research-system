@@ -1,4 +1,5 @@
 import type { PresentationSlideConfig } from "../config";
+import { ANNUAL_CHANGE_DEFINITION, QUARTERLY_REVISION_DEFINITION } from "../definitions";
 import { PresentationSlideTabs } from "./PresentationSlideTabs";
 
 export function PresentationHeader({
@@ -31,8 +32,8 @@ export function PresentationHeader({
         <div><dt>发布期</dt><dd>{releaseLabel}</dd></div>
         <div><dt>上一发布期</dt><dd>{previousReleaseLabel}</dd></div>
         <div><dt>单位</dt><dd>{unitLabel}</dd></div>
-        <div><dt>年度变化</dt><dd>最新年度 − 上一年度</dd></div>
-        <div><dt>季度修正</dt><dd>当前发布期 − 上一发布期</dd></div>
+        <div><dt>年度变化</dt><dd>{ANNUAL_CHANGE_DEFINITION}</dd></div>
+        <div><dt>季度修正</dt><dd>{QUARTERLY_REVISION_DEFINITION}</dd></div>
         <div><dt>数据来源</dt><dd>Oil World正式发布数据</dd></div>
       </dl>
       <PresentationSlideTabs slides={slides} currentPage={currentPage} onPage={onPage} />
