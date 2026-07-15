@@ -5,34 +5,64 @@
   "product": "Soybeans",
   "region": "Brazil",
   "market_year_basis": [
-    "Jan–Dec（自然年，审计冲突，数值不展示）",
-    "Oil World作物年度"
+    "Jan–Dec自然年｜Oil World国家平衡表",
+    "Oil World作物年度｜世界生产表"
   ],
   "periods": [
     "2026/27",
+    "2026",
     "2025/26",
-    "2024/25"
+    "2025",
+    "2024/25",
+    "2024"
   ],
   "forecast_status": {
     "2026/27": "implicit_forecast",
+    "2026": "historical",
     "2025/26": "historical",
-    "2024/25": "historical"
+    "2025": "historical",
+    "2024/25": "historical",
+    "2024": "historical"
   },
   "metrics": [
     {
       "metric": "Beginning Stocks",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "direct",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Open'g stocks",
+      "values": {
+        "2026": 6800.0,
+        "2025": 4000.0,
+        "2024": 6400.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": 2800.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -42,29 +72,63 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B3"
+        ],
+        "2025": [
+          "AN51000A!C3"
+        ],
+        "2024": [
+          "AN51000A!D3"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B3:D3",
       "is_derived": false,
       "derivation_method": "",
       "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Production",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "direct",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Crop",
+      "values": {
+        "2026": 180800.0,
+        "2025": 172000.0,
+        "2024": 154600.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": 8800.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -74,29 +138,129 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B4"
+        ],
+        "2025": [
+          "AN51000A!C4"
+        ],
+        "2024": [
+          "AN51000A!D4"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B4:D4",
       "is_derived": false,
       "derivation_method": "",
       "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
+      "has_footnote": false,
+      "has_star": false
+    },
+    {
+      "metric": "Production",
+      "mapping_status": "direct",
+      "market_year_basis": "Oil World作物年度｜世界生产表",
+      "period_family": "crop_year",
+      "period_basis": "Oil World crop year",
+      "source_role": "production_table",
+      "periods": [
+        "2026/27",
+        "2025/26",
+        "2024/25"
+      ],
+      "original_periods": {
+        "2026/27": "26/27",
+        "2025/26": "25/26",
+        "2024/25": "24/25"
+      },
+      "forecast_status": {
+        "2026/27": "implicit_forecast",
+        "2025/26": "historical",
+        "2024/25": "historical"
+      },
+      "original_metric": "PRODUCTION",
+      "values": {
+        "2026/27": 184000.0,
+        "2025/26": 180800.0,
+        "2024/25": 172000.0
+      },
+      "annual_change": {
+        "current_period": "2026/27",
+        "previous_period": "2025/26",
+        "value": 3200.0,
+        "unit": "1000 T"
+      },
+      "quarter_revision": null,
+      "quarter_revision_note": "暂无上一期",
+      "unit": "1000 T",
+      "original_unit": "1000 T",
+      "source_report_id": [
+        "AN13993"
+      ],
+      "source_report_title": [
+        "SOYBEANS : World Production (1000T), Yields (T/ha) and Harvested Area (1000ha)"
+      ],
+      "source_sheet": [
+        "AN13993"
+      ],
+      "source_cells": {
+        "2026/27": [
+          "AN13993!C11"
+        ],
+        "2025/26": [
+          "AN13993!D11"
+        ],
+        "2024/25": [
+          "AN13993!E11"
+        ]
+      },
+      "source_cell_or_range": "AN13993!C11:E11",
+      "is_derived": false,
+      "derivation_method": "",
+      "derivation_components": "",
+      "quality_note": "",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Imports",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "direct",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Imports",
+      "values": {
+        "2026": 830.0,
+        "2025": 971.0,
+        "2024": 822.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": -141.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -106,29 +270,63 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B5"
+        ],
+        "2025": [
+          "AN51000A!C5"
+        ],
+        "2024": [
+          "AN51000A!D5"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B5:D5",
       "is_derived": false,
       "derivation_method": "",
       "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Exports",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "direct",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Exports",
+      "values": {
+        "2026": 116600.0,
+        "2025": 108181.0,
+        "2024": 98813.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": 8419.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -138,29 +336,63 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B6"
+        ],
+        "2025": [
+          "AN51000A!C6"
+        ],
+        "2024": [
+          "AN51000A!D6"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B6:D6",
       "is_derived": false,
       "derivation_method": "",
       "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Crush",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "direct",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Crushings",
+      "values": {
+        "2026": 61600.0,
+        "2025": 58698.0,
+        "2024": 55811.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": 2902.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -170,12 +402,22 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B7"
+        ],
+        "2025": [
+          "AN51000A!C7"
+        ],
+        "2024": [
+          "AN51000A!D7"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B7:D7",
       "is_derived": false,
       "derivation_method": "",
       "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
@@ -183,6 +425,9 @@
       "metric": "Product Output",
       "mapping_status": "not_applicable",
       "market_year_basis": "未提供（该指标无可展示数值）",
+      "period_family": "marketing_year",
+      "period_basis": "未提供（该指标无可展示数值）",
+      "source_role": "balance",
       "periods": [],
       "original_periods": {},
       "forecast_status": {},
@@ -207,18 +452,42 @@
     },
     {
       "metric": "Domestic Consumption",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "derived",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Crushings + Other use",
+      "values": {
+        "2026": 65030.0,
+        "2025": 61989.0,
+        "2024": 59009.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": 3041.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -228,29 +497,66 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
-      "is_derived": false,
-      "derivation_method": "",
-      "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B7",
+          "AN51000A!B8"
+        ],
+        "2025": [
+          "AN51000A!C7",
+          "AN51000A!C8"
+        ],
+        "2024": [
+          "AN51000A!D7",
+          "AN51000A!D8"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B7:D7 + AN51000A!B8:D8",
+      "is_derived": true,
+      "derivation_method": "Domestic Consumption = Crushings + Other use",
+      "derivation_components": "AN51000A rows 7 + 8",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Ending Stocks",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "direct",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Ending stocks",
+      "values": {
+        "2026": 6800.0,
+        "2025": 6800.0,
+        "2024": 4000.0
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": 0.0,
+        "unit": "1000 T"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "1000 T",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -260,29 +566,63 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B9"
+        ],
+        "2025": [
+          "AN51000A!C9"
+        ],
+        "2024": [
+          "AN51000A!D9"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B9:D9",
       "is_derived": false,
       "derivation_method": "",
       "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Stocks/Use Ratio",
-      "mapping_status": "conflict",
-      "market_year_basis": "Jan–Dec（自然年，审计冲突，数值不展示）",
-      "periods": [],
-      "original_periods": {},
-      "forecast_status": {},
-      "original_metric": "",
-      "values": {},
-      "annual_change": null,
+      "mapping_status": "derived",
+      "market_year_basis": "Jan–Dec自然年｜Oil World国家平衡表",
+      "period_family": "calendar_year",
+      "period_basis": "Jan–Dec",
+      "source_role": "balance",
+      "periods": [
+        "2026",
+        "2025",
+        "2024"
+      ],
+      "original_periods": {
+        "2026": "Jan Dec 2026",
+        "2025": "Jan Dec 2025",
+        "2024": "Jan Dec 2024"
+      },
+      "forecast_status": {
+        "2026": "historical",
+        "2025": "historical",
+        "2024": "historical"
+      },
+      "original_metric": "Ending stocks / (Crushings + Other use)",
+      "values": {
+        "2026": 10.45671229,
+        "2025": 10.96968817,
+        "2024": 6.77862699
+      },
+      "annual_change": {
+        "current_period": "2026",
+        "previous_period": "2025",
+        "value": -0.51297588,
+        "unit": "percentage points"
+      },
       "quarter_revision": null,
       "quarter_revision_note": "暂无上一期",
       "unit": "%",
-      "original_unit": "",
+      "original_unit": "1000 T",
       "source_report_id": [
         "AN51000A"
       ],
@@ -292,19 +632,38 @@
       "source_sheet": [
         "AN51000A"
       ],
-      "source_cells": {},
-      "source_cell_or_range": "",
-      "is_derived": false,
-      "derivation_method": "",
-      "derivation_components": "",
-      "quality_note": "原始Oil World报表存在统计周期、指标定义或来源冲突，当前版本暂不展示该数值。 主国家表采用Jan–Dec自然年，按本次规则不得混入完整市场年度矩阵。",
+      "source_cells": {
+        "2026": [
+          "AN51000A!B9",
+          "AN51000A!B7",
+          "AN51000A!B8"
+        ],
+        "2025": [
+          "AN51000A!C9",
+          "AN51000A!C7",
+          "AN51000A!C8"
+        ],
+        "2024": [
+          "AN51000A!D9",
+          "AN51000A!D7",
+          "AN51000A!D8"
+        ]
+      },
+      "source_cell_or_range": "AN51000A!B9:D9 / (AN51000A!B7:D7 + AN51000A!B8:D8)",
+      "is_derived": true,
+      "derivation_method": "Stocks/Use Ratio = Ending Stocks / Domestic Consumption × 100",
+      "derivation_components": "AN51000A rows 7, 8, 9",
+      "quality_note": "Jan–Dec natural-year balance; kept separate from Oil World crop-year production table.",
       "has_footnote": false,
       "has_star": false
     },
     {
       "metric": "Area Harvested",
       "mapping_status": "direct",
-      "market_year_basis": "Oil World作物年度",
+      "market_year_basis": "Oil World作物年度｜世界生产表",
+      "period_family": "crop_year",
+      "period_basis": "Oil World crop year",
+      "source_role": "production_table",
       "periods": [
         "2026/27",
         "2025/26",
@@ -367,7 +726,10 @@
     {
       "metric": "Yield",
       "mapping_status": "direct",
-      "market_year_basis": "Oil World作物年度",
+      "market_year_basis": "Oil World作物年度｜世界生产表",
+      "period_family": "crop_year",
+      "period_basis": "Oil World crop year",
+      "source_role": "production_table",
       "periods": [
         "2026/27",
         "2025/26",

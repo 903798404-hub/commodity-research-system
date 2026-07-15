@@ -518,14 +518,14 @@
     }
   ],
   "combination_count": 59,
-  "mapping_record_count": 649,
-  "numeric_observation_count": 1777,
-  "annual_change_count": 358,
+  "mapping_record_count": 651,
+  "numeric_observation_count": 1831,
+  "annual_change_count": 376,
   "status_counts": {
-    "direct": 286,
+    "direct": 300,
     "not_applicable": 182,
-    "derived": 75,
-    "conflict": 51,
+    "derived": 79,
+    "conflict": 35,
     "missing": 55
   },
   "quarter_revision_available": false

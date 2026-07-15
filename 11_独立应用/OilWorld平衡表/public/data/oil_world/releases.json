@@ -11,9 +11,9 @@
       "previous_release": null,
       "next_release": "2026-06",
       "quality_status": "passed",
-      "mapping_record_count": 649,
-      "numeric_value_count": 1777,
-      "annual_change_count": 358,
+      "mapping_record_count": 651,
+      "numeric_value_count": 1831,
+      "annual_change_count": 376,
       "available": true
     },
     {
@@ -26,9 +26,9 @@
       "previous_release": "2026-03",
       "next_release": null,
       "quality_status": "passed",
-      "mapping_record_count": 649,
-      "numeric_value_count": 1791,
-      "annual_change_count": 358,
+      "mapping_record_count": 651,
+      "numeric_value_count": 1845,
+      "annual_change_count": 376,
       "available": true
     }
   ]

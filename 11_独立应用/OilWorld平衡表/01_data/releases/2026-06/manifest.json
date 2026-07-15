@@ -2,8 +2,8 @@
   "schema_version": 1,
   "release": "2026-06",
   "release_label": "June 2026",
-  "generated_at": "2026-07-14T15:29:04.493664+00:00",
-  "source_workbook": "01_原始资料/2026-06/油世界季度表-June 2026.xlsx",
+  "generated_at": "2026-07-15T08:33:33.300741+00:00",
+  "source_workbook": "source/油世界季度表-June 2026.xlsx",
   "source_workbook_sha256": "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e",
   "mapping_audit": {
     "mapping_audit": "2026-06_report_mapping_audit.json",
@@ -12,16 +12,16 @@
     "metric_mapping": "2026-06_metric_mapping.csv"
   },
   "combination_count": 59,
-  "mapping_record_count": 649,
-  "numeric_observation_count": 1791,
-  "annual_change_count": 358,
+  "mapping_record_count": 651,
+  "numeric_observation_count": 1845,
+  "annual_change_count": 376,
   "adopted_report_count": 30,
-  "numeric_source_report_count": 28,
+  "numeric_source_report_count": 30,
   "status_counts": {
-    "direct": 286,
+    "direct": 300,
     "not_applicable": 182,
-    "derived": 75,
-    "conflict": 51,
+    "derived": 79,
+    "conflict": 35,
     "missing": 55
   },
   "available": true

@@ -21,8 +21,8 @@ function treeHash(root: string) {
   };
   visit(root);
   files.sort((left, right) => {
-    const leftRelative = path.relative(root, left).replaceAll("\\", "/");
-    const rightRelative = path.relative(root, right).replaceAll("\\", "/");
+    const leftRelative = path.relative(root, left).replaceAll("\\", "/").toLowerCase();
+    const rightRelative = path.relative(root, right).replaceAll("\\", "/").toLowerCase();
     return leftRelative < rightRelative ? -1 : leftRelative > rightRelative ? 1 : 0;
   });
   const digest = crypto.createHash("sha256");
@@ -65,7 +65,7 @@ test("正负变化共用同一颜色类且无方向色切换", () => {
 test("发布数据和计算结果保持原样", () => {
   const internal = path.join(projectRoot, "01_data", "releases", "2026-06");
   const published = path.join(projectRoot, "public", "data", "oil_world", "releases", "2026-06");
-  const expected = "cf0e890c6b0f067a4e733aac55362709739a9b6f6df7a10c2a752fb0b0979930";
+  const expected = "8ec74563583a2002d934aeda53689c6e19da30e1496ada999a0422faefff89aa";
   assert.equal(treeHash(internal), expected);
   assert.equal(treeHash(published), expected);
   const soybeanGlobal = JSON.parse(fs.readFileSync(path.join(published, "combinations", "soybeans__global.json"), "utf8"));

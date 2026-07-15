@@ -12,8 +12,710 @@
       "system": "大豆体系",
       "product": "Soybeans",
       "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 6800.0,
+      "current_value": 6800.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 4000.0,
+      "current_value": 4000.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Beginning Stocks",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 6400.0,
+      "current_value": 6400.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 179000.0,
+      "current_value": 180800.0,
+      "quarter_revision": 1800.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 172000.0,
+      "current_value": 172000.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 154600.0,
+      "current_value": 154600.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2026/27",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 184000.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2025/26",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": 179000.0,
+      "current_value": 180800.0,
+      "quarter_revision": 1800.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2024/25",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": 172000.0,
+      "current_value": 172000.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Production",
+      "period": "2023/24",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": 154600.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN13993"
+      ],
+      "current_report_id": [
+        "AN13993"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Imports",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 630.0,
+      "current_value": 830.0,
+      "quarter_revision": 200.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Imports",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 971.0,
+      "current_value": 971.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Imports",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 822.0,
+      "current_value": 822.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 116600.0,
+      "current_value": 116600.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 108181.0,
+      "current_value": 108181.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Exports",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 98813.0,
+      "current_value": 98813.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Crush",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 61400.0,
+      "current_value": 61600.0,
+      "quarter_revision": 200.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Crush",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 58698.0,
+      "current_value": 58698.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Crush",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 55811.0,
+      "current_value": 55811.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 64830.0,
+      "current_value": 65030.0,
+      "quarter_revision": 200.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 61989.0,
+      "current_value": 61989.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Domestic Consumption",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 59009.0,
+      "current_value": 59009.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 5000.0,
+      "current_value": 6800.0,
+      "quarter_revision": 1800.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 6800.0,
+      "current_value": 6800.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Ending Stocks",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 4000.0,
+      "current_value": 4000.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Stocks/Use Ratio",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "percentage points",
+      "previous_value": 7.71247879,
+      "current_value": 10.45671229,
+      "quarter_revision": 2.7442335,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Stocks/Use Ratio",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "percentage points",
+      "previous_value": 10.96968817,
+      "current_value": 10.96968817,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
+      "metric": "Stocks/Use Ratio",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "percentage points",
+      "previous_value": 6.77862699,
+      "current_value": 6.77862699,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN51000A"
+      ],
+      "current_report_id": [
+        "AN51000A"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "大豆体系",
+      "product": "Soybeans",
+      "region": "Brazil",
       "metric": "Area Harvested",
       "period": "2026/27",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": null,
       "current_value": 51800.0,
@@ -37,6 +739,8 @@
       "region": "Brazil",
       "metric": "Area Harvested",
       "period": "2025/26",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": 50500.0,
       "current_value": 50500.0,
@@ -60,6 +764,8 @@
       "region": "Brazil",
       "metric": "Area Harvested",
       "period": "2024/25",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": 48800.0,
       "current_value": 48900.0,
@@ -83,6 +789,8 @@
       "region": "Brazil",
       "metric": "Area Harvested",
       "period": "2023/24",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": 47000.0,
       "current_value": null,
@@ -106,6 +814,8 @@
       "region": "Brazil",
       "metric": "Yield",
       "period": "2026/27",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": null,
       "current_value": 3.55,
@@ -129,6 +839,8 @@
       "region": "Brazil",
       "metric": "Yield",
       "period": "2025/26",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": 3.54,
       "current_value": 3.58,
@@ -152,6 +864,8 @@
       "region": "Brazil",
       "metric": "Yield",
       "period": "2024/25",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": 3.52,
       "current_value": 3.52,
@@ -175,6 +889,8 @@
       "region": "Brazil",
       "metric": "Yield",
       "period": "2023/24",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": 3.29,
       "current_value": null,

@@ -25,7 +25,7 @@ from oil_world_data.release_pipeline import (  # noqa: E402
 import openpyxl  # noqa: E402
 
 
-BASELINE_TREE_HASH = "cf0e890c6b0f067a4e733aac55362709739a9b6f6df7a10c2a752fb0b0979930"
+BASELINE_TREE_HASH = "8ec74563583a2002d934aeda53689c6e19da30e1496ada999a0422faefff89aa"
 
 
 def read_json(path: Path):

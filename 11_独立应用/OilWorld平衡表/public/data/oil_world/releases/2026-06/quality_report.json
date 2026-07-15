@@ -3,7 +3,7 @@
   "passed": true,
   "source_workbook_sha256": "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e",
   "audit_file_sha256": {
-    "mapping_audit": "c1508fa436db79b4cc6d0e9c83b7990daefdfae7c0648e1ae1d119ef3fc7e0ed",
+    "mapping_audit": "ba3e589533066afd46b71190cc318de89ae6c1cd38787e1eba12047f3716a558",
     "coverage_matrix": "ca624cada6f969785a2091c8d4e7b433d6415c43ed3bbbd8c6888163fdf36f15",
     "report_catalog": "f1ebfa847f77c4e8c4ab53f97d05c3d8dda30fff5e3f96598911ae3ee34329af",
     "metric_mapping": "affb4a90552d9f35105129ef64d99765bdb4ccea01b328eafdae2eb0be47da8e"
@@ -34,21 +34,23 @@
     "AN40001",
     "AN40502B",
     "AN50001",
+    "AN50002",
+    "AN51000A",
     "AN62801",
     "AN62802",
     "AN80501"
   ],
-  "validated_source_report_count": 28,
+  "validated_source_report_count": 30,
   "mapping_status_counts": {
-    "direct": 286,
+    "direct": 300,
     "not_applicable": 182,
-    "derived": 75,
-    "conflict": 51,
+    "derived": 79,
+    "conflict": 35,
     "missing": 55
   },
   "combination_count": 59,
-  "numeric_observation_count": 1791,
-  "annual_change_count": 358,
+  "numeric_observation_count": 1845,
+  "annual_change_count": 376,
   "spot_check_count": 30,
   "spot_checks_passed": 30,
   "quarter_revision": "暂无上一期",

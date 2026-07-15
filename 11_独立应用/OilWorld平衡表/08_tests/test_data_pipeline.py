@@ -66,7 +66,7 @@ class OilWorldDataTests(unittest.TestCase):
         )
         self.assertEqual(
             counts,
-            Counter({"direct": 286, "derived": 75, "missing": 55, "not_applicable": 182, "conflict": 51}),
+            Counter({"direct": 300, "derived": 79, "missing": 55, "not_applicable": 182, "conflict": 35}),
         )
 
     def test_03_not_applicable_is_separate_from_missing(self):
@@ -119,14 +119,22 @@ class OilWorldDataTests(unittest.TestCase):
                     self.assertFalse(any(token in original_period for token in forbidden))
                 self.assertTrue(all(period.startswith("20") for period in metric["periods"]))
 
-    def test_09_natural_year_conflicts_are_disclosed(self):
+    def test_09_natural_year_and_crop_year_production_are_separate(self):
         brazil = self.combinations[("Soybeans", "Brazil")]
         argentina = self.combinations[("Sunflowerseed", "Argentina")]
         self.assertTrue(any("Jan–Dec" in basis for basis in brazil["market_year_basis"]))
         self.assertTrue(any("Jan–Dec" in basis for basis in argentina["market_year_basis"]))
-        brazil_production = next(item for item in brazil["metrics"] if item["metric"] == "Production")
-        self.assertEqual(brazil_production["mapping_status"], "conflict")
-        self.assertEqual(brazil_production["values"], {})
+        brazil_production = [item for item in brazil["metrics"] if item["metric"] == "Production"]
+        self.assertEqual(len(brazil_production), 2)
+        by_axis = {(item["period_family"], item["source_role"]): item for item in brazil_production}
+        calendar = by_axis[("calendar_year", "balance")]
+        crop = by_axis[("crop_year", "production_table")]
+        self.assertEqual(calendar["mapping_status"], "direct")
+        self.assertEqual(calendar["periods"], ["2026", "2025", "2024"])
+        self.assertGreater(calendar["values"]["2026"], 0)
+        self.assertEqual(crop["mapping_status"], "direct")
+        self.assertEqual(crop["periods"], ["2026/27", "2025/26", "2024/25"])
+        self.assertGreater(crop["values"]["2026/27"], 0)
 
     def test_10_annual_change_is_absolute_difference(self):
         payload = self.combinations[("Palm Oil", "Global")]

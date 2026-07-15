@@ -12,8 +12,710 @@
       "system": "葵花体系",
       "product": "Sunflowerseed",
       "region": "Argentina",
+      "metric": "Beginning Stocks",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 462.0,
+      "current_value": 462.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Beginning Stocks",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 183.0,
+      "current_value": 183.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Beginning Stocks",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 272.0,
+      "current_value": 272.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 6200.0,
+      "current_value": 6500.0,
+      "quarter_revision": 300.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 5200.0,
+      "current_value": 5200.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 3840.0,
+      "current_value": 3840.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2026/27",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": null,
+      "current_value": 6100.0,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2025/26",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": 6200.0,
+      "current_value": 6500.0,
+      "quarter_revision": 300.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2024/25",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": 5200.0,
+      "current_value": 5200.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Production",
+      "period": "2023/24",
+      "period_family": "crop_year",
+      "source_role": "production_table",
+      "unit": "1000 T",
+      "previous_value": 3840.0,
+      "current_value": null,
+      "quarter_revision": null,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN14793"
+      ],
+      "current_report_id": [
+        "AN14793"
+      ],
+      "comparison_status": "value_missing",
+      "quality_note": "任意一期为空时季度修正保持为空。"
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Imports",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 2.0,
+      "current_value": 5.0,
+      "quarter_revision": 3.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Imports",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 2.0,
+      "current_value": 2.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Imports",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 1.0,
+      "current_value": 1.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Exports",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 900.0,
+      "current_value": 1120.0,
+      "quarter_revision": 220.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Exports",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 214.0,
+      "current_value": 214.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Exports",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 77.0,
+      "current_value": 77.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Crush",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 5360.0,
+      "current_value": 5270.0,
+      "quarter_revision": -90.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Crush",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 4628.0,
+      "current_value": 4628.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Crush",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 3781.0,
+      "current_value": 3781.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Domestic Consumption",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 5444.0,
+      "current_value": 5357.0,
+      "quarter_revision": -87.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Domestic Consumption",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 4709.0,
+      "current_value": 4709.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Domestic Consumption",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 3853.0,
+      "current_value": 3853.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Ending Stocks",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 320.0,
+      "current_value": 490.0,
+      "quarter_revision": 170.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Ending Stocks",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 462.0,
+      "current_value": 462.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Ending Stocks",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "1000 T",
+      "previous_value": 183.0,
+      "current_value": 183.0,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "direct",
+      "current_mapping_status": "direct",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Stocks/Use Ratio",
+      "period": "2026",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "percentage points",
+      "previous_value": 5.87803086,
+      "current_value": 9.14691058,
+      "quarter_revision": 3.26887972,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Stocks/Use Ratio",
+      "period": "2025",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "percentage points",
+      "previous_value": 9.81100021,
+      "current_value": 9.81100021,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
+      "metric": "Stocks/Use Ratio",
+      "period": "2024",
+      "period_family": "calendar_year",
+      "source_role": "balance",
+      "unit": "percentage points",
+      "previous_value": 4.74954581,
+      "current_value": 4.74954581,
+      "quarter_revision": 0.0,
+      "previous_mapping_status": "derived",
+      "current_mapping_status": "derived",
+      "previous_report_id": [
+        "AN50002"
+      ],
+      "current_report_id": [
+        "AN50002"
+      ],
+      "comparison_status": "calculated",
+      "quality_note": ""
+    },
+    {
+      "previous_release": "2026-03",
+      "current_release": "2026-06",
+      "system": "葵花体系",
+      "product": "Sunflowerseed",
+      "region": "Argentina",
       "metric": "Area Harvested",
       "period": "2026/27",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": null,
       "current_value": 3000.0,
@@ -37,6 +739,8 @@
       "region": "Argentina",
       "metric": "Area Harvested",
       "period": "2025/26",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": 2840.0,
       "current_value": 2960.0,
@@ -60,6 +764,8 @@
       "region": "Argentina",
       "metric": "Area Harvested",
       "period": "2024/25",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": 2370.0,
       "current_value": 2370.0,
@@ -83,6 +789,8 @@
       "region": "Argentina",
       "metric": "Area Harvested",
       "period": "2023/24",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "1000 ha",
       "previous_value": 1900.0,
       "current_value": null,
@@ -106,6 +814,8 @@
       "region": "Argentina",
       "metric": "Yield",
       "period": "2026/27",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": null,
       "current_value": 2.03,
@@ -129,6 +839,8 @@
       "region": "Argentina",
       "metric": "Yield",
       "period": "2025/26",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": 2.18,
       "current_value": 2.2,
@@ -152,6 +864,8 @@
       "region": "Argentina",
       "metric": "Yield",
       "period": "2024/25",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": 2.19,
       "current_value": 2.19,
@@ -175,6 +889,8 @@
       "region": "Argentina",
       "metric": "Yield",
       "period": "2023/24",
+      "period_family": "crop_year",
+      "source_role": "production_table",
       "unit": "T/ha",
       "previous_value": 2.02,
       "current_value": null,
