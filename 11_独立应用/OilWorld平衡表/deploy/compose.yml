@@ -1,0 +1,17 @@
+services:
+  oil-world-dashboard:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        OIL_WORLD_BASE_PATH: /oil-world/
+    image: ${OIL_WORLD_IMAGE:-market-data-oil-world-dashboard:local}
+    container_name: oil-world-dashboard
+    ports:
+      - "127.0.0.1:${OIL_WORLD_PORT:-8081}:80"
+    volumes:
+      - type: bind
+        source: ${OIL_WORLD_DATA_ROOT:-../public/data/oil_world}
+        target: /usr/share/nginx/html/oil-world/data/oil_world
+        read_only: true
+    restart: unless-stopped
