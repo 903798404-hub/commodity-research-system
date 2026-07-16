@@ -15,6 +15,7 @@ import openpyxl
 from openpyxl.utils import column_index_from_string, get_column_letter
 
 from .generator import BuildError, build_release
+from .paths import raw_source_reference, resolve_raw_data_root
 
 
 RELEASE_PATTERN = re.compile(r"^20\d{2}-(0[1-9]|1[0-2])$")
@@ -76,7 +77,7 @@ def _release_label(release: str) -> str:
 
 
 def find_source_workbook(project_root: Path, release: str) -> Path:
-    source_directory = project_root / "01_原始资料" / release
+    source_directory = resolve_raw_data_root(project_root) / release
     if not source_directory.is_dir():
         raise ReleasePipelineError(f"原始发布期目录不存在：{source_directory}")
     workbooks = sorted(
@@ -757,7 +758,7 @@ def update_release(
         new_entry = {
             "release": release,
             "label": index.get("release_label", _release_label(release)),
-            "source_file": str(workbook_path.relative_to(project_root)).replace("\\", "/"),
+            "source_file": raw_source_reference(project_root, workbook_path),
             "source_file_hash": source_hash_after,
             "release_type": "backfill" if backfill else "regular_update",
             "import_time": timestamp,

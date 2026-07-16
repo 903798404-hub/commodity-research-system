@@ -14,7 +14,7 @@ Brazil Soybeans和Argentina Sunflowerseed保留Jan–Dec自然年口径说明，
 
 ## 目录
 
-- 原始Excel：`01_原始资料/2026-06/`
+- 原始资料：Git 仓库外统一目录，由 `OILWORLD_RAW_DATA_ROOT` 定位
 - 映射依据：`07_docs/报表映射审计/`
 - 发布配置：`02_configs/release_2026-06.json`
 - 数据核心：`03_src/oil_world_data/`
@@ -27,6 +27,14 @@ Brazil Soybeans和Argentina Sunflowerseed保留Jan–Dec自然年口径说明，
 - 数据测试：`08_tests/`
 
 ## 本地运行
+
+原始资料根目录按以下顺序解析：环境变量 `OILWORLD_RAW_DATA_ROOT`、不进入 Git 的 `02_configs/local_paths.json`、仓库内旧目录兼容回退。本机覆盖文件格式如下：
+
+```json
+{
+  "OILWORLD_RAW_DATA_ROOT": "D:/data/OilWorld"
+}
+```
 
 在本目录执行：
 
@@ -47,6 +55,6 @@ pnpm --dir 05_apps/oil_world_dashboard dev
 
 前端通过`import.meta.env.BASE_URL`读取`latest.json`、`releases.json`、发布索引和组合文件，不写死服务器地址。
 
-历史脚本`01_原始资料/2026-06/数据导入.py`继续作为原始资料保留，当前未启用，也不是本系统开发基础。
+外部原始资料根目录中的历史脚本`2026-06/数据导入.py`继续作为原始资料保留，当前未启用，也不是本系统开发基础。
 
 本项目已通过主仓库`02_configs/report_catalog.yaml`中的独立应用卡片接入主农产品工作台，数据仍由本目录独立维护，不复制到Streamlit项目中，也没有修改USDA项目。

@@ -23,6 +23,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from oil_world_data.generator import build_release  # noqa: E402
+from oil_world_data.paths import resolve_raw_data_root  # noqa: E402
 
 
 SOURCE_RANGE = re.compile(
@@ -178,7 +179,7 @@ def compare_snapshots(candidate_root: Path, official_root: Path) -> dict[str, An
 
 def main() -> int:
     output = PROJECT_ROOT / "06_outputs" / "workbook_rebuild" / "2026-06"
-    original_root = next(path for path in PROJECT_ROOT.iterdir() if path.name.startswith("01_") and path.name != "01_data")
+    original_root = resolve_raw_data_root(PROJECT_ROOT)
     old_path = next((original_root / "2026-06").glob("*.xlsx"))
     new_path = next(output.glob("*.xlsx"))
     audit = read_json(next((PROJECT_ROOT / "07_docs").glob("*/2026-06_report_mapping_audit.json")))

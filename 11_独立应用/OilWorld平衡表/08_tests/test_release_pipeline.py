@@ -20,6 +20,7 @@ from oil_world_data.release_pipeline import (  # noqa: E402
     _atomic_replace,
     _comparison_record,
     _rebase_audit_for_workbook,
+    find_source_workbook,
     update_release,
 )
 import openpyxl  # noqa: E402
@@ -329,7 +330,7 @@ class OilWorldReleasePipelineTests(unittest.TestCase):
 
     def test_real_june_rebase_preserves_all_649_mappings_and_other_reports(self):
         audit_path = ROOT / "07_docs" / "报表映射审计" / "2026-06_report_mapping_audit.json"
-        workbook_path = ROOT / "01_原始资料" / "2026-06" / "油世界季度表-June 2026.xlsx"
+        workbook_path = find_source_workbook(ROOT, "2026-06")
         audit = read_json(audit_path)
         original = deepcopy(audit["coverage_matrix"])
         rebased = _rebase_audit_for_workbook(deepcopy(audit), workbook_path)["coverage_matrix"]

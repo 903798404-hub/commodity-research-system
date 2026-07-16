@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from openpyxl.utils.cell import range_boundaries
 
 from .workbook_builder import extract_report, normalize_cell, read_soup, sha256
+from .paths import resolve_raw_data_root
 
 
 SOURCE_RANGE = re.compile(
@@ -154,7 +155,7 @@ def audit_rebuild(project_root: Path) -> dict[str, Any]:
     audit = _json(audit_path)
     coverage = audit["coverage_matrix"]
     required = config["required_report_ids"]
-    original_root = next(path for path in project_root.iterdir() if path.name.startswith("01_") and path.name != "01_data")
+    original_root = resolve_raw_data_root(project_root)
     march_source = original_root / "2026-03"
     june_source = original_root / "2026-06"
     march_candidate = next((project_root / "06_outputs" / "workbook_rebuild" / "2026-03").glob("*.xlsx"))

@@ -54,3 +54,8 @@ Thumbs.db
 !/11_独立应用/OilWorld平衡表/01_data/
 !/11_独立应用/OilWorld平衡表/01_data/releases/
 !/11_独立应用/OilWorld平衡表/01_data/releases/**
+
+# Oil World licensed raw inputs and machine-local path selection
+/11_独立应用/OilWorld平衡表/01_原始资料/
+/11_独立应用/OilWorld平衡表/02_configs/local_paths.json
+/11_独立应用/OilWorld平衡表/.oil_world_parse_tmp/

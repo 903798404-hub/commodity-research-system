@@ -11,13 +11,16 @@ import openpyxl
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE = ROOT / "01_data" / "releases" / "2026-06"
-PUBLIC_RELEASE = ROOT / "public" / "data" / "oil_world" / "releases" / "2026-06"
-WORKBOOK = ROOT / "01_原始资料" / "2026-06" / "油世界季度表-June 2026.xlsx"
-EXPECTED_HASH = "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e"
 sys.path.insert(0, str(ROOT / "03_src"))
 
 from oil_world_data.generator import _numeric_or_none  # noqa: E402
+from oil_world_data.paths import resolve_raw_data_root  # noqa: E402
+
+
+RELEASE = ROOT / "01_data" / "releases" / "2026-06"
+PUBLIC_RELEASE = ROOT / "public" / "data" / "oil_world" / "releases" / "2026-06"
+WORKBOOK = resolve_raw_data_root(ROOT) / "2026-06" / "油世界季度表-June 2026.xlsx"
+EXPECTED_HASH = "f113830abd5feab1fc12b9e4cf3327f90c8e4f6b834d74515650faff3a9dc20e"
 
 
 def load_json(path: Path):

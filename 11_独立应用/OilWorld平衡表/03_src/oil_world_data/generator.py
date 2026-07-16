@@ -17,6 +17,8 @@ from typing import Any, Iterable
 import openpyxl
 from openpyxl.utils import column_index_from_string, get_column_letter
 
+from .paths import resolve_configured_source_workbook
+
 
 class BuildError(RuntimeError):
     """Raised when the audited source structure cannot be confirmed."""
@@ -578,7 +580,7 @@ def build_release(project_root: Path, replace: bool = False) -> dict[str, Any]:
     config_path = project_root / "02_configs" / "release_2026-06.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     release = config["release"]
-    workbook_path = project_root / config["source_workbook"]
+    workbook_path = resolve_configured_source_workbook(project_root, config["source_workbook"])
     audit_dir = project_root / config["audit_directory"]
     audit_paths = {name: audit_dir / filename for name, filename in config["audit_files"].items()}
     for required in [config_path, workbook_path, *audit_paths.values()]:
