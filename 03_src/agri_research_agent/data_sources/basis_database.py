@@ -70,9 +70,15 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
-def _resolve_source_path(config: dict[str, Any]) -> Path:
-    source_file = config.get("source_file", {})
-    source_path = Path(str(source_file.get("path", "")))
+def _resolve_source_path(
+    config: dict[str, Any],
+    source_path: Path | str | None = None,
+) -> Path:
+    if source_path is None:
+        source_file = config.get("source_file", {})
+        source_path = Path(str(source_file.get("path", "")))
+    else:
+        source_path = Path(source_path)
     if not source_path.is_absolute():
         source_path = PROJECT_ROOT / source_path
     source_path = source_path.resolve()
@@ -210,6 +216,7 @@ def _standardize_sheet(
 def build_basis_database(
     config_path: Path | str | None = None,
     output_path: Path | str | None = None,
+    source_path: Path | str | None = None,
 ) -> dict[str, Any]:
     resolved_config = (
         Path(config_path)
@@ -220,11 +227,11 @@ def build_basis_database(
         Path(output_path) if output_path is not None else BASIS_DATABASE_FILE
     )
     config = _load_config(resolved_config)
-    source_path = _resolve_source_path(config)
+    resolved_source = _resolve_source_path(config, source_path)
 
     frames: list[pd.DataFrame] = []
     sheet_summaries: list[dict[str, Any]] = []
-    with pd.ExcelFile(source_path, engine="openpyxl") as workbook:
+    with pd.ExcelFile(resolved_source, engine="openpyxl") as workbook:
         for section_name, quote_type in (
             ("basis_sheets", "基差报价"),
             ("cash_price_sheets", "一口价"),
@@ -261,7 +268,7 @@ def build_basis_database(
             temporary_path.unlink()
 
     return {
-        "source_file": source_path,
+        "source_file": resolved_source,
         "output_file": resolved_output,
         "rows": len(database),
         "basis_rows": int(database["basis"].notna().sum()),

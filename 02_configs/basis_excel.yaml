@@ -2,6 +2,28 @@ source_file:
   path: 01_data/manual/basis/国内现货基差.xlsx
   description: 手动维护的国内现货基差 Excel，保持中文文件名，不要重命名
 
+update:
+  incoming_path: 01_data/incoming/basis/国内现货基差.xlsx
+  parquet_path: 01_data/database/basis/basis_quotes.parquet
+  status_path: 01_data/update_status.json
+  primary_key:
+    - date
+    - commodity
+    - region
+    - quote_type
+    - delivery_month
+    - futures_contract
+  formal_display_commodities:
+    一豆: 豆油
+    三菜: 菜油
+    24度: 棕榈油
+    豆粕: 豆粕
+    菜粕: 菜粕
+  excluded_display_commodities:
+    - 葵粕
+    - 一葵
+    - 一级玉米油
+
 basis_sheets:
   豆粕基差:
     commodity: 豆粕
