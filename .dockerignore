@@ -11,6 +11,7 @@ __pycache__
 10_logs
 *.log
 *.xlsx
+!02_configs/historical_spread_config.xlsx
 *.xls
 *.csv
 *.tsv
