@@ -172,7 +172,17 @@ export default function App() {
           <h1>Oil World 供需平衡表</h1>
           <p>以原始报表与专项映射审计为依据，保留各国真实市场年度口径。</p>
         </div>
-        <div className="release-pill">{index ? `当前发布 · ${index.release_label}` : "读取发布信息"}</div>
+        <div className="hero-actions">
+          <div className="release-pill">{index ? `当前发布 · ${index.release_label}` : "读取发布信息"}</div>
+          <a
+            className="presentation-mode-link"
+            href={`${BASE_URL}presentation`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            演示模式
+          </a>
+        </div>
       </header>
 
       {error && (

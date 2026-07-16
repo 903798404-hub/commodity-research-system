@@ -19,7 +19,11 @@ button, select { font: inherit; }
 .eyebrow, .section-heading span { color: #a8d6c1; font-size: 12px; font-weight: 700; letter-spacing: .16em; }
 h1 { margin: 10px 0 10px; font-family: Georgia, "Microsoft YaHei", serif; font-size: 40px; letter-spacing: .02em; }
 .hero p { margin: 0; color: #dcece4; font-size: 15px; }
+.hero-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
 .release-pill { position: relative; z-index: 1; padding: 11px 16px; background: rgba(255,255,255,.11); border: 1px solid rgba(255,255,255,.22); border-radius: 999px; font-weight: 600; backdrop-filter: blur(10px); }
+.presentation-mode-link { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 10px 17px; color: #103e33; background: #f7fbf8; border: 1px solid rgba(255,255,255,.7); border-radius: 999px; box-shadow: 0 8px 20px rgba(5, 31, 24, .16); font-weight: 700; text-decoration: none; white-space: nowrap; transition: background .16s ease, transform .16s ease; }
+.presentation-mode-link:hover { background: #e8f3ed; transform: translateY(-1px); }
+.presentation-mode-link:focus-visible { outline: 3px solid rgba(255,255,255,.48); outline-offset: 3px; }
 .panel { background: rgba(255,255,255,.94); border: 1px solid #dce6e1; border-radius: 20px; box-shadow: 0 12px 30px rgba(45, 73, 63, .07); }
 .filters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin: -18px 28px 28px; padding: 22px 24px; position: relative; z-index: 2; }
 .filters label, .chart-select { display: flex; flex-direction: column; gap: 8px; color: #667770; font-size: 12px; font-weight: 700; }
@@ -107,7 +111,8 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
   .app-shell { width: calc(100% - 24px); max-width: 1520px; padding-top: 18px; }
   .hero { align-items: flex-start; min-height: 0; padding: 28px 24px 54px; border-radius: 20px; }
   .hero h1 { font-size: 32px; }
-  .release-pill { position: absolute; right: 22px; bottom: 18px; }
+  .hero-actions { position: absolute; right: 22px; bottom: 18px; }
+  .release-pill { position: static; }
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: -12px 12px 22px; }
   .context-line { align-items: flex-start; flex-direction: column; gap: 12px; }
   .dual-basis-summary { justify-content: flex-start; text-align: left; }
@@ -122,7 +127,7 @@ tbody tr:hover th, tbody tr:hover td { background: #f8fbf9; }
 @media (max-width: 620px) {
   .filters, .cards { grid-template-columns: 1fr; }
   .hero p { max-width: 280px; }
-  .release-pill { left: 22px; right: auto; }
+  .hero-actions { left: 22px; right: auto; }
 }
 
 /* 16:9 presentation mode */

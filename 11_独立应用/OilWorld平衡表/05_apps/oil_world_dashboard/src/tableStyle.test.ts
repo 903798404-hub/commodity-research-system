@@ -91,3 +91,24 @@ test("平衡表头部在窄屏换行且不改变表格滚动容器", () => {
   assert.match(cssSource, /@media \(max-width: 900px\)[\s\S]*\.matrix-heading__meta\s*\{[^}]*flex-basis:\s*100%/);
   assert.match(cssSource, /\.table-scroll\s*\{[^}]*overflow-x:\s*auto/);
 });
+
+test("详细看板标题区提供基于BASE_URL的新标签页演示入口", () => {
+  const hero = appSource.slice(appSource.indexOf('<header className="hero">'), appSource.indexOf("</header>"));
+  assert.match(appSource, /const BASE_URL = import\.meta\.env\.BASE_URL/);
+  assert.match(hero, />\s*演示模式\s*</);
+  assert.match(hero, /href=\{`\$\{BASE_URL\}presentation`\}/);
+  assert.match(hero, /target="_blank"/);
+  assert.match(hero, /rel="noreferrer"/);
+  assert.doesNotMatch(hero, /product=|region=|release=|127\.0\.0\.1|:\/\/|\/oil-world\/presentation/);
+});
+
+test("演示入口不改变详细看板筛选器和平衡表组件", () => {
+  const filters = appSource.slice(appSource.indexOf('<section className="filters panel"'), appSource.indexOf("</section>", appSource.indexOf('<section className="filters panel"')));
+  assert.match(filters, /aria-label="筛选条件"/);
+  assert.match(filters, />发布期</);
+  assert.match(filters, />品种体系</);
+  assert.match(filters, />产品</);
+  assert.match(filters, />国家或地区</);
+  assert.match(appSource, /<MetricMatrix/);
+  assert.match(cssSource, /\.presentation-mode-link\s*\{/);
+});
