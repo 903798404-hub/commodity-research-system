@@ -802,6 +802,27 @@ def test_data_baseline_rejects_invalid_spread_key_statistics(
         collect_data_baseline(data_root, PRODUCTION_CONTAINER, runtime)
 
 
+def test_non_spread_baseline_records_nullable_business_key_fields(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "host-data"
+    create_data_files(data_root)
+    runtime = FakeReleaseRuntime()
+    runtime.dataset_overrides["basis"] = {
+        "records": 10,
+        "latest_business_date": "2026-07-12",
+        "primary_key_null_rows": 3,
+        "duplicate_rows_on_key": 2,
+        "invalid_date_rows": 0,
+    }
+
+    baseline = collect_data_baseline(data_root, PRODUCTION_CONTAINER, runtime)
+    basis = next(item for item in baseline["datasets"] if item["name"] == "basis")
+
+    assert basis["primary_key_null_rows"] == 3
+    assert basis["duplicate_rows_on_key"] == 2
+
+
 def test_data_baseline_rejects_a_missing_required_file(tmp_path: Path) -> None:
     runtime = FakeReleaseRuntime()
 

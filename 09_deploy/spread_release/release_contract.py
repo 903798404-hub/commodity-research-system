@@ -339,6 +339,7 @@ class DockerReleaseRuntime:
                     "path": spec.container_path,
                     "date_column": spec.date_column,
                     "primary_key": spec.primary_key,
+                    "strict_primary_key": spec.name == "spread",
                 },
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -366,18 +367,18 @@ blank_key = (
 )
 null_key = key_frame.isna().any(axis=1) | blank_key
 primary_key_null_rows = int(null_key.sum())
-if primary_key_null_rows:
+if payload["strict_primary_key"] and primary_key_null_rows:
     raise ValueError(
         f"primary key contains null or blank values: {primary_key_null_rows}"
     )
 
 dates = pd.to_datetime(data[payload["date_column"]], errors="coerce")
 invalid_date_rows = int(dates.isna().sum())
-if invalid_date_rows:
+if payload["strict_primary_key"] and invalid_date_rows:
     raise ValueError(f"date column contains invalid values: {invalid_date_rows}")
 
 duplicate_rows = int(data.duplicated(payload["primary_key"], keep=False).sum())
-if duplicate_rows:
+if payload["strict_primary_key"] and duplicate_rows:
     raise ValueError(f"duplicate primary key rows: {duplicate_rows}")
 
 latest = dates.max()
@@ -961,11 +962,11 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
             raise ContractError(f"data baseline {spec.name} filename mismatch")
         if item.get("primary_key") != list(spec.primary_key):
             raise ContractError(f"data baseline {spec.name} primary key mismatch")
-        if item.get("primary_key_null_rows") != 0:
+        if spec.name == "spread" and item.get("primary_key_null_rows") != 0:
             raise ContractError(
                 f"data baseline {spec.name} primary key contains null values"
             )
-        if item.get("duplicate_rows_on_key") != 0:
+        if spec.name == "spread" and item.get("duplicate_rows_on_key") != 0:
             raise ContractError(
                 f"data baseline {spec.name} contains duplicate primary keys"
             )
@@ -1342,15 +1343,15 @@ def collect_data_baseline(
             raise ContractError(f"{spec.name} latest business date is invalid")
         if not isinstance(primary_key_null_rows, int) or primary_key_null_rows < 0:
             raise ContractError(f"{spec.name} primary key null count is invalid")
-        if primary_key_null_rows != 0:
+        if spec.name == "spread" and primary_key_null_rows != 0:
             raise ContractError(f"{spec.name} primary key contains null values")
         if not isinstance(duplicate_rows, int) or duplicate_rows < 0:
             raise ContractError(f"{spec.name} duplicate count is invalid")
-        if duplicate_rows != 0:
+        if spec.name == "spread" and duplicate_rows != 0:
             raise ContractError(f"{spec.name} contains duplicate primary keys")
         if not isinstance(invalid_date_rows, int) or invalid_date_rows < 0:
             raise ContractError(f"{spec.name} invalid date count is invalid")
-        if invalid_date_rows != 0:
+        if spec.name == "spread" and invalid_date_rows != 0:
             raise ContractError(f"{spec.name} contains invalid business dates")
         datasets.append(
             {

@@ -193,10 +193,12 @@
           }
         },
         "primary_key_null_rows": {
-          "const": 0
+          "type": "integer",
+          "minimum": 0
         },
         "duplicate_rows_on_key": {
-          "const": 0
+          "type": "integer",
+          "minimum": 0
         },
         "update_task": {
           "type": "string",
