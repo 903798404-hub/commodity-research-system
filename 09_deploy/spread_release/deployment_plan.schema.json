@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.0.0.json",
+  "title": "spread-dashboard sealed production deployment plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "git_commit",
+    "image_ref",
+    "expected_image_id",
+    "candidate_result_file",
+    "candidate_result_sha256",
+    "candidate_container_removed",
+    "production_env_file",
+    "production_env_sha256",
+    "USDA_DASHBOARD_URL",
+    "OIL_WORLD_DASHBOARD_URL",
+    "MARKET_DATA_GIT_HEAD",
+    "compose_project",
+    "compose_file",
+    "compose_template_sha256",
+    "candidate_compose_sha256",
+    "production_compose_sha256",
+    "candidate_runtime_environment",
+    "production_runtime_environment",
+    "allowed_candidate_production_differences",
+    "semantic_comparison",
+    "production_service_scope",
+    "rollback_git_commit",
+    "rollback_image_ref",
+    "rollback_image_id",
+    "created_at",
+    "plan_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
+    },
+    "git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "image_ref": {
+      "type": "string",
+      "pattern": "(?:^|/)market-data-spread-dashboard:spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
+    },
+    "expected_image_id": {
+      "$ref": "#/$defs/imageId"
+    },
+    "candidate_result_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_result_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "candidate_container_removed": {
+      "const": true
+    },
+    "production_env_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "production_env_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "USDA_DASHBOARD_URL": {
+      "type": "string",
+      "minLength": 8
+    },
+    "OIL_WORLD_DASHBOARD_URL": {
+      "type": "string",
+      "minLength": 8
+    },
+    "MARKET_DATA_GIT_HEAD": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "compose_project": {
+      "const": "market-data"
+    },
+    "compose_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compose_template_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "candidate_compose_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "production_compose_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "candidate_runtime_environment": {
+      "$ref": "#/$defs/runtimeEnvironment"
+    },
+    "production_runtime_environment": {
+      "$ref": "#/$defs/runtimeEnvironment"
+    },
+    "allowed_candidate_production_differences": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "USDA_DASHBOARD_URL",
+          "OIL_WORLD_DASHBOARD_URL"
+        ]
+      }
+    },
+    "semantic_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_semantics_equal",
+        "candidate_semantic_sha256",
+        "production_semantic_sha256"
+      ],
+      "properties": {
+        "base_semantics_equal": {
+          "const": true
+        },
+        "candidate_semantic_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "production_semantic_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "production_service_scope": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "const": "spread-dashboard"
+      }
+    },
+    "rollback_git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "rollback_image_ref": {
+      "type": "string",
+      "pattern": "(?:^|/)market-data-spread-dashboard:[A-Za-z0-9_][A-Za-z0-9_.-]*"
+    },
+    "rollback_image_id": {
+      "$ref": "#/$defs/imageId"
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 20
+    },
+    "plan_status": {
+      "const": "deployment_plan_sealed"
+    }
+  },
+  "$defs": {
+    "fullGitCommit": {
+      "type": "string",
+      "pattern": "[0-9a-f]{40}"
+    },
+    "imageId": {
+      "type": "string",
+      "pattern": "sha256:[0-9a-f]{64}"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "[0-9a-f]{64}"
+    },
+    "runtimeEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "USDA_DASHBOARD_URL",
+        "OIL_WORLD_DASHBOARD_URL"
+      ],
+      "properties": {
+        "USDA_DASHBOARD_URL": {
+          "type": "string",
+          "minLength": 8
+        },
+        "OIL_WORLD_DASHBOARD_URL": {
+          "type": "string",
+          "minLength": 8
+        }
+      }
+    }
+  }
+}

@@ -44,7 +44,7 @@ class ProductionPackagingTests(unittest.TestCase):
         )
         self.assertIn("build", spread)
 
-    def test_spread_image_receives_oil_world_url_from_existing_environment(self) -> None:
+    def test_spread_image_requires_explicit_dashboard_urls(self) -> None:
         compose = yaml.safe_load(
             (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
         )
@@ -52,11 +52,11 @@ class ProductionPackagingTests(unittest.TestCase):
 
         self.assertEqual(
             environment["USDA_DASHBOARD_URL"],
-            "${USDA_DASHBOARD_URL:-http://127.0.0.1:8080/usda/}",
+            "${USDA_DASHBOARD_URL:?USDA_DASHBOARD_URL must be explicitly set}",
         )
         self.assertEqual(
             environment["OIL_WORLD_DASHBOARD_URL"],
-            "${OIL_WORLD_DASHBOARD_URL:-http://127.0.0.1:5175/}",
+            "${OIL_WORLD_DASHBOARD_URL:?OIL_WORLD_DASHBOARD_URL must be explicitly set}",
         )
 
     def test_spread_config_is_the_only_excel_allowed_into_main_image(self) -> None:

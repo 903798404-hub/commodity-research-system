@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import ipaddress
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import uuid
@@ -21,13 +23,44 @@ APPLICATION = "spread-dashboard"
 COMPOSE_PROJECT = "market-data"
 COMPOSE_SERVICE = "spread-dashboard"
 PRODUCTION_CONTAINER = "spread-dashboard"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.0.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.0.0"
 RELEASE_ENV_KEYS = (
     "RELEASE_ID",
     "SPREAD_IMAGE",
     "EXPECTED_IMAGE_ID",
     "EXPECTED_GIT_COMMIT",
 )
+PRODUCTION_ENV_KEYS = (
+    "SPREAD_IMAGE",
+    "MARKET_DATA_GIT_HEAD",
+    "USDA_DASHBOARD_URL",
+    "OIL_WORLD_DASHBOARD_URL",
+)
+RUNTIME_URL_KEYS = (
+    "USDA_DASHBOARD_URL",
+    "OIL_WORLD_DASHBOARD_URL",
+)
+CANDIDATE_RUNTIME_ENVIRONMENT = {
+    "USDA_DASHBOARD_URL": "http://127.0.0.1:8080/usda/",
+    "OIL_WORLD_DASHBOARD_URL": "http://127.0.0.1:5175/",
+}
+RUNTIME_ENVIRONMENT_CONTRACT = {
+    "allowed_production_variables": list(PRODUCTION_ENV_KEYS),
+    "required_production_variables": list(PRODUCTION_ENV_KEYS),
+    "release_bound_variables": {
+        "SPREAD_IMAGE": "image_ref",
+        "MARKET_DATA_GIT_HEAD": "git_commit",
+    },
+    "allowed_candidate_production_differences": list(RUNTIME_URL_KEYS),
+    "undeclared_variables_forbidden": True,
+}
+PRODUCTION_SERVICE_SCOPE = (COMPOSE_SERVICE,)
+PRODUCTION_DATA_MOUNTS = {
+    "01_data": "/app/01_data",
+    "06_outputs": "/app/06_outputs",
+    "10_logs": "/app/10_logs",
+}
 
 FULL_GIT_RE = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -142,6 +175,8 @@ class ReleaseRuntime(Protocol):
 
     def container_record(self, container_name: str) -> dict[str, Any]: ...
 
+    def container_exists(self, container_name: str) -> bool: ...
+
     def read_candidate_release(self, container_name: str) -> dict[str, Any]: ...
 
     def candidate_release_sha256(self, container_name: str) -> str: ...
@@ -155,7 +190,13 @@ class ReleaseRuntime(Protocol):
     def container_release_sha256(self, container_name: str) -> str: ...
 
     def compose_config(
-        self, repository: Path, image_ref: str
+        self,
+        repository: Path,
+        image_ref: str,
+        *,
+        environment: Mapping[str, str] | None = None,
+        project_directory: Path | None = None,
+        compose_file: Path | None = None,
     ) -> tuple[dict[str, Any], str, list[str]]: ...
 
     def dataset_stats(
@@ -217,6 +258,22 @@ class DockerReleaseRuntime:
         if not isinstance(config_image, str) or not config_image:
             raise ContractError(f"container {container_name} has no Config.Image")
         return {"image_id": image_id, "config_image": config_image}
+
+    def container_exists(self, container_name: str) -> bool:
+        if not SAFE_CONTAINER_RE.fullmatch(container_name):
+            raise ContractError("container name is invalid")
+        output = self.runner.run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"name=^/{container_name}$",
+                "--format",
+                "{{.ID}}",
+            ]
+        )
+        return bool(output.strip())
 
     def read_candidate_release(self, container_name: str) -> dict[str, Any]:
         return _parse_release_json(
@@ -301,22 +358,32 @@ class DockerReleaseRuntime:
                     self.runner.run(["docker", "rm", temporary_name])
 
     def compose_config(
-        self, repository: Path, image_ref: str
+        self,
+        repository: Path,
+        image_ref: str,
+        *,
+        environment: Mapping[str, str] | None = None,
+        project_directory: Path | None = None,
+        compose_file: Path | None = None,
     ) -> tuple[dict[str, Any], str, list[str]]:
-        compose_file = repository / "docker-compose.yml"
+        repository = repository.resolve()
+        resolved_project_directory = (project_directory or repository).resolve()
+        resolved_compose_file = (compose_file or repository / "docker-compose.yml").resolve()
         base = [
             "docker",
             "compose",
             "--project-directory",
-            str(repository),
+            str(resolved_project_directory),
             "-f",
-            str(compose_file),
+            str(resolved_compose_file),
         ]
-        environment = {"SPREAD_IMAGE": image_ref}
+        compose_environment = {"SPREAD_IMAGE": image_ref}
+        if environment:
+            compose_environment.update(environment)
         raw_config = self.runner.run(
             [*base, "config", "--format", "json"],
-            cwd=repository,
-            env=environment,
+            cwd=resolved_project_directory,
+            env=compose_environment,
         )
         try:
             parsed = json.loads(raw_config)
@@ -324,8 +391,8 @@ class DockerReleaseRuntime:
             raise ContractError(f"docker compose config returned invalid JSON: {exc}") from exc
         raw_images = self.runner.run(
             [*base, "config", "--images"],
-            cwd=repository,
-            env=environment,
+            cwd=resolved_project_directory,
+            env=compose_environment,
         )
         images = [line.strip() for line in raw_images.splitlines() if line.strip()]
         return parsed, raw_config, images
@@ -688,6 +755,12 @@ def validate_repository_static(repository: Path) -> None:
     dockerignore_path = repository / ".dockerignore"
     deploy_path = repository / "09_deploy/spread_release/deploy_spread_release.sh"
     rollback_path = repository / "09_deploy/spread_release/rollback_spread_release.sh"
+    plan_creator_path = (
+        repository / "09_deploy/spread_release/create_deployment_plan.py"
+    )
+    plan_schema_path = (
+        repository / "09_deploy/spread_release/deployment_plan.schema.json"
+    )
     required_config = repository / "02_configs/historical_spread_config.xlsx"
     for path in (
         compose_path,
@@ -695,6 +768,8 @@ def validate_repository_static(repository: Path) -> None:
         dockerignore_path,
         deploy_path,
         rollback_path,
+        plan_creator_path,
+        plan_schema_path,
         required_config,
     ):
         if not path.is_file():
@@ -708,6 +783,12 @@ def validate_repository_static(repository: Path) -> None:
         raise ContractError("docker-compose.yml must declare name: market-data")
     if required_image_line not in compose_text:
         raise ContractError("spread Compose image must be a required SPREAD_IMAGE")
+    for variable in RUNTIME_URL_KEYS:
+        marker = f"${{{variable}:?{variable} must be explicitly set}}"
+        if marker not in compose_text:
+            raise ContractError(
+                f"spread Compose production environment must require {variable}"
+            )
     if not re.search(
         r"(?ms)^\s{2}spread-dashboard:\s*\n.*?^\s{4}build:\s*$", compose_text
     ):
@@ -763,6 +844,25 @@ def validate_repository_static(repository: Path) -> None:
         if "--no-build" not in script or "--no-deps" not in script:
             raise ContractError(
                 f"{description} command must include --no-build and --no-deps"
+            )
+        if "--env-file" not in script or "--deployment-plan" not in script:
+            raise ContractError(
+                f"{description} command must require the sealed production environment "
+                "and deployment plan"
+            )
+        if not re.search(
+            r"up\s+-d\s+--no-build\s+--no-deps\s+spread-dashboard",
+            script,
+        ):
+            raise ContractError(
+                f"{description} command service scope must be spread-dashboard only"
+            )
+        if re.search(
+            r"(?is)\bup\b[^\n]*(?:usda-dashboard|oil-world|oil_world)",
+            script,
+        ):
+            raise ContractError(
+                f"{description} command must not switch USDA or Oil World services"
             )
         if re.search(r"\bdocker\s+(?:image\s+)?(?:build|tag)\b", script):
             raise ContractError(f"{description} script must not build or retag images")
@@ -890,6 +990,9 @@ def load_schema(schema_path: Path) -> dict[str, Any]:
 
 def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) -> None:
     validate_against_schema(manifest, schema)
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {"1.0.0", SCHEMA_VERSION}:
+        raise ContractError(f"unsupported release schema_version: {schema_version!r}")
     commit = validate_full_git_commit(manifest.get("git_commit"))
     release_id = str(manifest.get("release_id", ""))
     validate_release_id(release_id, commit, str(manifest.get("build_time", "")))
@@ -906,7 +1009,31 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
         raise ContractError(f"compose_project must be {COMPOSE_PROJECT}")
     if manifest.get("compose_files") != ["docker-compose.yml"]:
         raise ContractError("compose_files must be exactly ['docker-compose.yml']")
-    validate_sha256(manifest.get("compose_config_sha256"), "compose_config_sha256")
+    if schema_version == "1.0.0":
+        validate_sha256(
+            manifest.get("compose_config_sha256"),
+            "compose_config_sha256",
+        )
+        if (
+            "compose_template_sha256" in manifest
+            or "runtime_environment_contract" in manifest
+        ):
+            raise ContractError(
+                "legacy release manifest cannot contain version 2 environment fields"
+            )
+    else:
+        if "compose_config_sha256" in manifest:
+            raise ContractError(
+                "release schema 2.0.0 must not seal a rendered Compose hash"
+            )
+        validate_sha256(
+            manifest.get("compose_template_sha256"),
+            "compose_template_sha256",
+        )
+        if manifest.get("runtime_environment_contract") != RUNTIME_ENVIRONMENT_CONTRACT:
+            raise ContractError(
+                "runtime_environment_contract does not match the fixed contract"
+            )
     validate_sha256(manifest.get("dockerfile_sha256"), "dockerfile_sha256")
     validate_sha256(manifest.get("dockerignore_sha256"), "dockerignore_sha256")
     validate_sha256(manifest.get("required_config_sha256"), "required_config_sha256")
@@ -1015,6 +1142,239 @@ def validate_release_env(
         raise ContractError("release.env does not exactly match release.json")
 
 
+def validate_production_url(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value or any(char.isspace() for char in value):
+        raise ContractError(f"{field} must be a non-empty URL without whitespace")
+    parsed = urlparse(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ContractError(
+            f"{field} must be an HTTP(S) URL without credentials, query, or fragment"
+        )
+    hostname = parsed.hostname.lower()
+    if hostname in {"localhost", "localhost.localdomain"}:
+        raise ContractError(f"{field} must not use localhost in production")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        if address.is_loopback or address.is_unspecified:
+            raise ContractError(f"{field} must not use a local address in production")
+    return value
+
+
+def parse_production_env(path: Path) -> dict[str, str]:
+    if not path.is_absolute():
+        raise ContractError("production environment file path must be absolute")
+    if not path.is_file():
+        raise ContractError(f"production environment file is missing: {path}")
+    if os.name != "nt":
+        mode = stat.S_IMODE(path.stat().st_mode)
+        if mode & 0o077:
+            raise ContractError(
+                "production environment file must not be accessible by group or others"
+            )
+        if path.stat().st_uid != os.geteuid():
+            raise ContractError(
+                "production environment file must be owned by the deployment user"
+            )
+    values: dict[str, str] = {}
+    for number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw_line:
+            continue
+        if raw_line.startswith("#") or "=" not in raw_line:
+            raise ContractError(
+                f"production environment line {number} is not a KEY=value entry"
+            )
+        key, value = raw_line.split("=", 1)
+        if key not in PRODUCTION_ENV_KEYS or key in values:
+            raise ContractError(
+                f"production environment contains invalid or duplicate key {key!r}"
+            )
+        if not value or any(char.isspace() for char in value):
+            raise ContractError(
+                f"production environment value for {key} is empty or unsafe"
+            )
+        values[key] = value
+    if set(values) != set(PRODUCTION_ENV_KEYS):
+        raise ContractError(
+            f"production environment must contain exactly {list(PRODUCTION_ENV_KEYS)}"
+        )
+    assert_no_sensitive_values(values, "production environment")
+    return values
+
+
+def validate_production_env(
+    environment: Mapping[str, str],
+    manifest: Mapping[str, Any],
+) -> None:
+    if set(environment) != set(PRODUCTION_ENV_KEYS):
+        raise ContractError(
+            f"production environment must contain exactly {list(PRODUCTION_ENV_KEYS)}"
+        )
+    if environment["SPREAD_IMAGE"] != manifest["image_ref"]:
+        raise ContractError("production SPREAD_IMAGE does not match release image_ref")
+    if environment["MARKET_DATA_GIT_HEAD"] != manifest["git_commit"]:
+        raise ContractError(
+            "production MARKET_DATA_GIT_HEAD does not match release git_commit"
+        )
+    validate_production_url(
+        environment["USDA_DASHBOARD_URL"],
+        "USDA_DASHBOARD_URL",
+    )
+    validate_production_url(
+        environment["OIL_WORLD_DASHBOARD_URL"],
+        "OIL_WORLD_DASHBOARD_URL",
+    )
+
+
+def _normalize_project_path(value: Any, project_root: Path) -> Any:
+    if not isinstance(value, str):
+        return value
+    normalized = value.replace("\\", "/").rstrip("/")
+    root = str(project_root.resolve()).replace("\\", "/").rstrip("/")
+    if normalized == root:
+        return "$PROJECT_ROOT"
+    if normalized.startswith(root + "/"):
+        return "$PROJECT_ROOT/" + normalized[len(root) + 1 :]
+    return value
+
+
+def _sorted_json_values(values: Any) -> Any:
+    if isinstance(values, list):
+        return sorted(
+            values,
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    return values
+
+
+def _compose_spread_semantics(
+    compose: Mapping[str, Any],
+    project_root: Path,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    services = compose.get("services")
+    if not isinstance(services, dict):
+        raise ContractError("Compose services are missing")
+    service = services.get(COMPOSE_SERVICE)
+    if not isinstance(service, dict):
+        raise ContractError(f"Compose service {COMPOSE_SERVICE} is missing")
+    normalized_service = copy.deepcopy(service)
+    environment = normalized_service.get("environment") or {}
+    if not isinstance(environment, dict):
+        raise ContractError("spread Compose environment must be an object")
+    runtime_environment: dict[str, str] = {}
+    for key in RUNTIME_URL_KEYS:
+        value = environment.get(key)
+        if not isinstance(value, str) or not value:
+            raise ContractError(f"spread Compose environment is missing {key}")
+        runtime_environment[key] = value
+    other_environment = {
+        key: value for key, value in environment.items() if key not in RUNTIME_URL_KEYS
+    }
+
+    build = normalized_service.get("build")
+    normalized_build: Any = build
+    if isinstance(build, dict):
+        normalized_build = {
+            **build,
+            "context": _normalize_project_path(build.get("context"), project_root),
+        }
+        normalized_service["build"] = normalized_build
+
+    volumes = normalized_service.get("volumes") or []
+    if not isinstance(volumes, list):
+        raise ContractError("spread Compose volumes must be an array")
+    normalized_volumes: list[Any] = []
+    for volume in volumes:
+        if not isinstance(volume, dict):
+            raise ContractError("spread Compose volume entries must be objects")
+        normalized_volumes.append(
+            {
+                **volume,
+                "source": _normalize_project_path(volume.get("source"), project_root),
+            }
+        )
+
+    normalized_service["volumes"] = _sorted_json_values(normalized_volumes)
+    normalized_service["ports"] = _sorted_json_values(
+        normalized_service.get("ports") or []
+    )
+    normalized_service["environment"] = other_environment
+    return normalized_service, runtime_environment
+
+
+def _validate_formal_spread_semantics(
+    compose: Mapping[str, Any],
+    project_root: Path,
+    expected_image_ref: str,
+) -> None:
+    service = compose["services"][COMPOSE_SERVICE]
+    if service.get("image") != expected_image_ref:
+        raise ContractError("formal Compose image does not match the release image_ref")
+    if service.get("container_name") != PRODUCTION_CONTAINER:
+        raise ContractError("formal spread container_name changed")
+    if service.get("restart") != "unless-stopped":
+        raise ContractError("formal spread restart policy changed")
+
+    ports = service.get("ports") or []
+    expected_port = {
+        "mode": "ingress",
+        "protocol": "tcp",
+        "published": "8501",
+        "target": 8501,
+    }
+    if ports != [expected_port]:
+        raise ContractError("formal spread port mapping changed")
+
+    volumes = service.get("volumes") or []
+    actual_mounts: dict[str, tuple[str, str, bool]] = {}
+    for volume in volumes:
+        if not isinstance(volume, dict):
+            raise ContractError("formal spread volume entry is invalid")
+        target = volume.get("target")
+        source = volume.get("source")
+        if isinstance(target, str) and isinstance(source, str):
+            actual_mounts[target] = (
+                str(Path(source).resolve()),
+                str(volume.get("type")),
+                bool(volume.get("read_only", False)),
+            )
+    expected_mounts = {
+        target: (
+            str((project_root / relative).resolve()),
+            "bind",
+            False,
+        )
+        for relative, target in PRODUCTION_DATA_MOUNTS.items()
+    }
+    if actual_mounts != expected_mounts:
+        raise ContractError("formal spread data mount contract changed")
+
+
+def _semantic_sha256(value: Mapping[str, Any]) -> str:
+    return hash_text(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+
+
 def load_manifest_bundle(
     manifest_path: Path,
     env_path: Path,
@@ -1055,6 +1415,371 @@ def validate_checksums(
     }
     if recorded != actual:
         raise ContractError("release bundle checksum mismatch")
+
+
+def load_candidate_result(
+    path: Path,
+    manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not path.is_absolute():
+        raise ContractError("candidate result path must be absolute")
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot load candidate result {path}: {exc}") from exc
+    if not isinstance(result, dict):
+        raise ContractError("candidate result must be a JSON object")
+    expected = {
+        "schema_version": "candidate-result-v1",
+        "application": APPLICATION,
+        "release_id": manifest["release_id"],
+        "git_commit": manifest["git_commit"],
+        "image_ref": manifest["image_ref"],
+        "image_id": manifest["image_id"],
+        "status": "candidate-validated",
+        "three_way_image_id_equal": True,
+        "formal_containers_unchanged": True,
+        "formal_git_unchanged": True,
+        "data_files_unchanged": True,
+        "production_switch_performed": False,
+    }
+    for key, expected_value in expected.items():
+        if result.get(key) != expected_value:
+            raise ContractError(
+                f"candidate result {key} mismatch: expected {expected_value!r}, "
+                f"got {result.get(key)!r}"
+            )
+    identity = result.get("identity")
+    if not isinstance(identity, dict):
+        raise ContractError("candidate result identity is missing")
+    for key, expected_value in (
+        ("config_image", manifest["image_ref"]),
+        ("actual_image_id", manifest["image_id"]),
+        ("tag_image_id", manifest["image_id"]),
+        ("manifest_image_id", manifest["image_id"]),
+        ("oci_revision", manifest["git_commit"]),
+    ):
+        if identity.get(key) != expected_value:
+            raise ContractError(f"candidate result identity {key} mismatch")
+    http = result.get("http")
+    if not isinstance(http, dict) or any(
+        http.get(key) != 200 for key in ("health", "host_config", "root")
+    ):
+        raise ContractError("candidate result HTTP validation did not fully pass")
+    pages = result.get("pages")
+    if not isinstance(pages, dict) or pages.get("status") != "passed":
+        raise ContractError("candidate result page validation did not pass")
+    assert_no_sensitive_values(result, "candidate result")
+    return result
+
+
+def validate_deployment_plan(
+    plan: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    schema: Mapping[str, Any],
+    *,
+    production_environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    validate_against_schema(plan, schema)
+    expected_release_fields = {
+        "release_id": manifest["release_id"],
+        "git_commit": manifest["git_commit"],
+        "image_ref": manifest["image_ref"],
+        "expected_image_id": manifest["image_id"],
+        "compose_project": COMPOSE_PROJECT,
+        "compose_template_sha256": manifest["compose_template_sha256"],
+        "rollback_git_commit": manifest["formal_git_commit"],
+        "rollback_image_ref": manifest["rollback_image_ref"],
+        "rollback_image_id": manifest["rollback_image_id"],
+    }
+    for key, expected in expected_release_fields.items():
+        if plan.get(key) != expected:
+            raise ContractError(
+                f"deployment plan {key} mismatch: expected {expected!r}, "
+                f"got {plan.get(key)!r}"
+            )
+    if plan.get("schema_version") != DEPLOYMENT_PLAN_SCHEMA_VERSION:
+        raise ContractError("unsupported deployment plan schema_version")
+    if plan.get("plan_status") != "deployment_plan_sealed":
+        raise ContractError("deployment plan is not sealed")
+    if plan.get("production_service_scope") != list(PRODUCTION_SERVICE_SCOPE):
+        raise ContractError(
+            "deployment plan service scope must contain only spread-dashboard"
+        )
+    compose_file = Path(str(plan.get("compose_file", "")))
+    if not compose_file.is_absolute() or compose_file.name != "docker-compose.yml":
+        raise ContractError(
+            "deployment plan compose_file must be an absolute docker-compose.yml path"
+        )
+    candidate_result_file = Path(str(plan.get("candidate_result_file", "")))
+    if not candidate_result_file.is_absolute():
+        raise ContractError("deployment plan candidate_result_file must be absolute")
+    load_candidate_result(candidate_result_file, manifest)
+    if hash_file(candidate_result_file) != plan.get("candidate_result_sha256"):
+        raise ContractError("candidate result changed after deployment plan sealing")
+    if plan.get("candidate_container_removed") is not True:
+        raise ContractError("deployment plan requires the candidate container to be removed")
+    allowed_differences = plan.get("allowed_candidate_production_differences")
+    if (
+        not isinstance(allowed_differences, list)
+        or len(set(allowed_differences)) != len(allowed_differences)
+        or not set(allowed_differences).issubset(RUNTIME_URL_KEYS)
+    ):
+        raise ContractError(
+            "deployment plan contains an undeclared candidate/production difference"
+        )
+    semantic = plan.get("semantic_comparison")
+    if not isinstance(semantic, dict):
+        raise ContractError("deployment plan semantic comparison is missing")
+    if semantic.get("base_semantics_equal") is not True:
+        raise ContractError("candidate and production Compose semantics differ")
+    candidate_semantic = validate_sha256(
+        semantic.get("candidate_semantic_sha256"),
+        "candidate_semantic_sha256",
+    )
+    production_semantic = validate_sha256(
+        semantic.get("production_semantic_sha256"),
+        "production_semantic_sha256",
+    )
+    if candidate_semantic != production_semantic:
+        raise ContractError("candidate and production semantic hashes differ")
+    candidate_runtime = plan.get("candidate_runtime_environment")
+    production_runtime = plan.get("production_runtime_environment")
+    if candidate_runtime != CANDIDATE_RUNTIME_ENVIRONMENT:
+        raise ContractError(
+            "deployment plan candidate runtime environment changed"
+        )
+    if not isinstance(production_runtime, dict):
+        raise ContractError(
+            "deployment plan production runtime environment is missing"
+        )
+    validate_sha256(
+        plan.get("candidate_compose_sha256"),
+        "candidate_compose_sha256",
+    )
+    validate_sha256(
+        plan.get("production_compose_sha256"),
+        "production_compose_sha256",
+    )
+    validate_build_time(plan.get("created_at"))
+
+    production_env_file = Path(str(plan.get("production_env_file", "")))
+    if not production_env_file.is_absolute():
+        raise ContractError("deployment plan production_env_file must be absolute")
+    environment = (
+        dict(production_environment)
+        if production_environment is not None
+        else parse_production_env(production_env_file)
+    )
+    validate_production_env(environment, manifest)
+    if hash_file(production_env_file) != plan.get("production_env_sha256"):
+        raise ContractError("production environment file changed after plan sealing")
+    for key in RUNTIME_URL_KEYS:
+        if plan.get(key) != environment[key]:
+            raise ContractError(f"deployment plan {key} does not match production env")
+        if production_runtime.get(key) != environment[key]:
+            raise ContractError(
+                f"deployment plan production runtime {key} does not match production env"
+            )
+    actual_differences = [
+        key
+        for key in RUNTIME_URL_KEYS
+        if candidate_runtime[key] != production_runtime[key]
+    ]
+    if allowed_differences != actual_differences:
+        raise ContractError(
+            "deployment plan runtime differences do not match the allowlisted facts"
+        )
+    if plan.get("MARKET_DATA_GIT_HEAD") != environment["MARKET_DATA_GIT_HEAD"]:
+        raise ContractError(
+            "deployment plan MARKET_DATA_GIT_HEAD does not match production env"
+        )
+    assert_no_sensitive_values(plan, "deployment plan")
+    return environment
+
+
+def create_deployment_plan(
+    *,
+    repository: Path,
+    production_project_directory: Path,
+    candidate_result_file: Path,
+    production_env_file: Path,
+    manifest: Mapping[str, Any],
+    runtime: ReleaseRuntime,
+    schema: Mapping[str, Any],
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    repository = repository.resolve()
+    production_project_directory = production_project_directory.resolve()
+    candidate_result_file = candidate_result_file.resolve()
+    production_env_file = production_env_file.resolve()
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ContractError(
+            "deployment plans require a release manifest using schema 2.0.0"
+        )
+    validate_repository_static(repository)
+    compose_template = repository / "docker-compose.yml"
+    template_sha = hash_file(compose_template)
+    if template_sha != manifest.get("compose_template_sha256"):
+        raise ContractError("Compose template SHA-256 does not match release.json")
+
+    production_environment = parse_production_env(production_env_file)
+    validate_production_env(production_environment, manifest)
+    load_candidate_result(candidate_result_file, manifest)
+    if runtime.container_exists(manifest["candidate_container_name"]):
+        raise ContractError(
+            "candidate container still exists; remove it before sealing deployment plan"
+        )
+    _verify_image_identity(manifest, runtime)
+
+    candidate_compose, candidate_raw, candidate_images = runtime.compose_config(
+        repository,
+        manifest["image_ref"],
+        environment=CANDIDATE_RUNTIME_ENVIRONMENT,
+        project_directory=repository,
+        compose_file=compose_template,
+    )
+    candidate_sha = validate_compose_result(
+        candidate_compose,
+        candidate_raw,
+        candidate_images,
+        manifest["image_ref"],
+    )
+
+    production_compose, production_raw, production_images = runtime.compose_config(
+        repository,
+        manifest["image_ref"],
+        environment=production_environment,
+        project_directory=production_project_directory,
+        compose_file=compose_template,
+    )
+    production_sha = validate_compose_result(
+        production_compose,
+        production_raw,
+        production_images,
+        manifest["image_ref"],
+    )
+    _validate_formal_spread_semantics(
+        production_compose,
+        production_project_directory,
+        manifest["image_ref"],
+    )
+
+    candidate_semantics, candidate_runtime = _compose_spread_semantics(
+        candidate_compose,
+        repository,
+    )
+    production_semantics, production_runtime = _compose_spread_semantics(
+        production_compose,
+        production_project_directory,
+    )
+    if candidate_semantics != production_semantics:
+        raise ContractError(
+            "candidate and production Compose differ outside the runtime URL allowlist"
+        )
+    allowed_differences = [
+        key
+        for key in RUNTIME_URL_KEYS
+        if candidate_runtime[key] != production_runtime[key]
+    ]
+    for key in RUNTIME_URL_KEYS:
+        if production_runtime[key] != production_environment[key]:
+            raise ContractError(
+                f"production Compose did not render the explicit {key} value"
+            )
+    semantic_sha = _semantic_sha256(candidate_semantics)
+    timestamp = created_at or datetime.now(timezone.utc).isoformat().replace(
+        "+00:00",
+        "Z",
+    )
+    validate_build_time(timestamp)
+    plan = {
+        "schema_version": DEPLOYMENT_PLAN_SCHEMA_VERSION,
+        "release_id": manifest["release_id"],
+        "git_commit": manifest["git_commit"],
+        "image_ref": manifest["image_ref"],
+        "expected_image_id": manifest["image_id"],
+        "candidate_result_file": str(candidate_result_file),
+        "candidate_result_sha256": hash_file(candidate_result_file),
+        "candidate_container_removed": True,
+        "production_env_file": str(production_env_file),
+        "production_env_sha256": hash_file(production_env_file),
+        "USDA_DASHBOARD_URL": production_environment["USDA_DASHBOARD_URL"],
+        "OIL_WORLD_DASHBOARD_URL": production_environment[
+            "OIL_WORLD_DASHBOARD_URL"
+        ],
+        "MARKET_DATA_GIT_HEAD": production_environment["MARKET_DATA_GIT_HEAD"],
+        "compose_project": COMPOSE_PROJECT,
+        "compose_file": str(
+            production_project_directory / "docker-compose.yml"
+        ),
+        "compose_template_sha256": template_sha,
+        "candidate_compose_sha256": candidate_sha,
+        "production_compose_sha256": production_sha,
+        "candidate_runtime_environment": dict(candidate_runtime),
+        "production_runtime_environment": dict(production_runtime),
+        "allowed_candidate_production_differences": allowed_differences,
+        "semantic_comparison": {
+            "base_semantics_equal": True,
+            "candidate_semantic_sha256": semantic_sha,
+            "production_semantic_sha256": semantic_sha,
+        },
+        "production_service_scope": list(PRODUCTION_SERVICE_SCOPE),
+        "rollback_git_commit": manifest["formal_git_commit"],
+        "rollback_image_ref": manifest["rollback_image_ref"],
+        "rollback_image_id": manifest["rollback_image_id"],
+        "created_at": timestamp,
+        "plan_status": "deployment_plan_sealed",
+    }
+    validate_deployment_plan(
+        plan,
+        manifest,
+        schema,
+        production_environment=production_environment,
+    )
+    return plan
+
+
+def write_deployment_plan(plan: Mapping[str, Any], path: Path) -> Path:
+    path = path.resolve()
+    if path.exists():
+        raise ContractError(
+            f"deployment plan already exists and will not be overwritten: {path}"
+        )
+    if not path.parent.is_dir():
+        raise ContractError(f"deployment plan parent directory is missing: {path.parent}")
+    temp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        temp_path.write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        if os.name != "nt":
+            temp_path.chmod(0o444)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return path
+
+
+def load_deployment_plan(
+    plan_path: Path,
+    manifest: Mapping[str, Any],
+    schema_path: Path,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot load deployment plan {plan_path}: {exc}") from exc
+    if not isinstance(plan, dict):
+        raise ContractError("deployment plan must be a JSON object")
+    environment = validate_deployment_plan(
+        plan,
+        manifest,
+        load_schema(schema_path),
+    )
+    return plan, environment
 
 
 def _verify_image_identity(
@@ -1119,13 +1844,25 @@ def verify_pre_deploy(
     repository: Path,
     runtime: ReleaseRuntime,
     *,
+    deployment_plan: Mapping[str, Any] | None = None,
+    production_environment: Mapping[str, str] | None = None,
     git_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
+    if (
+        manifest.get("schema_version") != SCHEMA_VERSION
+        or deployment_plan is None
+        or production_environment is None
+    ):
+        raise ContractError(
+            "production deployment requires a schema 2.0.0 release and "
+            "a sealed deployment_plan"
+        )
     validate_repository_static(repository)
     validate_git_state(repository, manifest["git_commit"], git_runner)
     for path, field in (
         (repository / "Dockerfile", "dockerfile_sha256"),
         (repository / ".dockerignore", "dockerignore_sha256"),
+        (repository / "docker-compose.yml", "compose_template_sha256"),
         (
             repository / "02_configs/historical_spread_config.xlsx",
             "required_config_sha256",
@@ -1135,23 +1872,66 @@ def verify_pre_deploy(
         if actual != manifest[field]:
             raise ContractError(f"{field} mismatch: expected {manifest[field]}, got {actual}")
 
+    validate_production_env(production_environment, manifest)
+    if deployment_plan.get("plan_status") != "deployment_plan_sealed":
+        raise ContractError("production deployment requires a sealed deployment_plan")
+    if deployment_plan.get("production_service_scope") != list(
+        PRODUCTION_SERVICE_SCOPE
+    ):
+        raise ContractError("deployment plan service scope changed")
+    if Path(str(deployment_plan.get("compose_file", ""))).resolve() != (
+        repository / "docker-compose.yml"
+    ).resolve():
+        raise ContractError("deployment plan Compose file path changed")
+    for key, expected in (
+        ("release_id", manifest["release_id"]),
+        ("git_commit", manifest["git_commit"]),
+        ("image_ref", manifest["image_ref"]),
+        ("expected_image_id", manifest["image_id"]),
+        ("production_env_sha256", hash_file(Path(deployment_plan["production_env_file"]))),
+    ):
+        if deployment_plan.get(key) != expected:
+            raise ContractError(f"deployment plan {key} changed before deployment")
+
     image_evidence = _verify_image_identity(manifest, runtime)
     compose, raw_config, images = runtime.compose_config(
-        repository, manifest["image_ref"]
+        repository,
+        manifest["image_ref"],
+        environment=production_environment,
+        project_directory=repository,
+        compose_file=repository / "docker-compose.yml",
     )
     compose_sha = validate_compose_result(
         compose, raw_config, images, manifest["image_ref"]
     )
-    if compose_sha != manifest["compose_config_sha256"]:
+    if compose_sha != deployment_plan["production_compose_sha256"]:
         raise ContractError(
-            "resolved Compose configuration changed after the manifest was sealed"
+            "production Compose configuration changed after deployment plan sealing"
         )
+    _validate_formal_spread_semantics(
+        compose,
+        repository,
+        manifest["image_ref"],
+    )
+    semantics, rendered_environment = _compose_spread_semantics(
+        compose,
+        repository,
+    )
+    if _semantic_sha256(semantics) != deployment_plan["semantic_comparison"][
+        "production_semantic_sha256"
+    ]:
+        raise ContractError("production Compose semantics changed after plan sealing")
+    for key in RUNTIME_URL_KEYS:
+        if rendered_environment[key] != production_environment[key]:
+            raise ContractError(f"production Compose rendered unexpected {key}")
     return {
         "phase": "pre-deploy",
         **image_evidence,
         "compose_project": compose["name"],
         "compose_image": compose["services"][COMPOSE_SERVICE]["image"],
         "compose_config_sha256": compose_sha,
+        "deployment_plan_status": deployment_plan["plan_status"],
+        "production_service_scope": deployment_plan["production_service_scope"],
     }
 
 
@@ -1216,7 +1996,17 @@ def verify_candidate(
 def verify_post_deploy(
     manifest: Mapping[str, Any],
     runtime: ReleaseRuntime,
+    *,
+    deployment_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if (
+        manifest.get("schema_version") != SCHEMA_VERSION
+        or deployment_plan is None
+        or deployment_plan.get("plan_status") != "deployment_plan_sealed"
+    ):
+        raise ContractError(
+            "post-deploy verification requires a sealed deployment_plan"
+        )
     container = runtime.container_record(PRODUCTION_CONTAINER)
     if container.get("image_id") != manifest["image_id"]:
         raise ContractError(
@@ -1249,6 +2039,7 @@ def verify_post_deploy(
         "oci_revision": labels["org.opencontainers.image.revision"],
         "embedded_release": release,
         "embedded_release_sha256": release_sha256,
+        "deployment_plan_status": deployment_plan["plan_status"],
     }
 
 
@@ -1256,7 +2047,19 @@ def verify_pre_rollback(
     manifest: Mapping[str, Any],
     repository: Path,
     runtime: ReleaseRuntime,
+    *,
+    deployment_plan: Mapping[str, Any] | None = None,
+    production_environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    if deployment_plan is None or production_environment is None:
+        raise ContractError("rollback requires a sealed deployment_plan")
+    if deployment_plan.get("plan_status") != "deployment_plan_sealed":
+        raise ContractError("rollback deployment_plan is not sealed")
+    if deployment_plan.get("production_service_scope") != list(
+        PRODUCTION_SERVICE_SCOPE
+    ):
+        raise ContractError("rollback service scope changed")
+    validate_production_env(production_environment, manifest)
     image_ref = validate_rollback_image_ref(manifest["rollback_image_ref"])
     expected_id = validate_image_id(
         manifest["rollback_image_id"], "rollback_image_id"
@@ -1266,13 +2069,24 @@ def verify_pre_rollback(
         raise ContractError(
             f"rollback tag ID mismatch: expected {expected_id}, got {record.get('id')}"
         )
-    compose, raw_config, images = runtime.compose_config(repository, image_ref)
+    rollback_environment = {
+        **production_environment,
+        "SPREAD_IMAGE": image_ref,
+    }
+    compose, raw_config, images = runtime.compose_config(
+        repository,
+        image_ref,
+        environment=rollback_environment,
+        project_directory=repository,
+        compose_file=repository / "docker-compose.yml",
+    )
     compose_sha = validate_compose_result(
         compose,
         raw_config,
         images,
         image_ref,
     )
+    _validate_formal_spread_semantics(compose, repository, image_ref)
     return {
         "phase": "pre-rollback",
         "rollback_image_ref": image_ref,
@@ -1458,8 +2272,12 @@ def create_manifest(
             f"expected {rollback_image_id}, got {rollback.get('id')}"
         )
 
-    compose, raw_config, images = runtime.compose_config(repository, image_ref)
-    compose_sha = validate_compose_result(compose, raw_config, images, image_ref)
+    compose, raw_config, images = runtime.compose_config(
+        repository,
+        image_ref,
+        environment=CANDIDATE_RUNTIME_ENVIRONMENT,
+    )
+    validate_compose_result(compose, raw_config, images, image_ref)
     baseline = collect_data_baseline(
         data_host_root,
         PRODUCTION_CONTAINER,
@@ -1477,7 +2295,8 @@ def create_manifest(
         "build_time": build_time,
         "compose_project": COMPOSE_PROJECT,
         "compose_files": ["docker-compose.yml"],
-        "compose_config_sha256": compose_sha,
+        "compose_template_sha256": hash_file(repository / "docker-compose.yml"),
+        "runtime_environment_contract": copy.deepcopy(RUNTIME_ENVIRONMENT_CONTRACT),
         "dockerfile_sha256": hash_file(repository / "Dockerfile"),
         "dockerignore_sha256": hash_file(repository / ".dockerignore"),
         "required_config_sha256": hash_file(

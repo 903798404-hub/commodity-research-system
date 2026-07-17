@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-release-1.0.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.0.0.json",
   "title": "spread-dashboard immutable release manifest",
   "type": "object",
   "additionalProperties": false,
@@ -16,7 +16,6 @@
     "build_time",
     "compose_project",
     "compose_files",
-    "compose_config_sha256",
     "dockerfile_sha256",
     "dockerignore_sha256",
     "required_config_sha256",
@@ -29,7 +28,10 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0.0"
+      "enum": [
+        "1.0.0",
+        "2.0.0"
+      ]
     },
     "application": {
       "const": "spread-dashboard"
@@ -73,6 +75,12 @@
     "compose_config_sha256": {
       "$ref": "#/$defs/sha256"
     },
+    "compose_template_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "runtime_environment_contract": {
+      "$ref": "#/$defs/runtimeEnvironmentContract"
+    },
     "dockerfile_sha256": {
       "$ref": "#/$defs/sha256"
     },
@@ -115,6 +123,75 @@
     "sha256": {
       "type": "string",
       "pattern": "[0-9a-f]{64}"
+    },
+    "runtimeEnvironmentContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_production_variables",
+        "required_production_variables",
+        "release_bound_variables",
+        "allowed_candidate_production_differences",
+        "undeclared_variables_forbidden"
+      ],
+      "properties": {
+        "allowed_production_variables": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "SPREAD_IMAGE",
+              "MARKET_DATA_GIT_HEAD",
+              "USDA_DASHBOARD_URL",
+              "OIL_WORLD_DASHBOARD_URL"
+            ]
+          }
+        },
+        "required_production_variables": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "SPREAD_IMAGE",
+              "MARKET_DATA_GIT_HEAD",
+              "USDA_DASHBOARD_URL",
+              "OIL_WORLD_DASHBOARD_URL"
+            ]
+          }
+        },
+        "release_bound_variables": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "SPREAD_IMAGE",
+            "MARKET_DATA_GIT_HEAD"
+          ],
+          "properties": {
+            "SPREAD_IMAGE": {
+              "const": "image_ref"
+            },
+            "MARKET_DATA_GIT_HEAD": {
+              "const": "git_commit"
+            }
+          }
+        },
+        "allowed_candidate_production_differences": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "USDA_DASHBOARD_URL",
+              "OIL_WORLD_DASHBOARD_URL"
+            ]
+          }
+        },
+        "undeclared_variables_forbidden": {
+          "const": true
+        }
+      }
     },
     "dataset": {
       "type": "object",

@@ -22,19 +22,26 @@ sys.path.insert(0, str(CONTRACT_DIR))
 
 from release_contract import (  # noqa: E402
     APPLICATION,
+    CANDIDATE_RUNTIME_ENVIRONMENT,
     COMPOSE_PROJECT,
     ContractError,
     DATA_SPECS,
     DockerReleaseRuntime,
+    PRODUCTION_ENV_KEYS,
     PRODUCTION_CONTAINER,
     SPREAD_PRIMARY_KEY,
     collect_data_baseline,
+    create_deployment_plan,
     create_manifest,
+    load_deployment_plan,
     load_manifest_bundle,
     load_schema,
+    parse_production_env,
     resolve_spread_image_offline,
+    validate_deployment_plan,
     validate_full_git_commit,
     validate_manifest,
+    validate_production_env,
     validate_release_image_ref,
     validate_repository_static,
     validate_rollback_image_ref,
@@ -44,6 +51,7 @@ from release_contract import (  # noqa: E402
     verify_post_rollback,
     verify_pre_deploy,
     verify_pre_rollback,
+    write_deployment_plan,
     write_release_bundle,
     write_result,
 )
@@ -61,6 +69,8 @@ UNTAGGED_REF = "market-data-spread-dashboard"
 BUILD_TIME = "2026-07-17T08:00:00Z"
 SOURCE = "https://github.com/example/commodity-research-system"
 CANDIDATE_CONTAINER = "spread-candidate-release"
+PRODUCTION_USDA_URL = "https://dashboards.example.com/usda/"
+PRODUCTION_OIL_WORLD_URL = "https://dashboards.example.com/oil-world/"
 
 
 class FakeGitRunner:
@@ -112,9 +122,32 @@ class FakeReleaseRuntime:
             "config_image": IMAGE_REF,
         }
         self.compose_image = IMAGE_REF
+        self.compose_command: object = [
+            "streamlit",
+            "run",
+            "05_apps/streamlit_app.py",
+            "--server.address=0.0.0.0",
+            "--server.port=8501",
+        ]
+        self.compose_ports: object = [
+            {
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8501",
+                "target": 8501,
+            }
+        ]
+        self.compose_mounts: object | None = None
+        self.compose_template_variant = "release-template"
+        self.candidate_command_override: object | None = None
+        self.production_command_override: object | None = None
+        self.candidate_mounts_override: object | None = None
+        self.production_mounts_override: object | None = None
+        self.production_ports_override: object | None = None
         self.dataset_overrides: dict[str, dict[str, object]] = {}
         self.container_record_calls: list[str] = []
         self.dataset_container_names: list[str] = []
+        self.candidate_container_exists = False
 
     def image_record(self, image_ref: str) -> dict[str, object]:
         if image_ref == IMAGE_REF:
@@ -135,6 +168,10 @@ class FakeReleaseRuntime:
         if container_name == "spread-dashboard":
             return dict(self.production_record)
         raise ContractError(f"unknown container in fixture: {container_name}")
+
+    def container_exists(self, container_name: str) -> bool:
+        assert container_name == CANDIDATE_CONTAINER
+        return self.candidate_container_exists
 
     def read_candidate_release(self, container_name: str) -> dict[str, str]:
         assert container_name == CANDIDATE_CONTAINER
@@ -174,23 +211,87 @@ class FakeReleaseRuntime:
         return hashlib.sha256(raw).hexdigest()
 
     def compose_config(
-        self, repository: Path, image_ref: str
+        self,
+        repository: Path,
+        image_ref: str,
+        *,
+        environment: dict[str, str] | None = None,
+        project_directory: Path | None = None,
+        compose_file: Path | None = None,
     ) -> tuple[dict[str, object], str, list[str]]:
         assert repository == REPOSITORY
         assert image_ref in {IMAGE_REF, ROLLBACK_REF}
+        project_root = (project_directory or repository).resolve()
+        assert (compose_file or repository / "docker-compose.yml").resolve() == (
+            repository / "docker-compose.yml"
+        ).resolve()
+        resolved_environment = {
+            **CANDIDATE_RUNTIME_ENVIRONMENT,
+            **(environment or {}),
+        }
+        is_candidate = all(
+            resolved_environment[key] == CANDIDATE_RUNTIME_ENVIRONMENT[key]
+            for key in CANDIDATE_RUNTIME_ENVIRONMENT
+        )
+        volumes = self.compose_mounts
+        if is_candidate and self.candidate_mounts_override is not None:
+            volumes = self.candidate_mounts_override
+        if not is_candidate and self.production_mounts_override is not None:
+            volumes = self.production_mounts_override
+        if volumes is None:
+            volumes = [
+                {
+                    "type": "bind",
+                    "source": str((project_root / relative).resolve()),
+                    "target": target,
+                    "bind": {"create_host_path": True},
+                }
+                for relative, target in (
+                    ("01_data", "/app/01_data"),
+                    ("06_outputs", "/app/06_outputs"),
+                    ("10_logs", "/app/10_logs"),
+                )
+            ]
         compose = {
             "name": COMPOSE_PROJECT,
             "services": {
                 "spread-dashboard": {
                     "image": self.compose_image,
                     "build": {
-                        "context": str(REPOSITORY),
+                        "context": str(project_root),
                         "dockerfile": "Dockerfile",
                     },
+                    "container_name": PRODUCTION_CONTAINER,
+                    "command": (
+                        self.candidate_command_override
+                        if is_candidate and self.candidate_command_override is not None
+                        else self.production_command_override
+                        if not is_candidate
+                        and self.production_command_override is not None
+                        else self.compose_command
+                    ),
+                    "ports": (
+                        self.production_ports_override
+                        if not is_candidate
+                        and self.production_ports_override is not None
+                        else self.compose_ports
+                    ),
+                    "environment": {
+                        key: resolved_environment[key]
+                        for key in (
+                            "USDA_DASHBOARD_URL",
+                            "OIL_WORLD_DASHBOARD_URL",
+                        )
+                    },
+                    "volumes": volumes,
+                    "restart": "unless-stopped",
+                    "x-test-template-variant": self.compose_template_variant,
                 },
                 "usda-dashboard": {
                     "build": {
-                        "context": str(REPOSITORY / "11_独立应用" / "USDA平衡表"),
+                        "context": str(
+                            project_root / "11_独立应用" / "USDA平衡表"
+                        ),
                         "dockerfile": "Dockerfile",
                     }
                 },
@@ -283,6 +384,95 @@ def build_manifest(
     return manifest, runtime, git
 
 
+def create_production_env(
+    tmp_path: Path,
+    manifest: dict[str, object],
+    *,
+    usda_url: str = PRODUCTION_USDA_URL,
+    oil_world_url: str = PRODUCTION_OIL_WORLD_URL,
+) -> tuple[Path, dict[str, str]]:
+    environment = {
+        "SPREAD_IMAGE": str(manifest["image_ref"]),
+        "MARKET_DATA_GIT_HEAD": str(manifest["git_commit"]),
+        "USDA_DASHBOARD_URL": usda_url,
+        "OIL_WORLD_DASHBOARD_URL": oil_world_url,
+    }
+    path = (tmp_path / "spread-production.env").resolve()
+    path.write_text(
+        "".join(f"{key}={environment[key]}\n" for key in PRODUCTION_ENV_KEYS),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    return path, environment
+
+
+def create_candidate_result(
+    tmp_path: Path,
+    manifest: dict[str, object],
+) -> Path:
+    path = (tmp_path / "candidate_result.json").resolve()
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "candidate-result-v1",
+                "application": APPLICATION,
+                "release_id": manifest["release_id"],
+                "git_commit": manifest["git_commit"],
+                "image_ref": manifest["image_ref"],
+                "image_id": manifest["image_id"],
+                "status": "candidate-validated",
+                "three_way_image_id_equal": True,
+                "formal_containers_unchanged": True,
+                "formal_git_unchanged": True,
+                "data_files_unchanged": True,
+                "production_switch_performed": False,
+                "identity": {
+                    "config_image": manifest["image_ref"],
+                    "actual_image_id": manifest["image_id"],
+                    "tag_image_id": manifest["image_id"],
+                    "manifest_image_id": manifest["image_id"],
+                    "oci_revision": manifest["git_commit"],
+                },
+                "http": {
+                    "health": 200,
+                    "host_config": 200,
+                    "root": 200,
+                },
+                "pages": {"status": "passed"},
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def build_deployment_plan(
+    tmp_path: Path,
+    manifest: dict[str, object],
+    runtime: FakeReleaseRuntime,
+) -> tuple[dict[str, object], Path, dict[str, str]]:
+    production_env_file, production_environment = create_production_env(
+        tmp_path,
+        manifest,
+    )
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    plan = create_deployment_plan(
+        repository=REPOSITORY,
+        production_project_directory=REPOSITORY,
+        candidate_result_file=candidate_result_file,
+        production_env_file=production_env_file,
+        manifest=manifest,
+        runtime=runtime,
+        schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        created_at=BUILD_TIME,
+    )
+    return plan, production_env_file, production_environment
+
+
 def docker_compose_is_available() -> bool:
     if shutil.which("docker") is None:
         return False
@@ -338,6 +528,8 @@ def test_offline_compose_resolution_rejects_old_latest_fallback() -> None:
 def test_real_compose_config_fails_without_spread_image() -> None:
     environment = os.environ.copy()
     environment.pop("SPREAD_IMAGE", None)
+    environment["USDA_DASHBOARD_URL"] = PRODUCTION_USDA_URL
+    environment["OIL_WORLD_DASHBOARD_URL"] = PRODUCTION_OIL_WORLD_URL
     result = subprocess.run(
         [
             "docker",
@@ -365,7 +557,12 @@ def test_real_compose_config_fails_without_spread_image() -> None:
     not docker_compose_is_available(), reason="local Docker Compose is unavailable"
 )
 def test_real_compose_config_resolves_exact_spread_image() -> None:
-    environment = {**os.environ, "SPREAD_IMAGE": IMAGE_REF}
+    environment = {
+        **os.environ,
+        "SPREAD_IMAGE": IMAGE_REF,
+        "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
+        "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
+    }
     result = subprocess.run(
         [
             "docker",
@@ -552,6 +749,316 @@ def test_production_result_is_separate_and_does_not_rewrite_manifest(
     assert manifest_path.read_bytes() == original
     with pytest.raises(ContractError, match="already exists"):
         write_result(result_path, {"status": "replacement"})
+
+
+def test_candidate_and_production_url_difference_seals_same_image_plan(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+
+    assert production_environment["USDA_DASHBOARD_URL"] != (
+        CANDIDATE_RUNTIME_ENVIRONMENT["USDA_DASHBOARD_URL"]
+    )
+    assert production_environment["OIL_WORLD_DASHBOARD_URL"] != (
+        CANDIDATE_RUNTIME_ENVIRONMENT["OIL_WORLD_DASHBOARD_URL"]
+    )
+    assert plan["image_ref"] == IMAGE_REF
+    assert plan["expected_image_id"] == IMAGE_ID
+    assert plan["candidate_compose_sha256"] != plan["production_compose_sha256"]
+    assert plan["allowed_candidate_production_differences"] == [
+        "USDA_DASHBOARD_URL",
+        "OIL_WORLD_DASHBOARD_URL",
+    ]
+    assert plan["semantic_comparison"]["base_semantics_equal"] is True
+    assert plan["plan_status"] == "deployment_plan_sealed"
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    ["USDA_DASHBOARD_URL", "OIL_WORLD_DASHBOARD_URL"],
+)
+def test_production_environment_missing_url_hard_fails(
+    tmp_path: Path,
+    missing_key: str,
+) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    path, environment = create_production_env(tmp_path, manifest)
+    environment.pop(missing_key)
+    path.write_text(
+        "".join(
+            f"{key}={environment[key]}\n"
+            for key in PRODUCTION_ENV_KEYS
+            if key in environment
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="must contain exactly"):
+        parse_production_env(path)
+
+
+def test_explicit_production_urls_pass_validation(tmp_path: Path) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    path, expected = create_production_env(tmp_path, manifest)
+
+    parsed = parse_production_env(path)
+    validate_production_env(parsed, manifest)
+
+    assert parsed == expected
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("SPREAD_IMAGE", ROLLBACK_REF, "SPREAD_IMAGE"),
+        ("MARKET_DATA_GIT_HEAD", OLD_GIT_COMMIT, "MARKET_DATA_GIT_HEAD"),
+    ],
+)
+def test_production_release_bound_identity_mismatch_fails(
+    tmp_path: Path,
+    key: str,
+    value: str,
+    message: str,
+) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    _, environment = create_production_env(tmp_path, manifest)
+    environment[key] = value
+
+    with pytest.raises(ContractError, match=message):
+        validate_production_env(environment, manifest)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8080/usda/",
+        "http://127.0.0.1:5175/",
+        "http://0.0.0.0:8080/",
+    ],
+)
+def test_production_url_rejects_local_defaults(tmp_path: Path, url: str) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    _, environment = create_production_env(tmp_path, manifest)
+    environment["USDA_DASHBOARD_URL"] = url
+
+    with pytest.raises(ContractError, match="must not use"):
+        validate_production_env(environment, manifest)
+
+
+def test_deployment_plan_rejects_compose_template_identity_change(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    manifest["compose_template_sha256"] = "f" * 64
+
+    with pytest.raises(ContractError, match="template SHA-256"):
+        create_deployment_plan(
+            repository=REPOSITORY,
+            production_project_directory=REPOSITORY,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_rejects_mount_difference(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    runtime.production_mounts_override = [
+        {
+            "type": "bind",
+            "source": str((REPOSITORY / "wrong-data").resolve()),
+            "target": "/app/01_data",
+        }
+    ]
+
+    with pytest.raises(ContractError, match="mount contract changed"):
+        create_deployment_plan(
+            repository=REPOSITORY,
+            production_project_directory=REPOSITORY,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_rejects_command_difference(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    runtime.production_command_override = ["python", "-m", "unexpected"]
+
+    with pytest.raises(ContractError, match="outside the runtime URL allowlist"):
+        create_deployment_plan(
+            repository=REPOSITORY,
+            production_project_directory=REPOSITORY,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_rejects_unexpected_production_port(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    runtime.production_ports_override = [
+        {
+            "mode": "ingress",
+            "protocol": "tcp",
+            "published": "9501",
+            "target": 8501,
+        }
+    ]
+
+    with pytest.raises(ContractError, match="port mapping changed"):
+        create_deployment_plan(
+            repository=REPOSITORY,
+            production_project_directory=REPOSITORY,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_is_write_once_and_loads_with_environment(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, expected_environment = build_deployment_plan(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    plan_path = tmp_path / "deployment_plan.json"
+
+    write_deployment_plan(plan, plan_path)
+    loaded, environment = load_deployment_plan(
+        plan_path,
+        manifest,
+        CONTRACT_DIR / "deployment_plan.schema.json",
+    )
+
+    assert loaded == plan
+    assert environment == expected_environment
+    with pytest.raises(ContractError, match="will not be overwritten"):
+        write_deployment_plan(plan, plan_path)
+
+
+def test_deployment_plan_requires_validated_candidate_result(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result = json.loads(
+        candidate_result_file.read_text(encoding="utf-8")
+    )
+    candidate_result["pages"]["status"] = "failed"
+    candidate_result_file.write_text(
+        json.dumps(candidate_result, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="page validation did not pass"):
+        create_deployment_plan(
+            repository=REPOSITORY,
+            production_project_directory=REPOSITORY,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_requires_candidate_container_removed(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    runtime.candidate_container_exists = True
+
+    with pytest.raises(ContractError, match="candidate container still exists"):
+        create_deployment_plan(
+            repository=REPOSITORY,
+            production_project_directory=REPOSITORY,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_rejects_undeclared_service_scope(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    plan["production_service_scope"] = [
+        "spread-dashboard",
+        "usda-dashboard",
+    ]
+
+    with pytest.raises(ContractError):
+        validate_deployment_plan(
+            plan,
+            manifest,
+            load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+            production_environment=production_environment,
+        )
+
+
+def test_non_offline_verifier_rejects_missing_deployment_plan(
+    tmp_path: Path,
+) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    release_directory = write_release_bundle(manifest, tmp_path / "releases")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CONTRACT_DIR / "verify_release_contract.py"),
+            "--phase",
+            "pre-deploy",
+            "--repository",
+            str(REPOSITORY),
+            "--manifest",
+            str(release_directory / "release.json"),
+        ],
+        cwd=REPOSITORY,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "requires --deployment-plan" in result.stderr
 
 
 def test_offline_verifier_accepts_a_valid_sealed_bundle(tmp_path: Path) -> None:
@@ -908,12 +1415,17 @@ def test_pre_deploy_accepts_exact_image_oci_release_and_compose(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, git = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
 
     evidence = verify_pre_deploy(
         manifest,
         REPOSITORY,
         runtime,
         git_runner=git,
+        deployment_plan=plan,
+        production_environment=production_environment,
     )
 
     assert evidence["image_ref"] == IMAGE_REF
@@ -924,48 +1436,89 @@ def test_pre_deploy_accepts_exact_image_oci_release_and_compose(
 
 def test_pre_deploy_rejects_tag_to_image_id_mismatch(tmp_path: Path) -> None:
     manifest, runtime, git = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
     runtime.release_image_id = ROLLBACK_ID
 
     with pytest.raises(ContractError, match="image tag ID mismatch"):
-        verify_pre_deploy(manifest, REPOSITORY, runtime, git_runner=git)
+        verify_pre_deploy(
+            manifest,
+            REPOSITORY,
+            runtime,
+            git_runner=git,
+            deployment_plan=plan,
+            production_environment=production_environment,
+        )
 
 
 def test_pre_deploy_rejects_oci_revision_mismatch(tmp_path: Path) -> None:
     manifest, runtime, git = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
     runtime.labels["org.opencontainers.image.revision"] = OLD_GIT_COMMIT
 
     with pytest.raises(ContractError, match="image label.*revision mismatch"):
-        verify_pre_deploy(manifest, REPOSITORY, runtime, git_runner=git)
+        verify_pre_deploy(
+            manifest,
+            REPOSITORY,
+            runtime,
+            git_runner=git,
+            deployment_plan=plan,
+            production_environment=production_environment,
+        )
 
 
 def test_pre_deploy_rejects_image_release_json_mismatch(tmp_path: Path) -> None:
     manifest, runtime, git = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
     runtime.image_release_json["git_commit"] = OLD_GIT_COMMIT
 
     with pytest.raises(ContractError, match="/app/RELEASE.json"):
-        verify_pre_deploy(manifest, REPOSITORY, runtime, git_runner=git)
+        verify_pre_deploy(
+            manifest,
+            REPOSITORY,
+            runtime,
+            git_runner=git,
+            deployment_plan=plan,
+            production_environment=production_environment,
+        )
 
 
 def test_regression_compose_must_not_resolve_old_latest_image(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, git = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
     assert runtime.image_record(IMAGE_REF)["id"] == IMAGE_ID
     assert runtime.image_record(LATEST_REF)["id"] == ROLLBACK_ID
     runtime.compose_image = LATEST_REF
 
     with pytest.raises(ContractError, match="Compose resolved spread image mismatch"):
-        verify_pre_deploy(manifest, REPOSITORY, runtime, git_runner=git)
+        verify_pre_deploy(
+            manifest,
+            REPOSITORY,
+            runtime,
+            git_runner=git,
+            deployment_plan=plan,
+            production_environment=production_environment,
+        )
 
 
 def test_candidate_and_production_must_use_same_image_id(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
     candidate = verify_candidate(manifest, runtime)
     assert candidate["actual_image_id"] == IMAGE_ID
     assert candidate["tag_image_id"] == IMAGE_ID
     assert candidate["manifest_image_id"] == IMAGE_ID
 
-    evidence = verify_post_deploy(manifest, runtime)
+    evidence = verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
     assert evidence["actual_image_id"] == IMAGE_ID
     assert evidence["config_image"] == IMAGE_REF
@@ -985,44 +1538,62 @@ def test_post_deploy_rejects_actual_container_image_id_mismatch(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
     runtime.production_record["image_id"] = ROLLBACK_ID
 
     with pytest.raises(ContractError, match="production container Image ID mismatch"):
-        verify_post_deploy(manifest, runtime)
+        verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
 
 def test_post_deploy_rejects_config_image_mismatch(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
     runtime.production_record["config_image"] = ROLLBACK_REF
 
     with pytest.raises(ContractError, match="Config.Image mismatch"):
-        verify_post_deploy(manifest, runtime)
+        verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
 
 def test_post_deploy_rejects_container_release_json_mismatch(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
     runtime.production_release_json["release_id"] = (
         "spread-20260717-aaaaaaaaaaaa-b02"
     )
 
     with pytest.raises(ContractError, match="/app/RELEASE.json"):
-        verify_post_deploy(manifest, runtime)
+        verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
 
 def test_rollback_requires_explicit_tag_to_image_id_match(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
     runtime.compose_image = ROLLBACK_REF
 
-    evidence = verify_pre_rollback(manifest, REPOSITORY, runtime)
+    evidence = verify_pre_rollback(
+        manifest,
+        REPOSITORY,
+        runtime,
+        deployment_plan=plan,
+        production_environment=production_environment,
+    )
 
     assert evidence["rollback_image_ref"] == ROLLBACK_REF
     assert evidence["rollback_image_id"] == ROLLBACK_ID
     assert evidence["compose_image"] == ROLLBACK_REF
     runtime.rollback_image_id = IMAGE_ID
     with pytest.raises(ContractError, match="rollback tag ID mismatch"):
-        verify_pre_rollback(manifest, REPOSITORY, runtime)
+        verify_pre_rollback(
+            manifest,
+            REPOSITORY,
+            runtime,
+            deployment_plan=plan,
+            production_environment=production_environment,
+        )
 
 
 def test_post_rollback_verifies_actual_container_image_id(tmp_path: Path) -> None:
@@ -1054,10 +1625,50 @@ def test_formal_scripts_never_build_retag_or_derive_from_config_image() -> None:
         assert ".Config.Image" not in script
         assert ":latest" not in script
         assert ":new" not in script
-    assert 'SPREAD_IMAGE="${SPREAD_IMAGE}" docker compose' in deploy
-    assert 'SPREAD_IMAGE="${rollback_image_ref}" docker compose' in rollback
+        assert "--env-file" in script
+        assert "--deployment-plan" in script
+        assert "up -d --no-build --no-deps spread-dashboard" in script
+        assert "up -d --no-build --no-deps usda-dashboard" not in script
+        assert "up -d --no-build --no-deps oil-world" not in script
+    assert 'production_env_file="${plan_identity[2]}"' in deploy
+    assert 'SPREAD_IMAGE="${rollback_image_ref}"' in rollback
     assert 'manifest["rollback_image_ref"]' in rollback
     assert 'manifest["rollback_image_id"]' in rollback
+
+
+def test_static_contract_rejects_usda_in_formal_switch_scope(
+    tmp_path: Path,
+) -> None:
+    fixture_repository = tmp_path / "repository"
+    required_paths = (
+        "docker-compose.yml",
+        "Dockerfile",
+        ".dockerignore",
+        "02_configs/historical_spread_config.xlsx",
+        "09_deploy/spread_release/deploy_spread_release.sh",
+        "09_deploy/spread_release/rollback_spread_release.sh",
+        "09_deploy/spread_release/create_deployment_plan.py",
+        "09_deploy/spread_release/deployment_plan.schema.json",
+    )
+    for relative_path in required_paths:
+        source = REPOSITORY / relative_path
+        destination = fixture_repository / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    deploy_path = (
+        fixture_repository
+        / "09_deploy"
+        / "spread_release"
+        / "deploy_spread_release.sh"
+    )
+    deploy_path.write_text(
+        deploy_path.read_text(encoding="utf-8")
+        + "\ndocker compose up -d --no-build --no-deps usda-dashboard\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="must not switch USDA"):
+        validate_repository_static(fixture_repository)
 
 
 def test_operator_docs_do_not_offer_legacy_spread_build_switch() -> None:
@@ -1083,7 +1694,10 @@ def test_deploy_checks_identity_before_http_and_auto_rolls_back() -> None:
     production_record = deploy.index("--phase record-deployment")
     assert post_identity < http_check < production_record
     assert "trap rollback_on_failure ERR" in deploy
-    assert 'bash "${rollback_script}" "${release_directory}" "${health_url}"' in deploy
+    assert (
+        'bash "${rollback_script}" "${release_directory}" '
+        '"${deployment_plan}" "${health_url}"'
+    ) in deploy
     assert deploy.index("trap rollback_on_failure ERR") < deploy.index(
         "docker compose"
     )

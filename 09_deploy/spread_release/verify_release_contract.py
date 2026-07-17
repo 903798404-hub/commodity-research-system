@@ -8,6 +8,8 @@ from pathlib import Path
 from release_contract import (
     ContractError,
     DockerReleaseRuntime,
+    hash_file,
+    load_deployment_plan,
     load_manifest_bundle,
     validate_repository_static,
     verify_post_deploy,
@@ -21,6 +23,7 @@ from release_contract import (
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_REPOSITORY = SCRIPT_DIR.parents[1]
 SCHEMA_PATH = SCRIPT_DIR / "release.schema.json"
+PLAN_SCHEMA_PATH = SCRIPT_DIR / "deployment_plan.schema.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--result-path", type=Path)
     parser.add_argument("--http-status", type=int)
+    parser.add_argument("--deployment-plan", type=Path)
     return parser
 
 
@@ -68,6 +72,15 @@ def main(argv: list[str] | None = None) -> int:
                 "image_id": manifest["image_id"],
             }
         else:
+            if args.deployment_plan is None:
+                raise ContractError(f"{args.phase} requires --deployment-plan")
+            plan_path = args.deployment_plan.resolve()
+            plan, production_environment = load_deployment_plan(
+                plan_path,
+                manifest,
+                PLAN_SCHEMA_PATH,
+            )
+            plan_sha256 = hash_file(plan_path)
             runtime = DockerReleaseRuntime()
             if args.phase == "pre-deploy":
                 if (manifest_path.parent / "deployment_result.json").exists():
@@ -75,9 +88,19 @@ def main(argv: list[str] | None = None) -> int:
                         "deployment_result.json already exists; this sealed release "
                         "will not be switched again"
                     )
-                evidence = verify_pre_deploy(manifest, repository, runtime)
+                evidence = verify_pre_deploy(
+                    manifest,
+                    repository,
+                    runtime,
+                    deployment_plan=plan,
+                    production_environment=production_environment,
+                )
             elif args.phase in {"post-deploy", "record-deployment"}:
-                evidence = verify_post_deploy(manifest, runtime)
+                evidence = verify_post_deploy(
+                    manifest,
+                    runtime,
+                    deployment_plan=plan,
+                )
                 if args.phase == "record-deployment":
                     if args.http_status != 200:
                         raise ContractError(
@@ -88,7 +111,14 @@ def main(argv: list[str] | None = None) -> int:
                         "phase": "deployment-result",
                         "release_id": manifest["release_id"],
                         "http_status": args.http_status,
-                        "status": "deployed-and-verified",
+                        "deployment_plan": str(plan_path),
+                        "deployment_plan_sha256": plan_sha256,
+                        "production_env_file": plan["production_env_file"],
+                        "production_env_sha256": plan["production_env_sha256"],
+                        "production_compose_sha256": plan[
+                            "production_compose_sha256"
+                        ],
+                        "status": "production_verified",
                     }
                     result_path = (
                         args.result_path.resolve()
@@ -98,9 +128,16 @@ def main(argv: list[str] | None = None) -> int:
                     write_result(result_path, evidence)
                     evidence["result_path"] = str(result_path)
             elif args.phase == "pre-rollback":
-                evidence = verify_pre_rollback(manifest, repository, runtime)
+                evidence = verify_pre_rollback(
+                    manifest,
+                    repository,
+                    runtime,
+                    deployment_plan=plan,
+                    production_environment=production_environment,
+                )
             else:
                 evidence = verify_post_rollback(manifest, runtime)
+                evidence["deployment_plan_sha256"] = plan_sha256
     except ContractError as exc:
         print(f"release contract rejected: {exc}", file=sys.stderr)
         return 2

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: bash deploy_spread_release.sh <release-directory> [health-url]" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "usage: bash deploy_spread_release.sh <release-directory> <deployment-plan> [health-url]" >&2
     exit 64
 fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository="$(cd -- "${script_dir}/../.." && pwd)"
 release_directory="$(cd -- "$1" && pwd)"
-health_url="${2:-http://127.0.0.1:8501/_stcore/health}"
+deployment_plan="$(cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")"
+health_url="${3:-http://127.0.0.1:8501/_stcore/health}"
 manifest="${release_directory}/release.json"
 environment_file="${release_directory}/release.env"
 verifier="${script_dir}/verify_release_contract.py"
@@ -19,26 +20,27 @@ python3 "${verifier}" \
     --phase pre-deploy \
     --repository "${repository}" \
     --manifest "${manifest}" \
-    --env-file "${environment_file}"
+    --env-file "${environment_file}" \
+    --deployment-plan "${deployment_plan}"
 
-while IFS='=' read -r key value; do
-    case "${key}" in
-        RELEASE_ID|SPREAD_IMAGE|EXPECTED_IMAGE_ID|EXPECTED_GIT_COMMIT)
-            printf -v "${key}" '%s' "${value}"
-            ;;
-        "")
-            ;;
-        *)
-            echo "unexpected release.env key: ${key}" >&2
-            exit 65
-            ;;
-    esac
-done < "${environment_file}"
-export RELEASE_ID SPREAD_IMAGE EXPECTED_IMAGE_ID EXPECTED_GIT_COMMIT
-: "${RELEASE_ID:?release.env did not provide RELEASE_ID}"
-: "${SPREAD_IMAGE:?release.env did not provide SPREAD_IMAGE}"
-: "${EXPECTED_IMAGE_ID:?release.env did not provide EXPECTED_IMAGE_ID}"
-: "${EXPECTED_GIT_COMMIT:?release.env did not provide EXPECTED_GIT_COMMIT}"
+readarray -t plan_identity < <(
+    python3 - "${deployment_plan}" <<'PY'
+import json
+import sys
+
+plan = json.load(open(sys.argv[1], encoding="utf-8"))
+print(plan["release_id"])
+print(plan["expected_image_id"])
+print(plan["production_env_file"])
+PY
+)
+if [[ "${#plan_identity[@]}" -ne 3 ]]; then
+    echo "deployment plan identity could not be read" >&2
+    exit 65
+fi
+RELEASE_ID="${plan_identity[0]}"
+EXPECTED_IMAGE_ID="${plan_identity[1]}"
+production_env_file="${plan_identity[2]}"
 
 switch_started=0
 deployment_succeeded=0
@@ -48,7 +50,7 @@ rollback_on_failure() {
     trap - ERR
     if [[ "${switch_started}" -eq 1 && "${deployment_succeeded}" -eq 0 ]]; then
         echo "deployment failed; restoring the manifest-sealed rollback Image ID" >&2
-        if ! bash "${rollback_script}" "${release_directory}" "${health_url}"; then
+        if ! bash "${rollback_script}" "${release_directory}" "${deployment_plan}" "${health_url}"; then
             echo "automatic rollback also failed; manual intervention is required" >&2
         fi
     fi
@@ -57,7 +59,8 @@ rollback_on_failure() {
 trap rollback_on_failure ERR
 
 switch_started=1
-SPREAD_IMAGE="${SPREAD_IMAGE}" docker compose \
+docker compose \
+    --env-file "${production_env_file}" \
     --project-name market-data \
     --project-directory "${repository}" \
     -f "${repository}/docker-compose.yml" \
@@ -67,7 +70,8 @@ python3 "${verifier}" \
     --phase post-deploy \
     --repository "${repository}" \
     --manifest "${manifest}" \
-    --env-file "${environment_file}"
+    --env-file "${environment_file}" \
+    --deployment-plan "${deployment_plan}"
 
 curl --fail --silent --show-error --max-time 30 "${health_url}" >/dev/null
 
@@ -76,6 +80,7 @@ python3 "${verifier}" \
     --repository "${repository}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
+    --deployment-plan "${deployment_plan}" \
     --http-status 200
 
 deployment_succeeded=1
