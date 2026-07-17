@@ -7,10 +7,11 @@ from pathlib import Path
 import streamlit as st
 
 
-CATEGORY_ORDER = ["价格", "价差", "供需", "席位", "运行监控"]
+CATEGORY_ORDER = ["价格", "价差", "供需", "北美种植与销售", "席位", "运行监控"]
 PAGE_TARGETS = {
     "basis_domestic": "基差/一口价",
     "spreads_dashboard": "价差动态看板",
+    "soybean_crop_progress": "美豆种植生长",
     "status": "运行监控",
 }
 
@@ -25,6 +26,11 @@ def open_catalog_page(page_key: str) -> None:
     target = PAGE_TARGETS.get(page_key)
     if target:
         st.session_state.selected_workspace_page = target
+
+
+def catalog_column_count(card_count: int) -> int:
+    """Use at most three catalog columns while preserving the existing wrap behavior."""
+    return min(3, card_count)
 
 
 def get_external_url(card: dict[str, object]) -> str:
@@ -123,7 +129,7 @@ def render_home(catalog_path: Path) -> None:
         if not category_cards:
             continue
         st.subheader(category)
-        columns = st.columns(min(3, len(category_cards)))
+        columns = st.columns(catalog_column_count(len(category_cards)))
         for index, card in enumerate(category_cards):
             with columns[index % len(columns)]:
                 render_card(card, index)

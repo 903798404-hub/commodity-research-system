@@ -55,6 +55,79 @@ def test_report_catalog_cards_and_disabled_state() -> None:
     assert oil_world_card["enabled"] is True
 
 
+def test_north_america_planting_and_sales_catalog() -> None:
+    import sys
+
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+
+    from home import CATEGORY_ORDER, PAGE_TARGETS, catalog_column_count
+
+    cards = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
+    north_america_cards = [
+        card for card in cards if card.get("category") == "北美种植与销售"
+    ]
+    original_titles = [
+        card["title"]
+        for card in cards
+        if card.get("category") != "北美种植与销售"
+    ]
+
+    assert CATEGORY_ORDER == ["价格", "价差", "供需", "北美种植与销售", "席位", "运行监控"]
+    assert [card["title"] for card in north_america_cards] == [
+        "美国种植",
+        "美国销售",
+        "加拿大销售",
+    ]
+    assert original_titles == [
+        "国内现货基差、一口价、价差",
+        "外盘现货价格",
+        "价差动态看板",
+        "USDA 平衡表",
+        "Oil World 供需平衡表",
+        "主力席位动向",
+        "日更运行状态",
+    ]
+    assert catalog_column_count(len(north_america_cards)) == 3
+
+    planting, us_sales, canada_sales = north_america_cards
+    assert planting == {
+        "title": "美国种植",
+        "category": "北美种植与销售",
+        "commodities": "大豆",
+        "region": "美国",
+        "description": "美国大豆播种、生长进度与作物状况周度跟踪。",
+        "page_key": "soybean_crop_progress",
+        "enabled": True,
+    }
+    assert PAGE_TARGETS[planting["page_key"]] == "美豆种植生长"
+
+    assert us_sales["description"] == "美国大豆出口销售、装运与未执行销售跟踪。"
+    assert canada_sales["description"] == "加拿大菜籽出口销售与装运进度跟踪。"
+    for card in (us_sales, canada_sales):
+        assert card["enabled"] is False
+        assert card["page_key"] not in PAGE_TARGETS
+        assert "url" not in card
+        assert card.get("type") != "external_app"
+
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
+    assert not app.exception
+    assert [subheader.value for subheader in app.subheader if subheader.value in CATEGORY_ORDER] == CATEGORY_ORDER
+
+    buttons_by_key = {button.key: button for button in app.button if button.key}
+    planting_button = buttons_by_key["catalog_open_soybean_crop_progress_0"]
+    assert planting_button.label == "打开"
+    assert not planting_button.disabled
+    assert buttons_by_key["catalog_disabled_us_soybean_sales_1"].disabled
+    assert buttons_by_key["catalog_disabled_canada_canola_sales_2"].disabled
+
+    planting_button.click().run()
+    assert not app.exception
+    assert app.radio[0].value == "美豆种植生长"
+    assert any(title.value == "美豆种植生长" for title in app.title)
+
+
 def test_usda_dashboard_card_supports_environment_url_override(monkeypatch) -> None:
     import sys
 
@@ -114,6 +187,7 @@ def test_workspace_navigation_includes_usda_entry_in_requested_order() -> None:
         "首页",
         "价差动态看板",
         "基差/一口价",
+        "美豆种植生长",
         "USDA平衡表",
         "外资与重点席位",
         "运行监控",

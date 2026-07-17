@@ -1,0 +1,92 @@
+schema_version: 1
+
+# 展示权重仅用于页面排序和州名展示，不参与美国全国值计算。
+weight_role: display_only
+weight_source: user_provided
+weight_vintage: unknown
+
+national:
+  region_name: US TOTAL
+  display_name: 美国全国
+
+metrics:
+  - metric: PLANTED
+    source: progress
+    tab_label: 播种率
+    display_name: 美豆播种率
+  - metric: EMERGED
+    source: progress
+    tab_label: 出苗率
+    display_name: 美豆出苗率
+  - metric: BLOOMING
+    source: progress
+    tab_label: 开花率
+    display_name: 美豆开花率
+  - metric: SETTING_PODS
+    source: progress
+    tab_label: 结荚率
+    display_name: 美豆结荚率
+  - metric: HARVESTED
+    source: progress
+    tab_label: 收割率
+    display_name: 美豆收割率
+  - metric: GOOD_EXCELLENT
+    source: condition
+    tab_label: 优良率
+    display_name: 美豆优良率
+
+states:
+  - region_name: ILLINOIS
+    display_name: 伊利诺伊州
+    display_weight_pct: 14.2
+  - region_name: IOWA
+    display_name: 艾奥瓦州
+    display_weight_pct: 13.8
+  - region_name: MINNESOTA
+    display_name: 明尼苏达州
+    display_weight_pct: 8.1
+  - region_name: NEBRASKA
+    display_name: 内布拉斯加州
+    display_weight_pct: 7.3
+  - region_name: INDIANA
+    display_name: 印第安纳州
+    display_weight_pct: 7.1
+  - region_name: MISSOURI
+    display_name: 密苏里州
+    display_weight_pct: 6.8
+  - region_name: OHIO
+    display_name: 俄亥俄州
+    display_weight_pct: 6.4
+  - region_name: SOUTH DAKOTA
+    display_name: 南达科他州
+    display_weight_pct: 5.4
+  - region_name: NORTH DAKOTA
+    display_name: 北达科他州
+    display_weight_pct: 4.8
+  - region_name: KANSAS
+    display_name: 堪萨斯州
+    display_weight_pct: 3.9
+  - region_name: ARKANSAS
+    display_name: 阿肯色州
+    display_weight_pct: 3.7
+  - region_name: MICHIGAN
+    display_name: 密歇根州
+    display_weight_pct: 2.5
+  - region_name: MISSISSIPPI
+    display_name: 密西西比州
+    display_weight_pct: 2.2
+  - region_name: WISCONSIN
+    display_name: 威斯康星州
+    display_weight_pct: 2.1
+  - region_name: TENNESSEE
+    display_name: 田纳西州
+    display_weight_pct: 1.9
+  - region_name: KENTUCKY
+    display_name: 肯塔基州
+    display_weight_pct: 1.8
+  - region_name: NORTH CAROLINA
+    display_name: 北卡罗来纳州
+    display_weight_pct: 1.5
+  - region_name: LOUISIANA
+    display_name: 路易斯安那州
+    display_weight_pct: 1.2

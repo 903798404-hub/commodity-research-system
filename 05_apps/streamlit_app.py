@@ -16,6 +16,7 @@ if str(APPS_DIR) not in sys.path:
 from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import get_external_app_url, render_home
+from soybean_crop_progress_page import render_soybean_crop_progress_page
 
 
 PAGE_TITLE = "油脂油料价差动态看板"
@@ -31,7 +32,16 @@ BASIS_RUNTIME_FALLBACK_FILE = (
     DATA_DIR / "database" / "basis" / "basis_quotes_sample.parquet"
 )
 USDA_PAGE_TITLE = "USDA平衡表"
-WORKSPACE_PAGES = ["首页", "价差动态看板", "基差/一口价", USDA_PAGE_TITLE, "外资与重点席位", "运行监控"]
+SOYBEAN_CROP_PAGE_TITLE = "美豆种植生长"
+WORKSPACE_PAGES = [
+    "首页",
+    "价差动态看板",
+    "基差/一口价",
+    SOYBEAN_CROP_PAGE_TITLE,
+    USDA_PAGE_TITLE,
+    "外资与重点席位",
+    "运行监控",
+]
 FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
 BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "品种间套利"]
@@ -517,6 +527,8 @@ def main() -> None:
         render_home(REPORT_CATALOG_FILE)
     elif selected_page == "基差/一口价":
         render_basis_page(BASIS_DATABASE_FILE, BASIS_RUNTIME_FALLBACK_FILE)
+    elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
+        render_soybean_crop_progress_page()
     elif selected_page == USDA_PAGE_TITLE:
         render_usda_page()
     elif selected_page == "运行监控":

@@ -49,6 +49,33 @@
     "enabled": true
   },
   {
+    "title": "美国种植",
+    "category": "北美种植与销售",
+    "commodities": "大豆",
+    "region": "美国",
+    "description": "美国大豆播种、生长进度与作物状况周度跟踪。",
+    "page_key": "soybean_crop_progress",
+    "enabled": true
+  },
+  {
+    "title": "美国销售",
+    "category": "北美种植与销售",
+    "commodities": "大豆",
+    "region": "美国",
+    "description": "美国大豆出口销售、装运与未执行销售跟踪。",
+    "page_key": "us_soybean_sales",
+    "enabled": false
+  },
+  {
+    "title": "加拿大销售",
+    "category": "北美种植与销售",
+    "commodities": "菜籽",
+    "region": "加拿大",
+    "description": "加拿大菜籽出口销售与装运进度跟踪。",
+    "page_key": "canada_canola_sales",
+    "enabled": false
+  },
+  {
     "title": "主力席位动向",
     "category": "席位",
     "commodities": "油脂油料",
