@@ -31,7 +31,13 @@
 标准流程：本地修改 → 运行与变更直接相关的定向测试 → 查看 Git diff → Git commit → Git push → 服务器只读获取并核验精确提交 → 构建和验证候选镜像 → 备份并切换正式容器 → HTTP 与页面验收 → 短期保留旧目录、旧镜像和回滚版本。
 
 - 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
-- 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须重建对应镜像。
+- Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负责生产镜像构建，本地 Docker 构建不再是 commit、push 或部署的前置条件。
+- 不得再建议用户安装 Docker Desktop、Podman 或 WSL，也不得要求用户为本项目安装这些工具。Windows 本地只负责代码修改、Python 和前端测试、Streamlit 启动检查、Dockerfile 与 Compose 静态检查、构建上下文文件存在性检查，以及 Git 差异和工作区检查。
+- 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须在服务器隔离候选目录中重建对应镜像，不得在服务器正式仓库中直接构建。
+- 服务器候选源码必须按完整提交 SHA 检出到 `/home/ubuntu/market-data-builds/<完整SHA>`，优先使用 detached `git worktree`；候选镜像必须带不可变 SHA 标签和 `org.opencontainers.image.revision=<完整SHA>`。
+- 候选容器只是一次性测试容器，只能绑定服务器本机测试端口；无论成功、失败、异常或中断都必须立即停止并删除。服务器平时只保留 `spread-dashboard`、`usda-dashboard`、`oil-world-dashboard` 三个正式运行容器。
+- 候选验证通过后保留候选镜像，正式部署直接使用同一个镜像 ID；该镜像必须已经通过验收，不得对同一个提交重新构建第二个正式镜像。
+- 候选容器如需正式数据，只允许只读挂载；缓存、日志和临时文件必须写入对应候选目录的 `runtime/`，不得修改正式业务数据。
 - 仅修改一个服务时，不得无必要重建或重启另一个服务。
 - `USDA_DASHBOARD_URL` 是正式环境变量；不要在页面代码中硬编码地址。
 

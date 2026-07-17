@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
 from pathlib import Path
 
 import pandas as pd
+import yaml
 from streamlit.testing.v1 import AppTest
 
 
@@ -11,6 +19,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FORMAL_ENTRY = PROJECT_ROOT / "05_apps" / "streamlit_app.py"
 PAGE_ENTRIES = sorted((PROJECT_ROOT / "05_apps" / "pages").glob("*.py"))
 CATALOG_FILE = PROJECT_ROOT / "02_configs" / "report_catalog.yaml"
+APP_CATALOG_FILE = PROJECT_ROOT / "02_configs" / "app_catalog.yaml"
+PRODUCTION_APPS = {
+    app["app_id"]: app
+    for app in yaml.safe_load(
+        APP_CATALOG_FILE.read_text(encoding="utf-8")
+    )["applications"]
+}
+PRODUCTION_OIL_WORLD_URL = PRODUCTION_APPS["oil_world_dashboard"]["production_url"]
 BASIS_SAMPLE_FILE = (
     PROJECT_ROOT
     / "08_tests"
@@ -26,7 +42,67 @@ def test_streamlit_entries_start_without_exceptions() -> None:
         assert app.title
 
 
-def test_report_catalog_cards_and_disabled_state() -> None:
+def test_streamlit_server_starts_and_answers_http() -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+
+    environment = os.environ.copy()
+    environment["OIL_WORLD_DASHBOARD_URL"] = PRODUCTION_OIL_WORLD_URL
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(FORMAL_ENTRY),
+            "--server.headless=true",
+            "--server.address=127.0.0.1",
+            f"--server.port={port}",
+        ],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        health_body = ""
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise AssertionError(
+                    f"Streamlit exited before startup with code {process.returncode}"
+                )
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/_stcore/health",
+                    timeout=2,
+                ) as response:
+                    health_body = response.read().decode("utf-8")
+                    if response.status == 200:
+                        break
+            except OSError:
+                time.sleep(0.25)
+        else:
+            raise AssertionError("Streamlit did not answer its health endpoint")
+
+        assert health_body == "ok"
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/",
+            timeout=5,
+        ) as response:
+            assert response.status == 200
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+
+
+def test_report_catalog_cards_and_disabled_state(monkeypatch) -> None:
+    monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", PRODUCTION_OIL_WORLD_URL)
     cards = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
 
@@ -47,9 +123,12 @@ def test_report_catalog_cards_and_disabled_state() -> None:
     assert all(not button.disabled for button in enabled_buttons)
     assert len(external_cards) == 2
     external_cards_by_title = {card["title"]: card for card in external_cards}
-    assert external_cards_by_title["USDA 平衡表"]["url"] == "http://127.0.0.1:5173"
+    usda_card = external_cards_by_title["USDA 平衡表"]
+    assert usda_card["page_key"] == "usda_dashboard"
+    assert usda_card["url"] == "http://127.0.0.1:5173"
     oil_world_card = external_cards_by_title["Oil World 供需平衡表"]
     assert oil_world_card["description"] == "Oil World 大豆、菜籽、葵花籽及棕榈油市场年度供需数据"
+    assert oil_world_card["page_key"] == "oil_world_dashboard"
     assert oil_world_card["url"] == "http://127.0.0.1:5175/"
     assert oil_world_card["url_env"] == "OIL_WORLD_DASHBOARD_URL"
     assert oil_world_card["enabled"] is True
@@ -62,7 +141,12 @@ def test_north_america_planting_and_sales_catalog() -> None:
     if apps_dir not in sys.path:
         sys.path.insert(0, apps_dir)
 
-    from home import CATEGORY_ORDER, PAGE_TARGETS, catalog_column_count
+    from home import (
+        CATEGORY_ORDER,
+        PAGE_TARGETS,
+        catalog_column_count,
+        catalog_component_key,
+    )
 
     cards = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
     north_america_cards = [
@@ -90,6 +174,17 @@ def test_north_america_planting_and_sales_catalog() -> None:
         "日更运行状态",
     ]
     assert catalog_column_count(len(north_america_cards)) == 3
+    component_keys = [catalog_component_key(card) for card in cards]
+    assert all(component_keys)
+    assert len(component_keys) == len(set(component_keys))
+    assert len({card["title"] for card in cards}) == len(cards)
+    assert len(
+        {
+            PRODUCTION_APPS["main_dashboard"]["production_url"],
+            PRODUCTION_APPS["usda_dashboard"]["production_url"],
+            PRODUCTION_APPS["oil_world_dashboard"]["production_url"],
+        }
+    ) == 3
 
     planting, us_sales, canada_sales = north_america_cards
     assert planting == {
@@ -116,11 +211,11 @@ def test_north_america_planting_and_sales_catalog() -> None:
     assert [subheader.value for subheader in app.subheader if subheader.value in CATEGORY_ORDER] == CATEGORY_ORDER
 
     buttons_by_key = {button.key: button for button in app.button if button.key}
-    planting_button = buttons_by_key["catalog_open_soybean_crop_progress_0"]
+    planting_button = buttons_by_key["catalog_open_soybean_crop_progress"]
     assert planting_button.label == "打开"
     assert not planting_button.disabled
-    assert buttons_by_key["catalog_disabled_us_soybean_sales_1"].disabled
-    assert buttons_by_key["catalog_disabled_canada_canola_sales_2"].disabled
+    assert buttons_by_key["catalog_disabled_us_soybean_sales"].disabled
+    assert buttons_by_key["catalog_disabled_canada_canola_sales"].disabled
 
     planting_button.click().run()
     assert not app.exception
@@ -170,6 +265,63 @@ def test_oil_world_dashboard_card_supports_environment_url_override(monkeypatch)
 
     monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", "http://127.0.0.1:5198/oil-world/")
     assert get_external_url(card) == "http://127.0.0.1:5198/oil-world/"
+
+
+def test_oil_world_card_uses_production_url_and_stable_component_key(monkeypatch) -> None:
+    import sys
+
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+
+    from home import get_external_url, render_card
+
+    cards = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
+    oil_world_card = next(
+        card for card in cards if card["page_key"] == "oil_world_dashboard"
+    )
+    monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", PRODUCTION_OIL_WORLD_URL)
+
+    link_calls: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr("home.st.container", lambda **_: nullcontext())
+    monkeypatch.setattr(
+        "home.st.columns",
+        lambda *_args, **_kwargs: [nullcontext(), nullcontext()],
+    )
+    monkeypatch.setattr("home.st.markdown", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("home.st.caption", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("home.st.write", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "home.st.link_button",
+        lambda label, url, **kwargs: link_calls.append((label, url, kwargs)),
+    )
+
+    render_card(oil_world_card, 0)
+
+    assert get_external_url(oil_world_card) == PRODUCTION_OIL_WORLD_URL
+    assert link_calls == [
+        (
+            "打开",
+            PRODUCTION_OIL_WORLD_URL,
+            {
+                "key": "catalog_external_oil_world_dashboard",
+                "use_container_width": True,
+            },
+        )
+    ]
+
+
+def test_home_does_not_request_unreachable_oil_world_service(monkeypatch) -> None:
+    unreachable_url = "http://127.0.0.1:1/oil-world/"
+    monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", unreachable_url)
+
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=15).run()
+
+    assert not app.exception
+    assert any(
+        title.value == "#### Oil World 供需平衡表"
+        for title in app.markdown
+    )
 
 
 def test_workspace_navigation_includes_usda_entry_in_requested_order() -> None:

@@ -33,6 +33,7 @@
     "region": "全球",
     "description": "查看全球主要农产品供需平衡表、月度修正及历史变化。",
     "type": "external_app",
+    "page_key": "usda_dashboard",
     "url": "http://127.0.0.1:5173",
     "url_env": "USDA_DASHBOARD_URL",
     "enabled": true
@@ -44,6 +45,7 @@
     "region": "全球",
     "description": "Oil World 大豆、菜籽、葵花籽及棕榈油市场年度供需数据",
     "type": "external_app",
+    "page_key": "oil_world_dashboard",
     "url": "http://127.0.0.1:5175/",
     "url_env": "OIL_WORLD_DASHBOARD_URL",
     "enabled": true

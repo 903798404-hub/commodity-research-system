@@ -33,6 +33,12 @@ def catalog_column_count(card_count: int) -> int:
     return min(3, card_count)
 
 
+def catalog_component_key(card: dict[str, object]) -> str:
+    """Return the stable component identity declared by the shared catalog."""
+    page_key = card.get("page_key")
+    return page_key.strip() if isinstance(page_key, str) else ""
+
+
 def get_external_url(card: dict[str, object]) -> str:
     """Return an external application URL, preferring its configured environment override."""
     env_name = card.get("url_env")
@@ -69,6 +75,7 @@ def get_external_app_url(catalog_path: Path, title: str) -> str:
 def render_card(card: dict[str, object], index: int) -> None:
     enabled = bool(card.get("enabled"))
     is_external_app = card.get("type") == "external_app"
+    component_key = catalog_component_key(card) or f"catalog_index_{index}"
     with st.container(border=True):
         title_col, status_col = st.columns([4, 1])
         with title_col:
@@ -83,12 +90,13 @@ def render_card(card: dict[str, object], index: int) -> None:
                 st.link_button(
                     "打开",
                     external_url,
+                    key=f"catalog_external_{component_key}",
                     use_container_width=True,
                 )
             else:
                 st.button(
                     "未配置地址",
-                    key=f"catalog_external_missing_{index}",
+                    key=f"catalog_external_missing_{component_key}",
                     disabled=True,
                     use_container_width=True,
                     help="请在报告目录配置或对应环境变量中设置访问地址。",
@@ -96,7 +104,7 @@ def render_card(card: dict[str, object], index: int) -> None:
         elif enabled:
             st.button(
                 "打开",
-                key=f"catalog_open_{card.get('page_key')}_{index}",
+                key=f"catalog_open_{component_key}",
                 use_container_width=True,
                 on_click=open_catalog_page,
                 args=(str(card.get("page_key", "")),),
@@ -104,7 +112,7 @@ def render_card(card: dict[str, object], index: int) -> None:
         else:
             st.button(
                 "待接入",
-                key=f"catalog_disabled_{card.get('page_key')}_{index}",
+                key=f"catalog_disabled_{component_key}",
                 disabled=True,
                 use_container_width=True,
             )

@@ -3,12 +3,49 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 USDA_ROOT = REPOSITORY / "11_独立应用" / "USDA平衡表"
 
 
 class ProductionPackagingTests(unittest.TestCase):
+    def test_windows_local_docker_is_not_a_release_gate(self) -> None:
+        required_rules = (
+            "Windows 本地没有 Docker、Podman 或 WSL 属于正常状态",
+            "本地不负责生产镜像构建",
+            "不得再建议用户安装 Docker Desktop、Podman 或 WSL",
+            "正式部署直接使用同一个镜像 ID",
+        )
+        for relative_path in ("AGENTS.md", "07_docs/开发与部署工作流.md"):
+            content = (REPOSITORY / relative_path).read_text(encoding="utf-8")
+            for rule in required_rules:
+                self.assertIn(rule, content)
+
+    def test_spread_image_build_context_includes_home_and_catalog(self) -> None:
+        dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("COPY 02_configs /app/02_configs", dockerfile)
+        self.assertIn("COPY 05_apps /app/05_apps", dockerfile)
+        self.assertTrue((REPOSITORY / "02_configs" / "report_catalog.yaml").is_file())
+        self.assertTrue((REPOSITORY / "05_apps" / "home.py").is_file())
+
+    def test_spread_image_receives_oil_world_url_from_existing_environment(self) -> None:
+        compose = yaml.safe_load(
+            (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
+        )
+        environment = compose["services"]["spread-dashboard"]["environment"]
+
+        self.assertEqual(
+            environment["USDA_DASHBOARD_URL"],
+            "${USDA_DASHBOARD_URL:-http://127.0.0.1:8080/usda/}",
+        )
+        self.assertEqual(
+            environment["OIL_WORLD_DASHBOARD_URL"],
+            "${OIL_WORLD_DASHBOARD_URL:-http://127.0.0.1:5175/}",
+        )
+
     def test_spread_config_is_the_only_excel_allowed_into_main_image(self) -> None:
         config_path = REPOSITORY / "02_configs" / "historical_spread_config.xlsx"
         self.assertTrue(config_path.is_file())
