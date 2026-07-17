@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import json
@@ -10,6 +11,7 @@ import sys
 from pathlib import Path
 
 import jsonschema
+import pandas as pd
 import pytest
 import yaml
 
@@ -24,6 +26,8 @@ from release_contract import (  # noqa: E402
     ContractError,
     DATA_SPECS,
     DockerReleaseRuntime,
+    PRODUCTION_CONTAINER,
+    SPREAD_PRIMARY_KEY,
     collect_data_baseline,
     create_manifest,
     load_manifest_bundle,
@@ -35,6 +39,7 @@ from release_contract import (  # noqa: E402
     validate_repository_static,
     validate_rollback_image_ref,
     validate_source,
+    verify_candidate,
     verify_post_deploy,
     verify_post_rollback,
     verify_pre_deploy,
@@ -108,6 +113,8 @@ class FakeReleaseRuntime:
         }
         self.compose_image = IMAGE_REF
         self.dataset_overrides: dict[str, dict[str, object]] = {}
+        self.container_record_calls: list[str] = []
+        self.dataset_container_names: list[str] = []
 
     def image_record(self, image_ref: str) -> dict[str, object]:
         if image_ref == IMAGE_REF:
@@ -122,6 +129,7 @@ class FakeReleaseRuntime:
         raise ContractError(f"unknown image reference in fixture: {image_ref}")
 
     def container_record(self, container_name: str) -> dict[str, str]:
+        self.container_record_calls.append(container_name)
         if container_name == CANDIDATE_CONTAINER:
             return dict(self.candidate_record)
         if container_name == "spread-dashboard":
@@ -193,15 +201,53 @@ class FakeReleaseRuntime:
         return compose, raw, images
 
     def dataset_stats(self, container_name, spec) -> dict[str, object]:
-        assert container_name == CANDIDATE_CONTAINER
+        self.dataset_container_names.append(container_name)
+        assert container_name in {CANDIDATE_CONTAINER, PRODUCTION_CONTAINER}
         return self.dataset_overrides.get(
             spec.name,
             {
                 "records": 10,
                 "latest_business_date": "2026-07-12",
+                "primary_key_null_rows": 0,
                 "duplicate_rows_on_key": 0,
+                "invalid_date_rows": 0,
             },
         )
+
+
+class LocalDatasetRunner:
+    def __init__(self, parquet_path: Path) -> None:
+        self.parquet_path = parquet_path
+
+    def run(self, command, *, cwd=None, env=None) -> str:
+        del cwd, env
+        assert command[:5] == [
+            "docker",
+            "exec",
+            "-e",
+            "PYTHONDONTWRITEBYTECODE=1",
+            CANDIDATE_CONTAINER,
+        ]
+        assert command[5:7] == ["python", "-c"]
+        program = command[-2]
+        payload = json.loads(
+            base64.urlsafe_b64decode(command[-1]).decode("utf-8")
+        )
+        payload["path"] = str(self.parquet_path)
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii")
+        result = subprocess.run(
+            [sys.executable, "-c", program, encoded],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise ContractError(detail)
+        return result.stdout
 
 
 def create_data_files(root: Path) -> None:
@@ -553,6 +599,130 @@ def test_generated_release_facts_do_not_make_git_worktree_dirty() -> None:
     assert policy.returncode != 0
 
 
+def spread_spec():
+    return next(spec for spec in DATA_SPECS if spec.name == "spread")
+
+
+def inspect_spread_fixture(
+    tmp_path: Path,
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    parquet_path = tmp_path / "historical_spread_database.parquet"
+    pd.DataFrame(rows).to_parquet(parquet_path, index=False)
+    runtime = DockerReleaseRuntime(
+        runner=LocalDatasetRunner(parquet_path)
+    )
+    return runtime.dataset_stats(CANDIDATE_CONTAINER, spread_spec())
+
+
+def test_spread_primary_key_is_one_authoritative_real_schema_definition() -> None:
+    assert SPREAD_PRIMARY_KEY == ("date", "spread_name")
+    assert spread_spec().primary_key is SPREAD_PRIMARY_KEY
+    assert not {
+        "exchange",
+        "product1",
+        "contract1",
+        "product2",
+        "contract2",
+    }.intersection(SPREAD_PRIMARY_KEY)
+
+
+def test_spread_unique_date_and_name_passes(tmp_path: Path) -> None:
+    stats = inspect_spread_fixture(
+        tmp_path,
+        [
+            {"date": "2026-07-16", "spread_name": "M09-M01"},
+            {"date": "2026-07-17", "spread_name": "Y09-Y01"},
+        ],
+    )
+
+    assert stats["records"] == 2
+    assert stats["latest_business_date"] == "2026-07-17"
+    assert stats["primary_key_null_rows"] == 0
+    assert stats["duplicate_rows_on_key"] == 0
+
+
+def test_spread_same_date_different_name_passes(tmp_path: Path) -> None:
+    stats = inspect_spread_fixture(
+        tmp_path,
+        [
+            {"date": "2026-07-17", "spread_name": "M09-M01"},
+            {"date": "2026-07-17", "spread_name": "Y09-Y01"},
+        ],
+    )
+
+    assert stats["duplicate_rows_on_key"] == 0
+
+
+def test_spread_same_name_different_date_passes(tmp_path: Path) -> None:
+    stats = inspect_spread_fixture(
+        tmp_path,
+        [
+            {"date": "2026-07-16", "spread_name": "M09-M01"},
+            {"date": "2026-07-17", "spread_name": "M09-M01"},
+        ],
+    )
+
+    assert stats["duplicate_rows_on_key"] == 0
+
+
+def test_spread_duplicate_date_and_name_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ContractError, match="duplicate primary key rows"):
+        inspect_spread_fixture(
+            tmp_path,
+            [
+                {"date": "2026-07-17", "spread_name": "M09-M01"},
+                {"date": "2026-07-17", "spread_name": "M09-M01"},
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [
+            {"date": None, "spread_name": "M09-M01"},
+            {"date": "2026-07-17", "spread_name": "Y09-Y01"},
+        ],
+        [
+            {"date": "2026-07-16", "spread_name": None},
+            {"date": "2026-07-17", "spread_name": "Y09-Y01"},
+        ],
+        [
+            {"date": "2026-07-16", "spread_name": "   "},
+            {"date": "2026-07-17", "spread_name": "Y09-Y01"},
+        ],
+    ],
+    ids=["null-date", "null-spread-name", "blank-spread-name"],
+)
+def test_spread_primary_key_null_or_blank_is_rejected(
+    tmp_path: Path,
+    rows: list[dict[str, object]],
+) -> None:
+    with pytest.raises(ContractError, match="primary key contains null or blank"):
+        inspect_spread_fixture(tmp_path, rows)
+
+
+@pytest.mark.parametrize("missing_column", ["date", "spread_name"])
+def test_spread_missing_required_primary_key_column_is_rejected(
+    tmp_path: Path,
+    missing_column: str,
+) -> None:
+    row = {"date": "2026-07-17", "spread_name": "M09-M01"}
+    row.pop(missing_column)
+
+    with pytest.raises(ContractError, match="missing columns"):
+        inspect_spread_fixture(tmp_path, [row])
+
+
+def test_spread_unparseable_date_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ContractError, match="date column contains invalid values"):
+        inspect_spread_fixture(
+            tmp_path,
+            [{"date": "not-a-date", "spread_name": "M09-M01"}],
+        )
+
+
 def test_data_baseline_is_deployment_time_and_host_persistent(
     tmp_path: Path,
 ) -> None:
@@ -574,6 +744,62 @@ def test_data_baseline_is_deployment_time_and_host_persistent(
         assert item["writes_to"] == "host_through_bind_mount"
         assert len(item["sha256"]) == 64
         assert item["records"] == 10
+        assert item["primary_key_null_rows"] == 0
+        assert item["duplicate_rows_on_key"] == 0
+
+    spread = next(item for item in baseline["datasets"] if item["name"] == "spread")
+    spread_path = tmp_path / "host-data" / spread_spec().relative_host_path
+    assert spread["primary_key"] == list(SPREAD_PRIMARY_KEY)
+    assert spread["sha256"] == hashlib.sha256(spread_path.read_bytes()).hexdigest()
+
+
+def test_sealed_data_baseline_is_not_retroactively_changed(
+    tmp_path: Path,
+) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    sealed = copy.deepcopy(manifest["data_baseline"])
+    spread_path = tmp_path / "host-data" / spread_spec().relative_host_path
+
+    spread_path.write_bytes(b"changed-after-seal")
+    os.utime(spread_path, (spread_path.stat().st_atime, spread_path.stat().st_mtime + 60))
+
+    assert manifest["data_baseline"] == sealed
+    spread = next(
+        item
+        for item in manifest["data_baseline"]["datasets"]
+        if item["name"] == "spread"
+    )
+    assert spread["sha256"] != hashlib.sha256(spread_path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("primary_key_null_rows", 1, "primary key contains null values"),
+        ("duplicate_rows_on_key", 2, "contains duplicate primary keys"),
+        ("invalid_date_rows", 1, "contains invalid business dates"),
+    ],
+)
+def test_data_baseline_rejects_invalid_spread_key_statistics(
+    tmp_path: Path,
+    field: str,
+    value: int,
+    message: str,
+) -> None:
+    data_root = tmp_path / "host-data"
+    create_data_files(data_root)
+    runtime = FakeReleaseRuntime()
+    runtime.dataset_overrides["spread"] = {
+        "records": 10,
+        "latest_business_date": "2026-07-12",
+        "primary_key_null_rows": 0,
+        "duplicate_rows_on_key": 0,
+        "invalid_date_rows": 0,
+        field: value,
+    }
+
+    with pytest.raises(ContractError, match=message):
+        collect_data_baseline(data_root, PRODUCTION_CONTAINER, runtime)
 
 
 def test_data_baseline_rejects_a_missing_required_file(tmp_path: Path) -> None:
@@ -629,31 +855,32 @@ def test_manifest_creation_rejects_git_head_mismatch(tmp_path: Path) -> None:
         )
 
 
-def test_manifest_creation_rejects_candidate_image_id_mismatch(
-    tmp_path: Path,
-) -> None:
+def test_manifest_seals_before_candidate_container_exists(tmp_path: Path) -> None:
     data_root = tmp_path / "data"
     create_data_files(data_root)
     runtime = FakeReleaseRuntime()
     runtime.candidate_record["image_id"] = ROLLBACK_ID
 
-    with pytest.raises(ContractError, match="candidate container Image ID mismatch"):
-        create_manifest(
-            repository=REPOSITORY,
-            data_host_root=data_root,
-            release_id=RELEASE_ID,
-            git_commit=GIT_COMMIT,
-            image_ref=IMAGE_REF,
-            expected_image_id=IMAGE_ID,
-            build_time=BUILD_TIME,
-            source=SOURCE,
-            candidate_container_name=CANDIDATE_CONTAINER,
-            rollback_image_ref=ROLLBACK_REF,
-            rollback_image_id=ROLLBACK_ID,
-            formal_git_commit=OLD_GIT_COMMIT,
-            runtime=runtime,
-            git_runner=FakeGitRunner(),
-        )
+    manifest = create_manifest(
+        repository=REPOSITORY,
+        data_host_root=data_root,
+        release_id=RELEASE_ID,
+        git_commit=GIT_COMMIT,
+        image_ref=IMAGE_REF,
+        expected_image_id=IMAGE_ID,
+        build_time=BUILD_TIME,
+        source=SOURCE,
+        candidate_container_name=CANDIDATE_CONTAINER,
+        rollback_image_ref=ROLLBACK_REF,
+        rollback_image_id=ROLLBACK_ID,
+        formal_git_commit=OLD_GIT_COMMIT,
+        runtime=runtime,
+        git_runner=FakeGitRunner(),
+    )
+
+    assert manifest["status"] == "candidate_sealed"
+    assert CANDIDATE_CONTAINER not in runtime.container_record_calls
+    assert set(runtime.dataset_container_names) == {PRODUCTION_CONTAINER}
 
 
 def test_pre_deploy_accepts_exact_image_oci_release_and_compose(
@@ -712,12 +939,25 @@ def test_regression_compose_must_not_resolve_old_latest_image(
 
 def test_candidate_and_production_must_use_same_image_id(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
-    assert runtime.container_record(CANDIDATE_CONTAINER)["image_id"] == IMAGE_ID
+    candidate = verify_candidate(manifest, runtime)
+    assert candidate["actual_image_id"] == IMAGE_ID
+    assert candidate["tag_image_id"] == IMAGE_ID
+    assert candidate["manifest_image_id"] == IMAGE_ID
 
     evidence = verify_post_deploy(manifest, runtime)
 
     assert evidence["actual_image_id"] == IMAGE_ID
     assert evidence["config_image"] == IMAGE_REF
+
+
+def test_candidate_identity_rejects_container_image_id_mismatch(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    runtime.candidate_record["image_id"] = ROLLBACK_ID
+
+    with pytest.raises(ContractError, match="candidate container Image ID mismatch"):
+        verify_candidate(manifest, runtime)
 
 
 def test_post_deploy_rejects_actual_container_image_id_mismatch(

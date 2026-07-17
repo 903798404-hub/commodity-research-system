@@ -61,20 +61,16 @@ class DataSpec:
     update_task: str
 
 
+SPREAD_PRIMARY_KEY = ("date", "spread_name")
+
+
 DATA_SPECS = (
     DataSpec(
         name="spread",
         relative_host_path="01_data/historical_spread_database.parquet",
         container_path="/app/01_data/historical_spread_database.parquet",
         date_column="date",
-        primary_key=(
-            "date",
-            "exchange",
-            "product1",
-            "contract1",
-            "product2",
-            "contract2",
-        ),
+        primary_key=SPREAD_PRIMARY_KEY,
         update_task="server_update_spreads.py scheduled update",
     ),
     DataSpec(
@@ -347,27 +343,77 @@ class DockerReleaseRuntime:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).decode("ascii")
-        program = (
-            "import base64,json,sys,pandas as pd;"
-            "p=json.loads(base64.urlsafe_b64decode(sys.argv[1]).decode());"
-            "d=pd.read_parquet(p['path']);"
-            "missing=[c for c in [p['date_column'],*p['primary_key']] if c not in d.columns];"
-            "assert not missing,f'missing columns: {missing}';"
-            "dates=pd.to_datetime(d[p['date_column']],errors='coerce');"
-            "latest=dates.max();"
-            "assert pd.notna(latest),'latest business date is empty';"
-            "print(json.dumps({'records':int(len(d)),"
-            "'latest_business_date':latest.date().isoformat(),"
-            "'duplicate_rows_on_key':int(d.duplicated(p['primary_key']).sum())}))"
-        )
+        program = """
+import base64
+import json
+import sys
+
+import pandas as pd
+
+payload = json.loads(base64.urlsafe_b64decode(sys.argv[1]).decode())
+data = pd.read_parquet(payload["path"])
+required = [payload["date_column"], *payload["primary_key"]]
+missing = [column for column in required if column not in data.columns]
+if missing:
+    raise ValueError(f"missing columns: {missing}")
+
+key_frame = data[payload["primary_key"]]
+blank_key = (
+    key_frame.astype("string")
+    .apply(lambda column: column.str.strip().eq(""))
+    .fillna(True)
+    .any(axis=1)
+)
+null_key = key_frame.isna().any(axis=1) | blank_key
+primary_key_null_rows = int(null_key.sum())
+if primary_key_null_rows:
+    raise ValueError(
+        f"primary key contains null or blank values: {primary_key_null_rows}"
+    )
+
+dates = pd.to_datetime(data[payload["date_column"]], errors="coerce")
+invalid_date_rows = int(dates.isna().sum())
+if invalid_date_rows:
+    raise ValueError(f"date column contains invalid values: {invalid_date_rows}")
+
+duplicate_rows = int(data.duplicated(payload["primary_key"], keep=False).sum())
+if duplicate_rows:
+    raise ValueError(f"duplicate primary key rows: {duplicate_rows}")
+
+latest = dates.max()
+if pd.isna(latest):
+    raise ValueError("latest business date is empty")
+
+print(
+    json.dumps(
+        {
+            "records": int(len(data)),
+            "latest_business_date": latest.date().isoformat(),
+            "primary_key_null_rows": primary_key_null_rows,
+            "duplicate_rows_on_key": duplicate_rows,
+            "invalid_date_rows": invalid_date_rows,
+        }
+    )
+)
+"""
         raw = self.runner.run(
-            ["docker", "exec", container_name, "python", "-c", program, payload]
+            [
+                "docker",
+                "exec",
+                "-e",
+                "PYTHONDONTWRITEBYTECODE=1",
+                container_name,
+                "python",
+                "-c",
+                program,
+                payload,
+            ]
         )
         try:
             result = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ContractError(
-                f"candidate data inspection failed for {spec.name}: {exc}"
+                f"deployment data inspection failed for {spec.name}: {exc}"
             ) from exc
         return result
 
@@ -915,6 +961,14 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
             raise ContractError(f"data baseline {spec.name} filename mismatch")
         if item.get("primary_key") != list(spec.primary_key):
             raise ContractError(f"data baseline {spec.name} primary key mismatch")
+        if item.get("primary_key_null_rows") != 0:
+            raise ContractError(
+                f"data baseline {spec.name} primary key contains null values"
+            )
+        if item.get("duplicate_rows_on_key") != 0:
+            raise ContractError(
+                f"data baseline {spec.name} contains duplicate primary keys"
+            )
         if item.get("update_task") != spec.update_task:
             raise ContractError(f"data baseline {spec.name} update task mismatch")
         if item.get("writes_to") != "host_through_bind_mount":
@@ -1100,6 +1154,64 @@ def verify_pre_deploy(
     }
 
 
+def verify_candidate(
+    manifest: Mapping[str, Any],
+    runtime: ReleaseRuntime,
+) -> dict[str, Any]:
+    container_name = manifest["candidate_container_name"]
+    container = runtime.container_record(container_name)
+    if container.get("image_id") != manifest["image_id"]:
+        raise ContractError(
+            "candidate container Image ID mismatch: "
+            f"expected {manifest['image_id']}, got {container.get('image_id')}"
+        )
+    if container.get("config_image") != manifest["image_ref"]:
+        raise ContractError(
+            "candidate container Config.Image mismatch: "
+            f"expected {manifest['image_ref']}, got {container.get('config_image')!r}"
+        )
+
+    image = runtime.image_record(manifest["image_ref"])
+    if image.get("id") != manifest["image_id"]:
+        raise ContractError(
+            "candidate image tag ID mismatch: "
+            f"expected {manifest['image_id']}, got {image.get('id')}"
+        )
+    labels = image.get("labels") or {}
+    expected_labels = {
+        "org.opencontainers.image.revision": manifest["git_commit"],
+        "org.opencontainers.image.version": manifest["release_id"],
+        "org.opencontainers.image.created": manifest["build_time"],
+    }
+    for key, expected in expected_labels.items():
+        if labels.get(key) != expected:
+            raise ContractError(
+                f"candidate image label {key} mismatch: "
+                f"expected {expected}, got {labels.get(key)!r}"
+            )
+
+    source = labels.get("org.opencontainers.image.source")
+    validate_source(source)
+    release = runtime.read_candidate_release(container_name)
+    _validate_embedded_release(release, manifest, source)
+    release_sha256 = runtime.candidate_release_sha256(container_name)
+    if release_sha256 != manifest["image_release_json_sha256"]:
+        raise ContractError(
+            "candidate container /app/RELEASE.json SHA-256 mismatch"
+        )
+    return {
+        "phase": "candidate",
+        "container_name": container_name,
+        "config_image": container["config_image"],
+        "actual_image_id": container["image_id"],
+        "tag_image_id": image["id"],
+        "manifest_image_id": manifest["image_id"],
+        "oci_revision": labels["org.opencontainers.image.revision"],
+        "embedded_release": release,
+        "embedded_release_sha256": release_sha256,
+    }
+
+
 def verify_post_deploy(
     manifest: Mapping[str, Any],
     runtime: ReleaseRuntime,
@@ -1199,15 +1311,13 @@ def verify_post_rollback(
 
 def collect_data_baseline(
     data_host_root: Path,
-    candidate_container_name: str,
+    inspection_container_name: str,
     runtime: ReleaseRuntime,
     *,
     captured_at: str | None = None,
 ) -> dict[str, Any]:
-    if not SAFE_CONTAINER_RE.fullmatch(candidate_container_name):
-        raise ContractError("candidate container name is unsafe")
-    if candidate_container_name == PRODUCTION_CONTAINER:
-        raise ContractError("candidate container must not be the production container")
+    if not SAFE_CONTAINER_RE.fullmatch(inspection_container_name):
+        raise ContractError("data inspection container name is unsafe")
     root = data_host_root.resolve()
     datasets: list[dict[str, Any]] = []
     for spec in DATA_SPECS:
@@ -1220,16 +1330,28 @@ def collect_data_baseline(
             raise ContractError(f"sensitive data path is not allowed: {host_path}")
         digest = hash_file(host_path)
         stat = host_path.stat()
-        stats = runtime.dataset_stats(candidate_container_name, spec)
+        stats = runtime.dataset_stats(inspection_container_name, spec)
         records = stats.get("records")
         latest = stats.get("latest_business_date")
+        primary_key_null_rows = stats.get("primary_key_null_rows")
         duplicate_rows = stats.get("duplicate_rows_on_key")
-        if not isinstance(records, int) or records < 0:
+        invalid_date_rows = stats.get("invalid_date_rows")
+        if not isinstance(records, int) or records < 1:
             raise ContractError(f"{spec.name} record count is invalid")
         if not isinstance(latest, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", latest):
             raise ContractError(f"{spec.name} latest business date is invalid")
+        if not isinstance(primary_key_null_rows, int) or primary_key_null_rows < 0:
+            raise ContractError(f"{spec.name} primary key null count is invalid")
+        if primary_key_null_rows != 0:
+            raise ContractError(f"{spec.name} primary key contains null values")
         if not isinstance(duplicate_rows, int) or duplicate_rows < 0:
             raise ContractError(f"{spec.name} duplicate count is invalid")
+        if duplicate_rows != 0:
+            raise ContractError(f"{spec.name} contains duplicate primary keys")
+        if not isinstance(invalid_date_rows, int) or invalid_date_rows < 0:
+            raise ContractError(f"{spec.name} invalid date count is invalid")
+        if invalid_date_rows != 0:
+            raise ContractError(f"{spec.name} contains invalid business dates")
         datasets.append(
             {
                 "name": spec.name,
@@ -1246,6 +1368,7 @@ def collect_data_baseline(
                 "records": records,
                 "latest_business_date": latest,
                 "primary_key": list(spec.primary_key),
+                "primary_key_null_rows": primary_key_null_rows,
                 "duplicate_rows_on_key": duplicate_rows,
                 "update_task": spec.update_task,
                 "writes_to": "host_through_bind_mount",
@@ -1300,17 +1423,6 @@ def create_manifest(
     validate_repository_static(repository)
     validate_git_state(repository, git_commit, git_runner)
 
-    candidate = runtime.container_record(candidate_container_name)
-    if candidate.get("image_id") != expected_image_id:
-        raise ContractError(
-            "candidate container Image ID mismatch: "
-            f"expected {expected_image_id}, got {candidate.get('image_id')}"
-        )
-    if candidate.get("config_image") != image_ref:
-        raise ContractError(
-            "candidate container Config.Image must equal the release image reference"
-        )
-
     image = runtime.image_record(image_ref)
     if image.get("id") != expected_image_id:
         raise ContractError(
@@ -1329,8 +1441,8 @@ def create_manifest(
                 f"candidate image label {key} mismatch: "
                 f"expected {expected}, got {labels.get(key)!r}"
             )
-    release = runtime.read_candidate_release(candidate_container_name)
-    release_sha256 = runtime.candidate_release_sha256(candidate_container_name)
+    release = runtime.read_image_release(image_ref)
+    release_sha256 = runtime.image_release_sha256(image_ref)
     identity = {
         "release_id": release_id,
         "git_commit": git_commit,
@@ -1349,7 +1461,7 @@ def create_manifest(
     compose_sha = validate_compose_result(compose, raw_config, images, image_ref)
     baseline = collect_data_baseline(
         data_host_root,
-        candidate_container_name,
+        PRODUCTION_CONTAINER,
         runtime,
     )
     manifest = {

@@ -132,6 +132,7 @@
         "records",
         "latest_business_date",
         "primary_key",
+        "primary_key_null_rows",
         "duplicate_rows_on_key",
         "update_task",
         "writes_to"
@@ -191,9 +192,11 @@
             "minLength": 1
           }
         },
+        "primary_key_null_rows": {
+          "const": 0
+        },
         "duplicate_rows_on_key": {
-          "type": "integer",
-          "minimum": 0
+          "const": 0
         },
         "update_task": {
           "type": "string",
