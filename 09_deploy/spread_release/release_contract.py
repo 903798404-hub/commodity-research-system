@@ -18,13 +18,17 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 from urllib.parse import urlparse
 
+from wait_for_service_ready import (
+    DEFAULT_READINESS_POLICY,
+    validate_readiness_policy,
+)
 
 APPLICATION = "spread-dashboard"
 COMPOSE_PROJECT = "market-data"
 COMPOSE_SERVICE = "spread-dashboard"
 PRODUCTION_CONTAINER = "spread-dashboard"
-SCHEMA_VERSION = "2.0.0"
-DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.1.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.1.0"
 RELEASE_ENV_KEYS = (
     "RELEASE_ID",
     "SPREAD_IMAGE",
@@ -991,7 +995,7 @@ def load_schema(schema_path: Path) -> dict[str, Any]:
 def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) -> None:
     validate_against_schema(manifest, schema)
     schema_version = manifest.get("schema_version")
-    if schema_version not in {"1.0.0", SCHEMA_VERSION}:
+    if schema_version not in {"1.0.0", "2.0.0", SCHEMA_VERSION}:
         raise ContractError(f"unsupported release schema_version: {schema_version!r}")
     commit = validate_full_git_commit(manifest.get("git_commit"))
     release_id = str(manifest.get("release_id", ""))
@@ -1009,6 +1013,17 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
         raise ContractError(f"compose_project must be {COMPOSE_PROJECT}")
     if manifest.get("compose_files") != ["docker-compose.yml"]:
         raise ContractError("compose_files must be exactly ['docker-compose.yml']")
+    if schema_version == SCHEMA_VERSION:
+        try:
+            readiness_policy = validate_readiness_policy(
+                manifest.get("readiness_policy") or {}
+            )
+        except ValueError as exc:
+            raise ContractError(f"invalid readiness_policy: {exc}") from exc
+        if readiness_policy != DEFAULT_READINESS_POLICY:
+            raise ContractError(
+                "readiness_policy must exactly equal the versioned deployment default"
+            )
     if schema_version == "1.0.0":
         validate_sha256(
             manifest.get("compose_config_sha256"),
@@ -1469,6 +1484,14 @@ def load_candidate_result(
     pages = result.get("pages")
     if not isinstance(pages, dict) or pages.get("status") != "passed":
         raise ContractError("candidate result page validation did not pass")
+    if manifest.get("schema_version") == SCHEMA_VERSION:
+        readiness = result.get("readiness")
+        if not isinstance(readiness, dict) or readiness.get("status") != "ready":
+            raise ContractError("candidate result readiness validation did not pass")
+        if readiness.get("expected_image_id") != manifest["image_id"]:
+            raise ContractError("candidate result readiness Image ID mismatch")
+        if readiness.get("policy") != manifest["readiness_policy"]:
+            raise ContractError("candidate result readiness policy mismatch")
     assert_no_sensitive_values(result, "candidate result")
     return result
 
@@ -1491,6 +1514,7 @@ def validate_deployment_plan(
         "rollback_git_commit": manifest["formal_git_commit"],
         "rollback_image_ref": manifest["rollback_image_ref"],
         "rollback_image_id": manifest["rollback_image_id"],
+        "readiness_policy": manifest["readiness_policy"],
     }
     for key, expected in expected_release_fields.items():
         if plan.get(key) != expected:
@@ -1500,6 +1524,14 @@ def validate_deployment_plan(
             )
     if plan.get("schema_version") != DEPLOYMENT_PLAN_SCHEMA_VERSION:
         raise ContractError("unsupported deployment plan schema_version")
+    try:
+        plan_readiness_policy = validate_readiness_policy(
+            plan.get("readiness_policy") or {}
+        )
+    except ValueError as exc:
+        raise ContractError(f"invalid deployment plan readiness_policy: {exc}") from exc
+    if plan_readiness_policy != manifest.get("readiness_policy"):
+        raise ContractError("deployment plan readiness_policy differs from release.json")
     if plan.get("plan_status") != "deployment_plan_sealed":
         raise ContractError("deployment plan is not sealed")
     if plan.get("production_service_scope") != list(PRODUCTION_SERVICE_SCOPE):
@@ -1615,7 +1647,7 @@ def create_deployment_plan(
     production_env_file = production_env_file.resolve()
     if manifest.get("schema_version") != SCHEMA_VERSION:
         raise ContractError(
-            "deployment plans require a release manifest using schema 2.0.0"
+            f"deployment plans require a release manifest using schema {SCHEMA_VERSION}"
         )
     validate_repository_static(repository)
     compose_template = repository / "docker-compose.yml"
@@ -1728,6 +1760,7 @@ def create_deployment_plan(
         "rollback_git_commit": manifest["formal_git_commit"],
         "rollback_image_ref": manifest["rollback_image_ref"],
         "rollback_image_id": manifest["rollback_image_id"],
+        "readiness_policy": copy.deepcopy(manifest["readiness_policy"]),
         "created_at": timestamp,
         "plan_status": "deployment_plan_sealed",
     }
@@ -1854,7 +1887,7 @@ def verify_pre_deploy(
         or production_environment is None
     ):
         raise ContractError(
-            "production deployment requires a schema 2.0.0 release and "
+            f"production deployment requires a schema {SCHEMA_VERSION} release and "
             "a sealed deployment_plan"
         )
     validate_repository_static(repository)
@@ -2297,6 +2330,7 @@ def create_manifest(
         "compose_files": ["docker-compose.yml"],
         "compose_template_sha256": hash_file(repository / "docker-compose.yml"),
         "runtime_environment_contract": copy.deepcopy(RUNTIME_ENVIRONMENT_CONTRACT),
+        "readiness_policy": copy.deepcopy(DEFAULT_READINESS_POLICY),
         "dockerfile_sha256": hash_file(repository / "Dockerfile"),
         "dockerignore_sha256": hash_file(repository / ".dockerignore"),
         "required_config_sha256": hash_file(

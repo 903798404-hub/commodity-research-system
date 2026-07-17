@@ -12,6 +12,7 @@ from release_contract import (
     load_deployment_plan,
     load_manifest_bundle,
     validate_repository_static,
+    verify_candidate,
     verify_post_deploy,
     verify_post_rollback,
     verify_pre_deploy,
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase",
         choices=(
             "offline",
+            "candidate",
             "pre-deploy",
             "post-deploy",
             "record-deployment",
@@ -46,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     parser.add_argument("--result-path", type=Path)
-    parser.add_argument("--http-status", type=int)
+    parser.add_argument("--readiness-result", type=Path)
     parser.add_argument("--deployment-plan", type=Path)
     return parser
 
@@ -71,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
                 "image_ref": manifest["image_ref"],
                 "image_id": manifest["image_id"],
             }
+        elif args.phase == "candidate":
+            runtime = DockerReleaseRuntime()
+            evidence = verify_candidate(manifest, runtime)
         else:
             if args.deployment_plan is None:
                 raise ContractError(f"{args.phase} requires --deployment-plan")
@@ -102,15 +107,39 @@ def main(argv: list[str] | None = None) -> int:
                     deployment_plan=plan,
                 )
                 if args.phase == "record-deployment":
-                    if args.http_status != 200:
+                    if args.readiness_result is None:
                         raise ContractError(
-                            "deployment result may be recorded only after HTTP 200"
+                            "deployment result requires --readiness-result"
+                        )
+                    readiness_path = args.readiness_result.resolve()
+                    try:
+                        readiness = json.loads(
+                            readiness_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, json.JSONDecodeError) as exc:
+                        raise ContractError(
+                            f"cannot load readiness result {readiness_path}: {exc}"
+                        ) from exc
+                    if (
+                        not isinstance(readiness, dict)
+                        or readiness.get("status") != "ready"
+                        or readiness.get("expected_image_id") != manifest["image_id"]
+                        or readiness.get("policy") != plan["readiness_policy"]
+                        or readiness.get("container") != "spread-dashboard"
+                    ):
+                        raise ContractError(
+                            "deployment readiness result does not match the sealed plan"
                         )
                     evidence = {
                         **evidence,
                         "phase": "deployment-result",
                         "release_id": manifest["release_id"],
-                        "http_status": args.http_status,
+                        "http_status": readiness.get("last_http_result", {}).get(
+                            "http_status"
+                        ),
+                        "readiness": readiness,
+                        "readiness_result": str(readiness_path),
+                        "readiness_result_sha256": hash_file(readiness_path),
                         "deployment_plan": str(plan_path),
                         "deployment_plan_sha256": plan_sha256,
                         "production_env_file": plan["production_env_file"],

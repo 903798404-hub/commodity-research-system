@@ -15,6 +15,9 @@ manifest="${release_directory}/release.json"
 environment_file="${release_directory}/release.env"
 verifier="${script_dir}/verify_release_contract.py"
 rollback_script="${script_dir}/rollback_spread_release.sh"
+readiness_waiter="${script_dir}/wait_for_service_ready.py"
+readiness_result="${release_directory}/production_readiness.json"
+readiness_failure="${release_directory}/production_readiness.failure.json"
 
 python3 "${verifier}" \
     --phase pre-deploy \
@@ -66,6 +69,10 @@ docker compose \
     -f "${repository}/docker-compose.yml" \
     up -d --no-build --no-deps spread-dashboard
 
+initial_restart_count="$(
+    docker inspect --format '{{.RestartCount}}' spread-dashboard
+)"
+
 python3 "${verifier}" \
     --phase post-deploy \
     --repository "${repository}" \
@@ -73,7 +80,14 @@ python3 "${verifier}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}"
 
-curl --fail --silent --show-error --max-time 30 "${health_url}" >/dev/null
+python3 "${readiness_waiter}" \
+    --container spread-dashboard \
+    --health-url "${health_url}" \
+    --expected-image-id "${EXPECTED_IMAGE_ID}" \
+    --initial-restart-count "${initial_restart_count}" \
+    --policy-file "${deployment_plan}" \
+    --result "${readiness_result}" \
+    --failure-artifact "${readiness_failure}"
 
 python3 "${verifier}" \
     --phase record-deployment \
@@ -81,7 +95,7 @@ python3 "${verifier}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}" \
-    --http-status 200
+    --readiness-result "${readiness_result}"
 
 deployment_succeeded=1
 trap - ERR

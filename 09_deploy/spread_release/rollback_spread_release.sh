@@ -14,6 +14,9 @@ health_url="${3:-http://127.0.0.1:8501/_stcore/health}"
 manifest="${release_directory}/release.json"
 environment_file="${release_directory}/release.env"
 verifier="${script_dir}/verify_release_contract.py"
+readiness_waiter="${script_dir}/wait_for_service_ready.py"
+readiness_result="${release_directory}/rollback_readiness.json"
+readiness_failure="${release_directory}/rollback_readiness.failure.json"
 
 python3 "${verifier}" \
     --phase pre-rollback \
@@ -53,6 +56,10 @@ docker compose \
     -f "${repository}/docker-compose.yml" \
     up -d --no-build --no-deps spread-dashboard
 
+initial_restart_count="$(
+    docker inspect --format '{{.RestartCount}}' spread-dashboard
+)"
+
 python3 "${verifier}" \
     --phase post-rollback \
     --repository "${repository}" \
@@ -60,5 +67,12 @@ python3 "${verifier}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}"
 
-curl --fail --silent --show-error --max-time 30 "${health_url}" >/dev/null
+python3 "${readiness_waiter}" \
+    --container spread-dashboard \
+    --health-url "${health_url}" \
+    --expected-image-id "${rollback_image_id}" \
+    --initial-restart-count "${initial_restart_count}" \
+    --policy-file "${deployment_plan}" \
+    --result "${readiness_result}" \
+    --failure-artifact "${readiness_failure}"
 echo "spread rollback restored Image ID ${rollback_image_id}"

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.0.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.1.0.json",
   "title": "spread-dashboard immutable release manifest",
   "type": "object",
   "additionalProperties": false,
@@ -26,11 +26,28 @@
     "data_baseline",
     "status"
   ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": "2.1.0"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "readiness_policy"
+        ]
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "enum": [
         "1.0.0",
-        "2.0.0"
+        "2.0.0",
+        "2.1.0"
       ]
     },
     "application": {
@@ -80,6 +97,9 @@
     },
     "runtime_environment_contract": {
       "$ref": "#/$defs/runtimeEnvironmentContract"
+    },
+    "readiness_policy": {
+      "$ref": "#/$defs/readinessPolicy"
     },
     "dockerfile_sha256": {
       "$ref": "#/$defs/sha256"
@@ -190,6 +210,50 @@
         },
         "undeclared_variables_forbidden": {
           "const": true
+        }
+      }
+    },
+    "readinessPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_timeout_seconds",
+        "poll_interval_seconds",
+        "request_timeout_seconds",
+        "consecutive_successes",
+        "health_endpoint_path",
+        "success_http_status",
+        "success_body_exact"
+      ],
+      "properties": {
+        "total_timeout_seconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "poll_interval_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "request_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "consecutive_successes": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "health_endpoint_path": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "success_http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "success_body_exact": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

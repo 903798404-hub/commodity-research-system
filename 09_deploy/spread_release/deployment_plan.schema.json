@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.0.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.1.0.json",
   "title": "spread-dashboard sealed production deployment plan",
   "type": "object",
   "additionalProperties": false,
@@ -31,12 +31,13 @@
     "rollback_git_commit",
     "rollback_image_ref",
     "rollback_image_id",
+    "readiness_policy",
     "created_at",
     "plan_status"
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0.0"
+      "const": "1.1.0"
     },
     "release_id": {
       "type": "string",
@@ -150,6 +151,9 @@
     "rollback_image_id": {
       "$ref": "#/$defs/imageId"
     },
+    "readiness_policy": {
+      "$ref": "#/$defs/readinessPolicy"
+    },
     "created_at": {
       "type": "string",
       "minLength": 20
@@ -170,6 +174,50 @@
     "sha256": {
       "type": "string",
       "pattern": "[0-9a-f]{64}"
+    },
+    "readinessPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_timeout_seconds",
+        "poll_interval_seconds",
+        "request_timeout_seconds",
+        "consecutive_successes",
+        "health_endpoint_path",
+        "success_http_status",
+        "success_body_exact"
+      ],
+      "properties": {
+        "total_timeout_seconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "poll_interval_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "request_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "consecutive_successes": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "health_endpoint_path": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "success_http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "success_body_exact": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "runtimeEnvironment": {
       "type": "object",

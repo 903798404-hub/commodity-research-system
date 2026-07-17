@@ -26,6 +26,7 @@ from release_contract import (  # noqa: E402
     COMPOSE_PROJECT,
     ContractError,
     DATA_SPECS,
+    DEFAULT_READINESS_POLICY,
     DockerReleaseRuntime,
     PRODUCTION_ENV_KEYS,
     PRODUCTION_CONTAINER,
@@ -439,6 +440,11 @@ def create_candidate_result(
                     "root": 200,
                 },
                 "pages": {"status": "passed"},
+                "readiness": {
+                    "status": "ready",
+                    "expected_image_id": manifest["image_id"],
+                    "policy": manifest["readiness_policy"],
+                },
             },
             ensure_ascii=False,
             indent=2,
@@ -659,6 +665,7 @@ def test_manifest_is_valid_draft_2020_12_schema(tmp_path: Path) -> None:
     assert manifest["status"] == "candidate_sealed"
     assert manifest["formal_git_commit"] == OLD_GIT_COMMIT
     assert len(manifest["image_release_json_sha256"]) == 64
+    assert manifest["readiness_policy"] == DEFAULT_READINESS_POLICY
 
 
 def test_schema_rejects_missing_required_field(tmp_path: Path) -> None:
@@ -776,7 +783,26 @@ def test_candidate_and_production_url_difference_seals_same_image_plan(
         "OIL_WORLD_DASHBOARD_URL",
     ]
     assert plan["semantic_comparison"]["base_semantics_equal"] is True
+    assert plan["readiness_policy"] == manifest["readiness_policy"]
     assert plan["plan_status"] == "deployment_plan_sealed"
+
+
+def test_deployment_plan_rejects_readiness_policy_drift(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    plan["readiness_policy"]["poll_interval_seconds"] = 3
+
+    with pytest.raises(ContractError, match="readiness_policy"):
+        validate_deployment_plan(
+            plan,
+            manifest,
+            load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+            production_environment=production_environment,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1534,6 +1560,19 @@ def test_candidate_identity_rejects_container_image_id_mismatch(
         verify_candidate(manifest, runtime)
 
 
+def test_candidate_release_json_mismatch_rejects_before_readiness(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    runtime.release_json = {
+        **runtime.release_json,
+        "git_commit": OLD_GIT_COMMIT,
+    }
+
+    with pytest.raises(ContractError, match="/app/RELEASE.json"):
+        verify_candidate(manifest, runtime)
+
+
 def test_post_deploy_rejects_actual_container_image_id_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -1690,17 +1729,47 @@ def test_deploy_checks_identity_before_http_and_auto_rolls_back() -> None:
     deploy = (CONTRACT_DIR / "deploy_spread_release.sh").read_text(encoding="utf-8")
 
     post_identity = deploy.index("--phase post-deploy")
-    http_check = deploy.index("curl --fail")
+    readiness_check = deploy.index('"${readiness_waiter}"')
     production_record = deploy.index("--phase record-deployment")
-    assert post_identity < http_check < production_record
+    assert post_identity < readiness_check < production_record
+    assert "curl --fail" not in deploy
+    assert "--policy-file \"${deployment_plan}\"" in deploy
+    assert "--readiness-result \"${readiness_result}\"" in deploy
     assert "trap rollback_on_failure ERR" in deploy
     assert (
         'bash "${rollback_script}" "${release_directory}" '
         '"${deployment_plan}" "${health_url}"'
     ) in deploy
+    assert deploy.count('bash "${rollback_script}"') == 1
+    assert deploy.count("docker compose") == 1
     assert deploy.index("trap rollback_on_failure ERR") < deploy.index(
         "docker compose"
     )
+
+
+def test_candidate_deploy_and_rollback_share_one_readiness_tool() -> None:
+    scripts = {
+        name: (CONTRACT_DIR / name).read_text(encoding="utf-8")
+        for name in (
+            "validate_spread_candidate.sh",
+            "deploy_spread_release.sh",
+            "rollback_spread_release.sh",
+        )
+    }
+    for content in scripts.values():
+        assert 'readiness_waiter="${script_dir}/wait_for_service_ready.py"' in content
+        assert '"${readiness_waiter}"' in content
+        assert "curl --fail" not in content
+        assert "--initial-restart-count" in content
+        assert "--expected-image-id" in content
+        assert "--policy-file" in content
+
+    assert scripts["validate_spread_candidate.sh"].index("--phase candidate") < scripts[
+        "validate_spread_candidate.sh"
+    ].index('"${readiness_waiter}"')
+    assert scripts["rollback_spread_release.sh"].index("--phase post-rollback") < scripts[
+        "rollback_spread_release.sh"
+    ].index('"${readiness_waiter}"')
 
 
 def test_static_repository_contract_includes_required_config_and_sensitive_exclusions() -> None:

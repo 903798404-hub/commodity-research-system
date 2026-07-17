@@ -51,8 +51,31 @@ python3 09_deploy/spread_release/create_release_manifest.py \
 ```
 
 生成目录包含 `release.json`、`release.env` 和 `checksums.sha256`。三者写入后
-不得静默覆盖。Schema 2.0 的 `release.json` 固定 Compose 模板 SHA-256，
+不得静默覆盖。Schema 2.1 的 `release.json` 固定 Compose 模板 SHA-256，
 但不固定某个运行环境渲染出的最终 Compose SHA-256。
+
+## 健康就绪契约
+
+`release.json` 和 `deployment_plan.json` 同时密封唯一一组就绪参数：总等待
+90 秒、轮询间隔 2 秒、单请求超时 3 秒、连续成功 2 次，端点固定为
+`/_stcore/health`，成功响应必须是 HTTP 200 且正文去除首尾空白后严格等于
+`ok`。候选验收、正式部署和回滚都只能调用
+`wait_for_service_ready.py`，不得各自实现一次性 HTTP 请求。
+
+每次探测前先验证容器仍在运行、实际 Image ID 未改变且 `RestartCount`
+没有增加。连接拒绝、连接重置、空回复、请求超时、502、503 和正文不符在
+容器身份与状态正常时属于可重试冷启动现象；容器退出或死亡、镜像不符、
+重启次数增加属于永久失败并立即停止。超时或永久失败证据包含逐次分类、
+非敏感 inspect 摘要、最后一次 HTTP 结果和最后 200 行容器日志。
+
+候选容器创建后先执行版本身份硬校验，再立即进入同一轮询器：
+
+```bash
+bash 09_deploy/spread_release/validate_spread_candidate.sh \
+  "09_deploy/releases/${RELEASE_ID}" \
+  "http://127.0.0.1:${CANDIDATE_PORT}/_stcore/health" \
+  "/path/to/candidate_readiness.json"
+```
 
 ## 运行环境契约
 
@@ -130,7 +153,7 @@ docker compose --env-file <production-env> ... \
   up -d --no-build --no-deps spread-dashboard
 ```
 
-切换后先验证实际容器 Image ID 和版本身份，再做 HTTP 验收，最后单独写入
+切换后先验证实际容器 Image ID 和版本身份，再按密封参数完成有界就绪轮询，最后单独写入
 `deployment_result.json`。发布清单和部署计划不会被改写。
 
 回滚同样必须提供同一个密封计划：
