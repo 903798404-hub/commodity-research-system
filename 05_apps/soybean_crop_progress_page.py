@@ -24,8 +24,14 @@ from agri_research_agent.pipelines.soybean_crop_comparison import (  # noqa: E40
 PROCESSED_DIR = (
     PROJECT_ROOT / "01_data" / "processed" / "soybean_crop_progress"
 )
-PROGRESS_FILE = PROCESSED_DIR / "soybeans_crop_progress_weekly_2021_2026.parquet"
-CONDITION_FILE = PROCESSED_DIR / "soybeans_crop_condition_weekly_2021_2026.parquet"
+PROGRESS_FILE = PROCESSED_DIR / "soybeans_crop_progress_weekly.parquet"
+CONDITION_FILE = PROCESSED_DIR / "soybeans_crop_condition_weekly.parquet"
+LEGACY_PROGRESS_FILE = (
+    PROCESSED_DIR / "soybeans_crop_progress_weekly_2021_2026.parquet"
+)
+LEGACY_CONDITION_FILE = (
+    PROCESSED_DIR / "soybeans_crop_condition_weekly_2021_2026.parquet"
+)
 DISPLAY_CONFIG_FILE = (
     PROJECT_ROOT / "02_configs" / "soybean_crop_progress_display.yaml"
 )
@@ -58,10 +64,43 @@ def load_crop_display_config(
     return load_display_config(config_path)
 
 
-def _require_page_inputs() -> bool:
+def resolve_processed_crop_paths(
+    config: dict[str, object],
+    *,
+    processed_dir: Path = PROCESSED_DIR,
+) -> tuple[Path, Path]:
+    """Select the stable pair together, otherwise use the legacy pair together."""
+
+    data_files = config["data_files"]
+    if not isinstance(data_files, dict):
+        raise ValueError("美豆页面数据文件配置无效")
+
+    def configured_path(family: str, role: str) -> Path:
+        selection = data_files[family]
+        if not isinstance(selection, dict):
+            raise ValueError(f"美豆页面{family}数据文件配置无效")
+        name = str(selection[role])
+        path = (processed_dir / name).resolve()
+        if path.parent != processed_dir.resolve():
+            raise ValueError("美豆页面数据文件必须位于正式 Processed 目录")
+        return path
+
+    preferred = (
+        configured_path("progress", "preferred"),
+        configured_path("condition", "preferred"),
+    )
+    if all(path.is_file() for path in preferred):
+        return preferred
+    return (
+        configured_path("progress", "fallback"),
+        configured_path("condition", "fallback"),
+    )
+
+
+def _require_page_inputs(progress_file: Path, condition_file: Path) -> bool:
     missing = [
         path
-        for path in (PROGRESS_FILE, CONDITION_FILE, DISPLAY_CONFIG_FILE)
+        for path in (progress_file, condition_file, DISPLAY_CONFIG_FILE)
         if not path.exists()
     ]
     if missing:
@@ -77,17 +116,21 @@ def render_soybean_crop_progress_page() -> None:
     st.caption(
         "美国全国值直接采用 USDA US TOTAL；州权重仅用于默认排序和名称展示，不参与全国值计算。"
     )
-    if not _require_page_inputs():
+    if not DISPLAY_CONFIG_FILE.exists():
+        st.error(f"缺少美豆种植生长页面所需文件：{DISPLAY_CONFIG_FILE}")
         return
 
-    progress, condition = load_processed_crop_data(
-        str(PROGRESS_FILE),
-        PROGRESS_FILE.stat().st_mtime_ns,
-        str(CONDITION_FILE),
-        CONDITION_FILE.stat().st_mtime_ns,
-    )
     config = load_crop_display_config(
         str(DISPLAY_CONFIG_FILE), DISPLAY_CONFIG_FILE.stat().st_mtime_ns
+    )
+    progress_file, condition_file = resolve_processed_crop_paths(config)
+    if not _require_page_inputs(progress_file, condition_file):
+        return
+    progress, condition = load_processed_crop_data(
+        str(progress_file),
+        progress_file.stat().st_mtime_ns,
+        str(condition_file),
+        condition_file.stat().st_mtime_ns,
     )
     comparisons = build_dashboard_comparisons(progress, condition, config)
 

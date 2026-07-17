@@ -94,12 +94,25 @@ def load_display_config(path: str | Path) -> dict[str, Any]:
     metrics = config.get("metrics")
     states = config.get("states")
     national = config.get("national")
+    data_files = config.get("data_files")
     if not isinstance(metrics, list) or len(metrics) != 6:
         raise ValueError("Exactly six display metrics must be configured")
     if not isinstance(states, list) or len(states) != 18:
         raise ValueError("Exactly 18 default states must be configured")
     if not isinstance(national, dict) or national.get("region_name") != "US TOTAL":
         raise ValueError("The national row must be configured as US TOTAL")
+    if not isinstance(data_files, dict):
+        raise ValueError("Stable and fallback crop data files must be configured")
+    for family in ("progress", "condition"):
+        selection = data_files.get(family)
+        if (
+            not isinstance(selection, dict)
+            or not isinstance(selection.get("preferred"), str)
+            or not isinstance(selection.get("fallback"), str)
+        ):
+            raise ValueError(
+                f"{family} preferred and fallback crop data files must be configured"
+            )
 
     weights = [float(state["display_weight_pct"]) for state in states]
     if weights != sorted(weights, reverse=True):

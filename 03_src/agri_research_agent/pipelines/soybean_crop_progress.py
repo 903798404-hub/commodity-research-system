@@ -1247,6 +1247,8 @@ def soybean_crop_weekly_paths(project_root: Path = PROJECT_ROOT) -> dict[str, Pa
 
 def identify_crop_metric_mappings(
     raw_requests: list[dict[str, Any]],
+    *,
+    require_all: bool = True,
 ) -> dict[str, Any]:
     """Audit every candidate and require exact three-field metric mappings."""
 
@@ -1271,6 +1273,8 @@ def identify_crop_metric_mappings(
                 and item["short_desc"] == expected_short_desc
             ]
             if len(matches) != 1:
+                if not require_all and not matches:
+                    continue
                 errors.append(
                     f"{family}/{metric} expected one exact candidate; found {len(matches)}"
                 )
@@ -1315,6 +1319,7 @@ def identify_crop_metric_mappings(
             "Each official metric uniquely matches statisticcat_desc, unit_desc, "
             "and the complete short_desc; no fuzzy keyword-only mapping is used."
         ),
+        "all_expected_metrics_required": require_all,
         "mapping_complete": not errors,
         "mapping_errors": errors,
     }
@@ -1366,6 +1371,7 @@ def normalize_crop_weekly_rows(
     mapping_audit: dict[str, Any],
     retrieved_at_utc: str,
     raw_snapshot: str,
+    allow_empty_families: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
     """Normalize all mapped official metrics without filling missing weeks."""
 
@@ -1443,7 +1449,11 @@ def normalize_crop_weekly_rows(
     for family in ("PROGRESS", "CONDITION"):
         frame = pd.DataFrame(output[family])
         if frame.empty:
-            raise ValueError(f"Mapped {family} data contains no records")
+            if not allow_empty_families:
+                raise ValueError(f"Mapped {family} data contains no records")
+            frame = pd.DataFrame(
+                columns=[*CROP_WEEKLY_COLUMNS, "_raw_record_source"]
+            )
         frame["calendar_year"] = frame["calendar_year"].astype("Int64")
         frame["value_pct"] = pd.to_numeric(
             frame["value_pct"], errors="coerce"

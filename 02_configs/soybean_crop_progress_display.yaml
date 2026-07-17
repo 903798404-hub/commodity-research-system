@@ -5,6 +5,14 @@ weight_role: display_only
 weight_source: user_provided
 weight_vintage: unknown
 
+data_files:
+  progress:
+    preferred: soybeans_crop_progress_weekly.parquet
+    fallback: soybeans_crop_progress_weekly_2021_2026.parquet
+  condition:
+    preferred: soybeans_crop_condition_weekly.parquet
+    fallback: soybeans_crop_condition_weekly_2021_2026.parquet
+
 national:
   region_name: US TOTAL
   display_name: 美国全国

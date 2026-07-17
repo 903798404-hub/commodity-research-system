@@ -84,3 +84,46 @@ def test_parquet_cache_key_changes_when_file_mtime_changes(tmp_path: Path) -> No
 
     assert first.loc[0, "value"] == 1
     assert updated.loc[0, "value"] == 9
+
+
+def test_stable_pair_is_preferred_and_legacy_pair_is_the_fallback(
+    tmp_path: Path,
+) -> None:
+    if str(APPS_DIR) not in sys.path:
+        sys.path.insert(0, str(APPS_DIR))
+    from soybean_crop_progress_page import resolve_processed_crop_paths
+
+    config = {
+        "data_files": {
+            "progress": {
+                "preferred": "progress.parquet",
+                "fallback": "progress_legacy.parquet",
+            },
+            "condition": {
+                "preferred": "condition.parquet",
+                "fallback": "condition_legacy.parquet",
+            },
+        }
+    }
+    legacy_progress = tmp_path / "progress_legacy.parquet"
+    legacy_condition = tmp_path / "condition_legacy.parquet"
+    pd.DataFrame({"value": [1]}).to_parquet(legacy_progress, index=False)
+    pd.DataFrame({"value": [2]}).to_parquet(legacy_condition, index=False)
+
+    assert resolve_processed_crop_paths(config, processed_dir=tmp_path) == (
+        legacy_progress,
+        legacy_condition,
+    )
+
+    stable_progress = tmp_path / "progress.parquet"
+    stable_condition = tmp_path / "condition.parquet"
+    pd.DataFrame({"value": [3]}).to_parquet(stable_progress, index=False)
+    assert resolve_processed_crop_paths(config, processed_dir=tmp_path) == (
+        legacy_progress,
+        legacy_condition,
+    )
+    pd.DataFrame({"value": [4]}).to_parquet(stable_condition, index=False)
+    assert resolve_processed_crop_paths(config, processed_dir=tmp_path) == (
+        stable_progress,
+        stable_condition,
+    )

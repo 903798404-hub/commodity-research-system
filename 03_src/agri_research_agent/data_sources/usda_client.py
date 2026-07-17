@@ -40,6 +40,17 @@ Transport = Callable[[str, int], tuple[int, bytes]]
 class NassApiError(RuntimeError):
     """A sanitized USDA NASS request or response failure."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        retry_count: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.retry_count = retry_count
+
 
 def redact_secret(value: object, secret: str) -> str:
     """Return text safe for logs, manifests, reports, and exceptions."""
@@ -80,8 +91,8 @@ def build_soybean_crop_weekly_query(
 ) -> dict[str, str]:
     """Build one secret-free year/category/geography crop-weekly query."""
 
-    if year not in SOYBEAN_PLANTED_YEARS:
-        raise ValueError(f"Unsupported soybean crop-weekly year: {year}")
+    if year < 1900 or year > 9999:
+        raise ValueError(f"Invalid soybean crop-weekly year: {year}")
     level = agg_level_desc.upper()
     if level not in SOYBEAN_PROGRESS_LEVELS:
         raise ValueError(f"Unsupported aggregate level: {agg_level_desc}")
@@ -102,6 +113,18 @@ def build_soybean_crop_weekly_query_grid() -> list[dict[str, str]]:
     return [
         build_soybean_crop_weekly_query(year, level, category)
         for year in SOYBEAN_PLANTED_YEARS
+        for category in SOYBEAN_STATISTIC_CATEGORIES
+        for level in SOYBEAN_PROGRESS_LEVELS
+    ]
+
+
+def build_soybean_crop_weekly_current_year_query_grid(
+    year: int,
+) -> list[dict[str, str]]:
+    """Return the four category-by-geography requests for one reporting year."""
+
+    return [
+        build_soybean_crop_weekly_query(year, level, category)
         for category in SOYBEAN_STATISTIC_CATEGORIES
         for level in SOYBEAN_PROGRESS_LEVELS
     ]
@@ -152,14 +175,23 @@ def fetch_nass_json(
     url = f"{NASS_API_ENDPOINT}?{urllib.parse.urlencode(params_with_key)}"
     transient_statuses = {429, 500, 502, 503, 504}
     last_error = ""
+    last_http_status: int | None = None
 
     for attempt in range(retries + 1):
         try:
             status, body = caller(url, timeout)
             if status in transient_statuses:
-                raise NassApiError(f"USDA NASS transient HTTP {status}")
+                raise NassApiError(
+                    f"USDA NASS transient HTTP {status}",
+                    http_status=status,
+                    retry_count=attempt,
+                )
             if status < 200 or status >= 300:
-                raise NassApiError(f"USDA NASS HTTP {status}")
+                raise NassApiError(
+                    f"USDA NASS HTTP {status}",
+                    http_status=status,
+                    retry_count=attempt,
+                )
             try:
                 payload = json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -178,24 +210,35 @@ def fetch_nass_json(
             }
         except urllib.error.HTTPError as exc:
             body = _safe_error_body(exc, api_key)
+            last_http_status = exc.code
             last_error = f"USDA NASS HTTP {exc.code}"
             if body:
                 last_error = f"{last_error}: {body}"
             retryable = exc.code in transient_statuses
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_http_status = None
             last_error = redact_secret(
                 f"USDA NASS network error: {type(exc).__name__}: {exc}",
                 api_key,
             )
             retryable = True
         except NassApiError as exc:
+            last_http_status = exc.http_status
             last_error = redact_secret(exc, api_key)
             retryable = any(
                 f"HTTP {status}" in last_error for status in transient_statuses
             )
 
         if not retryable or attempt >= retries:
-            raise NassApiError(last_error) from None
+            raise NassApiError(
+                last_error,
+                http_status=last_http_status,
+                retry_count=attempt,
+            ) from None
         sleep(min(2**attempt, 8))
 
-    raise NassApiError(last_error or "USDA NASS request failed")
+    raise NassApiError(
+        last_error or "USDA NASS request failed",
+        http_status=last_http_status,
+        retry_count=retries,
+    )

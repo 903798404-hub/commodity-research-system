@@ -112,6 +112,16 @@ def test_config_contains_six_chinese_metrics_and_display_only_state_order() -> N
     assert config["weight_role"] == "display_only"
     assert config["weight_source"] == "user_provided"
     assert config["weight_vintage"] == "unknown"
+    assert config["data_files"] == {
+        "progress": {
+            "preferred": "soybeans_crop_progress_weekly.parquet",
+            "fallback": "soybeans_crop_progress_weekly_2021_2026.parquet",
+        },
+        "condition": {
+            "preferred": "soybeans_crop_condition_weekly.parquet",
+            "fallback": "soybeans_crop_condition_weekly_2021_2026.parquet",
+        },
+    }
     assert len(config["states"]) == 18
     assert [state["region_name"] for state in config["states"][:3]] == [
         "ILLINOIS",
