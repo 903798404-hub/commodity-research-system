@@ -20,6 +20,12 @@ htmlcov/
 01_data/
 06_outputs/
 10_logs/
+
+# Release facts are sealed only after an image exists, so they cannot be part of
+# the Git commit that identifies that same image. Keep them locally without
+# making the formal repository dirty; retain only the tracked directory policy.
+09_deploy/releases/*
+!09_deploy/releases/说明.md
 output/
 raw/
 data/raw/

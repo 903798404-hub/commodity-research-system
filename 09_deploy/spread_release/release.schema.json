@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-release-1.0.0.json",
+  "title": "spread-dashboard immutable release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "application",
+    "release_id",
+    "git_commit",
+    "image_ref",
+    "image_id",
+    "image_oci_revision",
+    "image_release_json_sha256",
+    "build_time",
+    "compose_project",
+    "compose_files",
+    "compose_config_sha256",
+    "dockerfile_sha256",
+    "dockerignore_sha256",
+    "required_config_sha256",
+    "candidate_container_name",
+    "rollback_image_ref",
+    "rollback_image_id",
+    "formal_git_commit",
+    "data_baseline",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "application": {
+      "const": "spread-dashboard"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
+    },
+    "git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "image_ref": {
+      "type": "string",
+      "pattern": "(?:^|/)market-data-spread-dashboard:spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
+    },
+    "image_id": {
+      "$ref": "#/$defs/imageId"
+    },
+    "image_oci_revision": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "image_release_json_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "build_time": {
+      "type": "string",
+      "minLength": 20
+    },
+    "compose_project": {
+      "const": "market-data"
+    },
+    "compose_files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "compose_config_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "dockerfile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "dockerignore_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "required_config_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "candidate_container_name": {
+      "type": "string",
+      "pattern": "[A-Za-z0-9][A-Za-z0-9_.-]+"
+    },
+    "rollback_image_ref": {
+      "type": "string",
+      "pattern": "(?:^|/)market-data-spread-dashboard:[A-Za-z0-9_][A-Za-z0-9_.-]*"
+    },
+    "rollback_image_id": {
+      "$ref": "#/$defs/imageId"
+    },
+    "formal_git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "data_baseline": {
+      "$ref": "#/$defs/dataBaseline"
+    },
+    "status": {
+      "const": "candidate_sealed"
+    }
+  },
+  "$defs": {
+    "fullGitCommit": {
+      "type": "string",
+      "pattern": "[0-9a-f]{40}"
+    },
+    "imageId": {
+      "type": "string",
+      "pattern": "sha256:[0-9a-f]{64}"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "[0-9a-f]{64}"
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "host_path",
+        "container_path",
+        "delivery",
+        "persistence",
+        "filename",
+        "sha256",
+        "size_bytes",
+        "mtime",
+        "records",
+        "latest_business_date",
+        "primary_key",
+        "duplicate_rows_on_key",
+        "update_task",
+        "writes_to"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "spread",
+            "basis",
+            "soybean_progress",
+            "soybean_condition"
+          ]
+        },
+        "host_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "container_path": {
+          "type": "string",
+          "pattern": "/app/01_data/.+"
+        },
+        "delivery": {
+          "const": "bind_mount"
+        },
+        "persistence": {
+          "const": "host"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mtime": {
+          "type": "string",
+          "minLength": 20
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latest_business_date": {
+          "type": "string",
+          "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+        },
+        "primary_key": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "duplicate_rows_on_key": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "update_task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "writes_to": {
+          "const": "host_through_bind_mount"
+        }
+      }
+    },
+    "dataBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "captured_at",
+        "mutable_after_deployment",
+        "datasets"
+      ],
+      "properties": {
+        "kind": {
+          "const": "deployment-time"
+        },
+        "captured_at": {
+          "type": "string",
+          "minLength": 20
+        },
+        "mutable_after_deployment": {
+          "const": true
+        },
+        "datasets": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "$ref": "#/$defs/dataset"
+          }
+        }
+      }
+    }
+  }
+}

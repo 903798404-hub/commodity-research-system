@@ -66,3 +66,5 @@ pnpm --dir 05_apps/oil_world_dashboard dev --host 127.0.0.1 --port 5175
 主工作台通过 `OIL_WORLD_DASHBOARD_URL` 读取 Oil World 地址，本地默认值为 `http://127.0.0.1:5175/`。Oil World 保持独立运行，数据不会复制到 Streamlit 项目中。
 
 整套服务使用根目录 `docker-compose.yml` 管理：`spread-dashboard` 提供 Streamlit 看板，`usda-dashboard` 从仓库内 USDA 子项目构建静态站点。服务器只需要部署一个 `market-data` 项目目录。
+
+`spread-dashboard` 的正式发布必须使用 [`09_deploy/spread_release/README.md`](09_deploy/spread_release/README.md) 定义的显式镜像、发布清单和 Image ID 硬校验流程；不得再用根 Compose 隐式命名、`latest`、`new` 或 `up --build` 作为正式切换入口。

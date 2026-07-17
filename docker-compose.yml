@@ -1,5 +1,8 @@
+name: market-data
+
 services:
   spread-dashboard:
+    image: ${SPREAD_IMAGE:?SPREAD_IMAGE must be set to an immutable release tag}
     build:
       context: .
       dockerfile: Dockerfile

@@ -1,5 +1,7 @@
 ﻿# 腾讯云轻量应用服务器部署说明
 
+> 本文保留基础服务器与网络说明。`spread-dashboard` 的正式镜像发布、切换和回滚以 [`spread_release/README.md`](spread_release/README.md) 为唯一入口；下文不得用于绕过发布清单或在正式仓库构建主工作台镜像。
+
 服务器信息：
 
 ```text
@@ -47,11 +49,14 @@ ls -lh 01_data/historical_spread_database.xlsx
 
 ## 3. 启动看板
 
+主工作台必须先完成隔离候选构建和清单密封，然后执行：
+
 ```bash
-docker compose up -d --build
+bash 09_deploy/spread_release/deploy_spread_release.sh \
+  "09_deploy/releases/${RELEASE_ID}"
 ```
 
-如果 Docker build 卡在 pip 下载，或出现 `files.pythonhosted.org` 超时，应确认 `Dockerfile` 使用腾讯云 PyPI 镜像源：
+构建问题只在隔离候选目录处理。如果候选构建的 pip 下载出现超时，应确认 `Dockerfile` 使用腾讯云 PyPI 镜像源：
 
 ```text
 PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
@@ -104,15 +109,11 @@ docker compose down
 
 ```bash
 cd /home/ubuntu/market-data
-docker compose down
-docker compose up -d --build
+bash 09_deploy/spread_release/deploy_spread_release.sh \
+  "09_deploy/releases/${RELEASE_ID}"
 ```
 
-如果只更新了挂载目录中的 `01_data`、`06_outputs`、`10_logs`，通常不需要重新 build，可直接重启：
-
-```bash
-docker compose restart spread-dashboard
-```
+不得先执行 `docker compose down`，也不得在正式仓库执行 `up --build`。如果只更新了挂载目录中的 `01_data`、`06_outputs`、`10_logs`，不需要构建或切换主工作台镜像；按对应数据更新流程验收文件和页面即可。
 
 ## 7. 备份 01_data、06_outputs、10_logs
 

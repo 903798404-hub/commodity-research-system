@@ -8,7 +8,17 @@ __pycache__
 .gitignore
 .env
 .env.*
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/id_rsa*
+**/id_ed25519*
+**/.ssh
+01_data
+06_outputs
 10_logs
+09_deploy/releases
 *.log
 *.xlsx
 !02_configs/historical_spread_config.xlsx

@@ -198,14 +198,14 @@ cd /home/ubuntu/market-data
 docker compose exec spread-dashboard python 04_scripts/server_update_spreads.py --update-from-akshare
 ```
 
-如果本次更新包含 `requirements.txt` 变化，例如新增 `pyarrow`，服务器需要先重新构建镜像：
+如果本次代码更新包含 `requirements.txt` 变化，例如新增 `pyarrow`，必须进入隔离候选构建和不可变发布流程；不得在正式仓库直接重新构建：
 
 ```bash
-cd /home/ubuntu/market-data
-docker compose up -d --build
+bash 09_deploy/spread_release/deploy_spread_release.sh \
+  "09_deploy/releases/${RELEASE_ID}"
 ```
 
-Phase 1 新增了 `filelock`，因此部署本次代码后同样必须重新构建镜像。
+候选构建必须先包含依赖变更并完成验证；上述正式切换只复用候选验证过的同一 Image ID。
 
 研究工作台首页依赖镜像内的以下目录：
 
@@ -217,11 +217,11 @@ Phase 1 新增了 `filelock`，因此部署本次代码后同样必须重新构�
 其中 `apps` 包含首页和基差页面骨架，`02_configs/report_catalog.yaml` 控制首页卡片。新增或更新这些目录后，服务器必须重新构建镜像：
 
 ```bash
-cd /home/ubuntu/market-data
-docker compose up -d --build
+bash 09_deploy/spread_release/deploy_spread_release.sh \
+  "09_deploy/releases/${RELEASE_ID}"
 ```
 
-只执行 `docker compose restart` 不会把新增的 `apps`、`configs` 文件复制进旧镜像。
+只执行 `docker compose restart` 不会把新增的应用或配置文件放入旧镜像；也不得用 `up --build` 绕过候选验证和发布清单。
 
 ## 配置 cron
 
@@ -335,7 +335,7 @@ cat /home/ubuntu/market-data/01_data/update_status.json
 - 默认不带参数的脚本仍然只是安全检查。
 - 真实自动更新必须使用 `--update-from-akshare`。
 - AkShare 行情接口可能受交易时段、网络或字段变化影响。上线 cron 前必须先在服务器手动 dry-run。
-- 如果服务器缺少 `pyarrow`，Parquet 生成和读取会失败。更新部署包后请执行 `docker compose up -d --build`。
+- 如果镜像缺少 `pyarrow`，Parquet 生成和读取会失败。修复依赖后重新走隔离候选构建、清单验证和同一 Image ID 正式切换，不在正式仓库执行构建。
 - cron 命令不需要因 Phase 1 修改，仍然使用 `server_update_spreads.py --update-from-akshare`。
 
 

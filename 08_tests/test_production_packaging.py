@@ -31,6 +31,19 @@ class ProductionPackagingTests(unittest.TestCase):
         self.assertTrue((REPOSITORY / "02_configs" / "report_catalog.yaml").is_file())
         self.assertTrue((REPOSITORY / "05_apps" / "home.py").is_file())
 
+    def test_spread_compose_requires_an_explicit_release_image(self) -> None:
+        compose = yaml.safe_load(
+            (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
+        )
+        spread = compose["services"]["spread-dashboard"]
+
+        self.assertEqual(compose["name"], "market-data")
+        self.assertEqual(
+            spread["image"],
+            "${SPREAD_IMAGE:?SPREAD_IMAGE must be set to an immutable release tag}",
+        )
+        self.assertIn("build", spread)
+
     def test_spread_image_receives_oil_world_url_from_existing_environment(self) -> None:
         compose = yaml.safe_load(
             (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
@@ -65,6 +78,53 @@ class ProductionPackagingTests(unittest.TestCase):
             [rule for rule in rules if rule.startswith("!") and rule.endswith(".xlsx")],
             ["!02_configs/historical_spread_config.xlsx"],
         )
+
+    def test_spread_image_declares_immutable_release_identity(self) -> None:
+        dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
+        for argument in (
+            "MARKET_DATA_GIT_HEAD",
+            "MARKET_DATA_RELEASE_ID",
+            "MARKET_DATA_BUILD_TIME",
+            "MARKET_DATA_SOURCE",
+        ):
+            self.assertIn(f"ARG {argument}", dockerfile)
+        for label in (
+            "org.opencontainers.image.revision",
+            "org.opencontainers.image.version",
+            "org.opencontainers.image.created",
+            "org.opencontainers.image.source",
+        ):
+            self.assertIn(label, dockerfile)
+        self.assertIn("/app/RELEASE.json", dockerfile)
+        self.assertIn("chmod 0444 /app/RELEASE.json", dockerfile)
+
+    def test_dynamic_data_and_sensitive_files_are_not_packaged(self) -> None:
+        dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
+        rules = {
+            line.strip()
+            for line in (REPOSITORY / ".dockerignore")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        self.assertNotIn("COPY 01_data /app/01_data", dockerfile)
+        self.assertNotIn("COPY 06_outputs /app/06_outputs", dockerfile)
+        self.assertIn("mkdir -p /app/01_data /app/06_outputs /app/10_logs", dockerfile)
+        for rule in (
+            ".env",
+            ".env.*",
+            "**/.env",
+            "**/.env.*",
+            "**/*.pem",
+            "**/*.key",
+            "**/id_rsa*",
+            "**/id_ed25519*",
+            "01_data",
+            "06_outputs",
+            "10_logs",
+        ):
+            self.assertIn(rule, rules)
 
     def test_usda_root_redirect_remains_relative(self) -> None:
         nginx = (USDA_ROOT / "deploy" / "nginx.conf").read_text(encoding="utf-8")
