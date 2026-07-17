@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 import urllib.parse
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -22,11 +25,14 @@ from agri_research_agent.pipelines.soybean_crop_progress import (
     PROGRESS_UNIT_TO_METRIC,
 )
 from agri_research_agent.pipelines.soybean_crop_weekly_update import (
+    GIT_HEAD_FAILURE_MESSAGE,
+    GIT_HEAD_ENVIRONMENT_VARIABLE,
     SoybeanWeeklyUpdateError,
     compare_business_records,
     is_soybean_reporting_season,
     merge_current_year,
     replace_processed_pair,
+    resolve_deployment_git_head,
     run_soybean_crop_weekly_update,
     soybean_weekly_update_paths,
     validate_candidate_pair,
@@ -35,6 +41,10 @@ from agri_research_agent.pipelines.soybean_crop_weekly_update import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FAKE_SECRET = "weekly-update-fixture-secret"
+TEST_GIT_HEAD = "0123456789abcdef0123456789abcdef01234567"
+CLI_GIT_HEAD = "1111111111111111111111111111111111111111"
+ENV_GIT_HEAD = "2222222222222222222222222222222222222222"
+LOCAL_GIT_HEAD = "3333333333333333333333333333333333333333"
 JULY_2026 = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 
 
@@ -272,6 +282,7 @@ def _run(
         now=now,
         sleep=lambda _: None,
         env={"NASS_API_KEY": FAKE_SECRET},
+        git_head=TEST_GIT_HEAD,
     )
 
 
@@ -297,6 +308,185 @@ def test_reporting_season_runs_from_april_through_november() -> None:
     assert is_soybean_reporting_season(date(2026, 4, 1))
     assert is_soybean_reporting_season(date(2026, 11, 30))
     assert not is_soybean_reporting_season(date(2026, 12, 1))
+
+
+def test_explicit_git_head_overrides_environment_before_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agri_research_agent.pipelines.soybean_crop_weekly_update as update_module
+
+    _prepare_root(tmp_path)
+    transport = CurrentYearTransport()
+
+    def fail_git(*args: object, **kwargs: object) -> object:
+        raise AssertionError("git fallback must not run")
+
+    monkeypatch.setattr(update_module.subprocess, "run", fail_git)
+    audit = run_soybean_crop_weekly_update(
+        project_root=tmp_path,
+        transport=transport,
+        retries=0,
+        now=JULY_2026,
+        sleep=lambda _: None,
+        env={
+            "NASS_API_KEY": FAKE_SECRET,
+            GIT_HEAD_ENVIRONMENT_VARIABLE: "invalid-environment-value",
+        },
+        git_head=CLI_GIT_HEAD,
+    )
+
+    assert audit["git_head"] == CLI_GIT_HEAD
+    assert len(transport.queries) == 4
+
+
+def test_environment_git_head_allows_container_without_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agri_research_agent.pipelines.soybean_crop_weekly_update as update_module
+
+    _prepare_root(tmp_path)
+    transport = CurrentYearTransport()
+
+    def missing_git(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(update_module.subprocess, "run", missing_git)
+    audit = run_soybean_crop_weekly_update(
+        project_root=tmp_path,
+        transport=transport,
+        retries=0,
+        now=JULY_2026,
+        sleep=lambda _: None,
+        env={
+            "NASS_API_KEY": FAKE_SECRET,
+            GIT_HEAD_ENVIRONMENT_VARIABLE: ENV_GIT_HEAD,
+        },
+    )
+
+    assert audit["git_head"] == ENV_GIT_HEAD
+    assert len(transport.queries) == 4
+
+
+def test_local_git_is_used_when_no_external_git_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agri_research_agent.pipelines.soybean_crop_weekly_update as update_module
+
+    calls: list[tuple[object, object]] = []
+
+    def local_git(command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs.get("cwd")))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=f"{LOCAL_GIT_HEAD}\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(update_module.subprocess, "run", local_git)
+    resolved = resolve_deployment_git_head(
+        tmp_path,
+        env={"NASS_API_KEY": FAKE_SECRET},
+    )
+
+    assert resolved == LOCAL_GIT_HEAD
+    assert calls == [(["git", "rev-parse", "HEAD"], tmp_path)]
+
+
+def test_missing_external_git_head_and_git_binary_fails_before_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agri_research_agent.pipelines.soybean_crop_weekly_update as update_module
+
+    transport = CurrentYearTransport()
+
+    def missing_git(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(update_module.subprocess, "run", missing_git)
+    with pytest.raises(
+        SoybeanWeeklyUpdateError,
+        match=f"^{GIT_HEAD_FAILURE_MESSAGE}$",
+    ) as error:
+        run_soybean_crop_weekly_update(
+            project_root=tmp_path,
+            transport=transport,
+            retries=0,
+            now=JULY_2026,
+            sleep=lambda _: None,
+            env={"NASS_API_KEY": FAKE_SECRET},
+        )
+
+    assert transport.queries == []
+    assert FAKE_SECRET not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("git_head", "environment"),
+    [
+        ("a" * 39, {"NASS_API_KEY": FAKE_SECRET}),
+        (
+            None,
+            {
+                "NASS_API_KEY": FAKE_SECRET,
+                GIT_HEAD_ENVIRONMENT_VARIABLE: "g" * 40,
+            },
+        ),
+    ],
+)
+def test_invalid_external_git_head_is_rejected_before_api(
+    tmp_path: Path,
+    git_head: str | None,
+    environment: dict[str, str],
+) -> None:
+    transport = CurrentYearTransport()
+
+    with pytest.raises(SoybeanWeeklyUpdateError) as error:
+        run_soybean_crop_weekly_update(
+            project_root=tmp_path,
+            transport=transport,
+            retries=0,
+            now=JULY_2026,
+            sleep=lambda _: None,
+            env=environment,
+            git_head=git_head,
+        )
+
+    message = str(error.value)
+    assert message.startswith(GIT_HEAD_FAILURE_MESSAGE)
+    assert "40位十六进制" in message
+    assert FAKE_SECRET not in message
+    assert transport.queries == []
+
+
+def test_cli_reports_invalid_git_head_without_traceback() -> None:
+    script = (
+        PROJECT_ROOT
+        / "04_scripts"
+        / "soybean_crop_progress"
+        / "update_soybeans_crop_weekly.py"
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--git-head", "invalid"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout.startswith("美豆周度更新失败：")
+    assert GIT_HEAD_FAILURE_MESSAGE in result.stdout
+    assert "40位十六进制" in result.stdout
+    assert "Traceback" not in result.stdout
+    assert "Traceback" not in result.stderr
 
 
 def test_initialization_replaces_current_year_and_preserves_prior_years(
@@ -537,6 +727,7 @@ def test_out_of_season_no_data_and_missing_key_statuses(tmp_path: Path) -> None:
         now=datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
         transport=outside,
         env={},
+        git_head=TEST_GIT_HEAD,
     )
     paths = soybean_weekly_update_paths(tmp_path)
     assert audit["status"] == "out_of_season"
@@ -550,6 +741,7 @@ def test_out_of_season_no_data_and_missing_key_statuses(tmp_path: Path) -> None:
             project_root=tmp_path,
             now=datetime(2026, 7, 18, 10, 0, tzinfo=timezone.utc),
             env={},
+            git_head=TEST_GIT_HEAD,
         )
     assert json.loads(paths["status"].read_text(encoding="utf-8"))[
         "status"
@@ -564,17 +756,31 @@ def test_out_of_season_no_data_and_missing_key_statuses(tmp_path: Path) -> None:
 
 
 def test_raw_manifest_and_all_outputs_are_secret_safe(tmp_path: Path) -> None:
-    _prepare_root(tmp_path)
+    paths = _prepare_root(tmp_path)
     audit = _run(tmp_path, CurrentYearTransport())
     manifest = json.loads(
         (tmp_path / str(audit["manifest_path"])).read_text(encoding="utf-8")
     )
+    audit_json = json.loads(
+        Path(str(audit["audit_json_path"])).read_text(encoding="utf-8")
+    )
+    audit_markdown = Path(str(audit["audit_markdown_path"])).read_text(
+        encoding="utf-8"
+    )
+    status = json.loads(paths["status"].read_text(encoding="utf-8"))
+    log_text = (
+        paths["log_dir"] / "nass_soybeans_crop_weekly_update_20260717.log"
+    ).read_text(encoding="utf-8")
 
     assert len(manifest["requests"]) == 4
     assert all(item["http_status"] == 200 for item in manifest["requests"])
     assert all(item["retry_count"] == 0 for item in manifest["requests"])
     assert all(item["response_sha256"] for item in manifest["requests"])
-    assert manifest["git_head"]
+    assert manifest["git_head"] == TEST_GIT_HEAD
+    assert audit_json["git_head"] == TEST_GIT_HEAD
+    assert status["git_head"] == TEST_GIT_HEAD
+    assert f"Git提交：`{TEST_GIT_HEAD}`" in audit_markdown
+    assert f"git_head={TEST_GIT_HEAD}" in log_text
     assert manifest["published"] is True
     for path in tmp_path.rglob("*"):
         if path.is_file():

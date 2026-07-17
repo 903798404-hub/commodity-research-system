@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -63,6 +64,9 @@ BLOCKING_QUALITY_COUNTS = (
     "range_anomaly_count",
     "national_source_anomaly_count",
 )
+GIT_HEAD_ENVIRONMENT_VARIABLE = "MARKET_DATA_GIT_HEAD"
+GIT_HEAD_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
+GIT_HEAD_FAILURE_MESSAGE = "无法确定部署Git提交，未调用USDA API。"
 
 
 class SoybeanWeeklyUpdateError(RuntimeError):
@@ -139,15 +143,57 @@ def _relative(path: Path | None, project_root: Path) -> str | None:
         return str(path.resolve())
 
 
-def _git_head(project_root: Path) -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else "UNKNOWN"
+def _validate_git_head(value: object, *, source: str) -> str:
+    candidate = str(value).strip()
+    if not GIT_HEAD_PATTERN.fullmatch(candidate):
+        raise SoybeanWeeklyUpdateError(
+            f"{GIT_HEAD_FAILURE_MESSAGE}"
+            f"{source}必须是40位十六进制Git提交哈希。"
+        )
+    return candidate.lower()
+
+
+def resolve_deployment_git_head(
+    project_root: Path,
+    *,
+    explicit_git_head: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve one validated deployment commit before any USDA request."""
+
+    environment = os.environ if env is None else env
+    if explicit_git_head is not None:
+        return _validate_git_head(
+            explicit_git_head,
+            source="命令行参数 --git-head ",
+        )
+
+    if GIT_HEAD_ENVIRONMENT_VARIABLE in environment:
+        return _validate_git_head(
+            environment[GIT_HEAD_ENVIRONMENT_VARIABLE],
+            source=f"环境变量 {GIT_HEAD_ENVIRONMENT_VARIABLE} ",
+        )
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        raise SoybeanWeeklyUpdateError(GIT_HEAD_FAILURE_MESSAGE) from None
+    if result.returncode != 0:
+        raise SoybeanWeeklyUpdateError(GIT_HEAD_FAILURE_MESSAGE)
+    try:
+        return _validate_git_head(
+            result.stdout,
+            source="git rev-parse HEAD 的输出",
+        )
+    except SoybeanWeeklyUpdateError:
+        raise SoybeanWeeklyUpdateError(GIT_HEAD_FAILURE_MESSAGE) from None
 
 
 def _json_default(value: object) -> object:
@@ -652,6 +698,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- 状态：`{audit['status']}`",
         f"- 运行模式：`{audit['run_mode']}`",
         f"- 当前年度：`{audit['current_year']}`",
+        f"- Git提交：`{audit['git_head']}`",
         f"- 开始时间（UTC）：`{audit['started_at_utc']}`",
         f"- 结束时间（UTC）：`{audit.get('finished_at_utc')}`",
         f"- 是否发现业务变化：`{str(audit.get('business_change_found', False)).lower()}`",
@@ -751,6 +798,7 @@ def _base_audit(
     force: bool,
     project_root: Path,
     paths: Mapping[str, Path],
+    git_head: str,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -764,7 +812,7 @@ def _base_audit(
         "force": force,
         "run_mode": "dry_run" if dry_run else "publish",
         "api_endpoint": NASS_API_ENDPOINT,
-        "git_head": _git_head(project_root),
+        "git_head": git_head,
         "business_comparison_excluded_fields": sorted(PROVENANCE_COLUMNS),
         "old_latest_week": None,
         "new_latest_week": None,
@@ -805,9 +853,16 @@ def run_soybean_crop_weekly_update(
     now: datetime | None = None,
     sleep: Callable[[float], None] | None = None,
     env: Mapping[str, str] | None = None,
+    git_head: str | None = None,
 ) -> dict[str, Any]:
     """Fetch one current year, validate a complete pair, and publish safely."""
 
+    environment = os.environ if env is None else env
+    deployment_git_head = resolve_deployment_git_head(
+        project_root,
+        explicit_git_head=git_head,
+        env=environment,
+    )
     started_at = _utc_now(now)
     reporting_date = new_york_reporting_date(started_at)
     current_year = reporting_date.year
@@ -838,6 +893,7 @@ def run_soybean_crop_weekly_update(
         force=force,
         project_root=project_root,
         paths=paths,
+        git_head=deployment_git_head,
     )
 
     def finish(status: str, *, secret: str = "") -> dict[str, Any]:
@@ -854,6 +910,10 @@ def run_soybean_crop_weekly_update(
         return audit
 
     try:
+        logger.info(
+            "Resolved deployment Git commit git_head=%s",
+            deployment_git_head,
+        )
         if not force and not is_soybean_reporting_season(reporting_date):
             logger.info(
                 "Skipped outside season current_year=%s reporting_date=%s",
@@ -862,7 +922,6 @@ def run_soybean_crop_weekly_update(
             )
             return finish("out_of_season")
 
-        environment = os.environ if env is None else env
         secret = str(environment.get("NASS_API_KEY", ""))
         if not secret:
             audit["error"] = "缺少 NASS_API_KEY；没有调用 USDA API。"

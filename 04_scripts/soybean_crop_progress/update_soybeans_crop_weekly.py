@@ -37,6 +37,13 @@ def main() -> int:
         action="store_true",
         help="Run even outside April 1 through November 30 in America/New_York.",
     )
+    parser.add_argument(
+        "--git-head",
+        help=(
+            "Explicit 40-character deployment Git commit. Overrides "
+            "MARKET_DATA_GIT_HEAD and local git discovery."
+        ),
+    )
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--retries", type=int, default=2)
     args = parser.parse_args()
@@ -48,6 +55,7 @@ def main() -> int:
             force=args.force,
             timeout=args.timeout,
             retries=args.retries,
+            git_head=args.git_head,
         )
     except SoybeanWeeklyUpdateError as exc:
         print(f"美豆周度更新失败：{exc}")
@@ -59,6 +67,7 @@ def main() -> int:
     print(f"状态：{audit['status']}")
     print(f"运行模式：{audit['run_mode']}")
     print(f"当前年度：{audit['current_year']}")
+    print(f"Git提交：{audit['git_head']}")
     if audit.get("request_record_counts"):
         print("四组请求记录数：")
         for name, count in audit["request_record_counts"].items():
