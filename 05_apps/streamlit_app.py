@@ -15,8 +15,9 @@ if str(APPS_DIR) not in sys.path:
 
 from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
-from home import get_external_app_url, render_home
+from home import apply_home_navigation_request, get_external_app_url, render_home
 from soybean_crop_progress_page import render_soybean_crop_progress_page
+from ui_theme import inject_workspace_theme, render_sidebar_navigation
 
 
 PAGE_TITLE = "油脂油料价差动态看板"
@@ -42,6 +43,13 @@ WORKSPACE_PAGES = [
     "外资与重点席位",
     "运行监控",
 ]
+SIDEBAR_NAVIGATION = (
+    ("工作台", (("工作台首页", "首页", None),)),
+    ("市场行情", (("价差动态", "价差动态看板", None), ("国内现货（基差与一口价）", "基差/一口价", None))),
+    ("周度跟踪", (("美豆周度跟踪", SOYBEAN_CROP_PAGE_TITLE, None),)),
+    ("国际供需", (("USDA供需平衡", USDA_PAGE_TITLE, None), ("Oil World供需平衡", "", "OIL_WORLD_DASHBOARD_URL"))),
+    ("研究工具", (("外资与重点席位", "外资与重点席位", None), ("运行监控", "运行监控", None))),
+)
 FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
 BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "品种间套利"]
@@ -509,19 +517,26 @@ def render_usda_page() -> None:
         st.info("尚未配置 USDA 平衡表地址。请在报告目录配置或 USDA_DASHBOARD_URL 环境变量中设置访问地址。")
 
 
+def apply_workspace_navigation_request() -> None:
+    """Accept a sidebar navigation request before any page widget is created."""
+    requested_page = st.query_params.get("workspace_page")
+    if isinstance(requested_page, str) and requested_page in WORKSPACE_PAGES:
+        st.session_state.selected_workspace_page = requested_page
+        del st.query_params["workspace_page"]
+
+
 def main() -> None:
     st.set_page_config(page_title="油脂油料研究工作台", layout="wide")
     if "selected_workspace_page" not in st.session_state:
         st.session_state.selected_workspace_page = "首页"
+    apply_home_navigation_request()
+    apply_workspace_navigation_request()
+    inject_workspace_theme()
 
     with st.sidebar:
-        st.subheader("研究工作台")
-        selected_page = st.radio(
-            "页面",
-            WORKSPACE_PAGES,
-            key="selected_workspace_page",
-            label_visibility="collapsed",
-        )
+        render_sidebar_navigation(SIDEBAR_NAVIGATION, st.session_state.selected_workspace_page)
+
+    selected_page = st.session_state.selected_workspace_page
 
     if selected_page == "首页":
         render_home(REPORT_CATALOG_FILE)

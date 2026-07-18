@@ -11,7 +11,8 @@ FORMAL_ENTRY = PROJECT_ROOT / "05_apps" / "streamlit_app.py"
 
 def test_basis_page_uses_formal_database_and_renders_modules() -> None:
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
-    app.radio[0].set_value("基差/一口价").run(timeout=20)
+    app.session_state["selected_workspace_page"] = "基差/一口价"
+    app.run(timeout=20)
 
     assert not app.exception
     assert any("当前读取：正式数据" in item.value for item in app.success)

@@ -19,7 +19,8 @@ MATCHING_METHODOLOGY_NOTE = (
 
 def test_main_workspace_renders_six_soybean_tabs_and_harvested_empty_state() -> None:
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
-    app.radio[0].set_value("美豆种植生长").run(timeout=30)
+    app.session_state["selected_workspace_page"] = "美豆种植生长"
+    app.run(timeout=30)
 
     assert not app.exception
     assert [tab.label for tab in app.tabs] == [
