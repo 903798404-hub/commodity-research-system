@@ -12,8 +12,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "02_configs" / "app_catalog.yaml"
-HANDBOOK_PATH = ROOT / "07_docs" / "农产品研究系统更新手册.md"
-WORKFLOW_PATH = ROOT / "07_docs" / "开发与部署工作流.md"
+HANDBOOK_PATH = ROOT / "07_docs" / "06_日常运行与数据更新手册.md"
+WORKFLOW_PATH = ROOT / "07_docs" / "03_标准开发与生产发布规范.md"
 
 EXPECTED_APP_IDS = {"main_dashboard", "usda_dashboard", "oil_world_dashboard"}
 ALLOWED_STATUSES = {"production", "pending_verification", "retired"}
@@ -54,8 +54,13 @@ DOCUMENTED_LOCAL_PATHS = (
     "docker-compose.yml",
     "04_scripts/update_basis_data.py",
     "04_scripts/server_update_spreads.py",
-    "07_docs/开发与部署工作流.md",
-    "07_docs/农产品研究系统更新手册.md",
+    "07_docs/00_文档索引与适用范围.md",
+    "07_docs/01_系统架构与项目边界.md",
+    "07_docs/02_数据与输出规范.md",
+    "07_docs/03_标准开发与生产发布规范.md",
+    "07_docs/04_开发与发布检查清单.md",
+    "07_docs/05_执行环境与跨环境传输规范.md",
+    "07_docs/06_日常运行与数据更新手册.md",
     "11_独立应用/USDA平衡表/configs/usda_report_version.json",
     "11_独立应用/USDA平衡表/scripts/buildData.ts",
     "11_独立应用/USDA平衡表/scripts/checkData.ts",
@@ -172,14 +177,13 @@ class ApplicationCatalogTests(unittest.TestCase):
             script_name = command.removeprefix("pnpm run ")
             self.assertIn(script_name, package["scripts"])
 
-    def test_handbook_matches_catalog_and_documents_have_mutual_links(self) -> None:
+    def test_current_handbook_and_workflow_match_catalog_and_link_each_other(self) -> None:
         for app in self.applications:
-            self.assertIn(app["display_name"], self.handbook)
-            self.assertIn(app["production_url"], self.handbook)
-            self.assertIn(f"`{app['container_name']}`", self.handbook)
-            self.assertIn(f"| {app['host_port']} |", self.handbook)
-        self.assertIn("开发与部署工作流.md", self.handbook)
-        self.assertIn("农产品研究系统更新手册.md", self.workflow)
+            self.assertIn(f"`{app['container_name']}`", self.workflow)
+            self.assertNotIn(app["production_url"], self.handbook)
+        self.assertIn("02_configs/app_catalog.yaml", self.handbook)
+        self.assertIn("03_标准开发与生产发布规范.md", self.handbook)
+        self.assertIn("06_日常运行与数据更新手册.md", self.workflow)
 
 
 if __name__ == "__main__":

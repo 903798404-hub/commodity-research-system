@@ -2614,7 +2614,7 @@ def test_static_contract_rejects_usda_in_formal_switch_scope(
 
 def test_operator_docs_do_not_offer_legacy_spread_build_switch() -> None:
     documents = (
-        "07_docs/农产品研究系统更新手册.md",
+        "07_docs/06_日常运行与数据更新手册.md",
         "09_deploy/SERVER_DAILY_UPDATE.md",
         "09_deploy/README_TENCENT_LIGHTHOUSE.md",
     )

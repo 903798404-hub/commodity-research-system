@@ -23,10 +23,14 @@
 
 ## 快速入口
 
+- 文档唯一入口：[`07_docs/00_文档索引与适用范围.md`](07_docs/00_文档索引与适用范围.md)
 - 项目入口：`00_项目入口/从这里开始.md`
-- 目录索引：`07_docs/目录索引.md`
-- 中文化规则：`07_docs/项目中文化规则.md`
-- 项目架构：`07_docs/architecture.md`
+- 系统架构与项目边界：[`07_docs/01_系统架构与项目边界.md`](07_docs/01_系统架构与项目边界.md)
+- 数据与输出规则：[`07_docs/02_数据与输出规范.md`](07_docs/02_数据与输出规范.md)
+- 标准开发与生产发布：[`07_docs/03_标准开发与生产发布规范.md`](07_docs/03_标准开发与生产发布规范.md)
+- 开发与发布检查清单：[`07_docs/04_开发与发布检查清单.md`](07_docs/04_开发与发布检查清单.md)
+- 执行环境与跨环境传输：[`07_docs/05_执行环境与跨环境传输规范.md`](07_docs/05_执行环境与跨环境传输规范.md)
+- 日常运行与数据更新：[`07_docs/06_日常运行与数据更新手册.md`](07_docs/06_日常运行与数据更新手册.md)
 
 ## 手动基差文件
 
@@ -67,4 +71,4 @@ pnpm --dir 05_apps/oil_world_dashboard dev --host 127.0.0.1 --port 5175
 
 整套服务使用根目录 `docker-compose.yml` 管理：`spread-dashboard` 提供 Streamlit 看板，`usda-dashboard` 从仓库内 USDA 子项目构建静态站点。服务器只需要部署一个 `market-data` 项目目录。
 
-`spread-dashboard` 的正式发布必须使用 [`09_deploy/spread_release/README.md`](09_deploy/spread_release/README.md) 定义的显式镜像、发布清单和 Image ID 硬校验流程；不得再用根 Compose 隐式命名、`latest`、`new` 或 `up --build` 作为正式切换入口。
+`spread-dashboard` 的发布规则以 [`07_docs/03_标准开发与生产发布规范.md`](07_docs/03_标准开发与生产发布规范.md) 为准。`09_deploy/spread_release/` 当前仍是候选实现，真实 Docker Compose 门槛通过前不得用于生产部署；任何正式切换都不得使用根 Compose 隐式命名、`latest`、`new` 或 `up --build`。

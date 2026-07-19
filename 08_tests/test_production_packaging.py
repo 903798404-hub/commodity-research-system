@@ -12,15 +12,23 @@ USDA_ROOT = REPOSITORY / "11_独立应用" / "USDA平衡表"
 
 class ProductionPackagingTests(unittest.TestCase):
     def test_windows_local_docker_is_not_a_release_gate(self) -> None:
-        required_rules = (
+        common_rules = (
             "Windows 本地没有 Docker、Podman 或 WSL 属于正常状态",
             "本地不负责生产镜像构建",
-            "不得再建议用户安装 Docker Desktop、Podman 或 WSL",
-            "正式部署直接使用同一个镜像 ID",
         )
-        for relative_path in ("AGENTS.md", "07_docs/开发与部署工作流.md"):
+        document_rules = {
+            "AGENTS.md": (
+                "不得再建议用户安装 Docker Desktop、Podman 或 WSL",
+                "正式部署直接使用同一个镜像 ID",
+            ),
+            "07_docs/03_标准开发与生产发布规范.md": (
+                "不得要求为本项目安装这些工具",
+                "候选验收与正式部署必须复用完全相同的 Image ID",
+            ),
+        }
+        for relative_path, specific_rules in document_rules.items():
             content = (REPOSITORY / relative_path).read_text(encoding="utf-8")
-            for rule in required_rules:
+            for rule in (*common_rules, *specific_rules):
                 self.assertIn(rule, content)
 
     def test_spread_image_build_context_includes_home_and_catalog(self) -> None:
