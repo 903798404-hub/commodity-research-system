@@ -7,7 +7,7 @@ if [[ $# -lt 2 || $# -gt 3 ]]; then
 fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repository="$(cd -- "${script_dir}/../.." && pwd)"
+tool_repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 release_directory="$(cd -- "$1" && pwd)"
 deployment_plan="$(cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")"
 health_url="${3:-http://127.0.0.1:8501/_stcore/health}"
@@ -21,7 +21,7 @@ readiness_failure="${release_directory}/production_readiness.failure.json"
 
 python3 "${verifier}" \
     --phase pre-deploy \
-    --repository "${repository}" \
+    --tool-repo-root "${tool_repo_root}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}"
@@ -33,17 +33,25 @@ import sys
 
 plan = json.load(open(sys.argv[1], encoding="utf-8"))
 print(plan["release_id"])
-print(plan["expected_image_id"])
+print(plan["candidate_image_id"])
 print(plan["production_env_file"])
+print(plan["production_compose_file"])
+print(plan["production_project_dir"])
+print(plan["compose_project"])
+print(plan["production_service"])
 PY
 )
-if [[ "${#plan_identity[@]}" -ne 3 ]]; then
+if [[ "${#plan_identity[@]}" -ne 7 ]]; then
     echo "deployment plan identity could not be read" >&2
     exit 65
 fi
 RELEASE_ID="${plan_identity[0]}"
 EXPECTED_IMAGE_ID="${plan_identity[1]}"
 production_env_file="${plan_identity[2]}"
+production_compose_file="${plan_identity[3]}"
+production_project_dir="${plan_identity[4]}"
+compose_project="${plan_identity[5]}"
+production_service="${plan_identity[6]}"
 
 switch_started=0
 deployment_succeeded=0
@@ -64,10 +72,10 @@ trap rollback_on_failure ERR
 switch_started=1
 docker compose \
     --env-file "${production_env_file}" \
-    --project-name market-data \
-    --project-directory "${repository}" \
-    -f "${repository}/docker-compose.yml" \
-    up -d --no-build --no-deps spread-dashboard
+    --project-name "${compose_project}" \
+    --project-directory "${production_project_dir}" \
+    -f "${production_compose_file}" \
+    up -d --no-build --no-deps "${production_service}"
 
 initial_restart_count="$(
     docker inspect --format '{{.RestartCount}}' spread-dashboard
@@ -75,7 +83,7 @@ initial_restart_count="$(
 
 python3 "${verifier}" \
     --phase post-deploy \
-    --repository "${repository}" \
+    --tool-repo-root "${tool_repo_root}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}"
@@ -91,7 +99,7 @@ python3 "${readiness_waiter}" \
 
 python3 "${verifier}" \
     --phase record-deployment \
-    --repository "${repository}" \
+    --tool-repo-root "${tool_repo_root}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}" \

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,7 +15,9 @@ sys.path.insert(0, str(CONTRACT_DIR))
 
 from wait_for_service_ready import (  # noqa: E402
     DEFAULT_READINESS_POLICY,
+    LOG_MAX_BYTES,
     ReadinessFailure,
+    build_log_summary,
     validate_readiness_policy,
     wait_for_service_ready,
 )
@@ -48,11 +51,15 @@ class FakeRuntime:
         inspect_records: list[dict[str, object]] | None = None,
         clock: FakeClock | None = None,
         request_durations: list[float] | None = None,
+        log_text: str = "last safe application log",
+        log_error: bool = False,
     ) -> None:
         self.requests = list(requests)
         self.inspect_records = list(inspect_records or [])
         self.clock = clock
         self.request_durations = list(request_durations or [])
+        self.log_text = log_text
+        self.log_error = log_error
         self.request_calls = 0
         self.inspect_calls = 0
         self.log_calls = 0
@@ -78,7 +85,9 @@ class FakeRuntime:
         assert container == "spread-candidate"
         assert tail == 200
         self.log_calls += 1
-        return "last safe application log"
+        if self.log_error:
+            raise RuntimeError("simulated docker log failure with SECRET_TOKEN=hidden")
+        return self.log_text
 
 
 def running_inspect(**overrides: object) -> dict[str, object]:
@@ -226,7 +235,8 @@ def test_request_timeout_consumes_total_timeout_and_writes_diagnostics() -> None
     assert result["classification"] == "readiness_timeout"
     assert result["transient_failure_counts"] == {"request_timeout": 1}
     assert result["elapsed_seconds"] == 91.0
-    assert result["container_logs_tail_200"] == "last safe application log"
+    assert result["log_summary"]["tail_text"] == "last safe application log"
+    assert result["log_summary"]["collection_status"] == "captured"
     assert "env" not in json.dumps(result).lower()
 
 
@@ -328,3 +338,77 @@ def test_health_url_must_be_exact_and_must_not_contain_credentials() -> None:
                 initial_restart_count=0,
                 policy=DEFAULT_READINESS_POLICY,
             )
+
+
+def test_success_and_failure_use_the_same_bounded_redacted_log_summary() -> None:
+    sensitive_logs = (
+        "WARNING startup delay\n"
+        "SECRET_TOKEN=do-not-record\n"
+        "Authorization: Bearer also-secret\n"
+        "ERROR final diagnostic\n"
+    )
+    success_runtime = FakeRuntime(
+        [response(), response()],
+        log_text=sensitive_logs,
+    )
+
+    success = run(success_runtime)
+    success_summary = success["log_summary"]
+
+    assert success_summary["collection_status"] == "captured"
+    assert success_summary["source_bytes"] == len(sensitive_logs.encode("utf-8"))
+    assert success_summary["warning_count"] == 1
+    assert success_summary["error_count"] == 1
+    assert success_summary["sha256"] == hashlib.sha256(
+        success_summary["tail_text"].encode("utf-8")
+    ).hexdigest()
+    serialized = json.dumps(success_summary)
+    assert "do-not-record" not in serialized
+    assert "also-secret" not in serialized
+    assert serialized.count("[REDACTED]") == 2
+
+    clock = FakeClock()
+    failure_runtime = FakeRuntime(
+        [response(exit_code=28, status=None)],
+        clock=clock,
+        request_durations=[91],
+        log_text=sensitive_logs,
+    )
+    with pytest.raises(ReadinessFailure) as captured:
+        run(failure_runtime, clock)
+    failure_summary = captured.value.result["log_summary"]
+    assert set(failure_summary) == set(success_summary)
+    assert failure_summary["sha256"] == success_summary["sha256"]
+
+
+def test_log_summary_enforces_line_and_byte_limits() -> None:
+    logs = "".join(f"line-{index:03d}-{'x' * 1000}\n" for index in range(250))
+
+    summary = build_log_summary(
+        logs,
+        collected_at_utc="2026-07-17T00:00:00Z",
+    )
+
+    assert summary["truncated"] is True
+    assert summary["tail_line_count"] <= 200
+    assert summary["stored_bytes"] <= LOG_MAX_BYTES
+    assert len(summary["tail_text"].encode("utf-8")) <= LOG_MAX_BYTES
+    assert summary["sha256"] == hashlib.sha256(
+        summary["tail_text"].encode("utf-8")
+    ).hexdigest()
+
+
+def test_log_collection_failure_is_a_controlled_non_sensitive_warning() -> None:
+    runtime = FakeRuntime(
+        [response(), response()],
+        log_error=True,
+    )
+
+    result = run(runtime)
+
+    summary = result["log_summary"]
+    assert summary["collection_status"] == "unavailable"
+    assert summary["collection_warning"] == "docker logs could not be read"
+    assert summary["tail_text"] == ""
+    assert "SECRET_TOKEN" not in json.dumps(summary)
+    assert "hidden" not in json.dumps(summary)

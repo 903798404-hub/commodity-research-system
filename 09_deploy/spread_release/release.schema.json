@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.1.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.3.0.json",
   "title": "spread-dashboard immutable release manifest",
   "type": "object",
   "additionalProperties": false,
@@ -9,6 +9,7 @@
     "application",
     "release_id",
     "git_commit",
+    "git_tree",
     "image_ref",
     "image_id",
     "image_oci_revision",
@@ -31,7 +32,7 @@
       "if": {
         "properties": {
           "schema_version": {
-            "const": "2.1.0"
+            "const": "2.3.0"
           }
         }
       },
@@ -47,7 +48,9 @@
       "enum": [
         "1.0.0",
         "2.0.0",
-        "2.1.0"
+        "2.1.0",
+        "2.2.0",
+        "2.3.0"
       ]
     },
     "application": {
@@ -58,6 +61,9 @@
       "pattern": "spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
     },
     "git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "git_tree": {
       "$ref": "#/$defs/fullGitCommit"
     },
     "image_ref": {

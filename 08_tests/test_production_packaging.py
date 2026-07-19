@@ -83,6 +83,7 @@ class ProductionPackagingTests(unittest.TestCase):
         dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
         for argument in (
             "MARKET_DATA_GIT_HEAD",
+            "MARKET_DATA_GIT_TREE",
             "MARKET_DATA_RELEASE_ID",
             "MARKET_DATA_BUILD_TIME",
             "MARKET_DATA_SOURCE",
@@ -96,6 +97,7 @@ class ProductionPackagingTests(unittest.TestCase):
         ):
             self.assertIn(label, dockerfile)
         self.assertIn("/app/RELEASE.json", dockerfile)
+        self.assertIn('"git_tree":tree', dockerfile)
         self.assertIn("chmod 0444 /app/RELEASE.json", dockerfile)
 
     def test_dynamic_data_and_sensitive_files_are_not_packaged(self) -> None:

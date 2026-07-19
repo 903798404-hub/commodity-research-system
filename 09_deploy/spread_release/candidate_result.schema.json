@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-candidate-result-1.2.0.json",
+  "title": "spread-dashboard validated candidate result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "application",
+    "release_id",
+    "git_commit",
+    "git_tree",
+    "image_ref",
+    "candidate_image_id",
+    "candidate_container_name",
+    "generated_at",
+    "status",
+    "identity",
+    "log_summary",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.2.0"
+    },
+    "application": {
+      "const": "spread-dashboard"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
+    },
+    "git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "git_tree": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "image_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_image_id": {
+      "$ref": "#/$defs/imageId"
+    },
+    "candidate_container_name": {
+      "type": "string",
+      "pattern": "[A-Za-z0-9][A-Za-z0-9_.-]+"
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 20
+    },
+    "status": {
+      "const": "candidate-validated"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config_image",
+        "actual_image_id",
+        "tag_image_id",
+        "release_image_id",
+        "oci_revision",
+        "runtime_git_commit",
+        "embedded_release_sha256"
+      ],
+      "properties": {
+        "config_image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actual_image_id": {
+          "$ref": "#/$defs/imageId"
+        },
+        "tag_image_id": {
+          "$ref": "#/$defs/imageId"
+        },
+        "release_image_id": {
+          "$ref": "#/$defs/imageId"
+        },
+        "oci_revision": {
+          "$ref": "#/$defs/fullGitCommit"
+        },
+        "runtime_git_commit": {
+          "$ref": "#/$defs/fullGitCommit"
+        },
+        "embedded_release_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "log_summary": {
+      "$ref": "#/$defs/logSummary"
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "readiness",
+        "http",
+        "pages",
+        "formal_containers_unchanged",
+        "formal_git_unchanged",
+        "data_files_unchanged",
+        "production_switch_performed"
+      ],
+      "properties": {
+        "readiness": {
+          "type": "object"
+        },
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "health",
+            "host_config",
+            "root"
+          ],
+          "properties": {
+            "health": {
+              "const": 200
+            },
+            "host_config": {
+              "const": 200
+            },
+            "root": {
+              "const": 200
+            }
+          }
+        },
+        "pages": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "passed"
+            }
+          }
+        },
+        "formal_containers_unchanged": {
+          "const": true
+        },
+        "formal_git_unchanged": {
+          "const": true
+        },
+        "data_files_unchanged": {
+          "const": true
+        },
+        "production_switch_performed": {
+          "const": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fullGitCommit": {
+      "type": "string",
+      "pattern": "[0-9a-f]{40}"
+    },
+    "imageId": {
+      "type": "string",
+      "pattern": "sha256:[0-9a-f]{64}"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "[0-9a-f]{64}"
+    },
+    "logSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collection_status",
+        "collected_at_utc",
+        "requested_tail_lines",
+        "max_bytes",
+        "source_bytes",
+        "stored_bytes",
+        "sha256",
+        "truncated",
+        "tail_line_count",
+        "tail_text",
+        "warning_count",
+        "error_count",
+        "collection_warning"
+      ],
+      "properties": {
+        "collection_status": {
+          "enum": [
+            "captured",
+            "unavailable"
+          ]
+        },
+        "collected_at_utc": {
+          "type": "string",
+          "minLength": 20
+        },
+        "requested_tail_lines": {
+          "const": 200
+        },
+        "max_bytes": {
+          "const": 65536
+        },
+        "source_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stored_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "tail_line_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "tail_text": {
+          "type": "string"
+        },
+        "warning_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "collection_warning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "collection_status": {
+                "const": "captured"
+              }
+            },
+            "required": [
+              "collection_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "collection_warning": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "collection_warning": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import copy
 import hashlib
 import json
@@ -11,7 +12,6 @@ import sys
 from pathlib import Path
 
 import jsonschema
-import pandas as pd
 import pytest
 import yaml
 
@@ -20,10 +20,12 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 CONTRACT_DIR = REPOSITORY / "09_deploy" / "spread_release"
 sys.path.insert(0, str(CONTRACT_DIR))
 
+import release_contract as release_contract_module  # noqa: E402
 from release_contract import (  # noqa: E402
     APPLICATION,
     CANDIDATE_RUNTIME_ENVIRONMENT,
     COMPOSE_PROJECT,
+    CommandRunner,
     ContractError,
     DATA_SPECS,
     DEFAULT_READINESS_POLICY,
@@ -32,16 +34,20 @@ from release_contract import (  # noqa: E402
     PRODUCTION_CONTAINER,
     SPREAD_PRIMARY_KEY,
     collect_data_baseline,
+    create_candidate_result,
     create_deployment_plan,
     create_manifest,
     load_deployment_plan,
     load_manifest_bundle,
+    load_candidate_result,
+    load_deployment_result,
     load_schema,
     parse_production_env,
     resolve_spread_image_offline,
     validate_deployment_plan,
     validate_full_git_commit,
     validate_manifest,
+    validate_artifact_manifest,
     validate_production_env,
     validate_release_image_ref,
     validate_repository_static,
@@ -53,12 +59,16 @@ from release_contract import (  # noqa: E402
     verify_pre_deploy,
     verify_pre_rollback,
     write_deployment_plan,
+    write_artifact_manifest,
+    write_candidate_result,
     write_release_bundle,
     write_result,
 )
+from wait_for_service_ready import build_log_summary  # noqa: E402
 
 
 GIT_COMMIT = "a" * 40
+GIT_TREE = "c" * 40
 OLD_GIT_COMMIT = "b" * 40
 RELEASE_ID = "spread-20260717-aaaaaaaaaaaa-b01"
 IMAGE_REF = f"market-data-spread-dashboard:{RELEASE_ID}"
@@ -75,17 +85,37 @@ PRODUCTION_OIL_WORLD_URL = "https://dashboards.example.com/oil-world/"
 
 
 class FakeGitRunner:
-    def __init__(self, *, head: str = GIT_COMMIT, status: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        head: str = GIT_COMMIT,
+        tree: str = GIT_TREE,
+        status: str = "",
+    ) -> None:
         self.head = head
+        self.tree = tree
         self.status = status
+        self.commands: list[tuple[list[str], Path | None]] = []
 
     def run(self, command, *, cwd=None, env=None) -> str:
-        del cwd, env
+        del env
+        self.commands.append((list(command), cwd))
         if command[:2] == ["git", "status"]:
             return self.status
         if command == ["git", "rev-parse", "HEAD"]:
             return self.head + "\n"
+        if command == ["git", "rev-parse", "HEAD^{tree}"]:
+            return self.tree + "\n"
         raise AssertionError(f"unexpected git command: {command}")
+
+
+class RecordingRealGitRunner(CommandRunner):
+    def __init__(self) -> None:
+        self.commands: list[tuple[list[str], Path | None]] = []
+
+    def run(self, command, *, cwd=None, env=None) -> str:
+        self.commands.append((list(command), cwd))
+        return super().run(command, cwd=cwd, env=env)
 
 
 class MultipleImageInspectRunner:
@@ -95,20 +125,54 @@ class MultipleImageInspectRunner:
         return json.dumps([{"Id": IMAGE_ID}, {"Id": ROLLBACK_ID}])
 
 
+class ContainerInspectRunner:
+    def __init__(self, environment: list[str] | None) -> None:
+        self.environment = environment
+
+    def run(self, command, *, cwd=None, env=None) -> str:
+        del cwd, env
+        assert command == ["docker", "inspect", CANDIDATE_CONTAINER]
+        return json.dumps(
+            [
+                {
+                    "Image": IMAGE_ID,
+                    "Config": {
+                        "Image": IMAGE_REF,
+                        "Env": self.environment,
+                    },
+                }
+            ]
+        )
+
+
 class FakeReleaseRuntime:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        git_commit: str = GIT_COMMIT,
+        git_tree: str = GIT_TREE,
+        release_id: str = RELEASE_ID,
+        image_ref: str = IMAGE_REF,
+        repository_root: Path = REPOSITORY,
+    ) -> None:
+        self.git_commit = git_commit
+        self.git_tree = git_tree
+        self.release_id = release_id
+        self.image_ref = image_ref
+        self.repository_root = repository_root.resolve()
         self.release_image_id = IMAGE_ID
         self.rollback_image_id = ROLLBACK_ID
         self.labels = {
-            "org.opencontainers.image.revision": GIT_COMMIT,
-            "org.opencontainers.image.version": RELEASE_ID,
+            "org.opencontainers.image.revision": git_commit,
+            "org.opencontainers.image.version": release_id,
             "org.opencontainers.image.created": BUILD_TIME,
             "org.opencontainers.image.source": SOURCE,
         }
         self.release_json = {
             "application": APPLICATION,
-            "release_id": RELEASE_ID,
-            "git_commit": GIT_COMMIT,
+            "release_id": release_id,
+            "git_commit": git_commit,
+            "git_tree": git_tree,
             "build_time": BUILD_TIME,
             "source": SOURCE,
         }
@@ -116,13 +180,15 @@ class FakeReleaseRuntime:
         self.production_release_json = dict(self.release_json)
         self.candidate_record = {
             "image_id": IMAGE_ID,
-            "config_image": IMAGE_REF,
+            "config_image": image_ref,
+            "runtime_git_commit": git_commit,
         }
         self.production_record = {
             "image_id": IMAGE_ID,
-            "config_image": IMAGE_REF,
+            "config_image": image_ref,
+            "runtime_git_commit": git_commit,
         }
-        self.compose_image = IMAGE_REF
+        self.compose_image = image_ref
         self.compose_command: object = [
             "streamlit",
             "run",
@@ -151,7 +217,7 @@ class FakeReleaseRuntime:
         self.candidate_container_exists = False
 
     def image_record(self, image_ref: str) -> dict[str, object]:
-        if image_ref == IMAGE_REF:
+        if image_ref == self.image_ref:
             return {"id": self.release_image_id, "labels": dict(self.labels)}
         if image_ref in {ROLLBACK_REF, LATEST_REF}:
             return {
@@ -183,11 +249,11 @@ class FakeReleaseRuntime:
         return self._release_sha256(self.release_json)
 
     def read_image_release(self, image_ref: str) -> dict[str, str]:
-        assert image_ref == IMAGE_REF
+        assert image_ref == self.image_ref
         return dict(self.image_release_json)
 
     def image_release_sha256(self, image_ref: str) -> str:
-        assert image_ref == IMAGE_REF
+        assert image_ref == self.image_ref
         return self._release_sha256(self.image_release_json)
 
     def read_container_release(self, container_name: str) -> dict[str, str]:
@@ -220,14 +286,13 @@ class FakeReleaseRuntime:
         project_directory: Path | None = None,
         compose_file: Path | None = None,
     ) -> tuple[dict[str, object], str, list[str]]:
-        assert repository == REPOSITORY
-        assert image_ref in {IMAGE_REF, ROLLBACK_REF}
+        assert repository.resolve() == self.repository_root
+        assert image_ref in {self.image_ref, ROLLBACK_REF}
         project_root = (project_directory or repository).resolve()
-        assert (compose_file or repository / "docker-compose.yml").resolve() == (
-            repository / "docker-compose.yml"
-        ).resolve()
+        assert (compose_file or repository / "docker-compose.yml").is_file()
         resolved_environment = {
             **CANDIDATE_RUNTIME_ENVIRONMENT,
+            "MARKET_DATA_GIT_HEAD": self.git_commit,
             **(environment or {}),
         }
         is_candidate = all(
@@ -280,6 +345,7 @@ class FakeReleaseRuntime:
                     "environment": {
                         key: resolved_environment[key]
                         for key in (
+                            "MARKET_DATA_GIT_HEAD",
                             "USDA_DASHBOARD_URL",
                             "OIL_WORLD_DASHBOARD_URL",
                         )
@@ -407,53 +473,67 @@ def create_production_env(
     return path, environment
 
 
-def create_candidate_result(
+def build_candidate_result_fixture(
+    manifest: dict[str, object],
+    runtime: FakeReleaseRuntime,
+    *,
+    page_status: str = "passed",
+) -> dict[str, object]:
+    return create_candidate_result(
+        manifest=manifest,
+        runtime=runtime,
+        readiness={
+            "schema_version": "1.1.0",
+            "status": "ready",
+            "container": manifest["candidate_container_name"],
+            "expected_image_id": manifest["image_id"],
+            "policy": manifest["readiness_policy"],
+            "log_summary": build_log_summary(
+                "candidate fixture WARNING\ncandidate fixture ready\n",
+                collected_at_utc=BUILD_TIME,
+            ),
+        },
+        checks={
+            "http": {
+                "health": 200,
+                "host_config": 200,
+                "root": 200,
+            },
+            "pages": {"status": page_status},
+            "formal_containers_unchanged": True,
+            "formal_git_unchanged": True,
+            "data_files_unchanged": True,
+            "production_switch_performed": False,
+        },
+        generated_at=BUILD_TIME,
+    )
+
+
+def write_candidate_result_fixture(
     tmp_path: Path,
     manifest: dict[str, object],
+    runtime: FakeReleaseRuntime,
+    *,
+    page_status: str = "passed",
 ) -> Path:
     path = (tmp_path / "candidate_result.json").resolve()
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": "candidate-result-v1",
-                "application": APPLICATION,
-                "release_id": manifest["release_id"],
-                "git_commit": manifest["git_commit"],
-                "image_ref": manifest["image_ref"],
-                "image_id": manifest["image_id"],
-                "status": "candidate-validated",
-                "three_way_image_id_equal": True,
-                "formal_containers_unchanged": True,
-                "formal_git_unchanged": True,
-                "data_files_unchanged": True,
-                "production_switch_performed": False,
-                "identity": {
-                    "config_image": manifest["image_ref"],
-                    "actual_image_id": manifest["image_id"],
-                    "tag_image_id": manifest["image_id"],
-                    "manifest_image_id": manifest["image_id"],
-                    "oci_revision": manifest["git_commit"],
-                },
-                "http": {
-                    "health": 200,
-                    "host_config": 200,
-                    "root": 200,
-                },
-                "pages": {"status": "passed"},
-                "readiness": {
-                    "status": "ready",
-                    "expected_image_id": manifest["image_id"],
-                    "policy": manifest["readiness_policy"],
-                },
-            },
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    result = build_candidate_result_fixture(
+        manifest,
+        runtime,
+        page_status=page_status,
     )
+    write_candidate_result(result, path)
     return path
+
+
+def create_production_project(tmp_path: Path) -> tuple[Path, Path]:
+    production_project_dir = (tmp_path / "production-project").resolve()
+    production_project_dir.mkdir()
+    production_compose_file = production_project_dir / "docker-compose.yml"
+    shutil.copyfile(REPOSITORY / "docker-compose.yml", production_compose_file)
+    for name in ("01_data", "06_outputs", "10_logs"):
+        (production_project_dir / name).mkdir()
+    return production_project_dir, production_compose_file
 
 
 def build_deployment_plan(
@@ -465,10 +545,18 @@ def build_deployment_plan(
         tmp_path,
         manifest,
     )
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
     plan = create_deployment_plan(
-        repository=REPOSITORY,
-        production_project_directory=REPOSITORY,
+        tool_repo_root=REPOSITORY,
+        production_compose_file=production_compose_file,
+        production_project_dir=production_project_dir,
         candidate_result_file=candidate_result_file,
         production_env_file=production_env_file,
         manifest=manifest,
@@ -477,6 +565,61 @@ def build_deployment_plan(
         created_at=BUILD_TIME,
     )
     return plan, production_env_file, production_environment
+
+
+def build_deployment_result(
+    tmp_path: Path,
+    manifest: dict[str, object],
+    plan: dict[str, object],
+) -> dict[str, object]:
+    readiness_path = (tmp_path / "production_readiness.json").resolve()
+    readiness = {
+        "status": "ready",
+        "container": PRODUCTION_CONTAINER,
+        "expected_image_id": manifest["image_id"],
+        "policy": manifest["readiness_policy"],
+        "last_http_result": {"http_status": 200},
+    }
+    readiness_path.write_text(
+        json.dumps(readiness, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    plan_path = (tmp_path / "sealed-plan-reference.json").resolve()
+    plan_path.write_text(
+        json.dumps(plan, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "schema_version": "1.1.0",
+        "application": APPLICATION,
+        "release_id": manifest["release_id"],
+        "git_commit": manifest["git_commit"],
+        "target_git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
+        "image_ref": manifest["image_ref"],
+        "candidate_image_id": manifest["image_id"],
+        "actual_image_id": manifest["image_id"],
+        "oci_revision": manifest["git_commit"],
+        "runtime_git_commit": manifest["git_commit"],
+        "runtime_git_commit_verified": True,
+        "container_name": PRODUCTION_CONTAINER,
+        "config_image": manifest["image_ref"],
+        "compose_project": plan["compose_project"],
+        "production_service": plan["production_service"],
+        "deployment_plan": str(plan_path),
+        "deployment_plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+        "production_env_file": plan["production_env_file"],
+        "production_env_sha256": plan["production_env_sha256"],
+        "production_compose_sha256": plan["production_compose_sha256"],
+        "readiness": readiness,
+        "readiness_result": str(readiness_path),
+        "readiness_result_sha256": hashlib.sha256(
+            readiness_path.read_bytes()
+        ).hexdigest(),
+        "http_status": 200,
+        "generated_at": BUILD_TIME,
+        "status": "production_verified",
+    }
 
 
 def docker_compose_is_available() -> bool:
@@ -503,6 +646,14 @@ def test_compose_declares_fixed_project_and_required_explicit_image() -> None:
         == "${SPREAD_IMAGE:?SPREAD_IMAGE must be set to an immutable release tag}"
     )
     assert "build" in spread
+    assert spread["environment"]["MARKET_DATA_GIT_HEAD"] == (
+        "${MARKET_DATA_GIT_HEAD:?"
+        "MARKET_DATA_GIT_HEAD must be explicitly set}"
+    )
+    assert "MARKET_DATA_GIT_HEAD" not in compose["services"]["usda-dashboard"].get(
+        "environment",
+        {},
+    )
 
 
 def test_offline_compose_resolution_rejects_missing_spread_image() -> None:
@@ -534,6 +685,7 @@ def test_offline_compose_resolution_rejects_old_latest_fallback() -> None:
 def test_real_compose_config_fails_without_spread_image() -> None:
     environment = os.environ.copy()
     environment.pop("SPREAD_IMAGE", None)
+    environment["MARKET_DATA_GIT_HEAD"] = GIT_COMMIT
     environment["USDA_DASHBOARD_URL"] = PRODUCTION_USDA_URL
     environment["OIL_WORLD_DASHBOARD_URL"] = PRODUCTION_OIL_WORLD_URL
     result = subprocess.run(
@@ -562,10 +714,45 @@ def test_real_compose_config_fails_without_spread_image() -> None:
 @pytest.mark.skipif(
     not docker_compose_is_available(), reason="local Docker Compose is unavailable"
 )
+def test_real_compose_config_fails_without_runtime_git_head() -> None:
+    environment = {
+        **os.environ,
+        "SPREAD_IMAGE": IMAGE_REF,
+        "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
+        "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
+    }
+    environment.pop("MARKET_DATA_GIT_HEAD", None)
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(REPOSITORY),
+            "-f",
+            str(REPOSITORY / "docker-compose.yml"),
+            "config",
+        ],
+        cwd=REPOSITORY,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "MARKET_DATA_GIT_HEAD must be explicitly set" in (
+        result.stderr + result.stdout
+    )
+
+
+@pytest.mark.skipif(
+    not docker_compose_is_available(), reason="local Docker Compose is unavailable"
+)
 def test_real_compose_config_resolves_exact_spread_image() -> None:
     environment = {
         **os.environ,
         "SPREAD_IMAGE": IMAGE_REF,
+        "MARKET_DATA_GIT_HEAD": GIT_COMMIT,
         "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
         "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
     }
@@ -639,6 +826,55 @@ def test_image_reference_must_resolve_to_exactly_one_image_object() -> None:
         runtime.image_record(IMAGE_REF)
 
 
+def test_docker_container_inspect_returns_only_validated_runtime_git_head() -> None:
+    runtime = DockerReleaseRuntime(
+        runner=ContainerInspectRunner(
+            [
+                "PATH=/usr/local/bin",
+                f"MARKET_DATA_GIT_HEAD={GIT_COMMIT}",
+                "SECRET_TOKEN=do-not-record",
+            ]
+        )
+    )
+
+    assert runtime.container_record(CANDIDATE_CONTAINER) == {
+        "image_id": IMAGE_ID,
+        "config_image": IMAGE_REF,
+        "runtime_git_commit": GIT_COMMIT,
+    }
+
+
+@pytest.mark.parametrize(
+    ("environment", "message"),
+    [
+        (None, "missing runtime MARKET_DATA_GIT_HEAD"),
+        (["PATH=/bin"], "missing runtime MARKET_DATA_GIT_HEAD"),
+        (["MARKET_DATA_GIT_HEAD="], "runtime MARKET_DATA_GIT_HEAD is empty"),
+        (
+            [
+                f"MARKET_DATA_GIT_HEAD={GIT_COMMIT}",
+                f"MARKET_DATA_GIT_HEAD={OLD_GIT_COMMIT}",
+            ],
+            "conflicting runtime MARKET_DATA_GIT_HEAD",
+        ),
+    ],
+)
+def test_docker_container_inspect_rejects_invalid_runtime_git_without_leaking_env(
+    environment: list[str] | None,
+    message: str,
+) -> None:
+    runtime = DockerReleaseRuntime(runner=ContainerInspectRunner(environment))
+
+    with pytest.raises(ContractError, match=message) as exc_info:
+        runtime.container_record(CANDIDATE_CONTAINER)
+
+    error = str(exc_info.value)
+    assert "SECRET_TOKEN" not in error
+    assert "do-not-record" not in error
+    assert GIT_COMMIT not in error
+    assert OLD_GIT_COMMIT not in error
+
+
 @pytest.mark.parametrize(
     "rollback_ref",
     [LATEST_REF, "market-data-spread-dashboard:new", UNTAGGED_REF],
@@ -666,6 +902,83 @@ def test_manifest_is_valid_draft_2020_12_schema(tmp_path: Path) -> None:
     assert manifest["formal_git_commit"] == OLD_GIT_COMMIT
     assert len(manifest["image_release_json_sha256"]) == 64
     assert manifest["readiness_policy"] == DEFAULT_READINESS_POLICY
+
+
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "release.schema.json",
+        "candidate_result.schema.json",
+        "artifact_manifest.schema.json",
+        "deployment_plan.schema.json",
+        "deployment_result.schema.json",
+    ],
+)
+def test_release_contract_schemas_are_valid_draft_2020_12(
+    schema_name: str,
+) -> None:
+    jsonschema.Draft202012Validator.check_schema(
+        load_schema(CONTRACT_DIR / schema_name)
+    )
+
+
+def test_artifact_manifest_schema_independently_binds_type_file_and_version() -> None:
+    schema = load_schema(CONTRACT_DIR / "artifact_manifest.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    candidate = {
+        "schema_version": "1.2.0",
+        "artifact_type": "candidate_result",
+        "target_file": "candidate_result.json",
+        "target_sha256": "d" * 64,
+        "target_size_bytes": 123,
+        "target_schema_version": "1.2.0",
+        "generated_at": BUILD_TIME,
+        "release_id": RELEASE_ID,
+        "git_commit": GIT_COMMIT,
+        "git_tree": GIT_TREE,
+        "image_id": IMAGE_ID,
+        "runtime_git_commit": GIT_COMMIT,
+    }
+    validator.validate(candidate)
+
+    mismatches = []
+    wrong_type_file = copy.deepcopy(candidate)
+    wrong_type_file["artifact_type"] = "release"
+    mismatches.append(wrong_type_file)
+    wrong_version = copy.deepcopy(candidate)
+    wrong_version["target_schema_version"] = "1.1.0"
+    mismatches.append(wrong_version)
+    candidate_with_result_filename = copy.deepcopy(candidate)
+    candidate_with_result_filename["target_file"] = "deployment_result.json"
+    mismatches.append(candidate_with_result_filename)
+
+    for payload in mismatches:
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(payload)
+
+    release = copy.deepcopy(candidate)
+    release.update(
+        artifact_type="release",
+        target_file="release.json",
+        target_schema_version="2.3.0",
+    )
+    release.pop("runtime_git_commit")
+    validator.validate(release)
+    forged_release = copy.deepcopy(release)
+    forged_release["runtime_git_commit"] = GIT_COMMIT
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(forged_release)
+
+    deployment_result = copy.deepcopy(candidate)
+    deployment_result.update(
+        artifact_type="deployment_result",
+        target_file="deployment_result.json",
+        target_schema_version="1.1.0",
+    )
+    validator.validate(deployment_result)
+    deployment_result.pop("runtime_git_commit")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(deployment_result)
 
 
 def test_schema_rejects_missing_required_field(tmp_path: Path) -> None:
@@ -736,26 +1049,490 @@ def test_release_bundle_is_not_silently_overwritten(tmp_path: Path) -> None:
 def test_production_result_is_separate_and_does_not_rewrite_manifest(
     tmp_path: Path,
 ) -> None:
-    manifest, _, _ = build_manifest(tmp_path)
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
     release_directory = write_release_bundle(manifest, tmp_path / "releases")
     manifest_path = release_directory / "release.json"
     original = manifest_path.read_bytes()
     result_path = release_directory / "deployment_result.json"
 
-    write_result(
-        result_path,
-        {
-            "phase": "deployment-result",
-            "release_id": RELEASE_ID,
-            "actual_image_id": IMAGE_ID,
-            "status": "deployed-and-verified",
-        },
-    )
+    result = build_deployment_result(tmp_path, manifest, plan)
+    write_result(result_path, result)
 
     assert result_path.is_file()
+    assert (release_directory / "deployment_result.manifest.json").is_file()
+    assert load_deployment_result(result_path, manifest, plan) == result
+    assert result["target_git_commit"] == GIT_COMMIT
+    assert result["runtime_git_commit"] == GIT_COMMIT
+    assert result["runtime_git_commit_verified"] is True
     assert manifest_path.read_bytes() == original
     with pytest.raises(ContractError, match="already exists"):
-        write_result(result_path, {"status": "replacement"})
+        write_result(result_path, result)
+
+
+def test_deployment_runtime_git_tamper_in_json_or_manifest_is_rejected(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = tmp_path / "deployment_result.json"
+    result = build_deployment_result(tmp_path, manifest, plan)
+    write_result(result_path, result)
+    artifact_manifest_path = tmp_path / "deployment_result.manifest.json"
+
+    result["runtime_git_commit"] = OLD_GIT_COMMIT
+    result_path.write_text(
+        json.dumps(result, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
+        load_deployment_result(result_path, manifest, plan)
+
+    result["runtime_git_commit"] = GIT_COMMIT
+    result_path.write_text(
+        json.dumps(result, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    artifact_manifest = json.loads(
+        artifact_manifest_path.read_text(encoding="utf-8")
+    )
+    artifact_manifest["target_sha256"] = hashlib.sha256(
+        result_path.read_bytes()
+    ).hexdigest()
+    artifact_manifest["target_size_bytes"] = result_path.stat().st_size
+    artifact_manifest["runtime_git_commit"] = OLD_GIT_COMMIT
+    artifact_manifest_path.write_text(
+        json.dumps(artifact_manifest, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ContractError, match="runtime_git_commit mismatch"):
+        load_deployment_result(result_path, manifest, plan)
+
+
+def test_all_four_json_artifacts_have_exact_verified_manifest_names(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    release_directory = write_release_bundle(manifest, tmp_path / "releases")
+    candidate_path = write_candidate_result_fixture(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    plan_root = tmp_path / "plan-fixture"
+    plan_root.mkdir()
+    plan, _, _ = build_deployment_plan(plan_root, manifest, runtime)
+    plan_path = tmp_path / "deployment_plan.json"
+    write_deployment_plan(plan, plan_path)
+    result_path = tmp_path / "deployment_result.json"
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+
+    artifacts = [
+        (
+            release_directory / "release.json",
+            release_directory / "release.manifest.json",
+            "release",
+        ),
+        (
+            candidate_path,
+            tmp_path / "candidate_result.manifest.json",
+            "candidate_result",
+        ),
+        (
+            plan_path,
+            tmp_path / "deployment_plan.manifest.json",
+            "deployment_plan",
+        ),
+        (
+            result_path,
+            tmp_path / "deployment_result.manifest.json",
+            "deployment_result",
+        ),
+    ]
+    for target, artifact_manifest, artifact_type in artifacts:
+        verified = validate_artifact_manifest(
+            target,
+            artifact_manifest,
+            artifact_type=artifact_type,
+            expected_release_id=RELEASE_ID,
+            expected_git_commit=GIT_COMMIT,
+            expected_git_tree=GIT_TREE,
+            expected_image_id=IMAGE_ID,
+        )
+        assert verified["target_file"] == target.name
+        assert verified["target_size_bytes"] == target.stat().st_size
+        assert verified["target_sha256"] == hashlib.sha256(
+            target.read_bytes()
+        ).hexdigest()
+        if artifact_type in {"candidate_result", "deployment_result"}:
+            assert verified["runtime_git_commit"] == GIT_COMMIT
+        else:
+            assert "runtime_git_commit" not in verified
+
+
+def test_candidate_result_is_formally_generated_and_write_once(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    loaded = load_candidate_result(path, manifest)
+
+    assert loaded["git_commit"] == GIT_COMMIT
+    assert loaded["git_tree"] == GIT_TREE
+    assert loaded["candidate_image_id"] == IMAGE_ID
+    assert loaded["candidate_container_name"] == CANDIDATE_CONTAINER
+    assert loaded["status"] == "candidate-validated"
+    assert loaded["identity"]["runtime_git_commit"] == GIT_COMMIT
+    assert loaded["log_summary"] == loaded["checks"]["readiness"]["log_summary"]
+    assert loaded["log_summary"]["stored_bytes"] <= 65536
+    assert loaded["log_summary"]["sha256"] == hashlib.sha256(
+        loaded["log_summary"]["tail_text"].encode("utf-8")
+    ).hexdigest()
+    assert (CONTRACT_DIR / "create_candidate_result.py").is_file()
+    with pytest.raises(ContractError, match="will not be overwritten"):
+        write_candidate_result(loaded, path)
+
+
+def test_exclusive_artifact_write_preserves_existing_content_and_hash(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    result = build_candidate_result_fixture(manifest, runtime)
+    path = (tmp_path / "candidate_result.json").resolve()
+    original = b'{"existing":"must-survive"}\n'
+    path.write_bytes(original)
+    original_hash = hashlib.sha256(original).hexdigest()
+
+    with pytest.raises(ContractError, match="already exists"):
+        write_candidate_result(result, path)
+
+    assert path.read_bytes() == original
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
+    assert not (tmp_path / "candidate_result.manifest.json").exists()
+
+
+def test_exclusive_manifest_write_preserves_existing_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    sealed_path = tmp_path / "candidate_result.manifest.json"
+    original = sealed_path.read_bytes()
+    original_hash = hashlib.sha256(original).hexdigest()
+
+    with pytest.raises(ContractError, match="already exists"):
+        write_artifact_manifest(
+            path,
+            artifact_type="candidate_result",
+            target_schema_version="1.2.0",
+            release_id=RELEASE_ID,
+            git_commit=GIT_COMMIT,
+            git_tree=GIT_TREE,
+            image_id=IMAGE_ID,
+            runtime_git_commit=GIT_COMMIT,
+        )
+
+    assert sealed_path.read_bytes() == original
+    assert hashlib.sha256(sealed_path.read_bytes()).hexdigest() == original_hash
+
+
+def test_competing_exclusive_writers_allow_exactly_one_complete_chain(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    result = build_candidate_result_fixture(manifest, runtime)
+    path = (tmp_path / "candidate_result.json").resolve()
+
+    def write_once() -> str:
+        try:
+            write_candidate_result(copy.deepcopy(result), path)
+        except ContractError:
+            return "rejected"
+        return "written"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _: write_once(), range(2)))
+
+    assert outcomes.count("written") == 1
+    assert outcomes.count("rejected") == 1
+    assert load_candidate_result(path, manifest) == result
+
+
+def test_manifest_write_failure_removes_unsealed_json_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    result = build_candidate_result_fixture(manifest, runtime)
+    path = (tmp_path / "candidate_result.json").resolve()
+    original_writer = release_contract_module._write_json_exclusive
+
+    def fail_manifest(target: Path, payload, *, description: str) -> None:
+        if target.name == "candidate_result.manifest.json":
+            raise ContractError("simulated manifest publication failure")
+        original_writer(target, payload, description=description)
+
+    monkeypatch.setattr(
+        release_contract_module,
+        "_write_json_exclusive",
+        fail_manifest,
+    )
+
+    with pytest.raises(ContractError, match="manifest publication failure"):
+        write_candidate_result(result, path)
+
+    assert not path.exists()
+    assert not (tmp_path / "candidate_result.manifest.json").exists()
+
+
+def test_candidate_result_content_tamper_is_rejected_before_read(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    path.write_text(path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
+        load_candidate_result(path, manifest)
+
+
+def test_artifact_manifest_hash_and_identity_tamper_are_rejected(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    artifact_manifest = tmp_path / "candidate_result.manifest.json"
+    sealed = json.loads(artifact_manifest.read_text(encoding="utf-8"))
+    sealed["target_sha256"] = "f" * 64
+    artifact_manifest.write_text(
+        json.dumps(sealed, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
+        load_candidate_result(path, manifest)
+
+    sealed["target_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    sealed["git_tree"] = OLD_GIT_COMMIT
+    artifact_manifest.write_text(
+        json.dumps(sealed, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ContractError, match="manifest git_tree mismatch"):
+        load_candidate_result(path, manifest)
+
+
+def test_candidate_runtime_git_tamper_in_json_or_manifest_is_rejected(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    artifact_manifest_path = tmp_path / "candidate_result.manifest.json"
+
+    result = json.loads(path.read_text(encoding="utf-8"))
+    result["identity"]["runtime_git_commit"] = OLD_GIT_COMMIT
+    path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
+        load_candidate_result(path, manifest)
+
+    result["identity"]["runtime_git_commit"] = GIT_COMMIT
+    path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    artifact_manifest = json.loads(
+        artifact_manifest_path.read_text(encoding="utf-8")
+    )
+    artifact_manifest["target_sha256"] = hashlib.sha256(
+        path.read_bytes()
+    ).hexdigest()
+    artifact_manifest["target_size_bytes"] = path.stat().st_size
+    artifact_manifest["runtime_git_commit"] = OLD_GIT_COMMIT
+    artifact_manifest_path.write_text(
+        json.dumps(artifact_manifest, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ContractError, match="runtime_git_commit mismatch"):
+        load_candidate_result(path, manifest)
+
+
+def test_tool_repository_and_formal_project_are_separate_and_formal_head_stays_old(
+    tmp_path: Path,
+) -> None:
+    def git(cwd: Path, *arguments: str) -> str:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return result.stdout.strip()
+
+    def initialize_repository(path: Path) -> tuple[str, str]:
+        git(path, "init")
+        git(path, "config", "user.name", "Release Contract Test")
+        git(path, "config", "user.email", "release-contract@example.invalid")
+        git(path, "add", "--all")
+        git(path, "commit", "-m", "test fixture")
+        return git(path, "rev-parse", "HEAD"), git(path, "rev-parse", "HEAD^{tree}")
+
+    tool_repo_root = (tmp_path / "tool-repository").resolve()
+    tool_repo_root.mkdir()
+    for relative_path in ("docker-compose.yml", "Dockerfile", ".dockerignore"):
+        shutil.copy2(REPOSITORY / relative_path, tool_repo_root / relative_path)
+    config = tool_repo_root / "02_configs" / "historical_spread_config.xlsx"
+    config.parent.mkdir(parents=True)
+    shutil.copy2(
+        REPOSITORY / "02_configs" / "historical_spread_config.xlsx",
+        config,
+    )
+    shutil.copytree(
+        CONTRACT_DIR,
+        tool_repo_root / "09_deploy" / "spread_release",
+    )
+    tool_head, tool_tree = initialize_repository(tool_repo_root)
+
+    production_project_dir = (tmp_path / "production-project").resolve()
+    production_project_dir.mkdir()
+    production_compose_file = production_project_dir / "docker-compose.yml"
+    shutil.copy2(REPOSITORY / "docker-compose.yml", production_compose_file)
+    production_head, production_tree = initialize_repository(
+        production_project_dir
+    )
+    for name in ("01_data", "06_outputs", "10_logs"):
+        (production_project_dir / name).mkdir()
+
+    assert tool_head != production_head
+    assert tool_tree != production_tree
+
+    release_id = f"spread-20260717-{tool_head[:12]}-b01"
+    image_ref = f"market-data-spread-dashboard:{release_id}"
+    runtime = FakeReleaseRuntime(
+        git_commit=tool_head,
+        git_tree=tool_tree,
+        release_id=release_id,
+        image_ref=image_ref,
+        repository_root=tool_repo_root,
+    )
+    data_root = tmp_path / "host-data"
+    create_data_files(data_root)
+    recording_git = RecordingRealGitRunner()
+    manifest = create_manifest(
+        repository=tool_repo_root,
+        data_host_root=data_root,
+        release_id=release_id,
+        git_commit=tool_head,
+        image_ref=image_ref,
+        expected_image_id=IMAGE_ID,
+        build_time=BUILD_TIME,
+        source=SOURCE,
+        candidate_container_name=CANDIDATE_CONTAINER,
+        rollback_image_ref=ROLLBACK_REF,
+        rollback_image_id=ROLLBACK_ID,
+        formal_git_commit=production_head,
+        runtime=runtime,
+        git_runner=recording_git,
+    )
+    production_env_file, production_environment = create_production_env(
+        tmp_path,
+        manifest,
+    )
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    plan = create_deployment_plan(
+        tool_repo_root=tool_repo_root,
+        production_compose_file=production_compose_file,
+        production_project_dir=production_project_dir,
+        candidate_result_file=candidate_result_file,
+        production_env_file=production_env_file,
+        manifest=manifest,
+        runtime=runtime,
+        schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        created_at=BUILD_TIME,
+    )
+
+    evidence = verify_pre_deploy(
+        manifest,
+        tool_repo_root,
+        runtime,
+        git_runner=recording_git,
+        deployment_plan=plan,
+        production_environment=production_environment,
+    )
+
+    assert Path(plan["tool_repo_root"]) == tool_repo_root
+    assert Path(plan["production_project_dir"]) == production_project_dir
+    assert Path(plan["production_project_dir"]) != tool_repo_root
+    assert Path(plan["production_compose_file"]).parent == Path(
+        plan["production_project_dir"]
+    )
+    assert git(tool_repo_root, "rev-parse", "HEAD") == tool_head
+    assert git(tool_repo_root, "rev-parse", "HEAD^{tree}") == tool_tree
+    assert git(production_project_dir, "rev-parse", "HEAD") == production_head
+    assert git(production_project_dir, "rev-parse", "HEAD^{tree}") == production_tree
+    assert git(production_project_dir, "status", "--porcelain") == ""
+    assert evidence["tool_repo_root"] == str(tool_repo_root)
+    assert all(cwd == tool_repo_root for _, cwd in recording_git.commands)
+    forbidden_git_writes = {"checkout", "reset", "clean", "switch", "restore"}
+    assert all(
+        not forbidden_git_writes.intersection(command)
+        for command, _ in recording_git.commands
+    )
+
+
+def test_deployment_plan_path_tamper_is_rejected_by_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    path = tmp_path / "deployment_plan.json"
+    write_deployment_plan(plan, path)
+    tampered = json.loads(path.read_text(encoding="utf-8"))
+    tampered["production_compose_file"] = str(
+        (tmp_path / "attacker" / "docker-compose.yml").resolve()
+    )
+    path.write_text(
+        json.dumps(tampered, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
+        load_deployment_plan(
+            path,
+            manifest,
+            CONTRACT_DIR / "deployment_plan.schema.json",
+        )
+
+
+def test_git_tree_and_image_identity_must_propagate_to_plan_and_result(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+    assert plan["git_tree"] == GIT_TREE
+    assert plan["candidate_image_id"] == IMAGE_ID
+
+    altered_plan = copy.deepcopy(plan)
+    altered_plan["git_tree"] = OLD_GIT_COMMIT
+    with pytest.raises(ContractError, match="deployment plan git_tree mismatch"):
+        validate_deployment_plan(
+            altered_plan,
+            manifest,
+            load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+            production_environment=production_environment,
+        )
+
+    bad_result = build_deployment_result(tmp_path, manifest, plan)
+    bad_result["git_tree"] = OLD_GIT_COMMIT
+    result_path = tmp_path / "deployment_result.json"
+    write_result(result_path, bad_result)
+    with pytest.raises(ContractError, match="manifest git_tree mismatch"):
+        load_deployment_result(result_path, manifest, plan)
 
 
 def test_candidate_and_production_url_difference_seals_same_image_plan(
@@ -882,13 +1659,43 @@ def test_deployment_plan_rejects_compose_template_identity_change(
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     production_env_file, _ = create_production_env(tmp_path, manifest)
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path, manifest, runtime
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
     manifest["compose_template_sha256"] = "f" * 64
 
-    with pytest.raises(ContractError, match="template SHA-256"):
+    with pytest.raises(ContractError, match="Compose file SHA-256"):
         create_deployment_plan(
-            repository=REPOSITORY,
-            production_project_directory=REPOSITORY,
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+        )
+
+
+def test_deployment_plan_rejects_tool_and_production_directory_alias(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path,
+        manifest,
+        runtime,
+    )
+
+    with pytest.raises(ContractError, match="must be different directories"):
+        create_deployment_plan(
+            tool_repo_root=REPOSITORY,
+            production_compose_file=REPOSITORY / "docker-compose.yml",
+            production_project_dir=REPOSITORY,
             candidate_result_file=candidate_result_file,
             production_env_file=production_env_file,
             manifest=manifest,
@@ -900,7 +1707,12 @@ def test_deployment_plan_rejects_compose_template_identity_change(
 def test_deployment_plan_rejects_mount_difference(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     production_env_file, _ = create_production_env(tmp_path, manifest)
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path, manifest, runtime
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
     runtime.production_mounts_override = [
         {
             "type": "bind",
@@ -911,8 +1723,9 @@ def test_deployment_plan_rejects_mount_difference(tmp_path: Path) -> None:
 
     with pytest.raises(ContractError, match="mount contract changed"):
         create_deployment_plan(
-            repository=REPOSITORY,
-            production_project_directory=REPOSITORY,
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
             candidate_result_file=candidate_result_file,
             production_env_file=production_env_file,
             manifest=manifest,
@@ -924,13 +1737,19 @@ def test_deployment_plan_rejects_mount_difference(tmp_path: Path) -> None:
 def test_deployment_plan_rejects_command_difference(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     production_env_file, _ = create_production_env(tmp_path, manifest)
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path, manifest, runtime
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
     runtime.production_command_override = ["python", "-m", "unexpected"]
 
     with pytest.raises(ContractError, match="outside the runtime URL allowlist"):
         create_deployment_plan(
-            repository=REPOSITORY,
-            production_project_directory=REPOSITORY,
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
             candidate_result_file=candidate_result_file,
             production_env_file=production_env_file,
             manifest=manifest,
@@ -944,7 +1763,12 @@ def test_deployment_plan_rejects_unexpected_production_port(
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     production_env_file, _ = create_production_env(tmp_path, manifest)
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path, manifest, runtime
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
     runtime.production_ports_override = [
         {
             "mode": "ingress",
@@ -956,8 +1780,9 @@ def test_deployment_plan_rejects_unexpected_production_port(
 
     with pytest.raises(ContractError, match="port mapping changed"):
         create_deployment_plan(
-            repository=REPOSITORY,
-            production_project_directory=REPOSITORY,
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
             candidate_result_file=candidate_result_file,
             production_env_file=production_env_file,
             manifest=manifest,
@@ -994,26 +1819,13 @@ def test_deployment_plan_requires_validated_candidate_result(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
-    production_env_file, _ = create_production_env(tmp_path, manifest)
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
-    candidate_result = json.loads(
-        candidate_result_file.read_text(encoding="utf-8")
-    )
-    candidate_result["pages"]["status"] = "failed"
-    candidate_result_file.write_text(
-        json.dumps(candidate_result, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
 
-    with pytest.raises(ContractError, match="page validation did not pass"):
-        create_deployment_plan(
-            repository=REPOSITORY,
-            production_project_directory=REPOSITORY,
-            candidate_result_file=candidate_result_file,
-            production_env_file=production_env_file,
-            manifest=manifest,
-            runtime=runtime,
-            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+    with pytest.raises(ContractError, match="checks.pages.status"):
+        write_candidate_result_fixture(
+            tmp_path,
+            manifest,
+            runtime,
+            page_status="failed",
         )
 
 
@@ -1022,13 +1834,19 @@ def test_deployment_plan_requires_candidate_container_removed(
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     production_env_file, _ = create_production_env(tmp_path, manifest)
-    candidate_result_file = create_candidate_result(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path, manifest, runtime
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
     runtime.candidate_container_exists = True
 
     with pytest.raises(ContractError, match="candidate container still exists"):
         create_deployment_plan(
-            repository=REPOSITORY,
-            production_project_directory=REPOSITORY,
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
             candidate_result_file=candidate_result_file,
             production_env_file=production_env_file,
             manifest=manifest,
@@ -1140,6 +1958,8 @@ def inspect_spread_fixture(
     tmp_path: Path,
     rows: list[dict[str, object]],
 ) -> dict[str, object]:
+    import pandas as pd
+
     parquet_path = tmp_path / "historical_spread_database.parquet"
     pd.DataFrame(rows).to_parquet(parquet_path, index=False)
     runtime = DockerReleaseRuntime(
@@ -1367,7 +2187,7 @@ def test_manifest_creation_rejects_dirty_git(tmp_path: Path) -> None:
     data_root = tmp_path / "data"
     create_data_files(data_root)
 
-    with pytest.raises(ContractError, match="worktree must be clean"):
+    with pytest.raises(ContractError, match="checkout must be clean"):
         create_manifest(
             repository=REPOSITORY,
             data_host_root=data_root,
@@ -1543,11 +2363,60 @@ def test_candidate_and_production_must_use_same_image_id(tmp_path: Path) -> None
     assert candidate["actual_image_id"] == IMAGE_ID
     assert candidate["tag_image_id"] == IMAGE_ID
     assert candidate["manifest_image_id"] == IMAGE_ID
+    assert candidate["runtime_git_commit"] == GIT_COMMIT
 
     evidence = verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
     assert evidence["actual_image_id"] == IMAGE_ID
     assert evidence["config_image"] == IMAGE_REF
+    assert evidence["runtime_git_commit"] == GIT_COMMIT
+    assert evidence["runtime_git_commit_verified"] is True
+
+
+@pytest.mark.parametrize(
+    ("runtime_git_commit", "message"),
+    [
+        (None, "missing runtime MARKET_DATA_GIT_HEAD"),
+        ("", "runtime MARKET_DATA_GIT_HEAD is empty"),
+        (OLD_GIT_COMMIT, "does not match the release"),
+    ],
+)
+def test_candidate_runtime_git_head_is_required_and_exact(
+    tmp_path: Path,
+    runtime_git_commit: str | None,
+    message: str,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    if runtime_git_commit is None:
+        runtime.candidate_record.pop("runtime_git_commit")
+    else:
+        runtime.candidate_record["runtime_git_commit"] = runtime_git_commit
+
+    with pytest.raises(ContractError, match=message):
+        verify_candidate(manifest, runtime)
+
+
+@pytest.mark.parametrize(
+    ("runtime_git_commit", "message"),
+    [
+        (None, "missing runtime MARKET_DATA_GIT_HEAD"),
+        (OLD_GIT_COMMIT, "does not match the release"),
+    ],
+)
+def test_production_runtime_git_head_is_required_and_exact(
+    tmp_path: Path,
+    runtime_git_commit: str | None,
+    message: str,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    if runtime_git_commit is None:
+        runtime.production_record.pop("runtime_git_commit")
+    else:
+        runtime.production_record["runtime_git_commit"] = runtime_git_commit
+
+    with pytest.raises(ContractError, match=message):
+        verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
 
 def test_candidate_identity_rejects_container_image_id_mismatch(
@@ -1567,6 +2436,19 @@ def test_candidate_release_json_mismatch_rejects_before_readiness(
     runtime.release_json = {
         **runtime.release_json,
         "git_commit": OLD_GIT_COMMIT,
+    }
+
+    with pytest.raises(ContractError, match="/app/RELEASE.json"):
+        verify_candidate(manifest, runtime)
+
+
+def test_candidate_release_json_tree_mismatch_rejects_before_readiness(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    runtime.release_json = {
+        **runtime.release_json,
+        "git_tree": OLD_GIT_COMMIT,
     }
 
     with pytest.raises(ContractError, match="/app/RELEASE.json"):
@@ -1606,6 +2488,17 @@ def test_post_deploy_rejects_container_release_json_mismatch(
         verify_post_deploy(manifest, runtime, deployment_plan=plan)
 
 
+def test_post_deploy_rejects_container_release_json_tree_mismatch(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    runtime.production_release_json["git_tree"] = OLD_GIT_COMMIT
+
+    with pytest.raises(ContractError, match="/app/RELEASE.json"):
+        verify_post_deploy(manifest, runtime, deployment_plan=plan)
+
+
 def test_rollback_requires_explicit_tag_to_image_id_match(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     plan, _, production_environment = build_deployment_plan(
@@ -1640,6 +2533,7 @@ def test_post_rollback_verifies_actual_container_image_id(tmp_path: Path) -> Non
     runtime.production_record = {
         "image_id": ROLLBACK_ID,
         "config_image": ROLLBACK_REF,
+        "runtime_git_commit": OLD_GIT_COMMIT,
     }
 
     evidence = verify_post_rollback(manifest, runtime)
@@ -1666,10 +2560,14 @@ def test_formal_scripts_never_build_retag_or_derive_from_config_image() -> None:
         assert ":new" not in script
         assert "--env-file" in script
         assert "--deployment-plan" in script
-        assert "up -d --no-build --no-deps spread-dashboard" in script
+        assert 'up -d --no-build --no-deps "${production_service}"' in script
         assert "up -d --no-build --no-deps usda-dashboard" not in script
         assert "up -d --no-build --no-deps oil-world" not in script
     assert 'production_env_file="${plan_identity[2]}"' in deploy
+    assert 'production_compose_file="${plan_identity[3]}"' in deploy
+    assert 'production_project_dir="${plan_identity[4]}"' in deploy
+    assert '-f "${production_compose_file}"' in deploy
+    assert '--project-directory "${production_project_dir}"' in deploy
     assert 'SPREAD_IMAGE="${rollback_image_ref}"' in rollback
     assert 'manifest["rollback_image_ref"]' in rollback
     assert 'manifest["rollback_image_id"]' in rollback
@@ -1687,7 +2585,11 @@ def test_static_contract_rejects_usda_in_formal_switch_scope(
         "09_deploy/spread_release/deploy_spread_release.sh",
         "09_deploy/spread_release/rollback_spread_release.sh",
         "09_deploy/spread_release/create_deployment_plan.py",
+        "09_deploy/spread_release/create_candidate_result.py",
         "09_deploy/spread_release/deployment_plan.schema.json",
+        "09_deploy/spread_release/candidate_result.schema.json",
+        "09_deploy/spread_release/artifact_manifest.schema.json",
+        "09_deploy/spread_release/deployment_result.schema.json",
     )
     for relative_path in required_paths:
         source = REPOSITORY / relative_path

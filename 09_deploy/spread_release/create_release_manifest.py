@@ -8,7 +8,9 @@ from pathlib import Path
 from release_contract import (
     ContractError,
     DockerReleaseRuntime,
+    artifact_manifest_path,
     create_manifest,
+    hash_file,
     write_release_bundle,
 )
 
@@ -78,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
             runtime=DockerReleaseRuntime(),
         )
         release_directory = write_release_bundle(manifest, output_root)
+        release_manifest = artifact_manifest_path(
+            release_directory / "release.json",
+            "release",
+        )
     except ContractError as exc:
         print(f"release manifest rejected: {exc}", file=sys.stderr)
         return 2
@@ -88,8 +94,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": "candidate_sealed",
                 "release_directory": str(release_directory),
                 "release_id": manifest["release_id"],
+                "git_tree": manifest["git_tree"],
                 "image_ref": manifest["image_ref"],
                 "image_id": manifest["image_id"],
+                "release_manifest": str(release_manifest),
+                "release_manifest_sha256": hash_file(release_manifest),
             },
             ensure_ascii=False,
             indent=2,

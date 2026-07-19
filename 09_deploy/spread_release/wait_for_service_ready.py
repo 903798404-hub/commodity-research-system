@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,6 +30,18 @@ DEFAULT_READINESS_POLICY: dict[str, Any] = {
 
 _POLICY_KEYS = frozenset(DEFAULT_READINESS_POLICY)
 _PERMANENT_CONTAINER_STATES = frozenset({"dead", "exited", "removing"})
+LOG_TAIL_LINES = 200
+LOG_MAX_BYTES = 64 * 1024
+_SENSITIVE_LOG_VALUE_RE = re.compile(
+    r"(?i)([A-Za-z0-9_.-]*(?:password|passwd|token|api[_-]?key|secret|"
+    r"credential|private[_-]?key)[A-Za-z0-9_.-]*)"
+    r"(\s*[:=]\s*)([^\s,;]+)"
+)
+_AUTHORIZATION_LOG_VALUE_RE = re.compile(
+    r"(?i)\b(authorization)(\s*[:=]\s*)(?:bearer\s+)?([^\s,;]+)"
+)
+_WARNING_RE = re.compile(r"(?i)\bwarn(?:ing)?\b")
+_ERROR_RE = re.compile(r"(?i)\b(?:error|exception|fatal)\b")
 
 
 class Runtime(Protocol):
@@ -190,7 +204,167 @@ class DockerCurlRuntime:
             capture_output=True,
             text=True,
         )
-        return (completed.stdout + completed.stderr)[-200_000:]
+        if completed.returncode != 0:
+            raise RuntimeError("docker logs could not be read")
+        return completed.stdout + completed.stderr
+
+
+def _redact_log_text(value: str) -> str:
+    redacted = _SENSITIVE_LOG_VALUE_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        value,
+    )
+    return _AUTHORIZATION_LOG_VALUE_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        redacted,
+    )
+
+
+def build_log_summary(
+    log_text: str,
+    *,
+    collected_at_utc: str,
+) -> dict[str, Any]:
+    if not isinstance(log_text, str):
+        raise TypeError("container logs must be text")
+    source_bytes = len(log_text.encode("utf-8", errors="replace"))
+    lines = log_text.splitlines(keepends=True)
+    line_truncated = len(lines) > LOG_TAIL_LINES
+    selected = "".join(lines[-LOG_TAIL_LINES:])
+    redacted = _redact_log_text(selected)
+    encoded = redacted.encode("utf-8", errors="replace")
+    byte_truncated = len(encoded) > LOG_MAX_BYTES
+    if byte_truncated:
+        encoded = encoded[-LOG_MAX_BYTES:]
+        redacted = encoded.decode("utf-8", errors="ignore")
+        encoded = redacted.encode("utf-8")
+    summary = {
+        "collection_status": "captured",
+        "collected_at_utc": collected_at_utc,
+        "requested_tail_lines": LOG_TAIL_LINES,
+        "max_bytes": LOG_MAX_BYTES,
+        "source_bytes": source_bytes,
+        "stored_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "truncated": line_truncated or byte_truncated,
+        "tail_line_count": len(redacted.splitlines()),
+        "tail_text": redacted,
+        "warning_count": len(_WARNING_RE.findall(redacted)),
+        "error_count": len(_ERROR_RE.findall(redacted)),
+        "collection_warning": None,
+    }
+    validate_log_summary(summary)
+    return summary
+
+
+def validate_log_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
+    required = {
+        "collection_status",
+        "collected_at_utc",
+        "requested_tail_lines",
+        "max_bytes",
+        "source_bytes",
+        "stored_bytes",
+        "sha256",
+        "truncated",
+        "tail_line_count",
+        "tail_text",
+        "warning_count",
+        "error_count",
+        "collection_warning",
+    }
+    if set(summary) != required:
+        raise ValueError("log summary fields are incomplete or unexpected")
+    status = summary["collection_status"]
+    if status not in {"captured", "unavailable"}:
+        raise ValueError("invalid log summary collection_status")
+    if summary["requested_tail_lines"] != LOG_TAIL_LINES:
+        raise ValueError("invalid log summary requested_tail_lines")
+    if summary["max_bytes"] != LOG_MAX_BYTES:
+        raise ValueError("invalid log summary max_bytes")
+    for key in (
+        "source_bytes",
+        "stored_bytes",
+        "tail_line_count",
+        "warning_count",
+        "error_count",
+    ):
+        if isinstance(summary[key], bool) or not isinstance(summary[key], int):
+            raise ValueError(f"log summary {key} must be an integer")
+        if summary[key] < 0:
+            raise ValueError(f"log summary {key} must be non-negative")
+    tail_text = summary["tail_text"]
+    if not isinstance(tail_text, str):
+        raise ValueError("log summary tail_text must be text")
+    if _redact_log_text(tail_text) != tail_text:
+        raise ValueError("log summary contains an unredacted sensitive value")
+    encoded = tail_text.encode("utf-8")
+    if len(encoded) > LOG_MAX_BYTES or summary["stored_bytes"] != len(encoded):
+        raise ValueError("log summary stored byte size mismatch")
+    if summary["tail_line_count"] != len(tail_text.splitlines()):
+        raise ValueError("log summary tail line count mismatch")
+    if summary["tail_line_count"] > LOG_TAIL_LINES:
+        raise ValueError("log summary exceeds the line limit")
+    if summary["sha256"] != hashlib.sha256(encoded).hexdigest():
+        raise ValueError("log summary SHA-256 mismatch")
+    if summary["warning_count"] != len(_WARNING_RE.findall(tail_text)):
+        raise ValueError("log summary warning count mismatch")
+    if summary["error_count"] != len(_ERROR_RE.findall(tail_text)):
+        raise ValueError("log summary error count mismatch")
+    warning = summary["collection_warning"]
+    if status == "captured" and warning is not None:
+        raise ValueError("captured log summary must not contain a warning")
+    if status == "unavailable":
+        if not isinstance(warning, str) or not warning:
+            raise ValueError("unavailable log summary requires a warning")
+        if any(
+            summary[key] != expected
+            for key, expected in (
+                ("source_bytes", 0),
+                ("stored_bytes", 0),
+                ("tail_line_count", 0),
+                ("tail_text", ""),
+                ("warning_count", 0),
+                ("error_count", 0),
+            )
+        ):
+            raise ValueError("unavailable log summary must not contain log content")
+    collected_at = summary["collected_at_utc"]
+    if not isinstance(collected_at, str) or len(collected_at) < 20:
+        raise ValueError("log summary collection timestamp is invalid")
+    if not isinstance(summary["truncated"], bool):
+        raise ValueError("log summary truncated must be boolean")
+    return dict(summary)
+
+
+def collect_log_summary(
+    runtime: Runtime,
+    container: str,
+    *,
+    collected_at_utc: str,
+) -> dict[str, Any]:
+    try:
+        log_text = runtime.logs(container, LOG_TAIL_LINES)
+    except Exception:
+        empty = b""
+        summary = {
+            "collection_status": "unavailable",
+            "collected_at_utc": collected_at_utc,
+            "requested_tail_lines": LOG_TAIL_LINES,
+            "max_bytes": LOG_MAX_BYTES,
+            "source_bytes": 0,
+            "stored_bytes": 0,
+            "sha256": hashlib.sha256(empty).hexdigest(),
+            "truncated": False,
+            "tail_line_count": 0,
+            "tail_text": "",
+            "warning_count": 0,
+            "error_count": 0,
+            "collection_warning": "docker logs could not be read",
+        }
+        validate_log_summary(summary)
+        return summary
+    return build_log_summary(log_text, collected_at_utc=collected_at_utc)
 
 
 def _container_failure(
@@ -282,8 +456,9 @@ def wait_for_service_ready(
 
     def finish_failure(classification: str, message: str) -> None:
         total_elapsed = elapsed()
+        finished_at = now()
         result = {
-            "schema_version": "1.0.0",
+            "schema_version": "1.1.0",
             "status": "failed",
             "classification": classification,
             "message": message,
@@ -293,7 +468,7 @@ def wait_for_service_ready(
             "initial_restart_count": initial_restart_count,
             "policy": sealed_policy,
             "started_at_utc": started_at,
-            "finished_at_utc": now(),
+            "finished_at_utc": finished_at,
             "elapsed_seconds": total_elapsed,
             "attempt_count": len(attempts),
             "consecutive_successes_observed": streak,
@@ -303,7 +478,11 @@ def wait_for_service_ready(
             "last_inspect_summary": dict(last_inspect),
             "last_http_result": dict(last_request) if last_request is not None else None,
             "attempts": attempts,
-            "container_logs_tail_200": runtime.logs(container, 200),
+            "log_summary": collect_log_summary(
+                runtime,
+                container,
+                collected_at_utc=finished_at,
+            ),
         }
         raise ReadinessFailure(result)
 
@@ -358,8 +537,9 @@ def wait_for_service_ready(
             observer(event)
 
         if streak >= sealed_policy["consecutive_successes"]:
+            ready_at = now()
             return {
-                "schema_version": "1.0.0",
+                "schema_version": "1.1.0",
                 "status": "ready",
                 "classification": "ready",
                 "container": container,
@@ -369,7 +549,7 @@ def wait_for_service_ready(
                 "final_restart_count": int(last_inspect.get("restart_count") or 0),
                 "policy": sealed_policy,
                 "started_at_utc": started_at,
-                "ready_at_utc": now(),
+                "ready_at_utc": ready_at,
                 "elapsed_seconds": elapsed(),
                 "attempt_count": len(attempts),
                 "consecutive_successes_observed": streak,
@@ -379,6 +559,11 @@ def wait_for_service_ready(
                 "last_inspect_summary": dict(last_inspect),
                 "last_http_result": dict(last_request),
                 "attempts": attempts,
+                "log_summary": collect_log_summary(
+                    runtime,
+                    container,
+                    collected_at_utc=ready_at,
+                ),
             }
 
         if elapsed() >= sealed_policy["total_timeout_seconds"]:
@@ -392,6 +577,8 @@ def write_json_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
     try:
         with path.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
     except FileExistsError as exc:
         raise RuntimeError(f"refusing to overwrite existing readiness artifact: {path}") from exc
 

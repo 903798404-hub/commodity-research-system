@@ -7,7 +7,7 @@ if [[ $# -lt 2 || $# -gt 3 ]]; then
 fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repository="$(cd -- "${script_dir}/../.." && pwd)"
+tool_repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 release_directory="$(cd -- "$1" && pwd)"
 deployment_plan="$(cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")"
 health_url="${3:-http://127.0.0.1:8501/_stcore/health}"
@@ -20,7 +20,7 @@ readiness_failure="${release_directory}/rollback_readiness.failure.json"
 
 python3 "${verifier}" \
     --phase pre-rollback \
-    --repository "${repository}" \
+    --tool-repo-root "${tool_repo_root}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}"
@@ -36,9 +36,13 @@ print(manifest["rollback_image_ref"])
 print(manifest["rollback_image_id"])
 print(manifest["formal_git_commit"])
 print(plan["production_env_file"])
+print(plan["production_compose_file"])
+print(plan["production_project_dir"])
+print(plan["compose_project"])
+print(plan["production_service"])
 PY
 )
-if [[ "${#rollback_identity[@]}" -ne 4 ]]; then
+if [[ "${#rollback_identity[@]}" -ne 8 ]]; then
     echo "rollback identity could not be read from the sealed manifest" >&2
     exit 65
 fi
@@ -46,15 +50,19 @@ rollback_image_ref="${rollback_identity[0]}"
 rollback_image_id="${rollback_identity[1]}"
 rollback_git_commit="${rollback_identity[2]}"
 production_env_file="${rollback_identity[3]}"
+production_compose_file="${rollback_identity[4]}"
+production_project_dir="${rollback_identity[5]}"
+compose_project="${rollback_identity[6]}"
+production_service="${rollback_identity[7]}"
 
 SPREAD_IMAGE="${rollback_image_ref}" \
 MARKET_DATA_GIT_HEAD="${rollback_git_commit}" \
 docker compose \
     --env-file "${production_env_file}" \
-    --project-name market-data \
-    --project-directory "${repository}" \
-    -f "${repository}/docker-compose.yml" \
-    up -d --no-build --no-deps spread-dashboard
+    --project-name "${compose_project}" \
+    --project-directory "${production_project_dir}" \
+    -f "${production_compose_file}" \
+    up -d --no-build --no-deps "${production_service}"
 
 initial_restart_count="$(
     docker inspect --format '{{.RestartCount}}' spread-dashboard
@@ -62,7 +70,7 @@ initial_restart_count="$(
 
 python3 "${verifier}" \
     --phase post-rollback \
-    --repository "${repository}" \
+    --tool-repo-root "${tool_repo_root}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}"

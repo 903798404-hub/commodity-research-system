@@ -8,6 +8,7 @@ from pathlib import Path
 from release_contract import (
     ContractError,
     DockerReleaseRuntime,
+    artifact_manifest_path,
     create_deployment_plan,
     hash_file,
     load_manifest_bundle,
@@ -29,13 +30,28 @@ def build_parser() -> argparse.ArgumentParser:
             "Compose contract for one already sealed and candidate-validated release."
         )
     )
-    parser.add_argument("--repository", type=Path, default=DEFAULT_REPOSITORY)
+    parser.add_argument(
+        "--tool-repo-root",
+        "--repository",
+        dest="tool_repo_root",
+        type=Path,
+        default=DEFAULT_REPOSITORY,
+        help="Independent read-only checkout containing the target Release SHA.",
+    )
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--release-env", type=Path)
     parser.add_argument(
+        "--production-project-dir",
         "--production-project-directory",
+        dest="production_project_dir",
         type=Path,
         required=True,
+    )
+    parser.add_argument(
+        "--production-compose-file",
+        type=Path,
+        required=True,
+        help="Absolute Compose file used for the formal switch.",
     )
     parser.add_argument(
         "--candidate-result",
@@ -66,13 +82,20 @@ def main(argv: list[str] | None = None) -> int:
             release_env_path,
             RELEASE_SCHEMA_PATH,
         )
-        if (manifest_path.parent / "deployment_result.json").exists():
+        if any(
+            (manifest_path.parent / name).exists()
+            for name in (
+                "deployment_result.json",
+                "deployment_result.manifest.json",
+            )
+        ):
             raise ContractError(
                 "deployment_result.json already exists; a new plan cannot be sealed"
             )
         plan = create_deployment_plan(
-            repository=args.repository,
-            production_project_directory=args.production_project_directory,
+            tool_repo_root=args.tool_repo_root,
+            production_compose_file=args.production_compose_file,
+            production_project_dir=args.production_project_dir,
             candidate_result_file=(
                 args.candidate_result.resolve()
                 if args.candidate_result
@@ -84,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             schema=load_schema(PLAN_SCHEMA_PATH),
         )
         write_deployment_plan(plan, output_path)
+        plan_manifest = artifact_manifest_path(output_path, "deployment_plan")
     except ContractError as exc:
         print(f"deployment plan rejected: {exc}", file=sys.stderr)
         return 2
@@ -94,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
                 "plan_status": plan["plan_status"],
                 "deployment_plan": str(output_path),
                 "deployment_plan_sha256": hash_file(output_path),
+                "deployment_plan_manifest": str(plan_manifest),
+                "deployment_plan_manifest_sha256": hash_file(plan_manifest),
                 "production_compose_sha256": plan[
                     "production_compose_sha256"
                 ],

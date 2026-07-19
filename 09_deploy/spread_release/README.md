@@ -1,21 +1,30 @@
 # spread-dashboard 发布环境契约
 
-本目录是 `spread-dashboard` 唯一的正式切换与回滚入口。它只管理
-spread 服务，不重建或切换 USDA、Oil World，也不改变业务数据更新方式。
+本目录是 `spread-dashboard` 预定的唯一正式切换与回滚入口，但当前工具状态
+仍为**候选**。代码和模拟契约测试已经完成；真实 `docker compose config`
+验证尚未完成。pyarrow 曾受 Windows 应用控制策略阻断，但 2026-07-19 最终
+复审已在仓库 `.venv` 和另一套独立 Python 环境通过相关测试；当前指定测试
+结果为 154 passed、3 skipped，3 个 skipped 均因本机没有 Docker Compose。
+pyarrow 已不再是当前环境阻塞项。真实 Compose 门槛通过前，不得把本目录称为
+正式生产发布工具，也不得用它执行生产部署。
+
+本工具只管理 spread 服务，不重建或切换 USDA、Oil World，也不改变业务数据
+更新方式。USDA 和 Oil World 的一条式发布工具仍待实现。
 
 ## 五层身份边界
 
 发布流程把以下事实分开记录，避免用一个渲染后的 Compose 哈希承担所有职责：
 
-1. Git 提交标识软件源代码，必须使用完整 40 位提交。
+1. Git 提交和 Tree SHA 标识软件源代码及其树对象，必须使用完整 40 位值。
 2. `release.json` 标识不可变软件发布，包括 Release ID、版本化镜像引用、
    Image ID、OCI revision、镜像内 `RELEASE.json`、Dockerfile、
    `.dockerignore`、Compose 模板和数据基线。
 3. 候选环境标识候选验收时使用的运行时 URL 和 Compose 渲染结果。
 4. `deployment_plan.json` 标识一次具体生产切换的非敏感环境、生产 Compose
    渲染结果、候选与生产的语义差异以及精确回滚对象。
-5. `deployment_result.json` 只记录切换后的实际容器 Image ID、OCI revision、
-   镜像内版本文件和 HTTP 验收结果。
+5. `deployment_result.json` 记录计划目标 Git SHA、容器 inspect 实测运行时
+   Git SHA、二者核验结果、实际容器 Image ID、OCI revision、镜像内版本文件
+   和 HTTP 验收结果。
 
 `Config.Image` 只是容器创建时使用的字符串，不能作为下一次发布或回滚的目标
 依据。最终硬校验依据始终是清单中的完整 Image ID。
@@ -29,14 +38,23 @@ market-data-spread-dashboard:spread-YYYYMMDD-<Git前缀>-bNN
 ```
 
 禁止 `latest`、`new`、无标签引用和 Compose 自动生成镜像名。候选构建只能执行
-一次，镜像的 OCI `revision` 必须等于完整 Git 提交，OCI `version` 必须等于
-Release ID，且 `/app/RELEASE.json` 必须与二者一致。
+一次，镜像的 OCI `revision` 只记录并必须等于完整 Git commit SHA，OCI
+`version` 必须等于 Release ID。Tree SHA 不要求写入 OCI 标签；它由可信
+`tool_repo_root` 的 `HEAD^{tree}`、Release 产物、镜像内
+`/app/RELEASE.json`、候选结果、部署计划、部署结果及各自 Manifest 传播和
+验证。`/app/RELEASE.json` 的 Git SHA 和 Tree SHA 必须与 Release 一致。
+构建器必须显式传入以下两个身份参数，不能使用默认值：
+
+```text
+--build-arg MARKET_DATA_GIT_HEAD=<完整目标 Git SHA>
+--build-arg MARKET_DATA_GIT_TREE=<完整目标 Tree SHA>
+```
 
 密封命令：
 
 ```bash
 python3 09_deploy/spread_release/create_release_manifest.py \
-  --repository /path/to/isolated-release-worktree \
+  --repository /path/to/isolated-readonly-shallow-clone \
   --data-host-root /home/ubuntu/market-data \
   --release-id "${RELEASE_ID}" \
   --git-commit "${FULL_GIT_COMMIT}" \
@@ -50,9 +68,15 @@ python3 09_deploy/spread_release/create_release_manifest.py \
   --formal-git-commit "${CURRENT_FORMAL_GIT_COMMIT}"
 ```
 
-生成目录包含 `release.json`、`release.env` 和 `checksums.sha256`。三者写入后
-不得静默覆盖。Schema 2.1 的 `release.json` 固定 Compose 模板 SHA-256，
-但不固定某个运行环境渲染出的最终 Compose SHA-256。
+生成目录包含 `release.json`、`release.manifest.json`、`release.env` 和
+`checksums.sha256`，写入后不得静默覆盖。Schema 2.3 的 `release.json`
+记录 Git SHA 和 Tree SHA，并固定 Compose 模板 SHA-256，但不固定某个运行
+环境渲染出的最终 Compose SHA-256。
+
+`release.manifest.json` 密封 `release.json` 的文件名、SHA-256、字节大小、
+目标 Schema 版本、生成时间、Release Git SHA、Tree SHA 和 Image ID。
+`release.env` 与 `checksums.sha256` 暂时保留为兼容产物；后者仍只校验
+`release.json` 和 `release.env`，不能替代 `release.manifest.json`。
 
 ## 健康就绪契约
 
@@ -65,8 +89,11 @@ python3 09_deploy/spread_release/create_release_manifest.py \
 每次探测前先验证容器仍在运行、实际 Image ID 未改变且 `RestartCount`
 没有增加。连接拒绝、连接重置、空回复、请求超时、502、503 和正文不符在
 容器身份与状态正常时属于可重试冷启动现象；容器退出或死亡、镜像不符、
-重启次数增加属于永久失败并立即停止。超时或永久失败证据包含逐次分类、
-非敏感 inspect 摘要、最后一次 HTTP 结果和最后 200 行容器日志。
+重启次数增加属于永久失败并立即停止。成功和失败结果都保存同一有限日志摘要：
+采集时间、请求的最后 200 行、原始采样字节数、最多 64 KiB 的脱敏尾部、
+尾部 SHA-256、是否截断、实际尾部行数及 warning/error 数量。日志读取失败时
+记录不含原始错误文本的受控 `unavailable` warning；不得保存完整无限日志、
+Docker inspect 环境变量或密钥值。
 
 候选容器创建后先执行版本身份硬校验，再立即进入同一轮询器：
 
@@ -76,6 +103,28 @@ bash 09_deploy/spread_release/validate_spread_candidate.sh \
   "http://127.0.0.1:${CANDIDATE_PORT}/_stcore/health" \
   "/path/to/candidate_readiness.json"
 ```
+
+候选身份、就绪、HTTP、页面、正式环境未变化和数据未变化检查全部通过后，使用
+正式入口生成候选结果：
+
+```bash
+python3 09_deploy/spread_release/create_candidate_result.py \
+  --tool-repo-root /path/to/isolated-readonly-shallow-clone \
+  --manifest "/path/to/release/release.json" \
+  --readiness-result "/path/to/candidate_readiness.json" \
+  --checks-file "/path/to/candidate_checks.json"
+```
+
+该命令不可覆盖地生成 `candidate_result.json` 和
+`candidate_result.manifest.json`，记录 Release Git SHA、Tree SHA、候选
+Image ID、候选容器身份、容器 inspect 实测的
+`MARKET_DATA_GIT_HEAD`、验收状态、有限脱敏日志摘要、关键检查摘要和生成
+时间。实测运行时 Git SHA 不接受人工参数，必须由 Docker inspect 的
+`Config.Env` 读取并与目标完整 SHA 核对。日志摘要作为
+`candidate_result.json` 必填内容，并由目标文件 SHA-256 纳入
+`candidate_result.manifest.json` 的密封身份。失败候选的就绪/失败证据也由
+同一轮询器不可覆盖地写入相同有限摘要，不依赖操作人员手工复制完整日志。
+随后删除候选容器并确认其不存在；只有完成这些步骤后才允许生成部署计划。
 
 ## 运行环境契约
 
@@ -98,26 +147,42 @@ OIL_WORLD_DASHBOARD_URL
 `SPREAD_IMAGE` 必须等于 `release.json.image_ref`，
 `MARKET_DATA_GIT_HEAD` 必须等于 `release.json.git_commit`。两个 URL 必须显式
 提供实际生产地址，禁止 localhost、回环地址、凭据、查询参数和片段。
+根 Compose 仅向 `spread-dashboard` 注入 `MARKET_DATA_GIT_HEAD`，并使用缺失
+即失败的插值；USDA 和 Oil World 的运行环境不因本工具而改变。
 
 ## 生产部署计划
 
-候选验收通过后，使用新 Release worktree 中的契约代码、正式仓库作为生产项目
-目录、唯一生产环境文件生成计划。候选验收结果必须已写入 Release 目录旁的
-`candidate_result.json`，且候选容器已经删除：
+候选验收通过后，使用目标 Release SHA 的独立只读浅克隆中的契约代码、正式
+Compose 文件、正式 Compose 项目目录和唯一生产环境文件生成计划。候选结果及
+其 Manifest 必须已验证，且候选容器已经删除：
 
 ```bash
 python3 09_deploy/spread_release/create_deployment_plan.py \
-  --repository /path/to/isolated-release-worktree \
+  --tool-repo-root /path/to/isolated-readonly-shallow-clone \
   --manifest "/path/to/release/release.json" \
-  --production-project-directory /home/ubuntu/market-data \
+  --candidate-result "/path/to/release/candidate_result.json" \
+  --production-compose-file /home/ubuntu/market-data/docker-compose.yml \
+  --production-project-dir /home/ubuntu/market-data \
   --production-env-file /home/ubuntu/.config/market-data/spread-production.env
 ```
 
-`deployment_plan.json` 记录生产环境文件 SHA-256、实际 USDA/Oil World URL、
-Compose 项目名和文件路径、模板 SHA-256、候选与生产各自的最终 Compose
-SHA-256、候选结果 SHA-256、候选容器删除状态、语义哈希、正式服务范围和精确
-回滚 Git/Image ID。状态固定为
-`deployment_plan_sealed`，写入后不得静默覆盖。
+`deployment_plan.json` 显式记录 `tool_repo_root`、
+`production_compose_file`、`production_project_dir`、Compose 项目名、
+服务名、Git SHA、Tree SHA、候选 Image ID、生产环境文件 SHA-256、实际
+USDA/Oil World URL、候选与生产各自的 Compose SHA-256、候选结果 SHA-256、
+候选容器删除状态、语义哈希、正式服务范围和精确回滚 Git/Image ID。状态固定
+为 `deployment_plan_sealed`，并由 `deployment_plan.manifest.json` 密封。
+
+四个目录/身份不得混淆：
+
+- `tool_repo_root`：包含目标 Release SHA 和发布工具的独立只读浅克隆；
+- `production_compose_file`：正式切换实际使用且经过哈希验证的绝对 Compose 路径；
+- `production_project_dir`：Compose 相对挂载源的解析基准；
+- `candidate_image_id`：候选已经验收并在正式切换中复用的精确 Image ID。
+
+正式仓库 HEAD 可以仍是旧提交。预部署只验证 `tool_repo_root` 的 HEAD 和 Tree
+SHA；不会也不得在 `/home/ubuntu/market-data` 执行 checkout、依赖安装、测试
+或镜像构建。
 
 候选与生产允许不同的字段只有：
 
@@ -145,16 +210,27 @@ bash 09_deploy/spread_release/deploy_spread_release.sh \
   "09_deploy/releases/${RELEASE_ID}/deployment_plan.json"
 ```
 
-脚本先重新校验发布清单、生产环境、部署计划、Git、模板、版本化镜像到 Image
-ID、OCI revision 和镜像内版本文件，然后仅执行：
+脚本先验证 `release.manifest.json`、`candidate_result.manifest.json` 和
+`deployment_plan.manifest.json`，再校验生产环境、隔离工具仓库 Git/Tree、
+计划指定的正式 Compose 路径、版本化镜像到 Image ID、OCI revision 和镜像内
+版本文件。脚本从计划读取 Compose 文件、项目目录、项目名、服务名和候选
+Image ID，然后仅执行：
 
 ```text
-docker compose --env-file <production-env> ... \
-  up -d --no-build --no-deps spread-dashboard
+docker compose --env-file <production-env> \
+  --project-name <compose-project> \
+  --project-directory <production-project-dir> \
+  -f <production-compose-file> \
+  up -d --no-build --no-deps <production-service>
 ```
 
-切换后先验证实际容器 Image ID 和版本身份，再按密封参数完成有界就绪轮询，最后单独写入
-`deployment_result.json`。发布清单和部署计划不会被改写。
+切换后先证明实际容器 Image ID 与候选结果和计划中的 Image ID 完全相同，
+验证 OCI revision、镜像内 `RELEASE.json` 的 Git SHA/Tree SHA，并从 Docker
+inspect 的 `Config.Env` 实测 `MARKET_DATA_GIT_HEAD`。实测值必须等于计划目标
+完整 SHA；缺失、空值、冲突值或不一致均停止。通过后再按密封参数完成有界就绪
+轮询，最后不可覆盖地写入 `deployment_result.json` 和
+`deployment_result.manifest.json`。结果区分计划目标 Git SHA、实测运行时 Git
+SHA 和验证布尔值；发布清单和部署计划不会被改写。
 
 回滚同样必须提供同一个密封计划：
 
@@ -176,9 +252,34 @@ bash 09_deploy/spread_release/rollback_spread_release.sh \
 `.env`、密码、Token、API Key、SSH 私钥等敏感内容不得进入发布清单、部署
 计划或镜像版本文件。生产环境文件仅允许四个已声明的非敏感变量。
 
+## 四类 Manifest
+
+| JSON 产物 | Manifest |
+|---|---|
+| `release.json` | `release.manifest.json` |
+| `candidate_result.json` | `candidate_result.manifest.json` |
+| `deployment_plan.json` | `deployment_plan.manifest.json` |
+| `deployment_result.json` | `deployment_result.manifest.json` |
+
+任何后续阶段读取上述 JSON 前都先验证对应 Manifest。目标文件内容、Manifest
+哈希、字节大小、Schema 版本、Release Git SHA、Tree SHA 或 Image ID 任一
+不一致即停止。候选结果和部署结果 Manifest 还密封实测运行时 Git SHA；Release
+和部署计划 Manifest 不得伪造该实测字段。Manifest Schema 自身将
+`artifact_type`、`target_file` 和 `target_schema_version` 一一绑定。当前
+Schema 版本分别为：`release.json` 2.3.0、`candidate_result.json` 1.2.0、
+`deployment_plan.json` 1.2.0、`deployment_result.json` 1.1.0，以及四类
+Manifest 共用的 1.2.0。
+
+四类 JSON 和四类 Manifest 使用同一排他发布实现：内容先在内存中完成
+序列化和 Schema 校验，再完整写入同目录临时文件并 `flush`、`fsync`，最后
+通过硬链接排他创建正式路径。已有目标不会被 `os.replace` 或其他方式覆盖；
+Manifest 发布失败时不会留下可被误认为完整成功链的孤立 JSON。
+
 ## 验证
 
 维护时必须运行部署契约测试、生产打包测试、完整仓库测试、JSON Schema
 校验、Python 和 Shell 语法检查以及 `git diff --check`。本地没有 Docker
-时，真实 `docker compose config` 用例会跳过；服务器在密封 Release 和
-deployment plan 时必须执行真实 Compose 解析和 Image ID 校验。
+时，真实 `docker compose config` 用例明确跳过，不得把跳过计为通过。
+2026-07-19 的两套 Python 环境已经通过 pyarrow 相关测试；当前剩余的工具
+转正门槛是真实 Compose 验证。在该门槛通过前，本工具保持候选状态，不得用于
+生产部署。

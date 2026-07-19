@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 from release_contract import (
+    APPLICATION,
     ContractError,
+    DEPLOYMENT_RESULT_SCHEMA_VERSION,
     DockerReleaseRuntime,
     hash_file,
     load_deployment_plan,
@@ -33,7 +35,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--env-file", type=Path)
-    parser.add_argument("--repository", type=Path, default=DEFAULT_REPOSITORY)
+    parser.add_argument(
+        "--tool-repo-root",
+        "--repository",
+        dest="tool_repo_root",
+        type=Path,
+        default=DEFAULT_REPOSITORY,
+    )
     parser.add_argument(
         "--phase",
         choices=(
@@ -61,11 +69,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.env_file
         else manifest_path.parent / "release.env"
     )
-    repository = args.repository.resolve()
+    tool_repo_root = args.tool_repo_root.resolve()
 
     try:
         manifest, _ = load_manifest_bundle(manifest_path, env_path, SCHEMA_PATH)
-        validate_repository_static(repository)
+        validate_repository_static(tool_repo_root)
         if args.phase == "offline":
             evidence = {
                 "phase": "offline",
@@ -88,14 +96,20 @@ def main(argv: list[str] | None = None) -> int:
             plan_sha256 = hash_file(plan_path)
             runtime = DockerReleaseRuntime()
             if args.phase == "pre-deploy":
-                if (manifest_path.parent / "deployment_result.json").exists():
+                if any(
+                    (manifest_path.parent / name).exists()
+                    for name in (
+                        "deployment_result.json",
+                        "deployment_result.manifest.json",
+                    )
+                ):
                     raise ContractError(
                         "deployment_result.json already exists; this sealed release "
                         "will not be switched again"
                     )
                 evidence = verify_pre_deploy(
                     manifest,
-                    repository,
+                    tool_repo_root,
                     runtime,
                     deployment_plan=plan,
                     production_environment=production_environment,
@@ -130,10 +144,25 @@ def main(argv: list[str] | None = None) -> int:
                         raise ContractError(
                             "deployment readiness result does not match the sealed plan"
                         )
-                    evidence = {
-                        **evidence,
-                        "phase": "deployment-result",
+                    result = {
+                        "schema_version": DEPLOYMENT_RESULT_SCHEMA_VERSION,
+                        "application": APPLICATION,
                         "release_id": manifest["release_id"],
+                        "git_commit": manifest["git_commit"],
+                        "target_git_commit": manifest["git_commit"],
+                        "git_tree": manifest["git_tree"],
+                        "image_ref": manifest["image_ref"],
+                        "candidate_image_id": plan["candidate_image_id"],
+                        "actual_image_id": evidence["actual_image_id"],
+                        "oci_revision": evidence["oci_revision"],
+                        "runtime_git_commit": evidence["runtime_git_commit"],
+                        "runtime_git_commit_verified": evidence[
+                            "runtime_git_commit_verified"
+                        ],
+                        "container_name": evidence["container_name"],
+                        "config_image": evidence["config_image"],
+                        "compose_project": plan["compose_project"],
+                        "production_service": plan["production_service"],
                         "http_status": readiness.get("last_http_result", {}).get(
                             "http_status"
                         ),
@@ -147,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
                         "production_compose_sha256": plan[
                             "production_compose_sha256"
                         ],
+                        "generated_at": readiness.get("ready_at_utc"),
                         "status": "production_verified",
                     }
                     result_path = (
@@ -154,12 +184,20 @@ def main(argv: list[str] | None = None) -> int:
                         if args.result_path
                         else manifest_path.parent / "deployment_result.json"
                     )
-                    write_result(result_path, evidence)
-                    evidence["result_path"] = str(result_path)
+                    write_result(result_path, result)
+                    evidence = {
+                        **result,
+                        "result_path": str(result_path),
+                        "result_manifest": str(
+                            result_path.with_name(
+                                "deployment_result.manifest.json"
+                            )
+                        ),
+                    }
             elif args.phase == "pre-rollback":
                 evidence = verify_pre_rollback(
                     manifest,
-                    repository,
+                    tool_repo_root,
                     runtime,
                     deployment_plan=plan,
                     production_environment=production_environment,

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from wait_for_service_ready import (
     DEFAULT_READINESS_POLICY,
+    validate_log_summary,
     validate_readiness_policy,
 )
 
@@ -27,8 +28,35 @@ APPLICATION = "spread-dashboard"
 COMPOSE_PROJECT = "market-data"
 COMPOSE_SERVICE = "spread-dashboard"
 PRODUCTION_CONTAINER = "spread-dashboard"
-SCHEMA_VERSION = "2.1.0"
-DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "2.3.0"
+CANDIDATE_RESULT_SCHEMA_VERSION = "1.2.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.2.0"
+DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.1.0"
+ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.2.0"
+ARTIFACT_MANIFEST_FILENAMES = {
+    "release": "release.manifest.json",
+    "candidate_result": "candidate_result.manifest.json",
+    "deployment_plan": "deployment_plan.manifest.json",
+    "deployment_result": "deployment_result.manifest.json",
+}
+ARTIFACT_TARGET_FILENAMES = {
+    "release": "release.json",
+    "candidate_result": "candidate_result.json",
+    "deployment_plan": "deployment_plan.json",
+    "deployment_result": "deployment_result.json",
+}
+ARTIFACT_TARGET_SCHEMA_VERSIONS = {
+    "release": SCHEMA_VERSION,
+    "candidate_result": CANDIDATE_RESULT_SCHEMA_VERSION,
+    "deployment_plan": DEPLOYMENT_PLAN_SCHEMA_VERSION,
+    "deployment_result": DEPLOYMENT_RESULT_SCHEMA_VERSION,
+}
+ARTIFACT_TARGET_SCHEMA_FILENAMES = {
+    "release": "release.schema.json",
+    "candidate_result": "candidate_result.schema.json",
+    "deployment_plan": "deployment_plan.schema.json",
+    "deployment_result": "deployment_result.schema.json",
+}
 RELEASE_ENV_KEYS = (
     "RELEASE_ID",
     "SPREAD_IMAGE",
@@ -65,6 +93,14 @@ PRODUCTION_DATA_MOUNTS = {
     "06_outputs": "/app/06_outputs",
     "10_logs": "/app/10_logs",
 }
+
+
+def candidate_compose_environment(git_commit: str) -> dict[str, str]:
+    return {
+        **CANDIDATE_RUNTIME_ENVIRONMENT,
+        "MARKET_DATA_GIT_HEAD": validate_full_git_commit(git_commit),
+    }
+
 
 FULL_GIT_RE = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -261,7 +297,15 @@ class DockerReleaseRuntime:
         config_image = payload.get("Config", {}).get("Image")
         if not isinstance(config_image, str) or not config_image:
             raise ContractError(f"container {container_name} has no Config.Image")
-        return {"image_id": image_id, "config_image": config_image}
+        runtime_git_commit = _runtime_git_commit_from_inspect(
+            payload,
+            f"container {container_name}",
+        )
+        return {
+            "image_id": image_id,
+            "config_image": config_image,
+            "runtime_git_commit": runtime_git_commit,
+        }
 
     def container_exists(self, container_name: str) -> bool:
         if not SAFE_CONTAINER_RE.fullmatch(container_name):
@@ -505,6 +549,43 @@ def _load_docker_array(raw: str, description: str) -> dict[str, Any]:
     return payload[0]
 
 
+def _runtime_git_commit_from_inspect(
+    payload: Mapping[str, Any],
+    description: str,
+) -> str:
+    config = payload.get("Config")
+    environment = config.get("Env") if isinstance(config, dict) else None
+    if not isinstance(environment, list):
+        raise ContractError(
+            f"{description} is missing runtime MARKET_DATA_GIT_HEAD"
+        )
+    values: list[str] = []
+    for entry in environment:
+        if not isinstance(entry, str):
+            continue
+        key, separator, value = entry.partition("=")
+        if separator and key == "MARKET_DATA_GIT_HEAD":
+            values.append(value)
+    if not values:
+        raise ContractError(
+            f"{description} is missing runtime MARKET_DATA_GIT_HEAD"
+        )
+    if any(not value for value in values):
+        raise ContractError(
+            f"{description} runtime MARKET_DATA_GIT_HEAD is empty"
+        )
+    if len(set(values)) != 1:
+        raise ContractError(
+            f"{description} has conflicting runtime MARKET_DATA_GIT_HEAD entries"
+        )
+    try:
+        return validate_full_git_commit(values[0])
+    except ContractError as exc:
+        raise ContractError(
+            f"{description} runtime MARKET_DATA_GIT_HEAD is invalid"
+        ) from exc
+
+
 def _parse_release_json(raw: str, description: str) -> dict[str, Any]:
     try:
         payload = json.loads(raw)
@@ -514,6 +595,7 @@ def _parse_release_json(raw: str, description: str) -> dict[str, Any]:
         "application",
         "release_id",
         "git_commit",
+        "git_tree",
         "build_time",
         "source",
     }
@@ -524,6 +606,11 @@ def _parse_release_json(raw: str, description: str) -> dict[str, Any]:
     if payload["application"] != APPLICATION:
         raise ContractError(f"{description} RELEASE.json application mismatch")
     validate_full_git_commit(payload["git_commit"])
+    validate_full_git_commit(payload["git_tree"])
+    if payload["git_tree"] == payload["git_commit"]:
+        raise ContractError(
+            f"{description} RELEASE.json git_tree must differ from git_commit"
+        )
     validate_release_id(payload["release_id"], payload["git_commit"], payload["build_time"])
     validate_build_time(payload["build_time"])
     validate_source(payload["source"])
@@ -690,18 +777,23 @@ def validate_git_state(
     repository: Path,
     expected_commit: str,
     runner: CommandRunner | None = None,
-) -> None:
+) -> str:
     validate_full_git_commit(expected_commit)
     command_runner = runner or CommandRunner()
     status = command_runner.run(
         ["git", "status", "--porcelain", "--untracked-files=all"], cwd=repository
     )
     if status.strip():
-        raise ContractError("git worktree must be clean before sealing a release")
+        raise ContractError("git checkout must be clean before sealing a release")
     head = command_runner.run(["git", "rev-parse", "HEAD"], cwd=repository).strip()
     validate_full_git_commit(head)
     if head != expected_commit:
         raise ContractError(f"git HEAD mismatch: expected {expected_commit}, got {head}")
+    tree = command_runner.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=repository,
+    ).strip()
+    return validate_full_git_commit(tree)
 
 
 def validate_compose_result(
@@ -765,6 +857,18 @@ def validate_repository_static(repository: Path) -> None:
     plan_schema_path = (
         repository / "09_deploy/spread_release/deployment_plan.schema.json"
     )
+    candidate_creator_path = (
+        repository / "09_deploy/spread_release/create_candidate_result.py"
+    )
+    candidate_schema_path = (
+        repository / "09_deploy/spread_release/candidate_result.schema.json"
+    )
+    artifact_manifest_schema_path = (
+        repository / "09_deploy/spread_release/artifact_manifest.schema.json"
+    )
+    deployment_result_schema_path = (
+        repository / "09_deploy/spread_release/deployment_result.schema.json"
+    )
     required_config = repository / "02_configs/historical_spread_config.xlsx"
     for path in (
         compose_path,
@@ -774,6 +878,10 @@ def validate_repository_static(repository: Path) -> None:
         rollback_path,
         plan_creator_path,
         plan_schema_path,
+        candidate_creator_path,
+        candidate_schema_path,
+        artifact_manifest_schema_path,
+        deployment_result_schema_path,
         required_config,
     ):
         if not path.is_file():
@@ -787,7 +895,7 @@ def validate_repository_static(repository: Path) -> None:
         raise ContractError("docker-compose.yml must declare name: market-data")
     if required_image_line not in compose_text:
         raise ContractError("spread Compose image must be a required SPREAD_IMAGE")
-    for variable in RUNTIME_URL_KEYS:
+    for variable in ("MARKET_DATA_GIT_HEAD", *RUNTIME_URL_KEYS):
         marker = f"${{{variable}:?{variable} must be explicitly set}}"
         if marker not in compose_text:
             raise ContractError(
@@ -801,6 +909,7 @@ def validate_repository_static(repository: Path) -> None:
     dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
     for argument in (
         "MARKET_DATA_GIT_HEAD",
+        "MARKET_DATA_GIT_TREE",
         "MARKET_DATA_RELEASE_ID",
         "MARKET_DATA_BUILD_TIME",
         "MARKET_DATA_SOURCE",
@@ -854,12 +963,18 @@ def validate_repository_static(repository: Path) -> None:
                 f"{description} command must require the sealed production environment "
                 "and deployment plan"
             )
+        if 'plan["production_service"]' not in script:
+            raise ContractError(
+                f"{description} command must read production_service from the "
+                "verified deployment plan"
+            )
         if not re.search(
-            r"up\s+-d\s+--no-build\s+--no-deps\s+spread-dashboard",
+            r'up\s+-d\s+--no-build\s+--no-deps\s+"\$\{production_service\}"',
             script,
         ):
             raise ContractError(
-                f"{description} command service scope must be spread-dashboard only"
+                f"{description} command service scope must come from the verified "
+                "deployment plan"
             )
         if re.search(
             r"(?is)\bup\b[^\n]*(?:usda-dashboard|oil-world|oil_world)",
@@ -929,7 +1044,10 @@ def validate_against_schema(
         return
 
     expected_type = schema.get("type")
-    if expected_type and not _matches_json_type(value, expected_type):
+    if isinstance(expected_type, list):
+        if not any(_matches_json_type(value, item) for item in expected_type):
+            raise ContractError(f"{path} must be one of JSON types {expected_type}")
+    elif expected_type and not _matches_json_type(value, expected_type):
         raise ContractError(f"{path} must be JSON type {expected_type}")
     if "const" in schema and value != schema["const"]:
         raise ContractError(f"{path} must equal {schema['const']!r}")
@@ -992,12 +1110,375 @@ def load_schema(schema_path: Path) -> dict[str, Any]:
     return payload
 
 
+def artifact_manifest_path(target_path: Path, artifact_type: str) -> Path:
+    try:
+        filename = ARTIFACT_MANIFEST_FILENAMES[artifact_type]
+    except KeyError as exc:
+        raise ContractError(f"unsupported artifact type: {artifact_type}") from exc
+    return target_path.resolve().with_name(filename)
+
+
+def create_artifact_manifest(
+    target_path: Path,
+    *,
+    artifact_type: str,
+    target_schema_version: str,
+    release_id: str,
+    git_commit: str,
+    git_tree: str,
+    image_id: str,
+    runtime_git_commit: str | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    target_path = target_path.resolve()
+    expected_target = ARTIFACT_TARGET_FILENAMES.get(artifact_type)
+    if expected_target is None:
+        raise ContractError(f"unsupported artifact type: {artifact_type}")
+    if target_path.name != expected_target:
+        raise ContractError(
+            f"{artifact_type} manifest target must be {expected_target}, "
+            f"got {target_path.name}"
+        )
+    expected_schema_version = ARTIFACT_TARGET_SCHEMA_VERSIONS[artifact_type]
+    if target_schema_version != expected_schema_version:
+        raise ContractError(
+            f"{artifact_type} manifest target schema version must be "
+            f"{expected_schema_version}, got {target_schema_version}"
+        )
+    validate_full_git_commit(git_commit)
+    validate_full_git_commit(git_tree)
+    validate_image_id(image_id)
+    timestamp = generated_at or datetime.now(timezone.utc).isoformat().replace(
+        "+00:00",
+        "Z",
+    )
+    validate_build_time(timestamp)
+    manifest = {
+        "schema_version": ARTIFACT_MANIFEST_SCHEMA_VERSION,
+        "artifact_type": artifact_type,
+        "target_file": target_path.name,
+        "target_sha256": hash_file(target_path),
+        "target_size_bytes": target_path.stat().st_size,
+        "target_schema_version": target_schema_version,
+        "generated_at": timestamp,
+        "release_id": release_id,
+        "git_commit": git_commit,
+        "git_tree": git_tree,
+        "image_id": image_id,
+    }
+    measured_artifact = artifact_type in {"candidate_result", "deployment_result"}
+    if measured_artifact:
+        if runtime_git_commit is None:
+            raise ContractError(
+                f"{artifact_type} manifest requires measured runtime_git_commit"
+            )
+        measured_commit = validate_full_git_commit(runtime_git_commit)
+        if measured_commit != git_commit:
+            raise ContractError(
+                f"{artifact_type} manifest runtime_git_commit mismatch: "
+                "must equal git_commit"
+            )
+        manifest["runtime_git_commit"] = measured_commit
+    elif runtime_git_commit is not None:
+        raise ContractError(
+            f"{artifact_type} manifest must not contain runtime_git_commit"
+        )
+    validate_against_schema(
+        manifest,
+        load_schema(Path(__file__).with_name("artifact_manifest.schema.json")),
+    )
+    return manifest
+
+
+def validate_artifact_manifest(
+    target_path: Path,
+    manifest_path: Path,
+    *,
+    artifact_type: str,
+    expected_release_id: str | None = None,
+    expected_git_commit: str | None = None,
+    expected_git_tree: str | None = None,
+    expected_image_id: str | None = None,
+    expected_runtime_git_commit: str | None = None,
+) -> dict[str, Any]:
+    target_path = target_path.resolve()
+    manifest_path = manifest_path.resolve()
+    expected_manifest_path = artifact_manifest_path(target_path, artifact_type)
+    if manifest_path != expected_manifest_path:
+        raise ContractError(
+            f"{artifact_type} manifest must be {expected_manifest_path.name}"
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(
+            f"cannot load {artifact_type} manifest {manifest_path}: {exc}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise ContractError(f"{artifact_type} manifest must be a JSON object")
+    validate_against_schema(
+        manifest,
+        load_schema(Path(__file__).with_name("artifact_manifest.schema.json")),
+    )
+    if manifest.get("artifact_type") != artifact_type:
+        raise ContractError(f"{artifact_type} manifest artifact_type mismatch")
+    expected_target = ARTIFACT_TARGET_FILENAMES.get(artifact_type)
+    if expected_target is None:
+        raise ContractError(f"unsupported artifact type: {artifact_type}")
+    if target_path.name != expected_target:
+        raise ContractError(
+            f"{artifact_type} manifest target must be {expected_target}, "
+            f"got {target_path.name}"
+        )
+    expected_schema_version = ARTIFACT_TARGET_SCHEMA_VERSIONS[artifact_type]
+    if manifest.get("target_schema_version") != expected_schema_version:
+        raise ContractError(
+            f"{artifact_type} manifest target_schema_version mismatch"
+        )
+    measured_artifact = artifact_type in {
+        "candidate_result",
+        "deployment_result",
+    }
+    runtime_git_commit = manifest.get("runtime_git_commit")
+    if measured_artifact:
+        if runtime_git_commit is None:
+            raise ContractError(
+                f"{artifact_type} manifest is missing runtime_git_commit"
+            )
+        measured_commit = validate_full_git_commit(runtime_git_commit)
+        if measured_commit != manifest.get("git_commit"):
+            raise ContractError(
+                f"{artifact_type} manifest runtime_git_commit mismatch: "
+                "must equal git_commit"
+            )
+    elif runtime_git_commit is not None:
+        raise ContractError(
+            f"{artifact_type} manifest must not contain runtime_git_commit"
+        )
+    if manifest.get("target_file") != target_path.name:
+        raise ContractError(f"{artifact_type} manifest target filename mismatch")
+    if manifest.get("target_sha256") != hash_file(target_path):
+        raise ContractError(f"{artifact_type} artifact SHA-256 mismatch")
+    if manifest.get("target_size_bytes") != target_path.stat().st_size:
+        raise ContractError(f"{artifact_type} artifact byte size mismatch")
+    expected_identity = {
+        "release_id": expected_release_id,
+        "git_commit": expected_git_commit,
+        "git_tree": expected_git_tree,
+        "image_id": expected_image_id,
+        "runtime_git_commit": expected_runtime_git_commit,
+    }
+    for key, expected in expected_identity.items():
+        if expected is not None and manifest.get(key) != expected:
+            raise ContractError(f"{artifact_type} manifest {key} mismatch")
+    validate_build_time(manifest.get("generated_at"))
+    return manifest
+
+
+def load_verified_json_artifact(
+    target_path: Path,
+    *,
+    artifact_type: str,
+    expected_release_id: str | None = None,
+    expected_git_commit: str | None = None,
+    expected_git_tree: str | None = None,
+    expected_image_id: str | None = None,
+    expected_runtime_git_commit: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    target_path = target_path.resolve()
+    artifact_manifest = validate_artifact_manifest(
+        target_path,
+        artifact_manifest_path(target_path, artifact_type),
+        artifact_type=artifact_type,
+        expected_release_id=expected_release_id,
+        expected_git_commit=expected_git_commit,
+        expected_git_tree=expected_git_tree,
+        expected_image_id=expected_image_id,
+        expected_runtime_git_commit=expected_runtime_git_commit,
+    )
+    try:
+        payload = json.loads(target_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(
+            f"cannot load verified {artifact_type} artifact {target_path}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ContractError(f"{artifact_type} artifact must be a JSON object")
+    if payload.get("schema_version") != artifact_manifest["target_schema_version"]:
+        raise ContractError(f"{artifact_type} target schema_version mismatch")
+    return payload, artifact_manifest
+
+
+def _serialize_json_payload(payload: Mapping[str, Any]) -> bytes:
+    try:
+        text = (
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n"
+        )
+        parsed = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ContractError(f"JSON payload cannot be serialized: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ContractError("JSON artifact must serialize to an object")
+    return text.encode("utf-8")
+
+
+def _write_bytes_exclusive(path: Path, content: bytes, *, description: str) -> None:
+    path = path.resolve()
+    if not path.parent.is_dir():
+        raise ContractError(f"{description} parent directory is missing: {path.parent}")
+    temp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            temp_path,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = None
+            written = handle.write(content)
+            if written != len(content):
+                raise OSError(
+                    f"short write: expected {len(content)} bytes, wrote {written}"
+                )
+            handle.flush()
+            os.fsync(handle.fileno())
+        if os.name != "nt":
+            temp_path.chmod(0o444)
+        try:
+            os.link(temp_path, path)
+        except FileExistsError as exc:
+            raise ContractError(
+                f"{description} already exists and will not be overwritten: {path}"
+            ) from exc
+        except OSError as exc:
+            raise ContractError(
+                f"cannot publish {description} exclusively at {path}: {exc}"
+            ) from exc
+    except ContractError:
+        raise
+    except OSError as exc:
+        raise ContractError(f"cannot write {description} {path}: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def _write_json_exclusive(
+    path: Path,
+    payload: Mapping[str, Any],
+    *,
+    description: str,
+) -> None:
+    content = _serialize_json_payload(payload)
+    _write_bytes_exclusive(path, content, description=description)
+
+
+def write_artifact_manifest(
+    target_path: Path,
+    *,
+    artifact_type: str,
+    target_schema_version: str,
+    release_id: str,
+    git_commit: str,
+    git_tree: str,
+    image_id: str,
+    runtime_git_commit: str | None = None,
+) -> Path:
+    target_path = target_path.resolve()
+    output = artifact_manifest_path(target_path, artifact_type)
+    manifest = create_artifact_manifest(
+        target_path,
+        artifact_type=artifact_type,
+        target_schema_version=target_schema_version,
+        release_id=release_id,
+        git_commit=git_commit,
+        git_tree=git_tree,
+        image_id=image_id,
+        runtime_git_commit=runtime_git_commit,
+    )
+    _write_json_exclusive(
+        output,
+        manifest,
+        description=f"{artifact_type} manifest",
+    )
+    validate_artifact_manifest(
+        target_path,
+        output,
+        artifact_type=artifact_type,
+        expected_release_id=release_id,
+        expected_git_commit=git_commit,
+        expected_git_tree=git_tree,
+        expected_image_id=image_id,
+        expected_runtime_git_commit=runtime_git_commit,
+    )
+    return output
+
+
+def write_json_artifact(
+    path: Path,
+    payload: Mapping[str, Any],
+    *,
+    artifact_type: str,
+    release_id: str,
+    git_commit: str,
+    git_tree: str,
+    image_id: str,
+    runtime_git_commit: str | None = None,
+) -> tuple[Path, Path]:
+    path = path.resolve()
+    manifest_path = artifact_manifest_path(path, artifact_type)
+    if manifest_path.exists():
+        raise ContractError(
+            f"{artifact_type} manifest already exists and will not be overwritten: "
+            f"{manifest_path}"
+        )
+    if not path.parent.is_dir():
+        raise ContractError(f"{artifact_type} parent directory is missing: {path.parent}")
+    schema_filename = ARTIFACT_TARGET_SCHEMA_FILENAMES.get(artifact_type)
+    if schema_filename is None:
+        raise ContractError(f"unsupported artifact type: {artifact_type}")
+    validate_against_schema(
+        payload,
+        load_schema(Path(__file__).with_name(schema_filename)),
+    )
+    installed_target = False
+    try:
+        _write_json_exclusive(
+            path,
+            payload,
+            description=f"{artifact_type} artifact",
+        )
+        installed_target = True
+        output_manifest = write_artifact_manifest(
+            path,
+            artifact_type=artifact_type,
+            target_schema_version=str(payload.get("schema_version", "")),
+            release_id=release_id,
+            git_commit=git_commit,
+            git_tree=git_tree,
+            image_id=image_id,
+            runtime_git_commit=runtime_git_commit,
+        )
+        return path, output_manifest
+    except Exception:
+        if installed_target and path.exists() and not manifest_path.exists():
+            path.unlink()
+        raise
+
+
 def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) -> None:
     validate_against_schema(manifest, schema)
     schema_version = manifest.get("schema_version")
-    if schema_version not in {"1.0.0", "2.0.0", SCHEMA_VERSION}:
+    if schema_version not in {"1.0.0", "2.0.0", "2.1.0", SCHEMA_VERSION}:
         raise ContractError(f"unsupported release schema_version: {schema_version!r}")
     commit = validate_full_git_commit(manifest.get("git_commit"))
+    tree = validate_full_git_commit(manifest.get("git_tree"))
+    if tree == commit:
+        raise ContractError("git_tree must identify a tree object, not the commit object")
     release_id = str(manifest.get("release_id", ""))
     validate_release_id(release_id, commit, str(manifest.get("build_time", "")))
     validate_release_image_ref(manifest.get("image_ref"), release_id)
@@ -1039,7 +1520,7 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
     else:
         if "compose_config_sha256" in manifest:
             raise ContractError(
-                "release schema 2.0.0 must not seal a rendered Compose hash"
+                "release schema version 2 must not seal a rendered Compose hash"
             )
         validate_sha256(
             manifest.get("compose_template_sha256"),
@@ -1335,6 +1816,7 @@ def _validate_formal_spread_semantics(
     compose: Mapping[str, Any],
     project_root: Path,
     expected_image_ref: str,
+    expected_git_commit: str,
 ) -> None:
     service = compose["services"][COMPOSE_SERVICE]
     if service.get("image") != expected_image_ref:
@@ -1343,6 +1825,14 @@ def _validate_formal_spread_semantics(
         raise ContractError("formal spread container_name changed")
     if service.get("restart") != "unless-stopped":
         raise ContractError("formal spread restart policy changed")
+    environment = service.get("environment")
+    if (
+        not isinstance(environment, dict)
+        or environment.get("MARKET_DATA_GIT_HEAD") != expected_git_commit
+    ):
+        raise ContractError(
+            "formal spread runtime MARKET_DATA_GIT_HEAD does not match the release"
+        )
 
     ports = service.get("ports") or []
     expected_port = {
@@ -1395,14 +1885,21 @@ def load_manifest_bundle(
     env_path: Path,
     schema_path: Path,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ContractError(f"cannot load release manifest {manifest_path}: {exc}") from exc
-    if not isinstance(manifest, dict):
-        raise ContractError("release manifest must be a JSON object")
+    manifest, _ = load_verified_json_artifact(
+        manifest_path,
+        artifact_type="release",
+    )
     schema = load_schema(schema_path)
     validate_manifest(manifest, schema)
+    validate_artifact_manifest(
+        manifest_path,
+        artifact_manifest_path(manifest_path, "release"),
+        artifact_type="release",
+        expected_release_id=manifest["release_id"],
+        expected_git_commit=manifest["git_commit"],
+        expected_git_tree=manifest["git_tree"],
+        expected_image_id=manifest["image_id"],
+    )
     environment = parse_release_env(env_path)
     validate_release_env(environment, manifest)
     validate_checksums(manifest_path.parent / "checksums.sha256", manifest_path, env_path)
@@ -1438,25 +1935,43 @@ def load_candidate_result(
 ) -> dict[str, Any]:
     if not path.is_absolute():
         raise ContractError("candidate result path must be absolute")
-    try:
-        result = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ContractError(f"cannot load candidate result {path}: {exc}") from exc
-    if not isinstance(result, dict):
-        raise ContractError("candidate result must be a JSON object")
+    result, artifact_manifest = load_verified_json_artifact(
+        path,
+        artifact_type="candidate_result",
+        expected_release_id=str(manifest["release_id"]),
+        expected_git_commit=str(manifest["git_commit"]),
+        expected_git_tree=str(manifest["git_tree"]),
+        expected_image_id=str(manifest["image_id"]),
+    )
+    validate_candidate_result(
+        result,
+        manifest,
+        load_schema(Path(__file__).with_name("candidate_result.schema.json")),
+    )
+    runtime_git_commit = result["identity"]["runtime_git_commit"]
+    if artifact_manifest.get("runtime_git_commit") != runtime_git_commit:
+        raise ContractError(
+            "candidate_result manifest runtime_git_commit mismatch"
+        )
+    return result
+
+
+def validate_candidate_result(
+    result: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    schema: Mapping[str, Any],
+) -> None:
+    validate_against_schema(result, schema)
     expected = {
-        "schema_version": "candidate-result-v1",
+        "schema_version": CANDIDATE_RESULT_SCHEMA_VERSION,
         "application": APPLICATION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
         "image_ref": manifest["image_ref"],
-        "image_id": manifest["image_id"],
+        "candidate_image_id": manifest["image_id"],
+        "candidate_container_name": manifest["candidate_container_name"],
         "status": "candidate-validated",
-        "three_way_image_id_equal": True,
-        "formal_containers_unchanged": True,
-        "formal_git_unchanged": True,
-        "data_files_unchanged": True,
-        "production_switch_performed": False,
     }
     for key, expected_value in expected.items():
         if result.get(key) != expected_value:
@@ -1471,29 +1986,128 @@ def load_candidate_result(
         ("config_image", manifest["image_ref"]),
         ("actual_image_id", manifest["image_id"]),
         ("tag_image_id", manifest["image_id"]),
-        ("manifest_image_id", manifest["image_id"]),
+        ("release_image_id", manifest["image_id"]),
         ("oci_revision", manifest["git_commit"]),
+        ("runtime_git_commit", manifest["git_commit"]),
+        ("embedded_release_sha256", manifest["image_release_json_sha256"]),
     ):
         if identity.get(key) != expected_value:
             raise ContractError(f"candidate result identity {key} mismatch")
-    http = result.get("http")
+    checks = result.get("checks")
+    if not isinstance(checks, dict):
+        raise ContractError("candidate result checks are missing")
+    http = checks.get("http")
     if not isinstance(http, dict) or any(
         http.get(key) != 200 for key in ("health", "host_config", "root")
     ):
         raise ContractError("candidate result HTTP validation did not fully pass")
-    pages = result.get("pages")
+    pages = checks.get("pages")
     if not isinstance(pages, dict) or pages.get("status") != "passed":
         raise ContractError("candidate result page validation did not pass")
-    if manifest.get("schema_version") == SCHEMA_VERSION:
-        readiness = result.get("readiness")
-        if not isinstance(readiness, dict) or readiness.get("status") != "ready":
-            raise ContractError("candidate result readiness validation did not pass")
-        if readiness.get("expected_image_id") != manifest["image_id"]:
-            raise ContractError("candidate result readiness Image ID mismatch")
-        if readiness.get("policy") != manifest["readiness_policy"]:
-            raise ContractError("candidate result readiness policy mismatch")
+    for key, expected_value in (
+        ("formal_containers_unchanged", True),
+        ("formal_git_unchanged", True),
+        ("data_files_unchanged", True),
+        ("production_switch_performed", False),
+    ):
+        if checks.get(key) is not expected_value:
+            raise ContractError(f"candidate result check {key} mismatch")
+    readiness = checks.get("readiness")
+    if not isinstance(readiness, dict) or readiness.get("status") != "ready":
+        raise ContractError("candidate result readiness validation did not pass")
+    if readiness.get("expected_image_id") != manifest["image_id"]:
+        raise ContractError("candidate result readiness Image ID mismatch")
+    if readiness.get("policy") != manifest["readiness_policy"]:
+        raise ContractError("candidate result readiness policy mismatch")
+    if readiness.get("container") != manifest["candidate_container_name"]:
+        raise ContractError("candidate result readiness container mismatch")
+    readiness_log_summary = readiness.get("log_summary")
+    if not isinstance(readiness_log_summary, dict):
+        raise ContractError("candidate result readiness log summary is missing")
+    try:
+        validated_log_summary = validate_log_summary(readiness_log_summary)
+    except ValueError as exc:
+        raise ContractError(f"candidate result log summary is invalid: {exc}") from exc
+    if result.get("log_summary") != validated_log_summary:
+        raise ContractError("candidate result log summary differs from readiness evidence")
+    validate_build_time(result.get("generated_at"))
     assert_no_sensitive_values(result, "candidate result")
+
+
+def create_candidate_result(
+    *,
+    manifest: Mapping[str, Any],
+    runtime: ReleaseRuntime,
+    readiness: Mapping[str, Any],
+    checks: Mapping[str, Any],
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    candidate_identity = verify_candidate(manifest, runtime)
+    timestamp = generated_at or datetime.now(timezone.utc).isoformat().replace(
+        "+00:00",
+        "Z",
+    )
+    result = {
+        "schema_version": CANDIDATE_RESULT_SCHEMA_VERSION,
+        "application": APPLICATION,
+        "release_id": manifest["release_id"],
+        "git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
+        "image_ref": manifest["image_ref"],
+        "candidate_image_id": manifest["image_id"],
+        "candidate_container_name": manifest["candidate_container_name"],
+        "generated_at": timestamp,
+        "status": "candidate-validated",
+        "identity": {
+            "config_image": candidate_identity["config_image"],
+            "actual_image_id": candidate_identity["actual_image_id"],
+            "tag_image_id": candidate_identity["tag_image_id"],
+            "release_image_id": candidate_identity["manifest_image_id"],
+            "oci_revision": candidate_identity["oci_revision"],
+            "runtime_git_commit": candidate_identity["runtime_git_commit"],
+            "embedded_release_sha256": candidate_identity[
+                "embedded_release_sha256"
+            ],
+        },
+        "log_summary": copy.deepcopy(dict(readiness.get("log_summary") or {})),
+        "checks": {
+            "readiness": copy.deepcopy(dict(readiness)),
+            "http": copy.deepcopy(dict(checks.get("http") or {})),
+            "pages": copy.deepcopy(dict(checks.get("pages") or {})),
+            "formal_containers_unchanged": checks.get(
+                "formal_containers_unchanged"
+            ),
+            "formal_git_unchanged": checks.get("formal_git_unchanged"),
+            "data_files_unchanged": checks.get("data_files_unchanged"),
+            "production_switch_performed": checks.get(
+                "production_switch_performed"
+            ),
+        },
+    }
+    validate_candidate_result(
+        result,
+        manifest,
+        load_schema(Path(__file__).with_name("candidate_result.schema.json")),
+    )
     return result
+
+
+def write_candidate_result(result: Mapping[str, Any], path: Path) -> Path:
+    validate_against_schema(
+        result,
+        load_schema(Path(__file__).with_name("candidate_result.schema.json")),
+    )
+    target, _ = write_json_artifact(
+        path,
+        result,
+        artifact_type="candidate_result",
+        release_id=str(result["release_id"]),
+        git_commit=str(result["git_commit"]),
+        git_tree=str(result["git_tree"]),
+        image_id=str(result["candidate_image_id"]),
+        runtime_git_commit=str(result["identity"]["runtime_git_commit"]),
+    )
+    return target
 
 
 def validate_deployment_plan(
@@ -1507,9 +2121,12 @@ def validate_deployment_plan(
     expected_release_fields = {
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
         "image_ref": manifest["image_ref"],
         "expected_image_id": manifest["image_id"],
+        "candidate_image_id": manifest["image_id"],
         "compose_project": COMPOSE_PROJECT,
+        "production_service": COMPOSE_SERVICE,
         "compose_template_sha256": manifest["compose_template_sha256"],
         "rollback_git_commit": manifest["formal_git_commit"],
         "rollback_image_ref": manifest["rollback_image_ref"],
@@ -1538,11 +2155,31 @@ def validate_deployment_plan(
         raise ContractError(
             "deployment plan service scope must contain only spread-dashboard"
         )
-    compose_file = Path(str(plan.get("compose_file", "")))
-    if not compose_file.is_absolute() or compose_file.name != "docker-compose.yml":
+    tool_repo_root = Path(str(plan.get("tool_repo_root", "")))
+    if not tool_repo_root.is_absolute() or not tool_repo_root.is_dir():
+        raise ContractError("deployment plan tool_repo_root must be an existing absolute directory")
+    production_compose_file = Path(str(plan.get("production_compose_file", "")))
+    if (
+        not production_compose_file.is_absolute()
+        or production_compose_file.name != "docker-compose.yml"
+        or not production_compose_file.is_file()
+    ):
         raise ContractError(
-            "deployment plan compose_file must be an absolute docker-compose.yml path"
+            "deployment plan production_compose_file must be an existing absolute "
+            "docker-compose.yml path"
         )
+    production_project_dir = Path(str(plan.get("production_project_dir", "")))
+    if not production_project_dir.is_absolute() or not production_project_dir.is_dir():
+        raise ContractError(
+            "deployment plan production_project_dir must be an existing absolute directory"
+        )
+    if production_project_dir.resolve() == tool_repo_root.resolve():
+        raise ContractError(
+            "deployment plan tool_repo_root and production_project_dir must be "
+            "different directories"
+        )
+    if hash_file(production_compose_file) != plan.get("compose_template_sha256"):
+        raise ContractError("deployment plan production Compose file changed")
     candidate_result_file = Path(str(plan.get("candidate_result_file", "")))
     if not candidate_result_file.is_absolute():
         raise ContractError("deployment plan candidate_result_file must be absolute")
@@ -1632,8 +2269,9 @@ def validate_deployment_plan(
 
 def create_deployment_plan(
     *,
-    repository: Path,
-    production_project_directory: Path,
+    tool_repo_root: Path,
+    production_compose_file: Path,
+    production_project_dir: Path,
     candidate_result_file: Path,
     production_env_file: Path,
     manifest: Mapping[str, Any],
@@ -1641,19 +2279,38 @@ def create_deployment_plan(
     schema: Mapping[str, Any],
     created_at: str | None = None,
 ) -> dict[str, Any]:
-    repository = repository.resolve()
-    production_project_directory = production_project_directory.resolve()
+    tool_repo_root = tool_repo_root.resolve()
+    production_compose_file = production_compose_file.resolve()
+    production_project_dir = production_project_dir.resolve()
     candidate_result_file = candidate_result_file.resolve()
     production_env_file = production_env_file.resolve()
     if manifest.get("schema_version") != SCHEMA_VERSION:
         raise ContractError(
             f"deployment plans require a release manifest using schema {SCHEMA_VERSION}"
         )
-    validate_repository_static(repository)
-    compose_template = repository / "docker-compose.yml"
-    template_sha = hash_file(compose_template)
+    validate_repository_static(tool_repo_root)
+    if tool_repo_root == production_project_dir:
+        raise ContractError(
+            "tool_repo_root and production_project_dir must be different directories"
+        )
+    if not production_project_dir.is_dir():
+        raise ContractError(
+            f"production project directory is missing: {production_project_dir}"
+        )
+    if not production_compose_file.is_file():
+        raise ContractError(
+            f"production Compose file is missing: {production_compose_file}"
+        )
+    compose_template = tool_repo_root / "docker-compose.yml"
+    template_sha = hash_file(production_compose_file)
     if template_sha != manifest.get("compose_template_sha256"):
-        raise ContractError("Compose template SHA-256 does not match release.json")
+        raise ContractError(
+            "production Compose file SHA-256 does not match release.json"
+        )
+    if hash_file(compose_template) != template_sha:
+        raise ContractError(
+            "tool repository Compose and production Compose file identities differ"
+        )
 
     production_environment = parse_production_env(production_env_file)
     validate_production_env(production_environment, manifest)
@@ -1665,10 +2322,10 @@ def create_deployment_plan(
     _verify_image_identity(manifest, runtime)
 
     candidate_compose, candidate_raw, candidate_images = runtime.compose_config(
-        repository,
+        tool_repo_root,
         manifest["image_ref"],
-        environment=CANDIDATE_RUNTIME_ENVIRONMENT,
-        project_directory=repository,
+        environment=candidate_compose_environment(manifest["git_commit"]),
+        project_directory=tool_repo_root,
         compose_file=compose_template,
     )
     candidate_sha = validate_compose_result(
@@ -1679,11 +2336,11 @@ def create_deployment_plan(
     )
 
     production_compose, production_raw, production_images = runtime.compose_config(
-        repository,
+        tool_repo_root,
         manifest["image_ref"],
         environment=production_environment,
-        project_directory=production_project_directory,
-        compose_file=compose_template,
+        project_directory=production_project_dir,
+        compose_file=production_compose_file,
     )
     production_sha = validate_compose_result(
         production_compose,
@@ -1693,17 +2350,18 @@ def create_deployment_plan(
     )
     _validate_formal_spread_semantics(
         production_compose,
-        production_project_directory,
+        production_project_dir,
         manifest["image_ref"],
+        manifest["git_commit"],
     )
 
     candidate_semantics, candidate_runtime = _compose_spread_semantics(
         candidate_compose,
-        repository,
+        tool_repo_root,
     )
     production_semantics, production_runtime = _compose_spread_semantics(
         production_compose,
-        production_project_directory,
+        production_project_dir,
     )
     if candidate_semantics != production_semantics:
         raise ContractError(
@@ -1729,8 +2387,10 @@ def create_deployment_plan(
         "schema_version": DEPLOYMENT_PLAN_SCHEMA_VERSION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
         "image_ref": manifest["image_ref"],
         "expected_image_id": manifest["image_id"],
+        "candidate_image_id": manifest["image_id"],
         "candidate_result_file": str(candidate_result_file),
         "candidate_result_sha256": hash_file(candidate_result_file),
         "candidate_container_removed": True,
@@ -1741,10 +2401,11 @@ def create_deployment_plan(
             "OIL_WORLD_DASHBOARD_URL"
         ],
         "MARKET_DATA_GIT_HEAD": production_environment["MARKET_DATA_GIT_HEAD"],
+        "tool_repo_root": str(tool_repo_root),
         "compose_project": COMPOSE_PROJECT,
-        "compose_file": str(
-            production_project_directory / "docker-compose.yml"
-        ),
+        "production_service": COMPOSE_SERVICE,
+        "production_compose_file": str(production_compose_file),
+        "production_project_dir": str(production_project_dir),
         "compose_template_sha256": template_sha,
         "candidate_compose_sha256": candidate_sha,
         "production_compose_sha256": production_sha,
@@ -1774,26 +2435,16 @@ def create_deployment_plan(
 
 
 def write_deployment_plan(plan: Mapping[str, Any], path: Path) -> Path:
-    path = path.resolve()
-    if path.exists():
-        raise ContractError(
-            f"deployment plan already exists and will not be overwritten: {path}"
-        )
-    if not path.parent.is_dir():
-        raise ContractError(f"deployment plan parent directory is missing: {path.parent}")
-    temp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
-    try:
-        temp_path.write_text(
-            json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        if os.name != "nt":
-            temp_path.chmod(0o444)
-        os.replace(temp_path, path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
-    return path
+    target, _ = write_json_artifact(
+        path,
+        plan,
+        artifact_type="deployment_plan",
+        release_id=str(plan["release_id"]),
+        git_commit=str(plan["git_commit"]),
+        git_tree=str(plan["git_tree"]),
+        image_id=str(plan["candidate_image_id"]),
+    )
+    return target
 
 
 def load_deployment_plan(
@@ -1801,12 +2452,14 @@ def load_deployment_plan(
     manifest: Mapping[str, Any],
     schema_path: Path,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    try:
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ContractError(f"cannot load deployment plan {plan_path}: {exc}") from exc
-    if not isinstance(plan, dict):
-        raise ContractError("deployment plan must be a JSON object")
+    plan, _ = load_verified_json_artifact(
+        plan_path,
+        artifact_type="deployment_plan",
+        expected_release_id=str(manifest["release_id"]),
+        expected_git_commit=str(manifest["git_commit"]),
+        expected_git_tree=str(manifest["git_tree"]),
+        expected_image_id=str(manifest["image_id"]),
+    )
     environment = validate_deployment_plan(
         plan,
         manifest,
@@ -1856,6 +2509,33 @@ def _verify_image_identity(
     }
 
 
+def _verified_runtime_git_commit(
+    container: Mapping[str, Any],
+    expected_git_commit: str,
+    description: str,
+) -> str:
+    value = container.get("runtime_git_commit")
+    if value is None:
+        raise ContractError(
+            f"{description} is missing runtime MARKET_DATA_GIT_HEAD"
+        )
+    if value == "":
+        raise ContractError(
+            f"{description} runtime MARKET_DATA_GIT_HEAD is empty"
+        )
+    try:
+        runtime_git_commit = validate_full_git_commit(value)
+    except ContractError as exc:
+        raise ContractError(
+            f"{description} runtime MARKET_DATA_GIT_HEAD is invalid"
+        ) from exc
+    if runtime_git_commit != expected_git_commit:
+        raise ContractError(
+            f"{description} runtime MARKET_DATA_GIT_HEAD does not match the release"
+        )
+    return runtime_git_commit
+
+
 def _validate_embedded_release(
     release: Mapping[str, Any],
     manifest: Mapping[str, Any],
@@ -1865,6 +2545,7 @@ def _validate_embedded_release(
         "application": APPLICATION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
         "build_time": manifest["build_time"],
         "source": expected_source,
     }
@@ -1874,7 +2555,7 @@ def _validate_embedded_release(
 
 def verify_pre_deploy(
     manifest: Mapping[str, Any],
-    repository: Path,
+    tool_repo_root: Path,
     runtime: ReleaseRuntime,
     *,
     deployment_plan: Mapping[str, Any] | None = None,
@@ -1890,14 +2571,24 @@ def verify_pre_deploy(
             f"production deployment requires a schema {SCHEMA_VERSION} release and "
             "a sealed deployment_plan"
         )
-    validate_repository_static(repository)
-    validate_git_state(repository, manifest["git_commit"], git_runner)
+    tool_repo_root = tool_repo_root.resolve()
+    validate_repository_static(tool_repo_root)
+    actual_tree = validate_git_state(
+        tool_repo_root,
+        manifest["git_commit"],
+        git_runner,
+    )
+    if actual_tree != manifest["git_tree"]:
+        raise ContractError(
+            f"tool repository Tree SHA mismatch: expected {manifest['git_tree']}, "
+            f"got {actual_tree}"
+        )
     for path, field in (
-        (repository / "Dockerfile", "dockerfile_sha256"),
-        (repository / ".dockerignore", "dockerignore_sha256"),
-        (repository / "docker-compose.yml", "compose_template_sha256"),
+        (tool_repo_root / "Dockerfile", "dockerfile_sha256"),
+        (tool_repo_root / ".dockerignore", "dockerignore_sha256"),
+        (tool_repo_root / "docker-compose.yml", "compose_template_sha256"),
         (
-            repository / "02_configs/historical_spread_config.xlsx",
+            tool_repo_root / "02_configs/historical_spread_config.xlsx",
             "required_config_sha256",
         ),
     ):
@@ -1912,15 +2603,30 @@ def verify_pre_deploy(
         PRODUCTION_SERVICE_SCOPE
     ):
         raise ContractError("deployment plan service scope changed")
-    if Path(str(deployment_plan.get("compose_file", ""))).resolve() != (
-        repository / "docker-compose.yml"
-    ).resolve():
-        raise ContractError("deployment plan Compose file path changed")
+    if Path(str(deployment_plan.get("tool_repo_root", ""))).resolve() != tool_repo_root:
+        raise ContractError("deployment plan tool_repo_root changed")
+    production_compose_file = Path(
+        str(deployment_plan.get("production_compose_file", ""))
+    ).resolve()
+    production_project_dir = Path(
+        str(deployment_plan.get("production_project_dir", ""))
+    ).resolve()
+    if production_project_dir == tool_repo_root:
+        raise ContractError(
+            "pre-deploy tool_repo_root and production_project_dir must be "
+            "different directories"
+        )
+    if hash_file(production_compose_file) != manifest["compose_template_sha256"]:
+        raise ContractError("deployment plan production Compose file changed")
     for key, expected in (
         ("release_id", manifest["release_id"]),
         ("git_commit", manifest["git_commit"]),
+        ("git_tree", manifest["git_tree"]),
         ("image_ref", manifest["image_ref"]),
         ("expected_image_id", manifest["image_id"]),
+        ("candidate_image_id", manifest["image_id"]),
+        ("compose_project", COMPOSE_PROJECT),
+        ("production_service", COMPOSE_SERVICE),
         ("production_env_sha256", hash_file(Path(deployment_plan["production_env_file"]))),
     ):
         if deployment_plan.get(key) != expected:
@@ -1928,11 +2634,11 @@ def verify_pre_deploy(
 
     image_evidence = _verify_image_identity(manifest, runtime)
     compose, raw_config, images = runtime.compose_config(
-        repository,
+        tool_repo_root,
         manifest["image_ref"],
         environment=production_environment,
-        project_directory=repository,
-        compose_file=repository / "docker-compose.yml",
+        project_directory=production_project_dir,
+        compose_file=production_compose_file,
     )
     compose_sha = validate_compose_result(
         compose, raw_config, images, manifest["image_ref"]
@@ -1943,12 +2649,13 @@ def verify_pre_deploy(
         )
     _validate_formal_spread_semantics(
         compose,
-        repository,
+        production_project_dir,
         manifest["image_ref"],
+        manifest["git_commit"],
     )
     semantics, rendered_environment = _compose_spread_semantics(
         compose,
-        repository,
+        production_project_dir,
     )
     if _semantic_sha256(semantics) != deployment_plan["semantic_comparison"][
         "production_semantic_sha256"
@@ -1965,6 +2672,9 @@ def verify_pre_deploy(
         "compose_config_sha256": compose_sha,
         "deployment_plan_status": deployment_plan["plan_status"],
         "production_service_scope": deployment_plan["production_service_scope"],
+        "tool_repo_root": str(tool_repo_root),
+        "production_compose_file": str(production_compose_file),
+        "production_project_dir": str(production_project_dir),
     }
 
 
@@ -1984,6 +2694,11 @@ def verify_candidate(
             "candidate container Config.Image mismatch: "
             f"expected {manifest['image_ref']}, got {container.get('config_image')!r}"
         )
+    runtime_git_commit = _verified_runtime_git_commit(
+        container,
+        manifest["git_commit"],
+        "candidate container",
+    )
 
     image = runtime.image_record(manifest["image_ref"])
     if image.get("id") != manifest["image_id"]:
@@ -2021,6 +2736,7 @@ def verify_candidate(
         "tag_image_id": image["id"],
         "manifest_image_id": manifest["image_id"],
         "oci_revision": labels["org.opencontainers.image.revision"],
+        "runtime_git_commit": runtime_git_commit,
         "embedded_release": release,
         "embedded_release_sha256": release_sha256,
     }
@@ -2040,17 +2756,31 @@ def verify_post_deploy(
         raise ContractError(
             "post-deploy verification requires a sealed deployment_plan"
         )
+    for key, expected in (
+        ("git_commit", manifest["git_commit"]),
+        ("git_tree", manifest["git_tree"]),
+        ("candidate_image_id", manifest["image_id"]),
+        ("production_service", COMPOSE_SERVICE),
+    ):
+        if deployment_plan.get(key) != expected:
+            raise ContractError(f"post-deploy deployment plan {key} mismatch")
     container = runtime.container_record(PRODUCTION_CONTAINER)
-    if container.get("image_id") != manifest["image_id"]:
+    if container.get("image_id") != deployment_plan["candidate_image_id"]:
         raise ContractError(
             "production container Image ID mismatch: "
-            f"expected {manifest['image_id']}, got {container.get('image_id')}"
+            f"expected {deployment_plan['candidate_image_id']}, "
+            f"got {container.get('image_id')}"
         )
     if container.get("config_image") != manifest["image_ref"]:
         raise ContractError(
             "production container Config.Image mismatch: "
             f"expected {manifest['image_ref']}, got {container.get('config_image')!r}"
         )
+    runtime_git_commit = _verified_runtime_git_commit(
+        container,
+        manifest["git_commit"],
+        "production container",
+    )
     record = runtime.image_record(manifest["image_ref"])
     labels = record.get("labels") or {}
     if labels.get("org.opencontainers.image.revision") != manifest["git_commit"]:
@@ -2070,6 +2800,8 @@ def verify_post_deploy(
         "config_image": container["config_image"],
         "actual_image_id": container["image_id"],
         "oci_revision": labels["org.opencontainers.image.revision"],
+        "runtime_git_commit": runtime_git_commit,
+        "runtime_git_commit_verified": True,
         "embedded_release": release,
         "embedded_release_sha256": release_sha256,
         "deployment_plan_status": deployment_plan["plan_status"],
@@ -2078,7 +2810,7 @@ def verify_post_deploy(
 
 def verify_pre_rollback(
     manifest: Mapping[str, Any],
-    repository: Path,
+    tool_repo_root: Path,
     runtime: ReleaseRuntime,
     *,
     deployment_plan: Mapping[str, Any] | None = None,
@@ -2093,6 +2825,20 @@ def verify_pre_rollback(
     ):
         raise ContractError("rollback service scope changed")
     validate_production_env(production_environment, manifest)
+    tool_repo_root = tool_repo_root.resolve()
+    if Path(str(deployment_plan.get("tool_repo_root", ""))).resolve() != tool_repo_root:
+        raise ContractError("rollback tool_repo_root changed")
+    production_compose_file = Path(
+        str(deployment_plan.get("production_compose_file", ""))
+    ).resolve()
+    production_project_dir = Path(
+        str(deployment_plan.get("production_project_dir", ""))
+    ).resolve()
+    if production_project_dir == tool_repo_root:
+        raise ContractError(
+            "rollback tool_repo_root and production_project_dir must be "
+            "different directories"
+        )
     image_ref = validate_rollback_image_ref(manifest["rollback_image_ref"])
     expected_id = validate_image_id(
         manifest["rollback_image_id"], "rollback_image_id"
@@ -2105,13 +2851,14 @@ def verify_pre_rollback(
     rollback_environment = {
         **production_environment,
         "SPREAD_IMAGE": image_ref,
+        "MARKET_DATA_GIT_HEAD": manifest["formal_git_commit"],
     }
     compose, raw_config, images = runtime.compose_config(
-        repository,
+        tool_repo_root,
         image_ref,
         environment=rollback_environment,
-        project_directory=repository,
-        compose_file=repository / "docker-compose.yml",
+        project_directory=production_project_dir,
+        compose_file=production_compose_file,
     )
     compose_sha = validate_compose_result(
         compose,
@@ -2119,7 +2866,12 @@ def verify_pre_rollback(
         images,
         image_ref,
     )
-    _validate_formal_spread_semantics(compose, repository, image_ref)
+    _validate_formal_spread_semantics(
+        compose,
+        production_project_dir,
+        image_ref,
+        manifest["formal_git_commit"],
+    )
     return {
         "phase": "pre-rollback",
         "rollback_image_ref": image_ref,
@@ -2149,11 +2901,18 @@ def verify_post_rollback(
             "rolled-back container Config.Image mismatch: "
             f"expected {expected_ref}, got {container.get('config_image')!r}"
         )
+    runtime_git_commit = _verified_runtime_git_commit(
+        container,
+        manifest["formal_git_commit"],
+        "rolled-back container",
+    )
     return {
         "phase": "post-rollback",
         "container_name": PRODUCTION_CONTAINER,
         "config_image": container["config_image"],
         "actual_image_id": container["image_id"],
+        "runtime_git_commit": runtime_git_commit,
+        "runtime_git_commit_verified": True,
     }
 
 
@@ -2269,7 +3028,7 @@ def create_manifest(
         raise ContractError("candidate container name is invalid")
 
     validate_repository_static(repository)
-    validate_git_state(repository, git_commit, git_runner)
+    git_tree = validate_git_state(repository, git_commit, git_runner)
 
     image = runtime.image_record(image_ref)
     if image.get("id") != expected_image_id:
@@ -2294,6 +3053,7 @@ def create_manifest(
     identity = {
         "release_id": release_id,
         "git_commit": git_commit,
+        "git_tree": git_tree,
         "build_time": build_time,
     }
     _validate_embedded_release(release, identity, source)
@@ -2308,7 +3068,7 @@ def create_manifest(
     compose, raw_config, images = runtime.compose_config(
         repository,
         image_ref,
-        environment=CANDIDATE_RUNTIME_ENVIRONMENT,
+        environment=candidate_compose_environment(git_commit),
     )
     validate_compose_result(compose, raw_config, images, image_ref)
     baseline = collect_data_baseline(
@@ -2321,6 +3081,7 @@ def create_manifest(
         "application": APPLICATION,
         "release_id": release_id,
         "git_commit": git_commit,
+        "git_tree": git_tree,
         "image_ref": image_ref,
         "image_id": expected_image_id,
         "image_oci_revision": labels["org.opencontainers.image.revision"],
@@ -2379,15 +3140,10 @@ def write_release_bundle(
         manifest_path = temp_dir / "release.json"
         env_path = temp_dir / "release.env"
         checksums_path = temp_dir / "checksums.sha256"
-        manifest_path.write_text(
-            json.dumps(
-                manifest,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+        _write_json_exclusive(
+            manifest_path,
+            manifest,
+            description="release artifact",
         )
         env_path.write_text(render_release_env(manifest), encoding="utf-8")
         checksums_path.write_text(
@@ -2395,8 +3151,22 @@ def write_release_bundle(
             f"{hash_file(env_path)}  release.env\n",
             encoding="utf-8",
         )
+        release_artifact_manifest = write_artifact_manifest(
+            manifest_path,
+            artifact_type="release",
+            target_schema_version=str(manifest["schema_version"]),
+            release_id=str(manifest["release_id"]),
+            git_commit=str(manifest["git_commit"]),
+            git_tree=str(manifest["git_tree"]),
+            image_id=str(manifest["image_id"]),
+        )
         if os.name != "nt":
-            for path in (manifest_path, env_path, checksums_path):
+            for path in (
+                manifest_path,
+                env_path,
+                checksums_path,
+                release_artifact_manifest,
+            ):
                 path.chmod(0o444)
         os.replace(temp_dir, target)
     except Exception:
@@ -2405,15 +3175,92 @@ def write_release_bundle(
     return target
 
 
-def write_result(path: Path, result: Mapping[str, Any]) -> None:
-    if path.exists():
-        raise ContractError(f"result file already exists: {path}")
-    payload = {
-        **result,
-        "verified_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+def validate_deployment_result(
+    result: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    deployment_plan: Mapping[str, Any],
+    schema: Mapping[str, Any],
+) -> None:
+    validate_against_schema(result, schema)
+    expected = {
+        "schema_version": DEPLOYMENT_RESULT_SCHEMA_VERSION,
+        "application": APPLICATION,
+        "release_id": manifest["release_id"],
+        "git_commit": manifest["git_commit"],
+        "target_git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
+        "image_ref": manifest["image_ref"],
+        "candidate_image_id": manifest["image_id"],
+        "actual_image_id": manifest["image_id"],
+        "oci_revision": manifest["git_commit"],
+        "runtime_git_commit": manifest["git_commit"],
+        "runtime_git_commit_verified": True,
+        "container_name": PRODUCTION_CONTAINER,
+        "config_image": manifest["image_ref"],
+        "compose_project": deployment_plan["compose_project"],
+        "production_service": deployment_plan["production_service"],
+        "production_env_file": deployment_plan["production_env_file"],
+        "production_env_sha256": deployment_plan["production_env_sha256"],
+        "production_compose_sha256": deployment_plan[
+            "production_compose_sha256"
+        ],
+        "status": "production_verified",
     }
-    assert_no_sensitive_values(payload, "deployment result")
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    for key, expected_value in expected.items():
+        if result.get(key) != expected_value:
+            raise ContractError(f"deployment result {key} mismatch")
+    if result.get("readiness", {}).get("expected_image_id") != manifest["image_id"]:
+        raise ContractError("deployment result readiness Image ID mismatch")
+    if result.get("readiness", {}).get("policy") != deployment_plan[
+        "readiness_policy"
+    ]:
+        raise ContractError("deployment result readiness policy mismatch")
+    if result.get("http_status") != 200:
+        raise ContractError("deployment result HTTP status is not successful")
+    validate_build_time(result.get("generated_at"))
+    assert_no_sensitive_values(result, "deployment result")
+
+
+def write_result(path: Path, result: Mapping[str, Any]) -> None:
+    validate_against_schema(
+        result,
+        load_schema(Path(__file__).with_name("deployment_result.schema.json")),
     )
+    write_json_artifact(
+        path,
+        result,
+        artifact_type="deployment_result",
+        release_id=str(result["release_id"]),
+        git_commit=str(result["git_commit"]),
+        git_tree=str(result["git_tree"]),
+        image_id=str(result["candidate_image_id"]),
+        runtime_git_commit=str(result["runtime_git_commit"]),
+    )
+
+
+def load_deployment_result(
+    path: Path,
+    manifest: Mapping[str, Any],
+    deployment_plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    result, artifact_manifest = load_verified_json_artifact(
+        path,
+        artifact_type="deployment_result",
+        expected_release_id=str(manifest["release_id"]),
+        expected_git_commit=str(manifest["git_commit"]),
+        expected_git_tree=str(manifest["git_tree"]),
+        expected_image_id=str(manifest["image_id"]),
+    )
+    validate_deployment_result(
+        result,
+        manifest,
+        deployment_plan,
+        load_schema(Path(__file__).with_name("deployment_result.schema.json")),
+    )
+    if artifact_manifest.get("runtime_git_commit") != result.get(
+        "runtime_git_commit"
+    ):
+        raise ContractError(
+            "deployment_result manifest runtime_git_commit mismatch"
+        )
+    return result
