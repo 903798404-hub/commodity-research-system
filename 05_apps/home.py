@@ -25,6 +25,7 @@ PAGE_TARGETS = {
     "spreads_dashboard": "价差动态看板",
     "basis_domestic": "基差/一口价",
     "soybean_crop_progress": "美豆种植生长",
+    "crop_weather": "大豆天气",
     "status": "运行监控",
 }
 
@@ -35,6 +36,7 @@ SOYBEAN_PROGRESS_FILE = (
     DATA_DIR / "processed" / "soybean_crop_progress" / "soybeans_crop_progress_weekly_2021_2026.parquet"
 )
 FOREIGN_SEATS_STATUS_FILE = DATA_DIR / "foreign_seats_update_status.json"
+SOYBEAN_WEATHER_STATUS_FILE = DATA_DIR / "update_status" / "soybean_weather_us.json"
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ class HomeModule:
     update_mode: str
     destination_page: str | None = None
     external_env: str | None = None
+    coverage_hint: str | None = None
+    overview_update_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +95,17 @@ HOME_MODULES = (
         destination_page=PAGE_TARGETS["soybean_crop_progress"],
     ),
     HomeModule(
+        module_id="crop_weather",
+        title="作物天气研究",
+        marker="天",
+        description="对比大豆、菜籽、棕榈油及印度作物当前天气与历史同期异常。",
+        source_label="全球主产区",
+        update_mode="全球主产区",
+        destination_page=PAGE_TARGETS["crop_weather"],
+        coverage_hint="大豆 · 菜籽 · 棕榈油 · 印度作物",
+        overview_update_mode="当前为历史快照",
+    ),
+    HomeModule(
         module_id="usda_dashboard",
         title="USDA 供需平衡",
         marker="US",
@@ -107,15 +122,6 @@ HOME_MODULES = (
         source_label="独立应用",
         update_mode="外部应用",
         external_env="OIL_WORLD_DASHBOARD_URL",
-    ),
-    HomeModule(
-        module_id="status",
-        title="运行监控",
-        marker="监",
-        description="检查自动任务、数据更新时间和运行日志",
-        source_label="系统状态",
-        update_mode="状态摘要",
-        destination_page=PAGE_TARGETS["status"],
     ),
 )
 
@@ -199,12 +205,13 @@ def load_home_statuses(
     spread_mtime: float,
     basis_mtime: float,
     soybean_mtime: float,
+    weather_mtime: float,
     foreign_seats_mtime: float,
     usda_url: str,
     oil_world_url: str,
 ) -> dict[str, ModuleStatus]:
     """Read existing, small status artifacts for homepage summaries only."""
-    del spread_mtime, basis_mtime, soybean_mtime, foreign_seats_mtime
+    del spread_mtime, basis_mtime, soybean_mtime, weather_mtime, foreign_seats_mtime
 
     spread = _read_json(SPREAD_STATUS_FILE)
     spread_latest = str(spread.get("latest_date") or "")
@@ -218,6 +225,12 @@ def load_home_statuses(
     if not soybean_latest:
         soybean_latest = _latest_parquet_date(SOYBEAN_PROGRESS_FILE, "week_ending")
     soybean_available = bool(soybean_latest) and soybean.get("status") not in {"failed", "error"}
+
+    weather = _read_json(SOYBEAN_WEATHER_STATUS_FILE)
+    weather_observed = str(weather.get("observed_latest_date") or "")[:10]
+    weather_ec_end = str(weather.get("ecmwf_forecast_end_date") or "")[:10]
+    weather_gfs_end = str(weather.get("gfs_forecast_end_date") or "")[:10]
+    weather_available = bool(weather_observed) and weather.get("status") not in {"failed", "error"}
 
     foreign = _read_json(FOREIGN_SEATS_STATUS_FILE).get("foreign_seats", {})
     foreign = foreign if isinstance(foreign, dict) else {}
@@ -247,6 +260,27 @@ def load_home_statuses(
             label="每周更新" if soybean_available else "暂不可用",
             detail="每周二至周四 06:30 检查",
             latest_value=f"截至 {soybean_latest}" if soybean_latest else "等待有效周度状态文件",
+        ),
+        "crop_weather": ModuleStatus(
+            state="info" if weather_available else "unavailable",
+            label="历史快照" if weather_available else "数据状态不可用",
+            detail=(
+                "美国大豆已接入"
+                f"｜EC预测截止日期 {weather_ec_end or '不可用'}"
+                f"｜GFS预测截止日期 {weather_gfs_end or '不可用'}"
+                if weather_available
+                else "无法读取美国大豆天气状态文件"
+            ),
+            latest_value=(
+                f"最新有效观测日期 {weather_observed}"
+                if weather_available
+                else "数据状态不可用"
+            ),
+            attention=(
+                "作物天气：美国大豆已接入历史快照；其他国家和作物仍待接入稳定数据源。"
+                if weather_available
+                else "作物天气：数据状态不可用，无法确认美国大豆历史快照日期。"
+            ),
         ),
         "usda_dashboard": ModuleStatus(
             state="external" if usda_url else "unavailable",
@@ -303,6 +337,7 @@ def get_home_statuses() -> dict[str, ModuleStatus]:
         _mtime(SPREAD_STATUS_FILE),
         _mtime(BASIS_DATABASE_FILE),
         max(_mtime(SOYBEAN_STATUS_FILE), _mtime(SOYBEAN_PROGRESS_FILE)),
+        _mtime(SOYBEAN_WEATHER_STATUS_FILE),
         _mtime(FOREIGN_SEATS_STATUS_FILE),
         os.getenv("USDA_DASHBOARD_URL", "").strip(),
         os.getenv("OIL_WORLD_DASHBOARD_URL", "").strip(),
@@ -315,7 +350,7 @@ def home_modules() -> tuple[HomeModule, ...]:
 
 
 def _overall_status(statuses: dict[str, ModuleStatus]) -> tuple[str, str]:
-    core_ids = ("spreads_dashboard", "basis_domestic", "soybean_crop_progress", "status")
+    core_ids = ("spreads_dashboard", "basis_domestic", "soybean_crop_progress", "crop_weather")
     all_available = all(statuses[module_id].state != "unavailable" for module_id in core_ids)
     return (
         ("success", "核心模块状态正常")
@@ -331,7 +366,7 @@ def render_home(catalog_path: Path | None = None) -> None:
     overall_state, overall_label = _overall_status(statuses)
     render_home_header(
         title="农产品研究工作台",
-        description="汇集市场价格、国内现货、周度跟踪与国际供需数据",
+        description="汇集市场价格、国内现货、周度跟踪、作物天气与国际供需数据",
         date_text=dt.date.today().strftime("%Y年%m月%d日"),
         state=overall_state,
         state_label=overall_label,
@@ -348,6 +383,7 @@ def render_home(catalog_path: Path | None = None) -> None:
 
     attention_items = [
         ("国内现货", statuses["basis_domestic"].attention),
+        ("作物天气", statuses["crop_weather"].attention),
         ("外资与重点席位", statuses["foreign_seats"].attention),
         ("USDA 供需平衡", statuses["usda_dashboard"].attention),
         ("Oil World 供需平衡", statuses["oil_world_dashboard"].attention),
@@ -360,17 +396,24 @@ def render_home(catalog_path: Path | None = None) -> None:
         st.caption("当前没有需要首页提示的额外事项。")
 
     render_section_heading("数据状态概览", "完整日志、任务细节和错误信息请进入运行监控页面。")
+    st.caption("[进入运行监控](?home_target=status)")
     overview_ids = (
         "spreads_dashboard",
         "basis_domestic",
         "soybean_crop_progress",
+        "crop_weather",
         "usda_dashboard",
         "oil_world_dashboard",
         "foreign_seats",
     )
     render_status_overview(
         [
-            (module.title, module.source_label, module.update_mode, statuses[module.module_id])
+            (
+                module.title,
+                module.source_label,
+                module.overview_update_mode or module.update_mode,
+                statuses[module.module_id],
+            )
             for module in HOME_MODULES
             if module.module_id in overview_ids
         ]

@@ -1,0 +1,116 @@
+soybean_weather_us:
+  crop: soybean
+  country: USA
+  page_title: 美国大豆天气研究
+  season_start_month_day: "11-01"
+  weekly_window_days: 7
+  weighted_coverage_percent: 88.9
+  regions:
+    - key: illinois
+      display_name: 伊利诺伊州
+      display_order: 1
+      weight: 15.4
+    - key: iowa
+      display_name: 爱荷华州
+      display_order: 2
+      weight: 13.5
+    - key: minnesota
+      display_name: 明尼苏达州
+      display_order: 3
+      weight: 8.3
+    - key: indiana
+      display_name: 印第安纳州
+      display_order: 4
+      weight: 7.9
+    - key: nebraska
+      display_name: 内布拉斯加州
+      display_order: 5
+      weight: 7.0
+    - key: missouri
+      display_name: 密苏里州
+      display_order: 6
+      weight: 6.5
+    - key: ohio
+      display_name: 俄亥俄州
+      display_order: 7
+      weight: 6.3
+    - key: south_dakota
+      display_name: 南达科他州
+      display_order: 8
+      weight: 5.1
+    - key: north_dakota
+      display_name: 北达科他州
+      display_order: 9
+      weight: 4.8
+    - key: kansas
+      display_name: 堪萨斯州
+      display_order: 10
+      weight: 3.6
+    - key: wisconsin
+      display_name: 威斯康星州
+      display_order: 11
+      weight: 2.5
+    - key: michigan
+      display_name: 密歇根州
+      display_order: 12
+      weight: 2.4
+    - key: kentucky
+      display_name: 肯塔基州
+      display_order: 13
+      weight: 2.3
+    - key: tennessee
+      display_name: 田纳西州
+      display_order: 14
+      weight: 1.8
+    - key: north_carolina
+      display_name: 北卡罗来纳州
+      display_order: 15
+      weight: 1.5
+  metrics:
+    precipitation:
+      display_name: 降雨
+      unit: mm
+      weekly_aggregation: sum
+    temperature_max:
+      display_name: 最高气温
+      unit: degC
+      weekly_aggregation: mean
+    temperature_min:
+      display_name: 最低气温
+      unit: degC
+      weekly_aggregation: mean
+    soil_moisture:
+      display_name: 土壤墒情
+      unit: 原始值，单位待确认
+      weekly_aggregation: mean
+  series_styles:
+    current_season:
+      label: 当前年
+      color: "#bd2c25"
+      dash: solid
+      width: 3.5
+    previous_season:
+      label: 上一年
+      color: "#334155"
+      dash: solid
+      width: 2.5
+    other_history:
+      label: 其他历史年
+      color: "#94a3b8"
+      dash: solid
+      width: 1.0
+    five_year_mean:
+      label: 5年均值
+      color: "#2a9d6e"
+      dash: dash
+      width: 3.0
+    ec:
+      label: EC
+      color: "#e07b39"
+      dash: dash
+      width: 2.5
+    gfs:
+      label: GFS
+      color: "#3b6fd4"
+      dash: dot
+      width: 2.5

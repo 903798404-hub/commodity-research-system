@@ -18,6 +18,7 @@ from foreign_seats_page import render_foreign_seats_page
 from home import apply_home_navigation_request, get_external_app_url, render_home
 from soybean_crop_progress_page import render_soybean_crop_progress_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
+from weather_research_page import render_weather_research_page
 
 
 PAGE_TITLE = "油脂油料价差动态看板"
@@ -34,11 +35,22 @@ BASIS_RUNTIME_FALLBACK_FILE = (
 )
 USDA_PAGE_TITLE = "USDA平衡表"
 SOYBEAN_CROP_PAGE_TITLE = "美豆种植生长"
+SOYBEAN_WEATHER_PAGE_TITLE = "大豆天气"
+RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
+PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
+INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
+WEATHER_PAGE_ROUTES = {
+    SOYBEAN_WEATHER_PAGE_TITLE: "soybean_weather",
+    RAPESEED_WEATHER_PAGE_TITLE: "rapeseed_weather",
+    PALM_OIL_WEATHER_PAGE_TITLE: "palm_oil_weather",
+    INDIA_CROP_WEATHER_PAGE_TITLE: "india_crop_weather",
+}
 WORKSPACE_PAGES = [
     "首页",
     "价差动态看板",
     "基差/一口价",
     SOYBEAN_CROP_PAGE_TITLE,
+    *WEATHER_PAGE_ROUTES,
     USDA_PAGE_TITLE,
     "外资与重点席位",
     "运行监控",
@@ -47,6 +59,7 @@ SIDEBAR_NAVIGATION = (
     ("工作台", (("工作台首页", "首页", None),)),
     ("市场行情", (("价差动态", "价差动态看板", None), ("国内现货（基差与一口价）", "基差/一口价", None))),
     ("周度跟踪", (("美豆周度跟踪", SOYBEAN_CROP_PAGE_TITLE, None),)),
+    ("天气研究", (("大豆天气", SOYBEAN_WEATHER_PAGE_TITLE, None), ("菜籽天气", RAPESEED_WEATHER_PAGE_TITLE, None), ("棕榈油天气", PALM_OIL_WEATHER_PAGE_TITLE, None), ("印度作物天气", INDIA_CROP_WEATHER_PAGE_TITLE, None))),
     ("国际供需", (("USDA供需平衡", USDA_PAGE_TITLE, None), ("Oil World供需平衡", "", "OIL_WORLD_DASHBOARD_URL"))),
     ("研究工具", (("外资与重点席位", "外资与重点席位", None), ("运行监控", "运行监控", None))),
 )
@@ -544,6 +557,8 @@ def main() -> None:
         render_basis_page(BASIS_DATABASE_FILE, BASIS_RUNTIME_FALLBACK_FILE)
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
         render_soybean_crop_progress_page()
+    elif selected_page in WEATHER_PAGE_ROUTES:
+        render_weather_research_page(WEATHER_PAGE_ROUTES[selected_page])
     elif selected_page == USDA_PAGE_TITLE:
         render_usda_page()
     elif selected_page == "运行监控":

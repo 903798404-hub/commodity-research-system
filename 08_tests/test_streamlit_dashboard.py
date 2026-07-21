@@ -54,13 +54,16 @@ def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -
         "市场价格",
         "国内现货",
         "美豆周度跟踪",
+        "作物天气研究",
         "USDA 供需平衡",
         "Oil World 供需平衡",
-        "运行监控",
     ]
     statuses = home.get_home_statuses()
     assert statuses["basis_domestic"].label == "人工维护"
     assert statuses["soybean_crop_progress"].label == "每周更新"
+    assert statuses["crop_weather"].label == "历史快照"
+    assert "美国大豆已接入" in statuses["crop_weather"].detail
+    assert statuses["crop_weather"].latest_value.startswith("最新有效观测日期 ")
     assert statuses["foreign_seats"].label != "正常"
 
     workspace = _import_workspace()
@@ -71,7 +74,7 @@ def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -
     assert "自定义首页" not in home_source
     assert "清除记录" not in home_source
     assert [group for group, _items in workspace.SIDEBAR_NAVIGATION] == [
-        "工作台", "市场行情", "周度跟踪", "国际供需", "研究工具"
+        "工作台", "市场行情", "周度跟踪", "天气研究", "国际供需", "研究工具"
     ]
     cards_markup = "\n".join(
         __import__("ui_theme").render_dashboard_card(module, statuses[module.module_id])
@@ -81,10 +84,77 @@ def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -
     assert '?home_target=spreads_dashboard' in cards_markup
     assert '?home_target=basis_domestic' in cards_markup
     assert '?home_target=soybean_crop_progress' in cards_markup
-    assert '?home_target=status' in cards_markup
+    assert '?home_target=crop_weather' in cards_markup
+    assert '?home_target=status' not in cards_markup
     assert "foreign_seats" not in [module.module_id for module in modules]
     assert "市场价格" in cards_markup
     assert "数据状态概览" in home_source
+    assert "?home_target=status" in home_source
+    assert home.PAGE_TARGETS["crop_weather"] == "大豆天气"
+    assert home.PAGE_TARGETS["status"] == "运行监控"
+
+
+def test_crop_weather_home_status_reads_real_json_and_degrades_without_fixture(monkeypatch, tmp_path: Path) -> None:
+    home = _import_home()
+    home.load_home_statuses.clear()
+    status_file = home.SOYBEAN_WEATHER_STATUS_FILE
+    raw_status = home._read_json(status_file)
+    statuses = home.get_home_statuses()
+
+    assert raw_status["observed_latest_date"] in statuses["crop_weather"].latest_value
+    assert raw_status["ecmwf_forecast_end_date"] in statuses["crop_weather"].detail
+    assert raw_status["gfs_forecast_end_date"] in statuses["crop_weather"].detail
+    assert statuses["crop_weather"].attention == "作物天气：美国大豆已接入历史快照；其他国家和作物仍待接入稳定数据源。"
+    weather_module = next(module for module in home.home_modules() if module.module_id == "crop_weather")
+    weather_markup = __import__("ui_theme").render_dashboard_card(weather_module, statuses["crop_weather"])
+    assert "全球主产区" in weather_markup
+    assert "大豆 · 菜籽 · 棕榈油 · 印度作物" in weather_markup
+    assert "SOYBEAN_WEATHER_FIXTURE" not in Path(home.__file__).read_text(encoding="utf-8")
+
+    monkeypatch.setattr(home, "SOYBEAN_WEATHER_STATUS_FILE", tmp_path / "missing_weather_status.json")
+    home.load_home_statuses.clear()
+    degraded = home.get_home_statuses()["crop_weather"]
+    assert degraded.label == "数据状态不可用"
+    assert degraded.latest_value == "数据状态不可用"
+    assert "无法读取" in degraded.detail
+
+
+def test_weather_navigation_uses_crop_entries_and_controlled_country_placeholders(monkeypatch) -> None:
+    workspace = _import_workspace()
+    weather_page = importlib.import_module("weather_research_page")
+    groups = {group: items for group, items in workspace.SIDEBAR_NAVIGATION}
+
+    assert groups["周度跟踪"] == (("美豆周度跟踪", workspace.SOYBEAN_CROP_PAGE_TITLE, None),)
+    assert [label for label, _target, _env in groups["天气研究"]] == [
+        "大豆天气", "菜籽天气", "棕榈油天气", "印度作物天气"
+    ]
+    assert "美国大豆天气研究" not in [label for _group, items in workspace.SIDEBAR_NAVIGATION for label, _target, _env in items]
+    assert workspace.WEATHER_PAGE_ROUTES == {
+        "大豆天气": "soybean_weather",
+        "菜籽天气": "rapeseed_weather",
+        "棕榈油天气": "palm_oil_weather",
+        "印度作物天气": "india_crop_weather",
+    }
+    assert weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["countries"] == (
+        ("USA", "美国"), ("BRA", "巴西"), ("ARG", "阿根廷")
+    )
+    assert weather_page._default_country_index(
+        weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["countries"], frozenset({"USA"})
+    ) == 0
+
+    usa_calls: list[str] = []
+    monkeypatch.setattr(weather_page, "render_soybean_weather_page", lambda: usa_calls.append("USA"))
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
+    app.session_state["selected_workspace_page"] = workspace.SOYBEAN_WEATHER_PAGE_TITLE
+    app.run(timeout=20)
+    country_radio = next(item for item in app.radio if item.label == "国家/地区")
+    assert country_radio.value == "美国"
+    assert country_radio.options == ["美国", "巴西", "阿根廷"]
+    assert usa_calls == ["USA"]
+
+    country_radio.set_value("巴西").run(timeout=20)
+    assert usa_calls == ["USA"]
+    assert any(item.value == "该地区天气研究页面尚未接入。" for item in app.info)
 
 
 def test_external_urls_are_environment_only_and_degrade_without_configuration(monkeypatch) -> None:

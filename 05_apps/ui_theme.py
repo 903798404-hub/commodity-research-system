@@ -206,6 +206,7 @@ def render_dashboard_card(module: HomeModule, status: ModuleStatus) -> str:
         "spreads_dashboard": "chart",
         "basis_domestic": "quote",
         "soybean_crop_progress": "leaf",
+        "crop_weather": "leaf",
         "usda_dashboard": "institution",
         "oil_world_dashboard": "globe",
         "status": "monitor",
@@ -226,6 +227,7 @@ def render_dashboard_card(module: HomeModule, status: ModuleStatus) -> str:
   <div class="agri-card-top">{_icon_markup(card_icons[module.module_id])}
     <div class="agri-card-title-group"><h3>{escape(module.title)}</h3><div class="agri-card-kicker">{escape(module.update_mode)}</div></div></div>
   <p class="agri-card-description">{escape(module.description)}</p>
+  {f'<p class="agri-card-detail">{escape(module.coverage_hint)}</p>' if module.coverage_hint else ''}
   {_status_markup(status.state, status.label)}
   <div class="agri-card-rule"></div>
   <p class="agri-card-detail"><strong>{escape(status.latest_value)}</strong></p>
