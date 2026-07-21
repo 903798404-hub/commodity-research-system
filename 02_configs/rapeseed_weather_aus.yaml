@@ -8,25 +8,30 @@ rapeseed_weather:
   source_table_prefix: 澳洲
   season_start_month_day: "01-01"
   weighted_aggregation: false
+  title_template: "{parent} - {region}"
   enabled_sections:
     rainfall_summary: false
     temperature_summary: false
     daily_rainfall: true
     cumulative_rainfall: true
     maximum_temperature: true
+    minimum_temperature: true
     soil_moisture: true
   chart_windows:
     cumulative_rain: {start: "05-01", end: "12-31"}
     temperature: {start: "05-01", end: "12-31"}
+    temperature_min: {start: "05-01", end: "12-31"}
     soil: {start: "04-01", end: "12-31"}
+  chart_axis:
+    soil: {tick_interval_days: 25, tick_angle: -45, bottom_margin: 70}
   regions:
     - {key: midlands, display_name: Midlands, display_order: 1, source_column: "Midlands (AUS WA)", parent_label: "西澳大利亚州（38%产量）"}
     - {key: perth, display_name: Perth, display_order: 2, source_column: "Perth (AUS WA)", parent_label: "西澳大利亚州（38%产量）"}
     - {key: upper_great_southern, display_name: Upper Great Southern, display_order: 3, source_column: "Upper Great Southern (AUS WA)", parent_label: "西澳大利亚州（38%产量）"}
     - {key: lower_great_southern, display_name: Lower Great Southern, display_order: 4, source_column: "Lower Great Southern (AUS WA)", parent_label: "西澳大利亚州（38%产量）"}
     - {key: south_west, display_name: South West, display_order: 5, source_column: "South West (AUS WA)", parent_label: "西澳大利亚州（38%产量）"}
-    - {key: new_south_wales, display_name: New South Wales, display_order: 6, source_column: "New South Wales (AUS)", parent_label: "新南威尔士州（33%产量）"}
-    - {key: victoria, display_name: Victoria, display_order: 7, source_column: "Victoria (AUS)", parent_label: "维多利亚州（19%产量）"}
+    - {key: new_south_wales, display_name: New South Wales, display_order: 6, source_column: "New South Wales (AUS)", parent_label: "新南威尔士州（33%产量）", title_template: "{parent}"}
+    - {key: victoria, display_name: Victoria, display_order: 7, source_column: "Victoria (AUS)", parent_label: "维多利亚州（19%产量）", title_template: "{parent}"}
     - {key: eyre, display_name: Eyre, display_order: 8, source_column: "Eyre (AUS SA)", parent_label: "南澳大利亚州（10%产量）"}
     - {key: yorke_and_lower_north, display_name: Yorke and Lower North, display_order: 9, source_column: "Yorke and Lower North (AUS SA)", parent_label: "南澳大利亚州（10%产量）"}
     - {key: murray_lands, display_name: Murray Lands, display_order: 10, source_column: "Murray Lands (AUS SA)", parent_label: "南澳大利亚州（10%产量）"}

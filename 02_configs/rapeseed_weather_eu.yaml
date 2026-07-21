@@ -1,0 +1,47 @@
+rapeseed_weather:
+  crop: rapeseed
+  crop_display_name: 菜籽
+  country: EU
+  country_display_name: 欧盟
+  page_title: 欧盟菜籽天气研究
+  data_slug: eu
+  source_table_prefix: 欧盟
+  season_mode: crop_year
+  season_label_style: range
+  season_start_month_day: "08-01"
+  season_end_month_day: "07-31"
+  weighted_aggregation: false
+  title_template: "{country}_{region}（{importance_label}）"
+  coverage_caption: 覆盖欧盟7个主要菜籽生产国，页面权重标签合计80%，仅用于重要性说明，不生成欧盟加权结果。
+  enabled_sections:
+    rainfall_summary: false
+    temperature_summary: false
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    minimum_temperature: true
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "08-01", end: "07-31"}
+    temperature: {start: "08-01", end: "07-31"}
+    soil: {start: "08-01", end: "07-31"}
+  chart_axis:
+    soil: {tick_interval_days: 30, tick_angle: -45, bottom_margin: 70}
+  allowed_missing_forecast_regions:
+    precipitation: {ECMWF: [germany]}
+  status_warnings: [germany_ec_forecast_unavailable]
+  warning_messages:
+    germany_ec_forecast_unavailable: 德国EC预测暂不可用；GFS和历史数据仍正常展示。
+  regions:
+    - {key: france, display_name: 法国, display_order: 1, weight: 21.0, importance_label: "21.0%", source_column: France}
+    - {key: germany, display_name: 德国, display_order: 2, weight: 21.0, importance_label: "21.0%", source_column: Germany}
+    - {key: poland, display_name: 波兰, display_order: 3, weight: 18.0, importance_label: "18.0%", source_column: Poland}
+    - {key: romania, display_name: 罗马尼亚, display_order: 4, weight: 6.0, importance_label: "6.0%", source_column: Romania}
+    - {key: czech_republic, display_name: 捷克, display_order: 5, weight: 6.0, importance_label: "6.0%", source_column: Czech Republic}
+    - {key: hungary, display_name: 匈牙利, display_order: 6, weight: 4.0, importance_label: "4.0%", source_column: Hungary}
+    - {key: denmark, display_name: 丹麦, display_order: 7, weight: 4.0, importance_label: "4.0%", source_column: Denmark}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    temperature_min: {display_name: 最低气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: 原始值，单位待确认, weekly_aggregation: mean}

@@ -1,0 +1,44 @@
+rapeseed_weather:
+  crop: rapeseed
+  crop_display_name: 菜籽
+  country: RUS
+  country_display_name: 俄罗斯
+  page_title: 俄罗斯菜籽天气研究
+  data_slug: rus
+  source_table_prefix: 俄罗斯
+  season_mode: natural_year
+  season_label_style: year
+  season_start_month_day: "01-01"
+  weighted_aggregation: false
+  title_template: "{country}_{parent}"
+  coverage_caption: 直接展示9个俄罗斯稳定地区序列；联邦区重要性标签仅用于说明，不生成全国或地区加权结果。
+  enabled_sections:
+    rainfall_summary: false
+    temperature_summary: false
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    minimum_temperature: true
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "04-01", end: "11-20"}
+    temperature: {start: "04-01", end: "11-20"}
+    temperature_min: {start: "04-01", end: "11-20"}
+    soil: {start: "03-01", end: "12-31"}
+  chart_axis:
+    soil: {tick_interval_days: 25, tick_angle: -45, bottom_margin: 70}
+  regions:
+    - {key: omsk_oblast_rus, display_name: 鄂木斯克州, display_order: 1, source_column: "Omsk Oblast (RUS)", parent_label: "西伯利亚联邦区（37%）", title_template: "{country}*{parent}*{region}"}
+    - {key: novosibirsk_oblast_rus, display_name: 新西伯利亚州, display_order: 2, source_column: "Novosibirsk Oblast (RUS)", parent_label: "西伯利亚联邦区（37%）", title_template: "{country}*{parent}*{region}"}
+    - {key: altai_krai_rus, display_name: 阿尔泰边疆区, display_order: 3, source_column: "Altai Krai (RUS)", parent_label: "西伯利亚联邦区（37%）", title_template: "{country}*{parent}*{region}"}
+    - {key: kemerovo_oblast_rus, display_name: 克麦罗沃州, display_order: 4, source_column: "Kemerovo Oblast (RUS)", parent_label: "西伯利亚联邦区（37%）", title_template: "{country}*{parent}*{region}"}
+    - {key: central_federal_district_rus, display_name: 中央联邦区, display_order: 5, source_column: "Central Federal District (RUS)", parent_label: "中央联邦区（30%）"}
+    - {key: volga_federal_district_rus, display_name: 伏尔加联邦区, display_order: 6, source_column: "Volga Federal District (RUS)", parent_label: "伏尔加联邦区（5%）"}
+    - {key: north_caucasian_federal_district_rus, display_name: 北高加索联邦区, display_order: 7, source_column: "North Caucasian Federal District (RUS)", parent_label: "北高加索联邦区（5%）"}
+    - {key: southern_federal_district_rus, display_name: 南部联邦区, display_order: 8, source_column: "Southern Federal District (RUS)", parent_label: "南部联邦区（5%）"}
+    - {key: ural_federal_district_rus, display_name: 乌拉尔联邦区, display_order: 9, source_column: "Ural Federal District (RUS)", parent_label: "乌拉尔联邦区（4%）"}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    temperature_min: {display_name: 最低气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: 原始值，单位待确认, weekly_aggregation: mean}

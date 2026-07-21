@@ -64,6 +64,24 @@ WEATHER_COUNTRY_FILES = {
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_aus.json",
     },
+    "EU": {
+        "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_eu.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "eu" / "rapeseed_weather_eu.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_eu.json",
+    },
+    "RUS": {
+        "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_rus.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "rus" / "rapeseed_weather_rus.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_rus.json",
+    },
+    "UKR": {
+        "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_ukr.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "ukr" / "rapeseed_weather_ukr.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_ukr.json",
+    },
 }
 
 MODULES = {
@@ -72,6 +90,7 @@ MODULES = {
     "daily_rainfall": ("单日降雨", "daily_rain", "precipitation"),
     "cumulative_rainfall": ("累计降雨", "cumulative_rain", "precipitation"),
     "maximum_temperature": ("最高气温", "temperature", "temperature_max"),
+    "minimum_temperature": ("最低气温", "temperature", "temperature_min"),
     "soil_moisture": ("土壤墒情", "soil", "soil_moisture"),
 }
 
@@ -162,11 +181,31 @@ def _load_normals(normal_path: str, normal_mtime_ns: int, normal_size: int) -> p
 
 
 def _region_label(region: pd.Series | object, config: dict[str, object] | None = None) -> str:
-    country_name = str((config or {}).get("country_display_name", "美国"))
-    parent_label = getattr(region, "parent_label", None)
-    if parent_label and not pd.isna(parent_label):
-        return f"{parent_label} - {region.display_name}"
-    return f"{country_name}_{region.display_name}（{float(region.weight):.1f}%）"
+    """Build a display title from the selected country's configuration only."""
+
+    def optional_value(field: str) -> str | None:
+        value = getattr(region, field, None)
+        return None if value is None or pd.isna(value) else str(value)
+
+    active_config = config or {}
+    country_name = str(active_config.get("country_display_name", ""))
+    region_name = optional_value("title_display_name") or str(region.display_name)
+    parent_label = optional_value("parent_region_display_name") or optional_value("parent_label") or ""
+    raw_weight = getattr(region, "weight", 0)
+    weight = 0.0 if raw_weight is None or pd.isna(raw_weight) else float(raw_weight)
+    importance_label = optional_value("importance_label") or (f"{weight:.1f}%" if weight else "")
+    template = optional_value("title_template") or active_config.get("title_template")
+    if template:
+        return str(template).format(
+            country=country_name,
+            region=region_name,
+            parent=parent_label,
+            importance_label=str(importance_label),
+        )
+    if parent_label:
+        return f"{parent_label} - {region_name}"
+    suffix = f"（{importance_label}）" if importance_label else ""
+    return f"{country_name + '_' if country_name else ''}{region_name}{suffix}"
 
 
 def _reference_date(value: object, season_start_month_day: str = "01-01") -> pd.Timestamp:
@@ -487,30 +526,29 @@ def _aligned_history(
     return observed, years, years[-1] if years else None
 
 
-def _history_card_heading(region: pd.Series | object) -> str:
-    parent_label = getattr(region, "parent_label", None)
-    if parent_label and not pd.isna(parent_label):
-        return (
-            '<div class="history-region-name">'
-            f"{html.escape(str(parent_label))} - {html.escape(str(region.display_name))}"
-            "</div>"
-        )
-    return (
-        '<div class="history-region-name">'
-        f"{html.escape(str(region.display_name))}（{float(region.weight):.1f}%）"
-        "</div>"
-    )
+def _history_card_heading(region: pd.Series | object, config: dict[str, object] | None = None) -> str:
+    return '<div class="history-region-name">' f"{html.escape(_region_label(region, config))}" "</div>"
 
 
-def _line_layout(unit: str, start_month_day: str, end_month_day: str, height: int = 350) -> go.Figure:
+def _line_layout(
+    unit: str,
+    start_month_day: str,
+    end_month_day: str,
+    height: int = 350,
+    axis_options: dict[str, object] | None = None,
+) -> go.Figure:
     figure = go.Figure()
+    options = axis_options or {}
+    tick_interval_days = int(options.get("tick_interval_days", 20))
+    bottom_margin = int(options.get("bottom_margin", 56))
+    tick_angle = int(options.get("tick_angle", -45))
     figure.update_layout(
         title={"text": ""},
         height=height,
         hovermode="x unified",
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
-        margin={"l": 45, "r": 16, "t": 6, "b": 56},
+        margin={"l": 45, "r": 16, "t": 6, "b": bottom_margin},
         legend={"orientation": "h", "y": -0.15, "x": 0.5, "xanchor": "center", "font": {"size": 10, "color": "#475569"}, "traceorder": "normal"},
     )
     axis_start, axis_end = _reference_window(start_month_day, end_month_day)
@@ -520,10 +558,11 @@ def _line_layout(unit: str, start_month_day: str, end_month_day: str, height: in
         tickformat="%m-%d",
         hoverformat="%m-%d",
         tick0=axis_start,
-        dtick=20 * 24 * 60 * 60 * 1000,
+        dtick=tick_interval_days * 24 * 60 * 60 * 1000,
         gridcolor="#edf3f7",
         griddash="dot",
-        tickangle=-45,
+        tickangle=tick_angle,
+        automargin=True,
     )
     figure.update_yaxes(title=unit, gridcolor="#d7e1ea", griddash="dot", gridwidth=0.9)
     return figure
@@ -559,20 +598,25 @@ def _add_line(
     )
 
 
-def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region: object, *, kind: str) -> go.Figure:
+def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region: object, *, kind: str, metric: str | None = None) -> go.Figure:
     legacy_windows = {
         "cumulative_rain": ("04-15", "11-20", "累计降水（mm）"),
         "soil": ("03-01", "12-26", "原始值，单位待确认"),
         "temperature": ("03-01", "11-20", "最高气温（℃）"),
     }
-    config_window = dict(config.get("chart_windows", {})).get(kind)
+    metric = metric or ("precipitation" if kind == "cumulative_rain" else "temperature_max")
+    chart_windows = dict(config.get("chart_windows", {}))
+    config_window = chart_windows.get(metric) or chart_windows.get(kind)
     if isinstance(config_window, dict):
         start_month_day, end_month_day = str(config_window["start"]), str(config_window["end"])
-        unit = legacy_windows[kind][2]
+        display_name = str(dict(config.get("metrics", {})).get(metric, {}).get("display_name", legacy_windows[kind][2]))
+        unit_value = str(dict(config.get("metrics", {})).get(metric, {}).get("unit", ""))
+        unit = f"{display_name}（℃）" if unit_value == "degC" else legacy_windows[kind][2]
     else:
         start_month_day, end_month_day, unit = legacy_windows[kind]
     observed, years, current_year = _aligned_history(records, region.key, start_month_day, end_month_day, config)
-    figure = _line_layout(unit, start_month_day, end_month_day)
+    axis_options = dict(config.get("chart_axis", {})).get(kind, {})
+    figure = _line_layout(unit, start_month_day, end_month_day, axis_options=axis_options if isinstance(axis_options, dict) else None)
     if current_year is None:
         return figure
     history_by_year: dict[object, pd.DataFrame] = {}
@@ -655,15 +699,16 @@ def _daily_rain_figure(
     figure.add_trace(go.Bar(x=observed["aligned_date"], y=observed["value"], name="历史降雨", marker_color=OLD_PAGE_COLORS["historical_rain"], width=DAILY_BAR_WIDTH_MS))
     for model, label, color in (("ECMWF", "EC预测", OLD_PAGE_COLORS["ec"]), ("GFS", "GFS预测", OLD_PAGE_COLORS["five_year_mean"])):
         data = forecasts[(forecasts["model"] == model) & (forecasts["region"] == region.key)].sort_values("date")
-        if not data.empty:
-            data = data.copy()
-            data["aligned_date"] = data["date"].map(lambda value: _reference_date(value, season_start))
+        if data.empty:
+            continue
+        data = data.copy()
+        data["aligned_date"] = data["date"].map(lambda value: _reference_date(value, season_start))
         figure.add_trace(go.Bar(x=data["aligned_date"], y=data["value"], name=label, marker_color=color, width=DAILY_BAR_WIDTH_MS))
     available = pd.concat([observed["aligned_date"], forecast_aligned.get("aligned_date", pd.Series(dtype="datetime64[ns]"))], ignore_index=True).dropna()
     axis_start = _reference_date(active_range[0], season_start) if active_range is not None else (available.min() if not available.empty else None)
     axis_end = _reference_date(active_range[1], season_start) if active_range is not None else (available.max() if not available.empty else None)
     figure.update_layout(
-        title={"text": _region_label(region), "x": 0.5, "y": 0.99, "xanchor": "center", "yanchor": "top", "font": {"color": "#0f172a", "size": 14, "family": "Inter, Helvetica Neue, Arial", "weight": "bold"}},
+        title={"text": _region_label(region, config), "x": 0.5, "y": 0.99, "xanchor": "center", "yanchor": "top", "font": {"color": "#0f172a", "size": 14, "family": "Inter, Helvetica Neue, Arial", "weight": "bold"}},
         barmode="group",
         bargap=0.18,
         bargroupgap=0.03,
@@ -692,7 +737,7 @@ def _daily_rain_figure(
     return figure
 
 
-def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str, columns: int) -> None:
+def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str, columns: int, metric: str) -> None:
     regions = region_weights(config)
     selected_range: tuple[pd.Timestamp, pd.Timestamp] | None = None
     if kind == "daily_rain":
@@ -728,8 +773,8 @@ def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str,
                 )
                 with st.container(border=True, key=card_key):
                     if kind in {"cumulative_rain", "temperature", "soil"}:
-                        st.markdown(_history_card_heading(region), unsafe_allow_html=True)
-                    figure = _daily_rain_figure(records, region, selected_range, config) if kind == "daily_rain" else _region_line_figure(records, config, region, kind=kind)
+                        st.markdown(_history_card_heading(region, config), unsafe_allow_html=True)
+                    figure = _daily_rain_figure(records, region, selected_range, config) if kind == "daily_rain" else _region_line_figure(records, config, region, kind=kind, metric=metric)
                     st.plotly_chart(
                         figure,
                         use_container_width=True,
@@ -785,7 +830,9 @@ def render_weather_page(country: str = "USA") -> None:
     snapshot_status = _load_snapshot_status(str(status_file), status_file.stat().st_mtime_ns) if status_file.is_file() else {}
     snapshot_date = str(snapshot_status.get("source_snapshot_date", "—"))
     enabled = dict(config.get("enabled_sections", {}))
-    module_keys = [key for key in MODULES if bool(enabled.get(key, True))]
+    # Minimum temperature is opt-in: historic country configurations predate
+    # this optional chart and must retain their approved module set.
+    module_keys = [key for key in MODULES if bool(enabled.get(key, key != "minimum_temperature"))]
     if not module_keys:
         st.info("当前国家尚未配置可展示的天气研究模块。")
         return
@@ -808,14 +855,19 @@ def render_weather_page(country: str = "USA") -> None:
     observed_end = latest_observation_date(records)
     observed_label = f"{observed_end:%Y-%m-%d}" if observed_end is not None else "—"
     st.caption(
-        f"数据来源：{source_label}（快照日期：{snapshot_date}；非实时数据）｜"
+        f"数据来源：{source_label}（快照日期：{snapshot_date}；本地历史快照，非实时数据）｜"
         f"观测截止：{observed_label}"
     )
     if bool(config.get("weighted_aggregation", True)):
         coverage_note = str(config.get("coverage_caption", f"覆盖{len(config['regions'])}个主要产区，权重{float(config['weighted_coverage_percent']):.1f}%"))
         st.caption(f"{coverage_note}｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}")
     else:
-        st.caption(f"直接展示{len(config['regions'])}个稳定地区序列；父级产量标签仅用于说明，不参与地区级或全国加权。｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}")
+        coverage_note = str(config.get("coverage_caption", f"直接展示{len(config['regions'])}个稳定地区序列；父级产量标签仅用于说明，不参与地区级或全国加权。"))
+        st.caption(f"{coverage_note}｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}")
+    warning_messages = dict(config.get("warning_messages", {}))
+    for warning in snapshot_status.get("warnings", []):
+        if warning in warning_messages:
+            st.warning(str(warning_messages[warning]))
     _inject_weather_styles()
     _section_heading(module_name)
     if kind == "weekly":
@@ -831,14 +883,14 @@ def render_weather_page(country: str = "USA") -> None:
             return
         _render_weekly(records, normals, config, metric=metric, snapshot_date=snapshot_date)
     elif kind == "daily_rain":
-        _render_grid(records, config, kind=kind, columns=3)
+        _render_grid(records, config, kind=kind, columns=3, metric=metric)
     elif kind == "cumulative_rain":
-        _render_grid(records, config, kind=kind, columns=3)
+        _render_grid(records, config, kind=kind, columns=3, metric=metric)
     elif kind == "temperature":
-        _render_grid(records, config, kind=kind, columns=2)
+        _render_grid(records, config, kind=kind, columns=2, metric=metric)
     else:
         st.caption("土壤墒情单位：原始值，单位待确认；本模块不展示预测曲线。")
-        _render_grid(records, config, kind=kind, columns=3)
+        _render_grid(records, config, kind=kind, columns=3, metric=metric)
 
 
 def render_soybean_weather_page(country: str = "USA") -> None:

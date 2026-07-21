@@ -135,11 +135,12 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
         "棕榈油天气": "palm_oil_weather",
         "印度作物天气": "india_crop_weather",
     }
-    assert weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["countries"] == (
-        ("USA", "美国"), ("BRA", "巴西"), ("ARG", "阿根廷")
-    )
+    assert weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["country_options"] == {
+        "美国": "USA", "巴西": "BRA", "阿根廷": "ARG"
+    }
     assert weather_page._default_country_index(
-        weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["countries"], frozenset({"USA"})
+        tuple((code, label) for label, code in weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["country_options"].items()),
+        frozenset({"USA"}),
     ) == 0
 
     rendered_countries: list[str] = []
@@ -147,7 +148,7 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
     monkeypatch.setattr(
         weather_page,
         "WEATHER_COUNTRY_RENDERERS",
-        {country: (lambda country=country: weather_page.render_weather_page(country)) for country in ("USA", "BRA", "ARG", "CAN", "AUS")},
+        {country: (lambda country=country: weather_page.render_weather_page(country)) for country in ("USA", "BRA", "ARG", "CAN", "AUS", "EU", "RUS", "UKR")},
     )
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
     app.session_state["selected_workspace_page"] = workspace.SOYBEAN_WEATHER_PAGE_TITLE
@@ -161,6 +162,40 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
     assert rendered_countries == ["USA", "BRA"]
     country_radio.set_value("阿根廷").run(timeout=20)
     assert rendered_countries == ["USA", "BRA", "ARG"]
+
+
+def test_rapeseed_country_labels_use_one_explicit_code_mapping(monkeypatch) -> None:
+    weather_page = importlib.import_module("weather_research_page")
+    crop_page = importlib.import_module("crop_weather_page")
+    page = weather_page.WEATHER_RESEARCH_PAGES["rapeseed_weather"]
+    expected_options = {
+        "加拿大": "CAN", "澳大利亚": "AUS", "欧盟": "EU", "俄罗斯": "RUS", "乌克兰": "UKR"
+    }
+    assert page["country_options"] == expected_options
+    assert page["available_countries"] == frozenset({"CAN", "AUS", "EU", "RUS", "UKR"})
+    assert set(weather_page.WEATHER_COUNTRY_RENDERERS) >= set(page["country_options"].values())
+    for code, config_name, data_name, slug in (
+        ("CAN", "rapeseed_weather_can.yaml", "rapeseed_weather_can.parquet", "can"),
+        ("AUS", "rapeseed_weather_aus.yaml", "rapeseed_weather_aus.parquet", "aus"),
+        ("EU", "rapeseed_weather_eu.yaml", "rapeseed_weather_eu.parquet", "eu"),
+        ("RUS", "rapeseed_weather_rus.yaml", "rapeseed_weather_rus.parquet", "rus"),
+        ("UKR", "rapeseed_weather_ukr.yaml", "rapeseed_weather_ukr.parquet", "ukr"),
+    ):
+        files = crop_page._country_files(code)
+        assert files["config"].name == config_name
+        assert files["data"].name == data_name
+        assert files["data"].parent.name == slug
+
+    monkeypatch.setattr(weather_page.st, "title", lambda *_args, **_kwargs: None)
+    for label, code in expected_options.items():
+        rendered: list[str] = []
+        notices: list[str] = []
+        monkeypatch.setattr(weather_page.st, "radio", lambda *_args, value=label, **_kwargs: value)
+        monkeypatch.setattr(weather_page.st, "info", notices.append)
+        monkeypatch.setattr(weather_page, "WEATHER_COUNTRY_RENDERERS", {key: (lambda key=key: rendered.append(key)) for key in expected_options.values()})
+        weather_page.render_weather_research_page("rapeseed_weather")
+        assert rendered == [code]
+        assert notices == []
 
 
 def test_soybean_weather_missing_brazil_snapshot_is_data_degradation(monkeypatch, tmp_path: Path) -> None:
@@ -194,6 +229,9 @@ def test_soybean_country_files_are_isolated_and_other_weather_pages_stay_placeho
         "ARG": ("soybean_weather_ar.yaml", "soybean_weather_ar.parquet", "ar"),
         "CAN": ("rapeseed_weather_can.yaml", "rapeseed_weather_can.parquet", "can"),
         "AUS": ("rapeseed_weather_aus.yaml", "rapeseed_weather_aus.parquet", "aus"),
+        "EU": ("rapeseed_weather_eu.yaml", "rapeseed_weather_eu.parquet", "eu"),
+        "RUS": ("rapeseed_weather_rus.yaml", "rapeseed_weather_rus.parquet", "rus"),
+        "UKR": ("rapeseed_weather_ukr.yaml", "rapeseed_weather_ukr.parquet", "ukr"),
     }
     for country, (config_name, data_name, slug) in expected.items():
         files = soybean_weather_page._country_files(country)
@@ -206,10 +244,10 @@ def test_soybean_country_files_are_isolated_and_other_weather_pages_stay_placeho
     rendered: list[str] = []
     monkeypatch.setattr(weather_page.st, "radio", lambda *_args, **_kwargs: "欧盟")
     monkeypatch.setattr(weather_page.st, "info", notices.append)
-    monkeypatch.setattr(weather_page, "WEATHER_COUNTRY_RENDERERS", {"CAN": lambda: rendered.append("CAN"), "AUS": lambda: rendered.append("AUS")})
+    monkeypatch.setattr(weather_page, "WEATHER_COUNTRY_RENDERERS", {"CAN": lambda: rendered.append("CAN"), "AUS": lambda: rendered.append("AUS"), "EU": lambda: rendered.append("EU"), "RUS": lambda: rendered.append("RUS"), "UKR": lambda: rendered.append("UKR")})
     weather_page.render_weather_research_page("rapeseed_weather")
-    assert notices == ["该地区天气研究页面尚未接入。"]
-    assert rendered == []
+    assert notices == []
+    assert rendered == ["EU"]
 
 
 def test_rapeseed_weather_countries_render_from_the_main_workspace_route() -> None:
@@ -224,14 +262,26 @@ def test_rapeseed_weather_countries_render_from_the_main_workspace_route() -> No
     assert country_radio.value == "加拿大"
     assert any(item.value == "加拿大菜籽天气研究" for item in app.title)
     section_radio = next(item for item in app.radio if item.label == "页面章节")
-    assert section_radio.options == ["降雨分析", "最高气温分析", "单日降雨", "累计降雨", "最高气温", "土壤墒情"]
+    assert section_radio.options == ["降雨分析", "最高气温分析", "单日降雨", "累计降雨", "最高气温", "最低气温", "土壤墒情"]
 
     country_radio.set_value("澳大利亚").run(timeout=30)
     assert not app.exception
     assert any(item.value == "澳大利亚菜籽天气研究" for item in app.title)
     section_radio = next(item for item in app.radio if item.label == "页面章节")
-    assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "土壤墒情"]
+    assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "最低气温", "土壤墒情"]
     assert not any("主产区加权" in item.value for item in app.caption)
+
+    for country, title, sections in (
+        ("欧盟", "欧盟菜籽天气研究", ["单日降雨", "累计降雨", "最高气温", "最低气温", "土壤墒情"]),
+        ("俄罗斯", "俄罗斯菜籽天气研究", ["单日降雨", "累计降雨", "最高气温", "最低气温", "土壤墒情"]),
+        ("乌克兰", "乌克兰菜籽天气研究", ["单日降雨", "累计降雨", "最高气温", "最低气温", "土壤墒情"]),
+    ):
+        country_radio = next(item for item in app.radio if item.label == "国家/地区")
+        country_radio.set_value(country).run(timeout=30)
+        assert not app.exception
+        assert any(item.value == title for item in app.title)
+        section_radio = next(item for item in app.radio if item.label == "页面章节")
+        assert section_radio.options == sections
 
 
 def test_external_urls_are_environment_only_and_degrade_without_configuration(monkeypatch) -> None:

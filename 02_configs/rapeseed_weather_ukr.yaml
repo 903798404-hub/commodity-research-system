@@ -1,0 +1,36 @@
+rapeseed_weather:
+  crop: rapeseed
+  crop_display_name: 菜籽
+  country: UKR
+  country_display_name: 乌克兰
+  page_title: 乌克兰菜籽天气研究
+  data_slug: ukr
+  source_table_prefix: 乌克兰
+  season_mode: crop_year
+  season_label_style: range
+  season_start_month_day: "09-01"
+  season_end_month_day: "08-31"
+  weighted_aggregation: false
+  title_template: "{region}"
+  coverage_caption: 直接展示乌克兰 National 稳定序列；无地区权重，不生成加权结果。
+  enabled_sections:
+    rainfall_summary: false
+    temperature_summary: false
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    minimum_temperature: true
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "09-01", end: "08-31"}
+    temperature: {start: "09-01", end: "08-31"}
+    soil: {start: "09-01", end: "08-31"}
+  chart_axis:
+    soil: {tick_interval_days: 30, tick_angle: -45, bottom_margin: 70}
+  regions:
+    - {key: ukraine, display_name: 乌克兰（National）, display_order: 1, source_column: 乌克兰}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    temperature_min: {display_name: 最低气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: 原始值，单位待确认, weekly_aggregation: mean}

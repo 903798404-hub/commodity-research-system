@@ -64,7 +64,7 @@ def validate_weather_records(records: pd.DataFrame) -> pd.DataFrame:
     if not invalid.empty:
         raise ValueError(f"天气数据存在 {len(invalid)} 条必填字段为空或格式无效的记录")
 
-    if not set(normalized["crop"]).issubset({"soybean", "rapeseed"}) or not set(normalized["country"]).issubset({"USA", "BRA", "ARG", "CAN", "AUS"}):
+    if not set(normalized["crop"]).issubset({"soybean", "rapeseed"}) or not set(normalized["country"]).issubset({"USA", "BRA", "ARG", "CAN", "AUS", "EU", "RUS", "UKR"}):
         raise ValueError("天气数据不符合已批准的油料作物天气标准化契约")
     for column, allowed in (
         ("metric", ALLOWED_METRICS),

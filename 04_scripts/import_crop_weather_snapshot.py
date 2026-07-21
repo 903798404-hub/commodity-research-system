@@ -320,10 +320,36 @@ def insert_table_name(statement: str) -> str | None:
     return table_name
 
 
-def expected_columns(config: dict[str, object], spec: TableSpec) -> list[str]:
+def _source_regions_for_spec(config: dict[str, object], spec: TableSpec) -> list[dict[str, object]]:
+    """Return the approved source columns for one table without inventing gaps.
+
+    A configured missing forecast column remains absent from the normalized
+    snapshot.  It is never represented by a zero, another model, or raw data.
+    """
+
     regions = config.get("source_regions", config["regions"])
-    if not isinstance(regions, list):
+    if not isinstance(regions, list) or not all(isinstance(region, dict) for region in regions):
         raise SnapshotParseError("天气配置地区列表无效")
+    missing = config.get("allowed_missing_forecast_regions", {})
+    if not isinstance(missing, dict):
+        raise SnapshotParseError("天气配置的允许缺失预测地区无效")
+    omitted: set[str] = set()
+    if spec.data_type == "forecast":
+        by_metric = missing.get(spec.metric, {})
+        if not isinstance(by_metric, dict):
+            raise SnapshotParseError("天气配置的允许缺失预测指标无效")
+        model_regions = by_metric.get(spec.model, [])
+        if not isinstance(model_regions, list) or not all(isinstance(key, str) for key in model_regions):
+            raise SnapshotParseError("天气配置的允许缺失预测地区无效")
+        omitted = set(model_regions)
+        known = {str(region.get("key", "")) for region in regions}
+        if not omitted.issubset(known):
+            raise SnapshotParseError("天气配置的允许缺失预测地区不在源地区配置中")
+    return [region for region in regions if str(region.get("key", "")) not in omitted]
+
+
+def expected_columns(config: dict[str, object], spec: TableSpec) -> list[str]:
+    regions = _source_regions_for_spec(config, spec)
     columns = ["日期"]
     for region in regions:
         if not isinstance(region, dict):
@@ -353,7 +379,7 @@ def _record_rows(
     source_value_issues: list[dict[str, str]] | None = None,
 ) -> Iterator[dict[str, object]]:
     spec = (table_specs or TARGET_TABLES)[table_name]
-    regions = config.get("source_regions", config["regions"])
+    regions = _source_regions_for_spec(config, spec)
     display_keys = {str(region["key"]) for region in config["regions"]}
     if columns != expected_columns(config, spec):
         raise SnapshotParseError(f"表 {table_name} 的字段与受控源地区配置不完全一致")
@@ -453,6 +479,10 @@ def validate_candidate(candidate_file: Path, config: dict[str, object], *, sourc
     temp = data[data["metric"].isin({"temperature_max", "temperature_min"})]
     abnormal_temperatures = int(((temp["value"] < -70) | (temp["value"] > 60)).sum())
     warnings: list[str] = ["local_historical_snapshot_not_realtime", "soil_moisture_unit_unconfirmed"]
+    configured_warnings = config.get("status_warnings", [])
+    if not isinstance(configured_warnings, list) or not all(isinstance(value, str) for value in configured_warnings):
+        raise SnapshotParseError("天气配置的状态警示无效")
+    warnings.extend(value for value in configured_warnings if value not in warnings)
     if abnormal_temperatures:
         warnings.append(f"obvious_temperature_outliers={abnormal_temperatures}")
     if source_value_issues:

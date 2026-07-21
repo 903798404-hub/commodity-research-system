@@ -13,24 +13,29 @@ rapeseed_weather:
   season_start_month_day: "01-01"
   weighted_aggregation: true
   weighted_coverage_percent: 99.0
+  title_template: "{country}_{region}（{importance_label}）"
   enabled_sections:
     rainfall_summary: true
     temperature_summary: true
     daily_rainfall: true
     cumulative_rainfall: true
     maximum_temperature: true
+    minimum_temperature: true
     soil_moisture: true
   chart_windows:
     cumulative_rain: {start: "04-01", end: "10-31"}
     temperature: {start: "04-01", end: "10-31"}
+    temperature_min: {start: "04-01", end: "10-31"}
     soil: {start: "04-01", end: "10-31"}
+  chart_axis:
+    soil: {tick_interval_days: 25, tick_angle: -45, bottom_margin: 70}
   normal_sheets:
     precipitation: 加拿大历史30年平均降雨
     temperature_max: 加拿大历史30年平均最高气温
   regions:
-    - {key: saskatchewan_weighted, display_name: 萨斯喀彻温, display_order: 1, weight: 55.0, source_column: 萨省_加权, source_column_soil_moisture: 萨省_土壤墒情, normal_column: 萨省}
-    - {key: alberta_weighted, display_name: 阿尔伯塔, display_order: 2, weight: 28.0, source_column: 阿尔伯塔_加权, source_column_soil_moisture: 阿尔伯塔_土壤墒情, normal_column: 阿尔伯塔}
-    - {key: manitoba_weighted, display_name: 曼尼托巴, display_order: 3, weight: 16.0, source_column: 曼尼托巴_加权, source_column_soil_moisture: 曼尼托巴_土壤墒情, normal_column: 曼尼托巴}
+    - {key: saskatchewan_weighted, display_name: 萨斯喀彻温, title_display_name: 萨斯喀彻温省, display_order: 1, weight: 55.0, importance_label: "55%", source_column: 萨省_加权, source_column_soil_moisture: 萨省_土壤墒情, normal_column: 萨省}
+    - {key: alberta_weighted, display_name: 阿尔伯塔, title_display_name: 阿尔伯塔省, display_order: 2, weight: 28.0, importance_label: "28%", source_column: 阿尔伯塔_加权, source_column_soil_moisture: 阿尔伯塔_土壤墒情, normal_column: 阿尔伯塔}
+    - {key: manitoba_weighted, display_name: 曼尼托巴, title_display_name: 曼尼托巴省, display_order: 3, weight: 16.0, importance_label: "16%", source_column: 曼尼托巴_加权, source_column_soil_moisture: 曼尼托巴_土壤墒情, normal_column: 曼尼托巴}
   source_regions:
     - {key: saskatchewan_raw, source_column: Saskatchewan}
     - {key: sk9a_raw, source_column: "Canadian Agricultural Region SK.9A"}
