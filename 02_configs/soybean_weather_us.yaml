@@ -2,9 +2,13 @@ soybean_weather_us:
   crop: soybean
   country: USA
   page_title: 美国大豆天气研究
+  summary_subject: 美豆
   season_start_month_day: "11-01"
   weekly_window_days: 7
   weighted_coverage_percent: 88.9
+  weighted_header_label: 15州 / 88.9%
+  summary_expand_label: 展开全部15州
+  coverage_caption: 15州覆盖权重88.9%
   regions:
     - key: illinois
       display_name: 伊利诺伊州

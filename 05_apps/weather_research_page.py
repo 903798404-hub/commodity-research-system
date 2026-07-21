@@ -4,40 +4,31 @@ from collections.abc import Callable, Mapping
 
 import streamlit as st
 
-from soybean_weather_page import render_soybean_weather_page
+from crop_weather_page import render_weather_page
 
 
 WeatherCountry = tuple[str, str]
 
 
-def _render_usa_soybean_weather() -> None:
-    render_soybean_weather_page("USA")
+def _render_country_weather(country: str) -> Callable[[], None]:
+    return lambda: render_weather_page(country)
 
 
-def _render_bra_soybean_weather() -> None:
-    render_soybean_weather_page("BRA")
-
-
-def _render_arg_soybean_weather() -> None:
-    render_soybean_weather_page("ARG")
-
-
-SOYBEAN_COUNTRY_RENDERERS: Mapping[str, Callable[[], None]] = {
-    "USA": _render_usa_soybean_weather,
-    "BRA": _render_bra_soybean_weather,
-    "ARG": _render_arg_soybean_weather,
+WEATHER_COUNTRY_RENDERERS: Mapping[str, Callable[[], None]] = {
+    country: _render_country_weather(country)
+    for country in ("USA", "BRA", "ARG", "CAN", "AUS")
 }
 
 WEATHER_RESEARCH_PAGES: Mapping[str, dict[str, object]] = {
     "soybean_weather": {
         "title": "大豆天气研究",
         "countries": (("USA", "美国"), ("BRA", "巴西"), ("ARG", "阿根廷")),
-        "available_countries": frozenset(SOYBEAN_COUNTRY_RENDERERS),
+        "available_countries": frozenset(("USA", "BRA", "ARG")),
     },
     "rapeseed_weather": {
         "title": "菜籽天气研究",
         "countries": (("CAN", "加拿大"), ("AUS", "澳大利亚"), ("EU", "欧盟"), ("RUS", "俄罗斯"), ("UKR", "乌克兰")),
-        "available_countries": frozenset(),
+        "available_countries": frozenset(("CAN", "AUS")),
     },
     "palm_oil_weather": {
         "title": "棕榈油天气研究",
@@ -75,8 +66,8 @@ def render_weather_research_page(page_key: str) -> None:
     )
     selected_country = next(country_key for country_key, label in countries if label == selected_label)
 
-    if page_key == "soybean_weather" and selected_country in available_countries:
-        SOYBEAN_COUNTRY_RENDERERS[selected_country]()
+    if selected_country in available_countries:
+        WEATHER_COUNTRY_RENDERERS[selected_country]()
         return
 
     st.info("该地区天气研究页面尚未接入。")

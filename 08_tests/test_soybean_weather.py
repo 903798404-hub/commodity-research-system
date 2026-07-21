@@ -492,7 +492,9 @@ def test_weather_page_degrades_without_stable_data_or_fixture(monkeypatch) -> No
         sys.path.insert(0, apps_dir)
     import soybean_weather_page
 
-    monkeypatch.setattr(soybean_weather_page, "STABLE_DATA_FILE", PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "missing.parquet")
+    usa_files = dict(soybean_weather_page.WEATHER_COUNTRY_FILES["USA"])
+    monkeypatch.setitem(usa_files, "data", PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "missing.parquet")
+    monkeypatch.setitem(soybean_weather_page.WEATHER_COUNTRY_FILES, "USA", usa_files)
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
     app.session_state["selected_workspace_page"] = "大豆天气"
     app.run(timeout=20)
