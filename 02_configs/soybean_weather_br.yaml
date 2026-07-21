@@ -1,0 +1,45 @@
+soybean_weather_br:
+  crop: soybean
+  country: BRA
+  country_display_name: 巴西
+  page_title: 巴西大豆天气研究
+  data_slug: br
+  season_start_month_day: "09-01"
+  season_label_style: range
+  weighted_coverage_percent: 88.8
+  source_table_prefix: 巴西
+  chart_windows:
+    cumulative_rain: {start: "09-01", end: "06-30"}
+    temperature: {start: "09-01", end: "06-30"}
+    soil: {start: "08-01", end: "06-30"}
+  normal_sheets:
+    precipitation: 巴西历史30年平均降雨
+    temperature_max: 巴西历史30年平均最高气温
+  regions:
+    - {key: mato_grosso, display_name: 马托格罗索州, display_order: 1, weight: 32.3}
+    - {key: goias, display_name: 戈亚斯州, display_order: 2, weight: 13.0}
+    - {key: parana, display_name: 巴拉那州, display_order: 3, weight: 9.8}
+    - {key: rio_grande_do_sul, display_name: 南里奥格兰德州, display_order: 4, weight: 7.9}
+    - {key: mato_grosso_do_sul, display_name: 南马托格罗索州, display_order: 5, weight: 7.2}
+    - {key: minas_gerais, display_name: 米纳斯吉拉斯州, display_order: 6, weight: 6.1}
+    - {key: bahia, display_name: 巴伊亚州, display_order: 7, weight: 5.6}
+    - {key: sao_paulo, display_name: 圣保罗州, display_order: 8, weight: 3.8}
+    - {key: tocantins, display_name: 托坎廷斯州, display_order: 9, weight: 3.1}
+  source_regions:
+    - {key: mato_grosso, display_name: 马托格罗索州}
+    - {key: goias, display_name: 戈亚斯州}
+    - {key: parana, display_name: 巴拉那州}
+    - {key: rio_grande_do_sul, display_name: 南里奥格兰德州}
+    - {key: mato_grosso_do_sul, display_name: 南马托格罗索州}
+    - {key: minas_gerais, display_name: 米纳斯吉拉斯州}
+    - {key: bahia, display_name: 巴伊亚州}
+    - {key: sao_paulo, display_name: 圣保罗州}
+    - {key: tocantins, display_name: 托坎廷斯州}
+    - {key: maranhao, display_name: 马拉尼昂州}
+    - {key: piaui, display_name: 皮奥伊州}
+    - {key: santa_catarina, display_name: 圣卡塔琳娜州}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    temperature_min: {display_name: 最低气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: 原始值，单位待确认, weekly_aggregation: mean}

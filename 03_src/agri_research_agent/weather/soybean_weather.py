@@ -1,4 +1,4 @@
-"""Pure calculations for the first-stage US soybean weather research page."""
+"""Pure calculations for configuration-driven soybean weather research pages."""
 
 from __future__ import annotations
 
@@ -10,19 +10,28 @@ import yaml
 
 def load_weather_config(path: str | Path) -> dict[str, object]:
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or not isinstance(payload.get("soybean_weather_us"), dict):
-        raise ValueError("美国大豆天气配置无效")
-    config = payload["soybean_weather_us"]
+    candidates = [value for key, value in (payload or {}).items() if str(key).startswith("soybean_weather_") and isinstance(value, dict)]
+    if len(candidates) != 1:
+        raise ValueError("大豆天气配置必须包含唯一的 soybean_weather_* 根节点")
+    config = candidates[0]
     regions = config.get("regions")
-    if not isinstance(regions, list) or len(regions) != 15:
-        raise ValueError("美国大豆天气配置必须包含 15 个州")
+    if not isinstance(regions, list) or not regions:
+        raise ValueError("大豆天气配置必须包含展示地区")
     keys = [str(item.get("key", "")) for item in regions if isinstance(item, dict)]
-    if len(keys) != 15 or len(set(keys)) != 15 or any(not key for key in keys):
-        raise ValueError("美国大豆天气州标识必须唯一")
+    if len(keys) != len(regions) or len(set(keys)) != len(keys) or any(not key for key in keys):
+        raise ValueError("大豆天气地区标识必须唯一")
     total = sum(float(item["weight"]) for item in regions if isinstance(item, dict))
     coverage = float(config.get("weighted_coverage_percent", 0))
-    if round(total, 1) != 88.9 or coverage != 88.9:
-        raise ValueError("美国大豆第一阶段权重及分母必须固定为 88.9")
+    if round(total, 1) != round(coverage, 1):
+        raise ValueError("大豆天气展示权重合计必须等于固定加权分母")
+    source_regions = config.get("source_regions", regions)
+    if not isinstance(source_regions, list) or not source_regions:
+        raise ValueError("大豆天气源地区配置无效")
+    source_keys = {str(item.get("key", "")) for item in source_regions if isinstance(item, dict)}
+    if not set(keys).issubset(source_keys):
+        raise ValueError("展示地区必须全部存在于源地区配置")
+    if str(config.get("crop")) != "soybean" or not str(config.get("country", "")):
+        raise ValueError("大豆天气作物或国家标识无效")
     return config
 
 
@@ -65,9 +74,9 @@ def previous_five_complete_seasons(records: pd.DataFrame, current_season: str) -
 
 
 def weighted_values(values_by_region: pd.Series, config: dict[str, object]) -> tuple[float, float]:
-    """Return the fixed-88.9 weighted value and available-weight coverage.
+    """Return the fixed configured-denominator value and available-weight coverage.
 
-    Missing states are not renormalized: the approved denominator remains 88.9
+    Missing regions are not renormalized: the approved denominator remains fixed
     and the caller receives the actual coverage for explicit display.
     """
 
@@ -175,7 +184,7 @@ def weekly_metric_summary(
     result["value"] = result["region"].map(values)
     weighted, coverage = weighted_values(values, config)
     weighted_row = pd.DataFrame(
-        [{"region": "weighted", "display_name": "主产区加权", "display_order": 0, "weight": 88.9, "value": weighted, "coverage_percent": coverage}]
+        [{"region": "weighted", "display_name": "主产区加权", "display_order": 0, "weight": float(config["weighted_coverage_percent"]), "value": weighted, "coverage_percent": coverage}]
     )
     result["coverage_percent"] = result["weight"].where(result["value"].notna(), 0.0)
     return pd.concat([weighted_row, result], ignore_index=True)
@@ -221,7 +230,7 @@ def weekly_historical_baseline(
     result = weights.copy()
     result["baseline_value"] = result["region"].map(mean_by_region)
     weighted_row = pd.DataFrame(
-        [{"region": "weighted", "display_name": "主产区加权", "display_order": 0, "weight": 88.9, "baseline_value": weighted_per_season.mean()}]
+        [{"region": "weighted", "display_name": "主产区加权", "display_order": 0, "weight": float(config["weighted_coverage_percent"]), "baseline_value": weighted_per_season.mean()}]
     )
     return pd.concat([weighted_row, result], ignore_index=True)
 

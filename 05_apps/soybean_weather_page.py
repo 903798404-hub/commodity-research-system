@@ -20,6 +20,7 @@ if str(SRC_DIR) not in sys.path:
 
 from agri_research_agent.data_sources.weather_adapter import load_weather_records  # noqa: E402
 from agri_research_agent.weather.soybean_weather import (  # noqa: E402
+    add_season_columns,
     latest_observation_date,
     load_weather_config,
     region_weights,
@@ -36,6 +37,21 @@ STATUS_FILE = PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_us.j
 FIXTURE_ENV = "SOYBEAN_WEATHER_FIXTURE_PATH"
 NORMAL_FIXTURE_ENV = "SOYBEAN_WEATHER_NORMAL_FIXTURE_PATH"
 PAGE_TITLE = "美国大豆天气研究"
+
+COUNTRY_FILES = {
+    "BRA": {
+        "config": PROJECT_ROOT / "02_configs" / "soybean_weather_br.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "br" / "soybean_weather_br.parquet",
+        "normal": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "br" / "soybean_weather_br_30y_normal.parquet",
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_br.json",
+    },
+    "ARG": {
+        "config": PROJECT_ROOT / "02_configs" / "soybean_weather_ar.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "ar" / "soybean_weather_ar.parquet",
+        "normal": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "ar" / "soybean_weather_ar_30y_normal.parquet",
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_ar.json",
+    },
+}
 
 MODULES = {
     "降雨分析": ("weekly", "precipitation"),
@@ -70,22 +86,32 @@ REFERENCE_YEAR = 2000
 DAILY_BAR_WIDTH_MS = 0.19 * 24 * 60 * 60 * 1000
 
 
-def _data_path() -> tuple[Path | None, str]:
-    fixture_path = os.environ.get(FIXTURE_ENV, "").strip()
+def _country_files(country: str) -> dict[str, Path]:
+    """Keep every country-specific local path at one page-boundary lookup."""
+
+    if country == "USA":
+        return {"config": CONFIG_FILE, "data": STABLE_DATA_FILE, "normal": NORMAL_DATA_FILE, "status": STATUS_FILE}
+    if country in COUNTRY_FILES:
+        return COUNTRY_FILES[country]
+    raise ValueError(f"未支持的大豆天气国家：{country}")
+
+
+def _data_path(country: str, files: dict[str, Path]) -> tuple[Path | None, str]:
+    fixture_path = os.environ.get(FIXTURE_ENV, "").strip() if country == "USA" else ""
     if fixture_path:
         return Path(fixture_path), "本地测试 fixture"
-    if STABLE_DATA_FILE.is_file():
-        return STABLE_DATA_FILE, "本地历史快照"
+    if files["data"].is_file():
+        return files["data"], "本地历史快照"
     return None, "本地历史快照未接入"
 
 
-def _normal_path() -> Path | None:
+def _normal_path(country: str, files: dict[str, Path]) -> Path | None:
     """Use a normal-baseline fixture only when a test explicitly requests one."""
 
-    fixture_path = os.environ.get(NORMAL_FIXTURE_ENV, "").strip()
+    fixture_path = os.environ.get(NORMAL_FIXTURE_ENV, "").strip() if country == "USA" else ""
     if fixture_path:
         return Path(fixture_path)
-    return NORMAL_DATA_FILE if NORMAL_DATA_FILE.is_file() else None
+    return files["normal"] if files["normal"].is_file() else None
 
 
 @st.cache_data(show_spinner=False)
@@ -121,21 +147,26 @@ def _load_normals(normal_path: str, normal_mtime_ns: int, normal_size: int) -> p
     return data
 
 
-def _region_label(region: pd.Series | object) -> str:
-    return f"美国_{region.display_name}（{float(region.weight):.1f}%）"
+def _region_label(region: pd.Series | object, config: dict[str, object] | None = None) -> str:
+    country_name = str((config or {}).get("country_display_name", "美国"))
+    return f"{country_name}_{region.display_name}（{float(region.weight):.1f}%）"
 
 
-def _reference_date(value: object) -> pd.Timestamp:
-    """Map every US natural-year observation to the same leap-year date axis."""
+def _reference_date(value: object, season_start_month_day: str = "01-01") -> pd.Timestamp:
+    """Map natural or cross-year seasons onto a fixed leap-year reference axis."""
 
     timestamp = pd.Timestamp(value)
-    return pd.Timestamp(year=REFERENCE_YEAR, month=timestamp.month, day=timestamp.day)
+    start_month, start_day = (int(part) for part in season_start_month_day.split("-"))
+    year = REFERENCE_YEAR if (timestamp.month, timestamp.day) >= (start_month, start_day) else REFERENCE_YEAR + 1
+    day = 28 if year % 4 and timestamp.month == 2 and timestamp.day == 29 else timestamp.day
+    return pd.Timestamp(year=year, month=timestamp.month, day=day)
 
 
 def _reference_window(start_month_day: str, end_month_day: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    end_year = REFERENCE_YEAR + 1 if end_month_day < start_month_day else REFERENCE_YEAR
     return (
         pd.Timestamp(f"{REFERENCE_YEAR}-{start_month_day}"),
-        pd.Timestamp(f"{REFERENCE_YEAR}-{end_month_day}"),
+        pd.Timestamp(f"{end_year}-{end_month_day}"),
     )
 
 
@@ -153,7 +184,10 @@ def _week_start(value: pd.Timestamp) -> pd.Timestamp:
     return value.normalize() - pd.Timedelta(days=value.weekday())
 
 
-def _weekly_windows(latest: pd.Timestamp) -> tuple[list[tuple[pd.Timestamp, pd.Timestamp]], list[tuple[pd.Timestamp, pd.Timestamp]]]:
+def _weekly_windows(
+    latest: pd.Timestamp,
+    forecast_start: pd.Timestamp | None = None,
+) -> tuple[list[tuple[pd.Timestamp, pd.Timestamp]], list[tuple[pd.Timestamp, pd.Timestamp]]]:
     """Use the legacy Monday-to-Sunday weekly windows without filling missing data."""
 
     latest_complete_end = _week_start(latest) - pd.Timedelta(days=1)
@@ -161,7 +195,7 @@ def _weekly_windows(latest: pd.Timestamp) -> tuple[list[tuple[pd.Timestamp, pd.T
         (latest_complete_end - pd.Timedelta(days=7 * offset + 6), latest_complete_end - pd.Timedelta(days=7 * offset))
         for offset in range(3, -1, -1)
     ]
-    first_forecast_start = latest_complete_end + pd.Timedelta(days=1)
+    first_forecast_start = forecast_start.normalize() if forecast_start is not None else latest_complete_end + pd.Timedelta(days=1)
     forecast = [
         (first_forecast_start + pd.Timedelta(days=7 * offset), first_forecast_start + pd.Timedelta(days=7 * offset + 6))
         for offset in range(2)
@@ -221,7 +255,7 @@ def _normal_summary(normals: pd.DataFrame, config: dict[str, object], *, metric:
     result = region_frame.copy()
     result["value"] = grouped.reindex(result.index)
     result = result.reset_index().rename(columns={"key": "region"})
-    result = pd.concat([pd.DataFrame([{"region": "weighted", "display_name": "主产区加权", "weight": 88.9, "display_order": 0, "value": weighted, "coverage_percent": coverage}]), result.assign(coverage_percent=100.0)], ignore_index=True)
+    result = pd.concat([pd.DataFrame([{"region": "weighted", "display_name": "主产区加权", "weight": float(config["weighted_coverage_percent"]), "display_order": 0, "value": weighted, "coverage_percent": coverage}]), result.assign(coverage_percent=100.0)], ignore_index=True)
     return result.set_index("region")
 
 
@@ -314,15 +348,23 @@ def _build_weekly_wide_table(
 
     all_regions = region_weights(config)
     regions = all_regions if show_all_regions else all_regions.head(9)
-    title = "美豆主产区降水" if metric == "precipitation" else "美豆主产区最高气温"
+    country_name = str(config.get("country_display_name", "美国"))
+    if str(config.get("country")) == "USA":
+        title = "美豆主产区降水" if metric == "precipitation" else "美豆主产区最高气温"
+    else:
+        title = f"{country_name}大豆主产区降水" if metric == "precipitation" else f"{country_name}大豆主产区最高气温"
     metric_label = "周度降雨（mm）" if metric == "precipitation" else "周度最高气温（℃）"
     colspan = 3 + 2 * (1 + len(regions))
-    history_windows, forecast_windows = _weekly_windows(latest)
+    forecasts = select_latest_forecasts(records, latest)
+    forecast_start = forecasts["date"].min() if not forecasts.empty else None
+    history_windows, forecast_windows = _weekly_windows(latest, forecast_start)
+    coverage = float(config["weighted_coverage_percent"])
 
+    weighted_header = "15州 / 88.9%" if str(config.get("country")) == "USA" else f"主产区 / {coverage:.1f}%"
     rows = [
         f'<tr><td colspan="{colspan}" class="table-title">{title}</td></tr>',
         f'<tr><td colspan="{colspan}" class="snapshot-date">业务日期：周一 ｜ — ｜ 周日</td></tr>',
-        '<tr class="weight-row"><td colspan="3">权重</td><td colspan="2">15州 / 88.9%</td>'
+        f'<tr class="weight-row"><td colspan="3">权重</td><td colspan="2">{weighted_header}</td>'
         + "".join(f'<td colspan="2">{region.weight:.1f}%</td>' for region in regions.itertuples(index=False))
         + "</tr>",
         '<tr class="section-header"><td colspan="3">' + metric_label + "</td>"
@@ -353,7 +395,7 @@ def _build_weekly_wide_table(
             normal = _normal_summary(normals, config, metric=metric, window=window)
             forecasts = {"ECMWF": _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model="ECMWF"), "GFS": _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model="GFS")}
             rows.append(_wide_row(window, regions, forecasts, normal, forecast=True, measure=measure, metric=metric))
-    rows.append(f'<tr><td colspan="{colspan}" class="table-note">主产区加权固定使用全部15州：sum(region_value × region_weight) / 88.9。偏差按当前值减30年基准，偏差幅度按当前值/30年基准−1计算。</td></tr>')
+    rows.append(f'<tr><td colspan="{colspan}" class="table-note">主产区加权固定使用全部{len(all_regions)}个展示地区：sum(region_value × region_weight) / {coverage:.1f}。偏差按当前值减30年基准，偏差幅度按当前值/30年基准−1计算。</td></tr>')
     return '<div class="weather-table-scroll"><table class="weather-wide-table">' + "".join(rows) + "</table></div>"
 
 
@@ -399,17 +441,34 @@ def _section_heading(title: str) -> None:
     st.markdown(f'<div class="weather-section-title">{html.escape(title)}</div>', unsafe_allow_html=True)
 
 
-def _aligned_history(records: pd.DataFrame, region_key: str, start_month_day: str, end_month_day: str) -> tuple[pd.DataFrame, list[int], int | None]:
+def _aligned_history(
+    records: pd.DataFrame,
+    region_key: str,
+    start_month_day: str,
+    end_month_day: str,
+    config: dict[str, object],
+) -> tuple[pd.DataFrame, list[object], object | None]:
     observed = records[(records["data_type"] == "observed") & (records["region"] == region_key)].copy()
     if observed.empty:
         return pd.DataFrame(), [], None
-    observed["year"] = observed["date"].dt.year
-    observed["month_day"] = observed["date"].dt.strftime("%m-%d")
-    observed = observed[(observed["month_day"] >= start_month_day) & (observed["month_day"] <= end_month_day)]
-    observed["aligned_date"] = observed["date"].map(_reference_date)
+    if str(config.get("season_label_style", "year")) != "range":
+        observed["year"] = observed["date"].dt.year
+        observed["month_day"] = observed["date"].dt.strftime("%m-%d")
+        observed = observed[(observed["month_day"] >= start_month_day) & (observed["month_day"] <= end_month_day)]
+        observed["aligned_date"] = observed["date"].map(_reference_date)
+        years = sorted(observed["year"].unique().tolist())[-12:]
+        current_year = max(years) if years else None
+        return observed, years, current_year
+    observed = add_season_columns(observed, config)
+    # The 365-day static normal has no Feb 29.  Keep seasonal comparisons
+    # deterministic by excluding this unmatched leap-day observation.
+    observed = observed[~((observed["date"].dt.month == 2) & (observed["date"].dt.day == 29))]
+    observed["aligned_date"] = observed["date"].map(lambda value: _reference_date(value, start_month_day))
+    axis_start, axis_end = _reference_window(start_month_day, end_month_day)
+    observed = observed[(observed["aligned_date"] >= axis_start) & (observed["aligned_date"] <= axis_end)]
+    observed["year"] = observed["season"]
     years = sorted(observed["year"].unique().tolist())[-12:]
-    current_year = max(years) if years else None
-    return observed, years, current_year
+    return observed, years, years[-1] if years else None
 
 
 def _history_card_heading(region: pd.Series | object) -> str:
@@ -478,24 +537,29 @@ def _add_line(
 
 
 def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region: object, *, kind: str) -> go.Figure:
-    if kind == "cumulative_rain":
-        start_month_day, end_month_day, unit = "04-15", "11-20", "累计降水（mm）"
-    elif kind == "soil":
-        start_month_day, end_month_day, unit = "03-01", "12-26", "原始值，单位待确认"
+    legacy_windows = {
+        "cumulative_rain": ("04-15", "11-20", "累计降水（mm）"),
+        "soil": ("03-01", "12-26", "原始值，单位待确认"),
+        "temperature": ("03-01", "11-20", "最高气温（℃）"),
+    }
+    config_window = dict(config.get("chart_windows", {})).get(kind)
+    if isinstance(config_window, dict):
+        start_month_day, end_month_day = str(config_window["start"]), str(config_window["end"])
+        unit = legacy_windows[kind][2]
     else:
-        start_month_day, end_month_day, unit = "03-01", "11-20", "最高气温（℃）"
-    observed, years, current_year = _aligned_history(records, region.key, start_month_day, end_month_day)
+        start_month_day, end_month_day, unit = legacy_windows[kind]
+    observed, years, current_year = _aligned_history(records, region.key, start_month_day, end_month_day, config)
     figure = _line_layout(unit, start_month_day, end_month_day)
     if current_year is None:
         return figure
-    history_by_year: dict[int, pd.DataFrame] = {}
+    history_by_year: dict[object, pd.DataFrame] = {}
     for year in years:
         series = observed[observed["year"] == year][["aligned_date", "value"]].sort_values("aligned_date").copy()
         if kind == "cumulative_rain":
             series["value"] = series["value"].cumsum()
         history_by_year[year] = series
-    previous_year = current_year - 1 if current_year - 1 in history_by_year else None
-    mean_years = [year for year in years if year < current_year][-5:]
+    previous_year = years[-2] if len(years) > 1 else None
+    mean_years = [year for year in years if year not in {current_year, previous_year}][-5:]
     for history_rank, year in enumerate(years):
         if year in {current_year, previous_year}:
             continue
@@ -522,10 +586,10 @@ def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region
             ("ECMWF", "EC预测", HISTORY_SERIES_COLORS["ec"], 140),
         ):
             model_data = forecast[(forecast["model"] == model) & (forecast["region"] == region.key)].copy()
-            model_data["month_day"] = model_data["date"].dt.strftime("%m-%d") if not model_data.empty else pd.Series(dtype="string")
-            model_data = model_data[(model_data["month_day"] >= start_month_day) & (model_data["month_day"] <= end_month_day)].sort_values("month_day")
             if not model_data.empty:
-                model_data["aligned_date"] = model_data["date"].map(_reference_date)
+                model_data["aligned_date"] = model_data["date"].map(lambda value: _reference_date(value, start_month_day))
+                axis_start, axis_end = _reference_window(start_month_day, end_month_day)
+                model_data = model_data[(model_data["aligned_date"] >= axis_start) & (model_data["aligned_date"] <= axis_end)].sort_values("aligned_date")
             if kind == "cumulative_rain" and not model_data.empty:
                 anchor = float(history_by_year[current_year]["value"].iloc[-1]) if not history_by_year[current_year].empty else 0.0
                 model_data["value"] = anchor + model_data["value"].cumsum()
@@ -547,6 +611,7 @@ def _daily_rain_figure(
     records: pd.DataFrame,
     region: object,
     date_range: tuple[pd.Timestamp, pd.Timestamp] | None = None,
+    config: dict[str, object] | None = None,
 ) -> go.Figure:
     latest = latest_observation_date(records)
     observed = records[(records["data_type"] == "observed") & (records["region"] == region.key)].copy()
@@ -558,21 +623,22 @@ def _daily_rain_figure(
         start, end = active_range
         observed = observed[(observed["date"] >= start) & (observed["date"] <= end)]
         forecasts = forecasts[(forecasts["date"] >= start) & (forecasts["date"] <= end)]
-    observed["aligned_date"] = observed["date"].map(_reference_date)
+    season_start = str((config or {}).get("season_start_month_day", "01-01"))
+    observed["aligned_date"] = observed["date"].map(lambda value: _reference_date(value, season_start))
     forecast_aligned = forecasts.copy()
     if not forecast_aligned.empty:
-        forecast_aligned["aligned_date"] = forecast_aligned["date"].map(_reference_date)
+        forecast_aligned["aligned_date"] = forecast_aligned["date"].map(lambda value: _reference_date(value, season_start))
     figure = go.Figure()
     figure.add_trace(go.Bar(x=observed["aligned_date"], y=observed["value"], name="历史降雨", marker_color=OLD_PAGE_COLORS["historical_rain"], width=DAILY_BAR_WIDTH_MS))
     for model, label, color in (("ECMWF", "EC预测", OLD_PAGE_COLORS["ec"]), ("GFS", "GFS预测", OLD_PAGE_COLORS["five_year_mean"])):
         data = forecasts[(forecasts["model"] == model) & (forecasts["region"] == region.key)].sort_values("date")
         if not data.empty:
             data = data.copy()
-            data["aligned_date"] = data["date"].map(_reference_date)
+            data["aligned_date"] = data["date"].map(lambda value: _reference_date(value, season_start))
         figure.add_trace(go.Bar(x=data["aligned_date"], y=data["value"], name=label, marker_color=color, width=DAILY_BAR_WIDTH_MS))
     available = pd.concat([observed["aligned_date"], forecast_aligned.get("aligned_date", pd.Series(dtype="datetime64[ns]"))], ignore_index=True).dropna()
-    axis_start = _reference_date(active_range[0]) if active_range is not None else (available.min() if not available.empty else None)
-    axis_end = _reference_date(active_range[1]) if active_range is not None else (available.max() if not available.empty else None)
+    axis_start = _reference_date(active_range[0], season_start) if active_range is not None else (available.min() if not available.empty else None)
+    axis_end = _reference_date(active_range[1], season_start) if active_range is not None else (available.max() if not available.empty else None)
     figure.update_layout(
         title={"text": _region_label(region), "x": 0.5, "y": 0.99, "xanchor": "center", "yanchor": "top", "font": {"color": "#0f172a", "size": 14, "family": "Inter, Helvetica Neue, Arial", "weight": "bold"}},
         barmode="group",
@@ -624,7 +690,7 @@ def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str,
                 value=(default_window[0].date(), default_window[1].date()),
                 min_value=minimum,
                 max_value=maximum,
-                key="soybean_daily_rain_date_range",
+                key=f"soybean_daily_rain_date_range_{config['country']}",
             )
             if isinstance(selected, tuple) and len(selected) == 2:
                 selected_range = (pd.Timestamp(selected[0]), pd.Timestamp(selected[1]))
@@ -640,7 +706,7 @@ def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str,
                 with st.container(border=True, key=card_key):
                     if kind in {"cumulative_rain", "temperature", "soil"}:
                         st.markdown(_history_card_heading(region), unsafe_allow_html=True)
-                    figure = _daily_rain_figure(records, region, selected_range) if kind == "daily_rain" else _region_line_figure(records, config, region, kind=kind)
+                    figure = _daily_rain_figure(records, region, selected_range, config) if kind == "daily_rain" else _region_line_figure(records, config, region, kind=kind)
                     st.plotly_chart(
                         figure,
                         use_container_width=True,
@@ -661,24 +727,37 @@ def _render_weekly(records: pd.DataFrame, normals: pd.DataFrame, config: dict[st
         st.warning("尚无可用于周度分析的观测数据。")
         return
     st.caption("沿用旧项目30年历史同期基准，具体起止年份未确认。")
-    show_all = st.checkbox("展开全部15州", value=False, key=f"weather_wide_table_{metric}")
-    st.caption("默认展示前9州；主产区加权始终使用全部15州，覆盖权重88.9%。")
+    region_count = len(config["regions"])
+    coverage = float(config["weighted_coverage_percent"])
+    legacy_us = str(config.get("country")) == "USA"
+    show_all = st.checkbox("展开全部15州" if legacy_us else f"展开全部{region_count}个地区", value=False, key=f"weather_wide_table_{config['country']}_{metric}")
+    st.caption("默认展示前9州；主产区加权始终使用全部15州，覆盖权重88.9%。" if legacy_us else f"默认展示前9个地区；主产区加权始终使用全部{region_count}个展示地区，覆盖权重{coverage:.1f}%。")
     st.markdown(_build_weekly_wide_table(records, normals, config, metric=metric, latest=latest, snapshot_date=snapshot_date, show_all_regions=show_all), unsafe_allow_html=True)
 
 
-def render_soybean_weather_page() -> None:
+def render_soybean_weather_page(country: str = "USA") -> None:
     """Render one ordered legacy-style module at a time from the stable snapshot."""
 
-    if not CONFIG_FILE.is_file():
-        st.error(f"缺少天气页面配置：{CONFIG_FILE}")
+    try:
+        files = _country_files(country)
+    except ValueError as exc:
+        st.error(str(exc))
         return
-    config = _load_config(str(CONFIG_FILE), CONFIG_FILE.stat().st_mtime_ns)
-    data_path, source_label = _data_path()
-    st.title(PAGE_TITLE)
+    config_file = files["config"]
+    if not config_file.is_file():
+        st.error(f"缺少天气页面配置：{config_file}")
+        return
+    config = _load_config(str(config_file), config_file.stat().st_mtime_ns)
+    data_path, source_label = _data_path(country, files)
+    st.title(str(config.get("page_title", PAGE_TITLE)))
     if data_path is None or not data_path.is_file():
-        st.error(f"{source_label}：当前模块未加载任何回退业务数据。")
+        st.error(
+            f"{config.get('country_display_name', country)}天气稳定数据不可用："
+            f"{source_label}。当前模块未加载任何回退业务数据。"
+        )
         return
-    snapshot_status = _load_snapshot_status(str(STATUS_FILE), STATUS_FILE.stat().st_mtime_ns) if STATUS_FILE.is_file() else {}
+    status_file = files["status"]
+    snapshot_status = _load_snapshot_status(str(status_file), status_file.stat().st_mtime_ns) if status_file.is_file() else {}
     snapshot_date = str(snapshot_status.get("source_snapshot_date", "—"))
     module_name = st.radio("页面章节", list(MODULES), horizontal=True)
     kind, metric = MODULES[module_name]
@@ -696,14 +775,16 @@ def render_soybean_weather_page() -> None:
         f"数据来源：{source_label}（快照日期：{snapshot_date}；非实时数据）｜"
         f"观测截止：{observed_label}"
     )
-    st.caption(
-        f"15州覆盖权重88.9%｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜"
-        f"GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}"
+    coverage_note = (
+        "15州覆盖权重88.9%"
+        if str(config.get("country")) == "USA"
+        else f"覆盖{len(config['regions'])}个主要产区，权重{float(config['weighted_coverage_percent']):.1f}%"
     )
+    st.caption(f"{coverage_note}｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}")
     _inject_weather_styles()
     _section_heading(module_name)
     if kind == "weekly":
-        normal_path = _normal_path()
+        normal_path = _normal_path(country, files)
         if normal_path is None or not normal_path.is_file():
             st.error("30年历史同期基准稳定数据不可用。")
             return

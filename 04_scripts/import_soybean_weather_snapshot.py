@@ -1,4 +1,4 @@
-"""Stream a Navicat/MySQL SQL snapshot into the US soybean weather contract.
+"""Stream a Navicat/MySQL SQL snapshot into a configured soybean weather contract.
 
 The importer deliberately does not connect to a database.  It identifies only the
 approved stable US summary tables, parses their DDL and INSERT statements with a
@@ -66,6 +66,26 @@ TARGET_TABLES: dict[str, TableSpec] = {
     "美国_最低气温_预测_gfs": TableSpec("temperature_min", "forecast", "GFS", "degC", "_lowtemp_gfs"),
     "美国_土壤墒情": TableSpec("soil_moisture", "observed", "observed", "原始值，单位待确认"),
 }
+
+
+def target_tables(config: dict[str, object]) -> dict[str, TableSpec]:
+    """Build the ten approved stable summary-table identities from one config."""
+
+    prefix = str(config.get("source_table_prefix", ""))
+    if not prefix:
+        raise SnapshotParseError("天气配置缺少非敏感源表前缀")
+    return {
+        f"{prefix}_降雨": TableSpec("precipitation", "observed", "observed", "mm"),
+        f"{prefix}_降雨_预测_ec": TableSpec("precipitation", "forecast", "ECMWF", "mm", "_precip_ec"),
+        f"{prefix}_降雨_预测_gfs": TableSpec("precipitation", "forecast", "GFS", "mm", "_precip_gfs"),
+        f"{prefix}_最高气温": TableSpec("temperature_max", "observed", "observed", "degC"),
+        f"{prefix}_最高气温_预测_ec": TableSpec("temperature_max", "forecast", "ECMWF", "degC", "_hightemp_ec"),
+        f"{prefix}_最高气温_预测_gfs": TableSpec("temperature_max", "forecast", "GFS", "degC", "_hightemp_gfs"),
+        f"{prefix}_最低气温": TableSpec("temperature_min", "observed", "observed", "degC"),
+        f"{prefix}_最低气温_预测_ec": TableSpec("temperature_min", "forecast", "ECMWF", "degC", "_lowtemp_ec"),
+        f"{prefix}_最低气温_预测_gfs": TableSpec("temperature_min", "forecast", "GFS", "degC", "_lowtemp_gfs"),
+        f"{prefix}_土壤墒情": TableSpec("soil_moisture", "observed", "observed", "原始值，单位待确认"),
+    }
 
 REQUIRED_COLUMNS = [
     "date", "crop", "country", "region", "metric", "data_type", "model", "value", "unit", "source_updated_at",
@@ -301,14 +321,15 @@ def insert_table_name(statement: str) -> str | None:
 
 
 def expected_columns(config: dict[str, object], spec: TableSpec) -> list[str]:
-    regions = config["regions"]
+    regions = config.get("source_regions", config["regions"])
     if not isinstance(regions, list):
         raise SnapshotParseError("天气配置地区列表无效")
+    prefix = str(config.get("source_table_prefix", "美国"))
     columns = ["日期"]
     for region in regions:
         if not isinstance(region, dict):
             raise SnapshotParseError("天气配置地区项无效")
-        columns.append(f"美国_{region['display_name']}{spec.column_suffix}")
+        columns.append(f"{prefix}_{region['display_name']}{spec.column_suffix}")
     return columns
 
 
@@ -318,11 +339,13 @@ def _record_rows(
     values: list[list[str | float | None]],
     config: dict[str, object],
     source_updated_at: pd.Timestamp,
+    table_specs: dict[str, TableSpec] | None = None,
 ) -> Iterator[dict[str, object]]:
-    spec = TARGET_TABLES[table_name]
-    regions = config["regions"]
+    spec = (table_specs or TARGET_TABLES)[table_name]
+    regions = config.get("source_regions", config["regions"])
+    display_keys = {str(region["key"]) for region in config["regions"]}
     if columns != expected_columns(config, spec):
-        raise SnapshotParseError(f"表 {table_name} 的字段与 15 州配置不完全一致")
+        raise SnapshotParseError(f"表 {table_name} 的字段与受控源地区配置不完全一致")
     for row in values:
         if len(row) != len(columns):
             raise SnapshotParseError(f"表 {table_name} 的 INSERT 值数量与 DDL 字段数量不一致")
@@ -336,13 +359,13 @@ def _record_rows(
         except (TypeError, ValueError) as exc:
             raise SnapshotParseError(f"表 {table_name} 存在无法解析的日期：{date_value}") from exc
         for region, value in zip(regions, row[1:], strict=True):
-            if value is None:
+            if value is None or str(region["key"]) not in display_keys:
                 continue
             numeric_value = float(value)
             yield {
                 "date": date,
                 "crop": "soybean",
-                "country": "USA",
+                "country": str(config["country"]),
                 "region": str(region["key"]),
                 "metric": spec.metric,
                 "data_type": spec.data_type,
@@ -384,6 +407,8 @@ def validate_candidate(candidate_file: Path, config: dict[str, object]) -> dict[
     data["value"] = pd.to_numeric(data["value"], errors="coerce")
     if data[REQUIRED_COLUMNS].isna().any().any():
         raise SnapshotParseError("候选 Parquet 存在空的标准字段")
+    if set(data["crop"].astype(str)) != {"soybean"} or set(data["country"].astype(str)) != {str(config["country"])}:
+        raise SnapshotParseError("候选 Parquet 的作物或国家不符合当前配置")
     allowed_metrics = {"precipitation", "temperature_max", "temperature_min", "soil_moisture"}
     allowed_types = {"observed", "forecast"}
     allowed_models = {"observed", "ECMWF", "GFS"}
@@ -457,40 +482,67 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     os.replace(temp, path)
 
 
-def promote_candidate(candidate_file: Path, status: dict[str, object]) -> tuple[Path | None, str]:
+def promote_candidate(
+    candidate_file: Path,
+    status: dict[str, object],
+    *,
+    stable_file: Path | None = None,
+    backup_root: Path | None = None,
+    status_file: Path | None = None,
+) -> tuple[Path | None, str]:
+    stable_file = stable_file or STABLE_FILE
+    backup_root = backup_root or BACKUP_ROOT
+    status_file = status_file or STATUS_FILE
     backup_path: Path | None = None
-    if STABLE_FILE.exists():
+    if stable_file.exists():
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup_path = BACKUP_ROOT / timestamp / STABLE_FILE.name
+        backup_path = backup_root / timestamp / stable_file.name
         backup_path.parent.mkdir(parents=True, exist_ok=False)
-        shutil.copy2(STABLE_FILE, backup_path)
-        if sha256_file(STABLE_FILE) != sha256_file(backup_path):
+        shutil.copy2(stable_file, backup_path)
+        if sha256_file(stable_file) != sha256_file(backup_path):
             raise SnapshotParseError("稳定文件备份哈希不一致，拒绝切换")
-    STABLE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temporary_stable = STABLE_FILE.with_name(f".{STABLE_FILE.name}.{uuid.uuid4().hex}.tmp")
+    stable_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary_stable = stable_file.with_name(f".{stable_file.name}.{uuid.uuid4().hex}.tmp")
     shutil.copy2(candidate_file, temporary_stable)
-    os.replace(temporary_stable, STABLE_FILE)
-    stable_hash = sha256_file(STABLE_FILE)
+    os.replace(temporary_stable, stable_file)
+    stable_hash = sha256_file(stable_file)
     status["stable_file_sha256"] = stable_hash
     status["status"] = "success"
-    atomic_write_json(STATUS_FILE, status)
+    atomic_write_json(status_file, status)
     return backup_path, stable_hash
 
 
-def import_snapshot(source: Path, *, run_id: str, promote: bool) -> dict[str, object]:
+def _country_paths(config_file: Path, config: dict[str, object]) -> tuple[Path, Path, Path, Path, str]:
+    """Resolve local candidate/stable/status paths without putting paths in page code."""
+
+    slug = str(config.get("data_slug", "us"))
+    if config_file == CONFIG_FILE:
+        return CANDIDATE_ROOT, STABLE_FILE, BACKUP_ROOT, STATUS_FILE, slug
+    return (
+        PROJECT_ROOT / "01_data" / "candidates" / "weather" / f"soybean_{slug}",
+        PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / slug / f"soybean_weather_{slug}.parquet",
+        PROJECT_ROOT / "01_data" / "backups" / "weather" / f"soybean_{slug}",
+        PROJECT_ROOT / "01_data" / "update_status" / f"soybean_weather_{slug}.json",
+        slug,
+    )
+
+
+def import_snapshot(source: Path, *, run_id: str, promote: bool, config_file: Path = CONFIG_FILE) -> dict[str, object]:
     if not source.is_file() or source.suffix.lower() != ".sql":
         raise SnapshotParseError("输入必须是可读的 .sql Navicat/MySQL 导出文件")
-    config = load_weather_config(CONFIG_FILE)
+    config = load_weather_config(config_file)
+    table_specs = target_tables(config) if config_file != CONFIG_FILE else TARGET_TABLES
+    candidate_root, stable_file, backup_root, status_file, slug = _country_paths(config_file, config)
     source_updated_at = pd.Timestamp(datetime.fromtimestamp(source.stat().st_mtime, tz=UTC))
     source_hash = sha256_file(source)
-    candidate_dir = CANDIDATE_ROOT / run_id
+    candidate_dir = candidate_root / run_id
     if candidate_dir.exists():
         raise SnapshotParseError(f"候选目录已存在，拒绝覆盖：{candidate_dir}")
     candidate_dir.mkdir(parents=True, exist_ok=False)
-    temporary_parquet = candidate_dir / ".soybean_weather_us.parquet.partial"
-    candidate_file = candidate_dir / "soybean_weather_us.parquet"
+    temporary_parquet = candidate_dir / f".soybean_weather_{slug}.parquet.partial"
+    candidate_file = candidate_dir / f"soybean_weather_{slug}.parquet"
     schemas: dict[str, list[str]] = {}
-    source_rows: dict[str, int] = {table: 0 for table in TARGET_TABLES}
+    source_rows: dict[str, int] = {table: 0 for table in table_specs}
     chunk: list[dict[str, object]] = []
     writer: pq.ParquetWriter | None = None
     try:
@@ -498,11 +550,11 @@ def import_snapshot(source: Path, *, run_id: str, promote: bool) -> dict[str, ob
             parsed_create = parse_create_statement(statement)
             if parsed_create is not None:
                 table_name, columns = parsed_create
-                if table_name in TARGET_TABLES:
+                if table_name in table_specs:
                     schemas[table_name] = columns
                 continue
             table_name = insert_table_name(statement)
-            if table_name is None or table_name not in TARGET_TABLES:
+            if table_name is None or table_name not in table_specs:
                 continue
             parsed_insert = parse_insert_statement(statement)
             if parsed_insert is None:
@@ -513,13 +565,13 @@ def import_snapshot(source: Path, *, run_id: str, promote: bool) -> dict[str, ob
             if table_name not in schemas:
                 raise SnapshotParseError(f"表 {table_name} 在 INSERT 前缺少可验证的 CREATE TABLE")
             source_rows[table_name] += len(rows)
-            for record in _record_rows(table_name, schemas[table_name], rows, config, source_updated_at):
+            for record in _record_rows(table_name, schemas[table_name], rows, config, source_updated_at, table_specs):
                 chunk.append(record)
                 if len(chunk) >= 50_000:
                     writer = _write_chunk(writer, chunk, temporary_parquet)
                     chunk.clear()
-        if set(schemas) != set(TARGET_TABLES):
-            missing = sorted(set(TARGET_TABLES) - set(schemas))
+        if set(schemas) != set(table_specs):
+            missing = sorted(set(table_specs) - set(schemas))
             raise SnapshotParseError("缺少目标表 DDL：" + "、".join(missing))
         if any(count == 0 for count in source_rows.values()):
             missing = sorted(table for table, count in source_rows.items() if count == 0)
@@ -554,8 +606,8 @@ def import_snapshot(source: Path, *, run_id: str, promote: bool) -> dict[str, ob
     atomic_write_json(candidate_dir / "candidate_report.json", {"status": status, "quality": quality, "source_rows": source_rows})
     result: dict[str, object] = {"candidate_dir": str(candidate_dir), "candidate_file": str(candidate_file), "candidate_sha256": candidate_hash, "quality": quality, "status": status}
     if promote:
-        backup_path, stable_hash = promote_candidate(candidate_file, status)
-        result["stable_file"] = str(STABLE_FILE)
+        backup_path, stable_hash = promote_candidate(candidate_file, status, stable_file=stable_file, backup_root=backup_root, status_file=status_file)
+        result["stable_file"] = str(stable_file)
         result["stable_sha256"] = stable_hash
         result["backup_path"] = str(backup_path) if backup_path else None
     return result
@@ -564,11 +616,12 @@ def import_snapshot(source: Path, *, run_id: str, promote: bool) -> dict[str, ob
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path, help="Verified local Navicat/MySQL .sql snapshot")
+    parser.add_argument("--config", type=Path, default=CONFIG_FILE, help="Country weather configuration")
     parser.add_argument("--run-id", default=None, help="Unique candidate run identifier")
     parser.add_argument("--promote", action="store_true", help="Promote only after candidate validation succeeds")
     args = parser.parse_args()
     run_id = args.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + sha256_file(args.source)[:12].lower()
-    result = import_snapshot(args.source, run_id=run_id, promote=args.promote)
+    result = import_snapshot(args.source, run_id=run_id, promote=args.promote, config_file=args.config)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
 

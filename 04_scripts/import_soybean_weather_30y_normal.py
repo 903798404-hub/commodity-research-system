@@ -1,4 +1,4 @@
-"""Extract the approved static US soybean 30-year normals from a read-only workbook."""
+"""Extract approved static soybean 30-year normals from a read-only workbook."""
 
 from __future__ import annotations
 
@@ -59,7 +59,19 @@ def sha256_file(path: Path) -> str:
 
 
 def _expected_headers(config: dict[str, object]) -> list[str]:
-    return ["日期", *[str(region["display_name"]) for region in config["regions"]]]
+    source_regions = config.get("source_regions", config["regions"])
+    return ["日期", *[str(region["display_name"]) for region in source_regions]]
+
+
+def target_sheets(config: dict[str, object]) -> dict[str, tuple[str, str]]:
+    configured = config.get("normal_sheets")
+    if not isinstance(configured, dict):
+        return TARGET_SHEETS
+    precipitation = configured.get("precipitation")
+    temperature_max = configured.get("temperature_max")
+    if not isinstance(precipitation, str) or not isinstance(temperature_max, str):
+        raise NormalImportError("天气配置缺少30年基准工作表名")
+    return {precipitation: ("precipitation", "mm"), temperature_max: ("temperature_max", "degC")}
 
 
 def _validate_source_sheet(workbook: Path, sheet_name: str, expected_headers: list[str]) -> None:
@@ -78,19 +90,22 @@ def _validate_source_sheet(workbook: Path, sheet_name: str, expected_headers: li
                 raise NormalImportError(f"工作表 {sheet_name} 的目标数据列包含公式，拒绝提取")
 
 
-def extract_normals(workbook: Path) -> tuple[pd.DataFrame, dict[str, object]]:
+def extract_normals(workbook: Path, *, config_file: Path = CONFIG_FILE) -> tuple[pd.DataFrame, dict[str, object]]:
     if not workbook.is_file() or workbook.suffix.lower() != ".xlsx":
         raise NormalImportError("输入必须是可读的 .xlsx 工作簿")
-    config = load_weather_config(CONFIG_FILE)
+    config = load_weather_config(config_file)
     expected_headers = _expected_headers(config)
+    sheet_specs = target_sheets(config)
     source_hash = sha256_file(workbook)
     frames: list[pd.DataFrame] = []
     sheet_info: dict[str, object] = {}
-    for sheet_name, (metric, unit) in TARGET_SHEETS.items():
+    for sheet_name, (metric, unit) in sheet_specs.items():
         _validate_source_sheet(workbook, sheet_name, expected_headers)
         wb = load_workbook(workbook, read_only=True, data_only=True)
         ws = wb[sheet_name]
         rows: list[dict[str, object]] = []
+        source_regions = list(config.get("source_regions", config["regions"]))
+        source_index = {str(region["key"]): index + 1 for index, region in enumerate(source_regions)}
         for values in ws.iter_rows(min_row=2, max_col=len(expected_headers), values_only=True):
             raw_date = values[0]
             if raw_date is None and all(value is None for value in values[1:]):
@@ -99,21 +114,22 @@ def extract_normals(workbook: Path) -> tuple[pd.DataFrame, dict[str, object]]:
             if pd.isna(parsed_date):
                 raise NormalImportError(f"工作表 {sheet_name} 存在无法解释的日期结构")
             month_day = parsed_date.strftime("%m-%d")
-            for region, value in zip(config["regions"], values[1:], strict=True):
+            for region in config["regions"]:
+                value = values[source_index[str(region["key"])]]
                 if value is None:
                     raise NormalImportError(f"工作表 {sheet_name} 的 {month_day} 存在缺州值")
                 try:
                     normal_value = float(value)
                 except (TypeError, ValueError) as exc:
                     raise NormalImportError(f"工作表 {sheet_name} 的 {month_day} 存在非数值基准") from exc
-                rows.append({"month_day": month_day, "country": "USA", "region": str(region["key"]), "metric": metric, "normal_value": normal_value, "unit": unit, "baseline_label": BASELINE_LABEL, "source_workbook_sha256": source_hash, "source_sheet": sheet_name})
+                rows.append({"month_day": month_day, "country": str(config["country"]), "region": str(region["key"]), "metric": metric, "normal_value": normal_value, "unit": unit, "baseline_label": BASELINE_LABEL, "source_workbook_sha256": source_hash, "source_sheet": sheet_name})
         frame = pd.DataFrame(rows)
         if frame.empty:
             raise NormalImportError(f"工作表 {sheet_name} 未提取到基准记录")
         if frame.duplicated(["month_day", "region", "metric"], keep=False).any():
             raise NormalImportError(f"工作表 {sheet_name} 存在重复月日或冲突值")
         if set(frame["region"]) != {str(region["key"]) for region in config["regions"]}:
-            raise NormalImportError(f"工作表 {sheet_name} 未覆盖全部15州")
+            raise NormalImportError(f"工作表 {sheet_name} 未覆盖全部展示地区")
         sheet_info[sheet_name] = {"rows": int(len(frame)), "month_day_start": str(frame["month_day"].min()), "month_day_end": str(frame["month_day"].max())}
         frames.append(frame)
     result = pd.concat(frames, ignore_index=True)
@@ -125,11 +141,11 @@ def extract_normals(workbook: Path) -> tuple[pd.DataFrame, dict[str, object]]:
 def validate_normals(frame: pd.DataFrame, config: dict[str, object]) -> dict[str, object]:
     if tuple(frame.columns) != REQUIRED_COLUMNS or frame[list(REQUIRED_COLUMNS)].isna().any().any():
         raise NormalImportError("30年基准存在缺失字段或Schema不正确")
-    if set(frame["metric"]) != {"precipitation", "temperature_max"} or set(frame["country"]) != {"USA"}:
+    if set(frame["metric"]) != {"precipitation", "temperature_max"} or set(frame["country"]) != {str(config["country"])}:
         raise NormalImportError("30年基准指标或国家不符合契约")
     expected_regions = {str(region["key"]) for region in config["regions"]}
     if set(frame["region"]) != expected_regions:
-        raise NormalImportError("30年基准地区集合不符合15州配置")
+        raise NormalImportError("30年基准地区集合不符合展示地区配置")
     if frame.duplicated(["month_day", "region", "metric"], keep=False).any():
         raise NormalImportError("30年基准存在重复或冲突月日")
     expected_days = 365
@@ -146,50 +162,68 @@ def _atomic_json(path: Path, value: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
-def promote(candidate: Path, status: dict[str, object]) -> str:
-    if STABLE_FILE.exists():
-        backup = BACKUP_ROOT / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") / STABLE_FILE.name
+def promote(candidate: Path, status: dict[str, object], *, stable_file: Path | None = None, backup_root: Path | None = None, status_file: Path | None = None) -> str:
+    stable_file = stable_file or STABLE_FILE
+    backup_root = backup_root or BACKUP_ROOT
+    status_file = status_file or STATUS_FILE
+    if stable_file.exists():
+        backup = backup_root / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") / stable_file.name
         backup.parent.mkdir(parents=True, exist_ok=False)
-        shutil.copy2(STABLE_FILE, backup)
-        if sha256_file(backup) != sha256_file(STABLE_FILE):
+        shutil.copy2(stable_file, backup)
+        if sha256_file(backup) != sha256_file(stable_file):
             raise NormalImportError("30年基准备份哈希不一致")
-    STABLE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temporary = STABLE_FILE.with_name(f".{STABLE_FILE.name}.{uuid.uuid4().hex}.tmp")
+    stable_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = stable_file.with_name(f".{stable_file.name}.{uuid.uuid4().hex}.tmp")
     shutil.copy2(candidate, temporary)
-    os.replace(temporary, STABLE_FILE)
-    stable_hash = sha256_file(STABLE_FILE)
+    os.replace(temporary, stable_file)
+    stable_hash = sha256_file(stable_file)
     status.update({"status": "success", "stable_file_sha256": stable_hash})
-    _atomic_json(STATUS_FILE, status)
+    _atomic_json(status_file, status)
     return stable_hash
 
 
-def import_workbook(workbook: Path, *, run_id: str, promote_stable: bool) -> dict[str, object]:
-    candidate_dir = CANDIDATE_ROOT / run_id
+def _country_paths(config_file: Path, config: dict[str, object]) -> tuple[Path, Path, Path, Path, str]:
+    slug = str(config.get("data_slug", "us"))
+    if config_file == CONFIG_FILE:
+        return CANDIDATE_ROOT, STABLE_FILE, BACKUP_ROOT, STATUS_FILE, slug
+    return (
+        PROJECT_ROOT / "01_data" / "candidates" / "weather" / f"soybean_{slug}_30y_normal",
+        PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / slug / f"soybean_weather_{slug}_30y_normal.parquet",
+        PROJECT_ROOT / "01_data" / "backups" / "weather" / f"soybean_{slug}_30y_normal",
+        PROJECT_ROOT / "01_data" / "update_status" / f"soybean_weather_{slug}_30y_normal.json",
+        slug,
+    )
+
+
+def import_workbook(workbook: Path, *, run_id: str, promote_stable: bool, config_file: Path = CONFIG_FILE) -> dict[str, object]:
+    config = load_weather_config(config_file)
+    candidate_root, stable_file, backup_root, status_file, slug = _country_paths(config_file, config)
+    candidate_dir = candidate_root / run_id
     if candidate_dir.exists():
         raise NormalImportError(f"候选目录已存在：{candidate_dir}")
     candidate_dir.mkdir(parents=True)
-    config = load_weather_config(CONFIG_FILE)
-    frame, source = extract_normals(workbook)
+    frame, source = extract_normals(workbook, config_file=config_file)
     quality = validate_normals(frame, config)
-    candidate = candidate_dir / "soybean_weather_us_30y_normal.parquet"
+    candidate = candidate_dir / f"soybean_weather_{slug}_30y_normal.parquet"
     pq.write_table(pa.Table.from_pandas(frame, schema=SCHEMA, preserve_index=False), candidate, compression="zstd")
-    status: dict[str, object] = {"status": "candidate_validated", "run_id": run_id, "source_filename": workbook.name, "source_sha256": source["source_sha256"], "source_sheets": list(TARGET_SHEETS), "generated_at": datetime.now(UTC).isoformat(), **quality}
+    status: dict[str, object] = {"status": "candidate_validated", "run_id": run_id, "source_filename": workbook.name, "source_sha256": source["source_sha256"], "source_sheets": list(target_sheets(config)), "generated_at": datetime.now(UTC).isoformat(), **quality}
     _atomic_json(candidate_dir / "candidate_report.json", {"status": status, "source": source})
     result: dict[str, object] = {"candidate": str(candidate), "candidate_sha256": sha256_file(candidate), "status": status}
     if promote_stable:
-        result["stable"] = str(STABLE_FILE)
-        result["stable_sha256"] = promote(candidate, status)
+        result["stable"] = str(stable_file)
+        result["stable_sha256"] = promote(candidate, status, stable_file=stable_file, backup_root=backup_root, status_file=status_file)
     return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workbook", type=Path, required=True)
+    parser.add_argument("--config", type=Path, default=CONFIG_FILE)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--promote", action="store_true")
     args = parser.parse_args()
     run_id = args.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    print(json.dumps(import_workbook(args.workbook, run_id=run_id, promote_stable=args.promote), ensure_ascii=False, indent=2))
+    print(json.dumps(import_workbook(args.workbook, run_id=run_id, promote_stable=args.promote, config_file=args.config), ensure_ascii=False, indent=2))
     return 0
 
 

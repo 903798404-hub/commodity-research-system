@@ -119,7 +119,7 @@ def test_crop_weather_home_status_reads_real_json_and_degrades_without_fixture(m
     assert "无法读取" in degraded.detail
 
 
-def test_weather_navigation_uses_crop_entries_and_controlled_country_placeholders(monkeypatch) -> None:
+def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) -> None:
     workspace = _import_workspace()
     weather_page = importlib.import_module("weather_research_page")
     groups = {group: items for group, items in workspace.SIDEBAR_NAVIGATION}
@@ -142,19 +142,73 @@ def test_weather_navigation_uses_crop_entries_and_controlled_country_placeholder
         weather_page.WEATHER_RESEARCH_PAGES["soybean_weather"]["countries"], frozenset({"USA"})
     ) == 0
 
-    usa_calls: list[str] = []
-    monkeypatch.setattr(weather_page, "render_soybean_weather_page", lambda: usa_calls.append("USA"))
+    rendered_countries: list[str] = []
+    monkeypatch.setattr(weather_page, "render_soybean_weather_page", lambda country="USA": rendered_countries.append(country))
+    monkeypatch.setattr(
+        weather_page,
+        "SOYBEAN_COUNTRY_RENDERERS",
+        {
+            "USA": lambda: weather_page.render_soybean_weather_page("USA"),
+            "BRA": lambda: weather_page.render_soybean_weather_page("BRA"),
+            "ARG": lambda: weather_page.render_soybean_weather_page("ARG"),
+        },
+    )
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
     app.session_state["selected_workspace_page"] = workspace.SOYBEAN_WEATHER_PAGE_TITLE
     app.run(timeout=20)
     country_radio = next(item for item in app.radio if item.label == "国家/地区")
     assert country_radio.value == "美国"
     assert country_radio.options == ["美国", "巴西", "阿根廷"]
-    assert usa_calls == ["USA"]
+    assert rendered_countries == ["USA"]
 
     country_radio.set_value("巴西").run(timeout=20)
-    assert usa_calls == ["USA"]
-    assert any(item.value == "该地区天气研究页面尚未接入。" for item in app.info)
+    assert rendered_countries == ["USA", "BRA"]
+    country_radio.set_value("阿根廷").run(timeout=20)
+    assert rendered_countries == ["USA", "BRA", "ARG"]
+
+
+def test_soybean_weather_missing_brazil_snapshot_is_data_degradation(monkeypatch, tmp_path: Path) -> None:
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+    soybean_weather_page = importlib.import_module("soybean_weather_page")
+    brazil_files = dict(soybean_weather_page.COUNTRY_FILES["BRA"])
+    monkeypatch.setitem(brazil_files, "data", tmp_path / "missing_brazil_snapshot.parquet")
+    monkeypatch.setitem(soybean_weather_page.COUNTRY_FILES, "BRA", brazil_files)
+
+    errors: list[str] = []
+    monkeypatch.setattr(soybean_weather_page.st, "title", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(soybean_weather_page.st, "error", errors.append)
+    soybean_weather_page.render_soybean_weather_page("BRA")
+    error_text = "\n".join(errors)
+    assert "巴西天气稳定数据不可用" in error_text
+    assert "该地区天气研究页面尚未接入" not in error_text
+
+
+def test_soybean_country_files_are_isolated_and_other_weather_pages_stay_placeholder(monkeypatch) -> None:
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+    soybean_weather_page = importlib.import_module("soybean_weather_page")
+    weather_page = importlib.import_module("weather_research_page")
+
+    expected = {
+        "USA": ("soybean_weather_us.yaml", "soybean_weather_us.parquet", "us"),
+        "BRA": ("soybean_weather_br.yaml", "soybean_weather_br.parquet", "br"),
+        "ARG": ("soybean_weather_ar.yaml", "soybean_weather_ar.parquet", "ar"),
+    }
+    for country, (config_name, data_name, slug) in expected.items():
+        files = soybean_weather_page._country_files(country)
+        assert files["config"].name == config_name
+        assert files["data"].name == data_name
+        assert files["data"].parent.name == slug
+
+    notices: list[str] = []
+    monkeypatch.setattr(weather_page.st, "title", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(weather_page.st, "radio", lambda *_args, **_kwargs: "加拿大")
+    monkeypatch.setattr(weather_page.st, "info", notices.append)
+    weather_page.render_weather_research_page("rapeseed_weather")
+    assert notices == ["该地区天气研究页面尚未接入。"]
 
 
 def test_external_urls_are_environment_only_and_degrade_without_configuration(monkeypatch) -> None:

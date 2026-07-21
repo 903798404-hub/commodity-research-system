@@ -1,0 +1,32 @@
+soybean_weather_ar:
+  crop: soybean
+  country: ARG
+  country_display_name: 阿根廷
+  page_title: 阿根廷大豆天气研究
+  data_slug: ar
+  season_start_month_day: "11-01"
+  season_label_style: range
+  weighted_coverage_percent: 87.0
+  source_table_prefix: 阿根廷
+  chart_windows:
+    cumulative_rain: {start: "11-01", end: "06-30"}
+    temperature: {start: "11-01", end: "06-30"}
+    soil: {start: "08-01", end: "06-30"}
+  normal_sheets:
+    precipitation: 阿根廷历史30年平均降雨
+    temperature_max: 阿根廷历史30年平均最高气温
+  regions:
+    - {key: buenos_aires, display_name: 布宜诺斯艾利斯, display_order: 1, weight: 31.0}
+    - {key: cordoba, display_name: 科尔多瓦, display_order: 2, weight: 28.0}
+    - {key: santa_fe, display_name: 圣菲, display_order: 3, weight: 19.0}
+    - {key: santiago, display_name: 圣地亚哥, display_order: 4, weight: 9.0}
+  source_regions:
+    - {key: buenos_aires, display_name: 布宜诺斯艾利斯}
+    - {key: cordoba, display_name: 科尔多瓦}
+    - {key: santa_fe, display_name: 圣菲}
+    - {key: santiago, display_name: 圣地亚哥}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    temperature_min: {display_name: 最低气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: 原始值，单位待确认, weekly_aggregation: mean}
