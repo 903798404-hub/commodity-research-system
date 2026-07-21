@@ -1,0 +1,51 @@
+cotton_weather:
+  crop: cotton
+  country: IND
+  country_code: IND
+  route_key: IND_COTTON
+  crop_display_name: 棉花
+  country_display_name: 印度
+  page_title: 印度棉花天气研究
+  data_slug: ind
+  source_table_prefix: 印度
+  season_mode: crop_year
+  season_label_style: range
+  season_start_month_day: "05-01"
+  season_end_month_day: "01-31"
+  weighted_aggregation: false
+  title_template: "{country}_{region}- {importance_label}"
+  coverage_caption: "覆盖印度主要棉花产区，标签权重合计73%，仅用于说明产区重要性，不代表全国完整覆盖，也不参与综合加权。"
+  enabled_sections:
+    rainfall_summary: false
+    temperature_summary: false
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    minimum_temperature: false
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "05-01", end: "01-31"}
+    temperature: {start: "05-01", end: "01-31"}
+    soil: {start: "04-01", end: "01-31"}
+  chart_axis:
+    soil: {tick_interval_days: 30, tick_angle: -45, bottom_margin: 70}
+  regions:
+    - {key: maharashtra, display_name: 马哈拉施特拉邦, title_display_name: "马哈拉施特拉邦（Maharashtra）", display_order: 1, source_column: Maharashtra, importance_label: "29%"}
+    - {key: gujarat, display_name: 古吉拉特邦, title_display_name: "古吉拉特邦（Gujarat）", display_order: 2, source_column: Gujarat, importance_label: "19%"}
+    - {key: rajasthan, display_name: 拉贾斯坦邦, title_display_name: "拉贾斯坦邦（Rajasthan）", display_order: 3, source_column: Rajasthan, importance_label: "9%"}
+    - {key: karnataka, display_name: 卡纳塔克邦, title_display_name: "卡纳塔克邦（Karnataka）", display_order: 4, source_column: Karnataka, importance_label: "8%"}
+    - {key: andhra_pradesh, display_name: 安得拉邦, title_display_name: "安得拉邦（Andhra Pradesh）", display_order: 5, source_column: Andhra Pradesh, importance_label: "5%"}
+    - {key: haryana, display_name: 哈里亚纳邦, title_display_name: "哈里亚纳邦（Haryana）", display_order: 6, source_column: Haryana, importance_label: "3%"}
+  source_regions:
+    - {key: andhra_pradesh, source_column: Andhra Pradesh}
+    - {key: gujarat, source_column: Gujarat}
+    - {key: haryana, source_column: Haryana}
+    - {key: karnataka, source_column: Karnataka}
+    - {key: maharashtra, source_column: Maharashtra}
+    - {key: rajasthan, source_column: Rajasthan}
+    - {key: telangana_state_division, source_column: "Telangana State Division of Andhra Pradesh"}
+    - {key: uttar_pradesh, source_column: Uttar Pradesh}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: "原始值，单位待确认", weekly_aggregation: mean}

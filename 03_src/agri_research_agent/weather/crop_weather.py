@@ -60,9 +60,14 @@ def season_day_for_date(date: pd.Timestamp, season_start_month_day: str) -> int:
     return int((date.normalize() - season_start).days + 1)
 
 
-def add_season_columns(records: pd.DataFrame, config: dict[str, object]) -> pd.DataFrame:
+def add_season_columns(
+    records: pd.DataFrame,
+    config: dict[str, object],
+    *,
+    season_start_month_day: str | None = None,
+) -> pd.DataFrame:
     enriched = records.copy()
-    season_start = str(config["season_start_month_day"])
+    season_start = season_start_month_day or str(config["season_start_month_day"])
     enriched["season"] = enriched["date"].map(lambda value: season_for_date(value, season_start))
     enriched["season_day"] = enriched["date"].map(lambda value: season_day_for_date(value, season_start))
     return enriched

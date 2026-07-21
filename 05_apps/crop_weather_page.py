@@ -94,6 +94,18 @@ WEATHER_COUNTRY_FILES = {
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_idn.json",
     },
+    "IND_COTTON": {
+        "config": PROJECT_ROOT / "02_configs" / "cotton_weather_ind.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "cotton" / "ind" / "cotton_weather_ind.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "cotton_weather_ind.json",
+    },
+    "IND_SUGARCANE": {
+        "config": PROJECT_ROOT / "02_configs" / "sugarcane_weather_ind.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "sugarcane" / "ind" / "sugarcane_weather_ind.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "sugarcane_weather_ind.json",
+    },
 }
 
 MODULES = {
@@ -160,20 +172,28 @@ def _normal_path(files: dict[str, object]) -> Path | None:
 
 
 @st.cache_data(show_spinner=False)
-def _load_selected_records(data_path: str, data_mtime_ns: int, crop: str, country: str, metric: str) -> pd.DataFrame:
-    del data_mtime_ns
+def _load_selected_records(
+    data_path: str,
+    data_mtime_ns: int,
+    crop: str,
+    country: str,
+    metric: str,
+    data_size: int = 0,
+    route_key: str = "",
+) -> pd.DataFrame:
+    del route_key, data_mtime_ns, data_size
     return load_weather_records(data_path, crop=crop, country=country, metric=metric)
 
 
 @st.cache_data(show_spinner=False)
-def _load_config(config_path: str, config_mtime_ns: int) -> dict[str, object]:
-    del config_mtime_ns
+def _load_config(config_path: str, config_mtime_ns: int, config_size: int = 0) -> dict[str, object]:
+    del config_mtime_ns, config_size
     return load_weather_config(config_path)
 
 
 @st.cache_data(show_spinner=False)
-def _load_snapshot_status(status_path: str, status_mtime_ns: int) -> dict[str, object]:
-    del status_mtime_ns
+def _load_snapshot_status(status_path: str, status_mtime_ns: int, status_size: int = 0) -> dict[str, object]:
+    del status_mtime_ns, status_size
     try:
         return json.loads(Path(status_path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -526,7 +546,7 @@ def _aligned_history(
         years = sorted(observed["year"].unique().tolist())[-12:]
         current_year = max(years) if years else None
         return observed, years, current_year
-    observed = add_season_columns(observed, config)
+    observed = add_season_columns(observed, config, season_start_month_day=start_month_day)
     # The 365-day static normal has no Feb 29.  Keep seasonal comparisons
     # deterministic by excluding this unmatched leap-day observation.
     observed = observed[~((observed["date"].dt.month == 2) & (observed["date"].dt.day == 29))]
@@ -770,7 +790,7 @@ def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str,
                 value=(default_window[0].date(), default_window[1].date()),
                 min_value=minimum,
                 max_value=maximum,
-                key=f"soybean_daily_rain_date_range_{config['country']}",
+                key=f"soybean_daily_rain_date_range_{config.get('route_key', config['country'])}",
             )
             if isinstance(selected, tuple) and len(selected) == 2:
                 selected_range = (pd.Timestamp(selected[0]), pd.Timestamp(selected[1]))
@@ -811,16 +831,16 @@ def _render_weekly(records: pd.DataFrame, normals: pd.DataFrame, config: dict[st
     coverage = float(config["weighted_coverage_percent"])
     initial_count = min(int(config.get("default_summary_regions", 9)), region_count)
     expand_label = str(config.get("summary_expand_label", f"展开全部{region_count}个地区"))
-    show_all = st.checkbox(expand_label, value=region_count <= initial_count, key=f"weather_wide_table_{config['country']}_{metric}")
+    show_all = st.checkbox(expand_label, value=region_count <= initial_count, key=f"weather_wide_table_{config.get('route_key', config['country'])}_{metric}")
     st.caption(f"默认展示前{initial_count}个地区；主产区加权始终使用全部{region_count}个展示地区，覆盖权重{coverage:.1f}%。")
     st.markdown(_build_weekly_wide_table(records, normals, config, metric=metric, latest=latest, snapshot_date=snapshot_date, show_all_regions=show_all), unsafe_allow_html=True)
 
 
-def render_weather_page(country: str = "USA") -> None:
+def render_weather_page(route_key: str = "USA") -> None:
     """Render a country page solely from its local country configuration."""
 
     try:
-        files = _country_files(country)
+        files = _country_files(route_key)
     except ValueError as exc:
         st.error(str(exc))
         return
@@ -828,18 +848,20 @@ def render_weather_page(country: str = "USA") -> None:
     if not config_file.is_file():
         st.error(f"缺少天气页面配置：{config_file}")
         return
-    config = _load_config(str(config_file), config_file.stat().st_mtime_ns)
+    config_stat = config_file.stat()
+    config = _load_config(str(config_file), config_stat.st_mtime_ns, config_stat.st_size)
     data_path, source_label = _data_path(files)
     st.title(str(config.get("page_title", PAGE_TITLE)))
     if data_path is None or not data_path.is_file():
         st.error(
-            f"{config.get('country_display_name', country)}天气稳定数据不可用："
+            f"{config.get('country_display_name', route_key)}天气稳定数据不可用："
             f"{source_label}。当前模块未加载任何回退业务数据。"
         )
         return
     status_file = files["status"]
     assert isinstance(status_file, Path)
-    snapshot_status = _load_snapshot_status(str(status_file), status_file.stat().st_mtime_ns) if status_file.is_file() else {}
+    status_stat = status_file.stat() if status_file.is_file() else None
+    snapshot_status = _load_snapshot_status(str(status_file), status_stat.st_mtime_ns, status_stat.st_size) if status_stat else {}
     snapshot_date = str(snapshot_status.get("source_snapshot_date", "—"))
     enabled = dict(config.get("enabled_sections", {}))
     # Minimum temperature is opt-in: historic country configurations predate
@@ -853,11 +875,12 @@ def render_weather_page(country: str = "USA") -> None:
         module_keys,
         format_func=lambda key: MODULES[key][0],
         horizontal=True,
-        key=f"weather_module_{config['country']}",
+        key=f"weather_module_{config.get('route_key', config['country'])}",
     )
     module_name, kind, metric = MODULES[module_key]
     try:
-        records = _load_selected_records(str(data_path), data_path.stat().st_mtime_ns, str(config["crop"]), str(config["country"]), metric)
+        data_stat = data_path.stat()
+        records = _load_selected_records(str(data_path), data_stat.st_mtime_ns, str(config["crop"]), str(config["country"]), metric, data_stat.st_size, route_key)
     except (OSError, ValueError, ImportError) as exc:
         st.error(f"天气数据读取失败：{exc}")
         return

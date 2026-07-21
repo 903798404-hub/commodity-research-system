@@ -1,0 +1,48 @@
+sugarcane_weather:
+  crop: sugarcane
+  country: IND
+  country_code: IND
+  route_key: IND_SUGARCANE
+  crop_display_name: 甘蔗
+  country_display_name: 印度
+  page_title: 印度甘蔗天气研究
+  data_slug: ind
+  source_table_prefix: 印度
+  season_mode: crop_year
+  season_label_style: range
+  season_start_month_day: "02-01"
+  season_end_month_day: "01-31"
+  weighted_aggregation: false
+  title_template: "{country}_{region}- {importance_label}"
+  coverage_caption: "覆盖印度主要甘蔗产区，标签权重合计83.33%，仅用于说明产区重要性，不参与综合加权。"
+  enabled_sections:
+    rainfall_summary: false
+    temperature_summary: false
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    minimum_temperature: false
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "02-01", end: "01-31"}
+    temperature: {start: "02-01", end: "01-31"}
+    soil: {start: "02-01", end: "01-31"}
+  chart_axis:
+    soil: {tick_interval_days: 30, tick_angle: -45, bottom_margin: 70}
+  regions:
+    - {key: uttar_pradesh, display_name: 北方邦, title_display_name: "北方邦（Uttar Pradesh）", display_order: 1, source_column: Uttar Pradesh, importance_label: "48.57%"}
+    - {key: maharashtra, display_name: 马哈拉施特拉邦, title_display_name: "马哈拉施特拉邦（Maharashtra）", display_order: 2, source_column: Maharashtra, importance_label: "24.19%"}
+    - {key: karnataka, display_name: 卡纳塔克邦, title_display_name: "卡纳塔克邦（Karnataka）", display_order: 3, source_column: Karnataka, importance_label: "10.57%"}
+  source_regions:
+    - {key: andhra_pradesh, source_column: Andhra Pradesh}
+    - {key: gujarat, source_column: Gujarat}
+    - {key: haryana, source_column: Haryana}
+    - {key: karnataka, source_column: Karnataka}
+    - {key: maharashtra, source_column: Maharashtra}
+    - {key: rajasthan, source_column: Rajasthan}
+    - {key: telangana_state_division, source_column: "Telangana State Division of Andhra Pradesh"}
+    - {key: uttar_pradesh, source_column: Uttar Pradesh}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: "原始值，单位待确认", weekly_aggregation: mean}
