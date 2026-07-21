@@ -129,6 +129,8 @@ def inject_workspace_theme() -> None:
 
 
 def _status_markup(state: str, label: str) -> str:
+    if not label:
+        return ""
     css_class = STATUS_CLASS.get(state, "is-info")
     return f'<span class="agri-status {css_class}">{escape(label)}</span>'
 
@@ -231,7 +233,7 @@ def render_dashboard_card(module: HomeModule, status: ModuleStatus) -> str:
   {_status_markup(status.state, status.label)}
   <div class="agri-card-rule"></div>
   <p class="agri-card-detail"><strong>{escape(status.latest_value)}</strong></p>
-  <p class="agri-card-detail">{escape(status.detail)}</p>
+  {f'<p class="agri-card-detail">{escape(status.detail)}</p>' if status.detail else ''}
   {action}
 </article>'''
 

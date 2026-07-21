@@ -61,9 +61,9 @@ def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -
     statuses = home.get_home_statuses()
     assert statuses["basis_domestic"].label == "人工维护"
     assert statuses["soybean_crop_progress"].label == "每周更新"
-    assert statuses["crop_weather"].label == "历史快照"
-    assert "美国大豆已接入" in statuses["crop_weather"].detail
-    assert statuses["crop_weather"].latest_value.startswith("最新有效观测日期 ")
+    assert statuses["crop_weather"].label == ""
+    assert statuses["crop_weather"].detail == ""
+    assert statuses["crop_weather"].latest_value.startswith("天气数据更新至 ")
     assert statuses["foreign_seats"].label != "正常"
 
     workspace = _import_workspace()
@@ -101,22 +101,55 @@ def test_crop_weather_home_status_reads_real_json_and_degrades_without_fixture(m
     raw_status = home._read_json(status_file)
     statuses = home.get_home_statuses()
 
-    assert raw_status["observed_latest_date"] in statuses["crop_weather"].latest_value
-    assert raw_status["ecmwf_forecast_end_date"] in statuses["crop_weather"].detail
-    assert raw_status["gfs_forecast_end_date"] in statuses["crop_weather"].detail
-    assert statuses["crop_weather"].attention == "作物天气：美国大豆已接入历史快照；其他国家和作物仍待接入稳定数据源。"
+    expected = f"天气数据更新至 {raw_status['observed_latest_date']}"
+    assert statuses["crop_weather"].latest_value == expected
+    assert statuses["crop_weather"].attention == expected
+    assert raw_status["ecmwf_forecast_end_date"] not in statuses["crop_weather"].detail
+    assert raw_status["gfs_forecast_end_date"] not in statuses["crop_weather"].detail
     weather_module = next(module for module in home.home_modules() if module.module_id == "crop_weather")
     weather_markup = __import__("ui_theme").render_dashboard_card(weather_module, statuses["crop_weather"])
     assert "全球主产区" in weather_markup
     assert "大豆 · 菜籽 · 棕榈油 · 印度作物" in weather_markup
+    assert expected in weather_markup
+    for forbidden in ("历史快照", "非实时数据", "EC预测", "GFS预测"):
+        assert forbidden not in weather_markup
     assert "SOYBEAN_WEATHER_FIXTURE" not in Path(home.__file__).read_text(encoding="utf-8")
 
     monkeypatch.setattr(home, "SOYBEAN_WEATHER_STATUS_FILE", tmp_path / "missing_weather_status.json")
     home.load_home_statuses.clear()
     degraded = home.get_home_statuses()["crop_weather"]
-    assert degraded.label == "数据状态不可用"
-    assert degraded.latest_value == "数据状态不可用"
-    assert "无法读取" in degraded.detail
+    assert degraded.label == ""
+    assert degraded.detail == ""
+    assert degraded.latest_value == "天气数据更新时间不可用"
+    assert degraded.attention == "天气数据更新时间不可用"
+
+
+def test_crop_weather_home_status_rejects_missing_or_invalid_observed_date(monkeypatch, tmp_path: Path) -> None:
+    home = _import_home()
+    status_file = tmp_path / "weather_status.json"
+    monkeypatch.setattr(home, "SOYBEAN_WEATHER_STATUS_FILE", status_file)
+
+    for payload in ({"status": "success"}, {"status": "success", "observed_latest_date": "not-a-date"}):
+        status_file.write_text(__import__("json").dumps(payload), encoding="utf-8")
+        home.load_home_statuses.clear()
+        status = home.get_home_statuses()["crop_weather"]
+        assert status.latest_value == "天气数据更新时间不可用"
+        assert status.attention == "天气数据更新时间不可用"
+
+
+def test_crop_weather_home_status_uses_status_json_date_without_hardcoded_fallback(monkeypatch, tmp_path: Path) -> None:
+    home = _import_home()
+    status_file = tmp_path / "weather_status.json"
+    status_file.write_text(
+        __import__("json").dumps({"status": "success", "observed_latest_date": "2031-02-03"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(home, "SOYBEAN_WEATHER_STATUS_FILE", status_file)
+    home.load_home_statuses.clear()
+
+    status = home.get_home_statuses()["crop_weather"]
+    assert status.latest_value == "天气数据更新至 2031-02-03"
+    assert status.attention == status.latest_value
 
 
 def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) -> None:
@@ -236,6 +269,18 @@ def test_palm_oil_weather_countries_render_from_the_main_workspace_route() -> No
     assert country_radio.options == ["印度尼西亚", "马来西亚"]
     assert country_radio.value == "印度尼西亚"
     assert any(item.value == "印度尼西亚棕榈油天气研究" for item in app.title)
+    idn_status = __import__("json").loads(
+        (PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_idn.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        item.value == f"天气数据更新至 {idn_status['observed_latest_date']}"
+        for item in app.caption
+    )
+    assert not any(
+        forbidden in item.value
+        for item in app.caption
+        for forbidden in ("历史快照", "非实时数据", "EC 截止", "GFS 截止")
+    )
     section_radio = next(item for item in app.radio if item.label == "页面章节")
     assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "土壤墒情"]
     assert not any("主产区加权" in item.value for item in app.caption)

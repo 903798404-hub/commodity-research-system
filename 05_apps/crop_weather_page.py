@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import html
 import json
 import os
@@ -157,8 +158,8 @@ def _data_path(files: dict[str, object]) -> tuple[Path | None, str]:
         return Path(fixture_path), "本地测试 fixture"
     data_file = files["data"]
     if isinstance(data_file, Path) and data_file.is_file():
-        return data_file, "本地历史快照"
-    return None, "本地历史快照未接入"
+        return data_file, "稳定天气数据"
+    return None, "稳定天气数据未接入"
 
 
 def _normal_path(files: dict[str, object]) -> Path | None:
@@ -887,18 +888,22 @@ def render_weather_page(route_key: str = "USA") -> None:
     if records.empty:
         st.info(f"当前选择没有可用的{config['metrics'][metric]['display_name']}数据。")
         return
-    observed_end = latest_observation_date(records)
-    observed_label = f"{observed_end:%Y-%m-%d}" if observed_end is not None else "—"
+    observed_status_date = snapshot_status.get("observed_latest_date")
+    try:
+        observed_status_label = dt.date.fromisoformat(observed_status_date.strip()).isoformat()
+    except (AttributeError, TypeError, ValueError):
+        observed_status_label = ""
     st.caption(
-        f"数据来源：{source_label}（快照日期：{snapshot_date}；本地历史快照，非实时数据）｜"
-        f"观测截止：{observed_label}"
+        f"天气数据更新至 {observed_status_label}"
+        if observed_status_label
+        else "天气数据更新时间不可用"
     )
     if bool(config.get("weighted_aggregation", True)):
         coverage_note = str(config.get("coverage_caption", f"覆盖{len(config['regions'])}个主要产区，权重{float(config['weighted_coverage_percent']):.1f}%"))
-        st.caption(f"{coverage_note}｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}")
+        st.caption(coverage_note)
     else:
         coverage_note = str(config.get("coverage_caption", f"直接展示{len(config['regions'])}个稳定地区序列；父级产量标签仅用于说明，不参与地区级或全国加权。"))
-        st.caption(f"{coverage_note}｜EC 截止：{snapshot_status.get('ecmwf_forecast_end_date', '—')}｜GFS 截止：{snapshot_status.get('gfs_forecast_end_date', '—')}")
+        st.caption(coverage_note)
     warning_messages = dict(config.get("warning_messages", {}))
     for warning in snapshot_status.get("warnings", []):
         if warning in warning_messages:

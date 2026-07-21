@@ -499,4 +499,4 @@ def test_weather_page_degrades_without_stable_data_or_fixture(monkeypatch) -> No
     app.session_state["selected_workspace_page"] = "大豆天气"
     app.run(timeout=20)
     assert not app.exception
-    assert any("本地历史快照未接入" in item.value for item in app.error)
+    assert any("稳定天气数据未接入" in item.value for item in app.error)

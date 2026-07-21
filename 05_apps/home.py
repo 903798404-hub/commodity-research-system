@@ -103,7 +103,7 @@ HOME_MODULES = (
         update_mode="全球主产区",
         destination_page=PAGE_TARGETS["crop_weather"],
         coverage_hint="大豆 · 菜籽 · 棕榈油 · 印度作物",
-        overview_update_mode="当前为历史快照",
+        overview_update_mode="天气数据更新",
     ),
     HomeModule(
         module_id="usda_dashboard",
@@ -200,6 +200,17 @@ def _latest_parquet_date(path: Path, column: str) -> str:
     return dates.max().strftime("%Y-%m-%d") if not dates.empty else ""
 
 
+def _status_iso_date(payload: dict[str, object], field: str) -> str:
+    """Return one validated ISO business date from a status artifact."""
+    raw_value = payload.get(field)
+    if not isinstance(raw_value, str):
+        return ""
+    try:
+        return dt.date.fromisoformat(raw_value.strip()).isoformat()
+    except ValueError:
+        return ""
+
+
 @st.cache_data(show_spinner=False)
 def load_home_statuses(
     spread_mtime: float,
@@ -227,10 +238,13 @@ def load_home_statuses(
     soybean_available = bool(soybean_latest) and soybean.get("status") not in {"failed", "error"}
 
     weather = _read_json(SOYBEAN_WEATHER_STATUS_FILE)
-    weather_observed = str(weather.get("observed_latest_date") or "")[:10]
-    weather_ec_end = str(weather.get("ecmwf_forecast_end_date") or "")[:10]
-    weather_gfs_end = str(weather.get("gfs_forecast_end_date") or "")[:10]
+    weather_observed = _status_iso_date(weather, "observed_latest_date")
     weather_available = bool(weather_observed) and weather.get("status") not in {"failed", "error"}
+    weather_update_text = (
+        f"天气数据更新至 {weather_observed}"
+        if weather_available
+        else "天气数据更新时间不可用"
+    )
 
     foreign = _read_json(FOREIGN_SEATS_STATUS_FILE).get("foreign_seats", {})
     foreign = foreign if isinstance(foreign, dict) else {}
@@ -263,24 +277,10 @@ def load_home_statuses(
         ),
         "crop_weather": ModuleStatus(
             state="info" if weather_available else "unavailable",
-            label="历史快照" if weather_available else "数据状态不可用",
-            detail=(
-                "美国大豆已接入"
-                f"｜EC预测截止日期 {weather_ec_end or '不可用'}"
-                f"｜GFS预测截止日期 {weather_gfs_end or '不可用'}"
-                if weather_available
-                else "无法读取美国大豆天气状态文件"
-            ),
-            latest_value=(
-                f"最新有效观测日期 {weather_observed}"
-                if weather_available
-                else "数据状态不可用"
-            ),
-            attention=(
-                "作物天气：美国大豆已接入历史快照；其他国家和作物仍待接入稳定数据源。"
-                if weather_available
-                else "作物天气：数据状态不可用，无法确认美国大豆历史快照日期。"
-            ),
+            label="",
+            detail="",
+            latest_value=weather_update_text,
+            attention=weather_update_text,
         ),
         "usda_dashboard": ModuleStatus(
             state="external" if usda_url else "unavailable",
