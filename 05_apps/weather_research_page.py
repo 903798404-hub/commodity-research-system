@@ -16,7 +16,7 @@ def _render_country_weather(country: str) -> Callable[[], None]:
 
 WEATHER_COUNTRY_RENDERERS: Mapping[str, Callable[[], None]] = {
     country: _render_country_weather(country)
-    for country in ("USA", "BRA", "ARG", "CAN", "AUS", "EU", "RUS", "UKR")
+    for country in ("USA", "BRA", "ARG", "CAN", "AUS", "EU", "RUS", "UKR", "IDN", "MYS")
 }
 
 WEATHER_RESEARCH_PAGES: Mapping[str, dict[str, object]] = {
@@ -39,7 +39,7 @@ WEATHER_RESEARCH_PAGES: Mapping[str, dict[str, object]] = {
     "palm_oil_weather": {
         "title": "棕榈油天气研究",
         "country_options": {"印度尼西亚": "IDN", "马来西亚": "MYS"},
-        "available_countries": frozenset(),
+        "available_countries": frozenset(("IDN", "MYS")),
     },
     "india_crop_weather": {
         "title": "印度作物天气研究",

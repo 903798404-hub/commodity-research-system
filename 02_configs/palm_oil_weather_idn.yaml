@@ -1,0 +1,40 @@
+palm_oil_weather:
+  crop: palm_oil
+  crop_display_name: 棕榈油
+  country: IDN
+  country_display_name: 印尼
+  page_title: 印度尼西亚棕榈油天气研究
+  data_slug: idn
+  source_table_prefix: 印尼
+  season_mode: natural_year
+  season_label_style: year
+  season_start_month_day: "01-01"
+  weighted_aggregation: false
+  title_template: "{country}_{region}（{importance_label}）"
+  coverage_caption: "直接展示7个印度尼西亚稳定地区序列；标签权重合计83%，仅用于地区重要性说明，不生成全国加权结果。"
+  enabled_sections:
+    rainfall_summary: false
+    temperature_summary: false
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    minimum_temperature: false
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "01-01", end: "12-31"}
+    temperature: {start: "01-01", end: "12-31"}
+    soil: {start: "01-01", end: "12-31"}
+  chart_axis:
+    soil: {tick_interval_days: 30, tick_angle: -45, bottom_margin: 70}
+  regions:
+    - {key: riau, display_name: 廖内省, display_order: 1, source_column: "Riau province (IDN)", importance_label: "20%"}
+    - {key: central_kalimantan, display_name: 中加里曼丹省, display_order: 2, source_column: "Kalimantan Tengah province (IDN)", importance_label: "17%"}
+    - {key: north_sumatra, display_name: 北苏门答腊省, display_order: 3, source_column: "Sumatera Utara province (IDN)", importance_label: "12%"}
+    - {key: west_kalimantan, display_name: 西加里曼丹省, display_order: 4, source_column: "Kalimantan Barat province (IDN)", importance_label: "12%"}
+    - {key: south_sumatra, display_name: 南苏门答腊省, display_order: 5, source_column: "Sumatera Selatan province (IDN)", importance_label: "8%"}
+    - {key: east_kalimantan, display_name: 东加里曼丹省, display_order: 6, source_column: "Kalimantan Timur province (IDN)", importance_label: "8%"}
+    - {key: jambi, display_name: 占碑省, display_order: 7, source_column: "Jambi province (IDN)", importance_label: "6%"}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: "原始值，单位待确认", weekly_aggregation: mean}

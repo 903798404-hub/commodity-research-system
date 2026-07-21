@@ -69,23 +69,32 @@ TARGET_TABLES: dict[str, TableSpec] = {
 
 
 def target_tables(config: dict[str, object]) -> dict[str, TableSpec]:
-    """Build the ten approved stable summary-table identities from one config."""
+    """Build only the stable summary-table identities enabled by one config."""
 
     prefix = str(config.get("source_table_prefix", ""))
     if not prefix:
         raise SnapshotParseError("天气配置缺少非敏感源表前缀")
-    return {
+    tables = {
         f"{prefix}_降雨": TableSpec("precipitation", "observed", "observed", "mm"),
         f"{prefix}_降雨_预测_ec": TableSpec("precipitation", "forecast", "ECMWF", "mm", "_precip_ec"),
         f"{prefix}_降雨_预测_gfs": TableSpec("precipitation", "forecast", "GFS", "mm", "_precip_gfs"),
         f"{prefix}_最高气温": TableSpec("temperature_max", "observed", "observed", "degC"),
         f"{prefix}_最高气温_预测_ec": TableSpec("temperature_max", "forecast", "ECMWF", "degC", "_hightemp_ec"),
         f"{prefix}_最高气温_预测_gfs": TableSpec("temperature_max", "forecast", "GFS", "degC", "_hightemp_gfs"),
-        f"{prefix}_最低气温": TableSpec("temperature_min", "observed", "observed", "degC"),
-        f"{prefix}_最低气温_预测_ec": TableSpec("temperature_min", "forecast", "ECMWF", "degC", "_lowtemp_ec"),
-        f"{prefix}_最低气温_预测_gfs": TableSpec("temperature_min", "forecast", "GFS", "degC", "_lowtemp_gfs"),
         f"{prefix}_土壤墒情": TableSpec("soil_moisture", "observed", "observed", "原始值，单位待确认"),
     }
+    enabled_sections = config.get("enabled_sections", {})
+    if not isinstance(enabled_sections, dict):
+        raise SnapshotParseError("天气配置的启用模块无效")
+    if bool(enabled_sections.get("minimum_temperature", False)):
+        tables.update(
+            {
+                f"{prefix}_最低气温": TableSpec("temperature_min", "observed", "observed", "degC"),
+                f"{prefix}_最低气温_预测_ec": TableSpec("temperature_min", "forecast", "ECMWF", "degC", "_lowtemp_ec"),
+                f"{prefix}_最低气温_预测_gfs": TableSpec("temperature_min", "forecast", "GFS", "degC", "_lowtemp_gfs"),
+            }
+        )
+    return tables
 
 REQUIRED_COLUMNS = [
     "date", "crop", "country", "region", "metric", "data_type", "model", "value", "unit", "source_updated_at",

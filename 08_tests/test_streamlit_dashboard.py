@@ -198,6 +198,55 @@ def test_rapeseed_country_labels_use_one_explicit_code_mapping(monkeypatch) -> N
         assert notices == []
 
 
+def test_palm_oil_countries_use_the_common_renderer_without_placeholder_or_cache_sharing(monkeypatch) -> None:
+    weather_page = importlib.import_module("weather_research_page")
+    crop_page = importlib.import_module("crop_weather_page")
+    page = weather_page.WEATHER_RESEARCH_PAGES["palm_oil_weather"]
+    expected_options = {"印度尼西亚": "IDN", "马来西亚": "MYS"}
+
+    assert page["country_options"] == expected_options
+    assert page["available_countries"] == frozenset({"IDN", "MYS"})
+    assert set(weather_page.WEATHER_COUNTRY_RENDERERS) >= {"IDN", "MYS"}
+    assert crop_page._country_files("IDN")["config"].name == "palm_oil_weather_idn.yaml"
+    assert crop_page._country_files("IDN")["data"].name == "palm_oil_weather_idn.parquet"
+    assert crop_page._country_files("MYS")["config"].name == "palm_oil_weather_mys.yaml"
+    assert crop_page._country_files("MYS")["data"].name == "palm_oil_weather_mys.parquet"
+    assert crop_page._country_files("IDN")["data"] != crop_page._country_files("MYS")["data"]
+
+    monkeypatch.setattr(weather_page.st, "title", lambda *_args, **_kwargs: None)
+    for label, code in expected_options.items():
+        rendered: list[str] = []
+        notices: list[str] = []
+        monkeypatch.setattr(weather_page.st, "radio", lambda *_args, value=label, **_kwargs: value)
+        monkeypatch.setattr(weather_page.st, "info", notices.append)
+        monkeypatch.setattr(weather_page, "WEATHER_COUNTRY_RENDERERS", {key: (lambda key=key: rendered.append(key)) for key in expected_options.values()})
+        weather_page.render_weather_research_page("palm_oil_weather")
+        assert rendered == [code]
+        assert notices == []
+
+
+def test_palm_oil_weather_countries_render_from_the_main_workspace_route() -> None:
+    """Exercise the data-backed palm-oil selector through the formal workspace entry."""
+
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
+    app.session_state["selected_workspace_page"] = "棕榈油天气"
+    app.run(timeout=30)
+    assert not app.exception
+    country_radio = next(item for item in app.radio if item.label == "国家/地区")
+    assert country_radio.options == ["印度尼西亚", "马来西亚"]
+    assert country_radio.value == "印度尼西亚"
+    assert any(item.value == "印度尼西亚棕榈油天气研究" for item in app.title)
+    section_radio = next(item for item in app.radio if item.label == "页面章节")
+    assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "土壤墒情"]
+    assert not any("主产区加权" in item.value for item in app.caption)
+
+    country_radio.set_value("马来西亚").run(timeout=30)
+    assert not app.exception
+    assert any(item.value == "马来西亚棕榈油天气研究" for item in app.title)
+    section_radio = next(item for item in app.radio if item.label == "页面章节")
+    assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "土壤墒情"]
+
+
 def test_soybean_weather_missing_brazil_snapshot_is_data_degradation(monkeypatch, tmp_path: Path) -> None:
     apps_dir = str(PROJECT_ROOT / "05_apps")
     if apps_dir not in sys.path:

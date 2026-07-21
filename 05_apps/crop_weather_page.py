@@ -82,6 +82,18 @@ WEATHER_COUNTRY_FILES = {
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_ukr.json",
     },
+    "MYS": {
+        "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_mys.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "palm_oil" / "mys" / "palm_oil_weather_mys.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_mys.json",
+    },
+    "IDN": {
+        "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_idn.yaml",
+        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "palm_oil" / "idn" / "palm_oil_weather_idn.parquet",
+        "normal": None,
+        "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_idn.json",
+    },
 }
 
 MODULES = {
