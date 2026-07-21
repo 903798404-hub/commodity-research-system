@@ -1,0 +1,53 @@
+rapeseed_weather:
+  crop: rapeseed
+  crop_display_name: 菜籽
+  country: CAN
+  country_display_name: 加拿大
+  page_title: 加拿大菜籽天气研究
+  data_slug: can
+  source_table_prefix: 加拿大
+  source_extra_columns_by_metric:
+    precipitation: [Date]
+    temperature_max: [Date]
+    temperature_min: [Date]
+  season_start_month_day: "01-01"
+  weighted_aggregation: true
+  weighted_coverage_percent: 99.0
+  enabled_sections:
+    rainfall_summary: true
+    temperature_summary: true
+    daily_rainfall: true
+    cumulative_rainfall: true
+    maximum_temperature: true
+    soil_moisture: true
+  chart_windows:
+    cumulative_rain: {start: "04-01", end: "10-31"}
+    temperature: {start: "04-01", end: "10-31"}
+    soil: {start: "04-01", end: "10-31"}
+  normal_sheets:
+    precipitation: 加拿大历史30年平均降雨
+    temperature_max: 加拿大历史30年平均最高气温
+  regions:
+    - {key: saskatchewan_weighted, display_name: 萨斯喀彻温, display_order: 1, weight: 55.0, source_column: 萨省_加权, source_column_soil_moisture: 萨省_土壤墒情, normal_column: 萨省}
+    - {key: alberta_weighted, display_name: 阿尔伯塔, display_order: 2, weight: 28.0, source_column: 阿尔伯塔_加权, source_column_soil_moisture: 阿尔伯塔_土壤墒情, normal_column: 阿尔伯塔}
+    - {key: manitoba_weighted, display_name: 曼尼托巴, display_order: 3, weight: 16.0, source_column: 曼尼托巴_加权, source_column_soil_moisture: 曼尼托巴_土壤墒情, normal_column: 曼尼托巴}
+  source_regions:
+    - {key: saskatchewan_raw, source_column: Saskatchewan}
+    - {key: sk9a_raw, source_column: "Canadian Agricultural Region SK.9A"}
+    - {key: alberta_raw, source_column: Alberta}
+    - {key: ab6_raw, source_column: "Canadian Agricultural Region AB.6"}
+    - {key: ab7_raw, source_column: "Canadian Agricultural Region AB.7"}
+    - {key: manitoba_raw, source_column: Manitoba}
+    - {key: mb12_raw, source_column: "Canadian Agricultural Region MB.12"}
+    - {key: saskatchewan_weighted, source_column: 萨省_加权, source_column_soil_moisture: 萨省_土壤墒情}
+    - {key: alberta_weighted, source_column: 阿尔伯塔_加权, source_column_soil_moisture: 阿尔伯塔_土壤墒情}
+    - {key: manitoba_weighted, source_column: 曼尼托巴_加权, source_column_soil_moisture: 曼尼托巴_土壤墒情}
+  normal_source_regions:
+    - {key: saskatchewan_weighted, normal_column: 萨省, display_name: 萨省}
+    - {key: alberta_weighted, normal_column: 阿尔伯塔, display_name: 阿尔伯塔}
+    - {key: manitoba_weighted, normal_column: 曼尼托巴, display_name: 曼尼托巴}
+  metrics:
+    precipitation: {display_name: 降雨, unit: mm, weekly_aggregation: sum}
+    temperature_max: {display_name: 最高气温, unit: degC, weekly_aggregation: mean}
+    temperature_min: {display_name: 最低气温, unit: degC, weekly_aggregation: mean}
+    soil_moisture: {display_name: 土壤墒情, unit: 原始值，单位待确认, weekly_aggregation: mean}
