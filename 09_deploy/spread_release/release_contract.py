@@ -80,10 +80,6 @@ RUNTIME_URL_KEYS = (
     "USDA_DASHBOARD_URL",
     "OIL_WORLD_DASHBOARD_URL",
 )
-CANDIDATE_RUNTIME_ENVIRONMENT = {
-    "USDA_DASHBOARD_URL": "http://127.0.0.1:8080/usda/",
-    "OIL_WORLD_DASHBOARD_URL": "http://127.0.0.1:5175/",
-}
 WEATHER_RUNTIME_ENV_KEY = "WEATHER_RUNTIME_CURRENT_DIR"
 WEATHER_DATA_DIR_ENV_KEY = "WEATHER_DATA_DIR"
 WEATHER_CONTAINER_PATH = "/app/runtime/weather"
@@ -108,7 +104,7 @@ RUNTIME_ENVIRONMENT_CONTRACT = {
         "SPREAD_IMAGE": "image_ref",
         "MARKET_DATA_GIT_HEAD": "git_commit",
     },
-    "allowed_candidate_production_differences": list(RUNTIME_URL_KEYS),
+    "allowed_candidate_production_differences": [],
     "undeclared_variables_forbidden": True,
     "weather_runtime_mount": copy.deepcopy(WEATHER_RUNTIME_MOUNT_CONTRACT),
 }
@@ -120,9 +116,18 @@ PRODUCTION_DATA_MOUNTS = {
 }
 
 
-def candidate_compose_environment(git_commit: str) -> dict[str, str]:
+def candidate_compose_environment(
+    git_commit: str, production_environment: Mapping[str, str]
+) -> dict[str, str]:
+    """Build candidate settings from validated browser-facing production URLs.
+
+    Candidate and production dashboards link users to the same independent USDA and
+    Oil World services.  Host-loopback addresses are reserved for server health
+    probes and must never be propagated into browser-facing candidate pages.
+    """
+    candidate_user_urls = candidate_user_url_environment(production_environment)
     return {
-        **CANDIDATE_RUNTIME_ENVIRONMENT,
+        **candidate_user_urls,
         "MARKET_DATA_GIT_HEAD": validate_full_git_commit(git_commit),
         WEATHER_RUNTIME_ENV_KEY: CANDIDATE_WEATHER_RUNTIME_DIR,
     }
@@ -1616,6 +1621,9 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
             raise ContractError(
                 "runtime_environment_contract does not match the fixed contract"
             )
+        candidate_user_url_environment(
+            manifest.get("candidate_user_url_environment") or {}
+        )
     validate_sha256(manifest.get("dockerfile_sha256"), "dockerfile_sha256")
     validate_sha256(manifest.get("dockerignore_sha256"), "dockerignore_sha256")
     validate_sha256(manifest.get("required_config_sha256"), "required_config_sha256")
@@ -1750,6 +1758,40 @@ def validate_production_url(value: Any, field: str) -> str:
         if address.is_loopback or address.is_unspecified:
             raise ContractError(f"{field} must not use a local address in production")
     return value
+
+
+def candidate_user_url_environment(
+    production_environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Extract the browser-facing URLs approved for a sealed candidate.
+
+    This deliberately validates the values again at the boundary where they enter
+    the candidate.  Internal localhost health endpoints are separate inputs and
+    are never part of this mapping.
+    """
+    values: dict[str, str] = {}
+    for key in RUNTIME_URL_KEYS:
+        try:
+            value = production_environment[key]
+        except KeyError as exc:
+            raise ContractError(f"production environment is missing {key}") from exc
+        values[key] = validate_production_url(value, key)
+    return values
+
+
+def validate_manifest_production_environment(
+    production_environment: Mapping[str, str]
+) -> None:
+    """Validate the production environment before it becomes a candidate URL source."""
+    if set(production_environment) != set(PRODUCTION_ENV_KEYS):
+        raise ContractError(
+            f"production environment must contain exactly {list(PRODUCTION_ENV_KEYS)}"
+        )
+    candidate_user_url_environment(production_environment)
+    validate_weather_runtime_dir(
+        production_environment[WEATHER_RUNTIME_ENV_KEY],
+        expected=PRODUCTION_WEATHER_RUNTIME_DIR,
+    )
 
 
 def validate_weather_runtime_dir(value: Any, *, expected: str | None = None) -> str:
@@ -2353,10 +2395,6 @@ def validate_deployment_plan(
         raise ContractError("candidate and production semantic hashes differ")
     candidate_runtime = plan.get("candidate_runtime_environment")
     production_runtime = plan.get("production_runtime_environment")
-    if candidate_runtime != CANDIDATE_RUNTIME_ENVIRONMENT:
-        raise ContractError(
-            "deployment plan candidate runtime environment changed"
-        )
     if not isinstance(production_runtime, dict):
         raise ContractError(
             "deployment plan production runtime environment is missing"
@@ -2380,6 +2418,11 @@ def validate_deployment_plan(
         else parse_production_env(production_env_file)
     )
     validate_production_env(environment, manifest)
+    expected_candidate_runtime = candidate_user_url_environment(environment)
+    if candidate_runtime != expected_candidate_runtime:
+        raise ContractError(
+            "deployment plan candidate runtime environment does not inherit production URLs"
+        )
     expected_weather_contract = weather_runtime_contract(
         environment[WEATHER_RUNTIME_ENV_KEY]
     )
@@ -2468,7 +2511,9 @@ def create_deployment_plan(
     candidate_compose, candidate_raw, candidate_images = runtime.compose_config(
         tool_repo_root,
         manifest["image_ref"],
-        environment=candidate_compose_environment(manifest["git_commit"]),
+        environment=candidate_compose_environment(
+            manifest["git_commit"], production_environment
+        ),
         project_directory=tool_repo_root,
         compose_file=compose_template,
     )
@@ -3160,6 +3205,7 @@ def create_manifest(
     rollback_image_ref: str,
     rollback_image_id: str,
     formal_git_commit: str,
+    production_environment: Mapping[str, str],
     runtime: ReleaseRuntime,
     git_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
@@ -3174,6 +3220,7 @@ def create_manifest(
     validate_full_git_commit(formal_git_commit)
     if formal_git_commit == git_commit:
         raise ContractError("formal_git_commit must differ from the candidate commit")
+    validate_manifest_production_environment(production_environment)
     if (
         not SAFE_CONTAINER_RE.fullmatch(candidate_container_name)
         or candidate_container_name == PRODUCTION_CONTAINER
@@ -3221,7 +3268,7 @@ def create_manifest(
     compose, raw_config, images = runtime.compose_config(
         repository,
         image_ref,
-        environment=candidate_compose_environment(git_commit),
+        environment=candidate_compose_environment(git_commit, production_environment),
     )
     validate_compose_result(compose, raw_config, images, image_ref)
     baseline = collect_data_baseline(
@@ -3244,6 +3291,9 @@ def create_manifest(
         "compose_files": ["docker-compose.yml"],
         "compose_template_sha256": hash_file(repository / "docker-compose.yml"),
         "runtime_environment_contract": copy.deepcopy(RUNTIME_ENVIRONMENT_CONTRACT),
+        "candidate_user_url_environment": candidate_user_url_environment(
+            production_environment
+        ),
         "readiness_policy": copy.deepcopy(DEFAULT_READINESS_POLICY),
         "dockerfile_sha256": hash_file(repository / "Dockerfile"),
         "dockerignore_sha256": hash_file(repository / ".dockerignore"),

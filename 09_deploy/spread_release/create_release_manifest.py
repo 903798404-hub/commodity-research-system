@@ -11,6 +11,7 @@ from release_contract import (
     artifact_manifest_path,
     create_manifest,
     hash_file,
+    parse_production_env,
     write_release_bundle,
 )
 
@@ -48,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="The full 40-character Git commit currently deployed before this release.",
     )
     parser.add_argument(
+        "--production-env-file",
+        type=Path,
+        required=True,
+        help="Validated production environment supplying browser-facing dashboard URLs.",
+    )
+    parser.add_argument(
         "--output-root",
         type=Path,
         help="Defaults to <repository>/09_deploy/releases.",
@@ -77,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
             rollback_image_ref=args.rollback_image_ref,
             rollback_image_id=args.rollback_image_id,
             formal_git_commit=args.formal_git_commit,
+            production_environment=parse_production_env(
+                args.production_env_file.resolve()
+            ),
             runtime=DockerReleaseRuntime(),
         )
         release_directory = write_release_bundle(manifest, output_root)

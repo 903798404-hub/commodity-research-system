@@ -24,7 +24,6 @@ import release_contract as release_contract_module  # noqa: E402
 import verify_release_contract as verifier_module  # noqa: E402
 from release_contract import (  # noqa: E402
     APPLICATION,
-    CANDIDATE_RUNTIME_ENVIRONMENT,
     COMPOSE_PROJECT,
     CommandRunner,
     ContractError,
@@ -36,6 +35,7 @@ from release_contract import (  # noqa: E402
     PRODUCTION_CONTAINER,
     SPREAD_PRIMARY_KEY,
     collect_data_baseline,
+    candidate_compose_environment,
     create_candidate_result,
     create_deployment_plan,
     create_deployment_result_bundle,
@@ -299,15 +299,16 @@ class FakeReleaseRuntime:
         project_root = (project_directory or repository).resolve()
         assert (compose_file or repository / "docker-compose.yml").is_file()
         resolved_environment = {
-            **CANDIDATE_RUNTIME_ENVIRONMENT,
+            "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
+            "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
             "MARKET_DATA_GIT_HEAD": self.git_commit,
             "WEATHER_RUNTIME_CURRENT_DIR": CANDIDATE_WEATHER_RUNTIME_DIR,
             "WEATHER_DATA_DIR": "/app/runtime/weather",
             **(environment or {}),
         }
-        is_candidate = all(
-            resolved_environment[key] == CANDIDATE_RUNTIME_ENVIRONMENT[key]
-            for key in CANDIDATE_RUNTIME_ENVIRONMENT
+        is_candidate = (
+            resolved_environment["WEATHER_RUNTIME_CURRENT_DIR"]
+            == CANDIDATE_WEATHER_RUNTIME_DIR
         )
         volumes = self.compose_mounts
         if is_candidate and self.candidate_mounts_override is not None:
@@ -464,10 +465,25 @@ def build_manifest(
         rollback_image_ref=ROLLBACK_REF,
         rollback_image_id=ROLLBACK_ID,
         formal_git_commit=OLD_GIT_COMMIT,
+        production_environment=production_environment_for(),
         runtime=runtime,
         git_runner=git,
     )
     return manifest, runtime, git
+
+
+def production_environment_for(
+    *, image_ref: str = IMAGE_REF, git_commit: str = GIT_COMMIT,
+    usda_url: str = PRODUCTION_USDA_URL,
+    oil_world_url: str = PRODUCTION_OIL_WORLD_URL,
+) -> dict[str, str]:
+    return {
+        "SPREAD_IMAGE": image_ref,
+        "MARKET_DATA_GIT_HEAD": git_commit,
+        "USDA_DASHBOARD_URL": usda_url,
+        "OIL_WORLD_DASHBOARD_URL": oil_world_url,
+        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
+    }
 
 
 def create_production_env(
@@ -477,13 +493,12 @@ def create_production_env(
     usda_url: str = PRODUCTION_USDA_URL,
     oil_world_url: str = PRODUCTION_OIL_WORLD_URL,
 ) -> tuple[Path, dict[str, str]]:
-    environment = {
-        "SPREAD_IMAGE": str(manifest["image_ref"]),
-        "MARKET_DATA_GIT_HEAD": str(manifest["git_commit"]),
-        "USDA_DASHBOARD_URL": usda_url,
-        "OIL_WORLD_DASHBOARD_URL": oil_world_url,
-        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
-    }
+    environment = production_environment_for(
+        image_ref=str(manifest["image_ref"]),
+        git_commit=str(manifest["git_commit"]),
+        usda_url=usda_url,
+        oil_world_url=oil_world_url,
+    )
     path = (tmp_path / "spread-production.env").resolve()
     path.write_text(
         "".join(f"{key}={environment[key]}\n" for key in PRODUCTION_ENV_KEYS),
@@ -1675,6 +1690,9 @@ def test_tool_repository_and_formal_project_are_separate_and_formal_head_stays_o
         rollback_image_ref=ROLLBACK_REF,
         rollback_image_id=ROLLBACK_ID,
         formal_git_commit=production_head,
+        production_environment=production_environment_for(
+            image_ref=image_ref, git_commit=tool_head
+        ),
         runtime=runtime,
         git_runner=recording_git,
     )
@@ -1782,7 +1800,7 @@ def test_git_tree_and_image_identity_must_propagate_to_plan_and_result(
         load_deployment_result(result_path, manifest, plan)
 
 
-def test_candidate_and_production_url_difference_seals_same_image_plan(
+def test_candidate_inherits_production_user_urls_in_same_image_plan(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
@@ -1793,19 +1811,13 @@ def test_candidate_and_production_url_difference_seals_same_image_plan(
         runtime,
     )
 
-    assert production_environment["USDA_DASHBOARD_URL"] != (
-        CANDIDATE_RUNTIME_ENVIRONMENT["USDA_DASHBOARD_URL"]
-    )
-    assert production_environment["OIL_WORLD_DASHBOARD_URL"] != (
-        CANDIDATE_RUNTIME_ENVIRONMENT["OIL_WORLD_DASHBOARD_URL"]
-    )
+    assert plan["candidate_runtime_environment"] == {
+        "USDA_DASHBOARD_URL": production_environment["USDA_DASHBOARD_URL"],
+        "OIL_WORLD_DASHBOARD_URL": production_environment["OIL_WORLD_DASHBOARD_URL"],
+    }
     assert plan["image_ref"] == IMAGE_REF
     assert plan["expected_image_id"] == IMAGE_ID
-    assert plan["candidate_compose_sha256"] != plan["production_compose_sha256"]
-    assert plan["allowed_candidate_production_differences"] == [
-        "USDA_DASHBOARD_URL",
-        "OIL_WORLD_DASHBOARD_URL",
-    ]
+    assert plan["allowed_candidate_production_differences"] == []
     assert plan["semantic_comparison"]["base_semantics_equal"] is True
     assert plan["readiness_policy"] == manifest["readiness_policy"]
     assert plan["plan_status"] == "deployment_plan_sealed"
@@ -1913,11 +1925,9 @@ def test_compose_weather_runtime_contract_rejects_invalid_shapes(
     compose, raw, images = runtime.compose_config(
         REPOSITORY,
         IMAGE_REF,
-        environment={
-            **CANDIDATE_RUNTIME_ENVIRONMENT,
-            "MARKET_DATA_GIT_HEAD": GIT_COMMIT,
-            "WEATHER_RUNTIME_CURRENT_DIR": CANDIDATE_WEATHER_RUNTIME_DIR,
-        },
+        environment=candidate_compose_environment(
+            GIT_COMMIT, production_environment_for()
+        ),
     )
     spread = compose["services"]["spread-dashboard"]
     if mutation == "missing_mount":
@@ -1978,6 +1988,42 @@ def test_explicit_production_urls_pass_validation(tmp_path: Path) -> None:
     validate_production_env(parsed, manifest)
 
     assert parsed == expected
+
+
+def test_candidate_environment_inherits_validated_public_urls(tmp_path: Path) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    _, production_environment = create_production_env(tmp_path, manifest)
+
+    candidate_environment = candidate_compose_environment(
+        GIT_COMMIT, production_environment
+    )
+
+    assert candidate_environment["USDA_DASHBOARD_URL"] == PRODUCTION_USDA_URL
+    assert candidate_environment["OIL_WORLD_DASHBOARD_URL"] == PRODUCTION_OIL_WORLD_URL
+    assert "127.0.0.1:5175" not in candidate_environment.values()
+    assert candidate_environment["MARKET_DATA_GIT_HEAD"] == GIT_COMMIT
+    assert candidate_environment["WEATHER_RUNTIME_CURRENT_DIR"] == (
+        CANDIDATE_WEATHER_RUNTIME_DIR
+    )
+    assert manifest["candidate_user_url_environment"] == {
+        "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
+        "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
+    }
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8081/oil-world/",
+        "http://127.0.0.1:8081/oil-world/",
+        "http://0.0.0.0:8081/oil-world/",
+    ],
+)
+def test_candidate_rejects_loopback_browser_urls(url: str) -> None:
+    environment = production_environment_for(oil_world_url=url)
+
+    with pytest.raises(ContractError, match="must not use|local address"):
+        candidate_compose_environment(GIT_COMMIT, environment)
 
 
 @pytest.mark.parametrize(
@@ -2699,6 +2745,7 @@ def test_manifest_creation_rejects_dirty_git(tmp_path: Path) -> None:
             rollback_image_ref=ROLLBACK_REF,
             rollback_image_id=ROLLBACK_ID,
             formal_git_commit=OLD_GIT_COMMIT,
+            production_environment=production_environment_for(),
             runtime=FakeReleaseRuntime(),
             git_runner=FakeGitRunner(status=" M Dockerfile\n"),
         )
@@ -2722,6 +2769,7 @@ def test_manifest_creation_rejects_git_head_mismatch(tmp_path: Path) -> None:
             rollback_image_ref=ROLLBACK_REF,
             rollback_image_id=ROLLBACK_ID,
             formal_git_commit=OLD_GIT_COMMIT,
+            production_environment=production_environment_for(),
             runtime=FakeReleaseRuntime(),
             git_runner=FakeGitRunner(head=OLD_GIT_COMMIT),
         )
@@ -2746,6 +2794,7 @@ def test_manifest_seals_before_candidate_container_exists(tmp_path: Path) -> Non
         rollback_image_ref=ROLLBACK_REF,
         rollback_image_id=ROLLBACK_ID,
         formal_git_commit=OLD_GIT_COMMIT,
+        production_environment=production_environment_for(),
         runtime=runtime,
         git_runner=FakeGitRunner(),
     )
