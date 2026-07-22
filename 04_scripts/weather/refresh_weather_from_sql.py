@@ -17,7 +17,7 @@ import subprocess
 import sys
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -244,7 +244,7 @@ def _generate_daily_files(source: Path, next_dir: Path, targets: list[DailyTarge
     for target in targets:
         for table in target.table_specs:
             by_table.setdefault(table, []).append(target)
-    source_updated_at = pd.Timestamp(datetime.fromtimestamp(source.stat().st_mtime, tz=UTC))
+    source_updated_at = pd.Timestamp(datetime.fromtimestamp(source.stat().st_mtime, tz=timezone.utc))
     sql_table_count = 0
     seen_sql_tables: set[str] = set()
     try:
@@ -390,7 +390,7 @@ def refresh(
 ) -> dict[str, object]:
     if not source.is_file() or source.suffix.lower() != ".sql":
         raise SnapshotParseError("输入必须是可读的 .sql Navicat/MySQL 快照")
-    started = datetime.now(UTC)
+    started = datetime.now(timezone.utc)
     current = processed_root / "current"
     static_source = current if current.is_dir() else bootstrap_static_dir
     if not static_source.is_dir():
@@ -402,7 +402,7 @@ def refresh(
         daily_results = {str(target.relative_path).replace("\\", "/"): _validate_daily_target(target, next_dir) for target in targets}
         files = _verify_all_files(next_dir, baseline_before, daily_results)
         latest_dates = [item.get("max_date") for item in daily_results.values() if item.get("max_date")]
-        completed = datetime.now(UTC)
+        completed = datetime.now(timezone.utc)
         payload: dict[str, object] = {
             "status": "success" if promote else "validated_not_promoted",
             "source_sql_path": str(source),

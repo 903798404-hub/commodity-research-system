@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -15,6 +16,23 @@ assert SPEC and SPEC.loader
 weather_refresh = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = weather_refresh
 SPEC.loader.exec_module(weather_refresh)
+
+
+def test_python_310_compatible_utc_is_aware_and_status_timestamps_are_explicit() -> None:
+    production_modules = (
+        SCRIPT_PATH,
+        PROJECT_ROOT / "04_scripts" / "import_crop_weather_snapshot.py",
+        PROJECT_ROOT / "04_scripts" / "import_crop_weather_30y_normal.py",
+    )
+    now = datetime.now(weather_refresh.timezone.utc)
+
+    for module_path in production_modules:
+        source = module_path.read_text(encoding="utf-8")
+        assert "from datetime import UTC" not in source
+        assert "datetime.UTC" not in source
+    assert now.tzinfo is weather_refresh.timezone.utc
+    assert now.utcoffset() == timedelta(0)
+    assert now.isoformat().endswith("+00:00")
 
 
 def _target_for_us() -> weather_refresh.DailyTarget:

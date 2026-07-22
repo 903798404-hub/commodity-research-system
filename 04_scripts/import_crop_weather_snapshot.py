@@ -17,7 +17,7 @@ import shutil
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -555,7 +555,7 @@ def promote_candidate(
     status_file = status_file or STATUS_FILE
     backup_path: Path | None = None
     if stable_file.exists():
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup_path = backup_root / timestamp / stable_file.name
         backup_path.parent.mkdir(parents=True, exist_ok=False)
         shutil.copy2(stable_file, backup_path)
@@ -594,7 +594,7 @@ def import_snapshot(source: Path, *, run_id: str, promote: bool, config_file: Pa
     config = load_weather_config(config_file)
     table_specs = target_tables(config) if config_file != CONFIG_FILE else TARGET_TABLES
     candidate_root, stable_file, backup_root, status_file, slug = _country_paths(config_file, config)
-    source_updated_at = pd.Timestamp(datetime.fromtimestamp(source.stat().st_mtime, tz=UTC))
+    source_updated_at = pd.Timestamp(datetime.fromtimestamp(source.stat().st_mtime, tz=timezone.utc))
     source_hash = sha256_file(source)
     candidate_dir = candidate_root / run_id
     if candidate_dir.exists():
@@ -658,7 +658,7 @@ def import_snapshot(source: Path, *, run_id: str, promote: bool, config_file: Pa
         "source_filename": source.name,
         "source_sha256": source_hash,
         "source_snapshot_date": source_updated_at.date().isoformat(),
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "row_count": quality["row_count"],
         "observed_latest_date": quality["observed_latest_date"],
         "ecmwf_forecast_end_date": quality["ecmwf_forecast_range"]["end"],
@@ -685,7 +685,7 @@ def main() -> int:
     parser.add_argument("--run-id", default=None, help="Unique candidate run identifier")
     parser.add_argument("--promote", action="store_true", help="Promote only after candidate validation succeeds")
     args = parser.parse_args()
-    run_id = args.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + sha256_file(args.source)[:12].lower()
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + sha256_file(args.source)[:12].lower()
     result = import_snapshot(args.source, run_id=run_id, promote=args.promote, config_file=args.config)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -167,7 +167,7 @@ def promote(candidate: Path, status: dict[str, object], *, stable_file: Path | N
     backup_root = backup_root or BACKUP_ROOT
     status_file = status_file or STATUS_FILE
     if stable_file.exists():
-        backup = backup_root / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") / stable_file.name
+        backup = backup_root / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") / stable_file.name
         backup.parent.mkdir(parents=True, exist_ok=False)
         shutil.copy2(stable_file, backup)
         if sha256_file(backup) != sha256_file(stable_file):
@@ -207,7 +207,7 @@ def import_workbook(workbook: Path, *, run_id: str, promote_stable: bool, config
     quality = validate_normals(frame, config)
     candidate = candidate_dir / f"{config['crop']}_weather_{slug}_30y_normal.parquet"
     pq.write_table(pa.Table.from_pandas(frame, schema=SCHEMA, preserve_index=False), candidate, compression="zstd")
-    status: dict[str, object] = {"status": "candidate_validated", "run_id": run_id, "source_filename": workbook.name, "source_sha256": source["source_sha256"], "source_sheets": list(target_sheets(config)), "generated_at": datetime.now(UTC).isoformat(), **quality}
+    status: dict[str, object] = {"status": "candidate_validated", "run_id": run_id, "source_filename": workbook.name, "source_sha256": source["source_sha256"], "source_sheets": list(target_sheets(config)), "generated_at": datetime.now(timezone.utc).isoformat(), **quality}
     _atomic_json(candidate_dir / "candidate_report.json", {"status": status, "source": source})
     result: dict[str, object] = {"candidate": str(candidate), "candidate_sha256": sha256_file(candidate), "status": status}
     if promote_stable:
@@ -223,7 +223,7 @@ def main() -> int:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--promote", action="store_true")
     args = parser.parse_args()
-    run_id = args.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     print(json.dumps(import_workbook(args.workbook, run_id=run_id, promote_stable=args.promote, config_file=args.config), ensure_ascii=False, indent=2))
     return 0
 
