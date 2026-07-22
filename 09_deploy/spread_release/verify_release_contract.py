@@ -184,6 +184,23 @@ def main(argv: list[str] | None = None) -> int:
                         "weather_runtime_contract": plan[
                             "weather_runtime_contract"
                         ],
+                        "weather_candidate_mode": plan[
+                            "weather_candidate_mode"
+                        ],
+                        "weather_candidate_source": plan[
+                            "weather_candidate_source"
+                        ],
+                        "weather_runtime_current_dir": plan[
+                            "weather_runtime_current_dir"
+                        ],
+                        "weather_data_promotion_required": plan[
+                            "weather_data_promotion_required"
+                        ],
+                        "weather_data_changed": plan["weather_data_changed"],
+                        "processed_next_created": plan["processed_next_created"],
+                        "processed_current_modified": plan[
+                            "processed_current_modified"
+                        ],
                         "generated_at": readiness.get("ready_at_utc"),
                         "status": "production_verified",
                     }

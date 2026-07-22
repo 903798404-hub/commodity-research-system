@@ -89,10 +89,20 @@ PRODUCTION_WEATHER_RUNTIME_DIR = (
 CANDIDATE_WEATHER_RUNTIME_DIR = (
     "/home/ubuntu/market-data-runtime/weather/processed/next"
 )
+WEATHER_CANDIDATE_MODE_CURRENT = "current"
+WEATHER_CANDIDATE_MODE_NEXT = "next"
+WEATHER_CANDIDATE_MODES = (
+    WEATHER_CANDIDATE_MODE_CURRENT,
+    WEATHER_CANDIDATE_MODE_NEXT,
+)
+WEATHER_CANDIDATE_RUNTIME_DIRS = {
+    WEATHER_CANDIDATE_MODE_CURRENT: PRODUCTION_WEATHER_RUNTIME_DIR,
+    WEATHER_CANDIDATE_MODE_NEXT: CANDIDATE_WEATHER_RUNTIME_DIR,
+}
 WEATHER_RUNTIME_MOUNT_CONTRACT = {
     "environment_variable": WEATHER_RUNTIME_ENV_KEY,
     "production_host_path": PRODUCTION_WEATHER_RUNTIME_DIR,
-    "candidate_host_path": CANDIDATE_WEATHER_RUNTIME_DIR,
+    "allowed_candidate_host_paths": list(WEATHER_CANDIDATE_RUNTIME_DIRS.values()),
     "container_path": WEATHER_CONTAINER_PATH,
     "read_only": True,
     "weather_data_dir": WEATHER_CONTAINER_PATH,
@@ -117,7 +127,9 @@ PRODUCTION_DATA_MOUNTS = {
 
 
 def candidate_compose_environment(
-    git_commit: str, production_environment: Mapping[str, str]
+    git_commit: str,
+    production_environment: Mapping[str, str],
+    weather_candidate_mode: str = WEATHER_CANDIDATE_MODE_NEXT,
 ) -> dict[str, str]:
     """Build candidate settings from validated browser-facing production URLs.
 
@@ -126,10 +138,11 @@ def candidate_compose_environment(
     probes and must never be propagated into browser-facing candidate pages.
     """
     candidate_user_urls = candidate_user_url_environment(production_environment)
+    candidate_weather_dir = weather_candidate_source(weather_candidate_mode)
     return {
         **candidate_user_urls,
         "MARKET_DATA_GIT_HEAD": validate_full_git_commit(git_commit),
-        WEATHER_RUNTIME_ENV_KEY: CANDIDATE_WEATHER_RUNTIME_DIR,
+        WEATHER_RUNTIME_ENV_KEY: candidate_weather_dir,
     }
 
 
@@ -1624,6 +1637,17 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
         candidate_user_url_environment(
             manifest.get("candidate_user_url_environment") or {}
         )
+        weather_facts = weather_candidate_facts(
+            manifest.get("weather_candidate_mode")
+        )
+        for key, expected_value in weather_facts.items():
+            if manifest.get(key) != expected_value:
+                raise ContractError(f"release manifest {key} mismatch")
+        if manifest.get("weather_runtime_contract") != weather_runtime_contract(
+            PRODUCTION_WEATHER_RUNTIME_DIR,
+            weather_facts["weather_candidate_mode"],
+        ):
+            raise ContractError("release manifest weather runtime contract mismatch")
     validate_sha256(manifest.get("dockerfile_sha256"), "dockerfile_sha256")
     validate_sha256(manifest.get("dockerignore_sha256"), "dockerignore_sha256")
     validate_sha256(manifest.get("required_config_sha256"), "required_config_sha256")
@@ -1813,8 +1837,45 @@ def validate_weather_runtime_dir(value: Any, *, expected: str | None = None) -> 
     return value
 
 
-def weather_runtime_contract(production_host_path: str) -> dict[str, Any]:
+def validate_weather_candidate_mode(value: Any) -> str:
+    if value not in WEATHER_CANDIDATE_MODES:
+        raise ContractError(
+            "weather_candidate_mode must be exactly 'current' or 'next'"
+        )
+    return str(value)
+
+
+def weather_candidate_source(weather_candidate_mode: Any) -> str:
+    mode = validate_weather_candidate_mode(weather_candidate_mode)
+    return WEATHER_CANDIDATE_RUNTIME_DIRS[mode]
+
+
+def weather_candidate_facts(weather_candidate_mode: Any) -> dict[str, Any]:
+    """Return sealed, non-user-configurable weather release facts.
+
+    The release tooling never creates or mutates weather data directories.  A
+    `next` candidate therefore records that a separately validated data
+    promotion is required; a `current` candidate is explicitly code-only.
+    """
+    mode = validate_weather_candidate_mode(weather_candidate_mode)
+    promotion_required = mode == WEATHER_CANDIDATE_MODE_NEXT
+    return {
+        "weather_candidate_mode": mode,
+        "weather_candidate_source": weather_candidate_source(mode),
+        "weather_runtime_current_dir": PRODUCTION_WEATHER_RUNTIME_DIR,
+        "weather_data_promotion_required": promotion_required,
+        "weather_data_changed": promotion_required,
+        "processed_next_created": False,
+        "processed_current_modified": False,
+    }
+
+
+def weather_runtime_contract(
+    production_host_path: str,
+    weather_candidate_mode: Any,
+) -> dict[str, Any]:
     validate_weather_runtime_dir(production_host_path, expected=PRODUCTION_WEATHER_RUNTIME_DIR)
+    validate_weather_candidate_mode(weather_candidate_mode)
     return {
         **copy.deepcopy(WEATHER_RUNTIME_MOUNT_CONTRACT),
         "production_host_path": production_host_path,
@@ -2151,9 +2212,16 @@ def validate_candidate_result(
                 f"candidate result {key} mismatch: expected {expected_value!r}, "
                 f"got {result.get(key)!r}"
             )
+    weather_facts = weather_candidate_facts(manifest.get("weather_candidate_mode"))
+    for key, expected_value in weather_facts.items():
+        if result.get(key) != expected_value:
+            raise ContractError(f"candidate result {key} mismatch")
     if result.get("weather_runtime_contract") != {
-        **copy.deepcopy(WEATHER_RUNTIME_MOUNT_CONTRACT),
-        "host_path": CANDIDATE_WEATHER_RUNTIME_DIR,
+        **weather_runtime_contract(
+            PRODUCTION_WEATHER_RUNTIME_DIR,
+            weather_facts["weather_candidate_mode"],
+        ),
+        "host_path": weather_facts["weather_candidate_source"],
     }:
         raise ContractError("candidate result weather runtime contract mismatch")
     identity = result.get("identity")
@@ -2236,9 +2304,13 @@ def create_candidate_result(
         "generated_at": timestamp,
         "status": "candidate-validated",
         "weather_runtime_contract": {
-            **copy.deepcopy(WEATHER_RUNTIME_MOUNT_CONTRACT),
-            "host_path": CANDIDATE_WEATHER_RUNTIME_DIR,
+            **weather_runtime_contract(
+                PRODUCTION_WEATHER_RUNTIME_DIR,
+                manifest["weather_candidate_mode"],
+            ),
+            "host_path": manifest["weather_candidate_source"],
         },
+        **weather_candidate_facts(manifest["weather_candidate_mode"]),
         "identity": {
             "config_image": candidate_identity["config_image"],
             "actual_image_id": candidate_identity["actual_image_id"],
@@ -2423,8 +2495,13 @@ def validate_deployment_plan(
         raise ContractError(
             "deployment plan candidate runtime environment does not inherit production URLs"
         )
+    weather_facts = weather_candidate_facts(manifest.get("weather_candidate_mode"))
+    for key, expected_value in weather_facts.items():
+        if plan.get(key) != expected_value:
+            raise ContractError(f"deployment plan {key} mismatch")
     expected_weather_contract = weather_runtime_contract(
-        environment[WEATHER_RUNTIME_ENV_KEY]
+        environment[WEATHER_RUNTIME_ENV_KEY],
+        weather_facts["weather_candidate_mode"],
     )
     if plan.get("weather_runtime_contract") != expected_weather_contract:
         raise ContractError("deployment plan weather runtime contract changed")
@@ -2512,7 +2589,9 @@ def create_deployment_plan(
         tool_repo_root,
         manifest["image_ref"],
         environment=candidate_compose_environment(
-            manifest["git_commit"], production_environment
+            manifest["git_commit"],
+            production_environment,
+            manifest["weather_candidate_mode"],
         ),
         project_directory=tool_repo_root,
         compose_file=compose_template,
@@ -2545,7 +2624,8 @@ def create_deployment_plan(
         production_environment[WEATHER_RUNTIME_ENV_KEY],
     )
     _validate_weather_runtime_compose(
-        candidate_compose, expected_source=CANDIDATE_WEATHER_RUNTIME_DIR
+        candidate_compose,
+        expected_source=manifest["weather_candidate_source"],
     )
 
     candidate_semantics, candidate_runtime = _compose_spread_semantics(
@@ -2595,8 +2675,10 @@ def create_deployment_plan(
         ],
         "MARKET_DATA_GIT_HEAD": production_environment["MARKET_DATA_GIT_HEAD"],
         "weather_runtime_contract": weather_runtime_contract(
-            production_environment[WEATHER_RUNTIME_ENV_KEY]
+            production_environment[WEATHER_RUNTIME_ENV_KEY],
+            manifest["weather_candidate_mode"],
         ),
+        **weather_candidate_facts(manifest["weather_candidate_mode"]),
         "tool_repo_root": str(tool_repo_root),
         "compose_project": COMPOSE_PROJECT,
         "production_service": COMPOSE_SERVICE,
@@ -3208,6 +3290,7 @@ def create_manifest(
     production_environment: Mapping[str, str],
     runtime: ReleaseRuntime,
     git_runner: CommandRunner | None = None,
+    weather_candidate_mode: str = WEATHER_CANDIDATE_MODE_NEXT,
 ) -> dict[str, Any]:
     repository = repository.resolve()
     validate_full_git_commit(git_commit)
@@ -3221,6 +3304,7 @@ def create_manifest(
     if formal_git_commit == git_commit:
         raise ContractError("formal_git_commit must differ from the candidate commit")
     validate_manifest_production_environment(production_environment)
+    weather_facts = weather_candidate_facts(weather_candidate_mode)
     if (
         not SAFE_CONTAINER_RE.fullmatch(candidate_container_name)
         or candidate_container_name == PRODUCTION_CONTAINER
@@ -3268,7 +3352,11 @@ def create_manifest(
     compose, raw_config, images = runtime.compose_config(
         repository,
         image_ref,
-        environment=candidate_compose_environment(git_commit, production_environment),
+        environment=candidate_compose_environment(
+            git_commit,
+            production_environment,
+            weather_facts["weather_candidate_mode"],
+        ),
     )
     validate_compose_result(compose, raw_config, images, image_ref)
     baseline = collect_data_baseline(
@@ -3291,6 +3379,11 @@ def create_manifest(
         "compose_files": ["docker-compose.yml"],
         "compose_template_sha256": hash_file(repository / "docker-compose.yml"),
         "runtime_environment_contract": copy.deepcopy(RUNTIME_ENVIRONMENT_CONTRACT),
+        "weather_runtime_contract": weather_runtime_contract(
+            production_environment[WEATHER_RUNTIME_ENV_KEY],
+            weather_facts["weather_candidate_mode"],
+        ),
+        **weather_facts,
         "candidate_user_url_environment": candidate_user_url_environment(
             production_environment
         ),
@@ -3410,6 +3503,10 @@ def validate_deployment_result(
         "status": "production_verified",
     }
     for key, expected_value in expected.items():
+        if result.get(key) != expected_value:
+            raise ContractError(f"deployment result {key} mismatch")
+    weather_facts = weather_candidate_facts(manifest.get("weather_candidate_mode"))
+    for key, expected_value in weather_facts.items():
         if result.get(key) != expected_value:
             raise ContractError(f"deployment result {key} mismatch")
     if result.get("weather_runtime_contract") != deployment_plan.get(

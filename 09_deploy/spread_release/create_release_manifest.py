@@ -55,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validated production environment supplying browser-facing dashboard URLs.",
     )
     parser.add_argument(
+        "--weather-candidate-mode",
+        choices=("current", "next"),
+        required=True,
+        help=(
+            "Use current for a code-only candidate or next for a separately "
+            "validated weather-data candidate."
+        ),
+    )
+    parser.add_argument(
         "--output-root",
         type=Path,
         help="Defaults to <repository>/09_deploy/releases.",
@@ -88,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.production_env_file.resolve()
             ),
             runtime=DockerReleaseRuntime(),
+            weather_candidate_mode=args.weather_candidate_mode,
         )
         release_directory = write_release_bundle(manifest, output_root)
         release_manifest = artifact_manifest_path(

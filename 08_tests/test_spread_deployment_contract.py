@@ -447,6 +447,8 @@ def create_data_files(root: Path) -> None:
 
 def build_manifest(
     tmp_path: Path,
+    *,
+    weather_candidate_mode: str = "next",
 ) -> tuple[dict[str, object], FakeReleaseRuntime, FakeGitRunner]:
     data_root = tmp_path / "host-data"
     create_data_files(data_root)
@@ -468,6 +470,7 @@ def build_manifest(
         production_environment=production_environment_for(),
         runtime=runtime,
         git_runner=git,
+        weather_candidate_mode=weather_candidate_mode,
     )
     return manifest, runtime, git
 
@@ -647,6 +650,15 @@ def build_deployment_result(
         "production_env_sha256": plan["production_env_sha256"],
         "production_compose_sha256": plan["production_compose_sha256"],
         "weather_runtime_contract": plan["weather_runtime_contract"],
+        "weather_candidate_mode": plan["weather_candidate_mode"],
+        "weather_candidate_source": plan["weather_candidate_source"],
+        "weather_runtime_current_dir": plan["weather_runtime_current_dir"],
+        "weather_data_promotion_required": plan[
+            "weather_data_promotion_required"
+        ],
+        "weather_data_changed": plan["weather_data_changed"],
+        "processed_next_created": plan["processed_next_created"],
+        "processed_current_modified": plan["processed_current_modified"],
         "readiness": readiness,
         "readiness_result": str(readiness_path),
         "readiness_result_sha256": hashlib.sha256(
@@ -1962,6 +1974,10 @@ def test_weather_runtime_contract_is_recorded_in_all_sealed_artifacts(
     tmp_path: Path,
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
+    assert manifest["weather_candidate_mode"] == "next"
+    assert manifest["weather_candidate_source"] == CANDIDATE_WEATHER_RUNTIME_DIR
+    assert manifest["weather_data_promotion_required"] is True
+    assert manifest["weather_data_changed"] is True
     candidate = build_candidate_result_fixture(manifest, runtime)
     candidate_path = write_candidate_result_fixture(tmp_path, manifest, runtime)
     plan_root = tmp_path / "plan"
@@ -1977,7 +1993,49 @@ def test_weather_runtime_contract_is_recorded_in_all_sealed_artifacts(
         "weather_runtime_contract"
     ]
     assert plan["weather_runtime_contract"]["production_host_path"] == PRODUCTION_WEATHER_RUNTIME_DIR
+    assert plan["weather_candidate_mode"] == "next"
+    assert plan["weather_data_promotion_required"] is True
     assert result["weather_runtime_contract"] == plan["weather_runtime_contract"]
+
+
+def test_code_only_weather_candidate_uses_current_without_data_promotion(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(
+        tmp_path,
+        weather_candidate_mode="current",
+    )
+    assert manifest["weather_candidate_mode"] == "current"
+    assert manifest["weather_candidate_source"] == PRODUCTION_WEATHER_RUNTIME_DIR
+    assert manifest["weather_data_promotion_required"] is False
+    assert manifest["weather_data_changed"] is False
+    assert manifest["processed_next_created"] is False
+    assert manifest["processed_current_modified"] is False
+
+    environment = candidate_compose_environment(
+        GIT_COMMIT,
+        production_environment_for(),
+        "current",
+    )
+    assert environment["WEATHER_RUNTIME_CURRENT_DIR"] == PRODUCTION_WEATHER_RUNTIME_DIR
+
+    candidate = build_candidate_result_fixture(manifest, runtime)
+    assert candidate["weather_runtime_contract"]["host_path"] == PRODUCTION_WEATHER_RUNTIME_DIR
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    assert plan["weather_candidate_mode"] == "current"
+    assert plan["weather_data_promotion_required"] is False
+    assert plan["weather_runtime_contract"]["production_host_path"] == (
+        PRODUCTION_WEATHER_RUNTIME_DIR
+    )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ("", "previous", "/tmp/weather", "CURRENT"),
+)
+def test_weather_candidate_mode_rejects_anything_except_current_or_next(mode: str) -> None:
+    with pytest.raises(ContractError, match="weather_candidate_mode"):
+        candidate_compose_environment(GIT_COMMIT, production_environment_for(), mode)
 
 
 def test_explicit_production_urls_pass_validation(tmp_path: Path) -> None:

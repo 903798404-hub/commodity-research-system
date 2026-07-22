@@ -27,6 +27,13 @@
     "production_env_sha256",
     "production_compose_sha256",
     "weather_runtime_contract",
+    "weather_candidate_mode",
+    "weather_candidate_source",
+    "weather_runtime_current_dir",
+    "weather_data_promotion_required",
+    "weather_data_changed",
+    "processed_next_created",
+    "processed_current_modified",
     "readiness",
     "readiness_result",
     "readiness_result_sha256",
@@ -106,6 +113,18 @@
     "weather_runtime_contract": {
       "$ref": "#/$defs/weatherRuntimeContract"
     },
+    "weather_candidate_mode": { "enum": ["current", "next"] },
+    "weather_candidate_source": {
+      "enum": [
+        "/home/ubuntu/market-data-runtime/weather/processed/current",
+        "/home/ubuntu/market-data-runtime/weather/processed/next"
+      ]
+    },
+    "weather_runtime_current_dir": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+    "weather_data_promotion_required": { "type": "boolean" },
+    "weather_data_changed": { "type": "boolean" },
+    "processed_next_created": { "const": false },
+    "processed_current_modified": { "const": false },
     "readiness": {
       "type": "object"
     },
@@ -134,7 +153,7 @@
       "required": [
         "environment_variable",
         "production_host_path",
-        "candidate_host_path",
+        "allowed_candidate_host_paths",
         "container_path",
         "read_only",
         "weather_data_dir"
@@ -142,7 +161,12 @@
       "properties": {
         "environment_variable": { "const": "WEATHER_RUNTIME_CURRENT_DIR" },
         "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
-        "candidate_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/next" },
+        "allowed_candidate_host_paths": {
+          "const": [
+            "/home/ubuntu/market-data-runtime/weather/processed/current",
+            "/home/ubuntu/market-data-runtime/weather/processed/next"
+          ]
+        },
         "container_path": { "const": "/app/runtime/weather" },
         "read_only": { "const": true },
         "weather_data_dir": { "const": "/app/runtime/weather" }
