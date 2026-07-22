@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.2.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.3.0.json",
   "title": "spread-dashboard sealed production deployment plan",
   "type": "object",
   "additionalProperties": false,
@@ -20,6 +20,7 @@
     "USDA_DASHBOARD_URL",
     "OIL_WORLD_DASHBOARD_URL",
     "MARKET_DATA_GIT_HEAD",
+    "weather_runtime_contract",
     "tool_repo_root",
     "compose_project",
     "production_service",
@@ -42,7 +43,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.2.0"
+      "const": "1.3.0"
     },
     "release_id": {
       "type": "string",
@@ -91,6 +92,9 @@
     },
     "MARKET_DATA_GIT_HEAD": {
       "$ref": "#/$defs/fullGitCommit"
+    },
+    "weather_runtime_contract": {
+      "$ref": "#/$defs/weatherRuntimeContract"
     },
     "tool_repo_root": {
       "type": "string",
@@ -185,6 +189,26 @@
     }
   },
   "$defs": {
+    "weatherRuntimeContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_variable",
+        "production_host_path",
+        "candidate_host_path",
+        "container_path",
+        "read_only",
+        "weather_data_dir"
+      ],
+      "properties": {
+        "environment_variable": { "const": "WEATHER_RUNTIME_CURRENT_DIR" },
+        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+        "candidate_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/next" },
+        "container_path": { "const": "/app/runtime/weather" },
+        "read_only": { "const": true },
+        "weather_data_dir": { "const": "/app/runtime/weather" }
+      }
+    },
     "fullGitCommit": {
       "type": "string",
       "pattern": "[0-9a-f]{40}"

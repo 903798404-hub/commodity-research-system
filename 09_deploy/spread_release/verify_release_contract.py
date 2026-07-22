@@ -181,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
                         "production_compose_sha256": plan[
                             "production_compose_sha256"
                         ],
+                        "weather_runtime_contract": plan[
+                            "weather_runtime_contract"
+                        ],
                         "generated_at": readiness.get("ready_at_utc"),
                         "status": "production_verified",
                     }

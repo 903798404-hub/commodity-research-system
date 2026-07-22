@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.1.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.2.0.json",
   "title": "spread-dashboard verified production deployment result",
   "type": "object",
   "additionalProperties": false,
@@ -26,6 +26,7 @@
     "production_env_file",
     "production_env_sha256",
     "production_compose_sha256",
+    "weather_runtime_contract",
     "readiness",
     "readiness_result",
     "readiness_result_sha256",
@@ -35,7 +36,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.1.0"
+      "const": "1.2.0"
     },
     "application": {
       "const": "spread-dashboard"
@@ -102,6 +103,9 @@
     "production_compose_sha256": {
       "$ref": "#/$defs/sha256"
     },
+    "weather_runtime_contract": {
+      "$ref": "#/$defs/weatherRuntimeContract"
+    },
     "readiness": {
       "type": "object"
     },
@@ -124,6 +128,26 @@
     }
   },
   "$defs": {
+    "weatherRuntimeContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_variable",
+        "production_host_path",
+        "candidate_host_path",
+        "container_path",
+        "read_only",
+        "weather_data_dir"
+      ],
+      "properties": {
+        "environment_variable": { "const": "WEATHER_RUNTIME_CURRENT_DIR" },
+        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+        "candidate_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/next" },
+        "container_path": { "const": "/app/runtime/weather" },
+        "read_only": { "const": true },
+        "weather_data_dir": { "const": "/app/runtime/weather" }
+      }
+    },
     "fullGitCommit": {
       "type": "string",
       "pattern": "[0-9a-f]{40}"

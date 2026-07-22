@@ -32,13 +32,14 @@
       "if": {
         "properties": {
           "schema_version": {
-            "const": "2.3.0"
+            "const": "2.4.0"
           }
         }
       },
       "then": {
         "required": [
-          "readiness_policy"
+          "readiness_policy",
+          "runtime_environment_contract"
         ]
       }
     }
@@ -50,7 +51,8 @@
         "2.0.0",
         "2.1.0",
         "2.2.0",
-        "2.3.0"
+        "2.3.0",
+        "2.4.0"
       ]
     },
     "application": {
@@ -159,31 +161,34 @@
         "release_bound_variables",
         "allowed_candidate_production_differences",
         "undeclared_variables_forbidden"
+        ,"weather_runtime_mount"
       ],
       "properties": {
         "allowed_production_variables": {
           "type": "array",
-          "minItems": 4,
+          "minItems": 5,
           "uniqueItems": true,
           "items": {
             "enum": [
               "SPREAD_IMAGE",
               "MARKET_DATA_GIT_HEAD",
               "USDA_DASHBOARD_URL",
-              "OIL_WORLD_DASHBOARD_URL"
+              "OIL_WORLD_DASHBOARD_URL",
+              "WEATHER_RUNTIME_CURRENT_DIR"
             ]
           }
         },
         "required_production_variables": {
           "type": "array",
-          "minItems": 4,
+          "minItems": 5,
           "uniqueItems": true,
           "items": {
             "enum": [
               "SPREAD_IMAGE",
               "MARKET_DATA_GIT_HEAD",
               "USDA_DASHBOARD_URL",
-              "OIL_WORLD_DASHBOARD_URL"
+              "OIL_WORLD_DASHBOARD_URL",
+              "WEATHER_RUNTIME_CURRENT_DIR"
             ]
           }
         },
@@ -216,7 +221,30 @@
         },
         "undeclared_variables_forbidden": {
           "const": true
+        },
+        "weather_runtime_mount": {
+          "$ref": "#/$defs/weatherRuntimeMount"
         }
+      }
+    },
+    "weatherRuntimeMount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_variable",
+        "production_host_path",
+        "candidate_host_path",
+        "container_path",
+        "read_only",
+        "weather_data_dir"
+      ],
+      "properties": {
+        "environment_variable": { "const": "WEATHER_RUNTIME_CURRENT_DIR" },
+        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+        "candidate_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/next" },
+        "container_path": { "const": "/app/runtime/weather" },
+        "read_only": { "const": true },
+        "weather_data_dir": { "const": "/app/runtime/weather" }
       }
     },
     "readinessPolicy": {

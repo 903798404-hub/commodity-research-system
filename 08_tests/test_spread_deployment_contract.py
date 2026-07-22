@@ -88,6 +88,8 @@ SOURCE = "https://github.com/example/commodity-research-system"
 CANDIDATE_CONTAINER = "spread-candidate-release"
 PRODUCTION_USDA_URL = "https://dashboards.example.com/usda/"
 PRODUCTION_OIL_WORLD_URL = "https://dashboards.example.com/oil-world/"
+PRODUCTION_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed/current"
+CANDIDATE_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed/next"
 
 
 class FakeGitRunner:
@@ -299,6 +301,8 @@ class FakeReleaseRuntime:
         resolved_environment = {
             **CANDIDATE_RUNTIME_ENVIRONMENT,
             "MARKET_DATA_GIT_HEAD": self.git_commit,
+            "WEATHER_RUNTIME_CURRENT_DIR": CANDIDATE_WEATHER_RUNTIME_DIR,
+            "WEATHER_DATA_DIR": "/app/runtime/weather",
             **(environment or {}),
         }
         is_candidate = all(
@@ -324,6 +328,14 @@ class FakeReleaseRuntime:
                     ("10_logs", "/app/10_logs"),
                 )
             ]
+            volumes.append(
+                {
+                    "type": "bind",
+                    "source": resolved_environment["WEATHER_RUNTIME_CURRENT_DIR"],
+                    "target": "/app/runtime/weather",
+                    "read_only": True,
+                }
+            )
         compose = {
             "name": COMPOSE_PROJECT,
             "services": {
@@ -354,6 +366,7 @@ class FakeReleaseRuntime:
                             "MARKET_DATA_GIT_HEAD",
                             "USDA_DASHBOARD_URL",
                             "OIL_WORLD_DASHBOARD_URL",
+                            "WEATHER_DATA_DIR",
                         )
                     },
                     "volumes": volumes,
@@ -469,6 +482,7 @@ def create_production_env(
         "MARKET_DATA_GIT_HEAD": str(manifest["git_commit"]),
         "USDA_DASHBOARD_URL": usda_url,
         "OIL_WORLD_DASHBOARD_URL": oil_world_url,
+        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
     }
     path = (tmp_path / "spread-production.env").resolve()
     path.write_text(
@@ -596,7 +610,7 @@ def build_deployment_result(
         encoding="utf-8",
     )
     return {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "application": APPLICATION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
@@ -617,6 +631,7 @@ def build_deployment_result(
         "production_env_file": plan["production_env_file"],
         "production_env_sha256": plan["production_env_sha256"],
         "production_compose_sha256": plan["production_compose_sha256"],
+        "weather_runtime_contract": plan["weather_runtime_contract"],
         "readiness": readiness,
         "readiness_result": str(readiness_path),
         "readiness_result_sha256": hashlib.sha256(
@@ -694,6 +709,7 @@ def test_real_compose_config_fails_without_spread_image() -> None:
     environment["MARKET_DATA_GIT_HEAD"] = GIT_COMMIT
     environment["USDA_DASHBOARD_URL"] = PRODUCTION_USDA_URL
     environment["OIL_WORLD_DASHBOARD_URL"] = PRODUCTION_OIL_WORLD_URL
+    environment["WEATHER_RUNTIME_CURRENT_DIR"] = PRODUCTION_WEATHER_RUNTIME_DIR
     result = subprocess.run(
         [
             "docker",
@@ -726,6 +742,7 @@ def test_real_compose_config_fails_without_runtime_git_head() -> None:
         "SPREAD_IMAGE": IMAGE_REF,
         "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
         "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
+        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
     }
     environment.pop("MARKET_DATA_GIT_HEAD", None)
     result = subprocess.run(
@@ -761,6 +778,7 @@ def test_real_compose_config_resolves_exact_spread_image() -> None:
         "MARKET_DATA_GIT_HEAD": GIT_COMMIT,
         "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
         "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
+        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
     }
     result = subprocess.run(
         [
@@ -933,12 +951,12 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     schema = load_schema(CONTRACT_DIR / "artifact_manifest.schema.json")
     validator = jsonschema.Draft202012Validator(schema)
     candidate = {
-        "schema_version": "1.2.0",
+        "schema_version": "1.3.0",
         "artifact_type": "candidate_result",
         "target_file": "candidate_result.json",
         "target_sha256": "d" * 64,
         "target_size_bytes": 123,
-        "target_schema_version": "1.2.0",
+        "target_schema_version": "1.3.0",
         "generated_at": BUILD_TIME,
         "release_id": RELEASE_ID,
         "git_commit": GIT_COMMIT,
@@ -967,7 +985,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     release.update(
         artifact_type="release",
         target_file="release.json",
-        target_schema_version="2.3.0",
+        target_schema_version="2.4.0",
     )
     release.pop("runtime_git_commit")
     validator.validate(release)
@@ -980,7 +998,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     deployment_result.update(
         artifact_type="deployment_result",
         target_file="deployment_result.json",
-        target_schema_version="1.1.0",
+        target_schema_version="1.2.0",
     )
     validator.validate(deployment_result)
     deployment_result.pop("runtime_git_commit")
@@ -1453,7 +1471,7 @@ def test_exclusive_manifest_write_preserves_existing_manifest(
         write_artifact_manifest(
             path,
             artifact_type="candidate_result",
-            target_schema_version="1.2.0",
+            target_schema_version="1.3.0",
             release_id=RELEASE_ID,
             git_commit=GIT_COMMIT,
             git_tree=GIT_TREE,
@@ -1813,9 +1831,13 @@ def test_deployment_plan_rejects_readiness_policy_drift(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "missing_key",
-    ["USDA_DASHBOARD_URL", "OIL_WORLD_DASHBOARD_URL"],
+    [
+        "USDA_DASHBOARD_URL",
+        "OIL_WORLD_DASHBOARD_URL",
+        "WEATHER_RUNTIME_CURRENT_DIR",
+    ],
 )
-def test_production_environment_missing_url_hard_fails(
+def test_production_environment_missing_required_key_hard_fails(
     tmp_path: Path,
     missing_key: str,
 ) -> None:
@@ -1833,6 +1855,119 @@ def test_production_environment_missing_url_hard_fails(
 
     with pytest.raises(ContractError, match="must contain exactly"):
         parse_production_env(path)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("", "empty or unsafe"),
+        ("weather/processed/current", "absolute POSIX path"),
+        ("/home/ubuntu/weather/processed/current", "fixed production runtime path"),
+        ("/home/ubuntu/weather\nvalue", "not a KEY=value entry"),
+    ],
+)
+def test_production_weather_runtime_dir_is_strictly_validated(
+    tmp_path: Path, value: str, message: str
+) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    path, environment = create_production_env(tmp_path, manifest)
+    environment["WEATHER_RUNTIME_CURRENT_DIR"] = value
+    path.write_text(
+        "".join(f"{key}={environment[key]}\n" for key in PRODUCTION_ENV_KEYS),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match=message):
+        parse_production_env(path)
+
+
+def test_production_environment_rejects_unknown_key(tmp_path: Path) -> None:
+    manifest, _, _ = build_manifest(tmp_path)
+    path, environment = create_production_env(tmp_path, manifest)
+    path.write_text(
+        "".join(f"{key}={environment[key]}\n" for key in PRODUCTION_ENV_KEYS)
+        + "UNAPPROVED_VALUE=1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="invalid or duplicate key"):
+        parse_production_env(path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_mount", "exactly one weather runtime mount"),
+        ("read_write_mount", "exact read-only bind mount"),
+        ("wrong_target", "exactly one weather runtime mount"),
+        ("raw_sql", "raw SQL files must not be mounted"),
+        ("missing_weather_data_dir", "WEATHER_DATA_DIR"),
+        ("wrong_weather_data_dir", "WEATHER_DATA_DIR"),
+        ("usda_mount", "only spread-dashboard may mount"),
+    ],
+)
+def test_compose_weather_runtime_contract_rejects_invalid_shapes(
+    mutation: str, message: str
+) -> None:
+    runtime = FakeReleaseRuntime()
+    compose, raw, images = runtime.compose_config(
+        REPOSITORY,
+        IMAGE_REF,
+        environment={
+            **CANDIDATE_RUNTIME_ENVIRONMENT,
+            "MARKET_DATA_GIT_HEAD": GIT_COMMIT,
+            "WEATHER_RUNTIME_CURRENT_DIR": CANDIDATE_WEATHER_RUNTIME_DIR,
+        },
+    )
+    spread = compose["services"]["spread-dashboard"]
+    if mutation == "missing_mount":
+        spread["volumes"] = spread["volumes"][:-1]
+    elif mutation == "read_write_mount":
+        spread["volumes"][-1]["read_only"] = False
+    elif mutation == "wrong_target":
+        spread["volumes"][-1]["target"] = "/app/runtime/not-weather"
+    elif mutation == "raw_sql":
+        spread["volumes"][-1]["source"] = "/safe/weather_latest.sql"
+    elif mutation == "missing_weather_data_dir":
+        del spread["environment"]["WEATHER_DATA_DIR"]
+    elif mutation == "wrong_weather_data_dir":
+        spread["environment"]["WEATHER_DATA_DIR"] = "/tmp/weather"
+    elif mutation == "usda_mount":
+        compose["services"]["usda-dashboard"]["volumes"] = [
+            {
+                "type": "bind",
+                "source": CANDIDATE_WEATHER_RUNTIME_DIR,
+                "target": "/app/runtime/weather",
+                "read_only": True,
+            }
+        ]
+    else:
+        raise AssertionError(mutation)
+
+    with pytest.raises(ContractError, match=message):
+        release_contract_module.validate_compose_result(compose, raw, images, IMAGE_REF)
+
+
+def test_weather_runtime_contract_is_recorded_in_all_sealed_artifacts(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    candidate = build_candidate_result_fixture(manifest, runtime)
+    candidate_path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    plan_root = tmp_path / "plan"
+    plan_root.mkdir()
+    plan, _, _ = build_deployment_plan(plan_root, manifest, runtime)
+    result = build_deployment_result(tmp_path, manifest, plan)
+
+    assert manifest["runtime_environment_contract"]["weather_runtime_mount"][
+        "production_host_path"
+    ] == PRODUCTION_WEATHER_RUNTIME_DIR
+    assert candidate["weather_runtime_contract"]["host_path"] == CANDIDATE_WEATHER_RUNTIME_DIR
+    assert load_candidate_result(candidate_path, manifest)["weather_runtime_contract"] == candidate[
+        "weather_runtime_contract"
+    ]
+    assert plan["weather_runtime_contract"]["production_host_path"] == PRODUCTION_WEATHER_RUNTIME_DIR
+    assert result["weather_runtime_contract"] == plan["weather_runtime_contract"]
 
 
 def test_explicit_production_urls_pass_validation(tmp_path: Path) -> None:
@@ -1947,7 +2082,13 @@ def test_deployment_plan_rejects_mount_difference(tmp_path: Path) -> None:
             "type": "bind",
             "source": str((REPOSITORY / "wrong-data").resolve()),
             "target": "/app/01_data",
-        }
+        },
+        {
+            "type": "bind",
+            "source": PRODUCTION_WEATHER_RUNTIME_DIR,
+            "target": "/app/runtime/weather",
+            "read_only": True,
+        },
     ]
 
     with pytest.raises(ContractError, match="mount contract changed"):
