@@ -319,21 +319,21 @@ def test_daily_rain_default_window_is_28_calendar_days_without_filling_missing_v
     region = region_weights(config).iloc[0]
     figure = soybean_weather_page._daily_rain_figure(precipitation, region)
     assert tuple(pd.Timestamp(value) for value in figure.layout.xaxis.range) == (
-        pd.Timestamp("2000-10-25"), pd.Timestamp("2000-11-21")
+        pd.Timestamp("2025-10-25"), pd.Timestamp("2025-11-21")
     )
     observed, ec, gfs = figure.data
-    assert all(pd.Timestamp(value) <= pd.Timestamp("2000-11-07") for value in observed.x)
+    assert all(pd.Timestamp(value) <= pd.Timestamp("2025-11-07") for value in observed.x)
     assert len(observed.x) == 7  # The missing Oct. days remain absent rather than being zero-filled.
     assert all(float(value) != 0 for value in observed.y)
     for trace in (ec, gfs):
-        assert all(pd.Timestamp("2000-11-08") <= pd.Timestamp(value) <= pd.Timestamp("2000-11-21") for value in trace.x)
+        assert all(pd.Timestamp("2025-11-08") <= pd.Timestamp(value) <= pd.Timestamp("2025-11-21") for value in trace.x)
         assert len(trace.x) == 14
     assert figure.layout.hovermode == "closest"
 
     manual_window = (pd.Timestamp("2025-11-04"), pd.Timestamp("2025-11-09"))
     manual_figure = soybean_weather_page._daily_rain_figure(precipitation, region, manual_window)
     assert tuple(pd.Timestamp(value) for value in manual_figure.layout.xaxis.range) == (
-        pd.Timestamp("2000-11-04"), pd.Timestamp("2000-11-09")
+        pd.Timestamp("2025-11-04"), pd.Timestamp("2025-11-09")
     )
 
 
@@ -427,11 +427,7 @@ def test_styles_and_page_route_preserve_approved_series_semantics(monkeypatch, t
     assert daily_figure.layout.xaxis.dtick == 24 * 60 * 60 * 1000
     assert daily_figure.layout.xaxis.tickangle == -55
     assert daily_figure.layout.xaxis.griddash == "dot"
-    assert daily_figure.layout.xaxis.rangeslider.visible is True
-    assert daily_figure.layout.xaxis.rangeslider.thickness == pytest.approx(0.05)
-    assert daily_figure.layout.xaxis.rangeslider.bgcolor == "#fcfdfe"
-    assert daily_figure.layout.xaxis.rangeslider.bordercolor == "#edf1f5"
-    assert daily_figure.layout.xaxis.rangeslider.borderwidth == 0
+    assert daily_figure.layout.xaxis.rangeslider.visible is False
     assert daily_figure.layout.height == 400
     assert daily_figure.layout.legend.y == pytest.approx(0.93)
     assert daily_figure.layout.barmode == "group"
@@ -439,7 +435,7 @@ def test_styles_and_page_route_preserve_approved_series_semantics(monkeypatch, t
     assert daily_figure.layout.bargroupgap == pytest.approx(0.03)
     assert [trace.name for trace in daily_figure.data] == ["历史降雨", "EC预测", "GFS预测"]
     assert all(trace.width == pytest.approx(soybean_weather_page.DAILY_BAR_WIDTH_MS) for trace in daily_figure.data)
-    assert all(pd.Timestamp(value).year == 2000 for trace in daily_figure.data for value in trace.x)
+    assert all(pd.Timestamp(value).year == 2025 for trace in daily_figure.data for value in trace.x)
 
     latest = soybean_weather_page.latest_observation_date(precipitation)
     normals = _weather_normals()

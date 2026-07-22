@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import html
-import json
 import os
 import sys
 from pathlib import Path
@@ -34,7 +32,6 @@ from agri_research_agent.weather.crop_weather import (  # noqa: E402
 CONFIG_FILE = PROJECT_ROOT / "02_configs" / "soybean_weather_us.yaml"
 STABLE_DATA_FILE = PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "soybean_weather_us.parquet"
 NORMAL_DATA_FILE = PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "soybean_weather_us_30y_normal.parquet"
-STATUS_FILE = PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_us.json"
 FIXTURE_ENV = "SOYBEAN_WEATHER_FIXTURE_PATH"
 NORMAL_FIXTURE_ENV = "SOYBEAN_WEATHER_NORMAL_FIXTURE_PATH"
 WEATHER_DATA_DIR_ENV = "WEATHER_DATA_DIR"
@@ -50,72 +47,61 @@ def _weather_data_file(relative_path: str) -> Path:
     return PROJECT_ROOT / "01_data" / "processed" / "weather" / relative_path
 
 WEATHER_COUNTRY_FILES = {
-    "USA": {"config": CONFIG_FILE, "data": _weather_data_file("soybean/us/soybean_weather_us.parquet"), "normal": _weather_data_file("soybean/us/soybean_weather_us_30y_normal.parquet"), "status": STATUS_FILE, "fixture_enabled": True},
+    "USA": {"config": CONFIG_FILE, "data": _weather_data_file("soybean/us/soybean_weather_us.parquet"), "normal": _weather_data_file("soybean/us/soybean_weather_us_30y_normal.parquet"), "fixture_enabled": True},
     "BRA": {
         "config": PROJECT_ROOT / "02_configs" / "soybean_weather_br.yaml",
         "data": _weather_data_file("soybean/br/soybean_weather_br.parquet"),
         "normal": _weather_data_file("soybean/br/soybean_weather_br_30y_normal.parquet"),
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_br.json",
     },
     "ARG": {
         "config": PROJECT_ROOT / "02_configs" / "soybean_weather_ar.yaml",
         "data": _weather_data_file("soybean/ar/soybean_weather_ar.parquet"),
         "normal": _weather_data_file("soybean/ar/soybean_weather_ar_30y_normal.parquet"),
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_ar.json",
     },
     "CAN": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_can.yaml",
         "data": _weather_data_file("rapeseed/can/rapeseed_weather_can.parquet"),
         "normal": _weather_data_file("rapeseed/can/rapeseed_weather_can_30y_normal.parquet"),
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_can.json",
     },
     "AUS": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_aus.yaml",
         "data": _weather_data_file("rapeseed/aus/rapeseed_weather_aus.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_aus.json",
     },
     "EU": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_eu.yaml",
         "data": _weather_data_file("rapeseed/eu/rapeseed_weather_eu.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_eu.json",
     },
     "RUS": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_rus.yaml",
         "data": _weather_data_file("rapeseed/rus/rapeseed_weather_rus.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_rus.json",
     },
     "UKR": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_ukr.yaml",
         "data": _weather_data_file("rapeseed/ukr/rapeseed_weather_ukr.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_ukr.json",
     },
     "MYS": {
         "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_mys.yaml",
         "data": _weather_data_file("palm_oil/mys/palm_oil_weather_mys.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_mys.json",
     },
     "IDN": {
         "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_idn.yaml",
         "data": _weather_data_file("palm_oil/idn/palm_oil_weather_idn.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_idn.json",
     },
     "IND_COTTON": {
         "config": PROJECT_ROOT / "02_configs" / "cotton_weather_ind.yaml",
         "data": _weather_data_file("cotton/ind/cotton_weather_ind.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "cotton_weather_ind.json",
     },
     "IND_SUGARCANE": {
         "config": PROJECT_ROOT / "02_configs" / "sugarcane_weather_ind.yaml",
         "data": _weather_data_file("sugarcane/ind/sugarcane_weather_ind.parquet"),
         "normal": None,
-        "status": PROJECT_ROOT / "01_data" / "update_status" / "sugarcane_weather_ind.json",
     },
 }
 
@@ -203,15 +189,6 @@ def _load_config(config_path: str, config_mtime_ns: int, config_size: int = 0) -
 
 
 @st.cache_data(show_spinner=False)
-def _load_snapshot_status(status_path: str, status_mtime_ns: int, status_size: int = 0) -> dict[str, object]:
-    del status_mtime_ns, status_size
-    try:
-        return json.loads(Path(status_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-@st.cache_data(show_spinner=False)
 def _load_normals(normal_path: str, normal_mtime_ns: int, normal_size: int) -> pd.DataFrame:
     """Load the static 30-year normal with a file-identity cache dependency."""
 
@@ -277,6 +254,99 @@ def _daily_rain_default_window(records: pd.DataFrame) -> tuple[pd.Timestamp, pd.
         return None
     latest = latest.normalize()
     return latest - pd.Timedelta(days=13), latest + pd.Timedelta(days=14)
+
+
+def _weather_freshness(records: pd.DataFrame, data_path: Path) -> dict[str, str]:
+    """Return page-facing dates from the mounted Parquet, never a stale status JSON."""
+
+    dates = pd.to_datetime(records["date"], errors="raise").dt.normalize()
+    observed = dates[records["data_type"] == "observed"]
+    forecasts = records[records["data_type"] == "forecast"].copy()
+    forecast_dates = pd.to_datetime(forecasts["date"], errors="raise").dt.normalize()
+
+    def latest(values: pd.Series) -> str:
+        return pd.Timestamp(values.max()).date().isoformat() if not values.empty else "—"
+
+    refreshed = pd.Timestamp(data_path.stat().st_mtime_ns, unit="ns", tz="UTC")
+    return {
+        "observed": latest(observed),
+        "ecmwf": latest(forecast_dates[forecasts["model"] == "ECMWF"]),
+        "gfs": latest(forecast_dates[forecasts["model"] == "GFS"]),
+        "refreshed_at": refreshed.strftime("%Y-%m-%d %H:%M UTC"),
+    }
+
+
+def _prepare_daily_rain_series(
+    records: pd.DataFrame,
+    region_key: str,
+    active_range: tuple[pd.Timestamp, pd.Timestamp] | None,
+) -> dict[str, pd.DataFrame]:
+    """Prepare the three country-level daily-rain series for a bounded date window.
+
+    Each configured page region is already a country-level series.  Its source
+    contract therefore requires one value per country/date/series: summing or
+    averaging duplicate rows would change the business value and is forbidden.
+    """
+
+    latest = latest_observation_date(records)
+    observed = records[(records["data_type"] == "observed") & (records["region"] == region_key)].copy()
+    if latest is not None:
+        observed = observed[observed["date"] <= latest]
+    forecasts = select_latest_forecasts(records, latest) if latest is not None else pd.DataFrame()
+    forecasts = forecasts[forecasts["region"] == region_key].copy()
+    selected = pd.concat([observed, forecasts], ignore_index=True)
+    if selected.empty:
+        return {}
+
+    selected["date"] = pd.to_datetime(selected["date"], errors="raise").dt.normalize()
+    selected["series"] = selected["model"].where(selected["data_type"] == "forecast", "observed")
+    if active_range is not None:
+        start, end = (pd.Timestamp(value).normalize() for value in active_range)
+        selected = selected[selected["date"].between(start, end)].copy()
+
+    duplicate_counts = selected.groupby(["country", "region", "date", "series"], dropna=False).size()
+    if not duplicate_counts.empty and int(duplicate_counts.max()) != 1:
+        duplicated = duplicate_counts[duplicate_counts > 1]
+        raise ValueError(f"单日降雨存在国家、日期、序列重复记录：{duplicated.index.tolist()[:3]}")
+
+    return {
+        series: group.sort_values("date").reset_index(drop=True)
+        for series, group in selected.groupby("series", sort=False)
+    }
+
+
+def _season_aligned_forecast(
+    records: pd.DataFrame,
+    start_month_day: str,
+    axis_start: pd.Timestamp,
+    axis_end: pd.Timestamp,
+) -> pd.DataFrame:
+    """Map chronological forecasts to a seasonal axis and insert wrap gaps.
+
+    A crop-year axis starts at e.g. 08-01.  Natural forecasts crossing 07-31
+    to 08-01 consequently map from the right edge of that axis back to its
+    left edge.  The explicit null point keeps Plotly from drawing a false line
+    across the whole chart while preserving every real forecast point.
+    """
+
+    if records.empty:
+        return pd.DataFrame(columns=["aligned_date", "value"])
+    source = records.copy()
+    source["date"] = pd.to_datetime(source["date"], errors="raise").dt.normalize()
+    source["aligned_date"] = source["date"].map(lambda value: _reference_date(value, start_month_day))
+    source = source[source["aligned_date"].between(axis_start, axis_end)].sort_values("date")
+    if source.empty:
+        return pd.DataFrame(columns=["aligned_date", "value"])
+
+    rows: list[dict[str, object]] = []
+    previous: pd.Timestamp | None = None
+    for row in source[["aligned_date", "value"]].itertuples(index=False):
+        aligned = pd.Timestamp(row.aligned_date)
+        if previous is not None and aligned < previous:
+            rows.append({"aligned_date": None, "value": None})
+        rows.append({"aligned_date": aligned, "value": row.value})
+        previous = aligned
+    return pd.DataFrame(rows)
 
 
 def _week_start(value: pd.Timestamp) -> pd.Timestamp:
@@ -696,10 +766,8 @@ def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region
             ("ECMWF", "EC预测", HISTORY_SERIES_COLORS["ec"], 140),
         ):
             model_data = forecast[(forecast["model"] == model) & (forecast["region"] == region.key)].copy()
-            if not model_data.empty:
-                model_data["aligned_date"] = model_data["date"].map(lambda value: _reference_date(value, start_month_day))
-                axis_start, axis_end = _reference_window(start_month_day, end_month_day)
-                model_data = model_data[(model_data["aligned_date"] >= axis_start) & (model_data["aligned_date"] <= axis_end)].sort_values("aligned_date")
+            axis_start, axis_end = _reference_window(start_month_day, end_month_day)
+            model_data = _season_aligned_forecast(model_data, start_month_day, axis_start, axis_end)
             if kind == "cumulative_rain" and not model_data.empty:
                 anchor = float(history_by_year[current_year]["value"].iloc[-1]) if not history_by_year[current_year].empty else 0.0
                 model_data["value"] = anchor + model_data["value"].cumsum()
@@ -723,33 +791,19 @@ def _daily_rain_figure(
     date_range: tuple[pd.Timestamp, pd.Timestamp] | None = None,
     config: dict[str, object] | None = None,
 ) -> go.Figure:
-    latest = latest_observation_date(records)
-    observed = records[(records["data_type"] == "observed") & (records["region"] == region.key)].copy()
-    if latest is not None:
-        observed = observed[observed["date"] <= latest]
-    forecasts = select_latest_forecasts(records, latest) if latest is not None else pd.DataFrame()
     active_range = date_range or _daily_rain_default_window(records)
-    if active_range is not None:
-        start, end = active_range
-        observed = observed[(observed["date"] >= start) & (observed["date"] <= end)]
-        forecasts = forecasts[(forecasts["date"] >= start) & (forecasts["date"] <= end)]
-    season_start = str((config or {}).get("season_start_month_day", "01-01"))
-    observed["aligned_date"] = observed["date"].map(lambda value: _reference_date(value, season_start))
-    forecast_aligned = forecasts.copy()
-    if not forecast_aligned.empty:
-        forecast_aligned["aligned_date"] = forecast_aligned["date"].map(lambda value: _reference_date(value, season_start))
+    series = _prepare_daily_rain_series(records, str(region.key), active_range)
     figure = go.Figure()
-    figure.add_trace(go.Bar(x=observed["aligned_date"], y=observed["value"], name="历史降雨", marker_color=OLD_PAGE_COLORS["historical_rain"], width=DAILY_BAR_WIDTH_MS))
+    observed = series.get("observed", pd.DataFrame(columns=["date", "value"]))
+    figure.add_trace(go.Bar(x=observed["date"], y=observed["value"], name="历史降雨", marker_color=OLD_PAGE_COLORS["historical_rain"], width=DAILY_BAR_WIDTH_MS))
     for model, label, color in (("ECMWF", "EC预测", OLD_PAGE_COLORS["ec"]), ("GFS", "GFS预测", OLD_PAGE_COLORS["five_year_mean"])):
-        data = forecasts[(forecasts["model"] == model) & (forecasts["region"] == region.key)].sort_values("date")
+        data = series.get(model, pd.DataFrame(columns=["date", "value"]))
         if data.empty:
             continue
-        data = data.copy()
-        data["aligned_date"] = data["date"].map(lambda value: _reference_date(value, season_start))
-        figure.add_trace(go.Bar(x=data["aligned_date"], y=data["value"], name=label, marker_color=color, width=DAILY_BAR_WIDTH_MS))
-    available = pd.concat([observed["aligned_date"], forecast_aligned.get("aligned_date", pd.Series(dtype="datetime64[ns]"))], ignore_index=True).dropna()
-    axis_start = _reference_date(active_range[0], season_start) if active_range is not None else (available.min() if not available.empty else None)
-    axis_end = _reference_date(active_range[1], season_start) if active_range is not None else (available.max() if not available.empty else None)
+        figure.add_trace(go.Bar(x=data["date"], y=data["value"], name=label, marker_color=color, width=DAILY_BAR_WIDTH_MS))
+    available = pd.concat([frame["date"] for frame in series.values()], ignore_index=True).dropna() if series else pd.Series(dtype="datetime64[ns]")
+    axis_start = pd.Timestamp(active_range[0]).normalize() if active_range is not None else (available.min() if not available.empty else None)
+    axis_end = pd.Timestamp(active_range[1]).normalize() if active_range is not None else (available.max() if not available.empty else None)
     figure.update_layout(
         title={"text": _region_label(region, config), "x": 0.5, "y": 0.99, "xanchor": "center", "yanchor": "top", "font": {"color": "#0f172a", "size": 14, "family": "Inter, Helvetica Neue, Arial", "weight": "bold"}},
         barmode="group",
@@ -774,7 +828,7 @@ def _daily_rain_figure(
         gridcolor="#dbe7f1",
         griddash="dot",
         gridwidth=0.8,
-        rangeslider={"visible": True, "thickness": 0.05, "bgcolor": "#fcfdfe", "bordercolor": "#edf1f5", "borderwidth": 0},
+        rangeslider={"visible": False},
     )
     figure.update_yaxes(title="降水（mm）", showgrid=True, gridcolor="#dbe7f1", griddash="dot", gridwidth=0.8, zeroline=False)
     return figure
@@ -869,11 +923,6 @@ def render_weather_page(route_key: str = "USA") -> None:
             f"{source_label}。当前模块未加载任何回退业务数据。"
         )
         return
-    status_file = files["status"]
-    assert isinstance(status_file, Path)
-    status_stat = status_file.stat() if status_file.is_file() else None
-    snapshot_status = _load_snapshot_status(str(status_file), status_stat.st_mtime_ns, status_stat.st_size) if status_stat else {}
-    snapshot_date = str(snapshot_status.get("source_snapshot_date", "—"))
     enabled = dict(config.get("enabled_sections", {}))
     # Minimum temperature is opt-in: historic country configurations predate
     # this optional chart and must retain their approved module set.
@@ -898,15 +947,16 @@ def render_weather_page(route_key: str = "USA") -> None:
     if records.empty:
         st.info(f"当前选择没有可用的{config['metrics'][metric]['display_name']}数据。")
         return
-    observed_status_date = snapshot_status.get("observed_latest_date")
-    try:
-        observed_status_label = dt.date.fromisoformat(observed_status_date.strip()).isoformat()
-    except (AttributeError, TypeError, ValueError):
-        observed_status_label = ""
+    freshness = _weather_freshness(records, data_path)
     st.caption(
-        f"天气数据更新至 {observed_status_label}"
-        if observed_status_label
-        else "天气数据更新时间不可用"
+        " · ".join(
+            (
+                f"观测更新至：{freshness['observed']}",
+                f"EC预测至：{freshness['ecmwf']}",
+                f"GFS预测至：{freshness['gfs']}",
+                f"数据包刷新时间：{freshness['refreshed_at']}",
+            )
+        )
     )
     if bool(config.get("weighted_aggregation", True)):
         coverage_note = str(config.get("coverage_caption", f"覆盖{len(config['regions'])}个主要产区，权重{float(config['weighted_coverage_percent']):.1f}%"))
@@ -915,7 +965,7 @@ def render_weather_page(route_key: str = "USA") -> None:
         coverage_note = str(config.get("coverage_caption", f"直接展示{len(config['regions'])}个稳定地区序列；父级产量标签仅用于说明，不参与地区级或全国加权。"))
         st.caption(coverage_note)
     warning_messages = dict(config.get("warning_messages", {}))
-    for warning in snapshot_status.get("warnings", []):
+    for warning in config.get("status_warnings", []):
         if warning in warning_messages:
             st.warning(str(warning_messages[warning]))
     _inject_weather_styles()
@@ -931,7 +981,7 @@ def render_weather_page(route_key: str = "USA") -> None:
         except (OSError, ValueError, ImportError) as exc:
             st.error(f"30年历史同期基准读取失败：{exc}")
             return
-        _render_weekly(records, normals, config, metric=metric, snapshot_date=snapshot_date)
+        _render_weekly(records, normals, config, metric=metric, snapshot_date=freshness["refreshed_at"])
     elif kind == "daily_rain":
         _render_grid(records, config, kind=kind, columns=3, metric=metric)
     elif kind == "cumulative_rain":

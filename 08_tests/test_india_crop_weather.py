@@ -104,7 +104,7 @@ def test_route_keys_and_cache_identity_are_isolated() -> None:
 
     assert cotton["config"] != sugar["config"]
     assert cotton["data"] != sugar["data"]
-    assert cotton["status"] != sugar["status"]
+    assert "status" not in cotton and "status" not in sugar
     parameters = inspect.signature(crop_weather_page._load_selected_records.__wrapped__).parameters
     assert {"data_path", "data_mtime_ns", "data_size", "crop", "country", "metric", "route_key"} <= set(parameters)
 
@@ -147,12 +147,12 @@ def test_india_daily_rain_uses_approved_28_day_window_without_filling_gaps() -> 
 
     figure = crop_weather_page._daily_rain_figure(records, region, (start, end), config)
     assert figure.layout.xaxis.tickformat == "%m-%d"
-    assert figure.layout.xaxis.rangeslider.thickness == pytest.approx(0.05)
+    assert figure.layout.xaxis.rangeslider.visible is False
     history = next(trace for trace in figure.data if trace.name == "历史降雨")
     ec = next(trace for trace in figure.data if trace.name == "EC预测")
-    assert pd.Timestamp(max(history.x)) == pd.Timestamp("2000-06-16")
-    assert list(ec.x) == [pd.Timestamp("2000-06-19")]
-    assert pd.Timestamp("2000-06-17") not in set(history.x) | set(ec.x)
+    assert pd.Timestamp(max(history.x)) == pd.Timestamp("2026-06-16")
+    assert list(ec.x) == [pd.Timestamp("2026-06-19")]
+    assert pd.Timestamp("2026-06-17") not in set(history.x) | set(ec.x)
 
 
 def test_india_history_figure_keeps_cross_year_reference_axis_and_forecast_continuation() -> None:

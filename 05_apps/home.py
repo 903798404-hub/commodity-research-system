@@ -36,7 +36,7 @@ SOYBEAN_PROGRESS_FILE = (
     DATA_DIR / "processed" / "soybean_crop_progress" / "soybeans_crop_progress_weekly_2021_2026.parquet"
 )
 FOREIGN_SEATS_STATUS_FILE = DATA_DIR / "foreign_seats_update_status.json"
-SOYBEAN_WEATHER_STATUS_FILE = DATA_DIR / "update_status" / "soybean_weather_us.json"
+WEATHER_DATA_DIR_ENV = "WEATHER_DATA_DIR"
 
 
 @dataclass(frozen=True)
@@ -200,15 +200,46 @@ def _latest_parquet_date(path: Path, column: str) -> str:
     return dates.max().strftime("%Y-%m-%d") if not dates.empty else ""
 
 
-def _status_iso_date(payload: dict[str, object], field: str) -> str:
-    """Return one validated ISO business date from a status artifact."""
-    raw_value = payload.get(field)
-    if not isinstance(raw_value, str):
-        return ""
-    try:
-        return dt.date.fromisoformat(raw_value.strip()).isoformat()
-    except ValueError:
-        return ""
+def _weather_runtime_files() -> tuple[Path, ...]:
+    """Return only the 12 dynamic weather files from the active runtime root."""
+
+    runtime_root = Path(os.getenv(WEATHER_DATA_DIR_ENV, "").strip() or DATA_DIR / "processed" / "weather")
+    if not runtime_root.is_dir():
+        return ()
+    return tuple(
+        path
+        for path in sorted(runtime_root.rglob("*_weather_*.parquet"))
+        if not path.name.endswith("_30y_normal.parquet")
+    )
+
+
+def _weather_runtime_identity() -> str:
+    """Include the mounted runtime path and every dynamic-file identity in the cache key."""
+
+    entries: list[str] = []
+    for path in _weather_runtime_files():
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append(f"{path}:{stat.st_mtime_ns}:{stat.st_size}")
+    return "|".join(entries)
+
+
+def _weather_observed_latest() -> str:
+    """Use the minimum per-file observed date as the global weather-card contract."""
+
+    latest_dates: list[pd.Timestamp] = []
+    for path in _weather_runtime_files():
+        try:
+            data = pd.read_parquet(path, columns=["date", "data_type"])
+        except (OSError, ValueError, KeyError):
+            return ""
+        observed = pd.to_datetime(data.loc[data["data_type"] == "observed", "date"], errors="coerce").dropna()
+        if observed.empty:
+            return ""
+        latest_dates.append(pd.Timestamp(observed.max()).normalize())
+    return min(latest_dates).date().isoformat() if latest_dates else ""
 
 
 @st.cache_data(show_spinner=False)
@@ -216,13 +247,13 @@ def load_home_statuses(
     spread_mtime: float,
     basis_mtime: float,
     soybean_mtime: float,
-    weather_mtime: float,
+    weather_runtime_identity: str,
     foreign_seats_mtime: float,
     usda_url: str,
     oil_world_url: str,
 ) -> dict[str, ModuleStatus]:
     """Read existing, small status artifacts for homepage summaries only."""
-    del spread_mtime, basis_mtime, soybean_mtime, weather_mtime, foreign_seats_mtime
+    del spread_mtime, basis_mtime, soybean_mtime, weather_runtime_identity, foreign_seats_mtime
 
     spread = _read_json(SPREAD_STATUS_FILE)
     spread_latest = str(spread.get("latest_date") or "")
@@ -237,9 +268,8 @@ def load_home_statuses(
         soybean_latest = _latest_parquet_date(SOYBEAN_PROGRESS_FILE, "week_ending")
     soybean_available = bool(soybean_latest) and soybean.get("status") not in {"failed", "error"}
 
-    weather = _read_json(SOYBEAN_WEATHER_STATUS_FILE)
-    weather_observed = _status_iso_date(weather, "observed_latest_date")
-    weather_available = bool(weather_observed) and weather.get("status") not in {"failed", "error"}
+    weather_observed = _weather_observed_latest()
+    weather_available = bool(weather_observed)
     weather_update_text = (
         f"天气数据更新至 {weather_observed}"
         if weather_available
@@ -337,7 +367,7 @@ def get_home_statuses() -> dict[str, ModuleStatus]:
         _mtime(SPREAD_STATUS_FILE),
         _mtime(BASIS_DATABASE_FILE),
         max(_mtime(SOYBEAN_STATUS_FILE), _mtime(SOYBEAN_PROGRESS_FILE)),
-        _mtime(SOYBEAN_WEATHER_STATUS_FILE),
+        _weather_runtime_identity(),
         _mtime(FOREIGN_SEATS_STATUS_FILE),
         os.getenv("USDA_DASHBOARD_URL", "").strip(),
         os.getenv("OIL_WORLD_DASHBOARD_URL", "").strip(),
