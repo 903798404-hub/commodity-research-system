@@ -37,73 +37,83 @@ NORMAL_DATA_FILE = PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean
 STATUS_FILE = PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_us.json"
 FIXTURE_ENV = "SOYBEAN_WEATHER_FIXTURE_PATH"
 NORMAL_FIXTURE_ENV = "SOYBEAN_WEATHER_NORMAL_FIXTURE_PATH"
+WEATHER_DATA_DIR_ENV = "WEATHER_DATA_DIR"
 PAGE_TITLE = "美国大豆天气研究"
 
+
+def _weather_data_file(relative_path: str) -> Path:
+    """Use the read-only runtime snapshot in production, with a local fallback."""
+
+    runtime_root = os.environ.get(WEATHER_DATA_DIR_ENV, "").strip()
+    if runtime_root:
+        return Path(runtime_root) / relative_path
+    return PROJECT_ROOT / "01_data" / "processed" / "weather" / relative_path
+
 WEATHER_COUNTRY_FILES = {
-    "USA": {"config": CONFIG_FILE, "data": STABLE_DATA_FILE, "normal": NORMAL_DATA_FILE, "status": STATUS_FILE, "fixture_enabled": True},
+    "USA": {"config": CONFIG_FILE, "data": _weather_data_file("soybean/us/soybean_weather_us.parquet"), "normal": _weather_data_file("soybean/us/soybean_weather_us_30y_normal.parquet"), "status": STATUS_FILE, "fixture_enabled": True},
     "BRA": {
         "config": PROJECT_ROOT / "02_configs" / "soybean_weather_br.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "br" / "soybean_weather_br.parquet",
-        "normal": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "br" / "soybean_weather_br_30y_normal.parquet",
+        "data": _weather_data_file("soybean/br/soybean_weather_br.parquet"),
+        "normal": _weather_data_file("soybean/br/soybean_weather_br_30y_normal.parquet"),
         "status": PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_br.json",
     },
     "ARG": {
         "config": PROJECT_ROOT / "02_configs" / "soybean_weather_ar.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "ar" / "soybean_weather_ar.parquet",
-        "normal": PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "ar" / "soybean_weather_ar_30y_normal.parquet",
+        "data": _weather_data_file("soybean/ar/soybean_weather_ar.parquet"),
+        "normal": _weather_data_file("soybean/ar/soybean_weather_ar_30y_normal.parquet"),
         "status": PROJECT_ROOT / "01_data" / "update_status" / "soybean_weather_ar.json",
     },
     "CAN": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_can.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "can" / "rapeseed_weather_can.parquet",
-        "normal": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "can" / "rapeseed_weather_can_30y_normal.parquet",
+        "data": _weather_data_file("rapeseed/can/rapeseed_weather_can.parquet"),
+        "normal": _weather_data_file("rapeseed/can/rapeseed_weather_can_30y_normal.parquet"),
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_can.json",
     },
     "AUS": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_aus.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "aus" / "rapeseed_weather_aus.parquet",
+        "data": _weather_data_file("rapeseed/aus/rapeseed_weather_aus.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_aus.json",
     },
     "EU": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_eu.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "eu" / "rapeseed_weather_eu.parquet",
+        "data": _weather_data_file("rapeseed/eu/rapeseed_weather_eu.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_eu.json",
     },
     "RUS": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_rus.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "rus" / "rapeseed_weather_rus.parquet",
+        "data": _weather_data_file("rapeseed/rus/rapeseed_weather_rus.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_rus.json",
     },
     "UKR": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_ukr.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "rapeseed" / "ukr" / "rapeseed_weather_ukr.parquet",
+        "data": _weather_data_file("rapeseed/ukr/rapeseed_weather_ukr.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "rapeseed_weather_ukr.json",
     },
     "MYS": {
         "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_mys.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "palm_oil" / "mys" / "palm_oil_weather_mys.parquet",
+        "data": _weather_data_file("palm_oil/mys/palm_oil_weather_mys.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_mys.json",
     },
     "IDN": {
         "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_idn.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "palm_oil" / "idn" / "palm_oil_weather_idn.parquet",
+        "data": _weather_data_file("palm_oil/idn/palm_oil_weather_idn.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "palm_oil_weather_idn.json",
     },
     "IND_COTTON": {
         "config": PROJECT_ROOT / "02_configs" / "cotton_weather_ind.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "cotton" / "ind" / "cotton_weather_ind.parquet",
+        "data": _weather_data_file("cotton/ind/cotton_weather_ind.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "cotton_weather_ind.json",
     },
     "IND_SUGARCANE": {
         "config": PROJECT_ROOT / "02_configs" / "sugarcane_weather_ind.yaml",
-        "data": PROJECT_ROOT / "01_data" / "processed" / "weather" / "sugarcane" / "ind" / "sugarcane_weather_ind.parquet",
+        "data": _weather_data_file("sugarcane/ind/sugarcane_weather_ind.parquet"),
         "normal": None,
         "status": PROJECT_ROOT / "01_data" / "update_status" / "sugarcane_weather_ind.json",
     },
