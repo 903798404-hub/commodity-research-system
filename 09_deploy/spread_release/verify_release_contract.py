@@ -166,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                         ],
                         "container_name": evidence["container_name"],
                         "config_image": evidence["config_image"],
+                        "formal_containers": evidence["formal_containers"],
                         "compose_project": plan["compose_project"],
                         "production_service": plan["production_service"],
                         "http_status": readiness.get("last_http_result", {}).get(

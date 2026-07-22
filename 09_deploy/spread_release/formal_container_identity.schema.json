@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://commodity-research-system.invalid/schemas/formal-container-identity-1.0.0.json",
+  "title": "USDA and Oil World formal container identity snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "captured_at", "containers"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "containers": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "$ref": "#/$defs/usdaIdentity" },
+        { "$ref": "#/$defs/oilWorldIdentity" }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "fullGitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "imageId": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["container_port", "protocol", "host_ip", "host_port"],
+      "properties": {
+        "container_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "protocol": { "enum": ["tcp", "udp", "sctp"] },
+        "host_ip": { "type": ["string", "null"] },
+        "host_port": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "mount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "source", "destination", "read_only"],
+      "properties": {
+        "type": { "enum": ["bind", "volume", "tmpfs", "npipe", "cluster"] },
+        "source": { "type": "string" },
+        "destination": { "type": "string", "minLength": 1 },
+        "read_only": { "type": "boolean" }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service",
+        "container_id",
+        "image_id",
+        "image_ref",
+        "oci_revision",
+        "created_at",
+        "started_at",
+        "restart_count",
+        "status",
+        "health_status",
+        "ports",
+        "mounts"
+      ],
+      "properties": {
+        "service": { "type": "string" },
+        "container_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "image_id": { "$ref": "#/$defs/imageId" },
+        "image_ref": {
+          "type": "string",
+          "minLength": 3,
+          "not": { "pattern": "(?i)(?::latest|:new)$" }
+        },
+        "oci_revision": { "$ref": "#/$defs/fullGitCommit" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "restart_count": { "type": "integer", "minimum": 0 },
+        "status": {
+          "enum": ["created", "running", "restarting", "removing", "paused", "exited", "dead"]
+        },
+        "health_status": {
+          "enum": ["healthy", "unhealthy", "starting", "not-configured"]
+        },
+        "ports": { "type": "array", "items": { "$ref": "#/$defs/port" } },
+        "mounts": { "type": "array", "items": { "$ref": "#/$defs/mount" } }
+      }
+    },
+    "usdaIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/identity" },
+        { "properties": { "service": { "const": "usda-dashboard" } } }
+      ]
+    },
+    "oilWorldIdentity": {
+      "allOf": [
+        { "$ref": "#/$defs/identity" },
+        { "properties": { "service": { "const": "oil-world-dashboard" } } }
+      ]
+    }
+  }
+}

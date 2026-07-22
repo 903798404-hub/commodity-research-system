@@ -28,17 +28,17 @@ APPLICATION = "spread-dashboard"
 COMPOSE_PROJECT = "market-data"
 COMPOSE_SERVICE = "spread-dashboard"
 PRODUCTION_CONTAINER = "spread-dashboard"
-SCHEMA_VERSION = "2.4.0"
-CANDIDATE_RESULT_SCHEMA_VERSION = "1.3.0"
-DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.3.0"
-DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.2.0"
+SCHEMA_VERSION = "2.5.0"
+CANDIDATE_RESULT_SCHEMA_VERSION = "1.4.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.4.0"
+DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.3.0"
 DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION = "1.0.0"
 DEPLOYMENT_RESULT_BUNDLE_FILENAME = "deployment_result.bundle.manifest.json"
 DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES = (
     "deployment_result.json",
     "deployment_result.manifest.json",
 )
-ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.3.0"
+ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.4.0"
 ARTIFACT_MANIFEST_FILENAMES = {
     "release": "release.manifest.json",
     "candidate_result": "candidate_result.manifest.json",
@@ -119,6 +119,28 @@ RUNTIME_ENVIRONMENT_CONTRACT = {
     "weather_runtime_mount": copy.deepcopy(WEATHER_RUNTIME_MOUNT_CONTRACT),
 }
 PRODUCTION_SERVICE_SCOPE = (COMPOSE_SERVICE,)
+FORMAL_CONTAINER_NAMES = ("usda-dashboard", "oil-world-dashboard")
+FORMAL_CONTAINER_IDENTITY_SCHEMA_VERSION = "1.0.0"
+FORMAL_CONTAINER_IDENTITY_FIELDS = (
+    "container_id",
+    "image_id",
+    "image_ref",
+    "oci_revision",
+    "created_at",
+    "started_at",
+    "restart_count",
+    "status",
+    "health_status",
+    "ports",
+    "mounts",
+)
+FORMAL_CONTAINER_IDENTITY_CONTRACT = {
+    "schema_version": FORMAL_CONTAINER_IDENTITY_SCHEMA_VERSION,
+    "services": list(FORMAL_CONTAINER_NAMES),
+    "required_fields": list(FORMAL_CONTAINER_IDENTITY_FIELDS),
+    "comparison": "exact_after_canonical_normalization",
+    "fail_closed": True,
+}
 PRODUCTION_DATA_MOUNTS = {
     "01_data": "/app/01_data",
     "06_outputs": "/app/06_outputs",
@@ -259,6 +281,8 @@ class ReleaseRuntime(Protocol):
 
     def container_record(self, container_name: str) -> dict[str, Any]: ...
 
+    def formal_container_identity(self, container_name: str) -> dict[str, Any]: ...
+
     def container_exists(self, container_name: str) -> bool: ...
 
     def read_candidate_release(self, container_name: str) -> dict[str, Any]: ...
@@ -349,6 +373,164 @@ class DockerReleaseRuntime:
             "image_id": image_id,
             "config_image": config_image,
             "runtime_git_commit": runtime_git_commit,
+        }
+
+    def formal_container_identity(self, container_name: str) -> dict[str, Any]:
+        if container_name not in FORMAL_CONTAINER_NAMES:
+            raise ContractError(f"unsupported formal container: {container_name}")
+        payload = _load_docker_array(
+            self.runner.run(["docker", "inspect", container_name]),
+            f"container {container_name}",
+        )
+        container_id = payload.get("Id")
+        if not isinstance(container_id, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", container_id
+        ):
+            raise ContractError(f"container {container_name} has no full container ID")
+        image_id = payload.get("Image")
+        validate_image_id(image_id, f"container {container_name} Image")
+        image_ref = payload.get("Config", {}).get("Image")
+        if not isinstance(image_ref, str) or not image_ref:
+            raise ContractError(f"container {container_name} has no Config.Image")
+        last_component = image_ref.rsplit("/", 1)[-1]
+        if ":" not in last_component:
+            raise ContractError(
+                f"container {container_name} image reference must have an explicit tag"
+            )
+        tag = last_component.rsplit(":", 1)[-1].casefold()
+        if tag in {"latest", "new"}:
+            raise ContractError(
+                f"container {container_name} image reference uses an ambiguous tag"
+            )
+        image = self.image_record(image_ref)
+        if image.get("id") != image_id:
+            raise ContractError(
+                f"container {container_name} image tag does not resolve to its Image ID"
+            )
+        revision = (image.get("labels") or {}).get(
+            "org.opencontainers.image.revision"
+        )
+        validate_full_git_commit(revision)
+        created_at = payload.get("Created")
+        state = payload.get("State") or {}
+        started_at = state.get("StartedAt")
+        validate_build_time(created_at)
+        validate_build_time(started_at)
+        restart_count = payload.get("RestartCount")
+        if not isinstance(restart_count, int) or isinstance(restart_count, bool):
+            raise ContractError(f"container {container_name} RestartCount is invalid")
+        if restart_count < 0:
+            raise ContractError(f"container {container_name} RestartCount is negative")
+        status = state.get("Status")
+        if status not in {
+            "created",
+            "running",
+            "restarting",
+            "removing",
+            "paused",
+            "exited",
+            "dead",
+        }:
+            raise ContractError(f"container {container_name} status is invalid")
+        health = state.get("Health")
+        health_status = (
+            health.get("Status") if isinstance(health, dict) else "not-configured"
+        )
+        if health_status not in {
+            "healthy",
+            "unhealthy",
+            "starting",
+            "not-configured",
+        }:
+            raise ContractError(f"container {container_name} health status is invalid")
+        ports: list[dict[str, Any]] = []
+        network_ports = (payload.get("NetworkSettings") or {}).get("Ports") or {}
+        if not isinstance(network_ports, dict):
+            raise ContractError(f"container {container_name} ports are invalid")
+        for container_port, bindings in network_ports.items():
+            match = re.fullmatch(r"([0-9]{1,5})/(tcp|udp|sctp)", str(container_port))
+            if not match:
+                raise ContractError(f"container {container_name} port key is invalid")
+            normalized_bindings = bindings if isinstance(bindings, list) and bindings else [None]
+            for binding in normalized_bindings:
+                host_ip = None
+                host_port = None
+                if binding is not None:
+                    if not isinstance(binding, dict):
+                        raise ContractError(
+                            f"container {container_name} port binding is invalid"
+                        )
+                    host_ip = binding.get("HostIp") or None
+                    raw_host_port = binding.get("HostPort") or None
+                    if raw_host_port is not None:
+                        if not str(raw_host_port).isdigit():
+                            raise ContractError(
+                                f"container {container_name} host port is invalid"
+                            )
+                        host_port = int(raw_host_port)
+                ports.append(
+                    {
+                        "container_port": int(match.group(1)),
+                        "protocol": match.group(2),
+                        "host_ip": host_ip,
+                        "host_port": host_port,
+                    }
+                )
+        ports.sort(
+            key=lambda item: (
+                item["container_port"],
+                item["protocol"],
+                item["host_ip"] or "",
+                item["host_port"] if item["host_port"] is not None else -1,
+            )
+        )
+        mounts: list[dict[str, Any]] = []
+        raw_mounts = payload.get("Mounts") or []
+        if not isinstance(raw_mounts, list):
+            raise ContractError(f"container {container_name} mounts are invalid")
+        for mount in raw_mounts:
+            if not isinstance(mount, dict):
+                raise ContractError(f"container {container_name} mount is invalid")
+            mount_type = mount.get("Type")
+            source = mount.get("Source")
+            destination = mount.get("Destination")
+            rw = mount.get("RW")
+            if (
+                mount_type not in {"bind", "volume", "tmpfs", "npipe", "cluster"}
+                or not isinstance(source, str)
+                or not isinstance(destination, str)
+                or not isinstance(rw, bool)
+            ):
+                raise ContractError(f"container {container_name} mount fields are invalid")
+            mounts.append(
+                {
+                    "type": mount_type,
+                    "source": source,
+                    "destination": destination,
+                    "read_only": not rw,
+                }
+            )
+        mounts.sort(
+            key=lambda item: (
+                item["type"],
+                item["source"],
+                item["destination"],
+                item["read_only"],
+            )
+        )
+        return {
+            "service": container_name,
+            "container_id": container_id,
+            "image_id": image_id,
+            "image_ref": image_ref,
+            "oci_revision": revision,
+            "created_at": created_at,
+            "started_at": started_at,
+            "restart_count": restart_count,
+            "status": status,
+            "health_status": health_status,
+            "ports": ports,
+            "mounts": mounts,
         }
 
     def container_exists(self, container_name: str) -> bool:
@@ -690,6 +872,187 @@ def validate_build_time(value: Any) -> datetime:
     if parsed.tzinfo is None:
         raise ContractError("build_time must include an explicit timezone")
     return parsed
+
+
+def formal_evidence_sha256(value: Mapping[str, Any]) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def validate_formal_container_snapshot(
+    snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        raise ContractError("formal container snapshot must be an object")
+    validate_against_schema(
+        snapshot,
+        load_schema(Path(__file__).with_name("formal_container_identity.schema.json")),
+    )
+    if snapshot.get("schema_version") != FORMAL_CONTAINER_IDENTITY_SCHEMA_VERSION:
+        raise ContractError("formal container snapshot schema_version mismatch")
+    validate_build_time(snapshot.get("captured_at"))
+    containers = snapshot.get("containers")
+    if not isinstance(containers, list):
+        raise ContractError("formal container snapshot containers are missing")
+    services = [item.get("service") for item in containers if isinstance(item, dict)]
+    if services != list(FORMAL_CONTAINER_NAMES):
+        raise ContractError(
+            "formal container snapshot must contain USDA and Oil World in canonical order"
+        )
+    for item in containers:
+        missing_fields = [
+            field for field in FORMAL_CONTAINER_IDENTITY_FIELDS if field not in item
+        ]
+        if missing_fields:
+            raise ContractError(
+                "formal container identity fields are missing: "
+                + ", ".join(missing_fields)
+            )
+        container_id = item.get("container_id")
+        if not isinstance(container_id, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", container_id
+        ):
+            raise ContractError("formal container ID must be full lowercase hex")
+        validate_image_id(item.get("image_id"), "formal container Image ID")
+        validate_full_git_commit(item.get("oci_revision"))
+        validate_build_time(item.get("created_at"))
+        validate_build_time(item.get("started_at"))
+        image_ref = item.get("image_ref")
+        if not isinstance(image_ref, str) or not image_ref:
+            raise ContractError("formal container image_ref is missing")
+        last_component = image_ref.rsplit("/", 1)[-1]
+        if ":" not in last_component or last_component.rsplit(":", 1)[-1].casefold() in {
+            "latest",
+            "new",
+        }:
+            raise ContractError("formal container image_ref must use an explicit stable tag")
+        restart_count = item.get("restart_count")
+        if (
+            not isinstance(restart_count, int)
+            or isinstance(restart_count, bool)
+            or restart_count < 0
+        ):
+            raise ContractError("formal container RestartCount is invalid")
+        ports = item.get("ports")
+        mounts = item.get("mounts")
+        if ports != sorted(
+            ports,
+            key=lambda entry: (
+                entry["container_port"],
+                entry["protocol"],
+                entry["host_ip"] or "",
+                entry["host_port"] if entry["host_port"] is not None else -1,
+            ),
+        ):
+            raise ContractError("formal container ports are not in canonical order")
+        if mounts != sorted(
+            mounts,
+            key=lambda entry: (
+                entry["type"],
+                entry["source"],
+                entry["destination"],
+                entry["read_only"],
+            ),
+        ):
+            raise ContractError("formal container mounts are not in canonical order")
+    return copy.deepcopy(dict(snapshot))
+
+
+def capture_formal_container_snapshot(
+    runtime: ReleaseRuntime,
+    *,
+    captured_at: str | None = None,
+) -> dict[str, Any]:
+    timestamp = captured_at or datetime.now(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    snapshot = {
+        "schema_version": FORMAL_CONTAINER_IDENTITY_SCHEMA_VERSION,
+        "captured_at": timestamp,
+        "containers": [
+            runtime.formal_container_identity(name) for name in FORMAL_CONTAINER_NAMES
+        ],
+    }
+    return validate_formal_container_snapshot(snapshot)
+
+
+def compare_formal_container_snapshots(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    before_phase: str,
+    after_phase: str,
+) -> dict[str, Any]:
+    validated_before = validate_formal_container_snapshot(before)
+    validated_after = validate_formal_container_snapshot(after)
+    differences: list[dict[str, Any]] = []
+    before_by_service = {
+        item["service"]: item for item in validated_before["containers"]
+    }
+    after_by_service = {
+        item["service"]: item for item in validated_after["containers"]
+    }
+    for service in FORMAL_CONTAINER_NAMES:
+        for field in FORMAL_CONTAINER_IDENTITY_FIELDS:
+            before_value = before_by_service[service][field]
+            after_value = after_by_service[service][field]
+            if before_value != after_value:
+                differences.append(
+                    {
+                        "service": service,
+                        "field": field,
+                        "before": copy.deepcopy(before_value),
+                        "after": copy.deepcopy(after_value),
+                    }
+                )
+    evidence = {
+        "before_phase": before_phase,
+        "after_phase": after_phase,
+        "before": validated_before,
+        "after": validated_after,
+        "compared_fields": list(FORMAL_CONTAINER_IDENTITY_FIELDS),
+        "differences": differences,
+        "formal_containers_unchanged": not differences,
+    }
+    assert_no_sensitive_values(evidence, "formal container identity evidence")
+    return evidence
+
+
+def require_formal_containers_unchanged(
+    evidence: Mapping[str, Any], description: str
+) -> None:
+    if not isinstance(evidence, dict):
+        raise ContractError(f"{description} formal container evidence is missing")
+    validate_formal_container_snapshot(evidence.get("before") or {})
+    validate_formal_container_snapshot(evidence.get("after") or {})
+    recomputed = compare_formal_container_snapshots(
+        evidence["before"],
+        evidence["after"],
+        before_phase=str(evidence.get("before_phase")),
+        after_phase=str(evidence.get("after_phase")),
+    )
+    if dict(evidence) != recomputed:
+        raise ContractError(f"{description} formal container comparison is not derived")
+    if recomputed["formal_containers_unchanged"] is not True:
+        raise ContractError(f"{description} formal containers changed")
+
+
+def write_formal_container_snapshot(
+    path: Path, snapshot: Mapping[str, Any]
+) -> Path:
+    target = path.resolve()
+    validated = validate_formal_container_snapshot(snapshot)
+    _write_json_exclusive(
+        target,
+        validated,
+        description="formal container identity snapshot",
+    )
+    return target
 
 
 def validate_source(value: Any) -> str:
@@ -1257,6 +1620,18 @@ def create_artifact_manifest(
         "Z",
     )
     validate_build_time(timestamp)
+    try:
+        target_payload = json.loads(target_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot read {artifact_type} target evidence: {exc}") from exc
+    evidence_key = (
+        "formal_container_identity_contract"
+        if artifact_type == "release"
+        else "formal_containers"
+    )
+    formal_evidence = target_payload.get(evidence_key)
+    if not isinstance(formal_evidence, dict):
+        raise ContractError(f"{artifact_type} target is missing {evidence_key}")
     manifest = {
         "schema_version": ARTIFACT_MANIFEST_SCHEMA_VERSION,
         "artifact_type": artifact_type,
@@ -1269,6 +1644,7 @@ def create_artifact_manifest(
         "git_commit": git_commit,
         "git_tree": git_tree,
         "image_id": image_id,
+        "formal_evidence_sha256": formal_evidence_sha256(formal_evidence),
     }
     measured_artifact = artifact_type in {"candidate_result", "deployment_result"}
     if measured_artifact:
@@ -1365,6 +1741,22 @@ def validate_artifact_manifest(
         raise ContractError(f"{artifact_type} artifact SHA-256 mismatch")
     if manifest.get("target_size_bytes") != target_path.stat().st_size:
         raise ContractError(f"{artifact_type} artifact byte size mismatch")
+    try:
+        target_payload = json.loads(target_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot read {artifact_type} target evidence: {exc}") from exc
+    evidence_key = (
+        "formal_container_identity_contract"
+        if artifact_type == "release"
+        else "formal_containers"
+    )
+    formal_evidence = target_payload.get(evidence_key)
+    if not isinstance(formal_evidence, dict):
+        raise ContractError(f"{artifact_type} target is missing {evidence_key}")
+    if manifest.get("formal_evidence_sha256") != formal_evidence_sha256(
+        formal_evidence
+    ):
+        raise ContractError(f"{artifact_type} formal evidence SHA-256 mismatch")
     expected_identity = {
         "release_id": expected_release_id,
         "git_commit": expected_git_commit,
@@ -1609,6 +2001,11 @@ def validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) ->
             raise ContractError(
                 "readiness_policy must exactly equal the versioned deployment default"
             )
+        if (
+            manifest.get("formal_container_identity_contract")
+            != FORMAL_CONTAINER_IDENTITY_CONTRACT
+        ):
+            raise ContractError("formal container identity contract mismatch")
     if schema_version == "1.0.0":
         validate_sha256(
             manifest.get("compose_config_sha256"),
@@ -2238,6 +2635,14 @@ def validate_candidate_result(
     ):
         if identity.get(key) != expected_value:
             raise ContractError(f"candidate result identity {key} mismatch")
+    formal_containers = result.get("formal_containers")
+    require_formal_containers_unchanged(
+        formal_containers, "candidate result"
+    )
+    if formal_containers.get("before_phase") != "before-candidate" or formal_containers.get(
+        "after_phase"
+    ) != "after-candidate":
+        raise ContractError("candidate result formal container phases mismatch")
     checks = result.get("checks")
     if not isinstance(checks, dict):
         raise ContractError("candidate result checks are missing")
@@ -2250,13 +2655,18 @@ def validate_candidate_result(
     if not isinstance(pages, dict) or pages.get("status") != "passed":
         raise ContractError("candidate result page validation did not pass")
     for key, expected_value in (
-        ("formal_containers_unchanged", True),
         ("formal_git_unchanged", True),
         ("data_files_unchanged", True),
         ("production_switch_performed", False),
     ):
         if checks.get(key) is not expected_value:
             raise ContractError(f"candidate result check {key} mismatch")
+    if checks.get("formal_containers_unchanged") is not formal_containers.get(
+        "formal_containers_unchanged"
+    ):
+        raise ContractError(
+            "candidate result formal_containers_unchanged is not derived"
+        )
     readiness = checks.get("readiness")
     if not isinstance(readiness, dict) or readiness.get("status") != "ready":
         raise ContractError("candidate result readiness validation did not pass")
@@ -2288,6 +2698,19 @@ def create_candidate_result(
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     candidate_identity = verify_candidate(manifest, runtime)
+    formal_before = checks.get("formal_containers_before")
+    if not isinstance(formal_before, dict):
+        raise ContractError(
+            "candidate checks must include a before-candidate formal container snapshot"
+        )
+    formal_after = capture_formal_container_snapshot(runtime)
+    formal_containers = compare_formal_container_snapshots(
+        formal_before,
+        formal_after,
+        before_phase="before-candidate",
+        after_phase="after-candidate",
+    )
+    require_formal_containers_unchanged(formal_containers, "candidate result")
     timestamp = generated_at or datetime.now(timezone.utc).isoformat().replace(
         "+00:00",
         "Z",
@@ -2322,14 +2745,15 @@ def create_candidate_result(
                 "embedded_release_sha256"
             ],
         },
+        "formal_containers": formal_containers,
         "log_summary": copy.deepcopy(dict(readiness.get("log_summary") or {})),
         "checks": {
             "readiness": copy.deepcopy(dict(readiness)),
             "http": copy.deepcopy(dict(checks.get("http") or {})),
             "pages": copy.deepcopy(dict(checks.get("pages") or {})),
-            "formal_containers_unchanged": checks.get(
+            "formal_containers_unchanged": formal_containers[
                 "formal_containers_unchanged"
-            ),
+            ],
             "formal_git_unchanged": checks.get("formal_git_unchanged"),
             "data_files_unchanged": checks.get("data_files_unchanged"),
             "production_switch_performed": checks.get(
@@ -2436,9 +2860,18 @@ def validate_deployment_plan(
     candidate_result_file = Path(str(plan.get("candidate_result_file", "")))
     if not candidate_result_file.is_absolute():
         raise ContractError("deployment plan candidate_result_file must be absolute")
-    load_candidate_result(candidate_result_file, manifest)
+    candidate_result = load_candidate_result(candidate_result_file, manifest)
     if hash_file(candidate_result_file) != plan.get("candidate_result_sha256"):
         raise ContractError("candidate result changed after deployment plan sealing")
+    formal_containers = plan.get("formal_containers")
+    require_formal_containers_unchanged(formal_containers, "deployment plan")
+    if (
+        formal_containers.get("before_phase") != "after-candidate"
+        or formal_containers.get("after_phase") != "pre-deploy"
+        or formal_containers.get("before")
+        != candidate_result.get("formal_containers", {}).get("after")
+    ):
+        raise ContractError("deployment plan formal container baseline mismatch")
     if plan.get("candidate_container_removed") is not True:
         raise ContractError("deployment plan requires the candidate container to be removed")
     allowed_differences = plan.get("allowed_candidate_production_differences")
@@ -2578,12 +3011,20 @@ def create_deployment_plan(
 
     production_environment = parse_production_env(production_env_file)
     validate_production_env(production_environment, manifest)
-    load_candidate_result(candidate_result_file, manifest)
+    candidate_result = load_candidate_result(candidate_result_file, manifest)
     if runtime.container_exists(manifest["candidate_container_name"]):
         raise ContractError(
             "candidate container still exists; remove it before sealing deployment plan"
         )
     _verify_image_identity(manifest, runtime)
+    pre_deploy_formal_snapshot = capture_formal_container_snapshot(runtime)
+    formal_containers = compare_formal_container_snapshots(
+        candidate_result["formal_containers"]["after"],
+        pre_deploy_formal_snapshot,
+        before_phase="after-candidate",
+        after_phase="pre-deploy",
+    )
+    require_formal_containers_unchanged(formal_containers, "deployment plan")
 
     candidate_compose, candidate_raw, candidate_images = runtime.compose_config(
         tool_repo_root,
@@ -2667,6 +3108,7 @@ def create_deployment_plan(
         "candidate_result_file": str(candidate_result_file),
         "candidate_result_sha256": hash_file(candidate_result_file),
         "candidate_container_removed": True,
+        "formal_containers": formal_containers,
         "production_env_file": str(production_env_file),
         "production_env_sha256": hash_file(production_env_file),
         "USDA_DASHBOARD_URL": production_environment["USDA_DASHBOARD_URL"],
@@ -2943,6 +3385,13 @@ def verify_pre_deploy(
     for key in RUNTIME_URL_KEYS:
         if rendered_environment[key] != production_environment[key]:
             raise ContractError(f"production Compose rendered unexpected {key}")
+    formal_containers = compare_formal_container_snapshots(
+        deployment_plan["formal_containers"]["after"],
+        capture_formal_container_snapshot(runtime),
+        before_phase="pre-deploy",
+        after_phase="pre-switch",
+    )
+    require_formal_containers_unchanged(formal_containers, "pre-deploy")
     return {
         "phase": "pre-deploy",
         **image_evidence,
@@ -2954,6 +3403,7 @@ def verify_pre_deploy(
         "tool_repo_root": str(tool_repo_root),
         "production_compose_file": str(production_compose_file),
         "production_project_dir": str(production_project_dir),
+        "formal_containers": formal_containers,
     }
 
 
@@ -3073,6 +3523,13 @@ def verify_post_deploy(
     source = labels.get("org.opencontainers.image.source")
     validate_source(source)
     _validate_embedded_release(release, manifest, source)
+    formal_containers = compare_formal_container_snapshots(
+        deployment_plan["formal_containers"]["after"],
+        capture_formal_container_snapshot(runtime),
+        before_phase="pre-deploy",
+        after_phase="post-deploy",
+    )
+    require_formal_containers_unchanged(formal_containers, "post-deploy")
     return {
         "phase": "post-deploy",
         "container_name": PRODUCTION_CONTAINER,
@@ -3084,6 +3541,7 @@ def verify_post_deploy(
         "embedded_release": release,
         "embedded_release_sha256": release_sha256,
         "deployment_plan_status": deployment_plan["plan_status"],
+        "formal_containers": formal_containers,
     }
 
 
@@ -3388,6 +3846,9 @@ def create_manifest(
             production_environment
         ),
         "readiness_policy": copy.deepcopy(DEFAULT_READINESS_POLICY),
+        "formal_container_identity_contract": copy.deepcopy(
+            FORMAL_CONTAINER_IDENTITY_CONTRACT
+        ),
         "dockerfile_sha256": hash_file(repository / "Dockerfile"),
         "dockerignore_sha256": hash_file(repository / ".dockerignore"),
         "required_config_sha256": hash_file(
@@ -3505,6 +3966,17 @@ def validate_deployment_result(
     for key, expected_value in expected.items():
         if result.get(key) != expected_value:
             raise ContractError(f"deployment result {key} mismatch")
+    formal_containers = result.get("formal_containers")
+    require_formal_containers_unchanged(
+        formal_containers, "deployment result"
+    )
+    if (
+        formal_containers.get("before_phase") != "pre-deploy"
+        or formal_containers.get("after_phase") != "post-deploy"
+        or formal_containers.get("before")
+        != deployment_plan.get("formal_containers", {}).get("after")
+    ):
+        raise ContractError("deployment result formal container baseline mismatch")
     weather_facts = weather_candidate_facts(manifest.get("weather_candidate_mode"))
     for key, expected_value in weather_facts.items():
         if result.get(key) != expected_value:

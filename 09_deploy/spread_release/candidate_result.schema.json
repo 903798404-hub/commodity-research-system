@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-candidate-result-1.3.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-candidate-result-1.4.0.json",
   "title": "spread-dashboard validated candidate result",
   "type": "object",
   "additionalProperties": false,
@@ -24,12 +24,13 @@
     "processed_next_created",
     "processed_current_modified",
     "identity",
+    "formal_containers",
     "log_summary",
     "checks"
   ],
   "properties": {
     "schema_version": {
-      "const": "1.3.0"
+      "const": "1.4.0"
     },
     "application": {
       "const": "spread-dashboard"
@@ -114,6 +115,9 @@
         }
       }
     },
+    "formal_containers": {
+      "$ref": "#/$defs/formalContainerEvidence"
+    },
     "log_summary": {
       "$ref": "#/$defs/logSummary"
     },
@@ -181,6 +185,20 @@
     }
   },
   "$defs": {
+    "formalContainerEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before_phase", "after_phase", "before", "after", "compared_fields", "differences", "formal_containers_unchanged"],
+      "properties": {
+        "before_phase": { "const": "before-candidate" },
+        "after_phase": { "const": "after-candidate" },
+        "before": { "type": "object" },
+        "after": { "type": "object" },
+        "compared_fields": { "type": "array", "minItems": 11, "maxItems": 11, "uniqueItems": true },
+        "differences": { "type": "array", "maxItems": 0 },
+        "formal_containers_unchanged": { "const": true }
+      }
+    },
     "weatherRuntimeContract": {
       "type": "object",
       "additionalProperties": false,

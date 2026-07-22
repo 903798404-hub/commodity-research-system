@@ -35,6 +35,8 @@ from release_contract import (  # noqa: E402
     PRODUCTION_CONTAINER,
     SPREAD_PRIMARY_KEY,
     collect_data_baseline,
+    capture_formal_container_snapshot,
+    compare_formal_container_snapshots,
     candidate_compose_environment,
     create_candidate_result,
     create_deployment_plan,
@@ -48,9 +50,11 @@ from release_contract import (  # noqa: E402
     load_schema,
     parse_production_env,
     resolve_spread_image_offline,
+    require_formal_containers_unchanged,
     validate_deployment_plan,
     validate_deployment_result_bundle,
     validate_full_git_commit,
+    validate_formal_container_snapshot,
     validate_manifest,
     validate_artifact_manifest,
     validate_production_env,
@@ -90,6 +94,12 @@ PRODUCTION_USDA_URL = "https://dashboards.example.com/usda/"
 PRODUCTION_OIL_WORLD_URL = "https://dashboards.example.com/oil-world/"
 PRODUCTION_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed/current"
 CANDIDATE_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed/next"
+USDA_CONTAINER_ID = "3" * 64
+OIL_WORLD_CONTAINER_ID = "4" * 64
+USDA_IMAGE_ID = "sha256:" + "5" * 64
+OIL_WORLD_IMAGE_ID = "sha256:" + "6" * 64
+USDA_IMAGE_REF = f"market-data-usda-dashboard:{GIT_COMMIT}"
+OIL_WORLD_IMAGE_REF = f"market-data-oil-world-dashboard:{GIT_COMMIT}"
 
 
 class FakeGitRunner:
@@ -151,6 +161,47 @@ class ContainerInspectRunner:
                 }
             ]
         )
+
+
+class FormalContainerInspectRunner:
+    def run(self, command, *, cwd=None, env=None) -> str:
+        del cwd, env
+        if command == ["docker", "inspect", "usda-dashboard"]:
+            return json.dumps([self._container_payload()])
+        if command == ["docker", "image", "inspect", USDA_IMAGE_REF]:
+            return json.dumps(
+                [{
+                    "Id": USDA_IMAGE_ID,
+                    "Config": {
+                        "Labels": {"org.opencontainers.image.revision": GIT_COMMIT}
+                    },
+                }]
+            )
+        raise AssertionError(f"unexpected command: {command}")
+
+    @staticmethod
+    def _container_payload() -> dict[str, object]:
+        return {
+            "Id": USDA_CONTAINER_ID,
+            "Image": USDA_IMAGE_ID,
+            "Created": BUILD_TIME,
+            "RestartCount": 2,
+            "Config": {"Image": USDA_IMAGE_REF, "Env": ["SECRET=must-not-leak"]},
+            "State": {
+                "Status": "running",
+                "StartedAt": BUILD_TIME,
+                "Health": {"Status": "healthy"},
+            },
+            "NetworkSettings": {
+                "Ports": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}]}
+            },
+            "Mounts": [{
+                "Type": "bind",
+                "Source": "/srv/usda/data",
+                "Destination": "/usr/share/nginx/html/data",
+                "RW": False,
+            }],
+        }
 
 
 class FakeReleaseRuntime:
@@ -223,6 +274,56 @@ class FakeReleaseRuntime:
         self.container_record_calls: list[str] = []
         self.dataset_container_names: list[str] = []
         self.candidate_container_exists = False
+        self.formal_records = {
+            "usda-dashboard": {
+                "service": "usda-dashboard",
+                "container_id": USDA_CONTAINER_ID,
+                "image_id": USDA_IMAGE_ID,
+                "image_ref": USDA_IMAGE_REF,
+                "oci_revision": GIT_COMMIT,
+                "created_at": BUILD_TIME,
+                "started_at": BUILD_TIME,
+                "restart_count": 0,
+                "status": "running",
+                "health_status": "healthy",
+                "ports": [{
+                    "container_port": 80,
+                    "protocol": "tcp",
+                    "host_ip": "0.0.0.0",
+                    "host_port": 8502,
+                }],
+                "mounts": [{
+                    "type": "bind",
+                    "source": "/home/ubuntu/market-data/11_apps/usda/public/data",
+                    "destination": "/usr/share/nginx/html/data",
+                    "read_only": True,
+                }],
+            },
+            "oil-world-dashboard": {
+                "service": "oil-world-dashboard",
+                "container_id": OIL_WORLD_CONTAINER_ID,
+                "image_id": OIL_WORLD_IMAGE_ID,
+                "image_ref": OIL_WORLD_IMAGE_REF,
+                "oci_revision": GIT_COMMIT,
+                "created_at": BUILD_TIME,
+                "started_at": BUILD_TIME,
+                "restart_count": 0,
+                "status": "running",
+                "health_status": "not-configured",
+                "ports": [{
+                    "container_port": 80,
+                    "protocol": "tcp",
+                    "host_ip": "0.0.0.0",
+                    "host_port": 8503,
+                }],
+                "mounts": [{
+                    "type": "bind",
+                    "source": "/home/ubuntu/market-data/11_apps/oil-world/public/data",
+                    "destination": "/usr/share/nginx/html/data",
+                    "read_only": True,
+                }],
+            },
+        }
 
     def image_record(self, image_ref: str) -> dict[str, object]:
         if image_ref == self.image_ref:
@@ -243,6 +344,14 @@ class FakeReleaseRuntime:
         if container_name == "spread-dashboard":
             return dict(self.production_record)
         raise ContractError(f"unknown container in fixture: {container_name}")
+
+    def formal_container_identity(self, container_name: str) -> dict[str, object]:
+        try:
+            return copy.deepcopy(self.formal_records[container_name])
+        except KeyError as exc:
+            raise ContractError(
+                f"unknown formal container in fixture: {container_name}"
+            ) from exc
 
     def container_exists(self, container_name: str) -> bool:
         assert container_name == CANDIDATE_CONTAINER
@@ -538,7 +647,9 @@ def build_candidate_result_fixture(
                 "root": 200,
             },
             "pages": {"status": page_status},
-            "formal_containers_unchanged": True,
+            "formal_containers_before": capture_formal_container_snapshot(
+                runtime, captured_at=BUILD_TIME
+            ),
             "formal_git_unchanged": True,
             "data_files_unchanged": True,
             "production_switch_performed": False,
@@ -628,7 +739,7 @@ def build_deployment_result(
         encoding="utf-8",
     )
     return {
-        "schema_version": "1.2.0",
+        "schema_version": "1.3.0",
         "application": APPLICATION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
@@ -642,6 +753,12 @@ def build_deployment_result(
         "runtime_git_commit_verified": True,
         "container_name": PRODUCTION_CONTAINER,
         "config_image": manifest["image_ref"],
+        "formal_containers": compare_formal_container_snapshots(
+            plan["formal_containers"]["after"],
+            plan["formal_containers"]["after"],
+            before_phase="pre-deploy",
+            after_phase="post-deploy",
+        ),
         "compose_project": plan["compose_project"],
         "production_service": plan["production_service"],
         "deployment_plan": str(plan_path),
@@ -964,6 +1081,7 @@ def test_manifest_is_valid_draft_2020_12_schema(tmp_path: Path) -> None:
         "deployment_plan.schema.json",
         "deployment_result.schema.json",
         "deployment_result_bundle.schema.json",
+        "formal_container_identity.schema.json",
     ],
 )
 def test_release_contract_schemas_are_valid_draft_2020_12(
@@ -974,21 +1092,155 @@ def test_release_contract_schemas_are_valid_draft_2020_12(
     )
 
 
+def test_formal_container_snapshot_requires_every_identity_field() -> None:
+    runtime = FakeReleaseRuntime()
+    snapshot = capture_formal_container_snapshot(runtime, captured_at=BUILD_TIME)
+    validate_formal_container_snapshot(snapshot)
+
+    required_fields = (
+        "container_id",
+        "image_id",
+        "image_ref",
+        "oci_revision",
+        "created_at",
+        "started_at",
+        "restart_count",
+        "status",
+        "health_status",
+        "ports",
+        "mounts",
+    )
+    for field in required_fields:
+        missing = copy.deepcopy(snapshot)
+        missing["containers"][0].pop(field)
+        with pytest.raises(ContractError):
+            validate_formal_container_snapshot(missing)
+
+
+def test_docker_formal_identity_records_full_fields_without_environment_values() -> None:
+    identity = DockerReleaseRuntime(
+        runner=FormalContainerInspectRunner()
+    ).formal_container_identity("usda-dashboard")
+
+    assert identity == {
+        "service": "usda-dashboard",
+        "container_id": USDA_CONTAINER_ID,
+        "image_id": USDA_IMAGE_ID,
+        "image_ref": USDA_IMAGE_REF,
+        "oci_revision": GIT_COMMIT,
+        "created_at": BUILD_TIME,
+        "started_at": BUILD_TIME,
+        "restart_count": 2,
+        "status": "running",
+        "health_status": "healthy",
+        "ports": [{
+            "container_port": 80,
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1",
+            "host_port": 8080,
+        }],
+        "mounts": [{
+            "type": "bind",
+            "source": "/srv/usda/data",
+            "destination": "/usr/share/nginx/html/data",
+            "read_only": True,
+        }],
+    }
+    assert "SECRET" not in json.dumps(identity)
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("container_id", "7" * 64),
+        ("image_id", "sha256:" + "8" * 64),
+        ("image_ref", f"market-data-usda-dashboard:{OLD_GIT_COMMIT}"),
+        ("oci_revision", OLD_GIT_COMMIT),
+        ("created_at", "2026-07-17T08:00:01Z"),
+        ("started_at", "2026-07-17T08:00:01Z"),
+        ("restart_count", 1),
+        ("status", "restarting"),
+        ("health_status", "unhealthy"),
+        ("ports", []),
+        ("mounts", []),
+    ],
+)
+def test_each_formal_container_identity_change_fails_closed(
+    field: str, changed_value: object
+) -> None:
+    runtime = FakeReleaseRuntime()
+    before = capture_formal_container_snapshot(runtime, captured_at=BUILD_TIME)
+    after = copy.deepcopy(before)
+    after["captured_at"] = "2026-07-17T08:00:02Z"
+    after["containers"][0][field] = changed_value
+
+    evidence = compare_formal_container_snapshots(
+        before,
+        after,
+        before_phase="before-candidate",
+        after_phase="after-candidate",
+    )
+    assert evidence["formal_containers_unchanged"] is False
+    assert evidence["differences"] == [
+        {
+            "service": "usda-dashboard",
+            "field": field,
+            "before": before["containers"][0][field],
+            "after": changed_value,
+        }
+    ]
+    with pytest.raises(ContractError, match="formal containers changed"):
+        require_formal_containers_unchanged(evidence, "test")
+
+
+def test_candidate_result_rejects_changed_formal_container_identity(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    before = capture_formal_container_snapshot(runtime, captured_at=BUILD_TIME)
+    runtime.formal_records["oil-world-dashboard"]["restart_count"] = 1
+
+    with pytest.raises(ContractError, match="formal containers changed"):
+        create_candidate_result(
+            manifest=manifest,
+            runtime=runtime,
+            readiness={
+                "schema_version": "1.1.0",
+                "status": "ready",
+                "container": manifest["candidate_container_name"],
+                "expected_image_id": manifest["image_id"],
+                "policy": manifest["readiness_policy"],
+                "log_summary": build_log_summary("ready\n", collected_at_utc=BUILD_TIME),
+            },
+            checks={
+                "http": {"health": 200, "host_config": 200, "root": 200},
+                "pages": {"status": "passed"},
+                "formal_containers_before": before,
+                "formal_containers_unchanged": True,
+                "formal_git_unchanged": True,
+                "data_files_unchanged": True,
+                "production_switch_performed": False,
+            },
+            generated_at=BUILD_TIME,
+        )
+
+
 def test_artifact_manifest_schema_independently_binds_type_file_and_version() -> None:
     schema = load_schema(CONTRACT_DIR / "artifact_manifest.schema.json")
     validator = jsonschema.Draft202012Validator(schema)
     candidate = {
-        "schema_version": "1.3.0",
+        "schema_version": "1.4.0",
         "artifact_type": "candidate_result",
         "target_file": "candidate_result.json",
         "target_sha256": "d" * 64,
         "target_size_bytes": 123,
-        "target_schema_version": "1.3.0",
+        "target_schema_version": "1.4.0",
         "generated_at": BUILD_TIME,
         "release_id": RELEASE_ID,
         "git_commit": GIT_COMMIT,
         "git_tree": GIT_TREE,
         "image_id": IMAGE_ID,
+        "formal_evidence_sha256": "e" * 64,
         "runtime_git_commit": GIT_COMMIT,
     }
     validator.validate(candidate)
@@ -1012,7 +1264,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     release.update(
         artifact_type="release",
         target_file="release.json",
-        target_schema_version="2.4.0",
+        target_schema_version="2.5.0",
     )
     release.pop("runtime_git_commit")
     validator.validate(release)
@@ -1025,7 +1277,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     deployment_result.update(
         artifact_type="deployment_result",
         target_file="deployment_result.json",
-        target_schema_version="1.2.0",
+        target_schema_version="1.3.0",
     )
     validator.validate(deployment_result)
     deployment_result.pop("runtime_git_commit")
@@ -1498,7 +1750,7 @@ def test_exclusive_manifest_write_preserves_existing_manifest(
         write_artifact_manifest(
             path,
             artifact_type="candidate_result",
-            target_schema_version="1.3.0",
+            target_schema_version="1.4.0",
             release_id=RELEASE_ID,
             git_commit=GIT_COMMIT,
             git_tree=GIT_TREE,
@@ -1592,6 +1844,29 @@ def test_artifact_manifest_hash_and_identity_tamper_are_rejected(
         encoding="utf-8",
     )
     with pytest.raises(ContractError, match="manifest git_tree mismatch"):
+        load_candidate_result(path, manifest)
+
+
+def test_formal_container_evidence_is_independently_sealed_by_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    path = write_candidate_result_fixture(tmp_path, manifest, runtime)
+    artifact_manifest_path = tmp_path / "candidate_result.manifest.json"
+    result = json.loads(path.read_text(encoding="utf-8"))
+    sealed = json.loads(artifact_manifest_path.read_text(encoding="utf-8"))
+
+    result["formal_containers"]["after"]["captured_at"] = (
+        "2026-07-17T08:00:03Z"
+    )
+    path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    sealed["target_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    sealed["target_size_bytes"] = path.stat().st_size
+    artifact_manifest_path.write_text(
+        json.dumps(sealed, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ContractError, match="formal evidence SHA-256 mismatch"):
         load_candidate_result(path, manifest)
 
 
@@ -2439,6 +2714,12 @@ def test_record_deployment_returns_zero_only_after_bundle_verification(
             "runtime_git_commit_verified": True,
             "container_name": PRODUCTION_CONTAINER,
             "config_image": IMAGE_REF,
+            "formal_containers": compare_formal_container_snapshots(
+                plan["formal_containers"]["after"],
+                plan["formal_containers"]["after"],
+                before_phase="pre-deploy",
+                after_phase="post-deploy",
+            ),
         },
     )
     result_path = release_directory / "deployment_result.json"
@@ -2502,6 +2783,12 @@ def test_record_deployment_returns_nonzero_when_bundle_verification_fails(
             "runtime_git_commit_verified": True,
             "container_name": PRODUCTION_CONTAINER,
             "config_image": IMAGE_REF,
+            "formal_containers": compare_formal_container_snapshots(
+                plan["formal_containers"]["after"],
+                plan["formal_containers"]["after"],
+                before_phase="pre-deploy",
+                after_phase="post-deploy",
+            ),
         },
     )
     monkeypatch.setattr(

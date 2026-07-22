@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.2.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.3.0.json",
   "title": "spread-dashboard verified production deployment result",
   "type": "object",
   "additionalProperties": false,
@@ -19,6 +19,7 @@
     "runtime_git_commit_verified",
     "container_name",
     "config_image",
+    "formal_containers",
     "compose_project",
     "production_service",
     "deployment_plan",
@@ -43,7 +44,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.2.0"
+      "const": "1.3.0"
     },
     "application": {
       "const": "spread-dashboard"
@@ -86,6 +87,9 @@
     "config_image": {
       "type": "string",
       "minLength": 1
+    },
+    "formal_containers": {
+      "$ref": "#/$defs/formalContainerEvidence"
     },
     "compose_project": {
       "const": "market-data"
@@ -147,6 +151,20 @@
     }
   },
   "$defs": {
+    "formalContainerEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before_phase", "after_phase", "before", "after", "compared_fields", "differences", "formal_containers_unchanged"],
+      "properties": {
+        "before_phase": { "const": "pre-deploy" },
+        "after_phase": { "const": "post-deploy" },
+        "before": { "type": "object" },
+        "after": { "type": "object" },
+        "compared_fields": { "type": "array", "minItems": 11, "maxItems": 11, "uniqueItems": true },
+        "differences": { "type": "array", "maxItems": 0 },
+        "formal_containers_unchanged": { "const": true }
+      }
+    },
     "weatherRuntimeContract": {
       "type": "object",
       "additionalProperties": false,

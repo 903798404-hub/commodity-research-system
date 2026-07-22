@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.3.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.5.0.json",
   "title": "spread-dashboard immutable release manifest",
   "type": "object",
   "additionalProperties": false,
@@ -40,7 +40,7 @@
       "if": {
         "properties": {
           "schema_version": {
-            "const": "2.4.0"
+            "const": "2.5.0"
           }
         }
       },
@@ -48,7 +48,8 @@
         "required": [
           "readiness_policy",
           "runtime_environment_contract",
-          "candidate_user_url_environment"
+          "candidate_user_url_environment",
+          "formal_container_identity_contract"
         ]
       }
     }
@@ -61,7 +62,8 @@
         "2.1.0",
         "2.2.0",
         "2.3.0",
-        "2.4.0"
+        "2.4.0",
+        "2.5.0"
       ]
     },
     "application": {
@@ -156,6 +158,9 @@
     },
     "formal_git_commit": {
       "$ref": "#/$defs/fullGitCommit"
+    },
+    "formal_container_identity_contract": {
+      "type": "object"
     },
     "data_baseline": {
       "$ref": "#/$defs/dataBaseline"

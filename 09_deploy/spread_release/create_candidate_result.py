@@ -43,12 +43,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-env", type=Path)
     parser.add_argument("--readiness-result", type=Path, required=True)
     parser.add_argument(
+        "--formal-containers-before",
+        type=Path,
+        required=True,
+        help="Snapshot captured before the candidate container was started.",
+    )
+    parser.add_argument(
         "--checks-file",
         type=Path,
         required=True,
         help=(
-            "JSON object containing http, pages, formal_containers_unchanged, "
-            "formal_git_unchanged, data_files_unchanged and "
+            "JSON object containing http, pages, formal_git_unchanged, "
+            "data_files_unchanged and "
             "production_switch_performed evidence summaries."
         ),
     )
@@ -91,6 +97,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         if actual_tree != manifest["git_tree"]:
             raise ContractError("tool repository Tree SHA differs from release.json")
+        checks = load_json_object(
+            args.checks_file.resolve(),
+            "candidate checks",
+        )
+        checks["formal_containers_before"] = load_json_object(
+            args.formal_containers_before.resolve(),
+            "before-candidate formal container snapshot",
+        )
         result = create_candidate_result(
             manifest=manifest,
             runtime=DockerReleaseRuntime(),
@@ -98,10 +112,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.readiness_result.resolve(),
                 "candidate readiness result",
             ),
-            checks=load_json_object(
-                args.checks_file.resolve(),
-                "candidate checks",
-            ),
+            checks=checks,
         )
         write_candidate_result(result, output_path)
         result_manifest = artifact_manifest_path(output_path, "candidate_result")
