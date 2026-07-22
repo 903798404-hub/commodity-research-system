@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-bundle-1.0.0.json",
+  "title": "spread-dashboard sealed deployment result bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "git_commit",
+    "git_tree",
+    "image_id",
+    "runtime_git_commit",
+    "generated_at",
+    "members"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}"
+    },
+    "git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "git_tree": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "image_id": {
+      "$ref": "#/$defs/imageId"
+    },
+    "runtime_git_commit": {
+      "$ref": "#/$defs/fullGitCommit"
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 20
+    },
+    "members": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_file",
+          "target_sha256",
+          "target_size_bytes"
+        ],
+        "properties": {
+          "target_file": {
+            "enum": [
+              "deployment_result.json",
+              "deployment_result.manifest.json"
+            ]
+          },
+          "target_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "target_size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fullGitCommit": {
+      "type": "string",
+      "pattern": "[0-9a-f]{40}"
+    },
+    "imageId": {
+      "type": "string",
+      "pattern": "sha256:[0-9a-f]{64}"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "[0-9a-f]{64}"
+    }
+  }
+}

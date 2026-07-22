@@ -18,6 +18,11 @@ rollback_script="${script_dir}/rollback_spread_release.sh"
 readiness_waiter="${script_dir}/wait_for_service_ready.py"
 readiness_result="${release_directory}/production_readiness.json"
 readiness_failure="${release_directory}/production_readiness.failure.json"
+bundle_filename="$(
+    cd -- "${script_dir}"
+    python3 -c 'from release_contract import DEPLOYMENT_RESULT_BUNDLE_FILENAME; print(DEPLOYMENT_RESULT_BUNDLE_FILENAME)'
+)"
+deployment_result_bundle="${release_directory}/${bundle_filename}"
 
 python3 "${verifier}" \
     --phase pre-deploy \
@@ -104,6 +109,11 @@ python3 "${verifier}" \
     --env-file "${environment_file}" \
     --deployment-plan "${deployment_plan}" \
     --readiness-result "${readiness_result}"
+
+if [[ ! -f "${deployment_result_bundle}" ]]; then
+    echo "deployment result bundle is missing after contract verification: ${deployment_result_bundle}" >&2
+    false
+fi
 
 deployment_succeeded=1
 trap - ERR

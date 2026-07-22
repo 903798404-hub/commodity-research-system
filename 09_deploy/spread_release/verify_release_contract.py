@@ -8,6 +8,7 @@ from pathlib import Path
 from release_contract import (
     APPLICATION,
     ContractError,
+    DEPLOYMENT_RESULT_BUNDLE_FILENAME,
     DEPLOYMENT_RESULT_SCHEMA_VERSION,
     DockerReleaseRuntime,
     hash_file,
@@ -19,6 +20,9 @@ from release_contract import (
     verify_post_rollback,
     verify_pre_deploy,
     verify_pre_rollback,
+    validate_deployment_result,
+    load_schema,
+    write_deployment_result_bundle,
     write_result,
 )
 
@@ -101,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                     for name in (
                         "deployment_result.json",
                         "deployment_result.manifest.json",
+                        DEPLOYMENT_RESULT_BUNDLE_FILENAME,
                     )
                 ):
                     raise ContractError(
@@ -184,7 +189,20 @@ def main(argv: list[str] | None = None) -> int:
                         if args.result_path
                         else manifest_path.parent / "deployment_result.json"
                     )
+                    validate_deployment_result(
+                        result,
+                        manifest,
+                        plan,
+                        load_schema(
+                            SCRIPT_DIR / "deployment_result.schema.json"
+                        ),
+                    )
                     write_result(result_path, result)
+                    bundle_path = write_deployment_result_bundle(
+                        result_path,
+                        manifest,
+                        plan,
+                    )
                     evidence = {
                         **result,
                         "result_path": str(result_path),
@@ -193,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                                 "deployment_result.manifest.json"
                             )
                         ),
+                        "result_bundle": str(bundle_path),
                     }
             elif args.phase == "pre-rollback":
                 evidence = verify_pre_rollback(

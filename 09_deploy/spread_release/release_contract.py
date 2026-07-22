@@ -32,6 +32,12 @@ SCHEMA_VERSION = "2.3.0"
 CANDIDATE_RESULT_SCHEMA_VERSION = "1.2.0"
 DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.2.0"
 DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.1.0"
+DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION = "1.0.0"
+DEPLOYMENT_RESULT_BUNDLE_FILENAME = "deployment_result.bundle.manifest.json"
+DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES = (
+    "deployment_result.json",
+    "deployment_result.manifest.json",
+)
 ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.2.0"
 ARTIFACT_MANIFEST_FILENAMES = {
     "release": "release.manifest.json",
@@ -869,6 +875,10 @@ def validate_repository_static(repository: Path) -> None:
     deployment_result_schema_path = (
         repository / "09_deploy/spread_release/deployment_result.schema.json"
     )
+    deployment_result_bundle_schema_path = (
+        repository
+        / "09_deploy/spread_release/deployment_result_bundle.schema.json"
+    )
     required_config = repository / "02_configs/historical_spread_config.xlsx"
     for path in (
         compose_path,
@@ -882,6 +892,7 @@ def validate_repository_static(repository: Path) -> None:
         candidate_schema_path,
         artifact_manifest_schema_path,
         deployment_result_schema_path,
+        deployment_result_bundle_schema_path,
         required_config,
     ):
         if not path.is_file():
@@ -3264,3 +3275,156 @@ def load_deployment_result(
             "deployment_result manifest runtime_git_commit mismatch"
         )
     return result
+
+
+def deployment_result_bundle_path(result_path: Path) -> Path:
+    result_path = result_path.resolve()
+    expected_result = DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES[0]
+    if result_path.name != expected_result:
+        raise ContractError(
+            f"deployment result bundle target must be {expected_result}, "
+            f"got {result_path.name}"
+        )
+    return result_path.with_name(DEPLOYMENT_RESULT_BUNDLE_FILENAME)
+
+
+def create_deployment_result_bundle(
+    result_path: Path,
+    manifest: Mapping[str, Any],
+    deployment_plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    result_path = result_path.resolve()
+    result = load_deployment_result(result_path, manifest, deployment_plan)
+    members = []
+    for filename in DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES:
+        member_path = result_path.with_name(filename)
+        if not member_path.is_file():
+            raise ContractError(
+                f"deployment result bundle member is missing: {member_path}"
+            )
+        members.append(
+            {
+                "target_file": filename,
+                "target_sha256": hash_file(member_path),
+                "target_size_bytes": member_path.stat().st_size,
+            }
+        )
+    bundle = {
+        "schema_version": DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION,
+        "release_id": result["release_id"],
+        "git_commit": result["git_commit"],
+        "git_tree": result["git_tree"],
+        "image_id": result["candidate_image_id"],
+        "runtime_git_commit": result["runtime_git_commit"],
+        "generated_at": result["generated_at"],
+        "members": members,
+    }
+    validate_against_schema(
+        bundle,
+        load_schema(
+            Path(__file__).with_name("deployment_result_bundle.schema.json")
+        ),
+    )
+    return bundle
+
+
+def validate_deployment_result_bundle(
+    bundle_path: Path,
+    manifest: Mapping[str, Any],
+    deployment_plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    bundle_path = bundle_path.resolve()
+    if bundle_path.name != DEPLOYMENT_RESULT_BUNDLE_FILENAME:
+        raise ContractError(
+            "deployment result bundle must be "
+            f"{DEPLOYMENT_RESULT_BUNDLE_FILENAME}"
+        )
+    result_path = bundle_path.with_name(
+        DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES[0]
+    )
+    result = load_deployment_result(result_path, manifest, deployment_plan)
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(
+            f"cannot load deployment result bundle {bundle_path}: {exc}"
+        ) from exc
+    if not isinstance(bundle, dict):
+        raise ContractError("deployment result bundle must be a JSON object")
+    validate_against_schema(
+        bundle,
+        load_schema(
+            Path(__file__).with_name("deployment_result_bundle.schema.json")
+        ),
+    )
+    members = bundle["members"]
+    member_filenames = [member["target_file"] for member in members]
+    if tuple(member_filenames) != DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES:
+        raise ContractError(
+            "deployment result bundle members must exactly and deterministically "
+            f"equal {list(DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES)!r}"
+        )
+    for member in members:
+        member_path = result_path.with_name(member["target_file"])
+        if not member_path.is_file():
+            raise ContractError(
+                f"deployment result bundle member is missing: {member_path}"
+            )
+        if member["target_sha256"] != hash_file(member_path):
+            raise ContractError(
+                "deployment result bundle member SHA-256 mismatch: "
+                f"{member['target_file']}"
+            )
+        if member["target_size_bytes"] != member_path.stat().st_size:
+            raise ContractError(
+                "deployment result bundle member byte size mismatch: "
+                f"{member['target_file']}"
+            )
+    expected_identity = {
+        "release_id": result["release_id"],
+        "git_commit": result["git_commit"],
+        "git_tree": result["git_tree"],
+        "image_id": result["candidate_image_id"],
+        "runtime_git_commit": result["runtime_git_commit"],
+        "generated_at": result["generated_at"],
+    }
+    for key, expected in expected_identity.items():
+        if bundle.get(key) != expected:
+            raise ContractError(f"deployment result bundle {key} mismatch")
+    return bundle
+
+
+def load_deployment_result_bundle(
+    bundle_path: Path,
+    manifest: Mapping[str, Any],
+    deployment_plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    return validate_deployment_result_bundle(
+        bundle_path,
+        manifest,
+        deployment_plan,
+    )
+
+
+def write_deployment_result_bundle(
+    result_path: Path,
+    manifest: Mapping[str, Any],
+    deployment_plan: Mapping[str, Any],
+) -> Path:
+    result_path = result_path.resolve()
+    output = deployment_result_bundle_path(result_path)
+    bundle = create_deployment_result_bundle(result_path, manifest, deployment_plan)
+    installed_bundle = False
+    try:
+        _write_json_exclusive(
+            output,
+            bundle,
+            description="deployment result bundle",
+        )
+        installed_bundle = True
+        validate_deployment_result_bundle(output, manifest, deployment_plan)
+    except Exception:
+        if installed_bundle and output.exists():
+            output.unlink()
+        raise
+    return output

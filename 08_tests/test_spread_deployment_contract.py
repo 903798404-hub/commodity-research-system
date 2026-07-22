@@ -21,6 +21,7 @@ CONTRACT_DIR = REPOSITORY / "09_deploy" / "spread_release"
 sys.path.insert(0, str(CONTRACT_DIR))
 
 import release_contract as release_contract_module  # noqa: E402
+import verify_release_contract as verifier_module  # noqa: E402
 from release_contract import (  # noqa: E402
     APPLICATION,
     CANDIDATE_RUNTIME_ENVIRONMENT,
@@ -29,6 +30,7 @@ from release_contract import (  # noqa: E402
     ContractError,
     DATA_SPECS,
     DEFAULT_READINESS_POLICY,
+    DEPLOYMENT_RESULT_BUNDLE_FILENAME,
     DockerReleaseRuntime,
     PRODUCTION_ENV_KEYS,
     PRODUCTION_CONTAINER,
@@ -36,15 +38,18 @@ from release_contract import (  # noqa: E402
     collect_data_baseline,
     create_candidate_result,
     create_deployment_plan,
+    create_deployment_result_bundle,
     create_manifest,
     load_deployment_plan,
     load_manifest_bundle,
     load_candidate_result,
     load_deployment_result,
+    load_deployment_result_bundle,
     load_schema,
     parse_production_env,
     resolve_spread_image_offline,
     validate_deployment_plan,
+    validate_deployment_result_bundle,
     validate_full_git_commit,
     validate_manifest,
     validate_artifact_manifest,
@@ -59,6 +64,7 @@ from release_contract import (  # noqa: E402
     verify_pre_deploy,
     verify_pre_rollback,
     write_deployment_plan,
+    write_deployment_result_bundle,
     write_artifact_manifest,
     write_candidate_result,
     write_release_bundle,
@@ -912,6 +918,7 @@ def test_manifest_is_valid_draft_2020_12_schema(tmp_path: Path) -> None:
         "artifact_manifest.schema.json",
         "deployment_plan.schema.json",
         "deployment_result.schema.json",
+        "deployment_result_bundle.schema.json",
     ],
 )
 def test_release_contract_schemas_are_valid_draft_2020_12(
@@ -1068,6 +1075,228 @@ def test_production_result_is_separate_and_does_not_rewrite_manifest(
     assert manifest_path.read_bytes() == original
     with pytest.raises(ContractError, match="already exists"):
         write_result(result_path, result)
+
+
+def test_deployment_result_bundle_is_sealed_and_reverified(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    result = build_deployment_result(tmp_path, manifest, plan)
+    write_result(result_path, result)
+
+    bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
+    bundle = load_deployment_result_bundle(bundle_path, manifest, plan)
+    expected_members = (
+        "deployment_result.json",
+        "deployment_result.manifest.json",
+    )
+
+    assert bundle_path.name == DEPLOYMENT_RESULT_BUNDLE_FILENAME
+    assert tuple(member["target_file"] for member in bundle["members"]) == (
+        expected_members
+    )
+    assert bundle["release_id"] == result["release_id"]
+    assert bundle["git_commit"] == result["git_commit"]
+    assert bundle["git_tree"] == result["git_tree"]
+    assert bundle["image_id"] == result["candidate_image_id"]
+    assert bundle["runtime_git_commit"] == result["runtime_git_commit"]
+    for member in bundle["members"]:
+        member_path = result_path.with_name(member["target_file"])
+        assert member["target_sha256"] == hashlib.sha256(
+            member_path.read_bytes()
+        ).hexdigest()
+        assert member["target_size_bytes"] == member_path.stat().st_size
+    jsonschema.Draft202012Validator(
+        load_schema(CONTRACT_DIR / "deployment_result_bundle.schema.json")
+    ).validate(bundle)
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        ("missing_member", "has too few items"),
+        ("extra_member", "must exactly and deterministically equal"),
+        ("duplicate_member", "must exactly and deterministically equal"),
+        ("reordered_member", "must exactly and deterministically equal"),
+        ("substituted_member", "must be one of"),
+        ("sha256", "member SHA-256 mismatch"),
+        ("size", "member byte size mismatch"),
+        ("release_id", "release_id mismatch"),
+        ("git_commit", "git_commit mismatch"),
+        ("git_tree", "git_tree mismatch"),
+        ("image_id", "image_id mismatch"),
+        ("runtime_git_commit", "runtime_git_commit mismatch"),
+    ],
+)
+def test_deployment_result_bundle_rejects_member_and_identity_tampering(
+    tmp_path: Path,
+    tamper: str,
+    message: str,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+    bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+
+    if tamper == "missing_member":
+        bundle["members"].pop()
+    elif tamper == "extra_member":
+        bundle["members"].append(copy.deepcopy(bundle["members"][0]))
+    elif tamper == "duplicate_member":
+        bundle["members"][1]["target_file"] = "deployment_result.json"
+    elif tamper == "reordered_member":
+        bundle["members"].reverse()
+    elif tamper == "substituted_member":
+        bundle["members"][0]["target_file"] = "candidate_result.json"
+    elif tamper == "sha256":
+        bundle["members"][0]["target_sha256"] = "f" * 64
+    elif tamper == "size":
+        bundle["members"][0]["target_size_bytes"] += 1
+    elif tamper == "release_id":
+        bundle["release_id"] = "spread-20260717-bbbbbbbbbbbb-b01"
+    elif tamper == "image_id":
+        bundle["image_id"] = "sha256:" + "f" * 64
+    else:
+        bundle[tamper] = OLD_GIT_COMMIT
+    bundle_path.write_text(json.dumps(bundle, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(ContractError, match=message):
+        validate_deployment_result_bundle(bundle_path, manifest, plan)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "../deployment_result.json",
+        "/deployment_result.json",
+        "C:\\release\\deployment_result.json",
+        "results/deployment_result.json",
+        "Deployment_Result.json",
+    ],
+)
+def test_deployment_result_bundle_rejects_uncontrolled_member_filename(
+    tmp_path: Path,
+    filename: str,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+    bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    bundle["members"][0]["target_file"] = filename
+    bundle_path.write_text(json.dumps(bundle, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(ContractError, match="must be one of"):
+        validate_deployment_result_bundle(bundle_path, manifest, plan)
+
+
+def test_deployment_result_bundle_rejects_malformed_or_incomplete_json(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+    bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
+
+    bundle_path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(ContractError, match="cannot load deployment result bundle"):
+        validate_deployment_result_bundle(bundle_path, manifest, plan)
+
+    bundle = create_deployment_result_bundle(result_path, manifest, plan)
+    bundle.pop("members")
+    bundle_path.write_text(json.dumps(bundle, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(ContractError, match="members is required"):
+        validate_deployment_result_bundle(bundle_path, manifest, plan)
+
+
+@pytest.mark.parametrize(
+    "member_filename",
+    [
+        "deployment_result.json",
+        "deployment_result.manifest.json",
+    ],
+)
+def test_deployment_result_bundle_rejects_missing_member_file(
+    tmp_path: Path,
+    member_filename: str,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+    bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
+    result_path.with_name(member_filename).unlink()
+
+    with pytest.raises(ContractError):
+        validate_deployment_result_bundle(bundle_path, manifest, plan)
+
+
+def test_deployment_result_bundle_write_failure_preserves_result_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+    original_result = result_path.read_bytes()
+    original_manifest = result_path.with_name(
+        "deployment_result.manifest.json"
+    ).read_bytes()
+    original_link = release_contract_module.os.link
+
+    def fail_bundle_link(source, target, *args, **kwargs) -> None:
+        if Path(target).name == DEPLOYMENT_RESULT_BUNDLE_FILENAME:
+            raise OSError("simulated deployment result bundle write failure")
+        original_link(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(release_contract_module.os, "link", fail_bundle_link)
+
+    with pytest.raises(ContractError, match="bundle write failure"):
+        write_deployment_result_bundle(result_path, manifest, plan)
+
+    assert result_path.read_bytes() == original_result
+    assert result_path.with_name("deployment_result.manifest.json").read_bytes() == (
+        original_manifest
+    )
+    assert not result_path.with_name(DEPLOYMENT_RESULT_BUNDLE_FILENAME).exists()
+    assert not list(tmp_path.glob(".deployment_result.bundle.manifest.json.*.tmp"))
+
+
+def test_deployment_result_bundle_reverification_failure_removes_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    result_path = (tmp_path / "deployment_result.json").resolve()
+    write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
+    original_result = result_path.read_bytes()
+    original_manifest = result_path.with_name(
+        "deployment_result.manifest.json"
+    ).read_bytes()
+    monkeypatch.setattr(
+        release_contract_module,
+        "validate_deployment_result_bundle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContractError("simulated deployment result bundle re-verification failure")
+        ),
+    )
+
+    with pytest.raises(ContractError, match="bundle re-verification failure"):
+        write_deployment_result_bundle(result_path, manifest, plan)
+
+    assert result_path.read_bytes() == original_result
+    assert result_path.with_name("deployment_result.manifest.json").read_bytes() == (
+        original_manifest
+    )
+    assert not result_path.with_name(DEPLOYMENT_RESULT_BUNDLE_FILENAME).exists()
 
 
 def test_deployment_runtime_git_tamper_in_json_or_manifest_is_rejected(
@@ -1929,6 +2158,134 @@ def test_offline_verifier_accepts_a_valid_sealed_bundle(tmp_path: Path) -> None:
     assert json.loads(result.stdout)["image_id"] == IMAGE_ID
 
 
+def test_record_deployment_returns_zero_only_after_bundle_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    release_directory = write_release_bundle(manifest, tmp_path / "releases")
+    plan_path = (tmp_path / "deployment_plan.json").resolve()
+    write_deployment_plan(plan, plan_path)
+    readiness_path = (tmp_path / "production_readiness.json").resolve()
+    readiness_path.write_text(
+        json.dumps(
+            {
+                "status": "ready",
+                "container": PRODUCTION_CONTAINER,
+                "expected_image_id": IMAGE_ID,
+                "policy": plan["readiness_policy"],
+                "ready_at_utc": BUILD_TIME,
+                "last_http_result": {"http_status": 200},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        verifier_module,
+        "verify_post_deploy",
+        lambda *_args, **_kwargs: {
+            "actual_image_id": IMAGE_ID,
+            "oci_revision": GIT_COMMIT,
+            "runtime_git_commit": GIT_COMMIT,
+            "runtime_git_commit_verified": True,
+            "container_name": PRODUCTION_CONTAINER,
+            "config_image": IMAGE_REF,
+        },
+    )
+    result_path = release_directory / "deployment_result.json"
+    argv = [
+        "--phase",
+        "record-deployment",
+        "--repository",
+        str(REPOSITORY),
+        "--manifest",
+        str(release_directory / "release.json"),
+        "--env-file",
+        str(release_directory / "release.env"),
+        "--deployment-plan",
+        str(plan_path),
+        "--readiness-result",
+        str(readiness_path),
+        "--result-path",
+        str(result_path),
+    ]
+
+    assert verifier_module.main(argv) == 0
+    evidence = json.loads(capsys.readouterr().out)
+    assert evidence["result_bundle"] == str(
+        release_directory / DEPLOYMENT_RESULT_BUNDLE_FILENAME
+    )
+    assert (release_directory / DEPLOYMENT_RESULT_BUNDLE_FILENAME).is_file()
+
+
+def test_record_deployment_returns_nonzero_when_bundle_verification_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, _ = build_deployment_plan(tmp_path, manifest, runtime)
+    release_directory = write_release_bundle(manifest, tmp_path / "releases")
+    plan_path = (tmp_path / "deployment_plan.json").resolve()
+    write_deployment_plan(plan, plan_path)
+    readiness_path = (tmp_path / "production_readiness.json").resolve()
+    readiness_path.write_text(
+        json.dumps(
+            {
+                "status": "ready",
+                "container": PRODUCTION_CONTAINER,
+                "expected_image_id": IMAGE_ID,
+                "policy": plan["readiness_policy"],
+                "ready_at_utc": BUILD_TIME,
+                "last_http_result": {"http_status": 200},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        verifier_module,
+        "verify_post_deploy",
+        lambda *_args, **_kwargs: {
+            "actual_image_id": IMAGE_ID,
+            "oci_revision": GIT_COMMIT,
+            "runtime_git_commit": GIT_COMMIT,
+            "runtime_git_commit_verified": True,
+            "container_name": PRODUCTION_CONTAINER,
+            "config_image": IMAGE_REF,
+        },
+    )
+    monkeypatch.setattr(
+        verifier_module,
+        "write_deployment_result_bundle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContractError("simulated bundle re-verification failure")
+        ),
+    )
+
+    assert verifier_module.main(
+        [
+            "--phase",
+            "record-deployment",
+            "--repository",
+            str(REPOSITORY),
+            "--manifest",
+            str(release_directory / "release.json"),
+            "--env-file",
+            str(release_directory / "release.env"),
+            "--deployment-plan",
+            str(plan_path),
+            "--readiness-result",
+            str(readiness_path),
+        ]
+    ) == 2
+    assert not (release_directory / DEPLOYMENT_RESULT_BUNDLE_FILENAME).exists()
+
+
 def test_generated_release_facts_do_not_make_git_worktree_dirty() -> None:
     ignored = subprocess.run(
         [
@@ -2590,6 +2947,7 @@ def test_static_contract_rejects_usda_in_formal_switch_scope(
         "09_deploy/spread_release/candidate_result.schema.json",
         "09_deploy/spread_release/artifact_manifest.schema.json",
         "09_deploy/spread_release/deployment_result.schema.json",
+        "09_deploy/spread_release/deployment_result_bundle.schema.json",
     )
     for relative_path in required_paths:
         source = REPOSITORY / relative_path
@@ -2646,6 +3004,16 @@ def test_deploy_checks_identity_before_http_and_auto_rolls_back() -> None:
     assert deploy.count("docker compose") == 1
     assert deploy.index("trap rollback_on_failure ERR") < deploy.index(
         "docker compose"
+    )
+    assert "DEPLOYMENT_RESULT_BUNDLE_FILENAME" in deploy
+    assert production_record < deploy.index('if [[ ! -f "${deployment_result_bundle}" ]]')
+    assert deploy.index('if [[ ! -f "${deployment_result_bundle}" ]]') < deploy.index(
+        "deployment_succeeded=1"
+    )
+    assert "exit 66" not in deploy
+    assert "    false\nfi" in deploy
+    assert deploy.index("deployment_succeeded=1") < deploy.index(
+        'echo "spread release ${RELEASE_ID} deployed'
     )
 
 
