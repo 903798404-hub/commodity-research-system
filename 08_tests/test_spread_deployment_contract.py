@@ -660,6 +660,13 @@ def build_candidate_result_fixture(
     )
 
 
+def test_validate_build_time_accepts_docker_nanosecond_timestamps() -> None:
+    parsed = release_contract_module.validate_build_time(
+        "2026-07-16T14:19:22.640338145Z"
+    )
+    assert parsed.isoformat() == "2026-07-16T14:19:22.640338+00:00"
+
+
 def write_candidate_result_fixture(
     tmp_path: Path,
     manifest: dict[str, object],

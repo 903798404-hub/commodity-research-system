@@ -870,8 +870,13 @@ def validate_sha256(value: Any, field: str) -> str:
 def validate_build_time(value: Any) -> datetime:
     if not isinstance(value, str) or not value:
         raise ContractError("build_time must be a non-empty RFC 3339 timestamp")
+    normalized = re.sub(
+        r"(\.\d{6})\d+(Z|[+-]\d{2}:\d{2})$",
+        r"\1\2",
+        value,
+    )
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ContractError("build_time must be a valid RFC 3339 timestamp") from exc
     if parsed.tzinfo is None:
