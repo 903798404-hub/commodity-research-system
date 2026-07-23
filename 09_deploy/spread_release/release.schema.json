@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.5.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-release-2.6.0.json",
   "title": "spread-dashboard immutable release manifest",
   "type": "object",
   "additionalProperties": false,
@@ -27,6 +27,7 @@
     "data_baseline",
     "weather_candidate_mode",
     "weather_candidate_source",
+    "weather_candidate_data_dir",
     "weather_runtime_current_dir",
     "weather_data_promotion_required",
     "weather_data_changed",
@@ -40,7 +41,7 @@
       "if": {
         "properties": {
           "schema_version": {
-            "const": "2.5.0"
+            "const": "2.6.0"
           }
         }
       },
@@ -63,7 +64,8 @@
         "2.2.0",
         "2.3.0",
         "2.4.0",
-        "2.5.0"
+        "2.5.0",
+        "2.6.0"
       ]
     },
     "application": {
@@ -121,13 +123,9 @@
       "$ref": "#/$defs/userUrlEnvironment"
     },
     "weather_candidate_mode": { "enum": ["current", "next"] },
-    "weather_candidate_source": {
-      "enum": [
-        "/home/ubuntu/market-data-runtime/weather/processed/current",
-        "/home/ubuntu/market-data-runtime/weather/processed/next"
-      ]
-    },
-    "weather_runtime_current_dir": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+    "weather_candidate_source": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
+    "weather_candidate_data_dir": { "enum": ["/app/runtime/weather/current", "/app/runtime/weather/next"] },
+    "weather_runtime_current_dir": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
     "weather_data_promotion_required": { "type": "boolean" },
     "weather_data_changed": { "type": "boolean" },
     "processed_next_created": { "const": false },
@@ -216,7 +214,8 @@
               "MARKET_DATA_GIT_HEAD",
               "USDA_DASHBOARD_URL",
               "OIL_WORLD_DASHBOARD_URL",
-              "WEATHER_RUNTIME_CURRENT_DIR"
+              "WEATHER_RUNTIME_CURRENT_DIR",
+              "WEATHER_DATA_DIR"
             ]
           }
         },
@@ -230,7 +229,8 @@
               "MARKET_DATA_GIT_HEAD",
               "USDA_DASHBOARD_URL",
               "OIL_WORLD_DASHBOARD_URL",
-              "WEATHER_RUNTIME_CURRENT_DIR"
+              "WEATHER_RUNTIME_CURRENT_DIR",
+              "WEATHER_DATA_DIR"
             ]
           }
         },
@@ -281,16 +281,15 @@
       ],
       "properties": {
         "environment_variable": { "const": "WEATHER_RUNTIME_CURRENT_DIR" },
-        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
         "allowed_candidate_host_paths": {
           "const": [
-            "/home/ubuntu/market-data-runtime/weather/processed/current",
-            "/home/ubuntu/market-data-runtime/weather/processed/next"
+            "/home/ubuntu/market-data-runtime/weather/processed"
           ]
         },
         "container_path": { "const": "/app/runtime/weather" },
         "read_only": { "const": true },
-        "weather_data_dir": { "const": "/app/runtime/weather" }
+        "weather_data_dir": { "const": "/app/runtime/weather/current" }
       }
     },
     "readinessPolicy": {

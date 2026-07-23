@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.3.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.4.0.json",
   "title": "spread-dashboard verified production deployment result",
   "type": "object",
   "additionalProperties": false,
@@ -30,6 +30,7 @@
     "weather_runtime_contract",
     "weather_candidate_mode",
     "weather_candidate_source",
+    "weather_candidate_data_dir",
     "weather_runtime_current_dir",
     "weather_data_promotion_required",
     "weather_data_changed",
@@ -44,7 +45,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.3.0"
+      "const": "1.4.0"
     },
     "application": {
       "const": "spread-dashboard"
@@ -118,13 +119,9 @@
       "$ref": "#/$defs/weatherRuntimeContract"
     },
     "weather_candidate_mode": { "enum": ["current", "next"] },
-    "weather_candidate_source": {
-      "enum": [
-        "/home/ubuntu/market-data-runtime/weather/processed/current",
-        "/home/ubuntu/market-data-runtime/weather/processed/next"
-      ]
-    },
-    "weather_runtime_current_dir": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+    "weather_candidate_source": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
+    "weather_candidate_data_dir": { "enum": ["/app/runtime/weather/current", "/app/runtime/weather/next"] },
+    "weather_runtime_current_dir": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
     "weather_data_promotion_required": { "type": "boolean" },
     "weather_data_changed": { "type": "boolean" },
     "processed_next_created": { "const": false },
@@ -178,16 +175,15 @@
       ],
       "properties": {
         "environment_variable": { "const": "WEATHER_RUNTIME_CURRENT_DIR" },
-        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed/current" },
+        "production_host_path": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
         "allowed_candidate_host_paths": {
           "const": [
-            "/home/ubuntu/market-data-runtime/weather/processed/current",
-            "/home/ubuntu/market-data-runtime/weather/processed/next"
+            "/home/ubuntu/market-data-runtime/weather/processed"
           ]
         },
         "container_path": { "const": "/app/runtime/weather" },
         "read_only": { "const": true },
-        "weather_data_dir": { "const": "/app/runtime/weather" }
+        "weather_data_dir": { "const": "/app/runtime/weather/current" }
       }
     },
     "fullGitCommit": {

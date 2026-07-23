@@ -14,7 +14,7 @@ services:
       MARKET_DATA_GIT_HEAD: ${MARKET_DATA_GIT_HEAD:?MARKET_DATA_GIT_HEAD must be explicitly set}
       USDA_DASHBOARD_URL: ${USDA_DASHBOARD_URL:?USDA_DASHBOARD_URL must be explicitly set}
       OIL_WORLD_DASHBOARD_URL: ${OIL_WORLD_DASHBOARD_URL:?OIL_WORLD_DASHBOARD_URL must be explicitly set}
-      WEATHER_DATA_DIR: /app/runtime/weather
+      WEATHER_DATA_DIR: ${WEATHER_DATA_DIR:?WEATHER_DATA_DIR must be explicitly set}
     volumes:
       - ./01_data:/app/01_data
       - ./06_outputs:/app/06_outputs

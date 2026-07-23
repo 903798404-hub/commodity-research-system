@@ -28,10 +28,10 @@ APPLICATION = "spread-dashboard"
 COMPOSE_PROJECT = "market-data"
 COMPOSE_SERVICE = "spread-dashboard"
 PRODUCTION_CONTAINER = "spread-dashboard"
-SCHEMA_VERSION = "2.5.0"
-CANDIDATE_RESULT_SCHEMA_VERSION = "1.4.0"
-DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.4.0"
-DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "2.6.0"
+CANDIDATE_RESULT_SCHEMA_VERSION = "1.5.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.5.0"
+DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.4.0"
 DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION = "1.0.0"
 DEPLOYMENT_RESULT_BUNDLE_FILENAME = "deployment_result.bundle.manifest.json"
 DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES = (
@@ -75,6 +75,7 @@ PRODUCTION_ENV_KEYS = (
     "USDA_DASHBOARD_URL",
     "OIL_WORLD_DASHBOARD_URL",
     "WEATHER_RUNTIME_CURRENT_DIR",
+    "WEATHER_DATA_DIR",
 )
 RUNTIME_URL_KEYS = (
     "USDA_DASHBOARD_URL",
@@ -83,12 +84,9 @@ RUNTIME_URL_KEYS = (
 WEATHER_RUNTIME_ENV_KEY = "WEATHER_RUNTIME_CURRENT_DIR"
 WEATHER_DATA_DIR_ENV_KEY = "WEATHER_DATA_DIR"
 WEATHER_CONTAINER_PATH = "/app/runtime/weather"
-PRODUCTION_WEATHER_RUNTIME_DIR = (
-    "/home/ubuntu/market-data-runtime/weather/processed/current"
-)
-CANDIDATE_WEATHER_RUNTIME_DIR = (
-    "/home/ubuntu/market-data-runtime/weather/processed/next"
-)
+WEATHER_CONTAINER_CURRENT_PATH = f"{WEATHER_CONTAINER_PATH}/current"
+WEATHER_CONTAINER_NEXT_PATH = f"{WEATHER_CONTAINER_PATH}/next"
+PRODUCTION_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed"
 WEATHER_CANDIDATE_MODE_CURRENT = "current"
 WEATHER_CANDIDATE_MODE_NEXT = "next"
 WEATHER_CANDIDATE_MODES = (
@@ -97,15 +95,21 @@ WEATHER_CANDIDATE_MODES = (
 )
 WEATHER_CANDIDATE_RUNTIME_DIRS = {
     WEATHER_CANDIDATE_MODE_CURRENT: PRODUCTION_WEATHER_RUNTIME_DIR,
-    WEATHER_CANDIDATE_MODE_NEXT: CANDIDATE_WEATHER_RUNTIME_DIR,
+    WEATHER_CANDIDATE_MODE_NEXT: PRODUCTION_WEATHER_RUNTIME_DIR,
+}
+WEATHER_CANDIDATE_DATA_DIRS = {
+    WEATHER_CANDIDATE_MODE_CURRENT: WEATHER_CONTAINER_CURRENT_PATH,
+    WEATHER_CANDIDATE_MODE_NEXT: WEATHER_CONTAINER_NEXT_PATH,
 }
 WEATHER_RUNTIME_MOUNT_CONTRACT = {
     "environment_variable": WEATHER_RUNTIME_ENV_KEY,
     "production_host_path": PRODUCTION_WEATHER_RUNTIME_DIR,
-    "allowed_candidate_host_paths": list(WEATHER_CANDIDATE_RUNTIME_DIRS.values()),
+    "allowed_candidate_host_paths": list(
+        dict.fromkeys(WEATHER_CANDIDATE_RUNTIME_DIRS.values())
+    ),
     "container_path": WEATHER_CONTAINER_PATH,
     "read_only": True,
-    "weather_data_dir": WEATHER_CONTAINER_PATH,
+    "weather_data_dir": WEATHER_CONTAINER_CURRENT_PATH,
 }
 RUNTIME_ENVIRONMENT_CONTRACT = {
     "allowed_production_variables": list(PRODUCTION_ENV_KEYS),
@@ -165,6 +169,7 @@ def candidate_compose_environment(
         **candidate_user_urls,
         "MARKET_DATA_GIT_HEAD": validate_full_git_commit(git_commit),
         WEATHER_RUNTIME_ENV_KEY: candidate_weather_dir,
+        WEATHER_DATA_DIR_ENV_KEY: weather_candidate_data_dir(weather_candidate_mode),
     }
 
 
@@ -1254,7 +1259,10 @@ def resolve_spread_image_offline(
 
 
 def _validate_weather_runtime_compose(
-    compose: Mapping[str, Any], *, expected_source: str | None = None
+    compose: Mapping[str, Any],
+    *,
+    expected_source: str | None = None,
+    expected_weather_data_dir: str | None = None,
 ) -> None:
     services = compose.get("services")
     if not isinstance(services, dict):
@@ -1263,8 +1271,16 @@ def _validate_weather_runtime_compose(
     if not isinstance(spread, dict):
         raise ContractError("spread Compose service is missing")
     environment = spread.get("environment")
-    if not isinstance(environment, dict) or environment.get(WEATHER_DATA_DIR_ENV_KEY) != WEATHER_CONTAINER_PATH:
-        raise ContractError("spread WEATHER_DATA_DIR must exactly equal /app/runtime/weather")
+    if (
+        not isinstance(environment, dict)
+        or environment.get(WEATHER_DATA_DIR_ENV_KEY)
+        not in (
+            (expected_weather_data_dir,)
+            if expected_weather_data_dir is not None
+            else tuple(WEATHER_CANDIDATE_DATA_DIRS.values())
+        )
+    ):
+        raise ContractError("spread WEATHER_DATA_DIR does not match the sealed runtime directory")
 
     weather_mounts: list[Mapping[str, Any]] = []
     for service_name, service in services.items():
@@ -1360,8 +1376,11 @@ def validate_repository_static(repository: Path) -> None:
             raise ContractError(
                 f"spread Compose production environment must require {variable}"
             )
-    if f"{WEATHER_DATA_DIR_ENV_KEY}: {WEATHER_CONTAINER_PATH}" not in compose_text:
-        raise ContractError("spread Compose WEATHER_DATA_DIR must be fixed to the weather runtime")
+    weather_data_marker = (
+        f"${{{WEATHER_DATA_DIR_ENV_KEY}:?{WEATHER_DATA_DIR_ENV_KEY} must be explicitly set}}"
+    )
+    if weather_data_marker not in compose_text:
+        raise ContractError("spread Compose WEATHER_DATA_DIR must be explicitly required")
     weather_mount_marker = (
         f"${{{WEATHER_RUNTIME_ENV_KEY}:?{WEATHER_RUNTIME_ENV_KEY} must be explicitly set}}:"
         f"{WEATHER_CONTAINER_PATH}:ro"
@@ -2247,6 +2266,11 @@ def weather_candidate_source(weather_candidate_mode: Any) -> str:
     return WEATHER_CANDIDATE_RUNTIME_DIRS[mode]
 
 
+def weather_candidate_data_dir(weather_candidate_mode: Any) -> str:
+    mode = validate_weather_candidate_mode(weather_candidate_mode)
+    return WEATHER_CANDIDATE_DATA_DIRS[mode]
+
+
 def weather_candidate_facts(weather_candidate_mode: Any) -> dict[str, Any]:
     """Return sealed, non-user-configurable weather release facts.
 
@@ -2259,6 +2283,7 @@ def weather_candidate_facts(weather_candidate_mode: Any) -> dict[str, Any]:
     return {
         "weather_candidate_mode": mode,
         "weather_candidate_source": weather_candidate_source(mode),
+        "weather_candidate_data_dir": weather_candidate_data_dir(mode),
         "weather_runtime_current_dir": PRODUCTION_WEATHER_RUNTIME_DIR,
         "weather_data_promotion_required": promotion_required,
         "weather_data_changed": promotion_required,
@@ -2396,8 +2421,10 @@ def _compose_spread_semantics(
         if not isinstance(value, str) or not value:
             raise ContractError(f"spread Compose environment is missing {key}")
         runtime_environment[key] = value
-    if environment.get(WEATHER_DATA_DIR_ENV_KEY) != WEATHER_CONTAINER_PATH:
-        raise ContractError("spread Compose WEATHER_DATA_DIR is not the fixed runtime path")
+    weather_data_dir = environment.get(WEATHER_DATA_DIR_ENV_KEY)
+    if weather_data_dir not in WEATHER_CANDIDATE_DATA_DIRS.values():
+        raise ContractError("spread Compose WEATHER_DATA_DIR is not a permitted runtime directory")
+    runtime_environment[WEATHER_DATA_DIR_ENV_KEY] = weather_data_dir
     other_environment = {
         key: value
         for key, value in environment.items()
@@ -2456,7 +2483,9 @@ def _validate_formal_spread_semantics(
             "formal spread runtime MARKET_DATA_GIT_HEAD does not match the release"
         )
     _validate_weather_runtime_compose(
-        compose, expected_source=expected_weather_runtime_dir
+        compose,
+        expected_source=expected_weather_runtime_dir,
+        expected_weather_data_dir=WEATHER_CONTAINER_CURRENT_PATH,
     )
 
     ports = service.get("ports") or []
@@ -2619,6 +2648,7 @@ def validate_candidate_result(
             weather_facts["weather_candidate_mode"],
         ),
         "host_path": weather_facts["weather_candidate_source"],
+        "candidate_weather_data_dir": weather_facts["weather_candidate_data_dir"],
     }:
         raise ContractError("candidate result weather runtime contract mismatch")
     identity = result.get("identity")
@@ -2732,6 +2762,7 @@ def create_candidate_result(
                 manifest["weather_candidate_mode"],
             ),
             "host_path": manifest["weather_candidate_source"],
+            "candidate_weather_data_dir": manifest["weather_candidate_data_dir"],
         },
         **weather_candidate_facts(manifest["weather_candidate_mode"]),
         "identity": {
@@ -2878,7 +2909,9 @@ def validate_deployment_plan(
     if (
         not isinstance(allowed_differences, list)
         or len(set(allowed_differences)) != len(allowed_differences)
-        or not set(allowed_differences).issubset(RUNTIME_URL_KEYS)
+        or not set(allowed_differences).issubset(
+            (*RUNTIME_URL_KEYS, WEATHER_DATA_DIR_ENV_KEY)
+        )
     ):
         raise ContractError(
             "deployment plan contains an undeclared candidate/production difference"
@@ -2923,7 +2956,12 @@ def validate_deployment_plan(
         else parse_production_env(production_env_file)
     )
     validate_production_env(environment, manifest)
-    expected_candidate_runtime = candidate_user_url_environment(environment)
+    expected_candidate_runtime = {
+        **candidate_user_url_environment(environment),
+        WEATHER_DATA_DIR_ENV_KEY: weather_candidate_data_dir(
+            manifest["weather_candidate_mode"]
+        ),
+    }
     if candidate_runtime != expected_candidate_runtime:
         raise ContractError(
             "deployment plan candidate runtime environment does not inherit production URLs"
@@ -2947,9 +2985,15 @@ def validate_deployment_plan(
             raise ContractError(
                 f"deployment plan production runtime {key} does not match production env"
             )
+    if production_runtime.get(WEATHER_DATA_DIR_ENV_KEY) != environment[
+        WEATHER_DATA_DIR_ENV_KEY
+    ]:
+        raise ContractError(
+            "deployment plan production weather runtime does not match production env"
+        )
     actual_differences = [
         key
-        for key in RUNTIME_URL_KEYS
+        for key in (*RUNTIME_URL_KEYS, WEATHER_DATA_DIR_ENV_KEY)
         if candidate_runtime[key] != production_runtime[key]
     ]
     if allowed_differences != actual_differences:
@@ -3067,6 +3111,7 @@ def create_deployment_plan(
     _validate_weather_runtime_compose(
         candidate_compose,
         expected_source=manifest["weather_candidate_source"],
+        expected_weather_data_dir=manifest["weather_candidate_data_dir"],
     )
 
     candidate_semantics, candidate_runtime = _compose_spread_semantics(
@@ -3083,10 +3128,10 @@ def create_deployment_plan(
         )
     allowed_differences = [
         key
-        for key in RUNTIME_URL_KEYS
+        for key in (*RUNTIME_URL_KEYS, WEATHER_DATA_DIR_ENV_KEY)
         if candidate_runtime[key] != production_runtime[key]
     ]
-    for key in RUNTIME_URL_KEYS:
+    for key in (*RUNTIME_URL_KEYS, WEATHER_DATA_DIR_ENV_KEY):
         if production_runtime[key] != production_environment[key]:
             raise ContractError(
                 f"production Compose did not render the explicit {key} value"

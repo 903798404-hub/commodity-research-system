@@ -191,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
                         "weather_candidate_source": plan[
                             "weather_candidate_source"
                         ],
+                        "weather_candidate_data_dir": plan[
+                            "weather_candidate_data_dir"
+                        ],
                         "weather_runtime_current_dir": plan[
                             "weather_runtime_current_dir"
                         ],

@@ -92,8 +92,10 @@ SOURCE = "https://github.com/example/commodity-research-system"
 CANDIDATE_CONTAINER = "spread-candidate-release"
 PRODUCTION_USDA_URL = "https://dashboards.example.com/usda/"
 PRODUCTION_OIL_WORLD_URL = "https://dashboards.example.com/oil-world/"
-PRODUCTION_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed/current"
-CANDIDATE_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed/next"
+PRODUCTION_WEATHER_RUNTIME_DIR = "/home/ubuntu/market-data-runtime/weather/processed"
+CANDIDATE_WEATHER_RUNTIME_DIR = PRODUCTION_WEATHER_RUNTIME_DIR
+PRODUCTION_WEATHER_DATA_DIR = "/app/runtime/weather/current"
+CANDIDATE_WEATHER_DATA_DIR = "/app/runtime/weather/next"
 USDA_CONTAINER_ID = "3" * 64
 OIL_WORLD_CONTAINER_ID = "4" * 64
 USDA_IMAGE_ID = "sha256:" + "5" * 64
@@ -412,12 +414,11 @@ class FakeReleaseRuntime:
             "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
             "MARKET_DATA_GIT_HEAD": self.git_commit,
             "WEATHER_RUNTIME_CURRENT_DIR": CANDIDATE_WEATHER_RUNTIME_DIR,
-            "WEATHER_DATA_DIR": "/app/runtime/weather",
+            "WEATHER_DATA_DIR": CANDIDATE_WEATHER_DATA_DIR,
             **(environment or {}),
         }
         is_candidate = (
-            resolved_environment["WEATHER_RUNTIME_CURRENT_DIR"]
-            == CANDIDATE_WEATHER_RUNTIME_DIR
+            resolved_environment["WEATHER_DATA_DIR"] == CANDIDATE_WEATHER_DATA_DIR
         )
         volumes = self.compose_mounts
         if is_candidate and self.candidate_mounts_override is not None:
@@ -595,6 +596,7 @@ def production_environment_for(
         "USDA_DASHBOARD_URL": usda_url,
         "OIL_WORLD_DASHBOARD_URL": oil_world_url,
         "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
+        "WEATHER_DATA_DIR": PRODUCTION_WEATHER_DATA_DIR,
     }
 
 
@@ -739,7 +741,7 @@ def build_deployment_result(
         encoding="utf-8",
     )
     return {
-        "schema_version": "1.3.0",
+        "schema_version": "1.4.0",
         "application": APPLICATION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
@@ -769,6 +771,7 @@ def build_deployment_result(
         "weather_runtime_contract": plan["weather_runtime_contract"],
         "weather_candidate_mode": plan["weather_candidate_mode"],
         "weather_candidate_source": plan["weather_candidate_source"],
+        "weather_candidate_data_dir": plan["weather_candidate_data_dir"],
         "weather_runtime_current_dir": plan["weather_runtime_current_dir"],
         "weather_data_promotion_required": plan[
             "weather_data_promotion_required"
@@ -1234,7 +1237,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
         "target_file": "candidate_result.json",
         "target_sha256": "d" * 64,
         "target_size_bytes": 123,
-        "target_schema_version": "1.4.0",
+        "target_schema_version": "1.5.0",
         "generated_at": BUILD_TIME,
         "release_id": RELEASE_ID,
         "git_commit": GIT_COMMIT,
@@ -1264,7 +1267,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     release.update(
         artifact_type="release",
         target_file="release.json",
-        target_schema_version="2.5.0",
+        target_schema_version="2.6.0",
     )
     release.pop("runtime_git_commit")
     validator.validate(release)
@@ -1277,7 +1280,7 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     deployment_result.update(
         artifact_type="deployment_result",
         target_file="deployment_result.json",
-        target_schema_version="1.3.0",
+        target_schema_version="1.4.0",
     )
     validator.validate(deployment_result)
     deployment_result.pop("runtime_git_commit")
@@ -1750,7 +1753,7 @@ def test_exclusive_manifest_write_preserves_existing_manifest(
         write_artifact_manifest(
             path,
             artifact_type="candidate_result",
-            target_schema_version="1.4.0",
+            target_schema_version="1.5.0",
             release_id=RELEASE_ID,
             git_commit=GIT_COMMIT,
             git_tree=GIT_TREE,
@@ -2101,10 +2104,11 @@ def test_candidate_inherits_production_user_urls_in_same_image_plan(
     assert plan["candidate_runtime_environment"] == {
         "USDA_DASHBOARD_URL": production_environment["USDA_DASHBOARD_URL"],
         "OIL_WORLD_DASHBOARD_URL": production_environment["OIL_WORLD_DASHBOARD_URL"],
+        "WEATHER_DATA_DIR": CANDIDATE_WEATHER_DATA_DIR,
     }
     assert plan["image_ref"] == IMAGE_REF
     assert plan["expected_image_id"] == IMAGE_ID
-    assert plan["allowed_candidate_production_differences"] == []
+    assert plan["allowed_candidate_production_differences"] == ["WEATHER_DATA_DIR"]
     assert plan["semantic_comparison"]["base_semantics_equal"] is True
     assert plan["readiness_policy"] == manifest["readiness_policy"]
     assert plan["plan_status"] == "deployment_plan_sealed"

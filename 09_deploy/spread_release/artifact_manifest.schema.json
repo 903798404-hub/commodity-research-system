@@ -112,7 +112,7 @@
           "const": "release.json"
         },
         "target_schema_version": {
-          "const": "2.5.0"
+          "const": "2.6.0"
         }
       },
       "required": [
@@ -130,7 +130,7 @@
           "const": "candidate_result.json"
         },
         "target_schema_version": {
-          "const": "1.4.0"
+          "const": "1.5.0"
         }
       },
       "required": [
@@ -148,7 +148,7 @@
           "const": "deployment_plan.json"
         },
         "target_schema_version": {
-          "const": "1.4.0"
+          "const": "1.5.0"
         }
       },
       "required": [
@@ -166,7 +166,7 @@
           "const": "deployment_result.json"
         },
         "target_schema_version": {
-          "const": "1.3.0"
+          "const": "1.4.0"
         }
       },
       "required": [
