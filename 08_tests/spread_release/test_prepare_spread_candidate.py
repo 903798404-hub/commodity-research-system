@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,9 @@ class FakeRunner(CommandRunner):
         self.commands: list[list[str]] = []
         self.built = False
         self.started = False
+        self.container_removed = False
+        self.image_removed = False
+        self.events: list[str] = []
 
     def run(self, command, *, cwd=None, env=None):  # type: ignore[override]
         command = list(command)
@@ -121,13 +125,21 @@ class FakeRunner(CommandRunner):
             return json.dumps(self.compose)
         if command[:2] == ["docker", "build"]:
             self.built = True
+            self.events.append("docker build")
             return "built"
+        if command[:3] == ["docker", "image", "rm"]:
+            self.image_removed = True
+            self.events.append("candidate image cleanup")
+            return "removed-image"
         if command[:2] == ["docker", "compose"] and "up" in command:
             self.started = True
+            self.events.append("compose up")
             return "started"
         if command[:3] == ["docker", "inspect", "--format"]:
             return CONTAINER_ID + "\n"
         if command[:3] == ["docker", "rm", "-f"]:
+            self.container_removed = True
+            self.events.append("candidate container cleanup")
             return "removed"
         raise AssertionError(f"unexpected command: {command}")
 
@@ -145,15 +157,32 @@ class FakeRuntime:
         self.existing_image = existing_image
 
     def container_exists(self, name: str) -> bool:
-        return self.existing_container or self.runner.started
+        return self.existing_container or (self.runner.started and not self.runner.container_removed)
 
     def image_record(self, image_ref: str):
+        if self.runner.image_removed:
+            raise ContractError("image was removed")
         if not self.runner.built and not self.existing_image:
             raise ContractError("image is absent")
         return {"id": IMAGE_ID, "labels": {}}
 
+    def container_record(self, container_name: str):
+        if container_name != "spread-dashboard":
+            raise ContractError(f"unexpected container record: {container_name}")
+        return {
+            "image_id": "sha256:" + "d" * 64,
+            "config_image": "market-data-spread-dashboard:spread-20260723-b704a2933fec-b01",
+            "runtime_git_commit": "b704a2933fecc667695d5a31065abeea1fda7492",
+        }
 
-def _options(tmp_path: Path, *, mode: str = "dry-run", compose: dict | None = None) -> tuple[CandidateOptions, FakeRunner]:
+
+def _options(
+    tmp_path: Path,
+    *,
+    mode: str = "dry-run",
+    compose: dict | None = None,
+    cleanup_policy: str = "on-failure",
+) -> tuple[CandidateOptions, FakeRunner]:
     repository, commit, tree = _copy_contract_repository(tmp_path)
     formal_compose = tmp_path / "formal-compose.yml"
     formal_compose.write_text("name: market-data\nservices: {}\n", encoding="utf-8")
@@ -194,11 +223,50 @@ def _options(tmp_path: Path, *, mode: str = "dry-run", compose: dict | None = No
         rollback_image_ref="market-data-spread-dashboard:spread-20260723-b704a2933fec-b01",
         rollback_image_id="sha256:" + "c" * 64,
         formal_git_commit="b704a2933fecc667695d5a31065abeea1fda7492",
-        cleanup_policy="on-failure",
+        cleanup_policy=cleanup_policy,
         execute_build=mode == "execute",
         execute_start=mode == "execute",
     )
     return options, FakeRunner(compose or _formal_compose())
+
+
+def _snapshot(_runtime: FakeRuntime, output: Path) -> tuple[Path, dict[str, str]]:
+    path = output / "formal_containers.before_candidate.json"
+    captured_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    path.write_text(json.dumps({"captured_at": captured_at}) + "\n", encoding="utf-8")
+    return path, {"captured_at": captured_at}
+
+
+def _seal_candidate_result(
+    _options: CandidateOptions,
+    _runtime: FakeRuntime,
+    _environment: dict[str, str],
+    release: Path,
+    _snapshot_path: Path,
+    _output: Path,
+    _formal_spread_before: dict[str, str],
+    _candidate_health_url: str,
+) -> dict[str, str]:
+    candidate_result = release / "candidate_result.json"
+    return {
+        "candidate_checks_path": str(release / "candidate_checks.json"),
+        "candidate_result_path": str(candidate_result),
+        "candidate_result_sha256": "a" * 64,
+    }
+
+
+def _seal_deployment_plan(
+    _options: CandidateOptions,
+    _runtime: FakeRuntime,
+    _environment: dict[str, str],
+    release: Path,
+    _candidate_result: Path,
+) -> dict[str, str]:
+    deployment_plan = release / "deployment_plan.json"
+    return {
+        "deployment_plan_path": str(deployment_plan),
+        "deployment_plan_sha256": "b" * 64,
+    }
 
 
 def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: Path) -> None:
@@ -315,11 +383,16 @@ def test_execute_uses_fake_docker_build_start_and_existing_validator(tmp_path: P
         port_probe=lambda _: True,
         release_sealer=seal,
         validator=validate,
+        formal_snapshotter=_snapshot,
+        candidate_result_sealer=_seal_candidate_result,
+        deployment_plan_sealer=_seal_deployment_plan,
     )
 
     assert result["status"] == "prepared"
     assert result["candidate_image_id"] == IMAGE_ID
     assert result["candidate_container_id"] == CONTAINER_ID
+    assert result["candidate_image_removed"] is False
+    assert result["candidate_image_retained_for_deployment"] is True
     assert validated == [(options.output_directory / "releases" / options.release_id, result["candidate_health_url"])]
     assert any(command[:2] == ["docker", "build"] for command in runner.commands)
     assert any(command[:2] == ["docker", "compose"] and "up" in command for command in runner.commands)
@@ -345,12 +418,180 @@ def test_execute_validation_failure_cleans_only_candidate_container(tmp_path: Pa
             port_probe=lambda _: True,
             release_sealer=seal,
             validator=fail_validator,
+            formal_snapshotter=_snapshot,
         )
     result = json.loads((options.output_directory / "candidate_prepare_result.json").read_text(encoding="utf-8"))
     assert result["status"] == "failed"
     assert result["failure_phase"] == "candidate-validation"
     assert any(command[:3] == ["docker", "rm", "-f"] for command in runner.commands)
     assert all(PRODUCTION_NAME not in command for command in runner.commands)
+
+
+def test_execute_obeys_the_formal_evidence_and_cleanup_order(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path, mode="execute", cleanup_policy="after-plan")
+    events: list[str] = []
+
+    def snapshot(*args):
+        runner.events.append("formal snapshot")
+        return _snapshot(*args)
+
+    def seal(*_args):
+        runner.events.append("release bundle")
+        release = options.output_directory / "releases" / options.release_id
+        release.mkdir(parents=True)
+        return release
+
+    def validate(*_args):
+        runner.events.append("validate")
+
+    def candidate_result(*args):
+        runner.events.append("candidate result")
+        return _seal_candidate_result(*args)
+
+    def deployment_plan(*args):
+        runner.events.append("deployment plan")
+        return _seal_deployment_plan(*args)
+
+    result = prepare_candidate(
+        options,
+        runner=runner,
+        runtime=FakeRuntime(runner),
+        port_probe=lambda _: True,
+        release_sealer=seal,
+        validator=validate,
+        formal_snapshotter=snapshot,
+        candidate_result_sealer=candidate_result,
+        deployment_plan_sealer=deployment_plan,
+    )
+    assert events == []
+    assert runner.events == [
+        "formal snapshot",
+        "docker build",
+        "release bundle",
+        "compose up",
+        "validate",
+        "candidate result",
+        "candidate container cleanup",
+        "deployment plan",
+        "candidate image cleanup",
+    ]
+    assert result["candidate_container_removed"] is True
+    assert result["candidate_image_removed"] is True
+    assert result["candidate_result_path"].endswith("candidate_result.json")
+    assert result["deployment_plan_path"].endswith("deployment_plan.json")
+
+
+def test_snapshot_failure_records_phase_and_never_calls_docker(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+
+    def fail_snapshot(*_args):
+        raise ContractError("formal snapshot failed")
+
+    with pytest.raises(ContractError, match="formal snapshot failed"):
+        prepare_candidate(
+            options,
+            runner=runner,
+            runtime=FakeRuntime(runner),
+            port_probe=lambda _: True,
+            formal_snapshotter=fail_snapshot,
+        )
+    result = json.loads((options.output_directory / "candidate_prepare_result.json").read_text(encoding="utf-8"))
+    assert result["failure_phase"] == "formal_snapshot"
+    assert not any(command[0] == "docker" and command[1] in {"build", "rm"} for command in runner.commands)
+
+
+def test_rejects_stale_or_external_snapshot_before_build(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+
+    def stale_snapshot(_runtime, output):
+        path = output / "formal_containers.before_candidate.json"
+        path.write_text(json.dumps({"captured_at": BUILD_TIME}) + "\n", encoding="utf-8")
+        return path, {"captured_at": BUILD_TIME}
+
+    with pytest.raises(ContractError, match="too old"):
+        prepare_candidate(
+            options,
+            runner=runner,
+            runtime=FakeRuntime(runner),
+            port_probe=lambda _: True,
+            formal_snapshotter=stale_snapshot,
+        )
+    assert not any(command[:2] == ["docker", "build"] for command in runner.commands)
+
+    external_options, external_runner = _options(tmp_path / "external", mode="execute")
+
+    def external_snapshot(_runtime, _output):
+        path = external_options.output_directory.parent / "old-snapshot.json"
+        path.write_text(json.dumps({"captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}) + "\n", encoding="utf-8")
+        return path, {"captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+
+    with pytest.raises(ContractError, match="this candidate output directory"):
+        prepare_candidate(
+            external_options,
+            runner=external_runner,
+            runtime=FakeRuntime(external_runner),
+            port_probe=lambda _: True,
+            formal_snapshotter=external_snapshot,
+        )
+    assert not any(command[:2] == ["docker", "build"] for command in external_runner.commands)
+
+
+def test_candidate_result_failure_does_not_return_prepared_and_cleans_candidate(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+
+    def seal(*_args):
+        release = options.output_directory / "releases" / options.release_id
+        release.mkdir(parents=True)
+        return release
+
+    def fail_candidate_result(*_args):
+        raise ContractError("candidate result schema failed")
+
+    with pytest.raises(ContractError, match="candidate result schema failed"):
+        prepare_candidate(
+            options,
+            runner=runner,
+            runtime=FakeRuntime(runner),
+            port_probe=lambda _: True,
+            release_sealer=seal,
+            validator=lambda *_args: None,
+            formal_snapshotter=_snapshot,
+            candidate_result_sealer=fail_candidate_result,
+        )
+    result = json.loads((options.output_directory / "candidate_prepare_result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "failed"
+    assert result["failure_phase"] == "candidate-result"
+    assert any(command[:3] == ["docker", "rm", "-f"] for command in runner.commands)
+    assert any(command[:3] == ["docker", "image", "rm"] for command in runner.commands)
+
+
+def test_deployment_plan_is_not_attempted_until_candidate_container_is_removed(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+
+    def seal(*_args):
+        release = options.output_directory / "releases" / options.release_id
+        release.mkdir(parents=True)
+        return release
+
+    def plan(_options, runtime, *_args):
+        assert runtime.container_exists(options.candidate_container_name) is False
+        raise ContractError("deployment plan schema failed")
+
+    with pytest.raises(ContractError, match="deployment plan schema failed"):
+        prepare_candidate(
+            options,
+            runner=runner,
+            runtime=FakeRuntime(runner),
+            port_probe=lambda _: True,
+            release_sealer=seal,
+            validator=lambda *_args: None,
+            formal_snapshotter=_snapshot,
+            candidate_result_sealer=_seal_candidate_result,
+            deployment_plan_sealer=plan,
+        )
+    result = json.loads((options.output_directory / "candidate_prepare_result.json").read_text(encoding="utf-8"))
+    assert result["failure_phase"] == "deployment-plan"
+    assert result["candidate_container_removed"] is True
 
 
 def test_execute_rejects_preexisting_candidate_image_tag_without_overwrite(tmp_path: Path) -> None:

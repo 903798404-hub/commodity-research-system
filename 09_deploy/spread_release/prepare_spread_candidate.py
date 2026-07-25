@@ -14,6 +14,8 @@ import os
 import re
 import socket
 import sys
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +31,16 @@ from release_contract import (
     DockerReleaseRuntime,
     ReleaseRuntime,
     candidate_compose_environment,
+    capture_formal_container_snapshot,
+    collect_data_baseline,
+    create_candidate_result,
+    create_deployment_plan,
     create_manifest,
+    hash_file,
+    load_candidate_result,
+    load_deployment_plan,
+    load_manifest_bundle,
+    load_schema,
     parse_production_env,
     validate_build_time,
     validate_full_git_commit,
@@ -41,6 +52,10 @@ from release_contract import (
     validate_source,
     validate_weather_runtime_dir,
     validate_git_state,
+    validate_formal_container_snapshot,
+    write_candidate_result,
+    write_deployment_plan,
+    write_formal_container_snapshot,
     write_release_bundle,
 )
 
@@ -51,10 +66,41 @@ DEFAULT_PORT_START = 18501
 DEFAULT_PORT_END = 18999
 CANDIDATE_SERVICE = "spread-dashboard-candidate"
 DEFAULT_CLEANUP_POLICY = "on-failure"
+AFTER_PLAN_CLEANUP_POLICY = "after-plan"
+SNAPSHOT_MAX_AGE_SECONDS = 300
 
 
 class CandidateValidator(Protocol):
     def __call__(self, release_directory: Path, health_url: str, output_directory: Path) -> None: ...
+
+
+class FormalSnapshotter(Protocol):
+    def __call__(self, runtime: ReleaseRuntime, output_directory: Path) -> tuple[Path, Mapping[str, Any]]: ...
+
+
+class CandidateResultSealer(Protocol):
+    def __call__(
+        self,
+        options: "CandidateOptions",
+        runtime: ReleaseRuntime,
+        production_environment: Mapping[str, str],
+        release_directory: Path,
+        formal_snapshot_path: Path,
+        output_directory: Path,
+        formal_spread_before: Mapping[str, Any],
+        candidate_health_url: str,
+    ) -> Mapping[str, str]: ...
+
+
+class DeploymentPlanSealer(Protocol):
+    def __call__(
+        self,
+        options: "CandidateOptions",
+        runtime: ReleaseRuntime,
+        production_environment: Mapping[str, str],
+        release_directory: Path,
+        candidate_result_path: Path,
+    ) -> Mapping[str, str]: ...
 
 
 @dataclass(frozen=True)
@@ -445,8 +491,11 @@ def _validate_options(options: CandidateOptions, runner: CommandRunner) -> tuple
         validate_rollback_image_ref(options.rollback_image_ref)
         validate_image_id(options.rollback_image_id, "rollback_image_id")
         validate_full_git_commit(options.formal_git_commit)
-    if options.cleanup_policy != DEFAULT_CLEANUP_POLICY:
-        raise ContractError("candidate cleanup policy must be on-failure")
+    if options.cleanup_policy not in {
+        DEFAULT_CLEANUP_POLICY,
+        AFTER_PLAN_CLEANUP_POLICY,
+    }:
+        raise ContractError("candidate cleanup policy is invalid")
     validate_full_git_commit(options.git_commit)
     validate_full_git_commit(options.git_tree)
     validate_build_time(options.build_time)
@@ -522,7 +571,207 @@ def _default_validator(release_directory: Path, health_url: str, output_director
     )
 
 
-def _cleanup_candidate(runtime: ReleaseRuntime, runner: CommandRunner, container_name: str) -> list[list[str]]:
+def _default_formal_snapshotter(
+    runtime: ReleaseRuntime, output_directory: Path
+) -> tuple[Path, Mapping[str, Any]]:
+    """Seal the existing formal-container snapshot before candidate startup."""
+    snapshot = capture_formal_container_snapshot(runtime)
+    path = write_formal_container_snapshot(
+        output_directory / "formal_containers.before_candidate.json", snapshot
+    )
+    # Re-load through the same validation boundary used by downstream artifacts.
+    parsed = json.loads(path.read_text(encoding="utf-8"))
+    return path, validate_formal_container_snapshot(parsed)
+
+
+def _load_json_object(path: Path, description: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot load {description}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ContractError(f"{description} must be a JSON object")
+    return value
+
+
+def _http_status(url: str) -> int:
+    """Return an actual loopback HTTP status for the isolated candidate."""
+    request = Request(url, method="GET")
+    try:
+        with urlopen(request, timeout=10) as response:  # noqa: S310 - loopback URL is constructed here.
+            return int(response.status)
+    except HTTPError as exc:
+        return int(exc.code)
+    except URLError as exc:
+        raise ContractError(f"candidate HTTP request failed for {url}: {exc.reason}") from exc
+
+
+def _candidate_check_evidence(
+    health_url: str,
+    readiness: Mapping[str, Any],
+    *,
+    formal_spread_before: Mapping[str, Any],
+    formal_spread_after: Mapping[str, Any],
+    data_baseline_before: Mapping[str, Any],
+    data_baseline_after: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build candidate-result checks from live evidence, never operator defaults."""
+    last_http = readiness.get("last_http_result") or {}
+    if last_http.get("http_status") != 200:
+        raise ContractError("candidate readiness HTTP status is not 200")
+    base_url = health_url.removesuffix("/_stcore/health")
+    if not base_url.startswith("http://127.0.0.1:"):
+        raise ContractError("candidate HTTP checks require a loopback candidate URL")
+    root_status = _http_status(f"{base_url}/")
+    host_config_status = _http_status(f"{base_url}/_stcore/host-config")
+    if root_status != 200 or host_config_status != 200:
+        raise ContractError(
+            "candidate HTTP validation failed: "
+            f"root={root_status}, host_config={host_config_status}"
+        )
+    if dict(formal_spread_before) != dict(formal_spread_after):
+        raise ContractError("formal spread-dashboard identity changed during candidate validation")
+    if data_baseline_before.get("datasets") != data_baseline_after.get("datasets"):
+        raise ContractError("formal data baseline changed during candidate validation")
+    return {
+        "http": {"health": 200, "host_config": host_config_status, "root": root_status},
+        # The Streamlit entry point and its host configuration were fetched from
+        # the running candidate.  Detailed visual acceptance remains a separate
+        # human gate; this is the contract's machine-readable page entry check.
+        "pages": {"status": "passed"},
+        "formal_git_unchanged": True,
+        "data_files_unchanged": True,
+        "production_switch_performed": False,
+    }
+
+
+def _default_candidate_result_sealer(
+    options: CandidateOptions,
+    runtime: ReleaseRuntime,
+    production_environment: Mapping[str, str],
+    release_directory: Path,
+    formal_snapshot_path: Path,
+    output_directory: Path,
+    formal_spread_before: Mapping[str, Any],
+    candidate_health_url: str,
+) -> Mapping[str, str]:
+    """Seal candidate_result with the existing generator and schema boundary."""
+    del production_environment
+    manifest_path = release_directory / "release.json"
+    manifest, _ = load_manifest_bundle(
+        manifest_path,
+        release_directory / "release.env",
+        SCRIPT_DIR / "release.schema.json",
+    )
+    readiness_path = output_directory / "candidate_readiness.json"
+    readiness = _load_json_object(readiness_path, "candidate readiness result")
+    if readiness.get("status") != "ready":
+        raise ContractError("candidate readiness result is not ready")
+    formal_spread_after = runtime.container_record(PRODUCTION_CONTAINER)
+    if options.data_host_root is None:
+        raise ContractError("candidate result requires a data host root")
+    data_baseline_after = collect_data_baseline(
+        options.data_host_root,
+        PRODUCTION_CONTAINER,
+        runtime,
+    )
+    checks = _candidate_check_evidence(
+        candidate_health_url,
+        readiness,
+        formal_spread_before=formal_spread_before,
+        formal_spread_after=formal_spread_after,
+        data_baseline_before=manifest["data_baseline"],
+        data_baseline_after=data_baseline_after,
+    )
+    checks_path = output_directory / "candidate_checks.json"
+    _write_json_exclusive(checks_path, checks)
+    formal_snapshot = _load_json_object(formal_snapshot_path, "formal snapshot")
+    candidate_result = create_candidate_result(
+        manifest=manifest,
+        runtime=runtime,
+        readiness=readiness,
+        checks={**checks, "formal_containers_before": formal_snapshot},
+    )
+    candidate_result_path = write_candidate_result(
+        candidate_result, release_directory / "candidate_result.json"
+    )
+    # Loading validates both the schema and its artifact manifest.
+    load_candidate_result(candidate_result_path, manifest)
+    return {
+        "candidate_checks_path": str(checks_path),
+        "candidate_result_path": str(candidate_result_path),
+        "candidate_result_sha256": hash_file(candidate_result_path),
+    }
+
+
+def _default_deployment_plan_sealer(
+    options: CandidateOptions,
+    runtime: ReleaseRuntime,
+    production_environment: Mapping[str, str],
+    release_directory: Path,
+    candidate_result_path: Path,
+) -> Mapping[str, str]:
+    """Seal deployment_plan only after the candidate container is gone."""
+    del production_environment
+    manifest_path = release_directory / "release.json"
+    manifest, _ = load_manifest_bundle(
+        manifest_path,
+        release_directory / "release.env",
+        SCRIPT_DIR / "release.schema.json",
+    )
+    plan = create_deployment_plan(
+        tool_repo_root=options.build_context,
+        production_compose_file=options.production_compose_file,
+        production_project_dir=options.production_compose_file.parent,
+        candidate_result_file=candidate_result_path,
+        production_env_file=options.production_env_file,
+        manifest=manifest,
+        runtime=runtime,
+        schema=load_schema(SCRIPT_DIR / "deployment_plan.schema.json"),
+    )
+    deployment_plan_path = write_deployment_plan(
+        plan, release_directory / "deployment_plan.json"
+    )
+    load_deployment_plan(deployment_plan_path, manifest)
+    return {
+        "deployment_plan_path": str(deployment_plan_path),
+        "deployment_plan_sha256": hash_file(deployment_plan_path),
+    }
+
+
+def _remove_candidate_container(
+    runtime: ReleaseRuntime, runner: CommandRunner, container_name: str
+) -> list[str]:
+    """Remove and re-check only this named candidate container."""
+    if not runtime.container_exists(container_name):
+        raise ContractError("candidate container is already absent before cleanup")
+    command = ["docker", "rm", "-f", container_name]
+    runner.run(command)
+    if runtime.container_exists(container_name):
+        raise ContractError("candidate container still exists after cleanup")
+    return command
+
+
+def _remove_candidate_image(
+    runtime: ReleaseRuntime, runner: CommandRunner, image_ref: str
+) -> list[str]:
+    """Remove only the validated candidate tag after plan sealing."""
+    record = runtime.image_record(image_ref)
+    if not isinstance(record.get("id"), str):
+        raise ContractError("candidate image identity is missing before cleanup")
+    command = ["docker", "image", "rm", image_ref]
+    runner.run(command)
+    try:
+        runtime.image_record(image_ref)
+    except ContractError:
+        return command
+    raise ContractError("candidate image tag still resolves after cleanup")
+
+
+def _best_effort_cleanup(
+    runtime: ReleaseRuntime, runner: CommandRunner, container_name: str, image_ref: str
+) -> list[list[str]]:
+    """Failure-path cleanup records only candidate actions and never masks the cause."""
     commands: list[list[str]] = []
     try:
         if runtime.container_exists(container_name):
@@ -530,8 +779,13 @@ def _cleanup_candidate(runtime: ReleaseRuntime, runner: CommandRunner, container
             runner.run(command)
             commands.append(command)
     except ContractError:
-        # Preserve the original failure; cleanup failure is captured in the result.
         commands.append(["docker", "rm", "-f", container_name, "# cleanup-failed"])
+    try:
+        command = ["docker", "image", "rm", image_ref]
+        runner.run(command)
+        commands.append(command)
+    except ContractError:
+        commands.append(["docker", "image", "rm", image_ref, "# cleanup-failed"])
     return commands
 
 
@@ -543,6 +797,9 @@ def prepare_candidate(
     port_probe: Callable[[int], bool] = _port_is_available,
     release_sealer: Callable[[CandidateOptions, ReleaseRuntime, Mapping[str, str]], Path] = _default_release_sealer,
     validator: CandidateValidator = _default_validator,
+    formal_snapshotter: FormalSnapshotter = _default_formal_snapshotter,
+    candidate_result_sealer: CandidateResultSealer = _default_candidate_result_sealer,
+    deployment_plan_sealer: DeploymentPlanSealer = _default_deployment_plan_sealer,
 ) -> dict[str, Any]:
     """Generate a dry plan or execute the candidate-only preflight sequence."""
     command_runner = runner or CommandRunner()
@@ -568,7 +825,11 @@ def prepare_candidate(
     project_name = str(candidate_compose["name"])
     build_command = _build_command(options)
     start_command = _compose_command(options, compose_path, project_name)
-    cleanup_commands: list[list[str]] = [["docker", "rm", "-f", options.candidate_container_name]]
+    snapshot_path = options.output_directory / "formal_containers.before_candidate.json"
+    cleanup_commands: list[list[str]] = [
+        ["docker", "rm", "-f", options.candidate_container_name],
+        ["docker", "image", "rm", options.image_ref],
+    ]
     result: dict[str, Any] = {
         "kind": "candidate_prepare_result",
         "generated_at": _utc_now(),
@@ -589,6 +850,9 @@ def prepare_candidate(
         "candidate_compose_file": str(compose_path),
         "build_command": build_command,
         "start_command": start_command,
+        "formal_snapshot_command": [sys.executable, str(SCRIPT_DIR / "capture_formal_container_snapshot.py"), "--output", str(snapshot_path)],
+        "candidate_result_command": [sys.executable, str(SCRIPT_DIR / "create_candidate_result.py")],
+        "deployment_plan_command": [sys.executable, str(SCRIPT_DIR / "create_deployment_plan.py")],
         "cleanup_commands": cleanup_commands,
         "weather_mount": {
             "source": production_environment["WEATHER_RUNTIME_CURRENT_DIR"],
@@ -598,15 +862,29 @@ def prepare_candidate(
         },
         "candidate_image_id": None,
         "candidate_container_id": None,
+        "formal_snapshot_path": str(snapshot_path),
+        "formal_snapshot_sha256": None,
+        "formal_snapshot_captured_at": None,
+        "candidate_started_at": None,
+        "candidate_result_path": None,
+        "deployment_plan_path": None,
+        "candidate_container_removed": False,
+        "candidate_image_removed": False,
+        "formal_spread_before": None,
+        "formal_spread_after_candidate_cleanup": None,
         "failure_phase": None,
     }
     result_path = options.output_directory / "candidate_prepare_result.json"
     if options.mode == "dry-run":
+        result["formal_snapshot_status"] = "not-executed"
+        result["candidate_result_status"] = "not-generated"
+        result["deployment_plan_status"] = "not-generated"
         _write_json_exclusive(result_path, result)
         return result
 
     candidate_runtime = runtime or DockerReleaseRuntime(command_runner)
     started = False
+    built = False
     phase = "preflight"
     try:
         if candidate_runtime.container_exists(options.candidate_container_name):
@@ -617,7 +895,26 @@ def prepare_candidate(
             pass
         else:
             raise ContractError("candidate image tag already exists; refusing to overwrite it")
+        phase = "formal_snapshot"
+        formal_snapshot_path, formal_snapshot = formal_snapshotter(
+            candidate_runtime, options.output_directory
+        )
+        if formal_snapshot_path.resolve().parent != options.output_directory.resolve():
+            raise ContractError("formal snapshot must be created in this candidate output directory")
+        result["formal_snapshot_path"] = str(formal_snapshot_path)
+        result["formal_snapshot_sha256"] = hash_file(formal_snapshot_path)
+        captured_at = formal_snapshot.get("captured_at")
+        captured_time = validate_build_time(captured_at)
+        result["formal_snapshot_captured_at"] = captured_at
+        snapshot_checked_at = validate_build_time(_utc_now())
+        if captured_time >= snapshot_checked_at:
+            raise ContractError("formal snapshot must precede candidate preparation")
+        if (snapshot_checked_at - captured_time).total_seconds() > SNAPSHOT_MAX_AGE_SECONDS:
+            raise ContractError("formal snapshot is too old for this candidate startup")
+        formal_spread_before = candidate_runtime.container_record(PRODUCTION_CONTAINER)
+        result["formal_spread_before"] = formal_spread_before
         phase = "build"
+        built = True
         command_runner.run(build_command, cwd=options.build_context)
         image = candidate_runtime.image_record(options.image_ref)
         result["candidate_image_id"] = image["id"]
@@ -628,6 +925,13 @@ def prepare_candidate(
         # begins from the attempted-start boundary rather than its exit status.
         started = True
         phase = "compose-start"
+        candidate_started_at = _utc_now()
+        candidate_started_time = validate_build_time(candidate_started_at)
+        if captured_time >= candidate_started_time:
+            raise ContractError("formal snapshot must precede candidate container startup")
+        if (candidate_started_time - captured_time).total_seconds() > SNAPSHOT_MAX_AGE_SECONDS:
+            raise ContractError("formal snapshot is too old for this candidate startup")
+        result["candidate_started_at"] = candidate_started_at
         command_runner.run(start_command, cwd=options.output_directory)
         container_id = command_runner.run(
             ["docker", "inspect", "--format", "{{.Id}}", options.candidate_container_name]
@@ -637,6 +941,44 @@ def prepare_candidate(
         result["candidate_container_id"] = container_id
         phase = "candidate-validation"
         validator(release_directory, str(result["candidate_health_url"]), options.output_directory)
+        phase = "candidate-result"
+        candidate_evidence = candidate_result_sealer(
+            options, candidate_runtime, production_environment, release_directory,
+            formal_snapshot_path, options.output_directory, formal_spread_before,
+            str(result["candidate_health_url"]),
+        )
+        result.update(candidate_evidence)
+        result["candidate_result_path"] = candidate_evidence["candidate_result_path"]
+        phase = "candidate-container-cleanup"
+        result["candidate_container_cleanup_command"] = _remove_candidate_container(
+            candidate_runtime, command_runner, options.candidate_container_name
+        )
+        result["candidate_container_removed"] = True
+        formal_spread_after_cleanup = candidate_runtime.container_record(PRODUCTION_CONTAINER)
+        if formal_spread_after_cleanup != formal_spread_before:
+            raise ContractError("formal spread-dashboard changed during candidate cleanup")
+        result["formal_spread_after_candidate_cleanup"] = formal_spread_after_cleanup
+        image_after_container_cleanup = candidate_runtime.image_record(options.image_ref)
+        if image_after_container_cleanup.get("id") != result["candidate_image_id"]:
+            raise ContractError("candidate image identity changed before deployment plan sealing")
+        phase = "deployment-plan"
+        plan_evidence = deployment_plan_sealer(
+            options,
+            candidate_runtime,
+            production_environment,
+            release_directory,
+            Path(str(result["candidate_result_path"])),
+        )
+        result.update(plan_evidence)
+        result["deployment_plan_path"] = plan_evidence["deployment_plan_path"]
+        if options.cleanup_policy == AFTER_PLAN_CLEANUP_POLICY:
+            phase = "candidate-image-cleanup"
+            result["candidate_image_cleanup_command"] = _remove_candidate_image(
+                candidate_runtime, command_runner, options.image_ref
+            )
+            result["candidate_image_removed"] = True
+        else:
+            result["candidate_image_retained_for_deployment"] = True
         result["status"] = "prepared"
     except ContractError as exc:
         result["status"] = "failed"
@@ -644,9 +986,9 @@ def prepare_candidate(
         match = re.search(r"command failed \((\d+)\):", str(exc))
         result["failure_exit_code"] = int(match.group(1)) if match else None
         result["failure"] = str(exc)
-        if started:
-            result["cleanup_commands_executed"] = _cleanup_candidate(
-                candidate_runtime, command_runner, options.candidate_container_name
+        if started or built:
+            result["cleanup_commands_executed"] = _best_effort_cleanup(
+                candidate_runtime, command_runner, options.candidate_container_name, options.image_ref
             )
         _write_json_exclusive(result_path, result)
         raise
@@ -673,7 +1015,15 @@ def build_parser() -> argparse.ArgumentParser:
     port_group = parser.add_mutually_exclusive_group(required=True)
     port_group.add_argument("--candidate-port", type=int)
     port_group.add_argument("--auto-port", action="store_true")
-    parser.add_argument("--cleanup-policy", choices=(DEFAULT_CLEANUP_POLICY,), default=DEFAULT_CLEANUP_POLICY)
+    parser.add_argument(
+        "--cleanup-policy",
+        choices=(DEFAULT_CLEANUP_POLICY, AFTER_PLAN_CLEANUP_POLICY),
+        default=DEFAULT_CLEANUP_POLICY,
+        help=(
+            "Retain the validated image for a later formal deployment, or remove "
+            "it only after deployment_plan sealing during a validation-only run."
+        ),
+    )
     parser.add_argument("--execute-build", action="store_true")
     parser.add_argument("--execute-start", action="store_true")
     # Required only when execute mode seals the existing release manifest.
