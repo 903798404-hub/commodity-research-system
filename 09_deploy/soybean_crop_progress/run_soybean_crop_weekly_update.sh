@@ -9,7 +9,7 @@ CONTAINER_NAME="${MARKET_DATA_SPREAD_CONTAINER:-spread-dashboard}"
 CONTAINER_ENTRYPOINT="${MARKET_DATA_SOYBEAN_ENTRYPOINT:-/app/04_scripts/soybean_crop_progress/update_soybeans_crop_weekly.py}"
 
 cleanup() {
-    unset NASS_API_KEY MARKET_DATA_GIT_HEAD
+    unset NASS_API_KEY MARKET_DATA_GIT_HEAD CONTROL_REPO_GIT_HEAD
 }
 
 trap cleanup EXIT
@@ -60,25 +60,48 @@ if [[ "${nass_key_lines}" -ne 1 || -z "${NASS_API_KEY}" ]]; then
     exit 1
 fi
 
-if ! MARKET_DATA_GIT_HEAD="$(
-    git -C "${REPOSITORY_PATH}" rev-parse HEAD 2>/dev/null
-)"; then
-    echo "无法读取正式仓库Git提交，未执行更新。" >&2
-    exit 1
-fi
-if [[ ! "${MARKET_DATA_GIT_HEAD}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    echo "正式仓库Git提交不是40位十六进制哈希，未执行更新。" >&2
-    exit 1
-fi
-MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD,,}"
-
-container_running="$(
+if ! container_running="$(
     docker inspect --format '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null
-)"
+)"; then
+    echo "容器不存在或无法检查：${CONTAINER_NAME}" >&2
+    exit 1
+fi
 if [[ "${container_running}" != "true" ]]; then
     echo "容器未运行：${CONTAINER_NAME}" >&2
     exit 1
 fi
+
+if ! MARKET_DATA_GIT_HEAD="$(
+    docker exec "${CONTAINER_NAME}" printenv MARKET_DATA_GIT_HEAD 2>/dev/null
+)"; then
+    echo "无法读取运行容器Git身份，未执行更新。" >&2
+    exit 1
+fi
+runtime_git_head_line_count="$(
+    docker exec "${CONTAINER_NAME}" printenv MARKET_DATA_GIT_HEAD 2>/dev/null | wc -l
+)"
+if [[ "${runtime_git_head_line_count}" != "1" || ! "${MARKET_DATA_GIT_HEAD}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "运行容器Git身份缺失或不是40位十六进制哈希，未执行更新。" >&2
+    exit 1
+fi
+MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD,,}"
+
+CONTROL_REPO_GIT_HEAD=""
+if CONTROL_REPO_GIT_HEAD="$(
+    git -C "${REPOSITORY_PATH}" rev-parse HEAD 2>/dev/null
+)" && [[ "${CONTROL_REPO_GIT_HEAD}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    CONTROL_REPO_GIT_HEAD="${CONTROL_REPO_GIT_HEAD,,}"
+else
+    CONTROL_REPO_GIT_HEAD="unavailable"
+fi
+
+identity_match=false
+if [[ "${CONTROL_REPO_GIT_HEAD}" == "${MARKET_DATA_GIT_HEAD}" ]]; then
+    identity_match=true
+fi
+echo "runtime_git_head=${MARKET_DATA_GIT_HEAD}"
+echo "control_repo_git_head=${CONTROL_REPO_GIT_HEAD}"
+echo "identity_match=${identity_match}"
 
 export NASS_API_KEY MARKET_DATA_GIT_HEAD
 
