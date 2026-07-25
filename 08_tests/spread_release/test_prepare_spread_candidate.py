@@ -510,7 +510,14 @@ def test_plan_sealer_uses_a_release_sealed_target_environment(
 
     monkeypatch.setattr(candidate_prepare, "create_deployment_plan", fake_create_plan)
     monkeypatch.setattr(candidate_prepare, "write_deployment_plan", fake_write_plan)
-    monkeypatch.setattr(candidate_prepare, "load_deployment_plan", lambda *_args: {})
+
+    def fake_load_plan(path: Path, loaded_manifest: dict, schema_path: Path):
+        captured["loaded_plan"] = path
+        captured["loaded_manifest"] = loaded_manifest
+        captured["schema_path"] = schema_path
+        return {}, {}
+
+    monkeypatch.setattr(candidate_prepare, "load_deployment_plan", fake_load_plan)
 
     evidence = candidate_prepare._default_deployment_plan_sealer(
         options,
@@ -533,6 +540,7 @@ def test_plan_sealer_uses_a_release_sealed_target_environment(
     assert f"SPREAD_IMAGE={options.image_ref}" in text
     assert f"MARKET_DATA_GIT_HEAD={options.git_commit}" in text
     assert "USDA_DASHBOARD_URL=https://dashboard.example/usda/" in text
+    assert captured["schema_path"].name == "deployment_plan.schema.json"
     assert evidence["target_production_env_file"] == str(target_env)
     assert len(evidence["target_production_env_sha256"]) == 64
 

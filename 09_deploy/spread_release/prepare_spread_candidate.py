@@ -743,7 +743,11 @@ def _default_deployment_plan_sealer(
     deployment_plan_path = write_deployment_plan(
         plan, release_directory / "deployment_plan.json"
     )
-    load_deployment_plan(deployment_plan_path, manifest)
+    load_deployment_plan(
+        deployment_plan_path,
+        manifest,
+        SCRIPT_DIR / "deployment_plan.schema.json",
+    )
     return {
         "deployment_plan_path": str(deployment_plan_path),
         "deployment_plan_sha256": hash_file(deployment_plan_path),
@@ -1015,7 +1019,7 @@ def prepare_candidate(
         else:
             result["candidate_image_retained_for_deployment"] = True
         result["status"] = "prepared"
-    except ContractError as exc:
+    except Exception as exc:
         result["status"] = "failed"
         result["failure_phase"] = phase
         match = re.search(r"command failed \((\d+)\):", str(exc))
