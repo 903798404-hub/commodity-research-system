@@ -929,8 +929,6 @@ def prepare_candidate(
         candidate_started_time = validate_build_time(candidate_started_at)
         if captured_time >= candidate_started_time:
             raise ContractError("formal snapshot must precede candidate container startup")
-        if (candidate_started_time - captured_time).total_seconds() > SNAPSHOT_MAX_AGE_SECONDS:
-            raise ContractError("formal snapshot is too old for this candidate startup")
         result["candidate_started_at"] = candidate_started_at
         command_runner.run(start_command, cwd=options.output_directory)
         container_id = command_runner.run(
