@@ -443,11 +443,11 @@ def test_styles_and_page_route_preserve_approved_series_semantics(monkeypatch, t
         precipitation, normals, config, metric="precipitation", latest=latest, snapshot_date="2026-06-22", show_all_regions=False
     )
     assert "美豆主产区降水" in table
-    assert "预测：未来2周" in table
+    assert "预测：未来2周（滚动7日）" in table
     assert "沿用旧项目30年历史同期基准" in table
     assert "30年历史基准待接入" not in table
-    assert "预测偏差：未来2周" in table
-    assert "预测偏差幅度：未来2周" in table
+    assert "预测偏差：未来2周（滚动7日）" in table
+    assert "预测偏差幅度：未来2周（滚动7日）" in table
     assert "15州 / 88.9%" in table
     assert table.find("15.4%") < table.find("伊利诺伊州")
     assert table.count("forecast-ec") >= 10

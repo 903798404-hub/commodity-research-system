@@ -115,6 +115,27 @@ MODULES = {
     "soil_moisture": ("土壤墒情", "soil", "soil_moisture"),
 }
 
+# The weekly precipitation and maximum-temperature analyses intentionally share
+# one matrix skeleton.  Only metric semantics belong here; layout, column
+# widths, forecast bands, and conditional-formatting structure belong to the
+# common renderer below.
+WEEKLY_TABLE_METRICS = {
+    "precipitation": {
+        "title_suffix": "降水",
+        "label": "周度降雨（mm）",
+        "absolute_anomaly_label": "周度偏差（mm）",
+        "unit": "mm",
+        "weekly_aggregation": "sum",
+    },
+    "temperature_max": {
+        "title_suffix": "最高气温",
+        "label": "周度最高气温（℃）",
+        "absolute_anomaly_label": "周度偏差（℃）",
+        "unit": "℃",
+        "weekly_aggregation": "mean",
+    },
+}
+
 OLD_PAGE_COLORS = {
     "historical_rain": "#3b6fd4",
     "current": "#bd2c25",
@@ -349,27 +370,70 @@ def _season_aligned_forecast(
     return pd.DataFrame(rows)
 
 
-def _week_start(value: pd.Timestamp) -> pd.Timestamp:
-    return value.normalize() - pd.Timedelta(days=value.weekday())
+def _forecast_window_plan(
+    records_by_metric: dict[str, pd.DataFrame],
+    config: dict[str, object],
+) -> dict[str, object]:
+    """Build two fixed seven-day windows from the shared forecast start date."""
+
+    region_keys = set(region_weights(config)["key"].astype(str))
+    metrics = tuple(sorted(records_by_metric))
+    dates_by_model: dict[str, set[pd.Timestamp]] = {"ECMWF": set(), "GFS": set()}
+    complete_dates: set[pd.Timestamp] | None = None
+
+    for model in ("ECMWF", "GFS"):
+        metric_date_sets: list[set[pd.Timestamp]] = []
+        for metric in metrics:
+            metric_records = records_by_metric[metric]
+            latest = latest_observation_date(metric_records)
+            forecasts = select_latest_forecasts(metric_records, latest)
+            selected = forecasts[(forecasts["model"] == model) & forecasts["value"].notna()].copy()
+            selected["date"] = pd.to_datetime(selected["date"], errors="coerce").dt.normalize()
+            selected = selected.dropna(subset=["date"])
+            metric_date_sets.append(set(selected["date"]))
+
+            complete_for_metric = {
+                pd.Timestamp(date).normalize()
+                for date, group in selected.groupby("date", sort=False)
+                if set(group["region"].astype(str)) == region_keys
+                and group.groupby("region")["value"].size().eq(1).all()
+            }
+            complete_dates = complete_for_metric if complete_dates is None else complete_dates & complete_for_metric
+        dates_by_model[model] = set.intersection(*metric_date_sets) if metric_date_sets else set()
+
+    complete_dates = complete_dates or set()
+    shared_start_dates = complete_dates or (dates_by_model["ECMWF"] & dates_by_model["GFS"])
+    start = min(shared_start_dates) if shared_start_dates else None
+    windows = (
+        [
+            (start, start + pd.Timedelta(days=6)),
+            (start + pd.Timedelta(days=7), start + pd.Timedelta(days=13)),
+        ]
+        if start is not None
+        else []
+    )
+    return {
+        "windows": windows,
+        "model_dates": dates_by_model,
+        "common_complete_dates": complete_dates,
+    }
 
 
-def _weekly_windows(
+def _historical_windows(
     latest: pd.Timestamp,
-    forecast_start: pd.Timestamp | None = None,
-) -> tuple[list[tuple[pd.Timestamp, pd.Timestamp]], list[tuple[pd.Timestamp, pd.Timestamp]]]:
-    """Use the legacy Monday-to-Sunday weekly windows without filling missing data."""
+    *,
+    count: int = 4,
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """Build chronological, contiguous seven-day observed windows ending on ``latest``."""
 
-    latest_complete_end = _week_start(latest) - pd.Timedelta(days=1)
-    history = [
-        (latest_complete_end - pd.Timedelta(days=7 * offset + 6), latest_complete_end - pd.Timedelta(days=7 * offset))
-        for offset in range(3, -1, -1)
+    if count < 1:
+        raise ValueError("历史观测窗口数量必须至少为 1")
+    last_end = latest.normalize()
+    first_start = last_end - pd.Timedelta(days=count * 7 - 1)
+    return [
+        (first_start + pd.Timedelta(days=7 * index), first_start + pd.Timedelta(days=7 * index + 6))
+        for index in range(count)
     ]
-    first_forecast_start = forecast_start.normalize() if forecast_start is not None else latest_complete_end + pd.Timedelta(days=1)
-    forecast = [
-        (first_forecast_start + pd.Timedelta(days=7 * offset), first_forecast_start + pd.Timedelta(days=7 * offset + 6))
-        for offset in range(2)
-    ]
-    return history, forecast
 
 
 def _format_value(value: object, *, percent: bool = False, signed: bool = False) -> str:
@@ -400,11 +464,54 @@ def _weekly_row(
     ).set_index("region")
 
 
+def _forecast_summary_row(
+    records: pd.DataFrame,
+    config: dict[str, object],
+    *,
+    metric: str,
+    window: tuple[pd.Timestamp, pd.Timestamp],
+    model: str,
+) -> pd.DataFrame:
+    """Aggregate one model's real non-null values in the displayed fixed window."""
+
+    return _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model=model)
+
+
+def _forecast_window_note(plan: dict[str, object]) -> str:
+    """Describe the source ranges and the exact shared-calendar decision."""
+
+    model_dates = plan["model_dates"]
+    assert isinstance(model_dates, dict)
+    ec_dates = set(model_dates["ECMWF"])
+    gfs_dates = set(model_dates["GFS"])
+    windows = list(plan["windows"])
+    window_notes = [
+        f"第{index}周{start:%Y-%m-%d}至{end:%Y-%m-%d}，共7天"
+        for index, (start, end) in enumerate(windows, start=1)
+    ]
+    ec_end = max(ec_dates).strftime("%Y-%m-%d") if ec_dates else "无"
+    gfs_end = max(gfs_dates).strftime("%Y-%m-%d") if gfs_dates else "无"
+    return (
+        "预测窗口按EC与GFS共同预测起始日构造固定滚动7日窗口；"
+        + "；".join(window_notes)
+        + "。"
+        f"EC预测数据截止日期：{ec_end}；"
+        f"GFS预测数据截止日期：{gfs_end}；"
+        "各模型仅聚合窗口内实际存在的非空日值，不填补缺失日。"
+    )
+
+
 def _value_cell(value: object, css_class: str = "", *, percent: bool = False, signed: bool = False) -> str:
     return f'<td colspan="2" class="{css_class}">{_format_value(value, percent=percent, signed=signed)}</td>'
 
 
-def _forecast_value_cells(ec: object, gfs: object, ec_css: str = "", gfs_css: str = "", *, percent: bool = False, signed: bool = False) -> str:
+def _forecast_value_cells(
+    ec: object,
+    gfs: object,
+    ec_css: str = "",
+    gfs_css: str = "",
+    *, percent: bool = False, signed: bool = False,
+) -> str:
     return (
         f'<td class="forecast-ec {ec_css}"><strong>{_format_value(ec, percent=percent, signed=signed)}</strong></td>'
         f'<td class="forecast-gfs {gfs_css}"><strong>{_format_value(gfs, percent=percent, signed=signed)}</strong></td>'
@@ -509,6 +616,7 @@ def _build_weekly_wide_table(
     config: dict[str, object],
     *,
     metric: str,
+    forecast_records_by_metric: dict[str, pd.DataFrame] | None = None,
     latest: pd.Timestamp,
     snapshot_date: str,
     show_all_regions: bool,
@@ -520,18 +628,34 @@ def _build_weekly_wide_table(
     country_name = str(config.get("country_display_name", ""))
     crop_name = str(config.get("crop_display_name", "大豆"))
     subject = str(config.get("summary_subject", f"{country_name}{crop_name}"))
-    title = f"{subject}主产区" + ("降水" if metric == "precipitation" else "最高气温")
-    metric_label = "周度降雨（mm）" if metric == "precipitation" else "周度最高气温（℃）"
+    try:
+        metric_config = WEEKLY_TABLE_METRICS[metric]
+    except KeyError as exc:
+        raise ValueError(f"不支持的周度天气指标：{metric}") from exc
+    title = f"{subject}主产区{metric_config['title_suffix']}"
+    metric_label = str(metric_config["label"])
     colspan = 3 + 2 * (1 + len(regions))
-    forecasts = select_latest_forecasts(records, latest)
-    forecast_start = forecasts["date"].min() if not forecasts.empty else None
-    history_windows, forecast_windows = _weekly_windows(latest, forecast_start)
+    history_windows = _historical_windows(latest)
+    plan = _forecast_window_plan(forecast_records_by_metric or {metric: records}, config)
+    forecast_windows = list(plan["windows"])
     coverage = float(config["weighted_coverage_percent"])
+    forecast_summaries: dict[tuple[pd.Timestamp, pd.Timestamp], dict[str, pd.DataFrame]] = {}
+    for window in forecast_windows:
+        forecast_summaries[window] = {}
+        for model in ("ECMWF", "GFS"):
+            summary = _forecast_summary_row(
+                records,
+                config,
+                metric=metric,
+                window=window,
+                model=model,
+            )
+            forecast_summaries[window][model] = summary
 
     weighted_header = str(config.get("weighted_header_label", f"主产区 / {coverage:.1f}%"))
     rows = [
         f'<tr><td colspan="{colspan}" class="table-title">{title}</td></tr>',
-        f'<tr><td colspan="{colspan}" class="snapshot-date">业务日期：周一 ｜ — ｜ 周日</td></tr>',
+        f'<tr><td colspan="{colspan}" class="snapshot-date">业务日期：按EC与GFS共同预测起始日构造两个连续7日窗口</td></tr>',
         f'<tr class="weight-row"><td colspan="3">权重</td><td colspan="2">{weighted_header}</td>'
         + "".join(f'<td colspan="2">{region.weight:.1f}%</td>' for region in regions.itertuples(index=False))
         + "</tr>",
@@ -544,14 +668,13 @@ def _build_weekly_wide_table(
         normal = _normal_summary(normals, config, metric=metric, window=window)
         observed = _weekly_row(records, config, metric=metric, window=window, data_type="observed")
         rows.append(_wide_row(window, regions, {"observed": observed}, normal, forecast=False, measure="value", metric=metric))
-    rows.append('<tr class="forecast-header"><td colspan="3">预测：未来2周</td>' + "".join('<td class="forecast-sub">EC</td><td class="forecast-sub">GFS</td>' for _ in range(1 + len(regions))) + "</tr>")
+    rows.append('<tr class="forecast-header"><td colspan="3">预测：未来2周（滚动7日）</td>' + "".join('<td class="forecast-sub">EC</td><td class="forecast-sub">GFS</td>' for _ in range(1 + len(regions))) + "</tr>")
     for window in forecast_windows:
         normal = _normal_summary(normals, config, metric=metric, window=window)
-        forecasts = {"ECMWF": _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model="ECMWF"), "GFS": _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model="GFS")}
-        rows.append(_wide_row(window, regions, forecasts, normal, forecast=True, measure="value", metric=metric))
+        rows.append(_wide_row(window, regions, forecast_summaries[window], normal, forecast=True, measure="value", metric=metric))
     for section, measure, forecast_heading in (
-        ("周度偏差（mm）" if metric == "precipitation" else "周度偏差（℃）", "absolute", "预测偏差：未来2周"),
-        ("周度偏差幅度（%）", "percent", "预测偏差幅度：未来2周"),
+        (str(metric_config["absolute_anomaly_label"]), "absolute", "预测偏差：未来2周（滚动7日）"),
+        ("周度偏差幅度（%）", "percent", "预测偏差幅度：未来2周（滚动7日）"),
     ):
         rows.append(f'<tr class="section-header"><td colspan="3">{section}</td><td colspan="{colspan - 3}">沿用旧项目30年历史同期基准</td></tr>')
         for window in history_windows:
@@ -561,9 +684,9 @@ def _build_weekly_wide_table(
         rows.append(f'<tr class="forecast-header"><td colspan="3">{forecast_heading}</td>' + "".join('<td class="forecast-sub">EC</td><td class="forecast-sub">GFS</td>' for _ in range(1 + len(regions))) + "</tr>")
         for window in forecast_windows:
             normal = _normal_summary(normals, config, metric=metric, window=window)
-            forecasts = {"ECMWF": _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model="ECMWF"), "GFS": _weekly_row(records, config, metric=metric, window=window, data_type="forecast", model="GFS")}
-            rows.append(_wide_row(window, regions, forecasts, normal, forecast=True, measure=measure, metric=metric))
-    rows.append(f'<tr><td colspan="{colspan}" class="table-note">主产区加权固定使用全部{len(all_regions)}个展示地区：sum(region_value × region_weight) / {coverage:.1f}。偏差按当前值减30年基准，偏差幅度按当前值/30年基准−1计算。</td></tr>')
+            rows.append(_wide_row(window, regions, forecast_summaries[window], normal, forecast=True, measure=measure, metric=metric))
+    note = f"{_forecast_window_note(plan)} 主产区加权固定使用全部{len(all_regions)}个展示地区：sum(region_value × region_weight) / {coverage:.1f}。偏差按当前值减30年基准，偏差幅度按当前值/30年基准−1计算。"
+    rows.append(f'<tr><td colspan="{colspan}" class="table-note">{note}</td></tr>')
     return '<div class="weather-table-scroll"><table class="weather-wide-table">' + "".join(rows) + "</table></div>"
 
 
@@ -579,7 +702,6 @@ def _inject_weather_styles() -> None:
         .weather-wide-table .snapshot-date {background:#eaf3fb;color:#36536f;text-align:center;font-weight:700;}
         .weather-wide-table .weight-row td,.weather-wide-table .section-header td {background:#dcecf9;color:#0b365a;font-weight:900;}
         .weather-wide-table .forecast-header td,.weather-wide-table .forecast-sub {background:#fff2cc;color:#795a13;font-weight:800;}
-        .weather-wide-table .row-forecast td {background:#fff9e7;}
         .weather-wide-table .forecast-ec,.weather-wide-table .forecast-gfs {font-size:12px;color:#1f2937;}
         .weather-wide-table .forecast-ec strong,.weather-wide-table .forecast-gfs strong {font-size:12px;color:#1f2937;}
         .weather-wide-table .anomaly-deep-negative {background:#C62828;color:#fff;font-weight:800;}
@@ -886,7 +1008,15 @@ def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str,
                     )
 
 
-def _render_weekly(records: pd.DataFrame, normals: pd.DataFrame, config: dict[str, object], *, metric: str, snapshot_date: str) -> None:
+def _render_weekly(
+    records: pd.DataFrame,
+    normals: pd.DataFrame,
+    config: dict[str, object],
+    *,
+    metric: str,
+    forecast_records_by_metric: dict[str, pd.DataFrame],
+    snapshot_date: str,
+) -> None:
     latest = latest_observation_date(records)
     if latest is None:
         st.warning("尚无可用于周度分析的观测数据。")
@@ -898,7 +1028,7 @@ def _render_weekly(records: pd.DataFrame, normals: pd.DataFrame, config: dict[st
     expand_label = str(config.get("summary_expand_label", f"展开全部{region_count}个地区"))
     show_all = st.checkbox(expand_label, value=region_count <= initial_count, key=f"weather_wide_table_{config.get('route_key', config['country'])}_{metric}")
     st.caption(f"默认展示前{initial_count}个地区；主产区加权始终使用全部{region_count}个展示地区，覆盖权重{coverage:.1f}%。")
-    st.markdown(_build_weekly_wide_table(records, normals, config, metric=metric, latest=latest, snapshot_date=snapshot_date, show_all_regions=show_all), unsafe_allow_html=True)
+    st.markdown(_build_weekly_wide_table(records, normals, config, metric=metric, forecast_records_by_metric=forecast_records_by_metric, latest=latest, snapshot_date=snapshot_date, show_all_regions=show_all), unsafe_allow_html=True)
 
 
 def render_weather_page(route_key: str = "USA") -> None:
@@ -981,7 +1111,24 @@ def render_weather_page(route_key: str = "USA") -> None:
         except (OSError, ValueError, ImportError) as exc:
             st.error(f"30年历史同期基准读取失败：{exc}")
             return
-        _render_weekly(records, normals, config, metric=metric, snapshot_date=freshness["refreshed_at"])
+        forecast_records_by_metric = {metric: records}
+        try:
+            for forecast_metric in WEEKLY_TABLE_METRICS:
+                if forecast_metric == metric:
+                    continue
+                forecast_records_by_metric[forecast_metric] = _load_selected_records(
+                    str(data_path),
+                    data_stat.st_mtime_ns,
+                    str(config["crop"]),
+                    str(config["country"]),
+                    forecast_metric,
+                    data_stat.st_size,
+                    route_key,
+                )
+        except (OSError, ValueError, ImportError) as exc:
+            st.error(f"完整预测窗口校验失败：{exc}")
+            return
+        _render_weekly(records, normals, config, metric=metric, forecast_records_by_metric=forecast_records_by_metric, snapshot_date=freshness["refreshed_at"])
     elif kind == "daily_rain":
         _render_grid(records, config, kind=kind, columns=3, metric=metric)
     elif kind == "cumulative_rain":
