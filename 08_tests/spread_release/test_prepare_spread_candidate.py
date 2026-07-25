@@ -14,6 +14,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = REPOSITORY / "09_deploy" / "spread_release"
 sys.path.insert(0, str(CONTRACT_DIR))
 
+import prepare_spread_candidate as candidate_prepare  # noqa: E402
 from prepare_spread_candidate import (  # noqa: E402
     CANDIDATE_SERVICE,
     CandidateOptions,
@@ -481,6 +482,61 @@ def test_execute_obeys_the_formal_evidence_and_cleanup_order(tmp_path: Path) -> 
     assert result["deployment_plan_path"].endswith("deployment_plan.json")
 
 
+def test_plan_sealer_uses_a_release_sealed_target_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+    release = options.output_directory / "releases" / options.release_id
+    release.mkdir(parents=True)
+    manifest = {
+        "image_ref": options.image_ref,
+        "git_commit": options.git_commit,
+    }
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        candidate_prepare,
+        "load_manifest_bundle",
+        lambda *_args: (manifest, {}),
+    )
+
+    def fake_create_plan(**kwargs):
+        captured.update(kwargs)
+        return {"plan_status": "deployment_plan_sealed"}
+
+    def fake_write_plan(_plan, path: Path) -> Path:
+        path.write_text("{}\n", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(candidate_prepare, "create_deployment_plan", fake_create_plan)
+    monkeypatch.setattr(candidate_prepare, "write_deployment_plan", fake_write_plan)
+    monkeypatch.setattr(candidate_prepare, "load_deployment_plan", lambda *_args: {})
+
+    evidence = candidate_prepare._default_deployment_plan_sealer(
+        options,
+        FakeRuntime(runner),
+        {
+            "SPREAD_IMAGE": "market-data-spread-dashboard:spread-20260723-b704a2933fec-b01",
+            "MARKET_DATA_GIT_HEAD": "b704a2933fecc667695d5a31065abeea1fda7492",
+            "USDA_DASHBOARD_URL": "https://dashboard.example/usda/",
+            "OIL_WORLD_DASHBOARD_URL": "https://dashboard.example/oil-world/",
+            "WEATHER_RUNTIME_CURRENT_DIR": "/home/ubuntu/market-data-runtime/weather/processed",
+            "WEATHER_DATA_DIR": "/app/runtime/weather/current",
+        },
+        release,
+        release / "candidate_result.json",
+    )
+
+    target_env = Path(captured["production_env_file"])
+    text = target_env.read_text(encoding="utf-8")
+    assert target_env == release / "production-target.env"
+    assert f"SPREAD_IMAGE={options.image_ref}" in text
+    assert f"MARKET_DATA_GIT_HEAD={options.git_commit}" in text
+    assert "USDA_DASHBOARD_URL=https://dashboard.example/usda/" in text
+    assert evidence["target_production_env_file"] == str(target_env)
+    assert len(evidence["target_production_env_sha256"]) == 64
+
+
 def test_snapshot_failure_records_phase_and_never_calls_docker(tmp_path: Path) -> None:
     options, runner = _options(tmp_path, mode="execute")
 
@@ -534,6 +590,41 @@ def test_rejects_stale_or_external_snapshot_before_build(tmp_path: Path) -> None
             formal_snapshotter=external_snapshot,
         )
     assert not any(command[:2] == ["docker", "build"] for command in external_runner.commands)
+
+
+def test_rejects_snapshot_timestamp_later_than_candidate_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+    moments = iter(
+        (
+            "2026-07-25T11:58:00Z",  # result creation
+            "2026-07-25T12:01:00Z",  # snapshot freshness check
+            "2026-07-25T11:59:00Z",  # attempted candidate startup
+        )
+    )
+    monkeypatch.setattr(candidate_prepare, "_utc_now", lambda: next(moments))
+
+    def snapshot(_runtime, output):
+        path = output / "formal_containers.before_candidate.json"
+        path.write_text('{"captured_at":"2026-07-25T12:00:00Z"}\n', encoding="utf-8")
+        return path, {"captured_at": "2026-07-25T12:00:00Z"}
+
+    def seal(*_args):
+        release = options.output_directory / "releases" / options.release_id
+        release.mkdir(parents=True)
+        return release
+
+    with pytest.raises(ContractError, match="must precede candidate container startup"):
+        prepare_candidate(
+            options,
+            runner=runner,
+            runtime=FakeRuntime(runner),
+            port_probe=lambda _: True,
+            formal_snapshotter=snapshot,
+            release_sealer=seal,
+        )
+    assert not any(command[:2] == ["docker", "compose"] and "up" in command for command in runner.commands)
 
 
 def test_candidate_result_failure_does_not_return_prepared_and_cleans_candidate(tmp_path: Path) -> None:
