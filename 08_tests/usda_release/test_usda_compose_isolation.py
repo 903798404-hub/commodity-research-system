@@ -202,6 +202,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
 
         responses = {
             "http://127.0.0.1:18080/usda/": Response(200, '<script src="/usda/assets/main.js"></script>'),
+            "http://127.0.0.1:18080/usda/presentation": Response(200, "presentation"),
             "http://127.0.0.1:18080/usda/data/index.json": Response(200, "{}"),
             "http://127.0.0.1:18080/usda/assets/main.js": Response(200, "console.log('ok')"),
         }
@@ -210,7 +211,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             timeout_seconds=10,
             request=lambda url, timeout: responses[url],
         )
-        self.assertEqual([item.get("http_status") for item in checks], [200, 200, 200])
+        self.assertEqual([item.get("http_status") for item in checks], [200, 200, 200, 200])
         self.assertEqual(checks[-1]["kind"], "static_asset")
 
     def test_candidate_log_summary_rejects_runtime_errors_without_storing_log_text(self) -> None:

@@ -148,7 +148,11 @@ def wait_for_candidate(
     if timeout_seconds < 10:
         raise ValueError("candidate timeout must be at least 10 seconds")
     root_url = f"http://127.0.0.1:{port}/usda/"
-    endpoints = (root_url, f"http://127.0.0.1:{port}/usda/data/index.json")
+    endpoints = (
+        root_url,
+        f"http://127.0.0.1:{port}/usda/presentation",
+        f"http://127.0.0.1:{port}/usda/data/index.json",
+    )
     deadline = time.monotonic() + timeout_seconds
     checks: list[dict[str, Any]] = []
     while True:
