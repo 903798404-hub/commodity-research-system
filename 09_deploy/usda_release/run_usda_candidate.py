@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.error import URLError
+from urllib.parse import urljoin
 from urllib.request import urlopen
 
 from capture_usda_runtime import sanitize_container, utc_now, write_json_exclusive
@@ -134,23 +136,47 @@ def wait_for_candidate(
 ) -> list[dict[str, Any]]:
     if timeout_seconds < 10:
         raise ValueError("candidate timeout must be at least 10 seconds")
-    endpoints = (f"http://127.0.0.1:{port}/usda/", f"http://127.0.0.1:{port}/usda/data/index.json")
+    root_url = f"http://127.0.0.1:{port}/usda/"
+    endpoints = (root_url, f"http://127.0.0.1:{port}/usda/data/index.json")
     deadline = time.monotonic() + timeout_seconds
     checks: list[dict[str, Any]] = []
     while True:
         all_ok = True
         checks = []
+        root_body = ""
         for endpoint in endpoints:
             try:
                 with request(endpoint, timeout=3) as response:
                     status = int(response.status)
                     checks.append({"url": endpoint, "http_status": status})
                     all_ok = all_ok and status == 200
+                    if endpoint == root_url and status == 200:
+                        root_body = response.read().decode("utf-8", errors="replace")
             except (URLError, OSError) as exc:
                 checks.append({"url": endpoint, "error": type(exc).__name__})
                 all_ok = False
         if all_ok:
-            return checks
+            asset_paths = re.findall(
+                r'(?:src|href)=["\']([^"\']+\.(?:js|css))(?:\?[^"\']*)?["\']',
+                root_body,
+                flags=re.IGNORECASE,
+            )
+            if not asset_paths:
+                checks.append({"url": root_url, "error": "static_asset_reference_missing"})
+                all_ok = False
+            else:
+                for asset_path in sorted(set(asset_paths)):
+                    asset_url = urljoin(root_url, asset_path)
+                    try:
+                        with request(asset_url, timeout=3) as response:
+                            status = int(response.status)
+                            checks.append({"url": asset_url, "http_status": status, "kind": "static_asset"})
+                            all_ok = all_ok and status == 200
+                    except (URLError, OSError) as exc:
+                        checks.append({"url": asset_url, "kind": "static_asset", "error": type(exc).__name__})
+                        all_ok = False
+            if all_ok:
+                return checks
         if time.monotonic() >= deadline:
             raise RuntimeError(f"candidate readiness timed out: {checks}")
         sleep(2)
@@ -162,6 +188,7 @@ def _candidate_result(
     inspected: Mapping[str, Any],
     expected_image_id: str,
     http_checks: list[dict[str, Any]],
+    log_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
     if not inspected["running"] or inspected["status"] != "running":
         raise RuntimeError("candidate container is not running")
@@ -185,7 +212,24 @@ def _candidate_result(
         "candidate_image": values["USDA_IMAGE"],
         "candidate_port": int(values["USDA_CANDIDATE_HOST_PORT"]),
         "http_checks": http_checks,
+        "log_summary": dict(log_summary),
         "forbidden_environment_names": sorted(FORBIDDEN_NAMES),
+    }
+
+
+def collect_log_summary(container: str, runner: Callable[..., Any]) -> dict[str, Any]:
+    completed = _run(["docker", "logs", "--tail", "200", container], runner)
+    raw = (completed.stdout or "") + (completed.stderr or "")
+    markers = ("Traceback", "FileNotFoundError", "KeyError", "ConfigurationError")
+    present = [marker for marker in markers if marker in raw]
+    if present:
+        raise RuntimeError(f"candidate logs contain failure markers: {present}")
+    encoded = raw.encode("utf-8", errors="replace")
+    return {
+        "tail_lines_requested": 200,
+        "bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "failure_markers": present,
     }
 
 
@@ -219,11 +263,13 @@ def main(argv: list[str] | None = None) -> int:
                 port=int(values["USDA_CANDIDATE_HOST_PORT"]),
                 timeout_seconds=args.timeout_seconds,
             )
+            log_summary = collect_log_summary(values["USDA_CANDIDATE_CONTAINER_NAME"], subprocess.run)
             result = _candidate_result(
                 values=values,
                 inspected=inspected,
                 expected_image_id=args.expected_image_id,
                 http_checks=checks,
+                log_summary=log_summary,
             )
             write_json_exclusive(args.evidence_dir / "candidate_result.json", result)
         finally:

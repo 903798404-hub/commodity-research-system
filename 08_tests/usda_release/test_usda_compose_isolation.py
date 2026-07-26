@@ -177,6 +177,48 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             ["docker", "rm", "-f", "usda-candidate-abc123"],
         )
 
+    def test_candidate_readiness_requires_html_static_asset_and_data_index(self) -> None:
+        class Response:
+            def __init__(self, status: int, body: str = "") -> None:
+                self.status = status
+                self._body = body.encode("utf-8")
+
+            def read(self) -> bytes:
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        responses = {
+            "http://127.0.0.1:18080/usda/": Response(200, '<script src="/usda/assets/main.js"></script>'),
+            "http://127.0.0.1:18080/usda/data/index.json": Response(200, "{}"),
+            "http://127.0.0.1:18080/usda/assets/main.js": Response(200, "console.log('ok')"),
+        }
+        checks = CANDIDATE_MODULE.wait_for_candidate(
+            port=18080,
+            timeout_seconds=10,
+            request=lambda url, timeout: responses[url],
+        )
+        self.assertEqual([item.get("http_status") for item in checks], [200, 200, 200])
+        self.assertEqual(checks[-1]["kind"], "static_asset")
+
+    def test_candidate_log_summary_rejects_runtime_errors_without_storing_log_text(self) -> None:
+        def fake_runner(command, **_kwargs):
+            return subprocess.CompletedProcess(command, 0, "Traceback: no", "")
+
+        with self.assertRaisesRegex(RuntimeError, "failure markers"):
+            CANDIDATE_MODULE.collect_log_summary("candidate", fake_runner)
+
+        summary = CANDIDATE_MODULE.collect_log_summary(
+            "candidate",
+            lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "normal startup", ""),
+        )
+        self.assertEqual(summary["failure_markers"], [])
+        self.assertNotIn("normal startup", json.dumps(summary))
+
     def test_runtime_snapshot_has_no_environment_values(self) -> None:
         def container(name: str) -> dict:
             return {
