@@ -107,6 +107,7 @@ class OilWorldReleaseContractTests(unittest.TestCase):
 
         nginx = (REPOSITORY / "11_独立应用" / "OilWorld平衡表" / "deploy" / "nginx.conf").read_text(encoding="utf-8")
         self.assertIn("location = /oil-world/RELEASE.json", nginx)
+        self.assertIn("alias /usr/share/nginx/html/oil-world/RELEASE.json;", nginx)
         self.assertIn("default_type application/json;", nginx)
         self.assertLess(nginx.index("location = /oil-world/RELEASE.json"), nginx.index("location /oil-world/"))
 
