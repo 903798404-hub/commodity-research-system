@@ -1,15 +1,26 @@
-FROM python:3.12-slim
+# Verified on the production builder as Python 3.12.13 for linux/amd64.
+FROM python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9
 
 ARG MARKET_DATA_GIT_HEAD
 ARG MARKET_DATA_GIT_TREE
 ARG MARKET_DATA_RELEASE_ID
 ARG MARKET_DATA_BUILD_TIME
 ARG MARKET_DATA_SOURCE
+ARG MARKET_DATA_SERVICE=spread
+ARG MARKET_DATA_ARTIFACT_ORIGIN=candidate
+ARG MARKET_DATA_ARTIFACT_PROMOTABLE=true
+ARG MARKET_DATA_DEPLOYMENT_ROLE=candidate
 
 LABEL org.opencontainers.image.revision="${MARKET_DATA_GIT_HEAD}" \
       org.opencontainers.image.version="${MARKET_DATA_RELEASE_ID}" \
       org.opencontainers.image.created="${MARKET_DATA_BUILD_TIME}" \
-      org.opencontainers.image.source="${MARKET_DATA_SOURCE}"
+      org.opencontainers.image.source="${MARKET_DATA_SOURCE}" \
+      market-data.git.tree="${MARKET_DATA_GIT_TREE}" \
+      market-data.release.id="${MARKET_DATA_RELEASE_ID}" \
+      market-data.service="${MARKET_DATA_SERVICE}" \
+      market-data.artifact.origin="${MARKET_DATA_ARTIFACT_ORIGIN}" \
+      market-data.artifact.promotable="${MARKET_DATA_ARTIFACT_PROMOTABLE}" \
+      market-data.deployment.role="${MARKET_DATA_DEPLOYMENT_ROLE}"
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -27,8 +38,11 @@ RUN sed -i \
     && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
+# requirements.txt is the hash-locked production input.  Development tools are
+# deliberately isolated in requirements-dev.txt and must never enter this image.
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt
+RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \
+    && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
 
 COPY 02_configs /app/02_configs
 COPY 03_src /app/03_src

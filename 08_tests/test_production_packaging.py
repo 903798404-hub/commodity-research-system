@@ -7,6 +7,35 @@ import yaml
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+
+
+def dockerfile_effective_instructions(dockerfile: str) -> tuple[str, ...]:
+    """Return Dockerfile instructions while excluding whole-line comments.
+
+    Docker comments are documentation, not part of the image build graph. Keep
+    continued instructions together so assertions inspect Docker commands, not
+    prose beside them.
+    """
+
+    instructions: list[str] = []
+    continued: list[str] = []
+    for raw_line in dockerfile.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        continued.append(line.rstrip("\\").rstrip())
+        if line.endswith("\\"):
+            continue
+
+        instructions.append(" ".join(continued))
+        continued = []
+
+    if continued:
+        instructions.append(" ".join(continued))
+    return tuple(instructions)
+
+
 USDA_ROOT = REPOSITORY / "11_独立应用" / "USDA平衡表"
 
 
@@ -89,6 +118,10 @@ class ProductionPackagingTests(unittest.TestCase):
 
     def test_spread_image_declares_immutable_release_identity(self) -> None:
         dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn(
+            "FROM python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9",
+            dockerfile,
+        )
         for argument in (
             "MARKET_DATA_GIT_HEAD",
             "MARKET_DATA_GIT_TREE",
@@ -107,6 +140,48 @@ class ProductionPackagingTests(unittest.TestCase):
         self.assertIn("/app/RELEASE.json", dockerfile)
         self.assertIn('"git_tree":tree', dockerfile)
         self.assertIn("chmod 0444 /app/RELEASE.json", dockerfile)
+        for label in (
+            "market-data.git.tree",
+            "market-data.release.id",
+            "market-data.service",
+            "market-data.artifact.origin",
+            "market-data.artifact.promotable",
+            "market-data.deployment.role",
+        ):
+            self.assertIn(label, dockerfile)
+
+    def test_spread_image_uses_only_the_production_lock_and_cleans_build_caches(self) -> None:
+        dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
+        instructions = dockerfile_effective_instructions(dockerfile)
+        instruction_text = "\n".join(instructions)
+        copy_instructions = [
+            instruction for instruction in instructions if instruction.upper().startswith("COPY ")
+        ]
+
+        self.assertIn("--require-hashes -r requirements.txt", instruction_text)
+        self.assertNotIn("requirements-dev.txt", instruction_text)
+        self.assertFalse(any("08_tests" in instruction for instruction in copy_instructions))
+        self.assertIn("rm -rf /var/lib/apt/lists/*", instruction_text)
+        self.assertIn("rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels", instruction_text)
+
+    def test_dockerfile_instruction_parser_ignores_comment_only_development_lock_reference(self) -> None:
+        instructions = dockerfile_effective_instructions(
+            "# requirements-dev.txt remains outside the production image\n"
+            "COPY requirements.txt /app/requirements.txt\n"
+            "RUN python -m pip install --require-hashes -r requirements.txt\n"
+        )
+
+        instruction_text = "\n".join(instructions)
+        self.assertNotIn("requirements-dev.txt", instruction_text)
+        self.assertIn("COPY requirements.txt /app/requirements.txt", instruction_text)
+        self.assertIn("RUN python -m pip install --require-hashes -r requirements.txt", instruction_text)
+
+    def test_dockerfile_instruction_parser_keeps_real_development_lock_reference(self) -> None:
+        instructions = dockerfile_effective_instructions(
+            "COPY requirements-dev.txt /app/requirements-dev.txt\n"
+        )
+
+        self.assertIn("requirements-dev.txt", "\n".join(instructions))
 
     def test_dynamic_data_and_sensitive_files_are_not_packaged(self) -> None:
         dockerfile = (REPOSITORY / "Dockerfile").read_text(encoding="utf-8")
