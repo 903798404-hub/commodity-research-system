@@ -121,6 +121,37 @@ def inspect_container(name: str, runner: Runner = subprocess.run) -> dict[str, A
     return sanitize_container(payload[0])
 
 
+def wait_for_candidate_health(
+    name: str,
+    *,
+    timeout_seconds: int,
+    runner: Runner = subprocess.run,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Return the candidate only after Docker reports its final healthy state.
+
+    Compose can return before the image's declared healthcheck start period has
+    elapsed.  A sealed candidate result must never capture that transient
+    ``starting`` state as a release failure or as success.
+    """
+
+    deadline = clock() + timeout_seconds
+    last_health = "unknown"
+    while True:
+        candidate = inspect_container(name, runner)
+        if not candidate["running"] or candidate["status"] != "running" or candidate["restart_count"] != 0:
+            raise ContractError("candidate container stopped or restarted while waiting for health")
+        last_health = str(candidate["health"])
+        if last_health == "healthy":
+            return candidate
+        if last_health == "unhealthy":
+            raise ContractError("candidate container healthcheck is unhealthy")
+        if clock() >= deadline:
+            raise ContractError(f"candidate container healthcheck timed out while {last_health}")
+        sleep(1.0)
+
+
 def formal_snapshot(runner: Runner = subprocess.run, phase: str = "before-candidate") -> dict[str, Any]:
     containers = [inspect_container(name, runner) for name in FORMAL_CONTAINERS]
     if {item["name"] for item in containers} != set(FORMAL_CONTAINERS):
@@ -404,7 +435,12 @@ def prepare(args: argparse.Namespace, runner: Runner = subprocess.run, request: 
             timeout=args.timeout_seconds,
         )
         _event(events, "validate")
-        candidate = inspect_container(values["OIL_WORLD_CANDIDATE_CONTAINER_NAME"], runner)
+        candidate = wait_for_candidate_health(
+            values["OIL_WORLD_CANDIDATE_CONTAINER_NAME"],
+            timeout_seconds=args.timeout_seconds,
+            runner=runner,
+            sleep=sleep,
+        )
         after = formal_snapshot(runner, phase="after-candidate")
         formal = formal_unchanged(before, after, after_phase="after-candidate")
         if data_identity(Path(production["OIL_WORLD_DATA_ROOT"])) != data:

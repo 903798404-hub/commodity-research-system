@@ -121,6 +121,23 @@ class OilWorldReleaseContractTests(unittest.TestCase):
         with self.assertRaisesRegex(contract.ContractError, "candidate port"):
             contract.candidate_environment(production, release_id=RELEASE_ID, candidate_port=8081)
 
+    def test_candidate_health_waits_through_docker_start_period(self) -> None:
+        starting = {"running": True, "status": "running", "restart_count": 0, "health": "starting"}
+        healthy = {"running": True, "status": "running", "restart_count": 0, "health": "healthy"}
+        sleeps: list[float] = []
+        clock_values = iter((0.0, 0.0))
+
+        with patch.object(candidate, "inspect_container", side_effect=[starting, healthy]):
+            result = candidate.wait_for_candidate_health(
+                "isolated-candidate",
+                timeout_seconds=30,
+                sleep=sleeps.append,
+                clock=lambda: next(clock_values),
+            )
+
+        self.assertEqual(result, healthy)
+        self.assertEqual(sleeps, [1.0])
+
     def test_dirty_temporary_git_repository_and_bound_candidate_port_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary) / "candidate-repository"
