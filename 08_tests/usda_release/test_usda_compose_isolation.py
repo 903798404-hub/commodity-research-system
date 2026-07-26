@@ -348,9 +348,11 @@ class UsdaComposeIsolationTests(unittest.TestCase):
                 candidate=candidate,
                 cleanup=cleanup,
                 after=after,
+                previous_migration_directory=Path("/runtime/old-migration"),
             )
         self.assertEqual(result["status"], "migration_verified")
         self.assertEqual(result["formal_after"]["containers"][1]["container_id"], "usda-new")
+        self.assertEqual(result["previous_migration_evidence"]["classification"], "historical_migration_evidence")
 
     def test_execute_candidate_records_validation_before_real_candidate_cleanup(self) -> None:
         inspected = {

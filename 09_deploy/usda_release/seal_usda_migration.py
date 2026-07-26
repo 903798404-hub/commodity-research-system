@@ -56,6 +56,7 @@ def build_migration_result(
     candidate: Mapping[str, Any],
     cleanup: Mapping[str, Any],
     after: Mapping[str, Any],
+    previous_migration_directory: Path | None = None,
 ) -> dict[str, Any]:
     if not SHA_RE.fullmatch(git_commit) or not SHA_RE.fullmatch(git_tree):
         raise ValueError("Git commit and tree must be complete lowercase SHA-1 values")
@@ -84,7 +85,7 @@ def build_migration_result(
         raise ValueError("formal USDA Image ID differs from the validated candidate")
     if not new_usda["running"] or new_usda["restart_count"] != 0:
         raise ValueError("new USDA container is not healthy enough to seal")
-    return {
+    result = {
         "schema_version": "1.0.0",
         "status": "migration_verified",
         "target_git_commit": git_commit,
@@ -110,6 +111,13 @@ def build_migration_result(
             "working_dir": old_usda["compose"]["working_dir"],
         },
     }
+    if previous_migration_directory is not None:
+        result["previous_migration_evidence"] = {
+            "path": str(previous_migration_directory),
+            "classification": "historical_migration_evidence",
+            "retention": "protected_from_candidate_and_7_day_temporary_cleanup",
+        }
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--cleanup", type=Path, required=True)
     parser.add_argument("--after", type=Path, required=True)
+    parser.add_argument("--previous-migration-directory", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -134,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate=load_json(args.candidate),
             cleanup=load_json(args.cleanup),
             after=load_json(args.after),
+            previous_migration_directory=args.previous_migration_directory,
         )
         target = write_json_exclusive(args.output, payload)
         print(json.dumps({"output": str(target), "sha256": sha256_file(target)}, sort_keys=True))
