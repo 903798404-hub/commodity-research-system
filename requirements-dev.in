@@ -1,0 +1,8 @@
+# Development and test dependencies. The runtime input remains requirements.in.
+-r requirements.in
+jsonschema==4.26.0
+pip==25.0.1
+pip-tools==7.5.0
+pytest==9.1.1
+setuptools==75.8.0
+wheel==0.45.1

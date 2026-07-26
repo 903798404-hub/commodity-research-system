@@ -6,7 +6,7 @@ COPY 05_apps/oil_world_dashboard/package.json \
      05_apps/oil_world_dashboard/pnpm-lock.yaml \
      05_apps/oil_world_dashboard/pnpm-workspace.yaml ./
 
-RUN corepack enable && pnpm install --frozen-lockfile
+RUN corepack enable && pnpm --version && pnpm install --frozen-lockfile
 
 COPY 05_apps/oil_world_dashboard/ ./
 

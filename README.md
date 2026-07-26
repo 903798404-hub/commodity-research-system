@@ -59,6 +59,22 @@ pytest
 streamlit run 05_apps/streamlit_app.py
 ```
 
+## 本地开发工具链
+
+正式 Python 基线为 3.12，标准本地环境为 `.venv-py312`；旧 `.venv`（Python
+3.14）不属于正式验证环境。首次创建和安装使用：
+
+```powershell
+py -3.12 -m venv .venv-py312
+.\.venv-py312\Scripts\python.exe -m pip install --require-hashes -r requirements-dev.txt
+.\.venv-py312\Scripts\python.exe 04_scripts\environment\verify_development_environment.py
+```
+
+运行时直接依赖维护在 `requirements.in`，生产锁为 `requirements.txt`；测试工具维护
+在 `requirements-dev.in`，开发锁为 `requirements-dev.txt`。两个前端统一使用 Node
+24、Corepack 管理的 pnpm 10.12.1，并必须执行 `pnpm install --frozen-lockfile`。
+缺少 Node、Corepack 或正式 pnpm 时，环境预检会失败且不会自动安装工具。
+
 USDA 子项目位于 `11_独立应用/USDA平衡表/`。本地开发在该目录运行 `pnpm run dev`，测试和生产构建分别运行 `pnpm run test`、`pnpm exec tsc -b --pretty false` 和 `pnpm run build`。
 
 Oil World 子项目位于 `11_独立应用/OilWorld平衡表/`。本地启动命令为：

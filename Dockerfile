@@ -28,7 +28,7 @@ RUN sed -i \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir --default-timeout=120 -r requirements.txt
+RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt
 
 COPY 02_configs /app/02_configs
 COPY 03_src /app/03_src

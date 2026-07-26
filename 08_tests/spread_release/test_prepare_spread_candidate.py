@@ -4,7 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -237,7 +237,11 @@ def _options(
 
 def _snapshot(_runtime: FakeRuntime, output: Path) -> tuple[Path, dict[str, str]]:
     path = output / "formal_containers.before_candidate.json"
-    captured_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    # The production contract rejects equal timestamps: a formal snapshot must
+    # be strictly earlier than candidate preparation.  Keep the successful
+    # fixture explicitly one second earlier rather than depending on Windows
+    # clock precision between two consecutive datetime.now() calls.
+    captured_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
     path.write_text(json.dumps({"captured_at": captured_at}) + "\n", encoding="utf-8")
     return path, {"captured_at": captured_at}
 
@@ -613,6 +617,34 @@ def test_rejects_stale_or_external_snapshot_before_build(tmp_path: Path) -> None
             formal_snapshotter=external_snapshot,
         )
     assert not any(command[:2] == ["docker", "build"] for command in external_runner.commands)
+
+
+def test_rejects_snapshot_timestamp_equal_to_preparation_check_before_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+    moments = iter(
+        (
+            "2026-07-25T11:58:00Z",  # result creation
+            "2026-07-25T12:00:00Z",  # snapshot freshness check
+        )
+    )
+    monkeypatch.setattr(candidate_prepare, "_utc_now", lambda: next(moments))
+
+    def equal_snapshot(_runtime, output):
+        path = output / "formal_containers.before_candidate.json"
+        path.write_text('{"captured_at":"2026-07-25T12:00:00Z"}\n', encoding="utf-8")
+        return path, {"captured_at": "2026-07-25T12:00:00Z"}
+
+    with pytest.raises(ContractError, match="must precede candidate preparation"):
+        prepare_candidate(
+            options,
+            runner=runner,
+            runtime=FakeRuntime(runner),
+            port_probe=lambda _: True,
+            formal_snapshotter=equal_snapshot,
+        )
+    assert not any(command[:2] == ["docker", "build"] for command in runner.commands)
 
 
 def test_rejects_snapshot_timestamp_later_than_candidate_start(
