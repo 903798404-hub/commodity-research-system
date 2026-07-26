@@ -392,7 +392,22 @@ def prepare(args: argparse.Namespace, runner: Runner = subprocess.run, request: 
         raise ContractError("--git-commit does not match the clean candidate repository")
     if git_tree != args.git_tree:
         raise ContractError("--git-tree does not match the clean candidate repository")
-    formal_image_ref = validate_immutable_image_reference(args.formal_image_ref, "--formal-image-ref")
+    # The formal tag is always a new immutable reference for this exact
+    # candidate commit.  The production env's current image stays exclusively
+    # in ``rollback``; accepting it as the target would overwrite the only
+    # rollback tag during ``docker tag``.
+    formal_image_ref = validate_immutable_image_reference(
+        f"market-data-oil-world-dashboard:{git_commit}",
+        "derived formal image reference",
+    )
+    requested_formal_image_ref = getattr(args, "formal_image_ref", None)
+    if requested_formal_image_ref is not None:
+        requested_formal_image_ref = validate_immutable_image_reference(
+            requested_formal_image_ref,
+            "--formal-image-ref",
+        )
+        if requested_formal_image_ref != formal_image_ref:
+            raise ContractError("--formal-image-ref must equal the candidate Git SHA tag")
     data = data_identity(Path(production["OIL_WORLD_DATA_ROOT"]))
     values = candidate_environment(production, release_id=args.release_id, candidate_port=args.candidate_port)
     ensure_candidate_port_available(args.candidate_port)
@@ -483,7 +498,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--rollback-image-ref", required=True)
     result.add_argument("--rollback-image-id", required=True)
     result.add_argument("--rollback-git-commit", required=True)
-    result.add_argument("--formal-image-ref", required=True)
+    result.add_argument("--formal-image-ref", help="optional assertion; must equal market-data-oil-world-dashboard:<git-commit>")
     result.add_argument("--candidate-port", type=int, default=18081)
     result.add_argument("--timeout-seconds", type=int, default=90)
     result.add_argument("--execute", action="store_true")

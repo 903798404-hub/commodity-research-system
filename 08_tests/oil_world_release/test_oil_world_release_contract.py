@@ -230,9 +230,10 @@ class OilWorldReleaseContractTests(unittest.TestCase):
             (data / "comparisons" / "2026-03_to_2026-06" / "index.json").write_text("{}", encoding="utf-8")
             env = root / "oil.env"
             env.write_text(f"OIL_WORLD_IMAGE=market-data-oil-world-dashboard:old\nOIL_WORLD_PORT=8081\nOIL_WORLD_DATA_ROOT={data}\n", encoding="utf-8")
-            args = Namespace(repository=REPOSITORY, production_compose=contract.PRODUCTION_COMPOSE, production_project_dir=root, production_env=env, output_dir=root / "release", release_id=RELEASE_ID, git_commit=COMMIT, git_tree=TREE, rollback_image_ref="market-data-oil-world-dashboard:old", rollback_image_id=ROLLBACK_IMAGE_ID, rollback_git_commit="e" * 40, formal_image_ref="market-data-oil-world-dashboard:oil-20260726-aaaaaaaaaaaa-b01-formal", candidate_port=18081, timeout_seconds=10, execute=True)
+            args = Namespace(repository=REPOSITORY, production_compose=contract.PRODUCTION_COMPOSE, production_project_dir=root, production_env=env, output_dir=root / "release", release_id=RELEASE_ID, git_commit=COMMIT, git_tree=TREE, rollback_image_ref="market-data-oil-world-dashboard:old", rollback_image_id=ROLLBACK_IMAGE_ID, rollback_git_commit="e" * 40, formal_image_ref=None, candidate_port=18081, timeout_seconds=10, execute=True)
             result = candidate.prepare(args, runner=runner, request=request, sleep=lambda _seconds: None)
             self.assertEqual(result["status"], "prepared")
+            self.assertEqual(result["formal_image_ref"], f"market-data-oil-world-dashboard:{COMMIT}")
             order = [item["name"] for item in result["events"]]
             self.assertEqual(order, ["formal_snapshot", "docker_build", "release_bundle", "compose_up", "validate", "candidate_result", "candidate_container_cleanup", "deployment_plan"])
             self.assertTrue((root / "release" / "candidate_result.json").exists())
@@ -335,7 +336,7 @@ class OilWorldReleaseContractTests(unittest.TestCase):
             (data / "releases" / "2026-06" / "index.json").write_text("{}", encoding="utf-8")
             env = root / "oil.env"
             env.write_text(f"OIL_WORLD_IMAGE=market-data-oil-world-dashboard:old\nOIL_WORLD_PORT=8081\nOIL_WORLD_DATA_ROOT={data}\n", encoding="utf-8")
-            args = Namespace(repository=REPOSITORY, production_compose=contract.PRODUCTION_COMPOSE, production_project_dir=root, production_env=env, output_dir=root / "release", release_id=RELEASE_ID, git_commit=COMMIT, git_tree=TREE, rollback_image_ref="market-data-oil-world-dashboard:old", rollback_image_id=ROLLBACK_IMAGE_ID, rollback_git_commit="e" * 40, formal_image_ref="market-data-oil-world-dashboard:oil-20260726-aaaaaaaaaaaa-b01-formal", candidate_port=18081, timeout_seconds=10, execute=True)
+            args = Namespace(repository=REPOSITORY, production_compose=contract.PRODUCTION_COMPOSE, production_project_dir=root, production_env=env, output_dir=root / "release", release_id=RELEASE_ID, git_commit=COMMIT, git_tree=TREE, rollback_image_ref="market-data-oil-world-dashboard:old", rollback_image_id=ROLLBACK_IMAGE_ID, rollback_git_commit="e" * 40, formal_image_ref=None, candidate_port=18081, timeout_seconds=10, execute=True)
             with patch.object(candidate, "validate_candidate_http", side_effect=contract.ContractError("forced readiness failure")):
                 with self.assertRaisesRegex(contract.ContractError, "forced readiness failure"):
                     candidate.prepare(args, runner=runner)
