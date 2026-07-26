@@ -1,4 +1,4 @@
-name: market-data
+name: market-data-usda
 
 # The sole formal USDA Compose entrypoint.  It intentionally does not import
 # the root Compose file, so it can be parsed without any Spread variables.

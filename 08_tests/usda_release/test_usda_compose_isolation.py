@@ -56,7 +56,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         text = PRODUCTION_COMPOSE.read_text(encoding="utf-8")
         compose = yaml.safe_load(text)
 
-        self.assertEqual(compose["name"], "market-data")
+        self.assertEqual(compose["name"], "market-data-usda")
         self.assertEqual(set(compose["services"]), {"usda-dashboard"})
         self.assertFalse(SPREAD_ONLY_VARIABLES & compose_variables(text))
         self.assertNotIn("docker-compose.yml", text)
@@ -101,7 +101,10 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         compose = yaml.safe_load(text)
         service = compose["services"]["usda-dashboard"]
 
-        self.assertEqual(compose["name"], "market-data-usda-candidate")
+        self.assertEqual(
+            compose["name"],
+            "${USDA_CANDIDATE_PROJECT_NAME:?USDA_CANDIDATE_PROJECT_NAME must be set}",
+        )
         self.assertEqual(set(compose["services"]), {"usda-dashboard"})
         self.assertEqual(
             service["container_name"],
@@ -121,10 +124,11 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         self.assertNotIn("spread-dashboard", text)
         self.assertNotIn("oil-world-dashboard", text)
 
-    def test_root_compose_marks_usda_definition_as_legacy_only(self) -> None:
+    def test_root_compose_only_manages_spread(self) -> None:
         root = (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
-        self.assertIn("Historical compatibility definition only", root)
-        self.assertIn("09_deploy/usda_release/compose.production.yml", root)
+        compose = yaml.safe_load(root)
+        self.assertEqual(set(compose["services"]), {"spread-dashboard"})
+        self.assertNotIn("usda-dashboard", root)
 
     def test_controlled_entrypoint_uses_only_independent_compose_files(self) -> None:
         text = ENTRYPOINT.read_text(encoding="utf-8")
@@ -138,12 +142,15 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             self.assertIn(flag, text)
         self.assertIn("candidate-remove", text)
         self.assertIn("rm --stop --force usda-dashboard", text)
+        self.assertIn('production_project="market-data-usda"', text)
+        self.assertNotIn('--project-name market-data ', text)
 
     def test_candidate_environment_rejects_spread_variables_and_formal_ports(self) -> None:
         valid = {
             "USDA_IMAGE": "market-data-usda-dashboard:abc123",
             "USDA_NETWORK_NAME": "market-data_default",
             "USDA_CANDIDATE_CONTAINER_NAME": "usda-candidate-abc123",
+            "USDA_CANDIDATE_PROJECT_NAME": "market-data-usda-candidate-abc123",
             "USDA_CANDIDATE_HOST_PORT": "18080",
         }
         self.assertEqual(
@@ -163,10 +170,11 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         values = {
             "USDA_IMAGE": "market-data-usda-dashboard:abc123",
             "USDA_CANDIDATE_CONTAINER_NAME": "usda-candidate-abc123",
+            "USDA_CANDIDATE_PROJECT_NAME": "market-data-usda-candidate-abc123",
             "USDA_CANDIDATE_HOST_PORT": "18080",
         }
         command = CANDIDATE_MODULE.compose_command(values, "up")
-        self.assertEqual(command[:4], ["docker", "compose", "--project-name", "market-data-usda-candidate"])
+        self.assertEqual(command[:4], ["docker", "compose", "--project-name", "market-data-usda-candidate-abc123"])
         self.assertEqual(command[-1], "usda-dashboard")
         self.assertIn("--no-build", command)
         self.assertIn("--pull", command)
@@ -315,7 +323,12 @@ class UsdaComposeIsolationTests(unittest.TestCase):
                 "restart_count": 0,
                 "ports": {},
                 "mounts": [],
-                "compose": {"service": service, "config_files": str(PRODUCTION_COMPOSE) if service == "usda-dashboard" else "/old/compose.yml"},
+                "compose": {
+                    "service": service,
+                    "config_files": str(PRODUCTION_COMPOSE) if service == "usda-dashboard" else "/old/compose.yml",
+                    "project": "market-data-usda" if service == "usda-dashboard" else "sidecar",
+                    "working_dir": str(PRODUCTION_COMPOSE.parent) if service == "usda-dashboard" else "/old",
+                },
             }
 
         before = {"containers": [identity("spread-dashboard", "spread-old"), identity("usda-dashboard", "usda-old"), identity("oil-world-dashboard", "oil-old")]}
@@ -351,7 +364,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
                 "WorkingDir": "/",
                 "Env": [],
                 "Labels": {
-                    "com.docker.compose.project": "market-data-usda-candidate",
+                    "com.docker.compose.project": "market-data-usda-candidate-abc123",
                     "com.docker.compose.project.working_dir": "/candidate",
                     "com.docker.compose.project.config_files": str(CANDIDATE_COMPOSE),
                     "com.docker.compose.service": "usda-dashboard",
@@ -381,6 +394,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
                     [
                         "USDA_IMAGE=market-data-usda-dashboard:abc123",
                         "USDA_CANDIDATE_CONTAINER_NAME=usda-candidate-abc123",
+                        "USDA_CANDIDATE_PROJECT_NAME=market-data-usda-candidate-abc123",
                         "USDA_CANDIDATE_HOST_PORT=18080",
                     ]
                 )

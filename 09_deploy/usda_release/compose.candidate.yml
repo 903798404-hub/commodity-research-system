@@ -1,4 +1,4 @@
-name: market-data-usda-candidate
+name: ${USDA_CANDIDATE_PROJECT_NAME:?USDA_CANDIDATE_PROJECT_NAME must be set}
 
 # Isolated validation configuration.  It uses the exact production image but
 # cannot claim the formal container name, port, restart policy, or project.

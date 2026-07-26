@@ -15,6 +15,7 @@ from capture_usda_runtime import sha256_file, write_json_exclusive
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+PRODUCTION_PROJECT = "market-data-usda"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -75,6 +76,10 @@ def build_migration_result(
         raise ValueError("USDA formal container was not recreated by the independent Compose")
     if new_usda["compose"]["config_files"] != str(compose):
         raise ValueError("new USDA container does not point to the independent Compose file")
+    if new_usda["compose"]["project"] != PRODUCTION_PROJECT:
+        raise ValueError("new USDA container does not use the independent Compose project")
+    if new_usda["compose"]["working_dir"] != str(compose.parent):
+        raise ValueError("new USDA container does not use the stable Compose working directory")
     if candidate.get("expected_image_id") != new_usda["image_id"]:
         raise ValueError("formal USDA Image ID differs from the validated candidate")
     if not new_usda["running"] or new_usda["restart_count"] != 0:
@@ -84,7 +89,12 @@ def build_migration_result(
         "status": "migration_verified",
         "target_git_commit": git_commit,
         "target_git_tree": git_tree,
-        "new_usda_compose": {"path": str(compose), "sha256": sha256_file(compose)},
+        "new_usda_compose": {
+            "path": str(compose),
+            "sha256": sha256_file(compose),
+            "project_name": PRODUCTION_PROJECT,
+            "working_dir": str(compose.parent),
+        },
         "usda_production_environment": environment_identity(environment),
         "candidate_result": candidate,
         "candidate_cleanup": cleanup,
@@ -96,6 +106,8 @@ def build_migration_result(
             "image_id": old_usda["image_id"],
             "ports": old_usda["ports"],
             "mounts": old_usda["mounts"],
+            "project_name": old_usda["compose"]["project"],
+            "working_dir": old_usda["compose"]["working_dir"],
         },
     }
 

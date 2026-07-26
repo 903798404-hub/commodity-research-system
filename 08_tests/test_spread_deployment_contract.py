@@ -825,10 +825,7 @@ def test_compose_declares_fixed_project_and_required_explicit_image() -> None:
         "${MARKET_DATA_GIT_HEAD:?"
         "MARKET_DATA_GIT_HEAD must be explicitly set}"
     )
-    assert "MARKET_DATA_GIT_HEAD" not in compose["services"]["usda-dashboard"].get(
-        "environment",
-        {},
-    )
+    assert set(compose["services"]) == {"spread-dashboard"}
 
 
 def test_offline_compose_resolution_rejects_missing_spread_image() -> None:

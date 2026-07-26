@@ -32,9 +32,15 @@ FORBIDDEN_NAMES = frozenset(
     }
 )
 REQUIRED_NAMES = frozenset(
-    {"USDA_IMAGE", "USDA_CANDIDATE_CONTAINER_NAME", "USDA_CANDIDATE_HOST_PORT"}
+    {
+        "USDA_IMAGE",
+        "USDA_CANDIDATE_CONTAINER_NAME",
+        "USDA_CANDIDATE_HOST_PORT",
+        "USDA_CANDIDATE_PROJECT_NAME",
+    }
 )
 CONTAINER_RE = re.compile(r"^usda-candidate-[a-z0-9][a-z0-9-]{2,62}$")
+PROJECT_RE = re.compile(r"^market-data-usda-candidate-[a-z0-9][a-z0-9-]{2,62}$")
 IMAGE_RE = re.compile(r"^[^\s]+:[^\s]+$")
 
 
@@ -71,6 +77,10 @@ def validate_candidate_environment(values: Mapping[str, str]) -> dict[str, str]:
     container = values["USDA_CANDIDATE_CONTAINER_NAME"].strip()
     if not CONTAINER_RE.fullmatch(container):
         raise ValueError("candidate container name is invalid")
+    project = values["USDA_CANDIDATE_PROJECT_NAME"].strip()
+    expected_project = f"market-data-{container}"
+    if not PROJECT_RE.fullmatch(project) or project != expected_project:
+        raise ValueError("candidate project name must be derived from the candidate container")
     try:
         port = int(values["USDA_CANDIDATE_HOST_PORT"])
     except ValueError as exc:
@@ -80,6 +90,7 @@ def validate_candidate_environment(values: Mapping[str, str]) -> dict[str, str]:
     normalized = dict(values)
     normalized["USDA_IMAGE"] = image
     normalized["USDA_CANDIDATE_CONTAINER_NAME"] = container
+    normalized["USDA_CANDIDATE_PROJECT_NAME"] = project
     normalized["USDA_CANDIDATE_HOST_PORT"] = str(port)
     return normalized
 
@@ -89,7 +100,7 @@ def compose_command(values: Mapping[str, str], action: str) -> list[str]:
         "docker",
         "compose",
         "--project-name",
-        "market-data-usda-candidate",
+        values["USDA_CANDIDATE_PROJECT_NAME"],
         "--env-file",
         "<candidate-env-file>",
         "-f",
@@ -200,6 +211,10 @@ def _candidate_result(
         raise RuntimeError("candidate restart policy is not disabled")
     if inspected["compose"]["service"] != "usda-dashboard":
         raise RuntimeError("candidate Compose service is invalid")
+    if inspected["compose"]["project"] != values["USDA_CANDIDATE_PROJECT_NAME"]:
+        raise RuntimeError("candidate Compose project is invalid")
+    if inspected["compose"]["config_files"] != str(CANDIDATE_COMPOSE):
+        raise RuntimeError("candidate Compose path is invalid")
     ports = inspected["ports"].get("80/tcp") or []
     if not ports or any(item.get("HostIp") not in {"127.0.0.1", "::1"} for item in ports):
         raise RuntimeError("candidate port is not localhost-only")
