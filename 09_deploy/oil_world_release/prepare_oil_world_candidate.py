@@ -392,7 +392,10 @@ def prepare(args: argparse.Namespace, runner: Runner = subprocess.run, request: 
         _run(compose_up_command(output / "candidate.env", values), runner)
         candidate_started = True
         _event(events, "compose_up")
-        candidate = inspect_container(values["OIL_WORLD_CANDIDATE_CONTAINER_NAME"], runner)
+        # Docker reports a newly-created container as "starting" while its
+        # healthcheck warms up.  The HTTP validator is the readiness gate and
+        # polls that transition; inspect only after it succeeds so the sealed
+        # result records the final healthy state, not an initial snapshot.
         checks = validate_candidate_http(
             args.candidate_port,
             data_root=Path(production["OIL_WORLD_DATA_ROOT"]),
@@ -401,6 +404,7 @@ def prepare(args: argparse.Namespace, runner: Runner = subprocess.run, request: 
             timeout=args.timeout_seconds,
         )
         _event(events, "validate")
+        candidate = inspect_container(values["OIL_WORLD_CANDIDATE_CONTAINER_NAME"], runner)
         after = formal_snapshot(runner, phase="after-candidate")
         formal = formal_unchanged(before, after, after_phase="after-candidate")
         if data_identity(Path(production["OIL_WORLD_DATA_ROOT"])) != data:

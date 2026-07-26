@@ -188,6 +188,7 @@ class OilWorldReleaseContractTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, "", "")
 
         def request(url, timeout):
+            events.append(["http", url])
             bodies = {
                 "http://127.0.0.1:18081/oil-world/": '<script src="/oil-world/assets/app.js"></script>',
                 "http://127.0.0.1:18081/oil-world/presentation": "presentation",
@@ -224,6 +225,9 @@ class OilWorldReleaseContractTests(unittest.TestCase):
             self.assertTrue(all("spread-dashboard" not in command for command in events if command and command[0] == "docker" and command[1] == "compose"))
             candidate_environment = contract.parse_environment(root / "release" / "candidate.env")
             self.assertEqual(candidate_environment["OIL_WORLD_IMAGE"], f"market-data-oil-world-dashboard:{RELEASE_ID}")
+            release_identity_request = next(index for index, event in enumerate(events) if event == ["http", "http://127.0.0.1:18081/oil-world/RELEASE.json"])
+            candidate_inspect = next(index for index, event in enumerate(events) if event[:3] == ["docker", "inspect", candidate_name])
+            self.assertLess(release_identity_request, candidate_inspect, "candidate inspection must occur after the readiness validator")
 
             docker_calls_before_preview = len([command for command in events if command[:1] == ["docker"]])
             preview = deployment.deploy(
