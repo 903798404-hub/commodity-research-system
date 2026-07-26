@@ -36,6 +36,23 @@ candidate_project_name() {
     printf 'market-data-%s\n' "$candidate_name"
 }
 
+handoff_legacy_usda_container() {
+    local existing_project
+    if ! docker inspect usda-dashboard >/dev/null 2>&1; then
+        return
+    fi
+    existing_project="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' usda-dashboard)"
+    case "$existing_project" in
+        market-data|market-data-usda)
+            docker rm -f usda-dashboard >/dev/null
+            ;;
+        *)
+            echo "refusing to remove usda-dashboard owned by unknown Compose project: $existing_project" >&2
+            exit 2
+            ;;
+    esac
+}
+
 case "$mode" in
     production-config)
         exec docker compose --project-name "$production_project" --env-file "$env_file" -f "$production_compose" config
@@ -50,6 +67,7 @@ case "$mode" in
         exec docker compose --project-name "$(candidate_project_name "$env_file")" --env-file "$env_file" -f "$candidate_compose" rm --stop --force usda-dashboard
         ;;
     production-up)
+        handoff_legacy_usda_container
         exec docker compose --project-name "$production_project" --env-file "$env_file" -f "$production_compose" up -d --no-build --pull never --no-deps --force-recreate usda-dashboard
         ;;
     *)

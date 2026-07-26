@@ -144,6 +144,9 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         self.assertIn("rm --stop --force usda-dashboard", text)
         self.assertIn('production_project="market-data-usda"', text)
         self.assertNotIn('--project-name market-data ', text)
+        self.assertIn("handoff_legacy_usda_container", text)
+        self.assertIn("market-data|market-data-usda", text)
+        self.assertIn("refusing to remove usda-dashboard owned by unknown Compose project", text)
 
     def test_candidate_environment_rejects_spread_variables_and_formal_ports(self) -> None:
         valid = {
