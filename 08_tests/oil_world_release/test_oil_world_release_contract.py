@@ -105,6 +105,11 @@ class OilWorldReleaseContractTests(unittest.TestCase):
         self.assertIn("test ! -e dist/data/oil_world", dockerfile)
         self.assertNotIn("COPY public/data/oil_world", dockerfile)
 
+        nginx = (REPOSITORY / "11_独立应用" / "OilWorld平衡表" / "deploy" / "nginx.conf").read_text(encoding="utf-8")
+        self.assertIn("location = /oil-world/RELEASE.json", nginx)
+        self.assertIn("default_type application/json;", nginx)
+        self.assertLess(nginx.index("location = /oil-world/RELEASE.json"), nginx.index("location /oil-world/"))
+
     def test_candidate_environment_rejects_formal_ports_and_preserves_read_only_data_root(self) -> None:
         production = contract.validate_production_environment(
             {"OIL_WORLD_IMAGE": "market-data-oil-world-dashboard:immutable", "OIL_WORLD_PORT": "8081", "OIL_WORLD_DATA_ROOT": "/data/oil"}
