@@ -22,6 +22,9 @@ services:
       - ${WEATHER_RUNTIME_CURRENT_DIR:?WEATHER_RUNTIME_CURRENT_DIR must be explicitly set}:/app/runtime/weather:ro
     restart: unless-stopped
 
+  # Historical compatibility definition only.  Formal USDA lifecycle commands
+  # use 09_deploy/usda_release/compose.production.yml and never parse this
+  # root Compose file.
   usda-dashboard:
     build:
       context: ./11_独立应用/USDA平衡表

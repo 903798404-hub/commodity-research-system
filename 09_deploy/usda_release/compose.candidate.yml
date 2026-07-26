@@ -1,0 +1,20 @@
+name: market-data-usda-candidate
+
+# Isolated validation configuration.  It uses the exact production image but
+# cannot claim the formal container name, port, restart policy, or project.
+services:
+  usda-dashboard:
+    image: ${USDA_IMAGE:?USDA_IMAGE must be set to an immutable release tag}
+    container_name: ${USDA_CANDIDATE_CONTAINER_NAME:?USDA_CANDIDATE_CONTAINER_NAME must be set}
+    command: ["nginx", "-g", "daemon off;"]
+    working_dir: /
+    ports:
+      - "127.0.0.1:${USDA_CANDIDATE_HOST_PORT:?USDA_CANDIDATE_HOST_PORT must be set}:80"
+    restart: "no"
+    networks:
+      - usda-network
+
+networks:
+  usda-network:
+    external: true
+    name: ${USDA_NETWORK_NAME:-market-data_default}

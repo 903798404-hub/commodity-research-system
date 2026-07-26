@@ -1,0 +1,20 @@
+name: market-data
+
+# The sole formal USDA Compose entrypoint.  It intentionally does not import
+# the root Compose file, so it can be parsed without any Spread variables.
+services:
+  usda-dashboard:
+    image: ${USDA_IMAGE:?USDA_IMAGE must be set to an immutable release tag}
+    container_name: usda-dashboard
+    command: ["nginx", "-g", "daemon off;"]
+    working_dir: /
+    ports:
+      - "${USDA_HOST_PORT:?USDA_HOST_PORT must be set}:80"
+    restart: unless-stopped
+    networks:
+      - usda-network
+
+networks:
+  usda-network:
+    external: true
+    name: ${USDA_NETWORK_NAME:-market-data_default}
