@@ -284,6 +284,26 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             CAPTURE_MODULE.sanitize_container(second)["mounts"],
         )
 
+    def test_runtime_snapshot_normalizes_external_network_id_to_network_name(self) -> None:
+        raw = {
+            "Id": "id",
+            "Name": "/usda-dashboard",
+            "Image": "sha256:usda",
+            "Created": "2026-07-26T00:00:00Z",
+            "RestartCount": 0,
+            "Config": {"Image": "image:usda", "Cmd": [], "WorkingDir": "/", "Env": [], "Labels": {"com.docker.compose.service": "usda-dashboard"}},
+            "HostConfig": {"NetworkMode": "network-id", "RestartPolicy": {"Name": "unless-stopped"}},
+            "State": {"Running": True, "Status": "running"},
+            "NetworkSettings": {"Ports": {}, "Networks": {"market-data_default": {"NetworkID": "network-id"}}},
+            "Mounts": [],
+        }
+        name_form = {**raw, "HostConfig": {"NetworkMode": "market-data_default", "RestartPolicy": {"Name": "unless-stopped"}}}
+        id_form = CAPTURE_MODULE.sanitize_container(raw)
+        name_form = CAPTURE_MODULE.sanitize_container(name_form)
+        self.assertEqual(id_form["network_mode"], "market-data_default")
+        self.assertEqual(id_form["network_mode"], name_form["network_mode"])
+        self.assertEqual(id_form["attached_networks"], name_form["attached_networks"])
+
     def test_sealed_migration_requires_same_image_and_unchanged_sidecars(self) -> None:
         def identity(service: str, container_id: str) -> dict:
             return {

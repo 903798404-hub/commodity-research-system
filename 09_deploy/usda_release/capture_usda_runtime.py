@@ -60,6 +60,13 @@ def sanitize_container(raw: Mapping[str, Any]) -> dict[str, Any]:
     state = raw.get("State") or {}
     labels = config.get("Labels") or {}
     network = raw.get("NetworkSettings") or {}
+    attached_networks = network.get("Networks") or {}
+    raw_network_mode = host.get("NetworkMode")
+    normalized_network_mode = raw_network_mode
+    for network_name, details in attached_networks.items():
+        if (details or {}).get("NetworkID") == raw_network_mode:
+            normalized_network_mode = network_name
+            break
     return {
         "container_id": raw.get("Id"),
         "container_name": str(raw.get("Name") or "").lstrip("/"),
@@ -72,7 +79,11 @@ def sanitize_container(raw: Mapping[str, Any]) -> dict[str, Any]:
         "restart_count": int(raw.get("RestartCount") or 0),
         "command": config.get("Cmd"),
         "working_dir": config.get("WorkingDir"),
-        "network_mode": host.get("NetworkMode"),
+        "network_mode": normalized_network_mode,
+        "attached_networks": [
+            {"name": name, "network_id": (details or {}).get("NetworkID")}
+            for name, details in sorted(attached_networks.items())
+        ],
         "restart_policy": (host.get("RestartPolicy") or {}).get("Name"),
         "health_status": (state.get("Health") or {}).get("Status", "none"),
         "ports": _safe_ports(network.get("Ports") or {}),
