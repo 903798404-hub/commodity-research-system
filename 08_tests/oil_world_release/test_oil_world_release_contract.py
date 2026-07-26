@@ -222,6 +222,8 @@ class OilWorldReleaseContractTests(unittest.TestCase):
             self.assertLess(order.index("candidate_result"), order.index("candidate_container_cleanup"))
             self.assertLess(order.index("candidate_container_cleanup"), order.index("deployment_plan"))
             self.assertTrue(all("spread-dashboard" not in command for command in events if command and command[0] == "docker" and command[1] == "compose"))
+            candidate_environment = contract.parse_environment(root / "release" / "candidate.env")
+            self.assertEqual(candidate_environment["OIL_WORLD_IMAGE"], f"market-data-oil-world-dashboard:{RELEASE_ID}")
 
             docker_calls_before_preview = len([command for command in events if command[:1] == ["docker"]])
             preview = deployment.deploy(

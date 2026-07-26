@@ -366,6 +366,9 @@ def prepare(args: argparse.Namespace, runner: Runner = subprocess.run, request: 
     values = candidate_environment(production, release_id=args.release_id, candidate_port=args.candidate_port)
     ensure_candidate_port_available(args.candidate_port)
     image_ref = f"market-data-oil-world-dashboard:{args.release_id}"
+    # A candidate must run the image just built for this release, never the
+    # formal image reference inherited from the protected production env.
+    values["OIL_WORLD_IMAGE"] = image_ref
     plan = {"status": "dry_run", "release_id": args.release_id, "git_commit": git_commit, "git_tree": git_tree, "image_ref": image_ref, "formal_image_ref": formal_image_ref, "candidate_container": values["OIL_WORLD_CANDIDATE_CONTAINER_NAME"], "candidate_project": values["OIL_WORLD_CANDIDATE_PROJECT_NAME"], "candidate_port": args.candidate_port, "build_command": build_command(repository, image_ref, git_commit, git_tree, args.release_id), "candidate_up_command": compose_up_command(output / "candidate.env", values), "candidate_cleanup_command": cleanup_command(values), "data_identity": data}
     if not args.execute:
         return plan
