@@ -461,7 +461,10 @@ def prepare(args: argparse.Namespace, runner: Runner = subprocess.run, request: 
         write_artifact(output, "deployment_plan", deployment, release_id=args.release_id, git_commit=git_commit, git_tree=git_tree, image_id=identity["image_id"])
         _event(events, "deployment_plan")
         (output / "event_order.json").write_text(json.dumps(events, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return {"status": "prepared", **plan, "output_dir": str(output), "events": events}
+        # Keep the final state authoritative: ``plan`` is deliberately marked
+        # dry_run when rendered before any Docker activity, but an executed
+        # chain is prepared only after every sealed artifact exists.
+        return {**plan, "status": "prepared", "output_dir": str(output), "events": events}
     finally:
         if candidate_started:
             runner(cleanup_command(values), check=False, capture_output=True, text=True)

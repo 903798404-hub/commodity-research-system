@@ -232,6 +232,7 @@ class OilWorldReleaseContractTests(unittest.TestCase):
             env.write_text(f"OIL_WORLD_IMAGE=market-data-oil-world-dashboard:old\nOIL_WORLD_PORT=8081\nOIL_WORLD_DATA_ROOT={data}\n", encoding="utf-8")
             args = Namespace(repository=REPOSITORY, production_compose=contract.PRODUCTION_COMPOSE, production_project_dir=root, production_env=env, output_dir=root / "release", release_id=RELEASE_ID, git_commit=COMMIT, git_tree=TREE, rollback_image_ref="market-data-oil-world-dashboard:old", rollback_image_id=ROLLBACK_IMAGE_ID, rollback_git_commit="e" * 40, formal_image_ref="market-data-oil-world-dashboard:oil-20260726-aaaaaaaaaaaa-b01-formal", candidate_port=18081, timeout_seconds=10, execute=True)
             result = candidate.prepare(args, runner=runner, request=request, sleep=lambda _seconds: None)
+            self.assertEqual(result["status"], "prepared")
             order = [item["name"] for item in result["events"]]
             self.assertEqual(order, ["formal_snapshot", "docker_build", "release_bundle", "compose_up", "validate", "candidate_result", "candidate_container_cleanup", "deployment_plan"])
             self.assertTrue((root / "release" / "candidate_result.json").exists())
