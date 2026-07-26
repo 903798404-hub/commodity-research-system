@@ -121,8 +121,25 @@ pnpm --dir 05_apps/oil_world_dashboard dev
 7. 正式切换阶段禁止 build；
 8. 最后生成并验证部署结果及其 Manifest。
 
-Oil World 的一条式候选、计划、正式切换和回滚工具尚未实现。该工具缺口不允许
-降低同一 Image ID、无正式阶段 build、生产目录不 checkout 和部署结果密封原则。
+Oil World 的受控发布入口位于 `09_deploy/oil_world_release/`。它只管理
+`oil-world-dashboard`，不读取 Spread 或 USDA 的环境变量，也不启动其他服务：
+
+1. `compose.production.yml` 是唯一 Git 管理的生产 Compose 契约，project name
+   固定为 `market-data-oil-world`；它只接收 Oil World 环境变量，并把正式数据
+   挂载为只读。
+2. `compose.candidate.yml` 只绑定 `127.0.0.1` 的 18081–18499 端口范围，restart
+   固定为 `no`，不能使用正式容器名、端口或 project name。
+3. `prepare_oil_world_candidate.py` 默认 dry-run，只有显式 `--execute` 才允许
+   构建和启动候选。真实顺序固定为：正式容器快照、构建、release bundle、候选
+   验证、`candidate_result`、候选容器删除、`deployment_plan`。候选验证后保留
+   同一 Image ID，正式阶段不得重新 build。
+4. `deploy_oil_world_release.py` 只接受已密封的 release、candidate result 和
+   deployment plan；它为同一 Image ID 增加正式不可变标签，并且只使用
+   `--no-build --pull never --no-deps --force-recreate oil-world-dashboard` 切换。
+   计划固定上一正式镜像作为回滚对象；任何身份、数据挂载或正式容器变化不符时停止。
+
+这些工具的本地假 Docker/HTTP 契约测试不能替代服务器真实 Compose 候选门槛。
+在服务器门槛通过前，不得使用它们切换正式 Oil World 服务。
 
 ## 6. 历史生产命令登记
 

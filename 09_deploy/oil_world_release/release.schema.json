@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "application", "release_id", "git_commit", "git_tree", "image_ref", "image_id", "oci_revision", "build_time", "compose_sha256", "data_identity", "formal_containers", "rollback", "candidate"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "application": {"const": "oil-world-dashboard"},
+    "release_id": {"type": "string", "pattern": "^oil-\\d{8}-[0-9a-f]{12}-b\\d{2}$"},
+    "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "git_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "image_ref": {"type": "string", "minLength": 12},
+    "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "oci_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "build_time": {"type": "string", "minLength": 20},
+    "compose_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "data_identity": {"type": "object", "required": ["host_path", "read_only", "file_count", "tree_sha256"], "properties": {"host_path": {"type": "string", "minLength": 1}, "read_only": {"const": true}, "file_count": {"type": "integer", "minimum": 1}, "tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": false},
+    "formal_containers": {"type": "object", "required": ["before_phase", "containers"], "properties": {"before_phase": {"const": "before-candidate"}, "containers": {"type": "array", "minItems": 3}}, "additionalProperties": false},
+    "rollback": {"type": "object", "required": ["image_ref", "image_id", "git_commit"], "properties": {"image_ref": {"type": "string"}, "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}}, "additionalProperties": false},
+    "candidate": {"type": "object", "required": ["container_name", "project_name", "port"], "properties": {"container_name": {"type": "string"}, "project_name": {"type": "string"}, "port": {"type": "integer", "minimum": 18081, "maximum": 18499}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

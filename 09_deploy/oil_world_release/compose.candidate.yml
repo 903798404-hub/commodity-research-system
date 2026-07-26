@@ -1,0 +1,25 @@
+name: ${OIL_WORLD_CANDIDATE_PROJECT_NAME:?OIL_WORLD_CANDIDATE_PROJECT_NAME must be set}
+
+# One isolated candidate service.  It cannot take the formal name or port and
+# never starts Spread or USDA.
+services:
+  oil-world-dashboard:
+    image: ${OIL_WORLD_IMAGE:?OIL_WORLD_IMAGE must be an immutable release tag}
+    container_name: ${OIL_WORLD_CANDIDATE_CONTAINER_NAME:?OIL_WORLD_CANDIDATE_CONTAINER_NAME must be set}
+    command: ["nginx", "-g", "daemon off;"]
+    working_dir: /
+    ports:
+      - "127.0.0.1:${OIL_WORLD_CANDIDATE_HOST_PORT:?OIL_WORLD_CANDIDATE_HOST_PORT must be set}:80"
+    volumes:
+      - type: bind
+        source: ${OIL_WORLD_DATA_ROOT:?OIL_WORLD_DATA_ROOT must be an absolute production data directory}
+        target: /usr/share/nginx/html/oil-world/data/oil_world
+        read_only: true
+    restart: "no"
+    networks:
+      - oil-world-network
+
+networks:
+  oil-world-network:
+    external: true
+    name: ${OIL_WORLD_NETWORK_NAME:-market-data-oil-world_default}

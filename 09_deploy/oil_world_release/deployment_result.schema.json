@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+  "required": ["schema_version", "application", "release_id", "git_commit", "git_tree", "image_id", "runtime_git_commit", "formal_containers", "http", "rollback_performed", "status", "created_at"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "application": {"const": "oil-world-dashboard"}, "release_id": {"type": "string"},
+    "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "git_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "runtime_git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "formal_containers": {"type": "object", "required": ["before_phase", "after_phase", "containers"], "properties": {"before_phase": {"const": "pre-deploy"}, "after_phase": {"const": "after-deploy"}, "containers": {"type": "array", "minItems": 3}}, "additionalProperties": false},
+    "http": {"type": "object", "minProperties": 2}, "rollback_performed": {"type": "boolean"}, "status": {"enum": ["deployment-succeeded", "deployment-rolled-back"]}, "created_at": {"type": "string", "minLength": 20}
+  }, "additionalProperties": false
+}

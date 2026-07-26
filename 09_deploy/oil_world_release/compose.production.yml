@@ -1,0 +1,25 @@
+name: market-data-oil-world
+
+# The sole stable production Compose entrypoint for Oil World.  It is
+# intentionally independent from root, Spread, and USDA Compose files.
+services:
+  oil-world-dashboard:
+    image: ${OIL_WORLD_IMAGE:?OIL_WORLD_IMAGE must be an immutable release tag}
+    container_name: oil-world-dashboard
+    command: ["nginx", "-g", "daemon off;"]
+    working_dir: /
+    ports:
+      - "${OIL_WORLD_PORT:?OIL_WORLD_PORT must be set}:80"
+    volumes:
+      - type: bind
+        source: ${OIL_WORLD_DATA_ROOT:?OIL_WORLD_DATA_ROOT must be an absolute production data directory}
+        target: /usr/share/nginx/html/oil-world/data/oil_world
+        read_only: true
+    restart: unless-stopped
+    networks:
+      - oil-world-network
+
+networks:
+  oil-world-network:
+    external: true
+    name: ${OIL_WORLD_NETWORK_NAME:-market-data-oil-world_default}

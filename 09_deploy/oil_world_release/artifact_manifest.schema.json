@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "target_file", "target_schema_version", "target_sha256", "target_size_bytes", "generated_at", "release_id", "git_commit", "git_tree", "image_id", "formal_evidence_sha256"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_type": {"enum": ["release", "candidate_result", "deployment_plan", "deployment_result"]},
+    "target_file": {"type": "string"},
+    "target_schema_version": {"type": "string"},
+    "target_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "target_size_bytes": {"type": "integer", "minimum": 1},
+    "generated_at": {"type": "string", "minLength": 20},
+    "release_id": {"type": "string", "pattern": "^oil-\\d{8}-[0-9a-f]{12}-b\\d{2}$"},
+    "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "git_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "runtime_git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "formal_evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}
