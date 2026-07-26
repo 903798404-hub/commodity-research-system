@@ -81,6 +81,10 @@ def _formal_compose(*, weather_read_only: bool = True, include_spread: bool = Tr
             "image": "market-data-spread-dashboard:spread-20260723-b704a2933fec-b01",
             "container_name": "spread-dashboard",
             "restart": "unless-stopped",
+            "labels": {
+                "market-data.deployment.role": "production",
+                "market-data.deployment.git_sha": "b704a2933fecc667695d5a31065abeea1fda7492",
+            },
             "command": ["streamlit", "run", "05_apps/streamlit_app.py"],
             "working_dir": "/app",
             "environment": {
@@ -288,6 +292,17 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert "depends_on" not in service
     assert service["volumes"][0]["read_only"] is True
     assert service["environment"]["WEATHER_DATA_DIR"] == "/app/runtime/weather/current"
+    assert service["labels"]["market-data.deployment.role"] == "candidate"
+    assert service["labels"]["market-data.deployment.git_sha"] == options.git_commit
+    assert "market-data.release.type=candidate" not in result["build_command"]
+    assert "market-data.artifact.origin=candidate" in result["build_command"]
+    assert "market-data.artifact.promotable=true" in result["build_command"]
+
+
+def test_root_compose_declares_future_production_runtime_role() -> None:
+    compose_text = (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "market-data.deployment.role: production" in compose_text
+    assert "market-data.deployment.git_sha: ${MARKET_DATA_GIT_HEAD" in compose_text
 
 
 @pytest.mark.parametrize("commit", ["deadbeef", "g" * 40])

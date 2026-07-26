@@ -306,6 +306,17 @@ def build_candidate_compose(
         }
     ]
     candidate_service["environment"] = candidate_environment
+    # The formal Compose service is explicitly labelled as production.  A
+    # candidate must not inherit that runtime role when its one-service Compose
+    # document is derived from the formal service.
+    candidate_labels = dict(candidate_service.get("labels") or {})
+    candidate_labels.update(
+        {
+            "market-data.deployment.role": "candidate",
+            "market-data.deployment.git_sha": git_commit,
+        }
+    )
+    candidate_service["labels"] = candidate_labels
     # Candidate Compose contains no USDA/Oil World service, so retaining this
     # production-only relationship would be invalid and could create siblings.
     candidate_service.pop("depends_on", None)
@@ -368,6 +379,13 @@ def validate_candidate_compose(
         raise ContractError("candidate MARKET_DATA_GIT_HEAD does not match the target commit")
     if environment.get("WEATHER_DATA_DIR") != WEATHER_CONTAINER_CURRENT_PATH:
         raise ContractError("candidate WEATHER_DATA_DIR is invalid")
+    labels = service.get("labels")
+    if not isinstance(labels, dict):
+        raise ContractError("candidate runtime labels are invalid")
+    if labels.get("market-data.deployment.role") != "candidate":
+        raise ContractError("candidate must have the candidate deployment role")
+    if labels.get("market-data.deployment.git_sha") != expected_git_commit:
+        raise ContractError("candidate deployment Git SHA does not match the target commit")
     mounts = [
         mount
         for mount in service.get("volumes") or []
@@ -426,7 +444,11 @@ def _build_command(options: CandidateOptions) -> list[str]:
         "--label",
         f"market-data.git.tree={options.git_tree}",
         "--label",
-        "market-data.release.type=candidate",
+        f"market-data.git.commit={options.git_commit}",
+        "--label",
+        "market-data.artifact.origin=candidate",
+        "--label",
+        "market-data.artifact.promotable=true",
         str(options.build_context),
     ]
 

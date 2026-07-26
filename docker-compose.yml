@@ -7,6 +7,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: spread-dashboard
+    labels:
+      market-data.deployment.role: production
+      market-data.deployment.git_sha: ${MARKET_DATA_GIT_HEAD:?MARKET_DATA_GIT_HEAD must be explicitly set}
     command: streamlit run 05_apps/streamlit_app.py --server.address=0.0.0.0 --server.port=8501
     ports:
       - "8501:8501"
