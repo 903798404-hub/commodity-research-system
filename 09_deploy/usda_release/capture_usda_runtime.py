@@ -31,7 +31,7 @@ def sha256_file(path: Path) -> str:
 
 
 def _safe_mounts(raw: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    return [
+    mounts = [
         {
             "type": mount.get("Type"),
             "source": mount.get("Source"),
@@ -40,6 +40,14 @@ def _safe_mounts(raw: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
         }
         for mount in raw
     ]
+    return sorted(
+        mounts,
+        key=lambda item: (
+            str(item["destination"] or ""),
+            str(item["type"] or ""),
+            str(item["source"] or ""),
+        ),
+    )
 
 
 def _safe_ports(raw: Mapping[str, Any]) -> dict[str, Any]:

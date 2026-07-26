@@ -254,6 +254,36 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         self.assertNotIn("must-not-leak", rendered)
         self.assertNotIn("/usr/bin", rendered)
 
+    def test_runtime_snapshot_normalizes_docker_mount_order(self) -> None:
+        common = {
+            "Id": "id",
+            "Name": "/usda-dashboard",
+            "Image": "sha256:usda",
+            "Created": "2026-07-26T00:00:00Z",
+            "RestartCount": 0,
+            "Config": {
+                "Image": "image:usda",
+                "Cmd": ["nginx"],
+                "WorkingDir": "/",
+                "Env": [],
+                "Labels": {
+                    "com.docker.compose.project": "market-data",
+                    "com.docker.compose.project.working_dir": "/srv/project",
+                    "com.docker.compose.project.config_files": "/srv/compose.yml",
+                    "com.docker.compose.service": "usda-dashboard",
+                },
+            },
+            "HostConfig": {"NetworkMode": "market-data_default", "RestartPolicy": {"Name": "unless-stopped"}},
+            "State": {"Running": True, "Status": "running", "StartedAt": "2026-07-26T00:00:00Z"},
+            "NetworkSettings": {"Ports": {}},
+        }
+        first = {**common, "Mounts": [{"Type": "bind", "Source": "/b", "Destination": "/z", "RW": True}, {"Type": "bind", "Source": "/a", "Destination": "/a", "RW": False}]}
+        second = {**common, "Mounts": list(reversed(first["Mounts"]))}
+        self.assertEqual(
+            CAPTURE_MODULE.sanitize_container(first)["mounts"],
+            CAPTURE_MODULE.sanitize_container(second)["mounts"],
+        )
+
     def test_sealed_migration_requires_same_image_and_unchanged_sidecars(self) -> None:
         def identity(service: str, container_id: str) -> dict:
             return {
