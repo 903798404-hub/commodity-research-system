@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,9 @@ class FakeRunner(CommandRunner):
             return super().run(command, cwd=cwd, env=env)
         if command[:3] == ["docker", "compose", "--env-file"]:
             return json.dumps(self.compose)
+        if command[:2] == ["docker", "compose"] and "config" in command:
+            compose_path = Path(command[command.index("-f") + 1])
+            return compose_path.read_text(encoding="utf-8")
         if command[:2] == ["docker", "build"]:
             self.built = True
             self.events.append("docker build")
@@ -142,6 +146,13 @@ class FakeRunner(CommandRunner):
             return "started"
         if command[:3] == ["docker", "inspect", "--format"]:
             return CONTAINER_ID + "\n"
+        if command[:3] == ["docker", "exec", command[2]]:
+            if command[-2:] == ["id", "-u"]:
+                return "1000\n"
+            if command[-2:] == ["id", "-g"]:
+                return "1000\n"
+            if "candidate-runtime-probe" in command:
+                return ""
         if command[:3] == ["docker", "rm", "-f"]:
             self.container_removed = True
             self.events.append("candidate container cleanup")
@@ -246,6 +257,22 @@ def _snapshot(_runtime: FakeRuntime, output: Path) -> tuple[Path, dict[str, str]
     return path, {"captured_at": captured_at}
 
 
+def _with_import_profit_runtime(options: CandidateOptions, tmp_path: Path) -> CandidateOptions:
+    approved = tmp_path / "approved-import-profit-runtimes"
+    runtime = approved / options.release_id
+    runtime.mkdir(parents=True)
+    return CandidateOptions(
+        **{
+            **options.__dict__,
+            "import_profit_runtime_host": runtime,
+            "import_profit_runtime_approved_root": approved,
+            "formal_import_profit_runtime_host": tmp_path / "formal-import-profit-runtime",
+            "pending_gate": "real_morning_open_snapshot",
+            "earliest_expected_business_date": "2026-08-03",
+        }
+    )
+
+
 def _seal_candidate_result(
     _options: CandidateOptions,
     _runtime: FakeRuntime,
@@ -255,6 +282,7 @@ def _seal_candidate_result(
     _output: Path,
     _formal_spread_before: dict[str, str],
     _candidate_health_url: str,
+    _candidate_runtime_access: dict[str, object] | None,
 ) -> dict[str, str]:
     candidate_result = release / "candidate_result.json"
     return {
@@ -301,6 +329,142 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert "market-data.release.type=candidate" not in result["build_command"]
     assert "market-data.artifact.origin=candidate" in result["build_command"]
     assert "market-data.artifact.promotable=true" in result["build_command"]
+
+
+def test_dry_run_adds_only_the_approved_import_profit_rw_mount(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options = _with_import_profit_runtime(options, tmp_path)
+    formal_sha = hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest()
+
+    result = prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+
+    compose = json.loads(Path(result["candidate_compose_file"]).read_text(encoding="utf-8"))
+    service = compose["services"][CANDIDATE_SERVICE]
+    assert service["volumes"][:-1] == _formal_compose()["services"]["spread-dashboard"]["volumes"]
+    assert service["volumes"][-1] == {
+        "type": "bind",
+        "source": str(options.import_profit_runtime_host.resolve()),
+        "target": "/app/runtime/import_profit",
+        "read_only": False,
+    }
+    assert service["environment"]["IMPORT_PROFIT_RUNTIME_ROOT"] == "/app/runtime/import_profit"
+    assert result["import_profit_runtime_mount"] == {
+        "mount_id": "import_profit_candidate_runtime",
+        "candidate_batch_id": options.release_id,
+        "target": "/app/runtime/import_profit",
+        "mode": "rw",
+        "environment_variable": "IMPORT_PROFIT_RUNTIME_ROOT",
+    }
+    assert str(options.import_profit_runtime_host) not in json.dumps(
+        result["import_profit_runtime_mount"]
+    )
+    assert hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest() == formal_sha
+
+
+def test_import_profit_runtime_path_safety_rules(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    base = {
+        **options.__dict__,
+        "import_profit_runtime_approved_root": approved,
+        "formal_import_profit_runtime_host": tmp_path / "formal-runtime",
+        "pending_gate": "real_morning_open_snapshot",
+        "earliest_expected_business_date": "2026-08-03",
+    }
+    for invalid in (tmp_path / "missing", outside, options.build_context):
+        changed = CandidateOptions(**{**base, "import_profit_runtime_host": invalid})
+        with pytest.raises(ContractError):
+            prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
+
+    file_path = approved / "not-a-directory"
+    file_path.write_text("x", encoding="utf-8")
+    with pytest.raises(ContractError, match="directory"):
+        prepare_candidate(
+            CandidateOptions(**{**base, "import_profit_runtime_host": file_path}),
+            runner=runner,
+            port_probe=lambda _: True,
+        )
+
+
+def test_import_profit_runtime_rejects_formal_path_and_symlink_escape(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    formal = approved / "formal"
+    formal.mkdir()
+    common = {
+        **options.__dict__,
+        "import_profit_runtime_approved_root": approved,
+        "formal_import_profit_runtime_host": formal,
+        "pending_gate": "real_morning_open_snapshot",
+        "earliest_expected_business_date": "2026-08-03",
+    }
+    with pytest.raises(ContractError, match="overlap"):
+        prepare_candidate(
+            CandidateOptions(**{**common, "import_profit_runtime_host": formal}),
+            runner=runner,
+            port_probe=lambda _: True,
+        )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = approved / "escape"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    with pytest.raises(ContractError, match="approved"):
+        prepare_candidate(
+            CandidateOptions(**{**common, "import_profit_runtime_host": link}),
+            runner=runner,
+            port_probe=lambda _: True,
+        )
+
+
+def test_import_profit_runtime_rejects_invalid_container_path(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options = _with_import_profit_runtime(options, tmp_path)
+    options = CandidateOptions(
+        **{**options.__dict__, "import_profit_runtime_container": "/app/runtime/../01_data"}
+    )
+    with pytest.raises(ContractError, match="container path"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+
+
+def test_candidate_compose_config_failure_leaves_no_candidate_artifact(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+
+    original_run = runner.run
+
+    def fail_candidate_config(command, *, cwd=None, env=None):
+        if list(command)[:2] == ["docker", "compose"] and "config" in command and "--env-file" not in command:
+            raise ContractError("candidate compose config failed")
+        return original_run(command, cwd=cwd, env=env)
+
+    runner.run = fail_candidate_config  # type: ignore[method-assign]
+    with pytest.raises(ContractError, match="candidate compose config failed"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+    assert not (options.output_directory / "candidate-compose.json").exists()
+    assert not (options.output_directory / ".candidate-compose.validating.json").exists()
+
+
+def test_import_profit_mount_rejects_existing_target_overlap(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options = _with_import_profit_runtime(options, tmp_path)
+    compose = _formal_compose()
+    compose["services"]["spread-dashboard"]["volumes"].append(
+        {
+            "type": "bind",
+            "source": str(tmp_path / "unrelated"),
+            "target": "/app/runtime",
+            "read_only": True,
+        }
+    )
+    runner.compose = compose
+    with pytest.raises(ContractError, match="conflicts"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
 
 
 def test_root_compose_declares_future_production_runtime_role() -> None:
@@ -416,6 +580,47 @@ def test_execute_uses_fake_docker_build_start_and_existing_validator(tmp_path: P
     assert validated == [(options.output_directory / "releases" / options.release_id, result["candidate_health_url"])]
     assert any(command[:2] == ["docker", "build"] for command in runner.commands)
     assert any(command[:2] == ["docker", "compose"] and "up" in command for command in runner.commands)
+
+
+def test_execute_waiting_candidate_probes_runtime_and_never_seals_deployment_plan(
+    tmp_path: Path,
+) -> None:
+    options, runner = _options(tmp_path, mode="execute")
+    options = _with_import_profit_runtime(options, tmp_path)
+    runtime = FakeRuntime(runner)
+
+    def seal(*_args):
+        release = options.output_directory / "releases" / options.release_id
+        release.mkdir(parents=True)
+        return release
+
+    def forbidden_plan(*_args):
+        raise AssertionError("waiting candidate must not seal a deployment plan")
+
+    result = prepare_candidate(
+        options,
+        runner=runner,
+        runtime=runtime,
+        port_probe=lambda _: True,
+        release_sealer=seal,
+        validator=lambda *_args: None,
+        formal_snapshotter=_snapshot,
+        candidate_result_sealer=_seal_candidate_result,
+        deployment_plan_sealer=forbidden_plan,
+    )
+
+    assert result["status"] == "waiting-for-gate"
+    assert result["candidate_result_status"] == "candidate-waiting-gate"
+    assert result["deployment_plan_status"] == "blocked-by-pending-gate"
+    assert result["candidate_container_removed"] is True
+    assert result["candidate_runtime_access"] == {
+        "container_path": "/app/runtime/import_profit",
+        "environment_variable": "IMPORT_PROFIT_RUNTIME_ROOT",
+        "uid": 1000,
+        "gid": 1000,
+        "read_write_probe": "passed",
+    }
+    assert any(command[:2] == ["docker", "exec"] for command in runner.commands)
 
 
 def test_execute_validation_failure_cleans_only_candidate_container(tmp_path: Path) -> None:

@@ -161,7 +161,7 @@ def evidence_from_artifacts(
         image_ref = result.get("image_ref")
         if isinstance(image_ref, str) and image_ref:
             candidate_refs.add(image_ref)
-        if result.get("status") == "candidate-validated":
+        if result.get("status") in {"candidate-validated", "candidate-waiting-gate"}:
             sealed_ids.add(candidate_id)
 
     return GovernanceEvidence(

@@ -49,6 +49,8 @@ from release_contract import (  # noqa: E402
     load_deployment_result_bundle,
     load_schema,
     parse_production_env,
+    pending_candidate_gate,
+    require_deployable_candidate_result,
     resolve_spread_image_offline,
     require_formal_containers_unchanged,
     validate_deployment_plan,
@@ -56,6 +58,7 @@ from release_contract import (  # noqa: E402
     validate_full_git_commit,
     validate_formal_container_snapshot,
     validate_manifest,
+    validate_candidate_result,
     validate_artifact_manifest,
     validate_production_env,
     validate_release_image_ref,
@@ -627,6 +630,10 @@ def build_candidate_result_fixture(
     runtime: FakeReleaseRuntime,
     *,
     page_status: str = "passed",
+    blocking_gates: tuple[dict[str, object], ...] = (),
+    completed_gates: tuple[dict[str, object], ...] = (),
+    runtime_mounts: tuple[dict[str, object], ...] = (),
+    candidate_runtime_access: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return create_candidate_result(
         manifest=manifest,
@@ -657,6 +664,10 @@ def build_candidate_result_fixture(
             "production_switch_performed": False,
         },
         generated_at=BUILD_TIME,
+        blocking_gates=blocking_gates,
+        completed_gates=completed_gates,
+        runtime_mounts=runtime_mounts,
+        candidate_runtime_access=candidate_runtime_access,
     )
 
 
@@ -673,12 +684,14 @@ def write_candidate_result_fixture(
     runtime: FakeReleaseRuntime,
     *,
     page_status: str = "passed",
+    **result_kwargs,
 ) -> Path:
     path = (tmp_path / "candidate_result.json").resolve()
     result = build_candidate_result_fixture(
         manifest,
         runtime,
         page_status=page_status,
+        **result_kwargs,
     )
     write_candidate_result(result, path)
     return path
@@ -1726,6 +1739,124 @@ def test_candidate_result_is_formally_generated_and_write_once(
         write_candidate_result(loaded, path)
 
 
+def _import_profit_runtime_mount() -> dict[str, object]:
+    return {
+        "mount_id": "import_profit_candidate_runtime",
+        "container_path": "/app/runtime/import_profit",
+        "mode": "rw",
+        "runtime_kind": "import_profit_candidate",
+        "candidate_batch_id": RELEASE_ID,
+        "required_environment_variable": "IMPORT_PROFIT_RUNTIME_ROOT",
+    }
+
+
+def _candidate_runtime_access() -> dict[str, object]:
+    return {
+        "container_path": "/app/runtime/import_profit",
+        "environment_variable": "IMPORT_PROFIT_RUNTIME_ROOT",
+        "uid": 1000,
+        "gid": 1000,
+        "read_write_probe": "passed",
+    }
+
+
+def test_candidate_waiting_gate_is_schema_valid_but_not_deployable(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    gate = pending_candidate_gate("real_morning_open_snapshot", "2026-08-03")
+    result = build_candidate_result_fixture(
+        manifest,
+        runtime,
+        blocking_gates=(gate,),
+        runtime_mounts=(_import_profit_runtime_mount(),),
+        candidate_runtime_access=_candidate_runtime_access(),
+    )
+
+    validate_candidate_result(
+        result,
+        manifest,
+        load_schema(CONTRACT_DIR / "candidate_result.schema.json"),
+    )
+    assert result["status"] == "candidate-waiting-gate"
+    with pytest.raises(ContractError, match="not eligible"):
+        require_deployable_candidate_result(result)
+
+    path = (tmp_path / "candidate_result.json").resolve()
+    write_candidate_result(result, path)
+    artifact = json.loads(
+        (tmp_path / "candidate_result.manifest.json").read_text(encoding="utf-8")
+    )
+    assert artifact["schema_version"] == "1.5.0"
+    assert artifact["target_schema_version"] == "1.6.0"
+    assert artifact["runtime_mounts"] == [_import_profit_runtime_mount()]
+    assert "host" not in json.dumps(artifact).lower()
+
+
+def test_legacy_validated_candidate_sample_remains_schema_compatible(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    result = build_candidate_result_fixture(manifest, runtime)
+    result["schema_version"] = "1.5.0"
+    for key in (
+        "blocking_gates",
+        "completed_gates",
+        "runtime_mounts",
+        "candidate_runtime_access",
+    ):
+        result.pop(key)
+    validate_candidate_result(
+        result,
+        manifest,
+        load_schema(CONTRACT_DIR / "candidate_result.schema.json"),
+    )
+
+
+def test_candidate_gate_schema_rejects_unknown_failed_and_malformed_states(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    schema = load_schema(CONTRACT_DIR / "candidate_result.schema.json")
+    valid = build_candidate_result_fixture(manifest, runtime)
+    for status in ("candidate-failed", "passed", "unknown"):
+        changed = {**valid, "status": status}
+        with pytest.raises(ContractError):
+            validate_candidate_result(changed, manifest, schema)
+    waiting_without_gate = {**valid, "status": "candidate-waiting-gate"}
+    with pytest.raises(ContractError):
+        validate_candidate_result(waiting_without_gate, manifest, schema)
+    validated_with_gate = {
+        **valid,
+        "blocking_gates": [pending_candidate_gate("real_morning_open_snapshot", "2026-08-03")],
+    }
+    with pytest.raises(ContractError):
+        validate_candidate_result(validated_with_gate, manifest, schema)
+
+
+def test_import_profit_validated_candidate_requires_completed_real_gate(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    result = build_candidate_result_fixture(
+        manifest,
+        runtime,
+        runtime_mounts=(_import_profit_runtime_mount(),),
+        candidate_runtime_access=_candidate_runtime_access(),
+    )
+    with pytest.raises(ContractError, match="completed real 09:00 gate"):
+        require_deployable_candidate_result(result)
+
+    result["completed_gates"] = [
+        {
+            "gate_id": "real_morning_open_snapshot",
+            "status": "completed",
+            "business_date": "2026-08-03",
+            "captured_at": "2026-08-03T09:01:00+08:00",
+            "target_contracts": ["m2609", "y2609"],
+            "snapshot_batch_id": "dce-20260803-090100",
+            "candidate_sha256": "f" * 64,
+        }
+    ]
+    require_deployable_candidate_result(result)
+
+
 def test_exclusive_artifact_write_preserves_existing_content_and_hash(
     tmp_path: Path,
 ) -> None:
@@ -2583,6 +2714,34 @@ def test_deployment_plan_requires_validated_candidate_result(
             manifest,
             runtime,
             page_status="failed",
+        )
+
+
+def test_deployment_plan_rejects_schema_valid_waiting_candidate(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path,
+        manifest,
+        runtime,
+        blocking_gates=(
+            pending_candidate_gate("real_morning_open_snapshot", "2026-08-03"),
+        ),
+        runtime_mounts=(_import_profit_runtime_mount(),),
+        candidate_runtime_access=_candidate_runtime_access(),
+    )
+    production_project_dir, production_compose_file = create_production_project(tmp_path)
+
+    with pytest.raises(ContractError, match="not eligible"):
+        create_deployment_plan(
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
         )
 
 

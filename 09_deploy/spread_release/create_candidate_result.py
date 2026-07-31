@@ -8,11 +8,16 @@ from typing import Any
 
 from release_contract import (
     ContractError,
+    CommandRunner,
     DockerReleaseRuntime,
+    IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+    IMPORT_PROFIT_RUNTIME_ENV_KEY,
     artifact_manifest_path,
+    completed_candidate_gate,
     create_candidate_result,
     hash_file,
     load_manifest_bundle,
+    load_candidate_result,
     validate_git_state,
     write_candidate_result,
 )
@@ -59,6 +64,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--prior-waiting-candidate-result",
+        type=Path,
+        help="Verified Stage A result whose runtime evidence is carried into a versioned Stage B result.",
+    )
+    parser.add_argument(
+        "--completed-gate-evidence",
+        type=Path,
+        help="Controlled real_morning_open_snapshot completion evidence for Stage B.",
+    )
     return parser
 
 
@@ -70,6 +85,34 @@ def load_json_object(path: Path, description: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ContractError(f"{description} must be a JSON object")
     return payload
+
+
+def measure_import_profit_runtime_access(container_name: str) -> dict[str, Any]:
+    runner = CommandRunner()
+    uid = runner.run(["docker", "exec", container_name, "id", "-u"]).strip()
+    gid = runner.run(["docker", "exec", container_name, "id", "-g"]).strip()
+    if not uid.isdigit() or not gid.isdigit():
+        raise ContractError("candidate container UID/GID probe returned invalid output")
+    probe = f"{IMPORT_PROFIT_RUNTIME_CONTAINER_PATH}/.candidate-stage-b-write-probe"
+    runner.run(
+        [
+            "docker",
+            "exec",
+            container_name,
+            "sh",
+            "-c",
+            'umask 077; : > "$1"; test -f "$1"; rm -f "$1"',
+            "candidate-runtime-probe",
+            probe,
+        ]
+    )
+    return {
+        "container_path": IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+        "environment_variable": IMPORT_PROFIT_RUNTIME_ENV_KEY,
+        "uid": int(uid),
+        "gid": int(gid),
+        "read_write_probe": "passed",
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -105,6 +148,31 @@ def main(argv: list[str] | None = None) -> int:
             args.formal_containers_before.resolve(),
             "before-candidate formal container snapshot",
         )
+        if bool(args.prior_waiting_candidate_result) != bool(args.completed_gate_evidence):
+            raise ContractError(
+                "Stage B requires both prior waiting candidate result and completed gate evidence"
+            )
+        runtime_mounts: list[dict[str, Any]] = []
+        candidate_runtime_access: dict[str, Any] | None = None
+        completed_gates: list[dict[str, Any]] = []
+        if args.prior_waiting_candidate_result:
+            prior = load_candidate_result(
+                args.prior_waiting_candidate_result.resolve(), manifest
+            )
+            if prior.get("status") != "candidate-waiting-gate":
+                raise ContractError("Stage B prior candidate result is not waiting for a gate")
+            runtime_mounts = list(prior.get("runtime_mounts") or [])
+            candidate_runtime_access = measure_import_profit_runtime_access(
+                str(manifest["candidate_container_name"])
+            )
+            completed_gates = [
+                completed_candidate_gate(
+                    load_json_object(
+                        args.completed_gate_evidence.resolve(),
+                        "completed candidate gate evidence",
+                    )
+                )
+            ]
         result = create_candidate_result(
             manifest=manifest,
             runtime=DockerReleaseRuntime(),
@@ -113,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
                 "candidate readiness result",
             ),
             checks=checks,
+            completed_gates=completed_gates,
+            runtime_mounts=runtime_mounts,
+            candidate_runtime_access=candidate_runtime_access,
         )
         write_candidate_result(result, output_path)
         result_manifest = artifact_manifest_path(output_path, "candidate_result")

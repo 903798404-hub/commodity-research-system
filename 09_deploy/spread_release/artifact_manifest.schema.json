@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-artifact-manifest-1.4.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-artifact-manifest-1.5.0.json",
   "title": "spread-dashboard sealed JSON artifact manifest",
   "type": "object",
   "additionalProperties": false,
@@ -20,7 +20,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.4.0"
+      "enum": ["1.4.0", "1.5.0"]
     },
     "artifact_type": {
       "enum": [
@@ -71,6 +71,11 @@
     },
     "runtime_git_commit": {
       "$ref": "#/$defs/fullGitCommit"
+    },
+    "runtime_mounts": {
+      "type": "array",
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/importProfitRuntimeMount" }
     }
   },
   "allOf": [
@@ -99,6 +104,15 @@
             "runtime_git_commit"
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": { "artifact_type": { "const": "candidate_result" } },
+        "required": ["artifact_type"]
+      },
+      "else": {
+        "not": { "required": ["runtime_mounts"] }
       }
     }
   ],
@@ -130,7 +144,7 @@
           "const": "candidate_result.json"
         },
         "target_schema_version": {
-          "const": "1.5.0"
+          "enum": ["1.5.0", "1.6.0"]
         }
       },
       "required": [
@@ -177,6 +191,19 @@
     }
   ],
   "$defs": {
+    "importProfitRuntimeMount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mount_id", "container_path", "mode", "runtime_kind", "candidate_batch_id", "required_environment_variable"],
+      "properties": {
+        "mount_id": { "const": "import_profit_candidate_runtime" },
+        "container_path": { "const": "/app/runtime/import_profit" },
+        "mode": { "const": "rw" },
+        "runtime_kind": { "const": "import_profit_candidate" },
+        "candidate_batch_id": { "type": "string", "pattern": "spread-[0-9]{8}-[0-9a-f]{12,40}-b[0-9]{2,}" },
+        "required_environment_variable": { "const": "IMPORT_PROFIT_RUNTIME_ROOT" }
+      }
+    },
     "fullGitCommit": {
       "type": "string",
       "pattern": "[0-9a-f]{40}"

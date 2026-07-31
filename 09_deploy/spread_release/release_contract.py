@@ -29,7 +29,12 @@ COMPOSE_PROJECT = "market-data"
 COMPOSE_SERVICE = "spread-dashboard"
 PRODUCTION_CONTAINER = "spread-dashboard"
 SCHEMA_VERSION = "2.6.0"
-CANDIDATE_RESULT_SCHEMA_VERSION = "1.5.0"
+CANDIDATE_RESULT_SCHEMA_VERSION = "1.6.0"
+LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION = "1.5.0"
+SUPPORTED_CANDIDATE_RESULT_SCHEMA_VERSIONS = {
+    LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION,
+    CANDIDATE_RESULT_SCHEMA_VERSION,
+}
 DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.5.0"
 DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.4.0"
 DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION = "1.0.0"
@@ -38,7 +43,8 @@ DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES = (
     "deployment_result.json",
     "deployment_result.manifest.json",
 )
-ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.4.0"
+ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.5.0"
+LEGACY_ARTIFACT_MANIFEST_SCHEMA_VERSION = "1.4.0"
 ARTIFACT_MANIFEST_FILENAMES = {
     "release": "release.manifest.json",
     "candidate_result": "candidate_result.manifest.json",
@@ -150,6 +156,12 @@ PRODUCTION_DATA_MOUNTS = {
     "06_outputs": "/app/06_outputs",
     "10_logs": "/app/10_logs",
 }
+IMPORT_PROFIT_RUNTIME_ENV_KEY = "IMPORT_PROFIT_RUNTIME_ROOT"
+IMPORT_PROFIT_RUNTIME_CONTAINER_PATH = "/app/runtime/import_profit"
+IMPORT_PROFIT_RUNTIME_MOUNT_ID = "import_profit_candidate_runtime"
+REAL_MORNING_OPEN_GATE_ID = "real_morning_open_snapshot"
+CANDIDATE_VALIDATED_STATUS = "candidate-validated"
+CANDIDATE_WAITING_STATUS = "candidate-waiting-gate"
 
 
 def candidate_compose_environment(
@@ -1631,7 +1643,10 @@ def create_artifact_manifest(
             f"got {target_path.name}"
         )
     expected_schema_version = ARTIFACT_TARGET_SCHEMA_VERSIONS[artifact_type]
-    if target_schema_version != expected_schema_version:
+    accepted_target_versions = {expected_schema_version}
+    if artifact_type == "candidate_result":
+        accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
+    if target_schema_version not in accepted_target_versions:
         raise ContractError(
             f"{artifact_type} manifest target schema version must be "
             f"{expected_schema_version}, got {target_schema_version}"
@@ -1670,6 +1685,9 @@ def create_artifact_manifest(
         "image_id": image_id,
         "formal_evidence_sha256": formal_evidence_sha256(formal_evidence),
     }
+    runtime_mounts = target_payload.get("runtime_mounts")
+    if artifact_type == "candidate_result" and runtime_mounts:
+        manifest["runtime_mounts"] = validate_runtime_mount_evidence(runtime_mounts)
     measured_artifact = artifact_type in {"candidate_result", "deployment_result"}
     if measured_artifact:
         if runtime_git_commit is None:
@@ -1735,7 +1753,10 @@ def validate_artifact_manifest(
             f"got {target_path.name}"
         )
     expected_schema_version = ARTIFACT_TARGET_SCHEMA_VERSIONS[artifact_type]
-    if manifest.get("target_schema_version") != expected_schema_version:
+    accepted_target_versions = {expected_schema_version}
+    if artifact_type == "candidate_result":
+        accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
+    if manifest.get("target_schema_version") not in accepted_target_versions:
         raise ContractError(
             f"{artifact_type} manifest target_schema_version mismatch"
         )
@@ -1781,6 +1802,15 @@ def validate_artifact_manifest(
         formal_evidence
     ):
         raise ContractError(f"{artifact_type} formal evidence SHA-256 mismatch")
+    target_runtime_mounts = target_payload.get("runtime_mounts", [])
+    manifest_runtime_mounts = manifest.get("runtime_mounts", [])
+    if artifact_type == "candidate_result":
+        if validate_runtime_mount_evidence(manifest_runtime_mounts) != validate_runtime_mount_evidence(
+            target_runtime_mounts
+        ):
+            raise ContractError("candidate_result runtime mount manifest mismatch")
+    elif manifest_runtime_mounts:
+        raise ContractError(f"{artifact_type} manifest must not contain runtime mounts")
     expected_identity = {
         "release_id": expected_release_id,
         "git_commit": expected_git_commit,
@@ -2620,6 +2650,144 @@ def load_candidate_result(
     return result
 
 
+def pending_candidate_gate(gate_id: str, earliest_business_date: str) -> dict[str, Any]:
+    if gate_id != REAL_MORNING_OPEN_GATE_ID:
+        raise ContractError(f"unsupported candidate gate: {gate_id}")
+    try:
+        parsed_date = datetime.strptime(earliest_business_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError) as exc:
+        raise ContractError("candidate gate earliest business date must be YYYY-MM-DD") from exc
+    if parsed_date.weekday() >= 5:
+        raise ContractError("candidate gate earliest business date must be a weekday")
+    return {
+        "gate_id": REAL_MORNING_OPEN_GATE_ID,
+        "status": "pending",
+        "required_business_timezone": "Asia/Shanghai",
+        "required_window_start": "09:00:00",
+        "required_window_end_exclusive": "09:03:00",
+        "earliest_expected_business_date": parsed_date.isoformat(),
+        "blocks_production_promotion": True,
+        "description": "Real AkShare morning_open_snapshot validation is pending.",
+    }
+
+
+def completed_candidate_gate(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    if evidence.get("gate_id") != REAL_MORNING_OPEN_GATE_ID or evidence.get("status") != "completed":
+        raise ContractError("completed candidate gate identity is invalid")
+    business_date = evidence.get("business_date")
+    try:
+        parsed_date = datetime.strptime(str(business_date), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ContractError("completed gate business date must be YYYY-MM-DD") from exc
+    if parsed_date.weekday() >= 5:
+        raise ContractError("completed gate business date must be a weekday")
+    captured_at = evidence.get("captured_at")
+    validate_build_time(captured_at)
+    contracts = evidence.get("target_contracts")
+    if (
+        not isinstance(contracts, list)
+        or not contracts
+        or len(set(contracts)) != len(contracts)
+        or any(not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", item) for item in contracts)
+    ):
+        raise ContractError("completed gate target contracts are invalid")
+    snapshot_batch_id = evidence.get("snapshot_batch_id")
+    if not isinstance(snapshot_batch_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", snapshot_batch_id):
+        raise ContractError("completed gate snapshot batch identity is invalid")
+    candidate_sha256 = evidence.get("candidate_sha256")
+    if not isinstance(candidate_sha256, str) or not SHA256_RE.fullmatch(candidate_sha256):
+        raise ContractError("completed gate candidate SHA-256 is invalid")
+    return {
+        "gate_id": REAL_MORNING_OPEN_GATE_ID,
+        "status": "completed",
+        "business_date": parsed_date.isoformat(),
+        "captured_at": str(captured_at),
+        "target_contracts": list(contracts),
+        "snapshot_batch_id": snapshot_batch_id,
+        "candidate_sha256": candidate_sha256,
+    }
+
+
+def validate_candidate_gate_state(result: Mapping[str, Any]) -> None:
+    version = result.get("schema_version")
+    if version not in SUPPORTED_CANDIDATE_RESULT_SCHEMA_VERSIONS:
+        raise ContractError("candidate result schema version is unsupported")
+    status = result.get("status")
+    blocking = result.get("blocking_gates", [])
+    completed = result.get("completed_gates", [])
+    if version == LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION:
+        if status != CANDIDATE_VALIDATED_STATUS or blocking or completed:
+            raise ContractError("legacy candidate result gate state is invalid")
+        return
+    if not isinstance(blocking, list) or not isinstance(completed, list):
+        raise ContractError("candidate gate collections must be arrays")
+    if len(completed) > 1 or any(
+        not isinstance(gate, dict) or completed_candidate_gate(gate) != gate
+        for gate in completed
+    ):
+        raise ContractError("candidate completed gate evidence is invalid")
+    if status == CANDIDATE_WAITING_STATUS:
+        if len(blocking) != 1 or completed:
+            raise ContractError("waiting candidate must contain exactly one blocking gate")
+        gate = blocking[0]
+        if not isinstance(gate, dict):
+            raise ContractError("candidate blocking gate is invalid")
+        expected = pending_candidate_gate(
+            str(gate.get("gate_id")), str(gate.get("earliest_expected_business_date"))
+        )
+        if gate != expected:
+            raise ContractError("candidate blocking gate does not match the controlled contract")
+    elif status == CANDIDATE_VALIDATED_STATUS:
+        if blocking:
+            raise ContractError("validated candidate must not contain blocking gates")
+    else:
+        raise ContractError("candidate result status is not supported")
+
+
+def validate_runtime_mount_evidence(mounts: Any) -> list[dict[str, Any]]:
+    if mounts is None:
+        return []
+    if not isinstance(mounts, list) or len(mounts) > 1:
+        raise ContractError("candidate runtime mounts must contain at most one approved mount")
+    validated: list[dict[str, Any]] = []
+    for item in mounts:
+        if not isinstance(item, dict):
+            raise ContractError("candidate runtime mount evidence is invalid")
+        expected = {
+            "mount_id": IMPORT_PROFIT_RUNTIME_MOUNT_ID,
+            "container_path": IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+            "mode": "rw",
+            "runtime_kind": "import_profit_candidate",
+            "candidate_batch_id": item.get("candidate_batch_id"),
+            "required_environment_variable": IMPORT_PROFIT_RUNTIME_ENV_KEY,
+        }
+        batch = expected["candidate_batch_id"]
+        if not isinstance(batch, str) or not RELEASE_ID_RE.fullmatch(batch):
+            raise ContractError("candidate runtime mount batch identity is invalid")
+        if item != expected:
+            raise ContractError("candidate runtime mount evidence does not match the approved contract")
+        validated.append(expected)
+    return validated
+
+
+def require_deployable_candidate_result(result: Mapping[str, Any]) -> None:
+    validate_candidate_gate_state(result)
+    if result.get("status") != CANDIDATE_VALIDATED_STATUS:
+        raise ContractError("candidate result is not eligible for production promotion")
+    if result.get("blocking_gates", []):
+        raise ContractError("candidate result has blocking production gates")
+    mounts = validate_runtime_mount_evidence(result.get("runtime_mounts", []))
+    if mounts:
+        completed = result.get("completed_gates", [])
+        if not isinstance(completed, list) or not any(
+            isinstance(gate, dict)
+            and gate.get("gate_id") == REAL_MORNING_OPEN_GATE_ID
+            and gate.get("status") == "completed"
+            for gate in completed
+        ):
+            raise ContractError("import profit candidate is missing the completed real 09:00 gate")
+
+
 def validate_candidate_result(
     result: Mapping[str, Any],
     manifest: Mapping[str, Any],
@@ -2627,7 +2795,6 @@ def validate_candidate_result(
 ) -> None:
     validate_against_schema(result, schema)
     expected = {
-        "schema_version": CANDIDATE_RESULT_SCHEMA_VERSION,
         "application": APPLICATION,
         "release_id": manifest["release_id"],
         "git_commit": manifest["git_commit"],
@@ -2635,7 +2802,6 @@ def validate_candidate_result(
         "image_ref": manifest["image_ref"],
         "candidate_image_id": manifest["image_id"],
         "candidate_container_name": manifest["candidate_container_name"],
-        "status": "candidate-validated",
     }
     for key, expected_value in expected.items():
         if result.get(key) != expected_value:
@@ -2643,6 +2809,24 @@ def validate_candidate_result(
                 f"candidate result {key} mismatch: expected {expected_value!r}, "
                 f"got {result.get(key)!r}"
             )
+    validate_candidate_gate_state(result)
+    runtime_mounts = validate_runtime_mount_evidence(result.get("runtime_mounts", []))
+    access = result.get("candidate_runtime_access")
+    if runtime_mounts:
+        if not isinstance(access, dict) or access != {
+            "container_path": IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+            "environment_variable": IMPORT_PROFIT_RUNTIME_ENV_KEY,
+            "uid": access.get("uid"),
+            "gid": access.get("gid"),
+            "read_write_probe": "passed",
+        }:
+            raise ContractError("candidate runtime access evidence is invalid")
+        for field in ("uid", "gid"):
+            value = access.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ContractError(f"candidate runtime access {field} is invalid")
+    elif access is not None:
+        raise ContractError("candidate runtime access must be absent without a runtime mount")
     weather_facts = weather_candidate_facts(manifest.get("weather_candidate_mode"))
     for key, expected_value in weather_facts.items():
         if result.get(key) != expected_value:
@@ -2730,6 +2914,10 @@ def create_candidate_result(
     runtime: ReleaseRuntime,
     readiness: Mapping[str, Any],
     checks: Mapping[str, Any],
+    blocking_gates: Sequence[Mapping[str, Any]] = (),
+    completed_gates: Sequence[Mapping[str, Any]] = (),
+    runtime_mounts: Sequence[Mapping[str, Any]] = (),
+    candidate_runtime_access: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     candidate_identity = verify_candidate(manifest, runtime)
@@ -2750,6 +2938,14 @@ def create_candidate_result(
         "+00:00",
         "Z",
     )
+    blocking_gate_list = [copy.deepcopy(dict(gate)) for gate in blocking_gates]
+    completed_gate_list = [copy.deepcopy(dict(gate)) for gate in completed_gates]
+    status = CANDIDATE_WAITING_STATUS if blocking_gate_list else CANDIDATE_VALIDATED_STATUS
+    runtime_mount_list = validate_runtime_mount_evidence(
+        [copy.deepcopy(dict(mount)) for mount in runtime_mounts]
+    )
+    if runtime_mount_list and candidate_runtime_access is None:
+        raise ContractError("import profit candidate requires measured runtime access evidence")
     result = {
         "schema_version": CANDIDATE_RESULT_SCHEMA_VERSION,
         "application": APPLICATION,
@@ -2760,7 +2956,15 @@ def create_candidate_result(
         "candidate_image_id": manifest["image_id"],
         "candidate_container_name": manifest["candidate_container_name"],
         "generated_at": timestamp,
-        "status": "candidate-validated",
+        "status": status,
+        "blocking_gates": blocking_gate_list,
+        "completed_gates": completed_gate_list,
+        "runtime_mounts": runtime_mount_list,
+        "candidate_runtime_access": (
+            copy.deepcopy(dict(candidate_runtime_access))
+            if candidate_runtime_access is not None
+            else None
+        ),
         "weather_runtime_contract": {
             **weather_runtime_contract(
                 PRODUCTION_WEATHER_RUNTIME_DIR,
@@ -2897,6 +3101,7 @@ def validate_deployment_plan(
     if not candidate_result_file.is_absolute():
         raise ContractError("deployment plan candidate_result_file must be absolute")
     candidate_result = load_candidate_result(candidate_result_file, manifest)
+    require_deployable_candidate_result(candidate_result)
     if hash_file(candidate_result_file) != plan.get("candidate_result_sha256"):
         raise ContractError("candidate result changed after deployment plan sealing")
     formal_containers = plan.get("formal_containers")

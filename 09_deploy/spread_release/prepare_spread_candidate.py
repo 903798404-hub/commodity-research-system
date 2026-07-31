@@ -18,12 +18,17 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from release_contract import (
     COMPOSE_SERVICE,
+    CANDIDATE_WAITING_STATUS,
+    IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+    IMPORT_PROFIT_RUNTIME_ENV_KEY,
+    IMPORT_PROFIT_RUNTIME_MOUNT_ID,
     PRODUCTION_CONTAINER,
+    REAL_MORNING_OPEN_GATE_ID,
     WEATHER_CONTAINER_CURRENT_PATH,
     WEATHER_CONTAINER_PATH,
     ContractError,
@@ -42,6 +47,7 @@ from release_contract import (
     load_manifest_bundle,
     load_schema,
     parse_production_env,
+    pending_candidate_gate,
     validate_build_time,
     validate_full_git_commit,
     validate_release_id,
@@ -90,6 +96,7 @@ class CandidateResultSealer(Protocol):
         output_directory: Path,
         formal_spread_before: Mapping[str, Any],
         candidate_health_url: str,
+        candidate_runtime_access: Mapping[str, Any] | None,
     ) -> Mapping[str, str]: ...
 
 
@@ -127,6 +134,12 @@ class CandidateOptions:
     cleanup_policy: str
     execute_build: bool
     execute_start: bool
+    import_profit_runtime_host: Path | None = None
+    import_profit_runtime_approved_root: Path | None = None
+    formal_import_profit_runtime_host: Path | None = None
+    import_profit_runtime_container: str = IMPORT_PROFIT_RUNTIME_CONTAINER_PATH
+    pending_gate: str | None = None
+    earliest_expected_business_date: str | None = None
 
 
 def _utc_now() -> str:
@@ -153,6 +166,70 @@ def _validate_output_parent(path: Path) -> None:
         raise ContractError("candidate output parent is not writable")
     if os.name != "nt" and ancestor.stat().st_uid == 0 and os.geteuid() != 0:
         raise ContractError("candidate output parent must not be a root-owned deployment path")
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def validate_import_profit_runtime_paths(options: CandidateOptions) -> Path | None:
+    supplied = (
+        options.import_profit_runtime_host,
+        options.import_profit_runtime_approved_root,
+        options.formal_import_profit_runtime_host,
+    )
+    if not any(supplied):
+        if options.pending_gate or options.earliest_expected_business_date:
+            raise ContractError("candidate gate requires an import profit runtime")
+        return None
+    if not all(supplied):
+        raise ContractError(
+            "import profit runtime requires host, approved root, and formal runtime paths"
+        )
+    runtime = options.import_profit_runtime_host
+    approved_root = options.import_profit_runtime_approved_root
+    formal_runtime = options.formal_import_profit_runtime_host
+    assert runtime is not None and approved_root is not None and formal_runtime is not None
+    if not runtime.is_absolute() or not approved_root.is_absolute() or not formal_runtime.is_absolute():
+        raise ContractError("import profit runtime paths must be absolute")
+    if not runtime.exists() or not runtime.is_dir():
+        raise ContractError("import profit candidate runtime must be an existing directory")
+    if not approved_root.exists() or not approved_root.is_dir():
+        raise ContractError("approved import profit candidate root must be an existing directory")
+    resolved_runtime = runtime.resolve(strict=True)
+    resolved_root = approved_root.resolve(strict=True)
+    resolved_formal = formal_runtime.resolve(strict=False)
+    if resolved_runtime == resolved_root or not _is_relative_to(resolved_runtime, resolved_root):
+        raise ContractError("import profit runtime must be below the approved candidate root")
+    if (
+        resolved_runtime == resolved_formal
+        or _is_relative_to(resolved_runtime, resolved_formal)
+        or _is_relative_to(resolved_formal, resolved_runtime)
+    ):
+        raise ContractError("candidate and formal import profit runtimes must not overlap")
+    build_context = options.build_context.resolve(strict=True)
+    if resolved_runtime == build_context or _is_relative_to(resolved_runtime, build_context):
+        raise ContractError("import profit runtime must not be inside the Git checkout")
+    container_path = options.import_profit_runtime_container
+    pure = PurePosixPath(container_path)
+    if (
+        not container_path.startswith("/")
+        or "\\" in container_path
+        or any(part in {".", ".."} for part in pure.parts)
+        or str(pure) != container_path
+        or container_path != IMPORT_PROFIT_RUNTIME_CONTAINER_PATH
+    ):
+        raise ContractError("import profit runtime container path is invalid")
+    if options.pending_gate != REAL_MORNING_OPEN_GATE_ID:
+        raise ContractError("import profit Stage A requires the controlled real 09:00 pending gate")
+    if not options.earliest_expected_business_date:
+        raise ContractError("import profit pending gate requires an earliest business date")
+    pending_candidate_gate(options.pending_gate, options.earliest_expected_business_date)
+    return resolved_runtime
 
 
 def _normalise_port(value: Any, field: str) -> int:
@@ -263,6 +340,8 @@ def build_candidate_compose(
     image_ref: str,
     candidate_container_name: str,
     candidate_port: int,
+    import_profit_runtime_host: Path | None = None,
+    import_profit_runtime_container: str = IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
 ) -> dict[str, Any]:
     """Derive a one-service candidate Compose document from formal Compose facts."""
     services = formal_compose.get("services")
@@ -286,6 +365,8 @@ def build_candidate_compose(
     candidate_environment.update(
         candidate_compose_environment(git_commit, production_environment, "current")
     )
+    if import_profit_runtime_host is not None:
+        candidate_environment[IMPORT_PROFIT_RUNTIME_ENV_KEY] = import_profit_runtime_container
     # WEATHER_RUNTIME_CURRENT_DIR is an interpolation input, never an application
     # environment variable.  Its value is represented by the resolved bind source.
     candidate_environment.pop("WEATHER_RUNTIME_CURRENT_DIR", None)
@@ -306,6 +387,34 @@ def build_candidate_compose(
         }
     ]
     candidate_service["environment"] = candidate_environment
+    formal_volumes = copy.deepcopy(formal_service.get("volumes") or [])
+    candidate_volumes = copy.deepcopy(formal_volumes)
+    if import_profit_runtime_host is not None:
+        targets = {
+            volume.get("target")
+            for volume in candidate_volumes
+            if isinstance(volume, dict)
+        }
+        candidate_target = PurePosixPath(import_profit_runtime_container)
+        if any(
+            isinstance(target, str)
+            and (
+                PurePosixPath(target) == candidate_target
+                or PurePosixPath(target) in candidate_target.parents
+                or candidate_target in PurePosixPath(target).parents
+            )
+            for target in targets
+        ):
+            raise ContractError("import profit runtime target conflicts with an existing mount")
+        candidate_volumes.append(
+            {
+                "type": "bind",
+                "source": str(import_profit_runtime_host),
+                "target": import_profit_runtime_container,
+                "read_only": False,
+            }
+        )
+    candidate_service["volumes"] = candidate_volumes
     # The formal Compose service is explicitly labelled as production.  A
     # candidate must not inherit that runtime role when its one-service Compose
     # document is derived from the formal service.
@@ -333,6 +442,11 @@ def build_candidate_compose(
         candidate_port=candidate_port,
         expected_weather_source=expected_weather_source,
         expected_git_commit=git_commit,
+        formal_volumes=formal_volumes,
+        expected_import_profit_runtime_host=(
+            str(import_profit_runtime_host) if import_profit_runtime_host is not None else None
+        ),
+        expected_import_profit_runtime_container=import_profit_runtime_container,
     )
     return candidate
 
@@ -345,6 +459,9 @@ def validate_candidate_compose(
     candidate_port: int,
     expected_weather_source: str,
     expected_git_commit: str,
+    formal_volumes: Sequence[Any],
+    expected_import_profit_runtime_host: str | None = None,
+    expected_import_profit_runtime_container: str = IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
 ) -> None:
     services = candidate.get("services")
     if not isinstance(services, dict) or set(services) != {CANDIDATE_SERVICE}:
@@ -379,6 +496,13 @@ def validate_candidate_compose(
         raise ContractError("candidate MARKET_DATA_GIT_HEAD does not match the target commit")
     if environment.get("WEATHER_DATA_DIR") != WEATHER_CONTAINER_CURRENT_PATH:
         raise ContractError("candidate WEATHER_DATA_DIR is invalid")
+    expected_runtime_environment = (
+        expected_import_profit_runtime_container
+        if expected_import_profit_runtime_host is not None
+        else None
+    )
+    if environment.get(IMPORT_PROFIT_RUNTIME_ENV_KEY) != expected_runtime_environment:
+        raise ContractError("candidate IMPORT_PROFIT_RUNTIME_ROOT is invalid")
     labels = service.get("labels")
     if not isinstance(labels, dict):
         raise ContractError("candidate runtime labels are invalid")
@@ -395,6 +519,21 @@ def validate_candidate_compose(
         raise ContractError("candidate weather mount source is invalid")
     if mounts[0].get("type") != "bind" or mounts[0].get("read_only") is not True:
         raise ContractError("candidate weather mount must remain read-only")
+    volumes = service.get("volumes") or []
+    expected_count = len(formal_volumes) + (1 if expected_import_profit_runtime_host else 0)
+    if not isinstance(volumes, list) or len(volumes) != expected_count:
+        raise ContractError("candidate mount set differs from the approved formal mount set")
+    if volumes[: len(formal_volumes)] != list(formal_volumes):
+        raise ContractError("candidate changed an inherited formal mount")
+    if expected_import_profit_runtime_host is not None:
+        runtime_mount = volumes[-1]
+        if runtime_mount != {
+            "type": "bind",
+            "source": expected_import_profit_runtime_host,
+            "target": expected_import_profit_runtime_container,
+            "read_only": False,
+        }:
+            raise ContractError("candidate import profit runtime mount is invalid")
     networks = candidate.get("networks")
     if not isinstance(networks, dict) or not networks:
         raise ContractError("candidate must explicitly join the formal network")
@@ -415,6 +554,50 @@ def _compose_command(options: CandidateOptions, compose_path: Path, project_name
         "--no-deps",
         CANDIDATE_SERVICE,
     ]
+
+
+def _validate_generated_candidate_compose(
+    options: CandidateOptions,
+    runner: CommandRunner,
+    compose_path: Path,
+    candidate_compose: Mapping[str, Any],
+    formal_compose: Mapping[str, Any],
+    runtime_host: Path | None,
+    candidate_port: int,
+) -> None:
+    project_name = str(candidate_compose["name"])
+    raw = runner.run(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            project_name,
+            "-f",
+            str(compose_path),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=options.output_directory,
+    )
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ContractError(f"candidate docker compose config returned invalid JSON: {exc}") from exc
+    formal_service = formal_compose["services"][COMPOSE_SERVICE]
+    validate_candidate_compose(
+        parsed,
+        image_ref=options.image_ref,
+        candidate_container_name=options.candidate_container_name,
+        candidate_port=candidate_port,
+        expected_weather_source=str(
+            _weather_mount(candidate_compose["services"][CANDIDATE_SERVICE])["source"]
+        ),
+        expected_git_commit=options.git_commit,
+        formal_volumes=copy.deepcopy(formal_service.get("volumes") or []),
+        expected_import_profit_runtime_host=(str(runtime_host) if runtime_host else None),
+        expected_import_profit_runtime_container=options.import_profit_runtime_container,
+    )
 
 
 def _build_command(options: CandidateOptions) -> list[str]:
@@ -541,7 +724,40 @@ def _validate_options(options: CandidateOptions, runner: CommandRunner) -> tuple
     if options.auto_port and options.candidate_port is not None:
         raise ContractError("--candidate-port and --auto-port are mutually exclusive")
     _validate_output_parent(options.output_directory)
+    validate_import_profit_runtime_paths(options)
     return production_environment, formal_compose
+
+
+def _probe_import_profit_runtime(
+    options: CandidateOptions, runner: CommandRunner
+) -> dict[str, Any] | None:
+    if options.import_profit_runtime_host is None:
+        return None
+    uid_text = runner.run(["docker", "exec", options.candidate_container_name, "id", "-u"]).strip()
+    gid_text = runner.run(["docker", "exec", options.candidate_container_name, "id", "-g"]).strip()
+    if not uid_text.isdigit() or not gid_text.isdigit():
+        raise ContractError("candidate container UID/GID probe returned invalid output")
+    probe_name = f".candidate-write-probe-{options.release_id}"
+    probe_path = f"{options.import_profit_runtime_container}/{probe_name}"
+    runner.run(
+        [
+            "docker",
+            "exec",
+            options.candidate_container_name,
+            "sh",
+            "-c",
+            'umask 077; : > "$1"; test -f "$1"; rm -f "$1"',
+            "candidate-runtime-probe",
+            probe_path,
+        ]
+    )
+    return {
+        "container_path": options.import_profit_runtime_container,
+        "environment_variable": IMPORT_PROFIT_RUNTIME_ENV_KEY,
+        "uid": int(uid_text),
+        "gid": int(gid_text),
+        "read_write_probe": "passed",
+    }
 
 
 def _default_release_sealer(
@@ -677,6 +893,7 @@ def _default_candidate_result_sealer(
     output_directory: Path,
     formal_spread_before: Mapping[str, Any],
     candidate_health_url: str,
+    candidate_runtime_access: Mapping[str, Any] | None,
 ) -> Mapping[str, str]:
     """Seal candidate_result with the existing generator and schema boundary."""
     del production_environment
@@ -709,11 +926,32 @@ def _default_candidate_result_sealer(
     checks_path = output_directory / "candidate_checks.json"
     _write_json_exclusive(checks_path, checks)
     formal_snapshot = _load_json_object(formal_snapshot_path, "formal snapshot")
+    blocking_gates = []
+    runtime_mounts = []
+    if options.import_profit_runtime_host is not None:
+        blocking_gates.append(
+            pending_candidate_gate(
+                str(options.pending_gate), str(options.earliest_expected_business_date)
+            )
+        )
+        runtime_mounts.append(
+            {
+                "mount_id": IMPORT_PROFIT_RUNTIME_MOUNT_ID,
+                "container_path": options.import_profit_runtime_container,
+                "mode": "rw",
+                "runtime_kind": "import_profit_candidate",
+                "candidate_batch_id": options.release_id,
+                "required_environment_variable": IMPORT_PROFIT_RUNTIME_ENV_KEY,
+            }
+        )
     candidate_result = create_candidate_result(
         manifest=manifest,
         runtime=runtime,
         readiness=readiness,
         checks={**checks, "formal_containers_before": formal_snapshot},
+        blocking_gates=blocking_gates,
+        runtime_mounts=runtime_mounts,
+        candidate_runtime_access=candidate_runtime_access,
     )
     candidate_result_path = write_candidate_result(
         candidate_result, release_directory / "candidate_result.json"
@@ -867,6 +1105,7 @@ def prepare_candidate(
     """Generate a dry plan or execute the candidate-only preflight sequence."""
     command_runner = runner or CommandRunner()
     production_environment, formal_compose = _validate_options(options, command_runner)
+    import_profit_runtime_host = validate_import_profit_runtime_paths(options)
     port = select_candidate_port(
         options.candidate_port,
         forbidden_ports=_published_ports(formal_compose),
@@ -879,12 +1118,29 @@ def prepare_candidate(
         image_ref=options.image_ref,
         candidate_container_name=options.candidate_container_name,
         candidate_port=port,
+        import_profit_runtime_host=import_profit_runtime_host,
+        import_profit_runtime_container=options.import_profit_runtime_container,
     )
     if options.output_directory.exists():
         raise ContractError("candidate output directory must not already exist")
     options.output_directory.mkdir(parents=True)
     compose_path = options.output_directory / "candidate-compose.json"
-    _write_json_exclusive(compose_path, candidate_compose)
+    validating_compose_path = options.output_directory / ".candidate-compose.validating.json"
+    _write_json_exclusive(validating_compose_path, candidate_compose)
+    try:
+        _validate_generated_candidate_compose(
+            options,
+            command_runner,
+            validating_compose_path,
+            candidate_compose,
+            formal_compose,
+            import_profit_runtime_host,
+            port,
+        )
+        os.replace(validating_compose_path, compose_path)
+    finally:
+        if validating_compose_path.exists():
+            validating_compose_path.unlink()
     project_name = str(candidate_compose["name"])
     build_command = _build_command(options)
     start_command = _compose_command(options, compose_path, project_name)
@@ -923,6 +1179,17 @@ def prepare_candidate(
             "read_only": True,
             "weather_data_dir": WEATHER_CONTAINER_CURRENT_PATH,
         },
+        "import_profit_runtime_mount": (
+            {
+                "mount_id": IMPORT_PROFIT_RUNTIME_MOUNT_ID,
+                "candidate_batch_id": options.release_id,
+                "target": options.import_profit_runtime_container,
+                "mode": "rw",
+                "environment_variable": IMPORT_PROFIT_RUNTIME_ENV_KEY,
+            }
+            if import_profit_runtime_host is not None
+            else None
+        ),
         "candidate_image_id": None,
         "candidate_container_id": None,
         "formal_snapshot_path": str(snapshot_path),
@@ -1002,11 +1269,15 @@ def prepare_candidate(
         result["candidate_container_id"] = container_id
         phase = "candidate-validation"
         validator(release_directory, str(result["candidate_health_url"]), options.output_directory)
+        phase = "candidate-runtime-access"
+        candidate_runtime_access = _probe_import_profit_runtime(options, command_runner)
+        result["candidate_runtime_access"] = candidate_runtime_access
         phase = "candidate-result"
         candidate_evidence = candidate_result_sealer(
             options, candidate_runtime, production_environment, release_directory,
             formal_snapshot_path, options.output_directory, formal_spread_before,
             str(result["candidate_health_url"]),
+            candidate_runtime_access,
         )
         result.update(candidate_evidence)
         result["candidate_result_path"] = candidate_evidence["candidate_result_path"]
@@ -1022,17 +1293,21 @@ def prepare_candidate(
         image_after_container_cleanup = candidate_runtime.image_record(options.image_ref)
         if image_after_container_cleanup.get("id") != result["candidate_image_id"]:
             raise ContractError("candidate image identity changed before deployment plan sealing")
-        phase = "deployment-plan"
-        plan_evidence = deployment_plan_sealer(
-            options,
-            candidate_runtime,
-            production_environment,
-            release_directory,
-            Path(str(result["candidate_result_path"])),
-        )
-        result.update(plan_evidence)
-        result["deployment_plan_path"] = plan_evidence["deployment_plan_path"]
-        if options.cleanup_policy == AFTER_PLAN_CLEANUP_POLICY:
+        if options.pending_gate:
+            result["candidate_result_status"] = CANDIDATE_WAITING_STATUS
+            result["deployment_plan_status"] = "blocked-by-pending-gate"
+        else:
+            phase = "deployment-plan"
+            plan_evidence = deployment_plan_sealer(
+                options,
+                candidate_runtime,
+                production_environment,
+                release_directory,
+                Path(str(result["candidate_result_path"])),
+            )
+            result.update(plan_evidence)
+            result["deployment_plan_path"] = plan_evidence["deployment_plan_path"]
+        if options.cleanup_policy == AFTER_PLAN_CLEANUP_POLICY and not options.pending_gate:
             phase = "candidate-image-cleanup"
             result["candidate_image_cleanup_command"] = _remove_candidate_image(
                 candidate_runtime, command_runner, options.image_ref
@@ -1040,7 +1315,7 @@ def prepare_candidate(
             result["candidate_image_removed"] = True
         else:
             result["candidate_image_retained_for_deployment"] = True
-        result["status"] = "prepared"
+        result["status"] = "waiting-for-gate" if options.pending_gate else "prepared"
     except Exception as exc:
         result["status"] = "failed"
         result["failure_phase"] = phase
@@ -1092,6 +1367,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rollback-image-ref")
     parser.add_argument("--rollback-image-id")
     parser.add_argument("--formal-git-commit")
+    parser.add_argument("--import-profit-runtime-host", type=Path)
+    parser.add_argument("--import-profit-runtime-approved-root", type=Path)
+    parser.add_argument("--formal-import-profit-runtime-host", type=Path)
+    parser.add_argument(
+        "--import-profit-runtime-container",
+        default=IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+    )
+    parser.add_argument("--pending-gate", choices=(REAL_MORNING_OPEN_GATE_ID,))
+    parser.add_argument("--earliest-expected-business-date")
     return parser
 
 
@@ -1121,6 +1405,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         cleanup_policy=args.cleanup_policy,
         execute_build=args.execute_build,
         execute_start=args.execute_start,
+        import_profit_runtime_host=(
+            args.import_profit_runtime_host.resolve()
+            if args.import_profit_runtime_host
+            else None
+        ),
+        import_profit_runtime_approved_root=(
+            args.import_profit_runtime_approved_root.resolve()
+            if args.import_profit_runtime_approved_root
+            else None
+        ),
+        formal_import_profit_runtime_host=(
+            args.formal_import_profit_runtime_host.resolve()
+            if args.formal_import_profit_runtime_host
+            else None
+        ),
+        import_profit_runtime_container=args.import_profit_runtime_container,
+        pending_gate=args.pending_gate,
+        earliest_expected_business_date=args.earliest_expected_business_date,
     )
     try:
         result = prepare_candidate(options)

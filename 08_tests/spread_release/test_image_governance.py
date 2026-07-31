@@ -145,6 +145,21 @@ def test_sealed_validation_and_orphan_categories_are_distinct() -> None:
     assert orphan["cleanup_action"] == ELIGIBLE_FOR_IMAGE_DELETE
 
 
+def test_waiting_gate_candidate_image_is_retained_but_not_production_verified() -> None:
+    evidence = evidence_from_artifacts(
+        candidate_results=[
+            {
+                "status": "candidate-waiting-gate",
+                "candidate_image_id": IMAGE,
+                "image_ref": "market-data-spread-dashboard:spread-20260803-cccccccccccc-b01",
+            }
+        ]
+    )
+    classified = classify_image(_image(), evidence)
+    assert classified["classification"] == SEALED_CANDIDATE
+    assert classified["cleanup_action"] == "retain"
+
+
 def test_release_bundle_reference_protects_a_candidate_image() -> None:
     classified = classify_image(
         _image(labels={"market-data.artifact.origin": "candidate"}),

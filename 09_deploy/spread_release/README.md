@@ -126,6 +126,17 @@ Image ID、候选容器身份、容器 inspect 实测的
 同一轮询器不可覆盖地写入相同有限摘要，不依赖操作人员手工复制完整日志。
 随后删除候选容器并确认其不存在；只有完成这些步骤后才允许生成部署计划。
 
+进口利润 Stage A 候选通过 `prepare_spread_candidate.py` 的受控 runtime 参数增加
+唯一的 `/app/runtime/import_profit` 读写 bind，并注入
+`IMPORT_PROFIT_RUNTIME_ROOT`。宿主绝对路径只保留在服务器本地候选 Compose，
+密封结果和 Manifest 只记录安全批次身份。真实 09:00 门禁未完成时结果状态为
+`candidate-waiting-gate`；工具删除候选容器、保留镜像，并明确跳过部署计划。
+等待态不是最终候选通过状态。
+Stage B 只能通过 `create_candidate_result.py --prior-waiting-candidate-result ...
+--completed-gate-evidence ... --output <new-directory>/candidate_result.json` 生成新的版本化
+结果；工具验证 Stage A Manifest 后继承其安全 runtime 身份，拒绝原地覆盖，并要求
+完整的业务日期、捕获时间、目标合约、`snapshot_batch_id` 和候选 SHA。
+
 ## 运行环境契约
 
 生产 Compose 要求显式提供以下四个非敏感变量：
@@ -152,7 +163,7 @@ OIL_WORLD_DASHBOARD_URL
 
 ## 生产部署计划
 
-候选验收通过后，使用目标 Release SHA 的独立只读浅克隆中的契约代码、正式
+候选最终验收通过后，使用目标 Release SHA 的独立只读浅克隆中的契约代码、正式
 Compose 文件、正式 Compose 项目目录和唯一生产环境文件生成计划。候选结果及
 其 Manifest 必须已验证，且候选容器已经删除：
 
@@ -264,11 +275,13 @@ bash 09_deploy/spread_release/rollback_spread_release.sh \
 任何后续阶段读取上述 JSON 前都先验证对应 Manifest。目标文件内容、Manifest
 哈希、字节大小、Schema 版本、Release Git SHA、Tree SHA 或 Image ID 任一
 不一致即停止。候选结果和部署结果 Manifest 还密封实测运行时 Git SHA；Release
-和部署计划 Manifest 不得伪造该实测字段。Manifest Schema 自身将
+和部署计划 Manifest 不得伪造该实测字段。进口利润候选的 Manifest 还可密封不含
+宿主路径的 runtime mount 身份。Manifest Schema 自身将
 `artifact_type`、`target_file` 和 `target_schema_version` 一一绑定。当前
-Schema 版本分别为：`release.json` 2.3.0、`candidate_result.json` 1.2.0、
-`deployment_plan.json` 1.2.0、`deployment_result.json` 1.1.0，以及四类
-Manifest 共用的 1.2.0。
+当前实现常量指定的版本分别为：`release.json` 2.6.0、
+`candidate_result.json` 1.6.0、`deployment_plan.json` 1.5.0、
+`deployment_result.json` 1.4.0，以及四类 Manifest 共用的 1.5.0。
+候选结果 1.5.0 与 Artifact Manifest 1.4.0 继续作为只读兼容输入；新产物只写新版本。
 
 四类 JSON 和四类 Manifest 使用同一排他发布实现：内容先在内存中完成
 序列化和 Schema 校验，再完整写入同目录临时文件并 `flush`、`fsync`，最后
