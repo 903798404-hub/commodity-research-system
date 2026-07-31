@@ -1,0 +1,321 @@
+schema_version: 1
+framework:
+  name: 进口商品利润研究框架
+  python_package: import_profit
+  shared_kernel: thin
+  product_models:
+    soybean: crush_profit
+    rapeseed: crush_profit
+    palm_oil: direct_import_profit
+  palm_oil_uses_crush_yields: false
+  extension_policy:
+    independent_calculator_per_product: true
+    independent_parameters_per_product: true
+    independent_sources_per_product: true
+    independent_contract_mapping_per_product: true
+    complex_plugin_system: false
+
+commodity: soybean
+page_title: 日度进口大豆盘面净榨利
+
+origins:
+  - code: brazil
+    label: 巴西
+  - code: us_gulf
+    label: 美湾
+  - code: us_pnw
+    label: 美西
+  - code: argentina
+    label: 阿根廷
+
+default_parameters:
+  meal_yield: 0.785
+  oil_yield: 0.185
+  cents_per_bushel_to_usd_per_tonne: 0.367437
+  tariff_rate: 0.03
+  vat_rate: 0.09
+  port_charge_cny_per_tonne: 100
+  processing_fee_cny_per_tonne: 150
+  additional_fees_cny_per_tonne: 0
+
+origin_overrides: {}
+
+formula_policy:
+  usd_cost:
+    expression: (cbot_daily_price + cnf_premium) * cents_per_bushel_to_usd_per_tonne
+  landed_duty_paid_cost:
+    expression: usd_cost * fx_rate * (1 + tariff_rate) * (1 + vat_rate)
+  screen_net_crush_margin:
+    expression: meal_screen_price * meal_yield + oil_screen_price * oil_yield - landed_duty_paid_cost - port_charge_cny_per_tonne - processing_fee_cny_per_tonne
+  allow_other_fees: false
+
+cnf_unit: cents_per_bushel
+stable_key:
+  - business_date
+  - commodity
+  - origin
+  - shipment_year
+  - shipment_month
+
+shipment_period:
+  format: YYYY-MM
+  replaces_stable_key_validation: false
+
+cnf_policy:
+  meaning: imported_soybean_premium
+  editable: true
+  same_key_save: overwrite
+  historical_entry_allowed: true
+  historical_edit_allowed: true
+  keep_revision_history: false
+  null_is_missing: true
+  zero_is_valid: true
+  fill_forward: false
+  fill_backward: false
+  inherit_across_dates: false
+  interpolate: false
+  substitute_adjacent_shipment: false
+  null_downstream_fields:
+    - usd_cost
+    - landed_duty_paid_cost
+    - screen_net_crush_margin
+
+fx_policy:
+  source_file: 01_data/manual/榨利表/油脂油料价格.sql
+  source_table: 美元兑人民币历史汇率
+  value_policy: use_source_value_directly
+  distinguish_bid_ask_mid: false
+  tenor_basis: integer_month_difference
+  tenor_start: business_date_month
+  tenor_end: shipment_period_month
+  minimum_tenor_months: 0
+  maximum_tenor_months: 12
+  reject_negative_tenor: true
+  reject_above_maximum_tenor: true
+  tenor_columns:
+    0: Spot
+    1: Fwd_1M
+    2: Fwd_2M
+    3: Fwd_3M
+    4: Fwd_4M
+    5: Fwd_5M
+    6: Fwd_6M
+    7: Fwd_7M
+    8: Fwd_8M
+    9: Fwd_9M
+    10: Fwd_10M
+    11: Fwd_11M
+    12: Fwd_1Y
+  exact_tenor_first: true
+  interpolation:
+    enabled_for_missing_target_only: true
+    method: linear
+    same_business_date_only: true
+    adjacent_valid_tenors_only: true
+    cross_date_allowed: false
+    extrapolation_allowed: false
+    audit_fields:
+      - is_interpolated
+      - lower_tenor
+      - upper_tenor
+
+business_calendar_policy:
+  timezone: Asia/Shanghai
+  calendar_type: weekday
+  weekdays:
+    - monday
+    - tuesday
+    - wednesday
+    - thursday
+    - friday
+  exclude_weekends: true
+  exchange_holiday_calendar_required: false
+  retain_weekday_without_market_data: true
+  infer_exchange_open_from_market_data: false
+  allow_previous_business_day_fallback: false
+  missing_market_inputs:
+    - cbot_daily_price
+    - fx_rate
+    - meal_screen_price
+    - oil_screen_price
+  record_specific_missing_reasons: true
+
+contract_mapping:
+  contract_year_expression: shipment_year + year_offset
+  code_policy: month_and_year_offset_only
+  shared_across:
+    - page
+    - historical_initialization
+    - historical_recalculation
+    - recent_table
+    - seasonality_chart
+  rows:
+    - shipment_month: 1
+      cbot: {contract_month: 1, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
+    - shipment_month: 2
+      cbot: {contract_month: 3, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
+    - shipment_month: 3
+      cbot: {contract_month: 3, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
+    - shipment_month: 4
+      cbot: {contract_month: 5, year_offset: 0}
+      dce: {contract_month: 9, year_offset: 0}
+    - shipment_month: 5
+      cbot: {contract_month: 5, year_offset: 0}
+      dce: {contract_month: 9, year_offset: 0}
+    - shipment_month: 6
+      cbot: {contract_month: 7, year_offset: 0}
+      dce: {contract_month: 9, year_offset: 0}
+    - shipment_month: 7
+      cbot: {contract_month: 7, year_offset: 0}
+      dce: {contract_month: 9, year_offset: 0}
+    - shipment_month: 8
+      cbot: {contract_month: 9, year_offset: 0}
+      dce: {contract_month: 1, year_offset: 1}
+    - shipment_month: 9
+      cbot: {contract_month: 9, year_offset: 0}
+      dce: {contract_month: 1, year_offset: 1}
+    - shipment_month: 10
+      cbot: {contract_month: 11, year_offset: 0}
+      dce: {contract_month: 1, year_offset: 1}
+    - shipment_month: 11
+      cbot: {contract_month: 11, year_offset: 0}
+      dce: {contract_month: 1, year_offset: 1}
+    - shipment_month: 12
+      cbot: {contract_month: 1, year_offset: 1}
+      dce: {contract_month: 1, year_offset: 1}
+
+display_policy:
+  application: spread-dashboard
+  new_container: false
+  add_home_core_card: false
+  sidebar_group: 市场行情
+  header_fields:
+    - title
+    - origin_selector
+    - business_date
+    - data_status
+    - parameter_summary
+  daily_table_columns:
+    - shipment_period
+    - cnf
+    - usd_cost
+    - cbot_contract
+    - cbot_daily_price
+    - fx_rate
+    - dce_contract
+    - meal_screen_price
+    - oil_screen_price
+    - tariff_rate
+    - vat_rate
+    - landed_duty_paid_cost
+    - screen_net_crush_margin
+  editable_columns:
+    - cnf
+  read_only_columns:
+    - shipment_period
+    - usd_cost
+    - cbot_contract
+    - cbot_daily_price
+    - fx_rate
+    - dce_contract
+    - meal_screen_price
+    - oil_screen_price
+    - tariff_rate
+    - vat_rate
+    - landed_duty_paid_cost
+    - screen_net_crush_margin
+  displayed_profit_metrics:
+    - screen_net_crush_margin
+  forbidden_profit_metrics:
+    - gross_crush_margin
+    - meal_cost
+    - oil_cost
+    - meal_breakeven_price
+    - oil_breakeven_price
+  recent_business_days: 10
+  recent_matrices:
+    - cnf
+    - landed_duty_paid_cost
+    - screen_net_crush_margin
+
+seasonality_policy:
+  charts:
+    - cnf
+    - landed_duty_paid_cost
+    - screen_net_crush_margin
+  window:
+    start: shipment_month_minus_4_month_start
+    end: shipment_month_minus_1_month_end
+  displayed_years:
+    current_shipment_year: true
+    prior_shipment_years: 5
+    prior_year_mean_years: 5
+  mean:
+    exclude_null: true
+    minimum_valid_years: 3
+    insufficient_history_result: null
+  smoothing:
+    enabled: false
+  null_line_break: true
+
+source_policy:
+  cbot:
+    display_name: CBOT日度价格
+    forbidden_names:
+      - CBOT收盘价
+      - CBOT结算价
+  dce:
+    historical_source:
+      kind: existing_database
+      purpose:
+        - initialization
+        - historical_recalculation
+      preserve_source_and_price_type: true
+    incremental_source:
+      provider: akshare
+      function: futures_zh_spot
+      source_field: current_price
+      price_type: morning_open_snapshot
+      price_semantics: DCE_morning_market_snapshot
+      exchange: DCE
+      capture_timezone: Asia/Shanghai
+      capture_window:
+        start: "09:00:00"
+        end_exclusive: "09:03:00"
+      require_same_business_date: true
+      require_complete_contract_set: true
+      allow_previous_date_fallback: false
+      allow_post_close_fallback: false
+      allow_historical_close_fallback: false
+      allow_adjacent_contract_fallback: false
+      allow_other_price_field_fallback: false
+      defines_exchange_open_day: false
+  raw_inputs:
+    excel:
+      repository_path: 01_data/manual/榨利表/大豆-进口榨利.xlsx
+      writable_by_program: false
+    sql:
+      repository_path: 01_data/manual/榨利表/油脂油料价格.sql
+      writable_by_program: false
+  daily_sql_committed_to_git: false
+  code_release_separate_from_daily_sql_update: true
+  sql_update:
+    candidate_validation_required: true
+    stable_slots:
+      - current
+      - previous
+    atomic_promotion_required: true
+  dce_daily_update:
+    lock_required: true
+    candidate_required: true
+    status_required: true
+    backup_required: true
+    atomic_switch_required: true
+  production_scheduler_in_scope: false
+  initial_production_sequence:
+    - promote_initial_data_to_new_dormant_stable_paths
+    - validate_data_and_manifest
+    - deploy_code_that_reads_new_stable_paths

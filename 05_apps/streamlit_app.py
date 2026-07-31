@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ if str(APPS_DIR) not in sys.path:
 from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import apply_home_navigation_request, get_external_app_url, render_home
+from import_profit_runtime_page import render_import_profit_runtime_page
 from soybean_crop_progress_page import render_soybean_crop_progress_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
@@ -39,6 +41,8 @@ SOYBEAN_WEATHER_PAGE_TITLE = "大豆天气"
 RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
 INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
+IMPORT_PROFIT_ROUTE_ID = "import_profit"
+IMPORT_PROFIT_PAGE_TITLE = "日度进口大豆盘面净榨利"
 WEATHER_PAGE_ROUTES = {
     SOYBEAN_WEATHER_PAGE_TITLE: "soybean_weather",
     RAPESEED_WEATHER_PAGE_TITLE: "rapeseed_weather",
@@ -53,6 +57,7 @@ WORKSPACE_PAGES = [
     *WEATHER_PAGE_ROUTES,
     USDA_PAGE_TITLE,
     "外资与重点席位",
+    IMPORT_PROFIT_ROUTE_ID,
     "运行监控",
 ]
 SIDEBAR_NAVIGATION = (
@@ -61,7 +66,7 @@ SIDEBAR_NAVIGATION = (
     ("周度跟踪", (("美豆周度跟踪", SOYBEAN_CROP_PAGE_TITLE, None),)),
     ("天气研究", (("大豆天气", SOYBEAN_WEATHER_PAGE_TITLE, None), ("菜籽天气", RAPESEED_WEATHER_PAGE_TITLE, None), ("棕榈油天气", PALM_OIL_WEATHER_PAGE_TITLE, None), ("印度作物天气", INDIA_CROP_WEATHER_PAGE_TITLE, None))),
     ("国际供需", (("USDA供需平衡", USDA_PAGE_TITLE, None), ("Oil World供需平衡", "", "OIL_WORLD_DASHBOARD_URL"))),
-    ("研究工具", (("外资与重点席位", "外资与重点席位", None), ("运行监控", "运行监控", None))),
+    ("研究工具", (("进口大豆榨利", IMPORT_PROFIT_ROUTE_ID, None), ("外资与重点席位", "外资与重点席位", None), ("运行监控", "运行监控", None))),
 )
 FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
@@ -530,6 +535,24 @@ def render_usda_page() -> None:
         st.info("尚未配置 USDA 平衡表地址。请在报告目录配置或 USDA_DASHBOARD_URL 环境变量中设置访问地址。")
 
 
+def render_import_profit_route() -> None:
+    """Resolve environment configuration only after this route is selected."""
+
+    runtime_root = os.getenv("IMPORT_PROFIT_RUNTIME_ROOT", "").strip()
+    configured_path = os.getenv(
+        "IMPORT_PROFIT_CONFIG_PATH", ""
+    ).strip()
+    config_path = (
+        Path(configured_path)
+        if configured_path
+        else CONFIG_DIR / "import_profit_soybean.yaml"
+    )
+    render_import_profit_runtime_page(
+        runtime_root or None,
+        config_path=config_path,
+    )
+
+
 def apply_workspace_navigation_request() -> None:
     """Accept a sidebar navigation request before any page widget is created."""
     requested_page = st.query_params.get("workspace_page")
@@ -550,6 +573,11 @@ def main() -> None:
         render_sidebar_navigation(SIDEBAR_NAVIGATION, st.session_state.selected_workspace_page)
 
     selected_page = st.session_state.selected_workspace_page
+    render_selected_workspace_page(selected_page)
+
+
+def render_selected_workspace_page(selected_page: str) -> None:
+    """Dispatch one validated workspace route without preloading others."""
 
     if selected_page == "首页":
         render_home(REPORT_CATALOG_FILE)
@@ -565,6 +593,8 @@ def main() -> None:
         render_status_page()
     elif selected_page == "外资与重点席位":
         render_foreign_seats_page(FOREIGN_SEATS_DATABASE_FILE)
+    elif selected_page == IMPORT_PROFIT_ROUTE_ID:
+        render_import_profit_route()
     else:
         render_spread_dashboard()
 
