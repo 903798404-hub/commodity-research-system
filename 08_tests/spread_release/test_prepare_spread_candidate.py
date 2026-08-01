@@ -20,6 +20,7 @@ from prepare_spread_candidate import (  # noqa: E402
     CANDIDATE_SERVICE,
     CandidateOptions,
     build_candidate_compose,
+    normalized_mount_mode,
     prepare_candidate,
     select_candidate_port,
 )
@@ -115,6 +116,7 @@ def _formal_compose(*, weather_read_only: bool = True, include_spread: bool = Tr
 class FakeRunner(CommandRunner):
     def __init__(self, compose: dict) -> None:
         self.compose = compose
+        self.omit_candidate_rw_read_only = False
         self.commands: list[list[str]] = []
         self.built = False
         self.started = False
@@ -131,7 +133,12 @@ class FakeRunner(CommandRunner):
             return json.dumps(self.compose)
         if command[:2] == ["docker", "compose"] and "config" in command:
             compose_path = Path(command[command.index("-f") + 1])
-            return compose_path.read_text(encoding="utf-8")
+            rendered = json.loads(compose_path.read_text(encoding="utf-8"))
+            if self.omit_candidate_rw_read_only:
+                runtime_mount = rendered["services"][CANDIDATE_SERVICE]["volumes"][-1]
+                if runtime_mount.get("target") == "/app/runtime/import_profit":
+                    runtime_mount.pop("read_only", None)
+            return json.dumps(rendered)
         if command[:2] == ["docker", "build"]:
             self.built = True
             self.events.append("docker build")
@@ -361,6 +368,125 @@ def test_dry_run_adds_only_the_approved_import_profit_rw_mount(tmp_path: Path) -
     assert hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest() == formal_sha
 
 
+def test_compose_v2271_omitted_rw_default_has_identical_normalized_evidence(
+    tmp_path: Path,
+) -> None:
+    explicit_options, explicit_runner = _options(tmp_path / "explicit")
+    explicit_options = _with_import_profit_runtime(explicit_options, tmp_path / "explicit")
+    explicit = prepare_candidate(explicit_options, runner=explicit_runner, port_probe=lambda _: True)
+
+    omitted_options, omitted_runner = _options(tmp_path / "omitted")
+    omitted_options = _with_import_profit_runtime(omitted_options, tmp_path / "omitted")
+    omitted_runner.omit_candidate_rw_read_only = True
+    omitted = prepare_candidate(omitted_options, runner=omitted_runner, port_probe=lambda _: True)
+
+    explicit_evidence = {**explicit["import_profit_runtime_mount"], "candidate_batch_id": "normalized"}
+    omitted_evidence = {**omitted["import_profit_runtime_mount"], "candidate_batch_id": "normalized"}
+    assert explicit_evidence == omitted_evidence
+    assert omitted_evidence["mode"] == "rw"
+
+
+@pytest.mark.parametrize("read_only", [True, "false", 0])
+def test_import_profit_runtime_rejects_non_rw_or_non_boolean_read_only(
+    tmp_path: Path, read_only: object
+) -> None:
+    options, runner = _options(tmp_path)
+    options = _with_import_profit_runtime(options, tmp_path)
+    environment = candidate_prepare.parse_production_env(options.production_env_file)
+    candidate = build_candidate_compose(
+        runner.compose,
+        environment,
+        git_commit=options.git_commit,
+        image_ref=options.image_ref,
+        candidate_container_name=options.candidate_container_name,
+        candidate_port=18502,
+        import_profit_runtime_host=options.import_profit_runtime_host.resolve(),
+    )
+    candidate["services"][CANDIDATE_SERVICE]["volumes"][-1]["read_only"] = read_only
+    with pytest.raises(ContractError):
+        candidate_prepare.validate_candidate_compose(
+            candidate,
+            image_ref=options.image_ref,
+            candidate_container_name=options.candidate_container_name,
+            candidate_port=18502,
+            expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
+            expected_git_commit=options.git_commit,
+            formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_import_profit_runtime_host=str(options.import_profit_runtime_host.resolve()),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("type", "volume"), ("target", "/app/runtime/wrong")],
+)
+def test_import_profit_runtime_rejects_wrong_mount_identity(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    options, runner = _options(tmp_path)
+    options = _with_import_profit_runtime(options, tmp_path)
+    environment = candidate_prepare.parse_production_env(options.production_env_file)
+    candidate = build_candidate_compose(
+        runner.compose,
+        environment,
+        git_commit=options.git_commit,
+        image_ref=options.image_ref,
+        candidate_container_name=options.candidate_container_name,
+        candidate_port=18502,
+        import_profit_runtime_host=options.import_profit_runtime_host.resolve(),
+    )
+    candidate["services"][CANDIDATE_SERVICE]["volumes"][-1][field] = value
+    with pytest.raises(ContractError, match="runtime mount is invalid"):
+        candidate_prepare.validate_candidate_compose(
+            candidate,
+            image_ref=options.image_ref,
+            candidate_container_name=options.candidate_container_name,
+            candidate_port=18502,
+            expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
+            expected_git_commit=options.git_commit,
+            formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_import_profit_runtime_host=str(options.import_profit_runtime_host.resolve()),
+        )
+
+
+def test_import_profit_runtime_rejects_wrong_resolved_source(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options = _with_import_profit_runtime(options, tmp_path)
+    wrong_source = tmp_path / "wrong-source"
+    wrong_source.mkdir()
+    environment = candidate_prepare.parse_production_env(options.production_env_file)
+    candidate = build_candidate_compose(
+        runner.compose,
+        environment,
+        git_commit=options.git_commit,
+        image_ref=options.image_ref,
+        candidate_container_name=options.candidate_container_name,
+        candidate_port=18502,
+        import_profit_runtime_host=options.import_profit_runtime_host.resolve(),
+    )
+    candidate["services"][CANDIDATE_SERVICE]["volumes"][-1]["source"] = str(wrong_source)
+    with pytest.raises(ContractError, match="runtime mount is invalid"):
+        candidate_prepare.validate_candidate_compose(
+            candidate,
+            image_ref=options.image_ref,
+            candidate_container_name=options.candidate_container_name,
+            candidate_port=18502,
+            expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
+            expected_git_commit=options.git_commit,
+            formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_import_profit_runtime_host=str(options.import_profit_runtime_host.resolve()),
+        )
+
+
+def test_normalized_mount_mode_accepts_only_compose_boolean_semantics() -> None:
+    assert normalized_mount_mode({"read_only": True}) == "ro"
+    assert normalized_mount_mode({"read_only": False}) == "rw"
+    assert normalized_mount_mode({}) == "rw"
+    for invalid in ("false", 0, None):
+        with pytest.raises(ContractError, match="must be a boolean"):
+            normalized_mount_mode({"read_only": invalid})
+
+
 def test_import_profit_runtime_path_safety_rules(tmp_path: Path) -> None:
     options, runner = _options(tmp_path)
     approved = tmp_path / "approved"
@@ -508,6 +634,12 @@ def test_rejects_missing_spread_service_and_writable_weather_mount(tmp_path: Pat
     options, mount_runner = _options(tmp_path / "writable", compose=_formal_compose(weather_read_only=False))
     with pytest.raises(ContractError, match="read-only"):
         prepare_candidate(options, runner=mount_runner)
+
+    missing_read_only = _formal_compose()
+    missing_read_only["services"]["spread-dashboard"]["volumes"][0].pop("read_only")
+    options, omitted_runner = _options(tmp_path / "omitted", compose=missing_read_only)
+    with pytest.raises(ContractError, match="read-only"):
+        prepare_candidate(options, runner=omitted_runner)
 
 
 def test_auto_port_skips_occupied_and_reserved_ports() -> None:

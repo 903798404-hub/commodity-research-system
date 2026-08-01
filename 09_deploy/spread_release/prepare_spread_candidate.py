@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 from release_contract import (
     COMPOSE_SERVICE,
@@ -332,6 +332,16 @@ def _weather_mount(service: Mapping[str, Any]) -> Mapping[str, Any]:
     return mount
 
 
+def normalized_mount_mode(mount: Mapping[str, object]) -> Literal["ro", "rw"]:
+    """Return the Compose mount mode without coercing non-boolean values."""
+    if "read_only" not in mount:
+        return "rw"
+    read_only = mount["read_only"]
+    if not isinstance(read_only, bool):
+        raise ContractError("candidate mount read_only must be a boolean when present")
+    return "ro" if read_only is True else "rw"
+
+
 def build_candidate_compose(
     formal_compose: Mapping[str, Any],
     production_environment: Mapping[str, str],
@@ -527,12 +537,20 @@ def validate_candidate_compose(
         raise ContractError("candidate changed an inherited formal mount")
     if expected_import_profit_runtime_host is not None:
         runtime_mount = volumes[-1]
-        if runtime_mount != {
-            "type": "bind",
-            "source": expected_import_profit_runtime_host,
-            "target": expected_import_profit_runtime_container,
-            "read_only": False,
-        }:
+        if not isinstance(runtime_mount, dict):
+            raise ContractError("candidate import profit runtime mount is invalid")
+        source = runtime_mount.get("source")
+        try:
+            source_path = Path(source).resolve(strict=True) if isinstance(source, str) else None
+            expected_source_path = Path(expected_import_profit_runtime_host).resolve(strict=True)
+        except OSError as exc:
+            raise ContractError("candidate import profit runtime mount is invalid") from exc
+        if (
+            runtime_mount.get("type") != "bind"
+            or source_path != expected_source_path
+            or runtime_mount.get("target") != expected_import_profit_runtime_container
+            or normalized_mount_mode(runtime_mount) != "rw"
+        ):
             raise ContractError("candidate import profit runtime mount is invalid")
     networks = candidate.get("networks")
     if not isinstance(networks, dict) or not networks:
