@@ -1,6 +1,9 @@
 # Runtime direct dependencies. Regenerate requirements.txt with pip-compile on
 # Python 3.12; do not edit the generated lock file by hand.
 akshare==1.18.64
+mini-racer==0.14.1 ; platform_system != "Linux"
+py-mini-racer==0.6.0 ; platform_system == "Linux"
+akracer==0.0.14 ; platform_system == "Linux"
 filelock==3.29.7
 matplotlib==3.11.0
 numpy==2.5.1

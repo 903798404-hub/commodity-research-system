@@ -44,7 +44,11 @@ def _pinned_requirements(path: Path) -> dict[str, str]:
         line = line.strip()
         if not line or line.startswith(("#", "-")):
             continue
-        match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([^\\\s]+)", line)
+        match = re.fullmatch(
+            r'([A-Za-z0-9_.-]+)==([^\\\s;]+)'
+            r'(?:\s*;\s*platform_system\s*(?:==|!=)\s*"Linux")?',
+            line,
+        )
         if not match:
             raise ValueError(f"{path} contains a non-pinned direct dependency: {line}")
         pins[_normalise_name(match.group(1))] = match.group(2)

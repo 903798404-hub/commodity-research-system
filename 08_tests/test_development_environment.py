@@ -21,6 +21,24 @@ def test_python_contract_is_fixed_to_python_312_and_lock_inputs_are_synced() -> 
     assert 'requires-python = ">=3.12,<3.13"' in (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 
+def test_direct_pin_parser_accepts_only_fixed_linux_platform_markers(tmp_path: Path) -> None:
+    valid = tmp_path / "valid.in"
+    valid.write_text(
+        'mini-racer==0.14.1 ; platform_system != "Linux"\n'
+        'py-mini-racer==0.6.0 ; platform_system == "Linux"\n',
+        encoding="utf-8",
+    )
+    assert environment._pinned_requirements(valid) == {
+        "mini-racer": "0.14.1",
+        "py-mini-racer": "0.6.0",
+    }
+
+    invalid = tmp_path / "invalid.in"
+    invalid.write_text('example>=1 ; python_version > "3.10"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="non-pinned direct dependency"):
+        environment._pinned_requirements(invalid)
+
+
 def test_python_314_is_not_accepted_as_the_formal_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(environment.sys, "version_info", (3, 14, 0, "final", 0))
     checks = environment.check_python(REPO_ROOT, allow_candidate=False)
