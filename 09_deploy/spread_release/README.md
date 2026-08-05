@@ -254,6 +254,30 @@ bash 09_deploy/spread_release/rollback_spread_release.sh \
 回滚只接受 `release.json` 中固定的回滚镜像引用和完整 Image ID，切换后再次
 校验实际容器 Image ID。回滚不会恢复或修改宿主机业务数据。
 
+## 候选 `01_data` 隔离
+
+正式 Compose 含有 `/app/01_data` bind 时，`prepare_spread_candidate.py`
+拒绝原样继承生产 host 路径。调用方必须同时提供：
+
+```text
+--data-host-root <候选Manifest数据根，内部含01_data/>
+--candidate-data-host-root <候选专属01_data目录>
+--candidate-data-approved-root <包含该目录的候选专属批准根>
+--candidate-basis-sha256 <密封basis_quotes.parquet SHA-256>
+```
+
+`--data-host-root` 继续只表示 Manifest 数据身份根，不改变其既有语义；
+`--candidate-data-host-root` 才控制候选容器实际的 `/app/01_data` host 来源。
+工具使用规范化绝对路径拒绝候选与生产目录相等、互为父子、符号链接逃逸、
+Git 检出内数据以及不匹配的 basis 哈希。候选根挂载保持正式挂载的类型、目标
+和模式，同时对 `basis_quotes.parquet` 增加精确只读文件 bind，保证候选进程
+不能修改密封数据工件。其他正式挂载保持逐项相等。
+
+Release 数据统计在候选容器启动后通过候选容器读取，不能借用正式容器。候选
+Compose 只用于候选验收；后续 `deployment_plan.json` 仍由正式
+`production_compose_file`、正式项目目录和正式环境生成，不记录或使用候选
+数据路径。
+
 ## 数据与敏感信息边界
 
 价差、基差、美豆种植进度和优良率数据由宿主机绑定挂载提供。清单记录候选验收

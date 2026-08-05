@@ -4004,6 +4004,7 @@ def create_manifest(
     runtime: ReleaseRuntime,
     git_runner: CommandRunner | None = None,
     weather_candidate_mode: str = WEATHER_CANDIDATE_MODE_NEXT,
+    data_inspection_container_name: str = PRODUCTION_CONTAINER,
 ) -> dict[str, Any]:
     repository = repository.resolve()
     validate_full_git_commit(git_commit)
@@ -4074,7 +4075,7 @@ def create_manifest(
     validate_compose_result(compose, raw_config, images, image_ref)
     baseline = collect_data_baseline(
         data_host_root,
-        PRODUCTION_CONTAINER,
+        data_inspection_container_name,
         runtime,
     )
     manifest = {

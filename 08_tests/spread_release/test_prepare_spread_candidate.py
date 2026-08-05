@@ -280,6 +280,39 @@ def _with_import_profit_runtime(options: CandidateOptions, tmp_path: Path) -> Ca
     )
 
 
+def _with_candidate_data(
+    options: CandidateOptions,
+    runner: FakeRunner,
+    tmp_path: Path,
+) -> tuple[CandidateOptions, Path, Path]:
+    production_data = tmp_path / "formal-data" / "01_data"
+    production_data.mkdir(parents=True)
+    candidate_manifest_root = tmp_path / "candidate-data"
+    candidate_data = candidate_manifest_root / "01_data"
+    basis = candidate_data / "database" / "basis" / "basis_quotes.parquet"
+    basis.parent.mkdir(parents=True)
+    basis.write_bytes(b"sealed candidate basis\n")
+    runner.compose["services"]["spread-dashboard"]["volumes"].insert(
+        0,
+        {
+            "type": "bind",
+            "source": str(production_data.resolve()),
+            "target": "/app/01_data",
+            "read_only": False,
+        },
+    )
+    changed = CandidateOptions(
+        **{
+            **options.__dict__,
+            "data_host_root": candidate_manifest_root,
+            "candidate_data_host_root": candidate_data,
+            "candidate_data_approved_root": candidate_manifest_root,
+            "candidate_basis_sha256": hashlib.sha256(basis.read_bytes()).hexdigest(),
+        }
+    )
+    return changed, production_data, basis
+
+
 def _seal_candidate_result(
     _options: CandidateOptions,
     _runtime: FakeRuntime,
@@ -336,6 +369,145 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert "market-data.release.type=candidate" not in result["build_command"]
     assert "market-data.artifact.origin=candidate" in result["build_command"]
     assert "market-data.artifact.promotable=true" in result["build_command"]
+
+
+def test_candidate_data_mount_replaces_only_host_source_and_overlays_basis_read_only(
+    tmp_path: Path,
+) -> None:
+    options, runner = _options(tmp_path)
+    options, production_data, basis = _with_candidate_data(options, runner, tmp_path)
+
+    result = prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+
+    compose = json.loads(Path(result["candidate_compose_file"]).read_text(encoding="utf-8"))
+    volumes = compose["services"][CANDIDATE_SERVICE]["volumes"]
+    data_mount = next(item for item in volumes if item["target"] == "/app/01_data")
+    basis_mount = next(
+        item
+        for item in volumes
+        if item["target"] == "/app/01_data/database/basis/basis_quotes.parquet"
+    )
+    assert data_mount == {
+        "type": "bind",
+        "source": str(options.candidate_data_host_root.resolve()),
+        "target": "/app/01_data",
+        "read_only": False,
+    }
+    assert basis_mount == {
+        "type": "bind",
+        "source": str(basis.resolve()),
+        "target": "/app/01_data/database/basis/basis_quotes.parquet",
+        "read_only": True,
+    }
+    assert all(item.get("source") != str(production_data.resolve()) for item in volumes)
+    assert result["candidate_data_mount"]["basis_sha256"] == options.candidate_basis_sha256
+    assert result["production_compose_file"] == str(options.production_compose_file)
+    assert str(options.candidate_data_host_root) not in options.production_compose_file.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_formal_data_mount_requires_explicit_candidate_isolation(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    formal_data = tmp_path / "formal-data"
+    formal_data.mkdir()
+    runner.compose["services"]["spread-dashboard"]["volumes"].insert(
+        0,
+        {
+            "type": "bind",
+            "source": str(formal_data.resolve()),
+            "target": "/app/01_data",
+            "read_only": False,
+        },
+    )
+    with pytest.raises(ContractError, match="requires candidate data host root"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+
+
+@pytest.mark.parametrize("relationship", ["equal", "candidate-below-formal", "formal-below-candidate"])
+def test_candidate_data_rejects_production_path_overlap(
+    tmp_path: Path, relationship: str
+) -> None:
+    options, runner = _options(tmp_path)
+    options, production_data, basis = _with_candidate_data(options, runner, tmp_path)
+    if relationship == "equal":
+        candidate_data = production_data
+    elif relationship == "candidate-below-formal":
+        candidate_data = production_data / "candidate"
+        candidate_data.mkdir()
+    else:
+        candidate_data = tmp_path / "overlap-root"
+        candidate_data.mkdir()
+        production_data = candidate_data / "production"
+        production_data.mkdir()
+        runner.compose["services"]["spread-dashboard"]["volumes"][0]["source"] = str(
+            production_data.resolve()
+        )
+    candidate_basis = candidate_data / "database" / "basis" / "basis_quotes.parquet"
+    candidate_basis.parent.mkdir(parents=True, exist_ok=True)
+    candidate_basis.write_bytes(basis.read_bytes())
+    changed = CandidateOptions(
+        **{
+            **options.__dict__,
+            "data_host_root": candidate_data.parent,
+            "candidate_data_host_root": candidate_data,
+            "candidate_data_approved_root": tmp_path,
+            "candidate_basis_sha256": hashlib.sha256(candidate_basis.read_bytes()).hexdigest(),
+        }
+    )
+    with pytest.raises(ContractError, match="must not overlap"):
+        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
+
+
+def test_candidate_data_rejects_missing_or_wrong_basis_identity(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options, _production_data, basis = _with_candidate_data(options, runner, tmp_path)
+    basis.unlink()
+    with pytest.raises(ContractError, match="basis"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+
+    basis.parent.mkdir(parents=True, exist_ok=True)
+    basis.write_bytes(b"different")
+    with pytest.raises(ContractError, match="SHA-256"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+
+
+def test_candidate_data_rejects_path_traversal_or_symlink_escape(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options, _production_data, basis = _with_candidate_data(options, runner, tmp_path)
+    outside = tmp_path / "outside-data"
+    outside.mkdir()
+    escaped = outside / "database" / "basis" / "basis_quotes.parquet"
+    escaped.parent.mkdir(parents=True)
+    escaped.write_bytes(basis.read_bytes())
+    link = options.candidate_data_approved_root / "escaped-01_data"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    changed = CandidateOptions(
+        **{
+            **options.__dict__,
+            "data_host_root": link.parent,
+            "candidate_data_host_root": link,
+            "candidate_basis_sha256": hashlib.sha256(escaped.read_bytes()).hexdigest(),
+        }
+    )
+    with pytest.raises(ContractError, match="approved candidate root"):
+        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
+
+
+def test_candidate_data_rejects_relative_path_traversal(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    options, _production_data, _basis = _with_candidate_data(options, runner, tmp_path)
+    changed = CandidateOptions(
+        **{
+            **options.__dict__,
+            "candidate_data_host_root": Path("candidate-data/../candidate-data/01_data"),
+        }
+    )
+    with pytest.raises(ContractError, match="must be absolute"):
+        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
 
 
 def test_dry_run_adds_only_the_approved_import_profit_rw_mount(tmp_path: Path) -> None:
@@ -824,8 +996,8 @@ def test_execute_obeys_the_formal_evidence_and_cleanup_order(tmp_path: Path) -> 
     assert runner.events == [
         "formal snapshot",
         "docker build",
-        "release bundle",
         "compose up",
+        "release bundle",
         "validate",
         "candidate result",
         "candidate container cleanup",
@@ -842,6 +1014,7 @@ def test_plan_sealer_uses_a_release_sealed_target_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     options, runner = _options(tmp_path, mode="execute")
+    options, _production_data, _basis = _with_candidate_data(options, runner, tmp_path)
     release = options.output_directory / "releases" / options.release_id
     release.mkdir(parents=True)
     manifest = {
@@ -896,6 +1069,11 @@ def test_plan_sealer_uses_a_release_sealed_target_environment(
     assert f"SPREAD_IMAGE={options.image_ref}" in text
     assert f"MARKET_DATA_GIT_HEAD={options.git_commit}" in text
     assert "USDA_DASHBOARD_URL=https://dashboard.example/usda/" in text
+    assert captured["production_compose_file"] == options.production_compose_file
+    assert captured["production_project_dir"] == options.production_compose_file.parent
+    assert str(options.candidate_data_host_root) not in json.dumps(
+        captured, default=str, sort_keys=True
+    )
     assert captured["schema_path"].name == "deployment_plan.schema.json"
     assert evidence["target_production_env_file"] == str(target_env)
     assert len(evidence["target_production_env_sha256"]) == 64

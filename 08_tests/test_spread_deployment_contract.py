@@ -588,6 +588,33 @@ def build_manifest(
     return manifest, runtime, git
 
 
+def test_manifest_can_inspect_isolated_candidate_data_through_candidate_container(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "candidate-host-data"
+    create_data_files(data_root)
+    runtime = FakeReleaseRuntime()
+    create_manifest(
+        repository=REPOSITORY,
+        data_host_root=data_root,
+        release_id=RELEASE_ID,
+        git_commit=GIT_COMMIT,
+        image_ref=IMAGE_REF,
+        expected_image_id=IMAGE_ID,
+        build_time=BUILD_TIME,
+        source=SOURCE,
+        candidate_container_name=CANDIDATE_CONTAINER,
+        rollback_image_ref=ROLLBACK_REF,
+        rollback_image_id=ROLLBACK_ID,
+        formal_git_commit=OLD_GIT_COMMIT,
+        production_environment=production_environment_for(),
+        runtime=runtime,
+        git_runner=FakeGitRunner(),
+        data_inspection_container_name=CANDIDATE_CONTAINER,
+    )
+    assert runtime.dataset_container_names == [CANDIDATE_CONTAINER] * len(DATA_SPECS)
+
+
 def production_environment_for(
     *, image_ref: str = IMAGE_REF, git_commit: str = GIT_COMMIT,
     usda_url: str = PRODUCTION_USDA_URL,
