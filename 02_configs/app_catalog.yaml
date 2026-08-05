@@ -27,7 +27,7 @@ applications:
       - type: repository_runtime_path
         path: 01_data/historical_price_long.xlsx
       - type: repository_runtime_path
-        path: 01_data/manual/basis/国内现货基差.xlsx
+        path: 01_data/manual/榨利表/油脂油料价格.sql
     runtime_data:
       - repository_path: 01_data/historical_spread_database.xlsx
         server_path: /home/ubuntu/market-data/01_data/historical_spread_database.xlsx
@@ -35,6 +35,10 @@ applications:
         server_path: /home/ubuntu/market-data/01_data/historical_spread_database.parquet
       - repository_path: 01_data/database/basis/basis_quotes.parquet
         server_path: /home/ubuntu/market-data/01_data/database/basis/basis_quotes.parquet
+      - repository_path: 01_data/database/basis/history/basis_quotes_before_20260601.parquet
+        server_path: /home/ubuntu/market-data/01_data/database/basis/history/basis_quotes_before_20260601.parquet
+      - repository_path: 01_data/database/basis/history/basis_quotes_before_20260601.identity.json
+        server_path: /home/ubuntu/market-data/01_data/database/basis/history/basis_quotes_before_20260601.identity.json
       - repository_path: 01_data/update_status.json
         server_path: /home/ubuntu/market-data/01_data/update_status.json
     release_data: []
@@ -43,7 +47,7 @@ applications:
       - /home/ubuntu/market-data/10_logs/server_update_spreads_YYYYMMDD.log
       - docker logs spread-dashboard
     update_method:
-      basis: manual_excel_upload_then_validated_atomic_update
+      basis: streaming_basis_price_sql_near_contract_median_then_atomic_update
       spreads: automatic_weekdays_16_30_cst_and_manual_retry
     update_command:
       basis: docker exec spread-dashboard python /app/04_scripts/update_basis_data.py
@@ -51,7 +55,7 @@ applications:
     deploy_method: root_compose_build_and_replace_only_spread_dashboard
     source_revision_policy: build_from_an_explicit_verified_full_git_sha
     retention_policy:
-      data: keep_current_production_files; basis_history_is_kept_in_the_user_external_backup
+      data: keep_current_production_files; keep_the_sealed_basis_history_baseline_and_external_backup
       images: keep_current_image_and_one_verified_rollback_image
       logs: fixed_retention_period_pending_confirmation
     dependencies:

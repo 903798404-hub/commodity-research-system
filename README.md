@@ -32,13 +32,14 @@
 - 执行环境与跨环境传输：[`07_docs/05_执行环境与跨环境传输规范.md`](07_docs/05_执行环境与跨环境传输规范.md)
 - 日常运行与数据更新：[`07_docs/06_日常运行与数据更新手册.md`](07_docs/06_日常运行与数据更新手册.md)
 
-## 手动基差文件
+## 国内基差正式原始数据
 
 固定放在：
 
-`01_data/manual/basis/国内现货基差.xlsx`
+`01_data/manual/榨利表/油脂油料价格.sql`
 
-程序只读取该文件，不会改名或改写。
+正式更新入口只流式读取 `basis_price` 表。历史 Excel
+`01_data/manual/basis/国内现货基差.xlsx` 保留为只读备份和人工核对资料。
 
 ## 标准化输出
 
@@ -55,6 +56,7 @@
 
 ```bash
 python 04_scripts/run_basis_import.py
+python 04_scripts/update_basis_data.py
 pytest
 streamlit run 05_apps/streamlit_app.py
 ```

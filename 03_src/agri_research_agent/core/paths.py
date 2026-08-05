@@ -16,6 +16,8 @@ CACHE_DIR = DATA_DIR / "cache"
 BASIS_MANUAL_DIR = DATA_DIR / "manual" / "basis"
 # 固定指向 01_data/manual/basis/国内现货基差.xlsx，程序只读取该文件。
 BASIS_EXCEL_FILE = BASIS_MANUAL_DIR / "国内现货基差.xlsx"
+# 国内基差正式原始数据源；仅流式读取 basis_price 表。
+BASIS_SQL_FILE = DATA_DIR / "manual" / "榨利表" / "油脂油料价格.sql"
 # 指向 01_data/processed/basis_spread/，存放基差标准化数据。
 BASIS_PROCESSED_DIR = DATA_DIR / "processed" / "basis_spread"
 BASIS_DATABASE_DIR = DATA_DIR / "database" / "basis"

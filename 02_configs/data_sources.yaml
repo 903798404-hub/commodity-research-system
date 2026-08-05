@@ -22,9 +22,16 @@ customs:
   update_frequency: monthly
   description: 中国海关进出口数据
 
-basis_excel:
+basis_sql:
   enabled: true
-  type: manual_excel
+  type: navicat_sql_dump
   update_frequency: daily
-  description: 手动维护的基差 Excel
-  path: 01_data/manual/basis/
+  description: 油脂油料价格 SQL 中的 basis_price 表，仅抽取现货基差并按近月合约聚合
+  path: 01_data/manual/榨利表/油脂油料价格.sql
+
+basis_excel_backup:
+  enabled: false
+  type: read_only_reference
+  update_frequency: manual
+  description: 历史国内现货基差 Excel，仅作备份和人工核对，不再生成正式 Parquet
+  path: 01_data/manual/basis/国内现货基差.xlsx

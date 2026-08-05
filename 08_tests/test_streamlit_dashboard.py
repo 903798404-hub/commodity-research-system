@@ -59,7 +59,9 @@ def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -
         "Oil World 供需平衡",
     ]
     statuses = home.get_home_statuses()
-    assert statuses["basis_domestic"].label == "人工维护"
+    assert statuses["basis_domestic"].label == "数据可用"
+    assert statuses["basis_domestic"].state == "success"
+    assert statuses["basis_domestic"].attention is None
     assert statuses["soybean_crop_progress"].label == "每周更新"
     assert statuses["crop_weather"].label == ""
     assert statuses["crop_weather"].detail == ""
@@ -495,9 +497,15 @@ def test_basis_page_reads_three_rows_and_formulas_are_correct() -> None:
     assert len(data) == 3
     assert (data["basis"] == data["cash_price"] - data["futures_price"]).all()
     assert (data["month_spread"] == data["near_contract_price"] - data["far_contract_price"]).all()
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+    from basis_page import filter_display_data
+
+    expected_rows = len(filter_display_data(data))
 
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=15).run()
     app.session_state["selected_workspace_page"] = "基差/一口价"
     app.run()
     assert not app.exception
-    assert any("共 3 行" in message.value for message in app.success)
+    assert any(f"共 {expected_rows} 行" in message.value for message in app.success)

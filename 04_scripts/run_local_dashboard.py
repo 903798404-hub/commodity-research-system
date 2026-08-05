@@ -10,7 +10,7 @@ import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-IMPORT_SCRIPT = PROJECT_ROOT / "04_scripts" / "import_basis_excel.py"
+IMPORT_SCRIPT = PROJECT_ROOT / "04_scripts" / "update_basis_data.py"
 STREAMLIT_ENTRY = PROJECT_ROOT / "05_apps" / "streamlit_app.py"
 DATABASE_FILE = (
     PROJECT_ROOT / "01_data" / "database" / "basis" / "basis_quotes.parquet"
@@ -51,7 +51,7 @@ def main() -> int:
     if import_result.returncode != 0:
         print(
             "[ERROR] 国内基差数据导入失败，面板未启动。"
-            "请根据上方错误信息检查原始 Excel。",
+            "请根据上方错误信息检查 basis_price SQL。",
             file=sys.stderr,
         )
         return import_result.returncode or 1

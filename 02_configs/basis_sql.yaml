@@ -1,0 +1,33 @@
+source:
+  path: 01_data/manual/榨利表/油脂油料价格.sql
+  table: basis_price
+
+history:
+  source_backup_path: 01_data/backups/basis/20260805_154834/basis_quotes.parquet
+  source_backup_sha256: 5c4a96cf8b07a4123048281fa70c95fa93dd412561289703e911c2d1c40600f0
+  baseline_path: 01_data/database/basis/history/basis_quotes_before_20260601.parquet
+  identity_path: 01_data/database/basis/history/basis_quotes_before_20260601.identity.json
+  cutover_date: 2026-06-01
+
+output:
+  parquet_path: 01_data/database/basis/basis_quotes.parquet
+  status_path: 01_data/update_status.json
+  backup_dir: 01_data/backups/basis
+  quality_report_path: 06_outputs/reports/current/basis_cutover_quality.json
+
+quality:
+  no_valid_group_limit: 0.01
+  minimum_latest_date: 2026-08-04
+  delivery_month_value: 现货
+  near_contract_group_key:
+    - date
+    - commodity
+    - region
+    - quote_type
+  primary_key:
+    - date
+    - commodity
+    - region
+    - quote_type
+    - delivery_month
+    - futures_contract

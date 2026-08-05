@@ -9,7 +9,7 @@ daily_tasks:
     time: "16:30"
     tasks:
       - update_futures_market
-      - update_basis_excel
+      - update_basis_sql
       - run_basis_spread_skill
       - run_position_change_skill
 

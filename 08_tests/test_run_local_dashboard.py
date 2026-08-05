@@ -48,7 +48,7 @@ def test_imports_prints_summary_then_starts_dashboard(
     assert "品种数量：2" in output
     assert "地区数量：2" in output
     assert len(calls) == 2
-    assert calls[0][-1].endswith("import_basis_excel.py")
+    assert calls[0][-1].endswith("update_basis_data.py")
     assert calls[1][-1].endswith("streamlit_app.py")
 
 

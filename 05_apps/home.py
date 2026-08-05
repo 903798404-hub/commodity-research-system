@@ -81,8 +81,8 @@ HOME_MODULES = (
         title="国内现货",
         marker="现",
         description="跟踪豆油、菜油、棕榈油及两粕基差与一口价",
-        source_label="人工维护 Excel",
-        update_mode="人工维护",
+        source_label="历史库 + basis_price SQL",
+        update_mode="SQL 更新",
         destination_page=PAGE_TARGETS["basis_domestic"],
     ),
     HomeModule(
@@ -289,14 +289,14 @@ def load_home_statuses(
             latest_value=f"最新业务日 {spread_latest}" if spread_latest else "等待有效状态文件",
         ),
         "basis_domestic": ModuleStatus(
-            state="warning" if basis_latest else "unavailable",
-            label="人工维护" if basis_latest else "暂不可用",
-            detail="人工维护，不承诺实时更新",
+            state="success" if basis_latest else "unavailable",
+            label="数据可用" if basis_latest else "暂不可用",
+            detail="SQL 更新，页面读取正式 Parquet",
             latest_value=f"最新业务日 {basis_latest}" if basis_latest else "未读取到稳定数据",
             attention=(
-                f"国内现货为人工维护，当前可信最新业务日为 {basis_latest}。"
+                None
                 if basis_latest
-                else "国内现货稳定数据未读取到，需检查人工维护文件。"
+                else "国内现货稳定数据未读取到，需检查正式 Parquet。"
             ),
         ),
         "soybean_crop_progress": ModuleStatus(

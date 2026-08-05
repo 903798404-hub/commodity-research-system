@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 import yaml
+from akshare.futures.cons import get_calendar
 from matplotlib.figure import Figure
 
 
@@ -16,12 +18,9 @@ SRC_DIR = PROJECT_ROOT / "03_src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from agri_research_agent.data_sources.basis_upload import (  # noqa: E402
-    update_basis_from_upload,
-)
 from agri_research_agent.data_sources.basis_database import build_basis_database  # noqa: E402
 from agri_research_agent.data_sources.basis_entry import (  # noqa: E402
-    adapt_excel_result, classify_duplicates, config as entry_config, parse_fixed_rows, parse_paste, parse_text, write_confirmed,
+    adapt_excel_result, classify_duplicates, config as entry_config, parse_fixed_rows, parse_paste, parse_text,
 )
 from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
     configure_matplotlib_chinese_fonts,
@@ -29,6 +28,11 @@ from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
 
 
 UNIT_LABEL = "元/吨"
+VALUE_AXIS_LABELS = {
+    "basis": f"基差（{UNIT_LABEL}）",
+    "cash_price": f"一口价（{UNIT_LABEL}）",
+    "spread_value": f"价差（{UNIT_LABEL}）",
+}
 DISPLAY_COMMODITY_MAP = {
     "一豆": "豆油",
     "24度": "棕榈油",
@@ -44,6 +48,15 @@ YEAR_COLORS = {
     2026: "#D62728",
 }
 FALLBACK_COLORS = ["#4C78A8", "#F58518", "#D62728"]
+MAX_MISSING_TRADING_DAYS = 5
+HIDDEN_CARD_PAIRS = {
+    ("豆粕", "东北"),
+    ("豆粕", "西南"),
+    ("豆粕", "华中"),
+    ("豆粕", "华北"),
+}
+OIL_CARD_COMMODITIES = {"豆油", "棕榈油", "菜油", "一豆", "24度", "三菜"}
+OIL_CARD_REGIONS = {"华东", "华北", "华南"}
 COMMODITY_ORDER = [
     "豆油",
     "棕榈油",
@@ -58,6 +71,41 @@ MONTH_LABELS = [f"{month:02d}-01" for month in range(1, 13)]
 
 
 configure_matplotlib_chinese_fonts()
+
+
+@lru_cache(maxsize=1)
+def china_futures_trading_days() -> pd.DatetimeIndex:
+    """Return AKShare's bundled China futures trading calendar."""
+    raw_calendar = get_calendar()
+    calendar = pd.DatetimeIndex(
+        pd.to_datetime(raw_calendar, format="%Y%m%d", errors="raise")
+    ).normalize()
+    calendar = calendar.drop_duplicates().sort_values()
+    required_start = pd.Timestamp("2022-01-01")
+    required_end = pd.Timestamp("2026-12-31")
+    if calendar.empty or calendar.min() > required_start or calendar.max() < required_end:
+        raise RuntimeError("国内期货交易日历覆盖范围不足")
+    return calendar
+
+
+def missing_trading_days_between(
+    previous_date: object,
+    current_date: object,
+    *,
+    trading_days: pd.DatetimeIndex | None = None,
+) -> int:
+    previous = pd.Timestamp(previous_date).normalize()
+    current = pd.Timestamp(current_date).normalize()
+    if current <= previous:
+        raise ValueError("报价日期必须严格递增")
+    calendar = (
+        china_futures_trading_days()
+        if trading_days is None
+        else pd.DatetimeIndex(trading_days).normalize().sort_values()
+    )
+    if previous < calendar.min() or current > calendar.max():
+        raise ValueError("报价日期超出国内期货交日历覆盖范围")
+    return int(((calendar > previous) & (calendar < current)).sum())
 
 
 def _missing_columns(
@@ -84,6 +132,10 @@ def filter_display_data(dataframe: pd.DataFrame) -> pd.DataFrame:
     filtered["commodity"] = filtered["commodity_code"].map(
         DISPLAY_COMMODITY_MAP
     ).astype("string")
+    if "delivery_month" in filtered.columns:
+        filtered = filtered[
+            filtered["delivery_month"].astype(str).eq("现货")
+        ].copy()
     return filtered
 
 
@@ -166,20 +218,40 @@ def build_seasonal_report_figure(
 ) -> Figure:
     prepared = prepare_seasonal_data(dataframe, value_col)
     prepared = prepared[prepared["year"].isin(years)]
-    seasonal = (
-        prepared.groupby(["year", "day_of_year"], as_index=False)[value_col]
-        .mean()
-        .sort_values(["year", "day_of_year"])
-    )
+    duplicate_dates = prepared.duplicated(["date"], keep=False)
+    if duplicate_dates.any():
+        dates = sorted(
+            prepared.loc[duplicate_dates, "date"]
+            .dt.strftime("%Y-%m-%d")
+            .unique()
+            .tolist()
+        )
+        raise ValueError("同一图表日期存在重复记录：" + "、".join(dates))
+    seasonal = prepared.sort_values(["year", "date"])
 
     figure, axis = plt.subplots(figsize=(6.2, 3.55), dpi=120)
     for index, year in enumerate(years):
         year_data = seasonal[seasonal["year"] == year]
         if year_data.empty:
             continue
+        x_values: list[float] = []
+        y_values: list[float] = []
+        previous_date: pd.Timestamp | None = None
+        for row in year_data.itertuples(index=False):
+            current_date = pd.Timestamp(row.date)
+            if (
+                previous_date is not None
+                and missing_trading_days_between(previous_date, current_date)
+                > MAX_MISSING_TRADING_DAYS
+            ):
+                x_values.append(float("nan"))
+                y_values.append(float("nan"))
+            x_values.append(float(row.day_of_year))
+            y_values.append(float(getattr(row, value_col)))
+            previous_date = current_date
         axis.plot(
-            year_data["day_of_year"],
-            year_data[value_col],
+            x_values,
+            y_values,
             color=YEAR_COLORS.get(
                 year, FALLBACK_COLORS[index % len(FALLBACK_COLORS)]
             ),
@@ -193,7 +265,7 @@ def build_seasonal_report_figure(
     axis.set_xlim(1, 366)
     axis.set_xticks(MONTH_TICKS)
     axis.set_xticklabels(MONTH_LABELS, rotation=45, ha="right", fontsize=7)
-    axis.set_ylabel(UNIT_LABEL, fontsize=9)
+    axis.set_ylabel(VALUE_AXIS_LABELS.get(value_col, UNIT_LABEL), fontsize=9)
     axis.grid(True, color="#D9D9D9", linewidth=0.6, alpha=0.8)
     axis.tick_params(axis="y", labelsize=8)
     axis.spines["top"].set_visible(False)
@@ -320,8 +392,17 @@ def _card_pairs(dataframe: pd.DataFrame) -> list[tuple[str, str]]:
         .drop_duplicates()
         .itertuples(index=False, name=None)
     )
+    visible_pairs = [
+        pair
+        for pair in pairs
+        if pair not in HIDDEN_CARD_PAIRS
+        and not (
+            pair[0] in OIL_CARD_COMMODITIES
+            and pair[1] not in OIL_CARD_REGIONS
+        )
+    ]
     return sorted(
-        pairs,
+        visible_pairs,
         key=lambda pair: (_commodity_sort_key(pair[0]), pair[1]),
     )
 
@@ -582,6 +663,11 @@ def _render_wholesale_spread_tab(
         return
 
     cash_data = prepare_cash_price_data(dataframe)
+    if cash_data.empty:
+        st.info(
+            "批发价差暂无数据：当前正式数据库未包含可用于价差的现货价格。"
+        )
+        return
     commodities = sorted(
         _options(cash_data, "commodity"),
         key=_commodity_sort_key,
@@ -713,77 +799,25 @@ def _render_shared_preview() -> None:
     preview=classify_duplicates(preview,existing)
     edited=st.data_editor(preview,use_container_width=True,key="basis_shared_preview")
     st.caption(f"有效 {int((edited.parse_status=='parsed').sum())}｜待确认 {int((edited.parse_status=='needs_review').sum())}｜无效 {int((edited.parse_status=='invalid').sum())}｜重复 {int(edited.duplicate_status.str.startswith('duplicate').sum())}")
-    overwrite=st.checkbox("冲突时使用新值覆盖",key="basis_shared_overwrite")
-    if st.button("确认写入",type="primary",key="basis_shared_write"):
-        st.session_state["basis_last_entry"]=write_confirmed(edited,path,PROJECT_ROOT/"01_data"/"backups",overwrite)
+    st.checkbox(
+        "冲突时使用新值覆盖",
+        key="basis_shared_overwrite",
+        disabled=True,
+    )
+    st.button(
+        "确认写入",
+        type="primary",
+        key="basis_shared_write",
+        disabled=True,
+    )
+    st.caption(
+        "正式基差已切换为 basis_price SQL；页面仅保留录入预览，"
+        "不得直接改写正式 Parquet。"
+    )
 
 
 def _render_legacy_excel_upload() -> None:
-    with st.expander("上传更新国内基差 Excel", expanded=False):
-        st.caption(
-            "仅支持 .xlsx。上传成功后会先备份旧文件，再生成最新正式 parquet。"
-        )
-        uploaded_file = st.file_uploader(
-            "选择最新国内现货基差 Excel",
-            type=["xlsx"],
-            key="basis_excel_upload",
-        )
-        if st.button(
-            "备份并导入更新",
-            type="primary",
-            disabled=uploaded_file is None,
-            key="basis_excel_upload_submit",
-        ):
-            try:
-                with st.spinner("正在备份、校验并导入数据..."):
-                    result = update_basis_from_upload(
-                        uploaded_file.getvalue(),
-                        uploaded_file.name,
-                    )
-                st.session_state["basis_upload_result"] = {
-                    "success": True,
-                    "output_file": str(result["output_file"]),
-                    "rows": result["rows"],
-                    "latest_date": result["latest_date"].strftime(
-                        "%Y-%m-%d"
-                    ),
-                    "modified_time": result["modified_time"].strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
-                    "backup_file": (
-                        str(result["backup_file"])
-                        if result["backup_file"] is not None
-                        else "-"
-                    ),
-                }
-                st.rerun()
-            except Exception as exc:  # noqa: BLE001
-                st.session_state["basis_upload_result"] = {
-                    "success": False,
-                    "error": str(exc),
-                }
-                st.rerun()
-
-        result = st.session_state.get("basis_upload_result")
-        if result:
-            if result["success"]:
-                st.success("导入成功，图表已读取最新正式数据。")
-                st.write(f"Parquet 路径：`{result['output_file']}`")
-                status_columns = st.columns(3)
-                status_columns[0].metric("总行数", f"{result['rows']:,}")
-                status_columns[1].metric(
-                    "最新日期", result["latest_date"]
-                )
-                status_columns[2].metric(
-                    "修改时间", result["modified_time"]
-                )
-                st.caption(f"旧 Excel 备份：{result['backup_file']}")
-            else:
-                st.error(f"导入失败：{result['error']}")
-
-
-def _render_legacy_excel_upload() -> None:
-    with st.expander("上传更新国内基差 Excel", expanded=False):
+    with st.expander("Excel 只读预览（不写入正式数据）", expanded=False):
         uploaded_file = st.file_uploader("选择 Excel", type=["xlsx"], key="basis_excel_shared")
         if st.button("解析 Excel 到共享预览", disabled=uploaded_file is None, key="basis_excel_shared_parse"):
             try:
@@ -838,6 +872,11 @@ def render_basis_page(
         f"当前读取：{source_label}（{database_path.name}），"
         f"共 {len(data)} 行。"
     )
+    if source_label == "正式数据":
+        st.caption(
+            "数据源：2026-06-01前为历史基差库；"
+            "2026-06-01起为basis_price现货基差。"
+        )
     if source_label == "正式数据" and runtime_fallback_path.exists():
         try:
             fallback_rows = len(pd.read_parquet(runtime_fallback_path))
