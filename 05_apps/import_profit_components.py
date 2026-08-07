@@ -59,6 +59,14 @@ METRIC_SECTIONS = (
         "元/吨",
     ),
 )
+PRICE_BASIS_NOTE = (
+    "价格基准：外盘及汇率采用当日上午最新导入数据；"
+    "内盘采用当交易日对应的夜盘收盘价，系统于北京时间08:30自动读取并冻结。"
+)
+HISTORICAL_PRICE_BASIS_NOTE = (
+    "价格基准：当前历史记录保留原历史连续合约收盘口径，"
+    "未改写为08:30夜盘收盘基准。"
+)
 
 
 class ImportProfitPageError(ValueError):
@@ -148,6 +156,38 @@ def origin_options(
     """Return the configured origin codes and labels in contract order."""
 
     return tuple((origin.code, origin.label) for origin in config.origins)
+
+
+def origin_profit_title(origin: str, label: str) -> str:
+    """Return the concise business title required by the page contract."""
+
+    if origin == "brazil":
+        return "巴西大豆榨利"
+    if origin in {"us_gulf", "us_pnw"}:
+        return "美国大豆榨利"
+    if origin == "argentina":
+        return "阿根廷大豆榨利"
+    return f"{label}大豆榨利"
+
+
+def price_basis_note(
+    records: Sequence[SoybeanQueryRecord | None],
+) -> str:
+    """Describe persisted price types without relabelling historical rows."""
+
+    price_types = {
+        value
+        for record in records
+        if record is not None
+        for value in (
+            record.soymeal_price_type,
+            record.soyoil_price_type,
+        )
+        if value
+    }
+    if price_types == {"historical_continuous_close"}:
+        return HISTORICAL_PRICE_BASIS_NOTE
+    return PRICE_BASIS_NOTE
 
 
 def parameter_summary(

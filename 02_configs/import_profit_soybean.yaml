@@ -278,15 +278,20 @@ source_policy:
       provider: akshare
       function: futures_zh_spot
       source_field: current_price
-      price_type: morning_open_snapshot
-      price_semantics: DCE_morning_market_snapshot
+      price_type: night_session_close
+      price_semantics: DCE_night_session_close
       exchange: DCE
       capture_timezone: Asia/Shanghai
+      scheduled_time: "08:30:00"
       capture_window:
-        start: "09:00:00"
-        end_exclusive: "09:03:00"
+        start: "08:30:00"
+        end_exclusive: "08:33:00"
+      source_quote_time_window:
+        start: "22:59:00"
+        end_exclusive: "23:01:00"
+      trade_calendar_function: tool_trade_date_hist_sina
       require_same_business_date: true
-      require_complete_contract_set: true
+      require_complete_contract_set: false
       allow_previous_date_fallback: false
       allow_post_close_fallback: false
       allow_historical_close_fallback: false

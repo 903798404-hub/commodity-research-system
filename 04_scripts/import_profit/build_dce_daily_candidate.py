@@ -1,4 +1,4 @@
-"""Build an isolated DCE morning-open snapshot candidate."""
+"""Build an isolated DCE night-session-close snapshot candidate."""
 
 from __future__ import annotations
 
@@ -33,27 +33,29 @@ from agri_research_agent.import_profit.dce_daily import (  # noqa: E402
     ADAPTER_VERSION,
     CAPTURE_TIMEZONE,
     CAPTURE_ZONE,
+    PRICE_FIELD,
     PRICE_TYPE,
     SOURCE,
     SOURCE_FUNCTION,
-    DceMorningOpenRecord,
+    DceNightSessionCloseRecord,
     DceSpotContractResult,
     SpotFetcher,
+    TradeCalendarFetcher,
     capture_gate_status,
     default_spot_fetcher,
-    fetch_dce_morning_open_snapshot,
+    fetch_dce_night_session_close_snapshot,
     records_as_dicts,
 )
 
 
-PARQUET_FILENAME = "dce_morning_open_prices.parquet"
+PARQUET_FILENAME = "dce_night_session_close_prices.parquet"
 MANIFEST_FILENAME = "manifest.json"
 QUALITY_FILENAME = "quality_report.json"
 MAX_ATTEMPTS = 5
 MAX_RETRY_SECONDS = 60.0
 SHIPMENT_PATTERN = re.compile(r"^(20\d{2})-(0[1-9]|1[0-2])$")
 
-DCE_MORNING_OPEN_SCHEMA = pa.schema(
+DCE_NIGHT_SESSION_CLOSE_SCHEMA = pa.schema(
     [
         pa.field("business_date", pa.date32(), nullable=False),
         pa.field("instrument", pa.string(), nullable=False),
@@ -74,6 +76,7 @@ DCE_MORNING_OPEN_SCHEMA = pa.schema(
         pa.field("is_usable", pa.bool_(), nullable=False),
     ]
 )
+DCE_MORNING_OPEN_SCHEMA = DCE_NIGHT_SESSION_CLOSE_SCHEMA
 
 
 class DceCandidateBuildError(RuntimeError):
@@ -132,6 +135,7 @@ def build_dce_daily_candidate(
     attempts: int = 1,
     retry_seconds: float = 0.0,
     fetcher: SpotFetcher = default_spot_fetcher,
+    trade_calendar_fetcher: TradeCalendarFetcher | None = None,
     sleeper: Callable[[float], None] = real_sleep,
     clock: Callable[[], datetime] | None = None,
     akshare_version: str | None = None,
@@ -161,10 +165,11 @@ def build_dce_daily_candidate(
         gate = capture_gate_status(target_date, attempt_time)
         for code in required_contracts:
             attempt_counts[code] += 1
-        batch = fetch_dce_morning_open_snapshot(
+        batch = fetch_dce_night_session_close_snapshot(
             required_contracts,
             target_date,
             fetcher=fetcher,
+            trade_calendar_fetcher=trade_calendar_fetcher,
             captured_at=attempt_time,
             enforce_capture_window=True,
         )
@@ -186,14 +191,15 @@ def build_dce_daily_candidate(
         final_results = {
             item.contract.code: item for item in batch.contract_results
         }
-        if batch.is_usable:
+        if batch.records:
             snapshot_captured_at = batch.captured_at
             snapshot_batch_id = _snapshot_batch_id(
                 target_date,
                 attempt_time,
                 batch.request_symbol,
             )
-            break
+            if batch.is_usable:
+                break
         if gate != "valid":
             break
         if attempt_index + 1 < attempts and retry_seconds:
@@ -217,13 +223,13 @@ def build_dce_daily_candidate(
         snapshot_batch_id,
         snapshot_captured_at,
     )
-    if missing:
+    if len(missing) == len(mapping["required_contracts"]):
         raise DceCandidateBuildError(
-            f"required contracts failed: {', '.join(missing)}",
+            "all required contracts failed",
             quality_report=quality_report,
         )
 
-    records: tuple[DceMorningOpenRecord, ...] = tuple(
+    records: tuple[DceNightSessionCloseRecord, ...] = tuple(
         final_results[code].record
         for code in mapping["required_contracts"]
         if final_results[code].record is not None
@@ -257,7 +263,7 @@ def build_dce_daily_candidate(
     try:
         table = pa.Table.from_pylist(
             records_as_dicts(records),
-            schema=DCE_MORNING_OPEN_SCHEMA,
+            schema=DCE_NIGHT_SESSION_CLOSE_SCHEMA,
         )
         pq.write_table(table, temporaries[PARQUET_FILENAME], compression="zstd")
         _fsync_file(temporaries[PARQUET_FILENAME])
@@ -275,7 +281,9 @@ def build_dce_daily_candidate(
         manifest = {
             "schema_version": 2,
             "adapter_version": ADAPTER_VERSION,
-            "candidate_status": "passed",
+            "candidate_status": (
+                "success" if not missing else "passed_with_incomplete"
+            ),
             "business_date": target_date.isoformat(),
             "commodity": "soybean",
             "shipment_periods": mapping["shipment_periods"],
@@ -283,10 +291,11 @@ def build_dce_daily_candidate(
             "required_contracts": mapping["required_contracts"],
             "required_contract_count": len(mapping["required_contracts"]),
             "successful_contract_count": len(records),
-            "missing_contracts": [],
+            "missing_contracts": missing,
             "mapping_identity": mapping["mapping_identity"],
             "source": SOURCE,
             "source_function": SOURCE_FUNCTION,
+            "price_field": PRICE_FIELD,
             "price_type": PRICE_TYPE,
             "snapshot_batch_id": snapshot_batch_id,
             "snapshot_captured_at": (
@@ -350,6 +359,7 @@ def _gate_failure_report(
         "capture_window_status": status,
         "source": SOURCE,
         "source_function": SOURCE_FUNCTION,
+        "price_field": PRICE_FIELD,
         "price_type": PRICE_TYPE,
         "snapshot_batch_id": None,
         "shipment_periods": mapping["shipment_periods"],
@@ -407,6 +417,7 @@ def _build_quality_report(
         ),
         "source": SOURCE,
         "source_function": SOURCE_FUNCTION,
+        "price_field": PRICE_FIELD,
         "price_type": PRICE_TYPE,
         "snapshot_batch_id": snapshot_batch_id,
         "shipment_periods": mapping["shipment_periods"],
@@ -415,12 +426,20 @@ def _build_quality_report(
         "requests": requests,
         "contract_results": contracts,
         "fatal_issues": (
-            [{"code": "required_contracts_unavailable", "contracts": missing}]
-            if missing
+            [{"code": "all_required_contracts_unavailable", "contracts": missing}]
+            if len(missing) == len(mapping["required_contracts"])
             else []
         ),
-        "warnings": [],
-        "candidate_status": "failed" if missing else "passed",
+        "warnings": (
+            [{"code": "required_contracts_incomplete", "contracts": missing}]
+            if missing and len(missing) < len(mapping["required_contracts"])
+            else []
+        ),
+        "candidate_status": (
+            "failed"
+            if len(missing) == len(mapping["required_contracts"])
+            else "passed_with_incomplete" if missing else "success"
+        ),
     }
 
 
@@ -474,7 +493,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _verify_parquet(path: Path, expected_rows: int) -> None:
     table = pq.read_table(path)
-    if table.schema != DCE_MORNING_OPEN_SCHEMA:
+    if table.schema != DCE_NIGHT_SESSION_CLOSE_SCHEMA:
         raise DceCandidateBuildError(f"Parquet schema mismatch: {path.name}")
     if table.num_rows != expected_rows:
         raise DceCandidateBuildError(f"Parquet row count mismatch: {path.name}")
@@ -506,7 +525,7 @@ def _snapshot_batch_id(
         f"{business_date.isoformat()}|{captured_at.isoformat()}|{request_symbol}"
     ).encode("utf-8")
     suffix = hashlib.sha256(payload).hexdigest().upper()[:16]
-    return f"dce-morning-{business_date:%Y%m%d}-{suffix}"
+    return f"dce-night-close-{business_date:%Y%m%d}-{suffix}"
 
 
 def _assert_manifest_safe(manifest: dict[str, Any]) -> None:
@@ -526,7 +545,7 @@ def _cleanup_paths(paths: Any) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build an isolated AkShare DCE morning-open snapshot candidate."
+        description="Build an isolated AkShare DCE night-session-close candidate."
     )
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--business-date", required=True, type=date.fromisoformat)

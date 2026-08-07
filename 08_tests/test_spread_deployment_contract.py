@@ -1789,7 +1789,7 @@ def _candidate_runtime_access() -> dict[str, object]:
 
 def test_candidate_waiting_gate_is_schema_valid_but_not_deployable(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
-    gate = pending_candidate_gate("real_morning_open_snapshot", "2026-08-03")
+    gate = pending_candidate_gate("real_night_session_close_snapshot", "2026-08-03")
     result = build_candidate_result_fixture(
         manifest,
         runtime,
@@ -1851,7 +1851,7 @@ def test_candidate_gate_schema_rejects_unknown_failed_and_malformed_states(
         validate_candidate_result(waiting_without_gate, manifest, schema)
     validated_with_gate = {
         **valid,
-        "blocking_gates": [pending_candidate_gate("real_morning_open_snapshot", "2026-08-03")],
+        "blocking_gates": [pending_candidate_gate("real_night_session_close_snapshot", "2026-08-03")],
     }
     with pytest.raises(ContractError):
         validate_candidate_result(validated_with_gate, manifest, schema)
@@ -1867,20 +1867,31 @@ def test_import_profit_validated_candidate_requires_completed_real_gate(
         runtime_mounts=(_import_profit_runtime_mount(),),
         candidate_runtime_access=_candidate_runtime_access(),
     )
-    with pytest.raises(ContractError, match="completed real 09:00 gate"):
+    with pytest.raises(ContractError, match="completed real 08:30 night-session gate"):
         require_deployable_candidate_result(result)
 
     result["completed_gates"] = [
         {
-            "gate_id": "real_morning_open_snapshot",
+            "gate_id": "real_night_session_close_snapshot",
             "status": "completed",
             "business_date": "2026-08-03",
-            "captured_at": "2026-08-03T09:01:00+08:00",
+            "captured_at": "2026-08-03T08:30:30+08:00",
             "target_contracts": ["m2609", "y2609"],
-            "snapshot_batch_id": "dce-20260803-090100",
+            "available_contracts": ["m2609", "y2609"],
+            "missing_contracts": [],
+            "capture_status": "success",
+            "business_date_validation": "passed",
+            "source_time_validation": "passed",
+            "snapshot_freeze_validation": "passed",
+            "cnf_refetch_validation": "passed",
+            "snapshot_batch_id": "dce-20260803-083030",
             "candidate_sha256": "f" * 64,
         }
     ]
+    require_deployable_candidate_result(result)
+    result["completed_gates"][0]["available_contracts"] = ["m2609"]
+    result["completed_gates"][0]["missing_contracts"] = ["y2609"]
+    result["completed_gates"][0]["capture_status"] = "passed_with_incomplete"
     require_deployable_candidate_result(result)
 
 
@@ -2752,7 +2763,7 @@ def test_deployment_plan_rejects_schema_valid_waiting_candidate(tmp_path: Path) 
         manifest,
         runtime,
         blocking_gates=(
-            pending_candidate_gate("real_morning_open_snapshot", "2026-08-03"),
+            pending_candidate_gate("real_night_session_close_snapshot", "2026-08-03"),
         ),
         runtime_mounts=(_import_profit_runtime_mount(),),
         candidate_runtime_access=_candidate_runtime_access(),

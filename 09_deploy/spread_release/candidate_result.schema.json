@@ -238,22 +238,22 @@
       "additionalProperties": false,
       "required": ["gate_id", "status", "required_business_timezone", "required_window_start", "required_window_end_exclusive", "earliest_expected_business_date", "blocks_production_promotion", "description"],
       "properties": {
-        "gate_id": { "const": "real_morning_open_snapshot" },
+        "gate_id": { "const": "real_night_session_close_snapshot" },
         "status": { "const": "pending" },
         "required_business_timezone": { "const": "Asia/Shanghai" },
-        "required_window_start": { "const": "09:00:00" },
-        "required_window_end_exclusive": { "const": "09:03:00" },
+        "required_window_start": { "const": "08:30:00" },
+        "required_window_end_exclusive": { "const": "08:33:00" },
         "earliest_expected_business_date": { "type": "string", "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}" },
         "blocks_production_promotion": { "const": true },
-        "description": { "const": "Real AkShare morning_open_snapshot validation is pending." }
+        "description": { "const": "Real AkShare night_session_close validation is pending." }
       }
     },
     "completedGate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["gate_id", "status", "business_date", "captured_at", "target_contracts", "snapshot_batch_id", "candidate_sha256"],
+      "required": ["gate_id", "status", "business_date", "captured_at", "target_contracts", "available_contracts", "missing_contracts", "capture_status", "business_date_validation", "source_time_validation", "snapshot_freeze_validation", "cnf_refetch_validation", "snapshot_batch_id", "candidate_sha256"],
       "properties": {
-        "gate_id": { "const": "real_morning_open_snapshot" },
+        "gate_id": { "const": "real_night_session_close_snapshot" },
         "status": { "const": "completed" },
         "business_date": { "type": "string", "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}" },
         "captured_at": { "type": "string", "minLength": 20 },
@@ -263,6 +263,24 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "[A-Za-z0-9._-]+" }
         },
+        "available_contracts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "[A-Za-z0-9._-]+" }
+        },
+        "missing_contracts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "[A-Za-z0-9._-]+" }
+        },
+        "capture_status": {
+          "enum": ["success", "passed_with_incomplete"]
+        },
+        "business_date_validation": { "const": "passed" },
+        "source_time_validation": { "const": "passed" },
+        "snapshot_freeze_validation": { "const": "passed" },
+        "cnf_refetch_validation": { "const": "passed" },
         "snapshot_batch_id": { "type": "string", "minLength": 1, "maxLength": 128 },
         "candidate_sha256": { "$ref": "#/$defs/sha256" }
       }

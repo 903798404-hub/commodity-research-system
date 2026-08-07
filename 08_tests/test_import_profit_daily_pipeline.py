@@ -8,7 +8,7 @@ from filelock import FileLock
 import pytest
 
 from agri_research_agent.import_profit.daily_increment import (
-    capture_and_store_dce_morning_input,
+    capture_and_store_dce_night_session_close,
 )
 from agri_research_agent.import_profit.morning_external_inputs import (
     store_morning_external_inputs_candidate,
@@ -31,6 +31,7 @@ from agri_research_agent.pipelines.import_profit_runtime import (
 from test_import_profit_daily_increment import (
     CONFIG_PATH,
     TARGET,
+    calendar_frame,
     clock_at,
     frame_for,
 )
@@ -57,15 +58,20 @@ def prepare_external(tmp_path, *, candidate_id="external-001"):
     )
 
 
-def prepare_dce(tmp_path, *, failed=False, candidate_id="dce-001"):
-    return capture_and_store_dce_morning_input(
+def prepare_dce(
+    tmp_path, *, failed=False, partial=False, candidate_id="dce-001"
+):
+    return capture_and_store_dce_night_session_close(
         tmp_path / "dce",
         business_date=TARGET,
         config=CONFIG,
         candidate_id=candidate_id,
         snapshot_batch_id=f"snapshot-{candidate_id}",
-        fetcher=lambda request: frame_for(request, omit_last=failed),
-        clock=clock_at(9, 0, 1),
+        fetcher=lambda request: frame_for(
+            request, omit_last=partial, omit_all=failed
+        ),
+        trade_calendar_fetcher=calendar_frame,
+        clock=clock_at(8, 30, 1),
     )
 
 
@@ -149,9 +155,93 @@ def test_legal_failed_dce_still_materializes_all_keys_with_missing_dce(tmp_path)
     )
     assert (
         load_runtime_release_dataset(runtime_root)
-        .resolved.manifest["morning_open_snapshot_start_date"]
+        .resolved.manifest["night_session_close_start_date"]
         is None
     )
+
+
+def test_partial_dce_freezes_valid_contracts_and_nulls_only_dependents(tmp_path):
+    runtime_root, _, _ = bootstrap_fixture(tmp_path)
+    prepare_external(tmp_path)
+    outcome = prepare_dce(tmp_path, partial=True)
+    assert outcome.outcome.attempt_status == "passed_with_incomplete"
+    materialize(runtime_root, tmp_path)
+    records = [
+        record
+        for record in load_runtime_release_dataset(runtime_root).dataset.records
+        if record.business_date == TARGET
+    ]
+    assert any(
+        "missing_soymeal" not in record.missing_reasons
+        and "missing_soyoil" not in record.missing_reasons
+        for record in records
+    )
+    assert any(
+        "missing_soymeal" in record.missing_reasons
+        or "missing_soyoil" in record.missing_reasons
+        for record in records
+    )
+    valid_record = next(
+        record
+        for record in records
+        if "missing_soymeal" not in record.missing_reasons
+        and "missing_soyoil" not in record.missing_reasons
+    )
+    missing_record = next(
+        record
+        for record in records
+        if "missing_soymeal" in record.missing_reasons
+        or "missing_soyoil" in record.missing_reasons
+    )
+    from agri_research_agent.import_profit.models import BusinessKey
+
+    current = resolve_current_runtime_release(runtime_root)
+    updates = []
+    for record in (valid_record, missing_record):
+        updates.append(
+            RuntimeCnfUpdate(
+                business_key=BusinessKey(
+                    record.business_date,
+                    record.commodity,
+                    record.origin,
+                    record.shipment_year,
+                    record.shipment_month,
+                    CONFIG.origin_codes,
+                    CONFIG.commodity,
+                ),
+                cnf_cents_per_bushel=100.0,
+                updated_at=CALCULATED,
+                batch_id="partial-cnf",
+            )
+        )
+    update_runtime_cnf_quotes(
+        runtime_root,
+        updates,
+        config=CONFIG,
+        config_path=CONFIG_PATH,
+        expected_release_id=current.release_id,
+        expected_index_sha256=current.identity.index_sha256,
+        expected_manual_cnf_sha256=current.identity.manual_cnf_sha256,
+        calculated_at=CALCULATED,
+        batch_id="partial-cnf",
+        release_id="partial-cnf",
+    )
+    repriced = load_runtime_release_dataset(runtime_root).dataset
+    valid_after = repriced.get(
+        business_date=valid_record.business_date,
+        origin=valid_record.origin,
+        shipment_year=valid_record.shipment_year,
+        shipment_month=valid_record.shipment_month,
+    )
+    missing_after = repriced.get(
+        business_date=missing_record.business_date,
+        origin=missing_record.origin,
+        shipment_year=missing_record.shipment_year,
+        shipment_month=missing_record.shipment_month,
+    )
+    assert valid_after is not None and valid_after.calculation_status == "success"
+    assert missing_after is not None and missing_after.calculation_status == "incomplete"
+    assert missing_after.net_crush_margin_cny_per_tonne is None
 
 
 def test_followup_manual_cnf_uses_frozen_daily_market_and_only_adds_real_key(
@@ -208,8 +298,8 @@ def test_followup_manual_cnf_uses_frozen_daily_market_and_only_adds_real_key(
     )
 
     assert changed is not None and changed.calculation_status == "success"
-    assert changed.soymeal_price_type == "morning_open_snapshot"
-    assert loaded.resolved.manifest["morning_open_snapshot_start_date"] == (
+    assert changed.soymeal_price_type == "night_session_close"
+    assert loaded.resolved.manifest["night_session_close_start_date"] == (
         TARGET.isoformat()
     )
     assert loaded.resolved.manifest["manual_cnf_record_count"] == 1

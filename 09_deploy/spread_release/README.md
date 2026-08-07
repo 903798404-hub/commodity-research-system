@@ -129,7 +129,7 @@ Image ID、候选容器身份、容器 inspect 实测的
 进口利润 Stage A 候选通过 `prepare_spread_candidate.py` 的受控 runtime 参数增加
 唯一的 `/app/runtime/import_profit` 读写 bind，并注入
 `IMPORT_PROFIT_RUNTIME_ROOT`。宿主绝对路径只保留在服务器本地候选 Compose，
-密封结果和 Manifest 只记录安全批次身份。真实 09:00 门禁未完成时结果状态为
+密封结果和 Manifest 只记录安全批次身份。真实工作日08:30夜盘收盘门禁未完成时结果状态为
 `candidate-waiting-gate`；工具删除候选容器、保留镜像，并明确跳过部署计划。
 等待态不是最终候选通过状态。
 Stage B 只能通过 `create_candidate_result.py --prior-waiting-candidate-result ...

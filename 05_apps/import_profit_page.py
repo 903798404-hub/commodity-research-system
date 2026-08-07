@@ -47,6 +47,8 @@ from import_profit_components import (
     initialize_preview_state,
     matrix_display_frame,
     origin_options,
+    origin_profit_title,
+    price_basis_note,
     parameter_summary,
     prepare_page_data,
     previews_from_editor,
@@ -297,6 +299,7 @@ def render_import_profit_page_from_dataset(
         prepared,
         config=config,
         origin=selected_origin,
+        origin_label=labels[selected_origin],
         business_date=selected_date,
     )
     if allow_cnf_preview:
@@ -401,10 +404,11 @@ def _render_daily_table(
     *,
     config: SoybeanImportProfitConfig,
     origin: str,
+    origin_label: str,
     business_date: date,
 ) -> None:
     render_section_heading(
-        "当日主表",
+        origin_profit_title(origin, origin_label),
         "正式历史值；空值显示为“—”，保留0与负数",
     )
     table = formal_daily_table(
@@ -419,6 +423,7 @@ def _render_daily_table(
         width="stretch",
         height=460,
     )
+    st.caption(price_basis_note(prepared.records))
 
 
 def _render_cnf_editor(

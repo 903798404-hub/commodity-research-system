@@ -1,4 +1,4 @@
-"""09:00 DCE morning-open capture entry point, independent of Reuters inputs."""
+"""08:30 DCE night-session-close capture entry point, independent of Reuters inputs."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if str(SOURCE_ROOT) not in sys.path:
 
 from agri_research_agent.import_profit.config import load_soybean_config  # noqa: E402
 from agri_research_agent.import_profit.daily_increment import (  # noqa: E402
-    capture_and_store_dce_morning_input,
+    capture_and_store_dce_night_session_close,
 )
 from agri_research_agent.pipelines.import_profit_daily import (  # noqa: E402
     try_materialize_import_profit_business_day,
@@ -25,7 +25,7 @@ from agri_research_agent.pipelines.import_profit_daily import (  # noqa: E402
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Capture one complete DCE morning-open batch and try daily materialization."
+        description="Freeze available DCE night-session closes and try daily materialization."
     )
     parser.add_argument("--config", required=True)
     parser.add_argument("--business-date", required=True)
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_soybean_config(args.config)
         business_date = date.fromisoformat(args.business_date)
-        capture = capture_and_store_dce_morning_input(
+        capture = capture_and_store_dce_night_session_close(
             args.dce_input_root,
             business_date=business_date,
             config=config,

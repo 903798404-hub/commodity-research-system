@@ -764,9 +764,9 @@ def _update_manifest(
         },
         "quality_report_filename": QUALITY_FILENAME,
     }
-    if "morning_open_snapshot_start_date" in current.manifest:
-        payload["morning_open_snapshot_start_date"] = current.manifest[
-            "morning_open_snapshot_start_date"
+    if "night_session_close_start_date" in current.manifest:
+        payload["night_session_close_start_date"] = current.manifest[
+            "night_session_close_start_date"
         ]
     return payload
 

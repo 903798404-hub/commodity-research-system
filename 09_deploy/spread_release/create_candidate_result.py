@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--completed-gate-evidence",
         type=Path,
-        help="Controlled real_morning_open_snapshot completion evidence for Stage B.",
+        help="Controlled real_night_session_close_snapshot completion evidence for Stage B.",
     )
     return parser
 

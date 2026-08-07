@@ -152,8 +152,16 @@ def test_complete_page_renders_controls_tables_tabs_and_figures(tmp_path):
         + _texts(app.caption)
         + _texts(app.info)
         + _texts(app.warning)
-    )
+        )
     assert "保存CNF" not in visible_text
+    assert any(
+        "巴西大豆榨利" in item.proto.body for item in app.get("html")
+    )
+    assert any(
+        "当前历史记录保留原历史连续合约收盘口径" in item.value
+        and "未改写为08:30夜盘收盘基准" in item.value
+        for item in app.caption
+    )
     assert "正式提交" not in visible_text
     assert "写入成功" not in visible_text
 
@@ -313,9 +321,9 @@ def test_cnf_repricing_preserves_morning_snapshot_price_type(tmp_path) -> None:
         cnf=None,
     )
     snapshot_row = dict(snapshot_row)
-    snapshot_row["soymeal_price_type"] = "morning_open_snapshot"
+    snapshot_row["soymeal_price_type"] = "night_session_close"
     snapshot_row["soymeal_source"] = "akshare"
-    snapshot_row["soyoil_price_type"] = "morning_open_snapshot"
+    snapshot_row["soyoil_price_type"] = "night_session_close"
     snapshot_row["soyoil_source"] = "akshare"
     paths = write_dataset(
         tmp_path,
@@ -331,10 +339,10 @@ def test_cnf_repricing_preserves_morning_snapshot_price_type(tmp_path) -> None:
         calculated_at=datetime(2026, 7, 27, 1, 10, tzinfo=timezone.utc),
     )
     assert repriced.updated_snapshot_row["soymeal_price_type"] == (
-        "morning_open_snapshot"
+        "night_session_close"
     )
     assert repriced.updated_snapshot_row["soyoil_price_type"] == (
-        "morning_open_snapshot"
+        "night_session_close"
     )
     assert repriced.updated_snapshot_row["soymeal_source"] == "akshare"
     assert repriced.updated_snapshot_row["soyoil_source"] == "akshare"

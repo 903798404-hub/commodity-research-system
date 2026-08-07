@@ -10,7 +10,7 @@ import pytest
 from agri_research_agent.import_profit.config import load_soybean_config
 from agri_research_agent.import_profit.daily_increment import (
     DailyIncrementError,
-    capture_and_store_dce_morning_input,
+    capture_and_store_dce_night_session_close,
     generate_daily_business_keys,
     load_current_dce_outcome,
     required_dce_contracts,
@@ -25,14 +25,18 @@ CONFIG_PATH = Path("02_configs/import_profit_soybean.yaml")
 TARGET = date(2026, 8, 5)
 
 
-def frame_for(request: str, *, omit_last: bool = False) -> pd.DataFrame:
+def frame_for(
+    request: str, *, omit_last: bool = False, omit_all: bool = False
+) -> pd.DataFrame:
     contracts = [normalize_full_contract_code(code) for code in request.split(",")]
     if omit_last:
         contracts = contracts[:-1]
+    if omit_all:
+        contracts = []
     return pd.DataFrame(
         {
             "symbol": [item.display_symbol for item in contracts],
-            "time": ["09:00:30"] * len(contracts),
+            "time": ["23:00:00"] * len(contracts),
             "current_price": [
                 3000.0 + index * 10
                 if item.instrument == "soymeal"
@@ -51,6 +55,12 @@ def clock_at(hour: int, minute: int, second: int):
         ]
     )
     return lambda: next(values)
+
+
+def calendar_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {"trade_date": [date(2026, 8, 4), TARGET]}
+    )
 
 
 def test_fixed_daily_keys_and_unique_dce_contracts():
@@ -72,48 +82,69 @@ def test_fixed_daily_keys_and_unique_dce_contracts():
     assert len(contracts) == len(set(contracts))
 
 
-@pytest.mark.parametrize("minute,second", [(0, 0), (2, 59)])
-def test_legal_window_passed_capture_writes_strict_candidate(
+@pytest.mark.parametrize("minute,second", [(30, 0), (32, 59)])
+def test_legal_window_success_capture_writes_strict_candidate(
     tmp_path, minute, second
 ):
     root = tmp_path / "dce"
-    result = capture_and_store_dce_morning_input(
+    result = capture_and_store_dce_night_session_close(
         root,
         business_date=TARGET,
         config=load_soybean_config(CONFIG_PATH),
         candidate_id=f"dce-{minute}-{second}",
         snapshot_batch_id=f"snapshot-{minute}-{second}",
         fetcher=lambda request: frame_for(request),
-        clock=clock_at(9, minute, second),
+        trade_calendar_fetcher=calendar_frame,
+        clock=clock_at(8, minute, second),
     )
 
-    assert result.outcome.attempt_status == "passed"
+    assert result.outcome.attempt_status == "success"
     assert result.outcome.record_count == len(result.outcome.requested_contracts)
-    assert (result.outcome.candidate_dir / "dce_morning_open_prices.parquet").is_file()
+    assert (result.outcome.candidate_dir / "dce_night_session_close_prices.parquet").is_file()
     assert load_current_dce_outcome(root).candidate_id == result.outcome.candidate_id
 
 
-def test_missing_contract_creates_legal_failed_outcome_without_fake_parquet(tmp_path):
+def test_missing_contract_freezes_valid_subset_as_incomplete(tmp_path):
     root = tmp_path / "dce"
-    result = capture_and_store_dce_morning_input(
+    result = capture_and_store_dce_night_session_close(
         root,
         business_date=TARGET,
         config=load_soybean_config(CONFIG_PATH),
         candidate_id="dce-failed",
         snapshot_batch_id="snapshot-failed",
         fetcher=lambda request: frame_for(request, omit_last=True),
-        clock=clock_at(9, 0, 1),
+        trade_calendar_fetcher=calendar_frame,
+        clock=clock_at(8, 30, 1),
     )
 
-    assert result.outcome.attempt_status == "failed"
+    assert result.outcome.attempt_status == "passed_with_incomplete"
     assert result.outcome.missing_contracts
-    assert not (
-        result.outcome.candidate_dir / "dce_morning_open_prices.parquet"
-    ).exists()
+    assert (
+        result.outcome.candidate_dir / "dce_night_session_close_prices.parquet"
+    ).is_file()
     manifest = json.loads(
         (result.outcome.candidate_dir / "manifest.json").read_text("utf-8")
     )
     assert manifest["capture_gate_status"] == "valid"
+    assert manifest["price_type"] == "night_session_close"
+
+
+def test_all_contracts_failed_records_failed_without_parquet(tmp_path):
+    root = tmp_path / "dce"
+    result = capture_and_store_dce_night_session_close(
+        root,
+        business_date=TARGET,
+        config=load_soybean_config(CONFIG_PATH),
+        candidate_id="dce-all-failed",
+        snapshot_batch_id="snapshot-all-failed",
+        fetcher=lambda request: frame_for(request, omit_all=True),
+        trade_calendar_fetcher=calendar_frame,
+        clock=clock_at(8, 30, 1),
+    )
+    assert result.outcome.attempt_status == "failed"
+    assert not (
+        result.outcome.candidate_dir / "dce_night_session_close_prices.parquet"
+    ).exists()
 
 
 def test_outside_window_fails_without_candidate_or_index(tmp_path):
@@ -126,14 +157,15 @@ def test_outside_window_fails_without_candidate_or_index(tmp_path):
         return frame_for(request)
 
     with pytest.raises(DailyIncrementError):
-        capture_and_store_dce_morning_input(
+        capture_and_store_dce_night_session_close(
             root,
             business_date=TARGET,
             config=load_soybean_config(CONFIG_PATH),
             candidate_id="dce-outside",
             snapshot_batch_id="snapshot-outside",
             fetcher=fetcher,
-            clock=clock_at(8, 59, 59),
+            trade_calendar_fetcher=calendar_frame,
+            clock=clock_at(8, 29, 59),
         )
 
     assert called is False

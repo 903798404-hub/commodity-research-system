@@ -25,7 +25,7 @@ from agri_research_agent.import_profit.dce_daily import (  # noqa: E402
     SpotFetcher,
     capture_gate_status,
     default_spot_fetcher,
-    fetch_dce_morning_open_snapshot,
+    fetch_dce_night_session_close_snapshot,
 )
 
 
@@ -43,7 +43,7 @@ def run_probe(
         raise ValueError("clock must return a timezone-aware datetime")
     local = started.astimezone(CAPTURE_ZONE)
     business_date = local.date()
-    result = fetch_dce_morning_open_snapshot(
+    result = fetch_dce_night_session_close_snapshot(
         contract_codes,
         business_date,
         fetcher=fetcher,

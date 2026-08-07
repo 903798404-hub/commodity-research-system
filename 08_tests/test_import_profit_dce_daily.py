@@ -10,7 +10,18 @@ from agri_research_agent.import_profit import dce_daily
 
 
 TARGET = date(2026, 7, 28)
-CAPTURED = datetime(2026, 7, 28, 9, 0, 30, tzinfo=dce_daily.CAPTURE_ZONE)
+CAPTURED = datetime(2026, 7, 28, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE)
+
+
+@pytest.fixture(autouse=True)
+def stable_trade_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        dce_daily,
+        "default_trade_calendar_fetcher",
+        lambda: pd.DataFrame(
+            {"trade_date": [date(2026, 7, 24), TARGET]}
+        ),
+    )
 
 
 def spot_frame(
@@ -21,7 +32,7 @@ def spot_frame(
 ) -> pd.DataFrame:
     symbols = symbols or ["豆粕2701", "豆油2701"]
     prices = prices or [3010.0, 8010.0]
-    times = times or ["09:00:25", 90026]
+    times = times or ["23:00:00", 230000]
     return pd.DataFrame(
         {
             "symbol": symbols,
@@ -105,11 +116,14 @@ def test_multi_contract_snapshot_produces_strict_records() -> None:
     ]
     record = result.records[0]
     assert tuple(record.as_dict()) == dce_daily.STANDARDIZED_RECORD_FIELDS
-    assert record.price_type == "morning_open_snapshot"
+    assert record.price_type == "night_session_close"
     assert record.source_function == "futures_zh_spot"
     assert record.capture_timezone == "Asia/Shanghai"
     assert record.source_quote_date is None
-    assert record.source_quote_time == time(9, 0, 25)
+    assert record.source_quote_time == time(23, 0)
+    assert record.quality_status == "valid_time_only"
+    assert result.attempt_status == "success"
+    assert result.previous_trading_date == date(2026, 7, 24)
 
 
 def test_return_order_changes_and_extra_contracts_do_not_change_matching() -> None:
@@ -119,7 +133,7 @@ def test_return_order_changes_and_extra_contracts_do_not_change_matching() -> No
         fetcher=lambda symbol: spot_frame(
             symbols=["A9999", "Y2701", "M2701"],
             prices=[1.0, 8001.0, 3001.0],
-            times=["09:00:25"] * 3,
+            times=["23:00:00"] * 3,
         ),
         captured_at=CAPTURED,
     )
@@ -158,7 +172,7 @@ def test_missing_and_duplicate_contracts_are_distinct() -> None:
         ["M2701", "Y2701"],
         TARGET,
         fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[3000.0], times=["09:00:25"]
+            symbols=["M2701"], prices=[3000.0], times=["23:00:00"]
         ),
         captured_at=CAPTURED,
     )
@@ -168,7 +182,7 @@ def test_missing_and_duplicate_contracts_are_distinct() -> None:
         fetcher=lambda symbol: spot_frame(
             symbols=["M2701", "豆粕2701"],
             prices=[3000.0, 3001.0],
-            times=["09:00:25", "09:00:26"],
+            times=["23:00:00", "23:00:01"],
         ),
         captured_at=CAPTURED,
     )
@@ -183,7 +197,7 @@ def test_adjacent_contract_never_substitutes_for_target() -> None:
         fetcher=lambda symbol: spot_frame(
             symbols=["M2705"],
             prices=[3000.0],
-            times=["09:00:25"],
+            times=["23:00:00"],
         ),
         captured_at=CAPTURED,
     )
@@ -197,7 +211,7 @@ def test_invalid_current_price_is_rejected(bad: object) -> None:
         ["M2701"],
         TARGET,
         fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[bad], times=["09:00:25"]
+            symbols=["M2701"], prices=[bad], times=["23:00:00"]
         ),
         captured_at=CAPTURED,
     )
@@ -208,10 +222,10 @@ def test_invalid_current_price_is_rejected(bad: object) -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        pd.DataFrame({"symbol": ["M2701"], "time": ["09:00:25"], "close": [3010]}),
-        pd.DataFrame({"symbol": ["M2701"], "time": ["09:00:25"], "settle": [3010]}),
+        pd.DataFrame({"symbol": ["M2701"], "time": ["23:00:00"], "close": [3010]}),
+        pd.DataFrame({"symbol": ["M2701"], "time": ["23:00:00"], "settle": [3010]}),
         pd.DataFrame({"symbol": ["M2701"], "current_price": [3010]}),
-        pd.DataFrame({"time": ["09:00:25"], "current_price": [3010]}),
+        pd.DataFrame({"time": ["23:00:00"], "current_price": [3010]}),
         pd.DataFrame(),
     ],
 )
@@ -232,7 +246,7 @@ def test_matching_quote_date_is_preserved() -> None:
         fetcher=lambda symbol: spot_frame(
             symbols=["M2701"],
             prices=[3010.0],
-            times=["09:00:25"],
+            times=["23:00:00"],
             date=["2026-07-28"],
         ),
         captured_at=CAPTURED,
@@ -248,7 +262,7 @@ def test_stale_quote_date_is_rejected() -> None:
         fetcher=lambda symbol: spot_frame(
             symbols=["M2701"],
             prices=[3010.0],
-            times=["09:00:25"],
+            times=["23:00:00"],
             date=["2026-07-27"],
         ),
         captured_at=CAPTURED,
@@ -259,7 +273,7 @@ def test_stale_quote_date_is_rejected() -> None:
 def test_no_quote_date_is_allowed_only_with_explicit_current_context() -> None:
     result = dce_daily.fetch_dce_morning_open_snapshot(
         ["M2701"], TARGET, fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[3010.0], times=["09:00:25"]
+            symbols=["M2701"], prices=[3010.0], times=["23:00:00"]
         ), captured_at=CAPTURED
     )
     assert result.is_usable
@@ -268,7 +282,7 @@ def test_no_quote_date_is_allowed_only_with_explicit_current_context() -> None:
 
 @pytest.mark.parametrize(
     "quote_time",
-    ["09:00:00", "09:01:00", "09:02:59", time(9, 2, 59, 999999)],
+    ["22:59:00", "23:00:00", "23:00:59", time(23, 0, 59, 999999)],
 )
 def test_allowed_quote_time_range_is_end_exclusive(quote_time: object) -> None:
     result = dce_daily.fetch_dce_morning_open_snapshot(
@@ -285,13 +299,13 @@ def test_allowed_quote_time_range_is_end_exclusive(quote_time: object) -> None:
 @pytest.mark.parametrize(
     ("quote_time", "status"),
     [
-        ("08:59:59", "quote_time_before_window"),
-        ("09:03:00", "quote_time_outside_allowed_range"),
-        ("15:00:00", "quote_time_outside_allowed_range"),
-        ("21:00:00", "quote_time_outside_allowed_range"),
+        ("22:58:59", "quote_time_before_window"),
+        ("23:01:00", "quote_time_outside_allowed_range"),
+        ("15:00:00", "quote_time_before_window"),
+        ("21:00:00", "quote_time_before_window"),
     ],
 )
-def test_quote_time_outside_morning_window_is_rejected(
+def test_quote_time_outside_night_close_window_is_rejected(
     quote_time: str, status: str
 ) -> None:
     result = dce_daily.fetch_dce_morning_open_snapshot(
@@ -322,15 +336,15 @@ def test_missing_or_invalid_time_is_schema_error(quote_time: object) -> None:
     ("captured_at", "status"),
     [
         (
-            datetime(2026, 7, 28, 8, 59, 59, tzinfo=dce_daily.CAPTURE_ZONE),
+            datetime(2026, 7, 28, 8, 29, 59, tzinfo=dce_daily.CAPTURE_ZONE),
             "capture_window_not_started",
         ),
         (
-            datetime(2026, 7, 28, 9, 0, 0, tzinfo=dce_daily.CAPTURE_ZONE),
+            datetime(2026, 7, 28, 8, 30, 0, tzinfo=dce_daily.CAPTURE_ZONE),
             "valid",
         ),
         (
-            datetime(2026, 7, 28, 9, 1, 0, tzinfo=dce_daily.CAPTURE_ZONE),
+            datetime(2026, 7, 28, 8, 31, 0, tzinfo=dce_daily.CAPTURE_ZONE),
             "valid",
         ),
         (
@@ -338,8 +352,8 @@ def test_missing_or_invalid_time_is_schema_error(quote_time: object) -> None:
                 2026,
                 7,
                 28,
-                9,
-                2,
+                8,
+                32,
                 59,
                 999999,
                 tzinfo=dce_daily.CAPTURE_ZONE,
@@ -347,7 +361,7 @@ def test_missing_or_invalid_time_is_schema_error(quote_time: object) -> None:
             "valid",
         ),
         (
-            datetime(2026, 7, 28, 9, 3, 0, tzinfo=dce_daily.CAPTURE_ZONE),
+            datetime(2026, 7, 28, 8, 33, 0, tzinfo=dce_daily.CAPTURE_ZONE),
             "capture_window_closed",
         ),
     ],
@@ -374,7 +388,7 @@ def test_probe_mode_can_inspect_source_outside_capture_window() -> None:
         ["M2701"],
         TARGET,
         fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[3010.0], times=["09:00:25"]
+            symbols=["M2701"], prices=[3010.0], times=["23:00:00"]
         ),
         captured_at=datetime(
             2026, 7, 28, 20, 0, tzinfo=dce_daily.CAPTURE_ZONE
@@ -383,6 +397,60 @@ def test_probe_mode_can_inspect_source_outside_capture_window() -> None:
     )
     assert result.capture_gate_status == "capture_window_closed"
     assert result.is_usable
+
+
+def test_monday_uses_calendar_previous_trading_date_without_sunday_guess() -> None:
+    monday = date(2026, 8, 3)
+    result = dce_daily.fetch_dce_night_session_close_snapshot(
+        ["M2701"],
+        monday,
+        fetcher=lambda symbol: spot_frame(
+            symbols=["M2701"], prices=[3010.0], times=["23:00:00"]
+        ),
+        trade_calendar_fetcher=lambda: pd.DataFrame(
+            {"trade_date": [date(2026, 7, 31), monday]}
+        ),
+        captured_at=datetime(
+            2026, 8, 3, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE
+        ),
+    )
+    assert result.attempt_status == "success"
+    assert result.previous_trading_date == date(2026, 7, 31)
+
+
+def test_post_holiday_without_valid_night_quote_fails_closed() -> None:
+    post_holiday = date(2026, 10, 9)
+    result = dce_daily.fetch_dce_night_session_close_snapshot(
+        ["M2701"],
+        post_holiday,
+        fetcher=lambda symbol: spot_frame(
+            symbols=["M2701"], prices=[3010.0], times=["14:59:59"]
+        ),
+        trade_calendar_fetcher=lambda: pd.DataFrame(
+            {"trade_date": [date(2026, 9, 30), post_holiday]}
+        ),
+        captured_at=datetime(
+            2026, 10, 9, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE
+        ),
+    )
+    assert result.attempt_status == "failed"
+    assert result.previous_trading_date == date(2026, 9, 30)
+    assert result.contract_results[0].quality_status == (
+        "quote_time_before_window"
+    )
+
+
+def test_partial_contract_set_is_passed_with_incomplete() -> None:
+    result = dce_daily.fetch_dce_night_session_close_snapshot(
+        ["M2701", "Y2701"],
+        TARGET,
+        fetcher=lambda symbol: spot_frame(
+            symbols=["M2701"], prices=[3010.0], times=["23:00:00"]
+        ),
+        captured_at=CAPTURED,
+    )
+    assert result.attempt_status == "passed_with_incomplete"
+    assert [record.contract_code for record in result.records] == ["M2701"]
 
 
 def test_fetcher_exception_is_structured_and_proxy_identity_is_redacted(

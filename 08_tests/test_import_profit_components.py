@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 import hashlib
 from pathlib import Path
@@ -155,6 +156,10 @@ def test_origin_order_parameter_summary_and_official_table(tmp_path):
     assert table.loc[0, "CNF升贴水"] == "0"
     assert table.loc[1, "CNF升贴水"] == "-2.50"
     assert table.loc[2, "CNF升贴水"] == "—"
+    assert components.origin_profit_title("brazil", "巴西") == "巴西大豆榨利"
+    assert components.origin_profit_title("us_gulf", "美湾") == "美国大豆榨利"
+    assert components.origin_profit_title("us_pnw", "美西") == "美国大豆榨利"
+    assert components.origin_profit_title("argentina", "阿根廷") == "阿根廷大豆榨利"
     assert table.loc[6, "美元成本"] == "407.00"
     assert table.loc[6, "CBOT日度价格"] == "1107.00"
     assert table.loc[6, "远期汇率"] == "6.870000"
@@ -162,6 +167,29 @@ def test_origin_order_parameter_summary_and_official_table(tmp_path):
     assert table.loc[6, "豆油盘面"] == "8107.00"
     assert "盘面净榨利" in table
     assert components.date_status_counts(records) == (8, 4)
+
+
+def test_price_basis_note_distinguishes_history_and_night_snapshot(tmp_path):
+    dataset, _ = page_dataset(tmp_path)
+    records = components.records_for_date(
+        dataset, origin="brazil", business_date=date(2026, 6, 25)
+    )
+    assert (
+        components.price_basis_note(records)
+        == components.HISTORICAL_PRICE_BASIS_NOTE
+    )
+
+    night_records = tuple(
+        None
+        if record is None
+        else replace(
+            record,
+            soymeal_price_type="night_session_close",
+            soyoil_price_type="night_session_close",
+        )
+        for record in records
+    )
+    assert components.price_basis_note(night_records) == components.PRICE_BASIS_NOTE
 
 
 @pytest.mark.parametrize(

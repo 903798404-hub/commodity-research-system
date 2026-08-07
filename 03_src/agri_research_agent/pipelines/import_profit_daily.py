@@ -144,7 +144,7 @@ def try_materialize_import_profit_business_day(
         )
     if external.candidate_status not in {"passed", "passed_with_incomplete"}:
         raise DailyMaterializationError("external input candidate status is invalid")
-    if dce.attempt_status not in {"passed", "failed"}:
+    if dce.attempt_status not in {"success", "passed_with_incomplete", "failed"}:
         raise DailyMaterializationError("DCE capture outcome status is invalid")
 
     paths = ImportProfitRuntimePaths(Path(runtime_root))
@@ -217,7 +217,7 @@ def try_materialize_import_profit_business_day(
         fx = load_fx_parquet(external.candidate_dir / FX_FILENAME)
         dce_records = (
             load_dce_parquet(dce.candidate_dir / DCE_FILENAME).records
-            if dce.attempt_status == "passed"
+            if dce.attempt_status in {"success", "passed_with_incomplete"}
             else ()
         )
         candidate = build_soybean_result_candidate(
@@ -307,7 +307,7 @@ def try_materialize_import_profit_business_day(
             )
         )
         quality = {
-            "transaction": "daily_morning_inputs_append",
+            "transaction": "daily_night_session_close_append",
             "business_date": business_date.isoformat(),
             "source_file_uploaded_at": external_manifest[
                 "source_file_uploaded_at"
@@ -346,8 +346,8 @@ def try_materialize_import_profit_business_day(
         identities[QUALITY_FILENAME] = json_identity(
             building / QUALITY_FILENAME, QUALITY_FILENAME
         )
-        start_date = current.manifest.get("morning_open_snapshot_start_date")
-        if start_date is None and dce.attempt_status == "passed":
+        start_date = current.manifest.get("night_session_close_start_date")
+        if start_date is None and dce.attempt_status in {"success", "passed_with_incomplete"}:
             start_date = business_date.isoformat()
         manual_count = (
             pq.read_table(building / MANUAL_CNF_FILENAME).num_rows
@@ -368,7 +368,7 @@ def try_materialize_import_profit_business_day(
             "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
             "release_id": release_id,
             "parent_release_id": current.release_id,
-            "release_reason": "daily_morning_inputs_append",
+            "release_reason": "daily_night_session_close_append",
             "generation": current.generation + 1,
             "business_date": business_date.isoformat(),
             "created_at": utc_text(calculated_at),
@@ -386,7 +386,7 @@ def try_materialize_import_profit_business_day(
             "dce_capture_status": dce.attempt_status,
             "dce_snapshot_batch_id": dce.snapshot_batch_id,
             "dce_captured_at": dce.captured_at.isoformat(),
-            "morning_open_snapshot_start_date": start_date,
+            "night_session_close_start_date": start_date,
             "appended_business_key_count": 48,
             "record_count": new_dataset.business_key_count,
             "success_count": new_dataset.success_count,
@@ -417,7 +417,7 @@ def try_materialize_import_profit_business_day(
             release_id=release_id,
             current=current,
             updated_at=calculated_at,
-            index_reason="daily_morning_inputs_append",
+            index_reason="daily_night_session_close_append",
             expected_record_count=new_dataset.business_key_count,
         )
         return DailyMaterializationResult(

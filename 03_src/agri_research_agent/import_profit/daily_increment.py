@@ -1,4 +1,4 @@
-"""Immutable DCE morning capture outcomes and daily business-key helpers."""
+"""Immutable DCE night-session-close outcomes and daily business-key helpers."""
 
 from __future__ import annotations
 
@@ -22,8 +22,9 @@ from .dce_daily import (
     CAPTURE_ZONE,
     DceSpotBatchResult,
     SpotFetcher,
+    TradeCalendarFetcher,
     default_spot_fetcher,
-    fetch_dce_morning_open_snapshot,
+    fetch_dce_night_session_close_snapshot,
     records_as_dicts,
 )
 from .historical_cnf_adapter import shipment_year_for
@@ -42,7 +43,7 @@ from .morning_external_inputs import (
 from .standard_io import DCE_INCREMENTAL_SCHEMA, load_dce_parquet
 
 
-DCE_FILENAME = "dce_morning_open_prices.parquet"
+DCE_FILENAME = "dce_night_session_close_prices.parquet"
 MANIFEST_FILENAME = "manifest.json"
 QUALITY_FILENAME = "quality_report.json"
 INDEX_FILENAME = "dce_input_index.json"
@@ -59,7 +60,7 @@ class DceInputLockedError(DailyIncrementError):
 
 
 @dataclass(frozen=True, slots=True)
-class DceMorningCaptureOutcome:
+class DceNightSessionCloseOutcome:
     business_date: date
     attempt_status: str
     attempt_started_at: datetime
@@ -76,10 +77,13 @@ class DceMorningCaptureOutcome:
     manifest_sha256: str
 
 
+DceMorningCaptureOutcome = DceNightSessionCloseOutcome
+
+
 @dataclass(frozen=True, slots=True)
 class DceInputPromotionResult:
     status: str
-    outcome: DceMorningCaptureOutcome
+    outcome: DceNightSessionCloseOutcome
     generation: int
     previous_candidate_id: str | None
     index_sha256: str
@@ -139,7 +143,7 @@ def empty_daily_cnf_records(
     )
 
 
-def capture_and_store_dce_morning_input(
+def capture_and_store_dce_night_session_close(
     dce_input_root: str | Path,
     *,
     business_date: date,
@@ -147,6 +151,7 @@ def capture_and_store_dce_morning_input(
     candidate_id: str,
     snapshot_batch_id: str,
     fetcher: SpotFetcher = default_spot_fetcher,
+    trade_calendar_fetcher: TradeCalendarFetcher | None = None,
     clock: Callable[[], datetime] | None = None,
     lock_timeout_seconds: float = 10.0,
 ) -> DceInputPromotionResult:
@@ -158,17 +163,18 @@ def capture_and_store_dce_morning_input(
     now = clock or (lambda: datetime.now(CAPTURE_ZONE))
     started = now()
     requested = required_dce_contracts(business_date, config)
-    batch = fetch_dce_morning_open_snapshot(
+    batch = fetch_dce_night_session_close_snapshot(
         requested,
         business_date,
         fetcher=fetcher,
+        trade_calendar_fetcher=trade_calendar_fetcher,
         captured_at=started,
         enforce_capture_window=True,
     )
     finished = now()
     if batch.capture_gate_status != "valid":
         raise DailyIncrementError(
-            "DCE capture was not executed inside the legal 09:00:00-09:02:59 window"
+            "DCE capture was not executed inside the legal 08:30:00-08:32:59 window"
         )
     available = tuple(
         sorted(
@@ -178,7 +184,7 @@ def capture_and_store_dce_morning_input(
         )
     )
     missing = tuple(sorted(set(requested) - set(available)))
-    status = "passed" if not missing and batch.is_usable else "failed"
+    status = batch.attempt_status
     reasons = tuple(
         sorted(
             {
@@ -207,7 +213,7 @@ def capture_and_store_dce_morning_input(
             raise DailyIncrementError("DCE candidate_id already exists")
         building.mkdir()
         outputs = {}
-        if status == "passed":
+        if status in {"success", "passed_with_incomplete"}:
             _write_dce_parquet(building / DCE_FILENAME, batch)
             outputs[DCE_FILENAME] = _file_identity(building / DCE_FILENAME)
         quality = {
@@ -221,7 +227,15 @@ def capture_and_store_dce_morning_input(
             "failure_reasons": list(reasons),
             "record_count": len(batch.records),
             "fatal": [],
-            "warning": [] if status == "passed" else ["dce_capture_failed"],
+            "warning": (
+                []
+                if status == "success"
+                else [
+                    "dce_contracts_incomplete"
+                    if status == "passed_with_incomplete"
+                    else "dce_capture_failed"
+                ]
+            ),
             "final_status": status,
         }
         _write_json(building / QUALITY_FILENAME, quality)
@@ -244,7 +258,15 @@ def capture_and_store_dce_morning_input(
             "failure_reasons": list(reasons),
             "source": "akshare",
             "source_function": "futures_zh_spot",
-            "price_type": "morning_open_snapshot",
+            "price_field": "current_price",
+            "price_type": "night_session_close",
+            "scheduled_time": "08:30:00",
+            "previous_trading_date": (
+                batch.previous_trading_date.isoformat()
+                if batch.previous_trading_date is not None
+                else None
+            ),
+            "trade_calendar_source": batch.trade_calendar_source,
             "output_files": outputs,
             "quality_report_filename": QUALITY_FILENAME,
         }
@@ -269,7 +291,7 @@ def capture_and_store_dce_morning_input(
         index_sha = _replace_json_atomically(
             root / INDEX_FILENAME, index, previous_sha
         )
-        outcome = DceMorningCaptureOutcome(
+        outcome = DceNightSessionCloseOutcome(
             business_date=business_date,
             attempt_status=status,
             attempt_started_at=started,
@@ -305,7 +327,7 @@ def capture_and_store_dce_morning_input(
 
 def load_current_dce_outcome(
     dce_input_root: str | Path,
-) -> DceMorningCaptureOutcome:
+) -> DceNightSessionCloseOutcome:
     root = Path(dce_input_root)
     index = _read_json(root / INDEX_FILENAME, "DCE input Index")
     _require_exact_dce_index(index)
@@ -322,7 +344,7 @@ def load_current_dce_outcome(
         or manifest["snapshot_batch_id"] != index["snapshot_batch_id"]
     ):
         raise DailyIncrementError("DCE input Index and Manifest disagree")
-    return DceMorningCaptureOutcome(
+    return DceNightSessionCloseOutcome(
         business_date=date.fromisoformat(manifest["business_date"]),
         attempt_status=manifest["attempt_status"],
         attempt_started_at=datetime.fromisoformat(manifest["attempt_started_at"]),
@@ -352,7 +374,7 @@ def _write_dce_parquet(path: Path, batch: DceSpotBatchResult) -> None:
 
 def _validate_dce_candidate(candidate_dir: Path, manifest: dict) -> None:
     status = manifest.get("attempt_status")
-    if status not in {"passed", "failed"}:
+    if status not in {"success", "passed_with_incomplete", "failed"}:
         raise DailyIncrementError("DCE attempt status is invalid")
     outputs = manifest.get("output_files")
     if not isinstance(outputs, dict):
@@ -361,7 +383,7 @@ def _validate_dce_candidate(candidate_dir: Path, manifest: dict) -> None:
     if outputs.get(QUALITY_FILENAME) != _file_identity(quality_path):
         raise DailyIncrementError("DCE quality identity mismatch")
     parquet_path = candidate_dir / DCE_FILENAME
-    if status == "passed":
+    if status in {"success", "passed_with_incomplete"}:
         if outputs.get(DCE_FILENAME) != _file_identity(parquet_path):
             raise DailyIncrementError("DCE Parquet identity mismatch")
         loaded = load_dce_parquet(parquet_path)
@@ -399,8 +421,12 @@ def _require_exact_dce_index(payload: dict) -> None:
     _safe_id(payload["snapshot_batch_id"])
     _required_sha(payload["current_manifest_sha256"], "DCE Manifest SHA")
     date.fromisoformat(payload["business_date"])
-    if payload["capture_status"] not in {"passed", "failed"}:
+    if payload["capture_status"] not in {"success", "passed_with_incomplete", "failed"}:
         raise DailyIncrementError("DCE input Index status is invalid")
+
+
+# Compatibility alias for pre-production callers; no separate 09:00 path remains.
+capture_and_store_dce_morning_input = capture_and_store_dce_night_session_close
 
 
 def _write_json(path: Path, payload: dict) -> None:

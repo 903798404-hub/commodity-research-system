@@ -43,7 +43,7 @@ python3 09_deploy/spread_release/create_candidate_result.py \
 
 候选结果只记录批次 ID、容器路径、`rw` 模式、容器 UID/GID 和读写探测结果，不记录宿主机绝对路径。候选测试 runtime 可以验证锁、临时文件、fsync、Release rename 和 Index 原子替换，但不得直接提升为正式 runtime；正式部署必须从干净历史输入和真实当日输入重新初始化。
 
-`candidate-waiting-gate` 表示源码、镜像、容器、页面和已执行检查通过，但真实北京时间 09:00 AkShare `morning_open_snapshot` 门禁仍未完成。该状态必须包含 `real_morning_open_snapshot` 阻塞门禁，不能生成部署计划，也不能进入正式提升。只有 `candidate-validated`、空 `blocking_gates`，且进口利润候选同时密封已完成的真实门禁证据时，才具备进入部署计划阶段的资格。真实门禁证据至少记录业务日期、捕获时间、`snapshot_batch_id` 和候选 SHA；目标合约的完整身份保存在对应候选证据中。
+`candidate-waiting-gate` 表示源码、镜像、容器、页面和已执行检查通过，但真实工作日北京时间08:30 AkShare `night_session_close` 门禁仍未完成。该状态必须包含 `real_night_session_close_snapshot` 阻塞门禁，不能生成部署计划，也不能进入正式提升。只有 `candidate-validated`、空 `blocking_gates`，且进口利润候选同时密封已完成的真实门禁证据时，才具备进入部署计划阶段的资格。真实门禁证据至少记录业务日期、捕获时间、`snapshot_batch_id` 和候选 SHA；目标合约的完整身份及缺失状态保存在对应候选证据中。
 
 ## 既有 b05
 

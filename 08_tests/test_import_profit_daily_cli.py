@@ -30,7 +30,7 @@ def load_script(name: str, monkeypatch):
     "name",
     [
         "refresh_import_profit_external_inputs",
-        "capture_import_profit_morning_open",
+        "capture_import_profit_night_session_close",
         "materialize_import_profit_daily_release",
     ],
 )
@@ -104,11 +104,11 @@ def test_materialize_cli_prints_bounded_path_free_summary(
 def test_dce_cli_calls_capture_then_common_materializer_without_sql(
     tmp_path, monkeypatch, capsys
 ):
-    module = load_script("capture_import_profit_morning_open", monkeypatch)
+    module = load_script("capture_import_profit_night_session_close", monkeypatch)
     capture = SimpleNamespace(
         outcome=SimpleNamespace(
             candidate_id="dce-001",
-            attempt_status="passed",
+            attempt_status="success",
             requested_contracts=("M2701", "Y2701"),
             available_contracts=("M2701", "Y2701"),
             missing_contracts=(),
@@ -117,7 +117,7 @@ def test_dce_cli_calls_capture_then_common_materializer_without_sql(
     called = []
     monkeypatch.setattr(
         module,
-        "capture_and_store_dce_morning_input",
+        "capture_and_store_dce_night_session_close",
         lambda *args, **kwargs: called.append("capture") or capture,
     )
     monkeypatch.setattr(
@@ -136,7 +136,7 @@ def test_dce_cli_calls_capture_then_common_materializer_without_sql(
     assert module.main(args) == 0
     payload = json.loads(capsys.readouterr().out)
     assert called == ["capture", "materialize"]
-    assert payload["dce_capture_status"] == "passed"
+    assert payload["dce_capture_status"] == "success"
     assert "sql" not in json.dumps(payload).lower()
 
 

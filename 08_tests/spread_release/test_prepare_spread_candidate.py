@@ -274,7 +274,7 @@ def _with_import_profit_runtime(options: CandidateOptions, tmp_path: Path) -> Ca
             "import_profit_runtime_host": runtime,
             "import_profit_runtime_approved_root": approved,
             "formal_import_profit_runtime_host": tmp_path / "formal-import-profit-runtime",
-            "pending_gate": "real_morning_open_snapshot",
+            "pending_gate": "real_night_session_close_snapshot",
             "earliest_expected_business_date": "2026-08-03",
         }
     )
@@ -669,7 +669,7 @@ def test_import_profit_runtime_path_safety_rules(tmp_path: Path) -> None:
         **options.__dict__,
         "import_profit_runtime_approved_root": approved,
         "formal_import_profit_runtime_host": tmp_path / "formal-runtime",
-        "pending_gate": "real_morning_open_snapshot",
+        "pending_gate": "real_night_session_close_snapshot",
         "earliest_expected_business_date": "2026-08-03",
     }
     for invalid in (tmp_path / "missing", outside, options.build_context):
@@ -697,7 +697,7 @@ def test_import_profit_runtime_rejects_formal_path_and_symlink_escape(tmp_path: 
         **options.__dict__,
         "import_profit_runtime_approved_root": approved,
         "formal_import_profit_runtime_host": formal,
-        "pending_gate": "real_morning_open_snapshot",
+        "pending_gate": "real_night_session_close_snapshot",
         "earliest_expected_business_date": "2026-08-03",
     }
     with pytest.raises(ContractError, match="overlap"):

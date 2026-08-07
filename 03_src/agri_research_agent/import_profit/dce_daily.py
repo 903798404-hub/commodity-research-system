@@ -1,4 +1,4 @@
-"""Strict adapter for AkShare DCE morning-open full-contract snapshots."""
+"""Strict adapter for AkShare DCE night-session-close full-contract snapshots."""
 
 from __future__ import annotations
 
@@ -9,22 +9,24 @@ from numbers import Real
 import os
 import re
 from time import perf_counter
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 
-ADAPTER_VERSION = "3"
+ADAPTER_VERSION = "4"
 SOURCE = "akshare"
 SOURCE_FUNCTION = "futures_zh_spot"
-PRICE_TYPE = "morning_open_snapshot"
+PRICE_FIELD = "current_price"
+PRICE_TYPE = "night_session_close"
 CAPTURE_TIMEZONE = "Asia/Shanghai"
 CAPTURE_ZONE = ZoneInfo(CAPTURE_TIMEZONE)
-CAPTURE_START = time(9, 0, 0)
-CAPTURE_END_EXCLUSIVE = time(9, 3, 0)
-QUOTE_TIME_START = CAPTURE_START
-QUOTE_TIME_END_EXCLUSIVE = CAPTURE_END_EXCLUSIVE
+SCHEDULED_TIME = time(8, 30, 0)
+CAPTURE_START = SCHEDULED_TIME
+CAPTURE_END_EXCLUSIVE = time(8, 33, 0)
+QUOTE_TIME_START = time(22, 59, 0)
+QUOTE_TIME_END_EXCLUSIVE = time(23, 1, 0)
 FULL_CONTRACT_PATTERN = re.compile(r"^([MYmy])(\d{2})(01|05|09)$")
 STANDARDIZED_RECORD_FIELDS = (
     "business_date",
@@ -47,6 +49,7 @@ STANDARDIZED_RECORD_FIELDS = (
 )
 
 SpotFetcher = Callable[[str], pd.DataFrame]
+TradeCalendarFetcher = Callable[[], pd.DataFrame]
 
 
 class DceSpotContractError(ValueError):
@@ -67,7 +70,7 @@ class DceFullContract:
 
 
 @dataclass(frozen=True, slots=True)
-class DceMorningOpenRecord:
+class DceNightSessionCloseRecord:
     business_date: date
     instrument: str
     commodity: str
@@ -95,7 +98,7 @@ class DceSpotContractResult:
     contract: DceFullContract
     quality_status: str
     is_usable: bool
-    record: DceMorningOpenRecord | None
+    record: DceNightSessionCloseRecord | None
     matched_source_symbol: str | None
     source_quote_date: date | None
     source_quote_time: time | None
@@ -127,11 +130,13 @@ class DceSpotBatchResult:
     captured_at: datetime
     capture_gate_status: str
     contract_results: tuple[DceSpotContractResult, ...]
+    previous_trading_date: date | None = None
+    trade_calendar_source: str | None = None
     source_error_type: str | None = None
     source_error_message: str | None = None
 
     @property
-    def records(self) -> tuple[DceMorningOpenRecord, ...]:
+    def records(self) -> tuple[DceNightSessionCloseRecord, ...]:
         return tuple(
             item.record for item in self.contract_results if item.record is not None
         )
@@ -141,6 +146,19 @@ class DceSpotBatchResult:
         return bool(self.contract_results) and all(
             item.is_usable for item in self.contract_results
         )
+
+    @property
+    def attempt_status(self) -> str:
+        available = sum(item.is_usable for item in self.contract_results)
+        if available == len(self.contract_results) and available:
+            return "success"
+        if available:
+            return "passed_with_incomplete"
+        return "failed"
+
+
+# Compatibility aliases for callers that imported the pre-production 09:00 names.
+DceMorningOpenRecord = DceNightSessionCloseRecord
 
 
 def normalize_full_contract_code(value: str) -> DceFullContract:
@@ -170,6 +188,13 @@ def default_spot_fetcher(batch_symbol: str) -> pd.DataFrame:
     return ak.futures_zh_spot(symbol=batch_symbol, market="CF", adjust="0")
 
 
+def default_trade_calendar_fetcher() -> pd.DataFrame:
+    """Load the closest available China trading-day calendar from AkShare."""
+    import akshare as ak
+
+    return ak.tool_trade_date_hist_sina()
+
+
 def capture_gate_status(business_date: date, captured_at: datetime) -> str:
     target = _require_date(business_date)
     local = _as_shanghai(captured_at)
@@ -183,15 +208,16 @@ def capture_gate_status(business_date: date, captured_at: datetime) -> str:
     return "valid"
 
 
-def fetch_dce_morning_open_snapshot(
+def fetch_dce_night_session_close_snapshot(
     contract_codes: Sequence[str],
     business_date: date,
     *,
     fetcher: SpotFetcher = default_spot_fetcher,
+    trade_calendar_fetcher: TradeCalendarFetcher | None = None,
     captured_at: datetime | None = None,
     enforce_capture_window: bool = True,
 ) -> DceSpotBatchResult:
-    """Fetch a single multi-contract spot snapshot and validate every contract."""
+    """Freeze the latest completed M/Y night-session prices at the 08:30 gate."""
     target = _require_date(business_date)
     timestamp = _as_shanghai(captured_at or datetime.now(CAPTURE_ZONE))
     contracts = _normalize_unique_contracts(contract_codes)
@@ -210,6 +236,53 @@ def fetch_dce_morning_open_snapshot(
                 _failure(item, gate, error_message=gate) for item in contracts
             ),
         )
+
+    try:
+        calendar_frame = (trade_calendar_fetcher or default_trade_calendar_fetcher)()
+        trading_dates = _trade_dates(calendar_frame)
+    except Exception as exc:
+        message = _bounded_safe_message(exc)
+        return DceSpotBatchResult(
+            requested_contracts=tuple(item.code for item in contracts),
+            request_symbol=request_symbol,
+            elapsed_seconds=0.0,
+            returned_fields=(),
+            source_row_count=0,
+            captured_at=timestamp,
+            capture_gate_status="trade_calendar_error",
+            contract_results=tuple(
+                _failure(
+                    item,
+                    "trade_calendar_error",
+                    error_type=type(exc).__name__,
+                    error_message=message,
+                )
+                for item in contracts
+            ),
+            trade_calendar_source="akshare.tool_trade_date_hist_sina",
+            source_error_type=type(exc).__name__,
+            source_error_message=message,
+        )
+    if target not in trading_dates:
+        return DceSpotBatchResult(
+            requested_contracts=tuple(item.code for item in contracts),
+            request_symbol=request_symbol,
+            elapsed_seconds=0.0,
+            returned_fields=(),
+            source_row_count=0,
+            captured_at=timestamp,
+            capture_gate_status="non_trading_business_date",
+            contract_results=tuple(
+                _failure(
+                    item,
+                    "non_trading_business_date",
+                    error_message="business_date is absent from the trading calendar",
+                )
+                for item in contracts
+            ),
+            trade_calendar_source="akshare.tool_trade_date_hist_sina",
+        )
+    previous_trading_date = max((item for item in trading_dates if item < target), default=None)
 
     started = perf_counter()
     try:
@@ -234,6 +307,8 @@ def fetch_dce_morning_open_snapshot(
                 )
                 for item in contracts
             ),
+            previous_trading_date=previous_trading_date,
+            trade_calendar_source="akshare.tool_trade_date_hist_sina",
             source_error_type=type(exc).__name__,
             source_error_message=message,
         )
@@ -266,7 +341,13 @@ def fetch_dce_morning_open_snapshot(
         captured_at=timestamp,
         capture_gate_status=gate,
         contract_results=results,
+        previous_trading_date=previous_trading_date,
+        trade_calendar_source="akshare.tool_trade_date_hist_sina",
     )
+
+
+# Import compatibility only; all formal callers use the night-session name.
+fetch_dce_morning_open_snapshot = fetch_dce_night_session_close_snapshot
 
 
 def _adapt_contract(
@@ -301,7 +382,7 @@ def _adapt_contract(
             "quote_time_before_window",
             matched_source_symbol=source_symbol,
             source_quote_time=quote_time,
-            error_message="quote time precedes the morning snapshot window",
+            error_message="quote time precedes the night-session close window",
         )
     if quote_time >= QUOTE_TIME_END_EXCLUSIVE:
         return _failure(
@@ -309,7 +390,7 @@ def _adapt_contract(
             "quote_time_outside_allowed_range",
             matched_source_symbol=source_symbol,
             source_quote_time=quote_time,
-            error_message="quote time is outside the morning snapshot window",
+            error_message="quote time is outside the night-session close window",
         )
     quote_date: date | None = None
     if "date" in frame.columns and not pd.isna(row["date"]):
@@ -342,7 +423,7 @@ def _adapt_contract(
             error_message="current_price must be a finite positive numeric value",
         )
     numeric_price = float(price)
-    record = DceMorningOpenRecord(
+    record = DceNightSessionCloseRecord(
         business_date=business_date,
         instrument=contract.instrument,
         commodity="soybean",
@@ -358,12 +439,14 @@ def _adapt_contract(
         source_quote_time=quote_time,
         captured_at=captured_at,
         capture_timezone=CAPTURE_TIMEZONE,
-        quality_status="valid",
+        quality_status=(
+            "valid" if quote_date is not None else "valid_time_only"
+        ),
         is_usable=True,
     )
     return DceSpotContractResult(
         contract=contract,
-        quality_status="valid",
+        quality_status=record.quality_status,
         is_usable=True,
         record=record,
         matched_source_symbol=source_symbol,
@@ -430,6 +513,20 @@ def _parse_quote_date(value: object) -> date | None:
     if pd.isna(parsed):
         return None
     return parsed.date()
+
+
+def _trade_dates(frame: pd.DataFrame) -> frozenset[date]:
+    if not isinstance(frame, pd.DataFrame) or "trade_date" not in frame.columns:
+        raise ValueError("trade calendar requires a trade_date column")
+    parsed: set[date] = set()
+    for value in frame["trade_date"]:
+        item = _parse_quote_date(value)
+        if item is None:
+            raise ValueError("trade calendar contains an invalid trade_date")
+        parsed.add(item)
+    if not parsed:
+        raise ValueError("trade calendar is empty")
+    return frozenset(parsed)
 
 
 def _valid_price(value: object) -> bool:
@@ -532,6 +629,6 @@ def _time_text(value: time | None) -> str | None:
 
 
 def records_as_dicts(
-    records: Sequence[DceMorningOpenRecord],
+    records: Sequence[DceNightSessionCloseRecord],
 ) -> list[Mapping[str, Any]]:
     return [record.as_dict() for record in records]

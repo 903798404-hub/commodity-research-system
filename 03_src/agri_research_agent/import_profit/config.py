@@ -158,8 +158,12 @@ class DceDailyPolicy:
     price_field: str
     price_type: str
     capture_timezone: str
+    scheduled_time: time
     capture_start: time
     capture_end_exclusive: time
+    source_quote_start: time
+    source_quote_end_exclusive: time
+    trade_calendar_function: str
     require_same_business_date: bool
     require_complete_contract_set: bool
     allow_previous_date_fallback: bool
@@ -173,12 +177,16 @@ DEFAULT_DCE_DAILY_POLICY = DceDailyPolicy(
     provider="akshare",
     source_function="futures_zh_spot",
     price_field="current_price",
-    price_type="morning_open_snapshot",
+    price_type="night_session_close",
     capture_timezone="Asia/Shanghai",
-    capture_start=time(9, 0),
-    capture_end_exclusive=time(9, 3),
+    scheduled_time=time(8, 30),
+    capture_start=time(8, 30),
+    capture_end_exclusive=time(8, 33),
+    source_quote_start=time(22, 59),
+    source_quote_end_exclusive=time(23, 1),
+    trade_calendar_function="tool_trade_date_hist_sina",
     require_same_business_date=True,
-    require_complete_contract_set=True,
+    require_complete_contract_set=False,
     allow_previous_date_fallback=False,
     allow_post_close_fallback=False,
     allow_historical_close_fallback=False,
@@ -568,7 +576,10 @@ def _parse_dce_daily_policy(value: object) -> DceDailyPolicy:
         "price_semantics",
         "exchange",
         "capture_timezone",
+        "scheduled_time",
         "capture_window",
+        "source_quote_time_window",
+        "trade_calendar_function",
         "require_same_business_date",
         "require_complete_contract_set",
         "allow_previous_date_fallback",
@@ -587,6 +598,15 @@ def _parse_dce_daily_policy(value: object) -> DceDailyPolicy:
         incremental["capture_window"],
         "source_policy.dce.incremental_source.capture_window",
     )
+    quote_window = _mapping(
+        incremental["source_quote_time_window"],
+        "source_policy.dce.incremental_source.source_quote_time_window",
+    )
+    _require_exact_keys(
+        quote_window,
+        {"start", "end_exclusive"},
+        "source_policy.dce.incremental_source.source_quote_time_window",
+    )
     _require_exact_keys(
         window,
         {"start", "end_exclusive"},
@@ -595,6 +615,9 @@ def _parse_dce_daily_policy(value: object) -> DceDailyPolicy:
     try:
         start = time.fromisoformat(str(window["start"]))
         end_exclusive = time.fromisoformat(str(window["end_exclusive"]))
+        scheduled_time = time.fromisoformat(str(incremental["scheduled_time"]))
+        quote_start = time.fromisoformat(str(quote_window["start"]))
+        quote_end_exclusive = time.fromisoformat(str(quote_window["end_exclusive"]))
     except ValueError as exc:
         raise ImportProfitConfigError(
             "DCE capture window times must use ISO local time"
@@ -603,12 +626,14 @@ def _parse_dce_daily_policy(value: object) -> DceDailyPolicy:
         "provider": "akshare",
         "function": "futures_zh_spot",
         "source_field": "current_price",
-        "price_type": "morning_open_snapshot",
-        "price_semantics": "DCE_morning_market_snapshot",
+        "price_type": "night_session_close",
+        "price_semantics": "DCE_night_session_close",
         "exchange": "DCE",
         "capture_timezone": "Asia/Shanghai",
+        "scheduled_time": "08:30:00",
+        "trade_calendar_function": "tool_trade_date_hist_sina",
         "require_same_business_date": True,
-        "require_complete_contract_set": True,
+        "require_complete_contract_set": False,
         "allow_previous_date_fallback": False,
         "allow_post_close_fallback": False,
         "allow_historical_close_fallback": False,
@@ -618,11 +643,14 @@ def _parse_dce_daily_policy(value: object) -> DceDailyPolicy:
     }
     if (
         any(incremental[key] != expected_value for key, expected_value in expected.items())
-        or start != time(9, 0)
-        or end_exclusive != time(9, 3)
+        or scheduled_time != time(8, 30)
+        or start != time(8, 30)
+        or end_exclusive != time(8, 33)
+        or quote_start != time(22, 59)
+        or quote_end_exclusive != time(23, 1)
     ):
         raise ImportProfitConfigError(
-            "DCE daily source policy violates the morning snapshot contract"
+            "DCE daily source policy violates the night-session-close contract"
         )
     return DEFAULT_DCE_DAILY_POLICY
 

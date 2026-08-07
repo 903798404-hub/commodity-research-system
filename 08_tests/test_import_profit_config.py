@@ -46,14 +46,20 @@ def test_real_config_loads_into_immutable_models() -> None:
     assert config.business_calendar_policy.exchange_holiday_calendar_required is False
     assert config.business_calendar_policy.retain_weekday_without_market_data is True
     assert config.business_calendar_policy.allow_previous_business_day_fallback is False
-    assert config.dce_daily_policy.price_type == "morning_open_snapshot"
+    assert config.dce_daily_policy.price_type == "night_session_close"
     assert config.dce_daily_policy.source_function == "futures_zh_spot"
     assert config.dce_daily_policy.price_field == "current_price"
     assert config.dce_daily_policy.capture_timezone == "Asia/Shanghai"
-    assert config.dce_daily_policy.capture_start == time(9, 0)
-    assert config.dce_daily_policy.capture_end_exclusive == time(9, 3)
+    assert config.dce_daily_policy.scheduled_time == time(8, 30)
+    assert config.dce_daily_policy.capture_start == time(8, 30)
+    assert config.dce_daily_policy.capture_end_exclusive == time(8, 33)
+    assert config.dce_daily_policy.source_quote_start == time(22, 59)
+    assert config.dce_daily_policy.source_quote_end_exclusive == time(23, 1)
+    assert config.dce_daily_policy.trade_calendar_function == (
+        "tool_trade_date_hist_sina"
+    )
     assert config.dce_daily_policy.require_same_business_date is True
-    assert config.dce_daily_policy.require_complete_contract_set is True
+    assert config.dce_daily_policy.require_complete_contract_set is False
     assert config.dce_daily_policy.allow_previous_date_fallback is False
     assert config.dce_daily_policy.allow_post_close_fallback is False
     assert config.dce_daily_policy.allow_historical_close_fallback is False
@@ -114,7 +120,7 @@ def test_weekday_calendar_policy_is_strict(
         ("price_type", "historical_continuous_close"),
         ("capture_timezone", "UTC"),
         ("require_same_business_date", False),
-        ("require_complete_contract_set", False),
+        ("require_complete_contract_set", True),
         ("allow_previous_date_fallback", True),
         ("allow_post_close_fallback", True),
         ("allow_historical_close_fallback", True),
@@ -122,7 +128,7 @@ def test_weekday_calendar_policy_is_strict(
         ("allow_other_price_field_fallback", True),
     ],
 )
-def test_dce_morning_snapshot_policy_is_strict(
+def test_dce_night_session_close_policy_is_strict(
     tmp_path: Path,
     field: str,
     value: object,
@@ -133,13 +139,13 @@ def test_dce_morning_snapshot_policy_is_strict(
             "incremental_source"
         ].update({field: value}),
     )
-    with pytest.raises(ImportProfitConfigError, match="morning snapshot"):
+    with pytest.raises(ImportProfitConfigError, match="night-session-close"):
         load_soybean_config(path)
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("start", "08:59:59"), ("end_exclusive", "09:03:01")],
+    [("start", "08:29:59"), ("end_exclusive", "08:33:01")],
 )
 def test_dce_capture_window_is_strict(
     tmp_path: Path,
@@ -152,7 +158,7 @@ def test_dce_capture_window_is_strict(
             "capture_window"
         ].update({field: value}),
     )
-    with pytest.raises(ImportProfitConfigError, match="morning snapshot"):
+    with pytest.raises(ImportProfitConfigError, match="night-session-close"):
         load_soybean_config(path)
 
 

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from wait_for_service_ready import (
     DEFAULT_READINESS_POLICY,
@@ -159,7 +160,7 @@ PRODUCTION_DATA_MOUNTS = {
 IMPORT_PROFIT_RUNTIME_ENV_KEY = "IMPORT_PROFIT_RUNTIME_ROOT"
 IMPORT_PROFIT_RUNTIME_CONTAINER_PATH = "/app/runtime/import_profit"
 IMPORT_PROFIT_RUNTIME_MOUNT_ID = "import_profit_candidate_runtime"
-REAL_MORNING_OPEN_GATE_ID = "real_morning_open_snapshot"
+REAL_NIGHT_SESSION_CLOSE_GATE_ID = "real_night_session_close_snapshot"
 CANDIDATE_VALIDATED_STATUS = "candidate-validated"
 CANDIDATE_WAITING_STATUS = "candidate-waiting-gate"
 
@@ -2651,7 +2652,7 @@ def load_candidate_result(
 
 
 def pending_candidate_gate(gate_id: str, earliest_business_date: str) -> dict[str, Any]:
-    if gate_id != REAL_MORNING_OPEN_GATE_ID:
+    if gate_id != REAL_NIGHT_SESSION_CLOSE_GATE_ID:
         raise ContractError(f"unsupported candidate gate: {gate_id}")
     try:
         parsed_date = datetime.strptime(earliest_business_date, "%Y-%m-%d").date()
@@ -2660,19 +2661,19 @@ def pending_candidate_gate(gate_id: str, earliest_business_date: str) -> dict[st
     if parsed_date.weekday() >= 5:
         raise ContractError("candidate gate earliest business date must be a weekday")
     return {
-        "gate_id": REAL_MORNING_OPEN_GATE_ID,
+        "gate_id": REAL_NIGHT_SESSION_CLOSE_GATE_ID,
         "status": "pending",
         "required_business_timezone": "Asia/Shanghai",
-        "required_window_start": "09:00:00",
-        "required_window_end_exclusive": "09:03:00",
+        "required_window_start": "08:30:00",
+        "required_window_end_exclusive": "08:33:00",
         "earliest_expected_business_date": parsed_date.isoformat(),
         "blocks_production_promotion": True,
-        "description": "Real AkShare morning_open_snapshot validation is pending.",
+        "description": "Real AkShare night_session_close validation is pending.",
     }
 
 
 def completed_candidate_gate(evidence: Mapping[str, Any]) -> dict[str, Any]:
-    if evidence.get("gate_id") != REAL_MORNING_OPEN_GATE_ID or evidence.get("status") != "completed":
+    if evidence.get("gate_id") != REAL_NIGHT_SESSION_CLOSE_GATE_ID or evidence.get("status") != "completed":
         raise ContractError("completed candidate gate identity is invalid")
     business_date = evidence.get("business_date")
     try:
@@ -2682,7 +2683,18 @@ def completed_candidate_gate(evidence: Mapping[str, Any]) -> dict[str, Any]:
     if parsed_date.weekday() >= 5:
         raise ContractError("completed gate business date must be a weekday")
     captured_at = evidence.get("captured_at")
-    validate_build_time(captured_at)
+    captured = validate_build_time(captured_at)
+    captured_local = captured.astimezone(ZoneInfo("Asia/Shanghai"))
+    if captured_local.date() != parsed_date or not (
+        (8, 30, 0) <= (
+            captured_local.hour,
+            captured_local.minute,
+            captured_local.second,
+        ) < (8, 33, 0)
+    ):
+        raise ContractError(
+            "completed gate captured_at must be inside the target business date 08:30 window"
+        )
     contracts = evidence.get("target_contracts")
     if (
         not isinstance(contracts, list)
@@ -2691,6 +2703,29 @@ def completed_candidate_gate(evidence: Mapping[str, Any]) -> dict[str, Any]:
         or any(not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", item) for item in contracts)
     ):
         raise ContractError("completed gate target contracts are invalid")
+    available = evidence.get("available_contracts")
+    missing = evidence.get("missing_contracts")
+    if (
+        not isinstance(available, list)
+        or not isinstance(missing, list)
+        or not available
+        or len(set(available)) != len(available)
+        or len(set(missing)) != len(missing)
+        or set(available) & set(missing)
+        or set(available) | set(missing) != set(contracts)
+    ):
+        raise ContractError("completed gate contract availability partition is invalid")
+    capture_status = evidence.get("capture_status")
+    expected_status = "success" if not missing else "passed_with_incomplete"
+    if capture_status != expected_status:
+        raise ContractError("completed gate capture status does not match contract availability")
+    if (
+        evidence.get("business_date_validation") != "passed"
+        or evidence.get("source_time_validation") != "passed"
+        or evidence.get("snapshot_freeze_validation") != "passed"
+        or evidence.get("cnf_refetch_validation") != "passed"
+    ):
+        raise ContractError("completed gate validation evidence is incomplete")
     snapshot_batch_id = evidence.get("snapshot_batch_id")
     if not isinstance(snapshot_batch_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", snapshot_batch_id):
         raise ContractError("completed gate snapshot batch identity is invalid")
@@ -2698,11 +2733,18 @@ def completed_candidate_gate(evidence: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(candidate_sha256, str) or not SHA256_RE.fullmatch(candidate_sha256):
         raise ContractError("completed gate candidate SHA-256 is invalid")
     return {
-        "gate_id": REAL_MORNING_OPEN_GATE_ID,
+        "gate_id": REAL_NIGHT_SESSION_CLOSE_GATE_ID,
         "status": "completed",
         "business_date": parsed_date.isoformat(),
         "captured_at": str(captured_at),
         "target_contracts": list(contracts),
+        "available_contracts": list(available),
+        "missing_contracts": list(missing),
+        "capture_status": capture_status,
+        "business_date_validation": "passed",
+        "source_time_validation": "passed",
+        "snapshot_freeze_validation": "passed",
+        "cnf_refetch_validation": "passed",
         "snapshot_batch_id": snapshot_batch_id,
         "candidate_sha256": candidate_sha256,
     }
@@ -2781,11 +2823,11 @@ def require_deployable_candidate_result(result: Mapping[str, Any]) -> None:
         completed = result.get("completed_gates", [])
         if not isinstance(completed, list) or not any(
             isinstance(gate, dict)
-            and gate.get("gate_id") == REAL_MORNING_OPEN_GATE_ID
+            and gate.get("gate_id") == REAL_NIGHT_SESSION_CLOSE_GATE_ID
             and gate.get("status") == "completed"
             for gate in completed
         ):
-            raise ContractError("import profit candidate is missing the completed real 09:00 gate")
+            raise ContractError("import profit candidate is missing the completed real 08:30 night-session gate")
 
 
 def validate_candidate_result(

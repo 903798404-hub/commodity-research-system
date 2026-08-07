@@ -28,7 +28,7 @@ from release_contract import (
     IMPORT_PROFIT_RUNTIME_ENV_KEY,
     IMPORT_PROFIT_RUNTIME_MOUNT_ID,
     PRODUCTION_CONTAINER,
-    REAL_MORNING_OPEN_GATE_ID,
+    REAL_NIGHT_SESSION_CLOSE_GATE_ID,
     WEATHER_CONTAINER_CURRENT_PATH,
     WEATHER_CONTAINER_PATH,
     ContractError,
@@ -232,8 +232,8 @@ def validate_import_profit_runtime_paths(options: CandidateOptions) -> Path | No
         or container_path != IMPORT_PROFIT_RUNTIME_CONTAINER_PATH
     ):
         raise ContractError("import profit runtime container path is invalid")
-    if options.pending_gate != REAL_MORNING_OPEN_GATE_ID:
-        raise ContractError("import profit Stage A requires the controlled real 09:00 pending gate")
+    if options.pending_gate != REAL_NIGHT_SESSION_CLOSE_GATE_ID:
+        raise ContractError("import profit Stage A requires the controlled real 08:30 night-session pending gate")
     if not options.earliest_expected_business_date:
         raise ContractError("import profit pending gate requires an earliest business date")
     pending_candidate_gate(options.pending_gate, options.earliest_expected_business_date)
@@ -1624,7 +1624,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--import-profit-runtime-container",
         default=IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
     )
-    parser.add_argument("--pending-gate", choices=(REAL_MORNING_OPEN_GATE_ID,))
+    parser.add_argument("--pending-gate", choices=(REAL_NIGHT_SESSION_CLOSE_GATE_ID,))
     parser.add_argument("--earliest-expected-business-date")
     return parser
 
