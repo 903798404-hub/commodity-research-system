@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -891,16 +892,21 @@ def test_offline_compose_resolution_rejects_old_latest_fallback() -> None:
         resolve_spread_image_offline(compose_text, {"SPREAD_IMAGE": LATEST_REF})
 
 
+def test_real_compose_environment_fixture_covers_required_variables() -> None:
+    compose_text = (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
+    required_variables = set(re.findall(r"\$\{([A-Z0-9_]+):\?", compose_text))
+    complete_environment = production_environment_for()
+
+    assert required_variables <= complete_environment.keys()
+    assert complete_environment["WEATHER_DATA_DIR"] == PRODUCTION_WEATHER_DATA_DIR
+
+
 @pytest.mark.skipif(
     not docker_compose_is_available(), reason="local Docker Compose is unavailable"
 )
 def test_real_compose_config_fails_without_spread_image() -> None:
-    environment = os.environ.copy()
+    environment = {**os.environ, **production_environment_for()}
     environment.pop("SPREAD_IMAGE", None)
-    environment["MARKET_DATA_GIT_HEAD"] = GIT_COMMIT
-    environment["USDA_DASHBOARD_URL"] = PRODUCTION_USDA_URL
-    environment["OIL_WORLD_DASHBOARD_URL"] = PRODUCTION_OIL_WORLD_URL
-    environment["WEATHER_RUNTIME_CURRENT_DIR"] = PRODUCTION_WEATHER_RUNTIME_DIR
     result = subprocess.run(
         [
             "docker",
@@ -928,13 +934,7 @@ def test_real_compose_config_fails_without_spread_image() -> None:
     not docker_compose_is_available(), reason="local Docker Compose is unavailable"
 )
 def test_real_compose_config_fails_without_runtime_git_head() -> None:
-    environment = {
-        **os.environ,
-        "SPREAD_IMAGE": IMAGE_REF,
-        "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
-        "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
-        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
-    }
+    environment = {**os.environ, **production_environment_for()}
     environment.pop("MARKET_DATA_GIT_HEAD", None)
     result = subprocess.run(
         [
@@ -963,14 +963,7 @@ def test_real_compose_config_fails_without_runtime_git_head() -> None:
     not docker_compose_is_available(), reason="local Docker Compose is unavailable"
 )
 def test_real_compose_config_resolves_exact_spread_image() -> None:
-    environment = {
-        **os.environ,
-        "SPREAD_IMAGE": IMAGE_REF,
-        "MARKET_DATA_GIT_HEAD": GIT_COMMIT,
-        "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
-        "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
-        "WEATHER_RUNTIME_CURRENT_DIR": PRODUCTION_WEATHER_RUNTIME_DIR,
-    }
+    environment = {**os.environ, **production_environment_for()}
     result = subprocess.run(
         [
             "docker",
