@@ -23,7 +23,9 @@ def test_main_workspace_renders_six_soybean_tabs_and_harvested_empty_state() -> 
     app.run(timeout=30)
 
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == [
+    assert app.tabs[0].label == "种植生长"
+    assert app.tabs[-1].label == "出口销售与装船"
+    assert [tab.label for tab in app.tabs[1:-1]] == [
         "播种率",
         "出苗率",
         "开花率",

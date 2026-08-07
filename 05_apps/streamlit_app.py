@@ -18,7 +18,7 @@ from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import apply_home_navigation_request, get_external_app_url, render_home
 from import_profit_runtime_page import render_import_profit_runtime_page
-from soybean_crop_progress_page import render_soybean_crop_progress_page
+from soybean_weekly_page import render_soybean_weekly_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
 
@@ -584,7 +584,7 @@ def render_selected_workspace_page(selected_page: str) -> None:
     elif selected_page == "基差/一口价":
         render_basis_page(BASIS_DATABASE_FILE, BASIS_RUNTIME_FALLBACK_FILE)
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
-        render_soybean_crop_progress_page()
+        render_soybean_weekly_page()
     elif selected_page in WEATHER_PAGE_ROUTES:
         render_weather_research_page(WEATHER_PAGE_ROUTES[selected_page])
     elif selected_page == USDA_PAGE_TITLE:
