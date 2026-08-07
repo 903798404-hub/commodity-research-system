@@ -15,6 +15,7 @@ from agri_research_agent.import_profit import (
     BusinessKey,
     SoybeanCalculationInput,
     SoybeanImportProfitConfig,
+    SoybeanParameters,
     calculate_soybean_net_crush_margin,
     map_soybean_contracts,
 )
@@ -292,6 +293,7 @@ def formal_daily_table(
             else shipment_year_for(business_date, month)
         )
         params = config.resolve_parameters(origin)
+        product_costs = _display_product_costs(record, params)
         rows.append(
             {
                 "船期": (
@@ -299,42 +301,28 @@ def formal_daily_table(
                     if record is not None
                     else f"{shipment_year:04d}-{month:02d}"
                 ),
-                "CNF升贴水": _display_number(
+                "CNF（美分/蒲）": _display_number(
                     record.cnf_cents_per_bushel if record else None
-                ),
-                "CNF来源": (
-                    record.cnf_source
-                    if record is not None and record.cnf_source
-                    else "—"
                 ),
                 "美元成本": _display_number(
                     record.usd_cost_per_tonne if record else None
                 ),
                 "CBOT合约": record.cbot_contract if record else "—",
-                "CBOT日度价格": _display_number(
+                "CBOT价格": _display_number(
                     record.cbot_price_cents_per_bushel if record else None
                 ),
-                "远期汇率": _display_number(
-                    record.fx_value if record else None, decimals=6
+                "汇率": _display_number(
+                    record.fx_value if record else None, decimals=4
                 ),
-                "汇率期限": (
-                    f"{record.fx_target_tenor}个月" if record else "—"
-                ),
-                "汇率状态": (
-                    _fx_status(record.fx_is_interpolated)
-                    if record
-                    else "—"
-                ),
-                "豆粕合约": record.soymeal_contract if record else "—",
+                "国内合约": _domestic_contract_label(record),
                 "豆粕盘面": _display_number(
                     record.soymeal_price_cny_per_tonne if record else None
                 ),
-                "豆油合约": record.soyoil_contract if record else "—",
                 "豆油盘面": _display_number(
                     record.soyoil_price_cny_per_tonne if record else None
                 ),
-                "关税": f"{params.tariff_rate:.0%}",
-                "增值税": f"{params.vat_rate:.0%}",
+                "关税%": f"{params.tariff_rate:.0%}",
+                "增值税%": f"{params.vat_rate:.0%}",
                 "完税成本": _display_number(
                     (
                         record.duty_paid_cost_cny_per_tonne
@@ -342,24 +330,65 @@ def formal_daily_table(
                         else None
                     )
                 ),
-                "盘面净榨利": _display_number(
+                "盘面榨利": _display_number(
                     (
                         record.net_crush_margin_cny_per_tonne
                         if record
                         else None
                     )
                 ),
-                "状态": (
-                    record.calculation_status if record else "missing_record"
-                ),
-                "缺失原因": (
-                    _display_reasons(record.missing_reasons)
-                    if record
-                    else "missing_record"
-                ),
+                "粕成本": product_costs[0],
+                "油成本": product_costs[1],
             }
         )
     return pd.DataFrame(rows)
+
+
+def _domestic_contract_label(
+    record: SoybeanQueryRecord | None,
+) -> str:
+    """Combine M/Y contracts for display without changing stored contracts."""
+
+    if record is None:
+        return "—"
+    soymeal = record.soymeal_contract.strip()
+    soyoil = record.soyoil_contract.strip()
+    meal_period = soymeal[1:] if soymeal[:1].upper() == "M" else soymeal
+    oil_period = soyoil[1:] if soyoil[:1].upper() == "Y" else soyoil
+    if meal_period and meal_period == oil_period:
+        return meal_period
+    if soymeal and soyoil:
+        return f"{soymeal} / {soyoil}"
+    return soymeal or soyoil or "—"
+
+
+def _display_product_costs(
+    record: SoybeanQueryRecord | None,
+    params: SoybeanParameters,
+) -> tuple[str, str]:
+    """Derive the two residual product costs for presentation only."""
+
+    if record is None or record.duty_paid_cost_cny_per_tonne is None:
+        return "—", "—"
+    total = (
+        record.duty_paid_cost_cny_per_tonne
+        + params.port_charge_cny_per_tonne
+        + params.processing_fee_cny_per_tonne
+        + params.additional_fees_cny_per_tonne
+    )
+    soymeal_value = None
+    if record.soyoil_price_cny_per_tonne is not None:
+        soymeal_value = (
+            total
+            - record.soyoil_price_cny_per_tonne * params.oil_yield
+        ) / params.meal_yield
+    soyoil_value = None
+    if record.soymeal_price_cny_per_tonne is not None:
+        soyoil_value = (
+            total
+            - record.soymeal_price_cny_per_tonne * params.meal_yield
+        ) / params.oil_yield
+    return _display_number(soymeal_value), _display_number(soyoil_value)
 
 
 def editable_daily_table(

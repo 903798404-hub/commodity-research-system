@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import importlib
+import os
 import pathlib
 from pathlib import Path
 import sys
@@ -85,7 +86,11 @@ def test_public_interface_and_cache_identity_include_file_changes(tmp_path):
     model = import_profit_page.ImportProfitPageDataPaths(*paths)
     assert model.paths == tuple(pathlib.Path(path) for path in paths)
     first = import_profit_page._file_signature(paths[0])
-    paths[0].touch()
+    stat = paths[0].stat()
+    os.utime(
+        paths[0],
+        ns=(stat.st_atime_ns, first[1] + 1_000_000_000),
+    )
     second = import_profit_page._file_signature(paths[0])
     assert first[0] == second[0]
     assert first[1:] != second[1:]
@@ -121,13 +126,18 @@ def test_complete_page_renders_controls_tables_tabs_and_figures(tmp_path):
         *(f"2027-{month:02d}" for month in range(1, 7)),
         *(f"2026-{month:02d}" for month in range(7, 13)),
     ]
-    assert official.loc[0, "CNF升贴水"] == "0"
-    assert official.loc[1, "CNF升贴水"] == "-2.50"
+    assert official.loc[0, "CNF（美分/蒲）"] == "0"
+    assert official.loc[1, "CNF（美分/蒲）"] == "-2.50"
     assert official.loc[6, "美元成本"] == "407.00"
-    assert official.loc[6, "CBOT日度价格"] == "1107.00"
-    assert official.loc[6, "远期汇率"] == "6.870000"
+    assert official.loc[6, "CBOT价格"] == "1107.00"
+    assert official.loc[6, "汇率"] == "6.8700"
     assert official.loc[6, "豆粕盘面"] == "2907.00"
     assert official.loc[6, "豆油盘面"] == "8107.00"
+    assert "国内合约" in official
+    assert "粕成本" in official
+    assert "油成本" in official
+    for hidden in ("CNF来源", "汇率期限", "汇率状态", "状态", "缺失原因"):
+        assert hidden not in official
 
     assert [tab.label for tab in app.tabs] == [
         "CNF报价",
@@ -154,9 +164,13 @@ def test_complete_page_renders_controls_tables_tabs_and_figures(tmp_path):
         + _texts(app.warning)
         )
     assert "保存CNF" not in visible_text
-    assert any(
-        "巴西大豆榨利" in item.proto.body for item in app.get("html")
-    )
+    origin_headings = [
+        item.proto.body
+        for item in app.get("html")
+        if "巴西大豆榨利" in item.proto.body
+    ]
+    assert origin_headings
+    assert all("正式历史值" not in body for body in origin_headings)
     assert any(
         "当前历史记录保留原历史连续合约收盘口径" in item.value
         and "未改写为08:30夜盘收盘基准" in item.value

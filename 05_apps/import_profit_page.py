@@ -409,7 +409,7 @@ def _render_daily_table(
 ) -> None:
     render_section_heading(
         origin_profit_title(origin, origin_label),
-        "正式历史值；空值显示为“—”，保留0与负数",
+        "当日船期、价格与榨利",
     )
     table = formal_daily_table(
         prepared.records,

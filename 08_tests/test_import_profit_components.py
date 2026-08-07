@@ -153,19 +153,50 @@ def test_origin_order_parameter_summary_and_official_table(tmp_path):
         *(f"2027-{month:02d}" for month in range(1, 7)),
         *(f"2026-{month:02d}" for month in range(7, 13)),
     ]
-    assert table.loc[0, "CNF升贴水"] == "0"
-    assert table.loc[1, "CNF升贴水"] == "-2.50"
-    assert table.loc[2, "CNF升贴水"] == "—"
+    assert list(table.columns) == [
+        "船期",
+        "CNF（美分/蒲）",
+        "美元成本",
+        "CBOT合约",
+        "CBOT价格",
+        "汇率",
+        "国内合约",
+        "豆粕盘面",
+        "豆油盘面",
+        "关税%",
+        "增值税%",
+        "完税成本",
+        "盘面榨利",
+        "粕成本",
+        "油成本",
+    ]
+    assert table.loc[0, "CNF（美分/蒲）"] == "0"
+    assert table.loc[1, "CNF（美分/蒲）"] == "-2.50"
+    assert table.loc[2, "CNF（美分/蒲）"] == "—"
     assert components.origin_profit_title("brazil", "巴西") == "巴西大豆榨利"
     assert components.origin_profit_title("us_gulf", "美湾") == "美国大豆榨利"
     assert components.origin_profit_title("us_pnw", "美西") == "美国大豆榨利"
     assert components.origin_profit_title("argentina", "阿根廷") == "阿根廷大豆榨利"
     assert table.loc[6, "美元成本"] == "407.00"
-    assert table.loc[6, "CBOT日度价格"] == "1107.00"
-    assert table.loc[6, "远期汇率"] == "6.870000"
+    assert table.loc[6, "CBOT价格"] == "1107.00"
+    assert table.loc[6, "汇率"] == "6.8700"
+    assert table.loc[6, "国内合约"] == "2609"
     assert table.loc[6, "豆粕盘面"] == "2907.00"
     assert table.loc[6, "豆油盘面"] == "8107.00"
-    assert "盘面净榨利" in table
+    total = 3007.0 + 100.0 + 150.0
+    assert table.loc[6, "粕成本"] == f"{(total - 8107.0 * 0.185) / 0.785:.2f}"
+    assert table.loc[6, "油成本"] == f"{(total - 2907.0 * 0.785) / 0.185:.2f}"
+    assert table.loc[2, "CBOT价格"] == "1103.00"
+    assert table.loc[2, "汇率"] == "6.8300"
+    assert table.loc[2, "豆粕盘面"] == "2903.00"
+    assert table.loc[2, "豆油盘面"] == "8103.00"
+    assert table.loc[2, "完税成本"] == "—"
+    assert table.loc[2, "盘面榨利"] == "—"
+    assert table.loc[2, "粕成本"] == "—"
+    assert table.loc[2, "油成本"] == "—"
+    assert components._domestic_contract_label(
+        replace(records[6], soyoil_contract="Y2701")
+    ) == "M2609 / Y2701"
     assert components.date_status_counts(records) == (8, 4)
 
 

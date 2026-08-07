@@ -386,11 +386,11 @@ def test_real_page_save_reloads_new_release_and_preserves_other_rows(
     assert after.previous_release_id == before.release_id
     official = app.dataframe[0].value
     row = official.loc[official["船期"] == "2026-12"].iloc[0]
-    assert row["CNF升贴水"] == "100.00"
-    assert row["CNF来源"] == "manual_ui"
+    assert row["CNF（美分/蒲）"] == "100.00"
+    assert "CNF来源" not in official
     assert row["美元成本"] == "460.12"
     assert row["完税成本"] == "3456.93"
-    assert row["盘面净榨利"] == "179.83"
+    assert row["盘面榨利"] == "179.83"
     assert app.session_state[
         components.STATE_RUNTIME_CONTEXT
     ].loaded_generation == 2
