@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -13,6 +12,7 @@ SOURCE_ROOT = PROJECT_ROOT / "03_src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from agri_research_agent.soybean_exports.common import resolve_runtime_git_head
 from agri_research_agent.soybean_exports.fas import (
     FasAdapter,
     resolve_fas_api_key,
@@ -33,14 +33,7 @@ def main() -> int:
         os.environ,
         allow_development_fallback=args.allow_usda_api_key_fallback,
     )
-    git_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=PROJECT_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    ).stdout.strip()
+    git_head = resolve_runtime_git_head(project_root=PROJECT_ROOT)
     result = run_fas_pipeline(
         runtime_root=args.runtime_root.resolve(),
         adapter=FasAdapter(

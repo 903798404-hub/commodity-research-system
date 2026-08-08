@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -12,6 +11,7 @@ SOURCE_ROOT = PROJECT_ROOT / "03_src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from agri_research_agent.soybean_exports.common import resolve_runtime_git_head
 from agri_research_agent.soybean_exports.fgis import (
     FgisAdapter,
     FgisYearlyAdapter,
@@ -43,14 +43,7 @@ def main() -> int:
         args.cert_date_start is not None or args.cert_date_end is not None
     ):
         parser.error("--cert-date-start/--cert-date-end are only valid with --source socrata")
-    git_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=PROJECT_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    ).stdout.strip()
+    git_head = resolve_runtime_git_head(project_root=PROJECT_ROOT)
     adapter = (
         FgisYearlyAdapter(
             timeout_seconds=args.timeout,

@@ -4,11 +4,13 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 import pandas as pd
 import pyarrow as pa
@@ -16,10 +18,124 @@ import pyarrow.parquet as pq
 
 
 SCHEMA_VERSION = 1
+RUNTIME_GIT_HEAD_ENVIRONMENT_VARIABLE = "MARKET_DATA_GIT_HEAD"
+RUNTIME_RELEASE_PATH = Path("/app/RELEASE.json")
+RUNTIME_RELEASE_FIELDS = frozenset(
+    {
+        "application",
+        "release_id",
+        "git_commit",
+        "git_tree",
+        "build_time",
+        "source",
+    }
+)
+FULL_GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 class PipelineError(RuntimeError):
     """A safe, user-facing data pipeline failure."""
+
+
+def _full_git_sha(value: object, *, source: str) -> str:
+    if not isinstance(value, str) or not FULL_GIT_SHA_RE.fullmatch(value):
+        raise PipelineError(f"{source} must be a full 40-character hexadecimal Git SHA")
+    return value.lower()
+
+
+def _release_git_head(release_path: Path) -> str:
+    if not release_path.is_file():
+        raise PipelineError("production runtime identity is missing /app/RELEASE.json")
+    try:
+        payload = json.loads(release_path.read_text(encoding="utf-8", errors="strict"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PipelineError(
+            "production runtime /app/RELEASE.json is unreadable or invalid"
+        ) from exc
+    if not isinstance(payload, dict) or set(payload) != RUNTIME_RELEASE_FIELDS:
+        raise PipelineError("production runtime /app/RELEASE.json schema is invalid")
+    if payload.get("application") != "spread-dashboard":
+        raise PipelineError("production runtime /app/RELEASE.json application is invalid")
+    for field in ("release_id", "build_time", "source"):
+        if not isinstance(payload.get(field), str) or not payload[field]:
+            raise PipelineError(
+                f"production runtime /app/RELEASE.json {field} is invalid"
+            )
+    git_commit = _full_git_sha(
+        payload.get("git_commit"),
+        source="production runtime /app/RELEASE.json git_commit",
+    )
+    git_tree = _full_git_sha(
+        payload.get("git_tree"),
+        source="production runtime /app/RELEASE.json git_tree",
+    )
+    if git_tree == git_commit:
+        raise PipelineError(
+            "production runtime /app/RELEASE.json git_tree must differ from git_commit"
+        )
+    return git_commit
+
+
+def resolve_runtime_git_head(
+    *,
+    project_root: Path,
+    environment: Mapping[str, str] | None = None,
+    release_path: Path | None = None,
+    git_runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> str:
+    """Resolve the sealed production identity or a local development Git checkout."""
+    selected_environment = os.environ if environment is None else environment
+    selected_release = RUNTIME_RELEASE_PATH if release_path is None else release_path
+    environment_present = RUNTIME_GIT_HEAD_ENVIRONMENT_VARIABLE in selected_environment
+    release_present = selected_release.exists()
+
+    if environment_present or release_present:
+        if not environment_present:
+            raise PipelineError(
+                "production runtime identity is missing MARKET_DATA_GIT_HEAD"
+            )
+        if not release_present:
+            raise PipelineError(
+                "production runtime identity is missing /app/RELEASE.json"
+            )
+        environment_git_head = _full_git_sha(
+            selected_environment.get(RUNTIME_GIT_HEAD_ENVIRONMENT_VARIABLE),
+            source="production runtime MARKET_DATA_GIT_HEAD",
+        )
+        release_git_head = _release_git_head(selected_release)
+        if environment_git_head != release_git_head:
+            raise PipelineError(
+                "production runtime MARKET_DATA_GIT_HEAD and /app/RELEASE.json disagree"
+            )
+        return environment_git_head
+
+    if project_root == Path("/app") or not (project_root / ".git").exists():
+        raise PipelineError(
+            "runtime Git identity is unavailable because production identities are absent "
+            "and the project root is not a local Git checkout"
+        )
+
+    runner = subprocess.run if git_runner is None else git_runner
+    try:
+        completed = runner(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except FileNotFoundError as exc:
+        raise PipelineError(
+            "local development Git identity is unavailable because git was not found"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise PipelineError(
+            "local development Git identity could not be read from the checkout"
+        ) from exc
+    return _full_git_sha(
+        completed.stdout.strip(), source="local development git rev-parse HEAD"
+    )
 
 
 def utc_now() -> datetime:
