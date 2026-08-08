@@ -4,9 +4,11 @@ import csv
 import gzip
 import io
 import json
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -39,6 +41,8 @@ FGIS_DATASET_ID = "sruw-w49i"
 FGIS_RESOURCE_URL = f"https://agtransport.usda.gov/resource/{FGIS_DATASET_ID}.json"
 FGIS_METADATA_URL = f"https://agtransport.usda.gov/api/views/{FGIS_DATASET_ID}"
 FGIS_YEARLY_BASE_URL = "https://fgisonline.ams.usda.gov/exportgrainreport"
+FGIS_YEARLY_MAX_ATTEMPTS = 5
+FGIS_YEARLY_RETRY_DELAYS_SECONDS = (1, 2, 4, 8)
 FGIS_YEARLY_REQUIRED_FIELDS = (
     "Thursday",
     "Cert Date",
@@ -128,6 +132,10 @@ FGIS_BUSINESS_COLUMNS = (
 
 class FgisAdapterError(PipelineError):
     pass
+
+
+class _FgisYearlyTransferError(Exception):
+    """A complete Yearly response was not received and may be retried."""
 
 
 @dataclass(frozen=True)
@@ -284,7 +292,7 @@ class FgisYearlyAdapter:
         session: requests.Session | None = None,
         timeout_seconds: float = 50,
         calendar_year: int | None = None,
-        max_attempts: int = 3,
+        max_attempts: int = FGIS_YEARLY_MAX_ATTEMPTS,
         use_environment_proxy: bool = True,
     ) -> None:
         if timeout_seconds <= 0 or max_attempts <= 0:
@@ -313,42 +321,66 @@ class FgisYearlyAdapter:
         source_url = f"{FGIS_YEARLY_BASE_URL}/{source_file}"
         fetched_at = iso_utc(utc_now())
         response = None
-        last_request_error: requests.RequestException | None = None
-        for _attempt in range(1, self.max_attempts + 1):
+        content: bytes | None = None
+        declared_length: int | None = None
+        last_transfer_error: BaseException | None = None
+        retryable_errors = (
+            requests.ConnectionError,
+            requests.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+            IncompleteRead,
+            _FgisYearlyTransferError,
+        )
+        for attempt in range(1, self.max_attempts + 1):
             try:
                 response = self.session.get(
                     source_url,
                     timeout=self.timeout_seconds,
                     headers={"Accept": "text/csv, application/octet-stream"},
                 )
+                if response.status_code != 200:
+                    raise FgisAdapterError(
+                        f"FGIS Yearly HTTP status {response.status_code}"
+                    )
+                content_type = _response_header(response, "Content-Type")
+                media_type = (content_type or "").split(";", 1)[0].strip().lower()
+                if media_type not in self._CONTENT_TYPES:
+                    raise FgisAdapterError(
+                        "FGIS Yearly unexpected Content-Type: "
+                        f"{content_type or 'missing'}"
+                    )
+                content = bytes(response.content)
+                content_length_header = _response_header(response, "Content-Length")
+                if content_length_header is not None:
+                    try:
+                        declared_length = int(content_length_header)
+                    except ValueError as exc:
+                        raise FgisAdapterError(
+                            "FGIS Yearly invalid Content-Length"
+                        ) from exc
+                    if declared_length != len(content):
+                        raise _FgisYearlyTransferError(
+                            "FGIS Yearly Content-Length mismatch"
+                        )
+                else:
+                    declared_length = len(content)
                 break
-            except requests.RequestException as exc:
-                last_request_error = exc
-        if response is None:
-            assert last_request_error is not None
+            except retryable_errors as exc:
+                response = None
+                content = None
+                declared_length = None
+                last_transfer_error = exc
+                if attempt < self.max_attempts:
+                    delay_index = min(
+                        attempt - 1, len(FGIS_YEARLY_RETRY_DELAYS_SECONDS) - 1
+                    )
+                    time.sleep(FGIS_YEARLY_RETRY_DELAYS_SECONDS[delay_index])
+        if response is None or content is None or declared_length is None:
+            assert last_transfer_error is not None
             raise FgisAdapterError(
                 f"FGIS Yearly request failed after {self.max_attempts} attempts: "
-                f"{type(last_request_error).__name__}"
-            ) from last_request_error
-        if response.status_code != 200:
-            raise FgisAdapterError(f"FGIS Yearly HTTP status {response.status_code}")
-        content_type = _response_header(response, "Content-Type")
-        media_type = (content_type or "").split(";", 1)[0].strip().lower()
-        if media_type not in self._CONTENT_TYPES:
-            raise FgisAdapterError(
-                f"FGIS Yearly unexpected Content-Type: {content_type or 'missing'}"
-            )
-        content = bytes(response.content)
-        content_length_header = _response_header(response, "Content-Length")
-        if content_length_header is not None:
-            try:
-                declared_length = int(content_length_header)
-            except ValueError as exc:
-                raise FgisAdapterError("FGIS Yearly invalid Content-Length") from exc
-            if declared_length != len(content):
-                raise FgisAdapterError("FGIS Yearly Content-Length mismatch")
-        else:
-            declared_length = len(content)
+                f"{type(last_transfer_error).__name__}"
+            ) from last_transfer_error
         try:
             text = content.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
@@ -798,7 +830,6 @@ def _previous_yearly_active(
     *,
     previous_success: Mapping[str, Any] | None,
     old_stable: pd.DataFrame | None,
-    current_active: pd.DataFrame,
     calendar_year: int,
 ) -> tuple[pd.DataFrame, str]:
     if (
@@ -824,11 +855,7 @@ def _previous_yearly_active(
     ):
         return _empty_fgis_stable(), "calendar_year_switch"
     if old_stable is not None and not old_stable.empty:
-        frozen_through = pd.to_datetime(old_stable["week_ending_date"]).max()
-        observed_baseline = current_active.loc[
-            pd.to_datetime(current_active["week_ending_date"]).le(frozen_through)
-        ].copy()
-        return observed_baseline, "initial_yearly_observation_against_frozen_baseline"
+        return _empty_fgis_stable(), "initial_yearly_observation_against_frozen_baseline"
     return _empty_fgis_stable(), "no_historical_baseline"
 
 
@@ -1195,7 +1222,6 @@ def run_fgis_pipeline(
             previous_active, baseline_mode = _previous_yearly_active(
                 previous_success=previous_success,
                 old_stable=old,
-                current_active=active,
                 calendar_year=int(fetched.calendar_year),
             )
             active_change = _active_change_summary(previous_active, active)

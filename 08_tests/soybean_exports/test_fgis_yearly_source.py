@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ import requests
 from agri_research_agent.soybean_exports.common import PipelineError, sha256_bytes
 from agri_research_agent.soybean_exports.fgis import (
     FGIS_DATASET_ID,
+    FGIS_YEARLY_MAX_ATTEMPTS,
     FGIS_YEARLY_SOURCE_CHANNEL,
     FgisAdapterError,
     FgisFetchResult,
@@ -97,12 +99,17 @@ class CsvResponse:
         *,
         status: int = 200,
         content_type: str = "application/octet-stream",
+        declared_content_length: int | None = None,
     ) -> None:
         self.content = content
         self.status_code = status
         self.headers = {
             "Content-Type": content_type,
-            "Content-Length": str(len(content)),
+            "Content-Length": str(
+                len(content)
+                if declared_content_length is None
+                else declared_content_length
+            ),
             "Last-Modified": "Mon, 03 Aug 2026 15:00:25 GMT",
             "ETag": '"yearly-etag"',
         }
@@ -129,6 +136,19 @@ class RetrySession(CsvSession):
             self.failures -= 1
             raise requests.ConnectionError("transient")
         return self.response
+
+
+class SequenceSession:
+    def __init__(self, outcomes: list[CsvResponse | BaseException]) -> None:
+        self.outcomes = list(outcomes)
+        self.calls: list[dict[str, Any]] = []
+
+    def get(self, url: str, **kwargs: Any) -> CsvResponse:
+        self.calls.append({"url": url, **kwargs})
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
 
 
 def yearly_adapter(rows: list[dict[str, str]], *, year: int) -> tuple[FgisYearlyAdapter, bytes]:
@@ -244,14 +264,77 @@ def test_yearly_adapter_dynamic_url_schema_mapping_filter_and_destination_identi
     assert result.records[0]["source_mkt_yr"] == "2526"
 
 
-def test_yearly_adapter_retries_transient_request_error_only() -> None:
+def test_yearly_adapter_retries_transient_request_error_only(monkeypatch: pytest.MonkeyPatch) -> None:
     content = csv_bytes([yearly_row()])
     session = RetrySession(CsvResponse(content))
+    delays: list[float] = []
+    monkeypatch.setattr("agri_research_agent.soybean_exports.fgis.time.sleep", delays.append)
     result = FgisYearlyAdapter(
         session=session, calendar_year=2026, max_attempts=2
     ).fetch_soybeans()
     assert len(session.calls) == 2
+    assert delays == [1]
     assert result.source_sha256 == sha256_bytes(content)
+
+
+def test_yearly_adapter_retries_chunked_encoding_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = csv_bytes([yearly_row()])
+    session = SequenceSession(
+        [requests.exceptions.ChunkedEncodingError("truncated"), CsvResponse(content)]
+    )
+    monkeypatch.setattr("agri_research_agent.soybean_exports.fgis.time.sleep", lambda _: None)
+    result = FgisYearlyAdapter(session=session, calendar_year=2026).fetch_soybeans()
+    assert len(session.calls) == 2
+    assert result.source_sha256 == sha256_bytes(content)
+
+
+def test_yearly_adapter_retries_incomplete_read_twice_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = csv_bytes([yearly_row()])
+    session = SequenceSession(
+        [IncompleteRead(b"partial", 10), IncompleteRead(b"partial", 5), CsvResponse(content)]
+    )
+    monkeypatch.setattr("agri_research_agent.soybean_exports.fgis.time.sleep", lambda _: None)
+    result = FgisYearlyAdapter(session=session, calendar_year=2026).fetch_soybeans()
+    assert len(session.calls) == 3
+    assert result.source_sha256 == sha256_bytes(content)
+
+
+def test_yearly_adapter_retries_content_length_mismatch_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = csv_bytes([yearly_row()])
+    session = SequenceSession(
+        [
+            CsvResponse(content, declared_content_length=len(content) + 1),
+            CsvResponse(content),
+        ]
+    )
+    monkeypatch.setattr("agri_research_agent.soybean_exports.fgis.time.sleep", lambda _: None)
+    result = FgisYearlyAdapter(session=session, calendar_year=2026).fetch_soybeans()
+    assert len(session.calls) == 2
+    assert result.content_length == len(content)
+
+
+def test_yearly_adapter_http_403_and_schema_error_are_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agri_research_agent.soybean_exports.fgis.time.sleep", lambda _: None)
+    forbidden = SequenceSession([CsvResponse(b"forbidden", status=403)])
+    with pytest.raises(FgisAdapterError, match="HTTP status 403"):
+        FgisYearlyAdapter(session=forbidden, calendar_year=2026).fetch_soybeans()
+    assert len(forbidden.calls) == 1
+
+    missing_metric_ton = tuple(field for field in YEARLY_FIELDS if field != "Metric Ton")
+    schema = SequenceSession(
+        [CsvResponse(csv_bytes([yearly_row()], missing_metric_ton))]
+    )
+    with pytest.raises(FgisAdapterError, match="missing required fields"):
+        FgisYearlyAdapter(session=schema, calendar_year=2026).fetch_soybeans()
+    assert len(schema.calls) == 1
 
 
 @pytest.mark.parametrize("case", ["schema", "date", "mt", "encoding", "content_type", "filter"])
@@ -308,7 +391,6 @@ def test_source_sha_no_change_skips_raw_candidate_and_stable_mtime(tmp_path: Pat
     runtime = tmp_path / "runtime"
     baseline = [
         socrata_row(cert_date="2024-09-01", week_ending="2024-09-05", destination="JAPAN", mt=30),
-        socrata_row(cert_date="2026-07-30", week_ending="2026-07-30", destination="CHINA", mt=10),
     ]
     seed_baseline(runtime, baseline)
     rows = [yearly_row(destination="CHINA", mt="10")]
@@ -339,7 +421,6 @@ def test_changed_current_year_revises_and_adds_without_deleting_frozen_history(t
         runtime,
         [
             socrata_row(cert_date="2024-09-01", week_ending="2024-09-05", destination="JAPAN", mt=30),
-            socrata_row(cert_date="2026-07-16", week_ending="2026-07-16", destination="CHINA", mt=10),
         ],
     )
     run_yearly(
@@ -394,7 +475,7 @@ def test_calendar_year_switch_freezes_old_year_and_continues_my_week(tmp_path: P
     seed_baseline(
         runtime,
         [
-            socrata_row(cert_date="2026-12-31", week_ending="2026-12-31", destination="CHINA", mt=10),
+            socrata_row(cert_date="2025-12-25", week_ending="2025-12-25", destination="CHINA", mt=9),
         ],
     )
     run_yearly(
@@ -416,7 +497,7 @@ def test_calendar_year_switch_freezes_old_year_and_continues_my_week(tmp_path: P
     assert annual["my_week"].tolist() == [1, 2]
     assert annual["weekly_mt"].tolist() == [10, 5]
     assert annual["cumulative_mt"].tolist() == [10, 15]
-    assert annual.iloc[0]["source_dataset_id"] == FGIS_DATASET_ID
+    assert annual.iloc[0]["source_dataset_id"] == "yearly_export_grain_csv:CY2026.csv"
     manifest = json.loads(
         fgis_paths(runtime, "unused")["stable_manifest"].read_text(encoding="utf-8")
     )
@@ -430,7 +511,7 @@ def test_shared_thursday_across_calendar_files_is_new_fact_not_revision(tmp_path
     seed_baseline(
         runtime,
         [
-            socrata_row(cert_date="2025-12-31", week_ending="2026-01-01", destination="CHINA", mt=10),
+            socrata_row(cert_date="2024-12-26", week_ending="2024-12-26", destination="CHINA", mt=9),
         ],
     )
     run_yearly(
@@ -457,11 +538,81 @@ def test_shared_thursday_across_calendar_files_is_new_fact_not_revision(tmp_path
     assert annual.iloc[0]["source_dataset_id"] == "historical_baseline+yearly_export_grain_csv"
 
 
+def test_first_initialization_adds_shared_thursday_active_to_frozen_baseline(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    seed_baseline(
+        runtime,
+        [
+            socrata_row(
+                cert_date="2024-09-01",
+                week_ending="2024-09-05",
+                destination="JAPAN",
+                mt=30,
+            ),
+            socrata_row(
+                cert_date="2025-12-31",
+                week_ending="2026-01-01",
+                destination="CHINA",
+                mt=983_113,
+            ),
+        ],
+    )
+    initialized, _ = run_yearly(
+        runtime,
+        [
+            yearly_row(
+                thursday="20260101",
+                cert_date="20260101",
+                destination="CHINA",
+                mt="1493",
+            ),
+            yearly_row(
+                thursday="20260108",
+                cert_date="20260102",
+                destination="JAPAN",
+                mt="7",
+            ),
+        ],
+        year=2026,
+        batch="first-yearly",
+    )
+    paths = fgis_paths(runtime, "unused")
+    stable = pd.read_parquet(paths["stable"])
+    research = build_fgis_research_view(stable)
+    current = research.loc[research["market_year_end"].eq(2026)].sort_values("my_week")
+    historical = stable.loc[stable["week_ending_date"].eq(pd.Timestamp("2024-09-05"))]
+
+    assert initialized["revision_count"] == 0
+    assert initialized["source_change"]["active_calendar_year"]["new_business_keys"] == 2
+    assert current["world_weekly_mt"].tolist() == [984_606, 7]
+    assert current["world_cumulative_mt"].tolist() == [984_606, 984_613]
+    assert current["my_week"].tolist() == [1, 2]
+    assert len(historical) == 1
+    assert int(historical.iloc[0]["weekly_mt"]) == 30
+    assert not stable.duplicated(
+        ["source", "commodity", "market_year_end", "week_ending_date", "destination"]
+    ).any()
+    shared = stable.loc[
+        stable["week_ending_date"].eq(pd.Timestamp("2026-01-01"))
+        & stable["destination"].eq("CHINA")
+    ].iloc[0]
+    assert int(shared["weekly_mt"]) == 984_606
+    assert shared["source_dataset_id"] == "historical_baseline+yearly_export_grain_csv"
+    manifest = json.loads(paths["stable_manifest"].read_text(encoding="utf-8"))
+    assert (
+        manifest["historical_baseline_provenance"]["baseline_mode"]
+        == "initial_yearly_observation_against_frozen_baseline"
+    )
+    assert not paths["revision"].exists()
+
+
 def test_changed_yearly_candidate_failure_preserves_stable(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     seed_baseline(
         runtime,
-        [socrata_row(cert_date="2026-07-30", week_ending="2026-07-30", destination="CHINA", mt=10)],
+        [socrata_row(cert_date="2025-07-31", week_ending="2025-07-31", destination="CHINA", mt=9)],
     )
     run_yearly(runtime, [yearly_row(mt="10")], year=2026, batch="good")
     paths = fgis_paths(runtime, "unused")
@@ -498,3 +649,36 @@ def test_changed_yearly_candidate_failure_preserves_stable(tmp_path: Path) -> No
     status = json.loads(paths["status"].read_text(encoding="utf-8"))
     assert status["status"] == "failed"
     assert status["last_success"]["batch_id"] == "good"
+
+
+def test_exhausted_yearly_transfer_retries_preserve_stable_and_create_no_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "runtime"
+    seed_baseline(
+        runtime,
+        [socrata_row(cert_date="2025-07-31", week_ending="2025-07-31", destination="CHINA", mt=9)],
+    )
+    paths = fgis_paths(runtime, "failed-download")
+    stable_bytes = paths["stable"].read_bytes()
+    session = SequenceSession(
+        [requests.exceptions.ChunkedEncodingError("truncated")]
+        * FGIS_YEARLY_MAX_ATTEMPTS
+    )
+    delays: list[float] = []
+    monkeypatch.setattr("agri_research_agent.soybean_exports.fgis.time.sleep", delays.append)
+    adapter = FgisYearlyAdapter(session=session, calendar_year=2026)
+
+    with pytest.raises(FgisAdapterError, match="failed after 5 attempts"):
+        run_fgis_pipeline(
+            runtime_root=runtime,
+            adapter=adapter,
+            git_head=GIT_HEAD,
+            batch_id="failed-download",
+        )
+
+    assert len(session.calls) == FGIS_YEARLY_MAX_ATTEMPTS
+    assert delays == [1, 2, 4, 8]
+    assert paths["stable"].read_bytes() == stable_bytes
+    assert not (runtime / "01_data/raw/soybean_export_inspections/failed-download").exists()
+    assert not paths["candidate_dir"].exists()
