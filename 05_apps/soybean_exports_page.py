@@ -18,6 +18,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from agri_research_agent.soybean_exports.research import (  # noqa: E402
+    SALES_PROGRESS_NULL_REASON,
     load_soybean_export_page_payload,
 )
 
@@ -577,11 +578,16 @@ def _render_weekly_observation(payload: dict[str, Any]) -> None:
         if fas:
             current = fas["current_summary"]
             next_item = fas["next_summary"]
+            progress_sentence = (
+                f"销售完成率 {_format_pct(current['sales_progress_pct'], signed=False)}。"
+                if current.get("sales_progress_pct") is not None
+                else f"{current.get('sales_progress_null_reason') or SALES_PROGRESS_NULL_REASON}。"
+            )
             st.markdown(
                 f"**本年度销售**  截至 {current['latest_week']} （Report MY {current['report_market_year_label']} 第{current['report_week']}周），"
                 f"本周净销售 {_format_wan(current['world_weekly_net_sales_mt'])}，累计销售 {_format_wan(current['world_total_commitments_mt'])}，"
                 f"累计出口 {_format_wan(current['world_accumulated_exports_mt'])}，待执行销售 {_format_wan(current['world_outstanding_sales_mt'])}，"
-                f"销售完成率 {_format_pct(current.get('sales_progress_pct'), signed=False)}。"
+                f"{progress_sentence}"
             )
             st.markdown(
                 f"**下一年度销售**  在 Report MY {next_item['report_market_year_label']} 第{next_item['report_week']}周，"

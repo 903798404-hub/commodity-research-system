@@ -10,6 +10,7 @@ from agri_research_agent.soybean_exports.common import PipelineError
 from agri_research_agent.soybean_exports.fas import fas_paths, run_fas_pipeline
 from agri_research_agent.soybean_exports.fgis import fgis_paths, run_fgis_pipeline
 from agri_research_agent.soybean_exports.research import (
+    SALES_PROGRESS_NULL_REASON,
     build_soybean_export_research_payload,
     read_usda_psd_soybean_exports_mt,
 )
@@ -45,6 +46,32 @@ def make_usda(root: Path, *, report_month: str = "2026-07", value: float = 4136.
     (snapshot / "2222000_US.json").write_text(content, encoding="utf-8")
     (current / "2222000_US.json").write_text(content, encoding="utf-8")
     return project
+
+
+def make_research_frames(root: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    runtime = root / "runtime"
+    fgis_rows = [
+        raw_row(cert_date="2024-09-01", week_ending="2024-09-05", destination="CHINA", mt=10),
+        raw_row(cert_date="2025-09-01", week_ending="2025-09-04", destination="CHINA", mt=20),
+        raw_row(cert_date="2025-09-08", week_ending="2025-09-11", destination="JAPAN", mt=80),
+    ]
+    fas_rows = [fas_row(country=5700), fas_row(country=9990)]
+    run_fgis_pipeline(
+        runtime_root=runtime,
+        adapter=FgisStaticAdapter(fgis_rows),
+        git_head=GIT_HEAD,
+        batch_id="fgis",
+    )
+    run_fas_pipeline(
+        runtime_root=runtime,
+        adapter=FasStaticAdapter(fas_rows),
+        git_head=GIT_HEAD,
+        batch_id="fas",
+    )
+    return (
+        pd.read_parquet(fgis_paths(runtime, "x")["stable"]),
+        pd.read_parquet(fas_paths(runtime, "x")["stable"]),
+    )
 
 
 def test_psd_reader_report_identity_year_matching_and_unit_conversion(tmp_path: Path) -> None:
@@ -85,17 +112,7 @@ def test_psd_reader_rejects_missing_or_inconsistent_inputs(tmp_path: Path, mode:
 
 
 def test_unified_payload_allows_different_source_weeks_and_returns_four_kpis(tmp_path: Path) -> None:
-    runtime = tmp_path / "runtime"
-    fgis_rows = [
-        raw_row(cert_date="2024-09-01", week_ending="2024-09-05", destination="CHINA", mt=10),
-        raw_row(cert_date="2025-09-01", week_ending="2025-09-04", destination="CHINA", mt=20),
-        raw_row(cert_date="2025-09-08", week_ending="2025-09-11", destination="JAPAN", mt=80),
-    ]
-    fas_rows = [fas_row(country=5700), fas_row(country=9990)]
-    run_fgis_pipeline(runtime_root=runtime, adapter=FgisStaticAdapter(fgis_rows), git_head=GIT_HEAD, batch_id="fgis")
-    run_fas_pipeline(runtime_root=runtime, adapter=FasStaticAdapter(fas_rows), git_head=GIT_HEAD, batch_id="fas")
-    fgis = pd.read_parquet(fgis_paths(runtime, "x")["stable"])
-    fas = pd.read_parquet(fas_paths(runtime, "x")["stable"])
+    fgis, fas = make_research_frames(tmp_path)
     payload = build_soybean_export_research_payload(
         fgis_stable=fgis,
         fas_stable=fas,
@@ -104,6 +121,7 @@ def test_unified_payload_allows_different_source_weeks_and_returns_four_kpis(tmp
     assert payload["fgis"]["latest_week"] == "2025-09-11"
     assert payload["fas_current"]["latest_week"] == "2026-07-30"
     assert payload["fas_current"]["sales_progress_denominator"]["exports_mt"] == 41_368_000
+    assert payload["fas_current"]["sales_progress_null_reason"] is None
     assert payload["kpis"]["next_my_total_sales_mt"] == 80
     assert payload["kpis"]["china_next_my_total_purchases_mt"] == 40
     assert set(payload["kpis"]) == {
@@ -112,6 +130,64 @@ def test_unified_payload_allows_different_source_weeks_and_returns_four_kpis(tmp
         "next_my_total_sales_mt",
         "china_next_my_total_purchases_mt",
     }
+
+
+def test_sales_progress_can_exceed_100(tmp_path: Path) -> None:
+    fgis, fas = make_research_frames(tmp_path)
+    payload = build_soybean_export_research_payload(
+        fgis_stable=fgis,
+        fas_stable=fas,
+        usda_project_root=make_usda(tmp_path, value=0.001),
+    )
+    assert payload["fas_current"]["sales_progress_pct"] > 100
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["missing_directory", "missing_report", "missing_snapshot", "missing_year", "missing_exports"],
+)
+def test_research_payload_keeps_fgis_and_fas_when_psd_is_unavailable(
+    tmp_path: Path, mode: str
+) -> None:
+    fgis, fas = make_research_frames(tmp_path)
+    if mode == "missing_directory":
+        usda = tmp_path / "absent-usda"
+    else:
+        usda = make_usda(tmp_path)
+        data = usda / "public/data"
+        snapshot = data / "snapshots/usda_psd/2026-07/matrix/2222000_US.json"
+        current = data / "matrix/2222000_US.json"
+        if mode == "missing_report":
+            (data / "report_version.json").unlink()
+        elif mode == "missing_snapshot":
+            snapshot.unlink()
+        else:
+            matrix = json.loads(snapshot.read_text(encoding="utf-8"))
+            if mode == "missing_year":
+                matrix["years"] = [2024, 2026]
+                matrix["rows"][0]["values"] = [5000, 4517.8]
+            else:
+                matrix["rows"] = []
+            text = json.dumps(matrix, ensure_ascii=False)
+            snapshot.write_text(text, encoding="utf-8")
+            current.write_text(text, encoding="utf-8")
+
+    payload = build_soybean_export_research_payload(
+        fgis_stable=fgis,
+        fas_stable=fas,
+        usda_project_root=usda,
+    )
+    assert payload["fas_current"]["sales_progress_pct"] is None
+    assert payload["fas_current"]["sales_progress_denominator"] is None
+    assert payload["fas_current"]["sales_progress_null_reason"] == SALES_PROGRESS_NULL_REASON
+    assert payload["kpis"]["current_my_sales_progress_pct"] is None
+    assert payload["kpis"]["current_my_sales_progress_pct"] != 0
+    assert payload["fgis"]["latest_week"] == "2025-09-11"
+    assert payload["fas_current"]["world_total_commitments_mt"] > 0
+    assert payload["fas_current"]["world_accumulated_exports_mt"] > 0
+    assert payload["fas_current"]["world_outstanding_sales_mt"] > 0
+    assert payload["fas_next"]["world_total_presales_mt"] == 80
+    assert payload["fas_next"]["china_total_presales_mt"] == 40
 
 
 def test_pipeline_failures_status_backup_revision_and_stable_are_independent(tmp_path: Path) -> None:

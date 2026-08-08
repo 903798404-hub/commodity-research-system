@@ -9,6 +9,7 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 from agri_research_agent.soybean_exports.research import (
+    SALES_PROGRESS_NULL_REASON,
     _same_week_comparison,
     build_soybean_export_page_payload,
     load_soybean_export_page_payload,
@@ -33,7 +34,9 @@ from soybean_exports_page import (  # noqa: E402
 )
 
 
-def page_payload(tmp_path: Path) -> dict[str, object]:
+def page_payload(
+    tmp_path: Path, *, usda_project_root: Path | None = None
+) -> dict[str, object]:
     fgis_rows = []
     for start_year in range(2019, 2026):
         end_year = start_year + 1
@@ -77,7 +80,9 @@ def page_payload(tmp_path: Path) -> dict[str, object]:
     return build_soybean_export_page_payload(
         fgis_stable=normalize_fgis(fgis_rows),
         fas_stable=normalize_fas(fas_rows),
-        usda_project_root=make_usda(tmp_path),
+        usda_project_root=(
+            make_usda(tmp_path) if usda_project_root is None else usda_project_root
+        ),
         fgis_manifest={"batch_id": "fgis-fixture", "source_latest_week": "2025-09-11"},
         fas_manifest={
             "batch_id": "fas-fixture",
@@ -132,6 +137,42 @@ def test_page_renders_independent_status_four_kpis_observation_and_thirteen_char
     assert "出口检验" in markdown and "本年度销售" in markdown and "下一年度销售" in markdown
     captions = "\n".join(item.value for item in app.caption)
     assert "2026-08-06 08:30:06.973 ET" in captions
+
+
+def test_page_remains_complete_when_entire_psd_directory_is_absent(tmp_path: Path) -> None:
+    available = page_payload(tmp_path / "available")
+    payload = page_payload(
+        tmp_path / "missing",
+        usda_project_root=tmp_path / "missing" / "absent-usda",
+    )
+    assert payload["fas"]["current_summary"]["sales_progress_pct"] is None
+    assert payload["fas"]["current_summary"]["sales_progress_denominator"] is None
+    assert (
+        payload["fas"]["current_summary"]["sales_progress_null_reason"]
+        == SALES_PROGRESS_NULL_REASON
+    )
+    assert payload["kpis"]["current_my_sales_progress_pct"] is None
+    assert payload["kpi_reasons"]["current_my_sales_progress_pct"] == SALES_PROGRESS_NULL_REASON
+    for key in (
+        "cumulative_export_inspections_yoy_pct",
+        "next_my_total_sales_mt",
+        "china_next_my_total_purchases_mt",
+    ):
+        assert payload["kpis"][key] == available["kpis"][key]
+
+    app = render_payload(payload)
+    assert not app.exception
+    assert app.metric[1].value == "—"
+    assert app.metric[1].help == SALES_PROGRESS_NULL_REASON
+    assert len(app.get("plotly_chart")) == 13
+    markdown = "\n".join(item.value for item in app.markdown)
+    assert "本周净销售" in markdown
+    assert "累计销售" in markdown
+    assert "累计出口" in markdown
+    assert "待执行销售" in markdown
+    assert "下一年度销售" in markdown
+    assert SALES_PROGRESS_NULL_REASON in markdown
+    assert "/app/11_" not in markdown
 
 
 def test_twelve_seasonal_charts_use_history_palette_axes_labels_and_single_hover(tmp_path: Path) -> None:

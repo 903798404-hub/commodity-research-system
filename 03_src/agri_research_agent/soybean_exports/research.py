@@ -16,6 +16,7 @@ PSD_COMMODITY = "Oilseed, Soybean"
 PSD_COUNTRY_CODE = "US"
 PSD_COUNTRY = "United States"
 PSD_EXPORT_ROW = "出口量"
+SALES_PROGRESS_NULL_REASON = "年度出口预测暂不可用"
 
 
 def read_usda_psd_soybean_exports_mt(
@@ -87,6 +88,29 @@ def read_usda_psd_soybean_exports_mt(
     }
 
 
+def _optional_sales_progress(
+    usda_project_root: Path,
+    *,
+    target_market_year_end: int,
+    commitments_mt: int,
+) -> tuple[float | None, dict[str, Any] | None, str | None, str | None]:
+    """Calculate sales progress without making PS&D a page availability gate."""
+
+    try:
+        denominator = read_usda_psd_soybean_exports_mt(
+            Path(usda_project_root),
+            target_market_year_end=target_market_year_end,
+        )
+    except Exception as exc:
+        return None, None, SALES_PROGRESS_NULL_REASON, str(exc)
+    return (
+        commitments_mt / denominator["exports_mt"] * 100,
+        denominator,
+        None,
+        None,
+    )
+
+
 def build_soybean_export_research_payload(
     *,
     fgis_stable: pd.DataFrame,
@@ -115,11 +139,14 @@ def build_soybean_export_research_payload(
 
     latest_fas = fas.sort_values(["report_market_year_end", "report_week"]).iloc[-1]
     target_year = int(latest_fas["current_target_market_year_end"])
-    denominator = read_usda_psd_soybean_exports_mt(
-        usda_project_root, target_market_year_end=target_year
-    )
     commitments = int(latest_fas["world_current_my_total_commitment_mt"])
-    sales_progress = commitments / denominator["exports_mt"] * 100
+    sales_progress, denominator, sales_progress_null_reason, _psd_error = (
+        _optional_sales_progress(
+            usda_project_root,
+            target_market_year_end=target_year,
+            commitments_mt=commitments,
+        )
+    )
     fgis_fact = {
         "market_year_end": int(latest_fgis["market_year_end"]),
         "market_year_label": str(latest_fgis["market_year_label"]),
@@ -148,6 +175,7 @@ def build_soybean_export_research_payload(
         "world_outstanding_sales_mt": int(latest_fas["world_outstanding_sales_mt"]),
         "sales_progress_pct": sales_progress,
         "sales_progress_denominator": denominator,
+        "sales_progress_null_reason": sales_progress_null_reason,
     }
     fas_next = {
         "report_market_year_end": int(latest_fas["report_market_year_end"]),
@@ -263,21 +291,18 @@ def build_soybean_export_page_payload(
         "china_next_my_total_purchases_mt": None if fas_section else errors["fas"],
     }
     if fas_section:
-        try:
-            denominator = read_usda_psd_soybean_exports_mt(
-                Path(usda_project_root),
-                target_market_year_end=fas_section["current_summary"][
-                    "target_market_year_end"
-                ],
-            )
-            commitments = fas_section["current_summary"]["world_total_commitments_mt"]
-            progress = commitments / denominator["exports_mt"] * 100
-            fas_section["current_summary"]["sales_progress_pct"] = progress
-            fas_section["current_summary"]["sales_progress_denominator"] = denominator
-            kpis["current_my_sales_progress_pct"] = progress
-        except Exception as exc:
-            errors["psd"] = str(exc)
-            kpi_reasons["current_my_sales_progress_pct"] = "PS&D 分母暂不可用"
+        current = fas_section["current_summary"]
+        progress, denominator, null_reason, psd_error = _optional_sales_progress(
+            Path(usda_project_root),
+            target_market_year_end=current["target_market_year_end"],
+            commitments_mt=current["world_total_commitments_mt"],
+        )
+        current["sales_progress_pct"] = progress
+        current["sales_progress_denominator"] = denominator
+        current["sales_progress_null_reason"] = null_reason
+        kpis["current_my_sales_progress_pct"] = progress
+        kpi_reasons["current_my_sales_progress_pct"] = null_reason
+        errors["psd"] = psd_error
     elif errors["fas"]:
         kpi_reasons["current_my_sales_progress_pct"] = errors["fas"]
 
@@ -446,6 +471,7 @@ def _build_fas_page_section(
             "world_outstanding_sales_mt": int(latest["world_outstanding_sales_mt"]),
             "sales_progress_pct": None,
             "sales_progress_denominator": None,
+            "sales_progress_null_reason": None,
         },
         "next_summary": {
             "report_market_year_end": current_year,
