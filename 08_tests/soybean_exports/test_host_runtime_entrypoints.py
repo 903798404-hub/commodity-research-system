@@ -12,6 +12,10 @@ import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 FGIS_WRAPPER = REPOSITORY / "09_deploy/soybean_exports/run_fgis_yearly_update.sh"
+FGIS_UPLOAD_WRAPPER = (
+    REPOSITORY
+    / "09_deploy/soybean_exports/run_fgis_uploaded_source_update.sh"
+)
 FAS_WRAPPER = REPOSITORY / "09_deploy/soybean_exports/run_fas_export_sales_update.sh"
 INSTALLER_PATH = (
     REPOSITORY / "09_deploy/soybean_exports/install_soybean_exports_runtime.py"
@@ -169,7 +173,7 @@ def _trusted_source(tmp_path: Path) -> tuple[Path, str, str]:
     source = tmp_path / "trusted-source"
     wrapper_dir = source / "09_deploy" / "soybean_exports"
     wrapper_dir.mkdir(parents=True)
-    for path in (FGIS_WRAPPER, FAS_WRAPPER):
+    for path in (FGIS_WRAPPER, FGIS_UPLOAD_WRAPPER, FAS_WRAPPER):
         (wrapper_dir / path.name).write_bytes(path.read_bytes())
     _git(source, "init")
     _git(source, "config", "user.name", "runtime-test")
@@ -184,7 +188,7 @@ def _trusted_source(tmp_path: Path) -> tuple[Path, str, str]:
 
 def test_shell_wrappers_have_valid_syntax_and_independent_contracts() -> None:
     bash = _bash_executable()
-    for wrapper in (FGIS_WRAPPER, FAS_WRAPPER):
+    for wrapper in (FGIS_WRAPPER, FGIS_UPLOAD_WRAPPER, FAS_WRAPPER):
         completed = subprocess.run(
             [bash, "-n", _bash_path(wrapper)],
             check=False,
@@ -195,12 +199,19 @@ def test_shell_wrappers_have_valid_syntax_and_independent_contracts() -> None:
         assert completed.returncode == 0, completed.stderr
 
     fgis = FGIS_WRAPPER.read_text(encoding="utf-8")
+    fgis_upload = FGIS_UPLOAD_WRAPPER.read_text(encoding="utf-8")
     fas = FAS_WRAPPER.read_text(encoding="utf-8")
     assert "/run/lock/fgis_yearly_update.lock" in fgis
     assert "/run/lock/fas_export_sales_update.lock" in fas
     assert "fgis_yearly_update.log" in fgis
     assert "fas_export_sales_update.log" in fas
     assert "docker run --rm --network none" in fgis
+    assert "docker run --rm --network none" in fgis_upload
+    assert 'SOURCE_FILE="CY${CALENDAR_YEAR}.csv"' in fgis_upload
+    assert 'UPLOAD_SOURCE="${INBOX_DIR}/${SOURCE_FILE}.uploading"' in fgis_upload
+    assert "curl" not in fgis_upload
+    assert "/run/lock/fgis_yearly_update.lock" in fgis_upload
+    assert "fgis_uploaded_source_update.log" in fgis_upload
     assert "--source-file" in fgis
     assert "--source-metadata-file" in fgis
     assert "docker run --rm" in fas
@@ -226,17 +237,19 @@ def test_shell_wrappers_have_valid_syntax_and_independent_contracts() -> None:
     assert "soybean_export_sales.json" in fas_source
 
 
-def test_contract_pins_approved_cron_to_fixed_host_runtime() -> None:
+def test_contract_pins_manual_fgis_and_only_fas_cron_to_fixed_runtime() -> None:
     contract = PROJECT_CONTRACT.read_text(encoding="utf-8")
     runtime = "/home/ubuntu/market-data-runtime/soybean-exports/current"
-    assert (
-        f"0 5 * * 3 /bin/bash {runtime}/run_fgis_yearly_update.sh" in contract
-    )
+    assert f"{runtime}/run_fgis_uploaded_source_update.sh" in contract
+    assert f"0 5 * * 3 /bin/bash {runtime}/run_fgis_yearly_update.sh" not in contract
     assert (
         f"15 6 * * 6 /bin/bash {runtime}/run_fas_export_sales_update.sh" in contract
     )
+    assert "FGIS 正式任务数固定为 0" in contract
+    assert "不得安装 FGIS Cron" in contract
     assert "/home/ubuntu/market-data/09_deploy/soybean_exports" not in contract
-    assert "本契约不表示 Cron 已安装" in contract
+    assert "本契约不表示" in contract
+    assert "FAS Cron 已安装" in contract
 
 
 def test_fas_wrapper_loads_only_formal_secret_and_propagates_identity(

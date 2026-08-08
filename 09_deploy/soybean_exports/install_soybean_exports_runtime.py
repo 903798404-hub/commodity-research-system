@@ -19,6 +19,9 @@ SCHEMA_VERSION = 1
 DEFAULT_RUNTIME_ROOT = Path("/home/ubuntu/market-data-runtime/soybean-exports")
 WRAPPERS = {
     "fgis": Path("09_deploy/soybean_exports/run_fgis_yearly_update.sh"),
+    "fgis_upload": Path(
+        "09_deploy/soybean_exports/run_fgis_uploaded_source_update.sh"
+    ),
     "fas": Path("09_deploy/soybean_exports/run_fas_export_sales_update.sh"),
 }
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
