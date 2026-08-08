@@ -15,6 +15,7 @@ from agri_research_agent.soybean_exports.common import resolve_runtime_git_head
 from agri_research_agent.soybean_exports.fgis import (
     FgisAdapter,
     FgisYearlyAdapter,
+    FgisYearlyFileAdapter,
     run_fgis_pipeline,
 )
 
@@ -36,6 +37,8 @@ def main() -> int:
     parser.add_argument("--cert-date-end", type=_date)
     parser.add_argument("--page-size", type=int, default=50_000)
     parser.add_argument("--timeout", type=float, default=50)
+    parser.add_argument("--source-file", type=Path)
+    parser.add_argument("--source-metadata-file", type=Path)
     parser.add_argument("--ignore-environment-proxy", action="store_true")
     parser.add_argument("--candidate-only", action="store_true")
     args = parser.parse_args()
@@ -43,11 +46,22 @@ def main() -> int:
         args.cert_date_start is not None or args.cert_date_end is not None
     ):
         parser.error("--cert-date-start/--cert-date-end are only valid with --source socrata")
+    if (args.source_file is None) != (args.source_metadata_file is None):
+        parser.error("--source-file and --source-metadata-file must be provided together")
+    if args.source_file is not None and args.source != "yearly":
+        parser.error("--source-file is only valid with --source yearly")
     git_head = resolve_runtime_git_head(project_root=PROJECT_ROOT)
     adapter = (
-        FgisYearlyAdapter(
-            timeout_seconds=args.timeout,
-            use_environment_proxy=not args.ignore_environment_proxy,
+        (
+            FgisYearlyFileAdapter(
+                source_path=args.source_file.resolve(),
+                metadata_path=args.source_metadata_file.resolve(),
+            )
+            if args.source_file is not None
+            else FgisYearlyAdapter(
+                timeout_seconds=args.timeout,
+                use_environment_proxy=not args.ignore_environment_proxy,
+            )
         )
         if args.source == "yearly"
         else FgisAdapter(

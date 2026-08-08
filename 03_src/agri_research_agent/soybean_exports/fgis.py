@@ -4,6 +4,7 @@ import csv
 import gzip
 import io
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -381,62 +382,232 @@ class FgisYearlyAdapter:
                 f"FGIS Yearly request failed after {self.max_attempts} attempts: "
                 f"{type(last_transfer_error).__name__}"
             ) from last_transfer_error
-        try:
-            text = content.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise FgisAdapterError("FGIS Yearly CSV is not strict UTF-8") from exc
-        reader = csv.DictReader(io.StringIO(text, newline=""))
-        fields = tuple(reader.fieldnames or ())
-        missing = sorted(set(FGIS_YEARLY_REQUIRED_FIELDS) - set(fields))
-        if missing:
-            raise FgisAdapterError(
-                f"FGIS Yearly CSV missing required fields: {', '.join(missing)}"
-            )
-        records: list[dict[str, Any]] = []
-        source_rows = 0
-        for raw in reader:
-            source_rows += 1
-            if raw.get("Grain") != "SOYBEANS":
-                continue
-            normalized = _normalize_yearly_row(raw)
-            if date.fromisoformat(normalized["cert_date"]).year != calendar_year:
-                raise FgisAdapterError(
-                    "FGIS Yearly Cert Date does not match the active calendar year"
-                )
-            records.append(normalized)
-        if not records:
-            raise FgisAdapterError("FGIS Yearly CSV contains no exact SOYBEANS rows")
         last_modified = _response_header(response, "Last-Modified")
-        source_sha256 = sha256_bytes(content)
-        return FgisFetchResult(
-            records=records,
-            fetch_time_utc=fetched_at,
-            dataset_updated_at=_http_timestamp(last_modified),
-            pages=[
-                {
-                    "offset": 0,
-                    "row_count": len(records),
-                    "source_row_count": source_rows,
-                    "response_sha256": source_sha256,
-                }
-            ],
-            query_scope={
-                "grain": "SOYBEANS",
-                "calendar_year": calendar_year,
-                "source_file": source_file,
-                "complete_calendar_year_file": True,
-            },
-            source_channel=FGIS_YEARLY_SOURCE_CHANNEL,
+        return _parse_yearly_source(
+            content=content,
             calendar_year=calendar_year,
             source_file=source_file,
             source_url=source_url,
-            source_sha256=source_sha256,
+            fetched_at=fetched_at,
             http_status=response.status_code,
             content_length=declared_length,
             etag=_response_header(response, "ETag"),
             last_modified=last_modified,
-            source_bytes=content,
+            delivery="https",
         )
+
+
+class FgisYearlyFileAdapter:
+    """Read a host-verified USDA FGIS Yearly CSV without making HTTP requests."""
+
+    def __init__(self, *, source_path: Path, metadata_path: Path) -> None:
+        self.source_path = Path(source_path)
+        self.metadata_path = Path(metadata_path)
+
+    def fetch_soybeans(
+        self,
+        *,
+        cert_date_start: date | None = None,
+        cert_date_end: date | None = None,
+    ) -> FgisFetchResult:
+        if cert_date_start is not None or cert_date_end is not None:
+            raise FgisAdapterError(
+                "Yearly local source always reads the complete active calendar-year file"
+            )
+        if not self.source_path.exists():
+            raise FgisAdapterError("FGIS Yearly source file does not exist")
+        if not self.source_path.is_file():
+            raise FgisAdapterError("FGIS Yearly source path is not a regular file")
+        try:
+            content = self.source_path.read_bytes()
+        except OSError as exc:
+            raise FgisAdapterError("FGIS Yearly source file is not readable") from exc
+        if not content:
+            raise FgisAdapterError("FGIS Yearly source file is empty")
+        if not self.metadata_path.exists():
+            raise FgisAdapterError("FGIS Yearly source metadata file does not exist")
+        if not self.metadata_path.is_file():
+            raise FgisAdapterError("FGIS Yearly source metadata path is not a regular file")
+        try:
+            metadata = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise FgisAdapterError(
+                "FGIS Yearly source metadata is unreadable or invalid"
+            ) from exc
+        if not isinstance(metadata, dict) or metadata.get("schema_version") != 1:
+            raise FgisAdapterError("FGIS Yearly source metadata schema is invalid")
+        if metadata.get("source_authority") != FGIS_SOURCE_AUTHORITY:
+            raise FgisAdapterError("FGIS Yearly source authority is invalid")
+        if metadata.get("source_channel") != FGIS_YEARLY_SOURCE_CHANNEL:
+            raise FgisAdapterError("FGIS Yearly source channel is invalid")
+        calendar_year = metadata.get("calendar_year")
+        if (
+            isinstance(calendar_year, bool)
+            or not isinstance(calendar_year, int)
+            or not 1983 <= calendar_year <= 9999
+        ):
+            raise FgisAdapterError("FGIS Yearly source calendar year is invalid")
+        source_file = metadata.get("source_file")
+        expected_source_file = f"CY{calendar_year}.csv"
+        if source_file != expected_source_file or self.source_path.name != source_file:
+            raise FgisAdapterError("FGIS Yearly source file identity is invalid")
+        source_url = metadata.get("official_url")
+        if source_url != f"{FGIS_YEARLY_BASE_URL}/{expected_source_file}":
+            raise FgisAdapterError("FGIS Yearly official URL identity is invalid")
+        content_length = metadata.get("content_length")
+        if (
+            isinstance(content_length, bool)
+            or not isinstance(content_length, int)
+            or content_length <= 0
+            or content_length != len(content)
+        ):
+            raise FgisAdapterError("FGIS Yearly source Content-Length identity mismatch")
+        if metadata.get("source_size") != content_length:
+            raise FgisAdapterError("FGIS Yearly source size identity mismatch")
+        expected_sha256 = str(metadata.get("source_sha256") or "").lower()
+        actual_sha256 = sha256_bytes(content).lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise FgisAdapterError("FGIS Yearly source SHA-256 identity is invalid")
+        if actual_sha256 != expected_sha256:
+            raise FgisAdapterError("FGIS Yearly source SHA-256 identity mismatch")
+        if metadata.get("accept_ranges") != "bytes":
+            raise FgisAdapterError("FGIS Yearly source Range identity is invalid")
+        last_modified = metadata.get("last_modified")
+        if not isinstance(last_modified, str) or not last_modified.strip():
+            raise FgisAdapterError("FGIS Yearly source Last-Modified is invalid")
+        etag = metadata.get("etag")
+        if etag is not None and not isinstance(etag, str):
+            raise FgisAdapterError("FGIS Yearly source ETag is invalid")
+        downloaded_at = metadata.get("download_completed_at_utc")
+        if not isinstance(downloaded_at, str) or not downloaded_at.strip():
+            raise FgisAdapterError("FGIS Yearly source download time is invalid")
+        try:
+            parsed_downloaded_at = datetime.fromisoformat(
+                downloaded_at.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise FgisAdapterError("FGIS Yearly source download time is invalid") from exc
+        if parsed_downloaded_at.tzinfo is None:
+            raise FgisAdapterError("FGIS Yearly source download time is invalid")
+        for name in ("metadata_before", "metadata_after"):
+            observed = metadata.get(name)
+            if not isinstance(observed, dict):
+                raise FgisAdapterError(f"FGIS Yearly {name} identity is invalid")
+            if observed.get("content_length") != content_length:
+                raise FgisAdapterError(f"FGIS Yearly {name} Content-Length mismatch")
+            if observed.get("accept_ranges") != "bytes":
+                raise FgisAdapterError(f"FGIS Yearly {name} Range identity is invalid")
+            observed_modified = observed.get("last_modified")
+            if not isinstance(observed_modified, str) or not observed_modified.strip():
+                raise FgisAdapterError(f"FGIS Yearly {name} Last-Modified is invalid")
+        metadata_before = metadata["metadata_before"]
+        metadata_after = metadata["metadata_after"]
+        if metadata_before.get("last_modified") != last_modified:
+            raise FgisAdapterError("FGIS Yearly Last-Modified identity mismatch")
+        if metadata_before.get("etag") != etag:
+            raise FgisAdapterError("FGIS Yearly ETag identity mismatch")
+        try:
+            before_modified = parsedate_to_datetime(metadata_before["last_modified"])
+            after_modified = parsedate_to_datetime(metadata_after["last_modified"])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise FgisAdapterError("FGIS Yearly Last-Modified identity is invalid") from exc
+        if abs((after_modified - before_modified).total_seconds()) > 1:
+            raise FgisAdapterError("FGIS Yearly Last-Modified changed during download")
+        return _parse_yearly_source(
+            content=content,
+            calendar_year=calendar_year,
+            source_file=source_file,
+            source_url=source_url,
+            fetched_at=iso_utc(utc_now()),
+            http_status=200,
+            content_length=content_length,
+            etag=etag,
+            last_modified=last_modified,
+            delivery="local_source_file",
+            delivery_metadata={
+                "download_completed_at_utc": downloaded_at,
+                "metadata_file": self.metadata_path.name,
+            },
+        )
+
+
+def _parse_yearly_source(
+    *,
+    content: bytes,
+    calendar_year: int,
+    source_file: str,
+    source_url: str,
+    fetched_at: str,
+    http_status: int,
+    content_length: int,
+    etag: str | None,
+    last_modified: str | None,
+    delivery: str,
+    delivery_metadata: Mapping[str, Any] | None = None,
+) -> FgisFetchResult:
+    """Apply the one authoritative Yearly UTF-8, CSV, soybean, and year parser."""
+    if source_file != f"CY{calendar_year}.csv":
+        raise FgisAdapterError("FGIS Yearly source file does not match calendar year")
+    if content_length != len(content):
+        raise FgisAdapterError("FGIS Yearly source byte length identity mismatch")
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise FgisAdapterError("FGIS Yearly CSV is not strict UTF-8") from exc
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    fields = tuple(reader.fieldnames or ())
+    missing = sorted(set(FGIS_YEARLY_REQUIRED_FIELDS) - set(fields))
+    if missing:
+        raise FgisAdapterError(
+            f"FGIS Yearly CSV missing required fields: {', '.join(missing)}"
+        )
+    records: list[dict[str, Any]] = []
+    source_rows = 0
+    for raw in reader:
+        source_rows += 1
+        if raw.get("Grain") != "SOYBEANS":
+            continue
+        normalized = _normalize_yearly_row(raw)
+        if date.fromisoformat(normalized["cert_date"]).year != calendar_year:
+            raise FgisAdapterError(
+                "FGIS Yearly Cert Date does not match the active calendar year"
+            )
+        records.append(normalized)
+    if not records:
+        raise FgisAdapterError("FGIS Yearly CSV contains no exact SOYBEANS rows")
+    source_sha256 = sha256_bytes(content)
+    return FgisFetchResult(
+        records=records,
+        fetch_time_utc=fetched_at,
+        dataset_updated_at=_http_timestamp(last_modified),
+        pages=[
+            {
+                "offset": 0,
+                "row_count": len(records),
+                "source_row_count": source_rows,
+                "response_sha256": source_sha256,
+            }
+        ],
+        query_scope={
+            "grain": "SOYBEANS",
+            "calendar_year": calendar_year,
+            "source_file": source_file,
+            "source_size": content_length,
+            "complete_calendar_year_file": True,
+            "delivery": delivery,
+            **dict(delivery_metadata or {}),
+        },
+        source_channel=FGIS_YEARLY_SOURCE_CHANNEL,
+        calendar_year=calendar_year,
+        source_file=source_file,
+        source_url=source_url,
+        source_sha256=source_sha256,
+        http_status=http_status,
+        content_length=content_length,
+        etag=etag,
+        last_modified=last_modified,
+        source_bytes=content,
+    )
 
 
 def _response_header(response: Any, name: str) -> str | None:
@@ -1143,6 +1314,7 @@ def run_fgis_pipeline(
                     "source_file": fetched.source_file,
                     "source_url": fetched.source_url,
                     "source_sha256": fetched.source_sha256,
+                    "source_size": fetched.content_length,
                     "batch_id": selected_batch,
                     "git_head": git_head,
                     "status": "no_change",
@@ -1183,6 +1355,7 @@ def run_fgis_pipeline(
                 "source_file": fetched.source_file,
                 "source_url": fetched.source_url,
                 "source_sha256": fetched.source_sha256,
+                "source_size": fetched.content_length,
                 "http_status": fetched.http_status,
                 "content_length": fetched.content_length,
                 "etag": fetched.etag,
@@ -1272,6 +1445,7 @@ def run_fgis_pipeline(
             "source_file": fetched.source_file,
             "source_url": fetched.source_url,
             "source_sha256": fetched.source_sha256,
+            "source_size": fetched.content_length,
             "http_status": fetched.http_status,
             "content_length": fetched.content_length,
             "etag": fetched.etag,
@@ -1338,6 +1512,7 @@ def run_fgis_pipeline(
                     "source_file": fetched.source_file,
                     "source_url": fetched.source_url,
                     "source_sha256": fetched.source_sha256,
+                    "source_size": fetched.content_length,
                     "etag": fetched.etag,
                     "last_modified": fetched.last_modified,
                     "fetch_time_utc": fetched.fetch_time_utc,
@@ -1426,6 +1601,7 @@ def run_fgis_pipeline(
                 "source_file": fetched.source_file,
                 "source_url": fetched.source_url,
                 "source_sha256": fetched.source_sha256,
+                "source_size": fetched.content_length,
                 "etag": fetched.etag,
                 "last_modified": fetched.last_modified,
                 "fetch_time_utc": fetched.fetch_time_utc,
@@ -1450,6 +1626,7 @@ def run_fgis_pipeline(
             "source_file": fetched.source_file,
             "source_url": fetched.source_url,
             "source_sha256": fetched.source_sha256,
+            "source_size": fetched.content_length,
             "batch_id": selected_batch,
             "git_head": git_head,
             "status": publication["status"],
