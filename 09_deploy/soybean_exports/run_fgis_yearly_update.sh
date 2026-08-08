@@ -13,12 +13,15 @@ LOG_ROOT="${MARKET_DATA_FGIS_LOG_ROOT:-/home/ubuntu/market-data-runtime/soybean-
 LOG_FILE="${MARKET_DATA_FGIS_LOG_FILE:-${LOG_ROOT}/fgis_yearly_update.log}"
 CONTAINER_ENTRYPOINT="${MARKET_DATA_FGIS_ENTRYPOINT:-/app/04_scripts/soybean_exports/run_fgis_export_inspections.py}"
 CALENDAR_YEAR="${MARKET_DATA_FGIS_CALENDAR_YEAR:-$(date -u +%Y)}"
-MAX_DOWNLOAD_ATTEMPTS="${MARKET_DATA_FGIS_MAX_DOWNLOAD_ATTEMPTS:-10}"
+MAX_DOWNLOAD_ATTEMPTS="${MARKET_DATA_FGIS_MAX_DOWNLOAD_ATTEMPTS:-16}"
 MAX_NO_PROGRESS_ATTEMPTS=2
 RANGE_CHUNK_BYTES=1048576
 YEARLY_BASE_URL="https://fgisonline.ams.usda.gov/exportgrainreport"
 
 cleanup() {
+    [[ -z "${ACTIVE_CHUNK:-}" ]] || rm -f "${ACTIVE_CHUNK}"
+    [[ -z "${ACTIVE_HEADERS:-}" ]] || rm -f "${ACTIVE_HEADERS}"
+    [[ -z "${ACTIVE_APPEND:-}" ]] || rm -f "${ACTIVE_APPEND}"
     unset MARKET_DATA_GIT_HEAD CONTAINER_IMAGE_ID OCI_REVISION
 }
 
@@ -32,7 +35,7 @@ fail() {
     exit 1
 }
 
-for required_command in awk chmod curl date docker flock mkdir mv python3 sha256sum stat touch wc; do
+for required_command in awk cat chmod curl date docker flock mkdir mv python3 rm sha256sum stat touch wc; do
     command -v "${required_command}" >/dev/null 2>&1 || \
         fail "missing required command ${required_command}"
 done
@@ -48,8 +51,8 @@ echo "FGIS Yearly wrapper started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 [[ "${CALENDAR_YEAR}" =~ ^[0-9]{4}$ ]] || fail "calendar year must have four digits"
 (( 10#${CALENDAR_YEAR} >= 1983 )) || fail "calendar year is outside the FGIS Yearly range"
 [[ "${MAX_DOWNLOAD_ATTEMPTS}" =~ ^[0-9]+$ ]] || fail "download attempts must be an integer"
-(( MAX_DOWNLOAD_ATTEMPTS >= 1 && MAX_DOWNLOAD_ATTEMPTS <= 10 )) || \
-    fail "download attempts must be between 1 and 10"
+(( MAX_DOWNLOAD_ATTEMPTS >= 1 && MAX_DOWNLOAD_ATTEMPTS <= 16 )) || \
+    fail "download attempts must be between 1 and 16"
 
 SOURCE_FILE="CY${CALENDAR_YEAR}.csv"
 OFFICIAL_URL="${YEARLY_BASE_URL}/${SOURCE_FILE}"
@@ -178,6 +181,14 @@ printf '%s' "${expected_identity}" >"${IDENTITY_FILE}" || fail "cannot record so
 
 attempt=0
 no_progress_attempts=0
+record_no_progress() {
+    local reason="$1"
+    no_progress_attempts=$((no_progress_attempts + 1))
+    echo "FGIS Range attempt ${attempt}: ${reason}; no validated progress (${no_progress_attempts}/${MAX_NO_PROGRESS_ATTEMPTS})" >&2
+    (( no_progress_attempts < MAX_NO_PROGRESS_ATTEMPTS )) || \
+        fail "download made no validated progress for ${MAX_NO_PROGRESS_ATTEMPTS} consecutive attempts"
+}
+
 while true; do
     current_size=0
     [[ -f "${PARTIAL_FILE}" ]] && current_size="$(stat --format='%s' "${PARTIAL_FILE}")"
@@ -186,43 +197,84 @@ while true; do
 
     attempt=$((attempt + 1))
     before_size="${current_size}"
+    range_end=$((before_size + RANGE_CHUNK_BYTES - 1))
+    (( range_end < CONTENT_LENGTH_BEFORE )) || range_end=$((CONTENT_LENGTH_BEFORE - 1))
+    chunk="${STAGING_DIR}/${SOURCE_FILE}.chunk.${RUN_ID}.${attempt}"
     headers="${STAGING_DIR}/download.${RUN_ID}.${attempt}.headers"
     errors="${STAGING_DIR}/download.${RUN_ID}.${attempt}.stderr"
+    append_file="${PARTIAL_FILE}.append.${RUN_ID}.${attempt}"
+    ACTIVE_CHUNK="${chunk}"
+    ACTIVE_HEADERS="${headers}"
+    ACTIVE_APPEND="${append_file}"
     curl_exit=0
-    if (( before_size == 0 )); then
-        range_end=$((RANGE_CHUNK_BYTES - 1))
-        (( range_end < CONTENT_LENGTH_BEFORE )) || range_end=$((CONTENT_LENGTH_BEFORE - 1))
-        curl --silent --show-error --location --http1.1 --fail \
-            --connect-timeout 20 --max-time 180 --speed-limit 1 --speed-time 30 \
-            --range "0-${range_end}" --dump-header "${headers}" \
-            --output "${PARTIAL_FILE}" "${OFFICIAL_URL}" 2>"${errors}" || curl_exit=$?
-    else
-        curl --silent --show-error --location --http1.1 --fail \
-            --connect-timeout 20 --max-time 180 --speed-limit 1 --speed-time 30 \
-            -C - --dump-header "${headers}" --output "${PARTIAL_FILE}" \
-            "${OFFICIAL_URL}" 2>"${errors}" || curl_exit=$?
+    curl --silent --show-error --location --http1.1 --fail \
+        --connect-timeout 20 --max-time 180 --speed-limit 1 --speed-time 30 \
+        --range "${before_size}-${range_end}" --dump-header "${headers}" \
+        --output "${chunk}" "${OFFICIAL_URL}" 2>"${errors}" || curl_exit=$?
+
+    status=""
+    [[ ! -f "${headers}" ]] || status="$(header_status "${headers}")"
+    if (( curl_exit != 0 )); then
+        rm -f "${chunk}" "${headers}"
+        ACTIVE_CHUNK=""
+        ACTIVE_HEADERS=""
+        record_no_progress "range_transport_failure_curl_${curl_exit}"
+        continue
+    fi
+    if [[ "${status}" != "206" ]]; then
+        rm -f "${chunk}" "${headers}"
+        ACTIVE_CHUNK=""
+        ACTIVE_HEADERS=""
+        if [[ "${status}" == "200" ]]; then
+            record_no_progress "range_ignored_http_200"
+        else
+            record_no_progress "range_response_rejected_http_${status:-unknown}"
+        fi
+        continue
     fi
 
-    after_size=0
-    [[ -f "${PARTIAL_FILE}" ]] && after_size="$(stat --format='%s' "${PARTIAL_FILE}")"
-    status="$(header_status "${headers}")"
-    [[ -z "${status}" || "${status}" == "206" ]] || \
-        fail "Range download returned HTTP ${status}"
-    if (( after_size > CONTENT_LENGTH_BEFORE )); then
-        reject_partial "oversize"
-        fail "partial exceeds official Content-Length"
+    content_range="$(header_value 'Content-Range' "${headers}")"
+    if [[ ! "${content_range}" =~ ^bytes[[:space:]]+([0-9]+)-([0-9]+)/([0-9]+)$ ]]; then
+        rm -f "${chunk}" "${headers}"
+        ACTIVE_CHUNK=""
+        ACTIVE_HEADERS=""
+        record_no_progress "content_range_invalid"
+        continue
+    fi
+    response_start="${BASH_REMATCH[1]}"
+    response_end="${BASH_REMATCH[2]}"
+    response_total="${BASH_REMATCH[3]}"
+    chunk_size=0
+    [[ -f "${chunk}" ]] && chunk_size="$(stat --format='%s' "${chunk}")"
+    expected_chunk_size=$((response_end - response_start + 1))
+    if (( response_start != before_size || response_total != CONTENT_LENGTH_BEFORE || \
+          response_end < response_start || chunk_size != expected_chunk_size )); then
+        rm -f "${chunk}" "${headers}"
+        ACTIVE_CHUNK=""
+        ACTIVE_HEADERS=""
+        record_no_progress "content_range_or_chunk_size_mismatch"
+        continue
     fi
 
-    if (( after_size > before_size )); then
-        [[ "${status}" == "206" ]] || fail "Range response did not prove HTTP 206"
-        no_progress_attempts=0
-        echo "FGIS Range attempt ${attempt}: bytes=${after_size}/${CONTENT_LENGTH_BEFORE}, curl_exit=${curl_exit}"
+    if [[ -f "${PARTIAL_FILE}" ]]; then
+        cat "${PARTIAL_FILE}" "${chunk}" >"${append_file}" || \
+            fail "cannot stage validated Range append"
     else
-        no_progress_attempts=$((no_progress_attempts + 1))
-        echo "FGIS Range attempt ${attempt}: no progress (${no_progress_attempts}/${MAX_NO_PROGRESS_ATTEMPTS}), curl_exit=${curl_exit}" >&2
-        (( no_progress_attempts < MAX_NO_PROGRESS_ATTEMPTS )) || \
-            fail "download made no progress for ${MAX_NO_PROGRESS_ATTEMPTS} consecutive attempts"
+        cat "${chunk}" >"${append_file}" || fail "cannot stage first validated Range chunk"
     fi
+    expected_after_size=$((before_size + chunk_size))
+    staged_size="$(stat --format='%s' "${append_file}")"
+    (( staged_size == expected_after_size && staged_size <= CONTENT_LENGTH_BEFORE )) || \
+        fail "validated Range append size mismatch"
+    mv -f "${append_file}" "${PARTIAL_FILE}" || fail "cannot atomically append validated Range chunk"
+    ACTIVE_APPEND=""
+    after_size="$(stat --format='%s' "${PARTIAL_FILE}")"
+    (( after_size == expected_after_size )) || fail "partial size changed after validated append"
+    rm -f "${chunk}" "${headers}" "${errors}"
+    ACTIVE_CHUNK=""
+    ACTIVE_HEADERS=""
+    no_progress_attempts=0
+    echo "FGIS Range attempt ${attempt}: validated bytes=${after_size}/${CONTENT_LENGTH_BEFORE}"
 done
 
 [[ -f "${PARTIAL_FILE}" ]] || fail "completed source file is absent"
