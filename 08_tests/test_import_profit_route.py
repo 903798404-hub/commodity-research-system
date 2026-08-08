@@ -32,15 +32,13 @@ def test_authoritative_route_is_unique_and_catalog_schema_stays_deployment_only(
     assert workspace.WORKSPACE_PAGES.count(
         workspace.IMPORT_PROFIT_ROUTE_ID
     ) == 1
-    groups = {
-        group: items for group, items in workspace.SIDEBAR_NAVIGATION
-    }
+    groups = {group.title: group.items for group in workspace.SIDEBAR_NAVIGATION}
     matching = [
         item
         for item in groups["研究工具"]
-        if item[1] == workspace.IMPORT_PROFIT_ROUTE_ID
+        if item.target == workspace.IMPORT_PROFIT_ROUTE_ID
     ]
-    assert matching == [
+    assert [(item.label, item.target, item.external_env) for item in matching] == [
         ("进口大豆榨利", "import_profit", None)
     ]
     assert workspace.IMPORT_PROFIT_PAGE_TITLE == "日度进口大豆盘面净榨利"

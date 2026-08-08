@@ -16,8 +16,19 @@ if str(APPS_DIR) not in sys.path:
 
 from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
-from home import apply_home_navigation_request, get_external_app_url, render_home
+from home import get_external_app_url, render_home
 from import_profit_runtime_page import render_import_profit_runtime_page
+from navigation import (
+    IMPORT_PROFIT_ROUTE_ID,
+    INDIA_CROP_WEATHER_PAGE_TITLE,
+    NAVIGATION_GROUPS,
+    PALM_OIL_WEATHER_PAGE_TITLE,
+    RAPESEED_WEATHER_PAGE_TITLE,
+    SOYBEAN_CROP_PAGE_TITLE,
+    SOYBEAN_WEATHER_PAGE_TITLE,
+    USDA_PAGE_TITLE,
+    internal_workspace_pages,
+)
 from soybean_weekly_page import render_soybean_weekly_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
@@ -35,13 +46,6 @@ BASIS_DATABASE_FILE = DATA_DIR / "database" / "basis" / "basis_quotes.parquet"
 BASIS_RUNTIME_FALLBACK_FILE = (
     DATA_DIR / "database" / "basis" / "basis_quotes_sample.parquet"
 )
-USDA_PAGE_TITLE = "USDA平衡表"
-SOYBEAN_CROP_PAGE_TITLE = "美豆种植生长"
-SOYBEAN_WEATHER_PAGE_TITLE = "大豆天气"
-RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
-PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
-INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
-IMPORT_PROFIT_ROUTE_ID = "import_profit"
 IMPORT_PROFIT_PAGE_TITLE = "日度进口大豆盘面净榨利"
 WEATHER_PAGE_ROUTES = {
     SOYBEAN_WEATHER_PAGE_TITLE: "soybean_weather",
@@ -49,25 +53,8 @@ WEATHER_PAGE_ROUTES = {
     PALM_OIL_WEATHER_PAGE_TITLE: "palm_oil_weather",
     INDIA_CROP_WEATHER_PAGE_TITLE: "india_crop_weather",
 }
-WORKSPACE_PAGES = [
-    "首页",
-    "价差动态看板",
-    "基差/一口价",
-    SOYBEAN_CROP_PAGE_TITLE,
-    *WEATHER_PAGE_ROUTES,
-    USDA_PAGE_TITLE,
-    "外资与重点席位",
-    IMPORT_PROFIT_ROUTE_ID,
-    "运行监控",
-]
-SIDEBAR_NAVIGATION = (
-    ("工作台", (("工作台首页", "首页", None),)),
-    ("市场行情", (("价差动态", "价差动态看板", None), ("国内现货（基差与一口价）", "基差/一口价", None))),
-    ("周度跟踪", (("美豆周度跟踪", SOYBEAN_CROP_PAGE_TITLE, None),)),
-    ("天气研究", (("大豆天气", SOYBEAN_WEATHER_PAGE_TITLE, None), ("菜籽天气", RAPESEED_WEATHER_PAGE_TITLE, None), ("棕榈油天气", PALM_OIL_WEATHER_PAGE_TITLE, None), ("印度作物天气", INDIA_CROP_WEATHER_PAGE_TITLE, None))),
-    ("国际供需", (("USDA供需平衡", USDA_PAGE_TITLE, None), ("Oil World供需平衡", "", "OIL_WORLD_DASHBOARD_URL"))),
-    ("研究工具", (("进口大豆榨利", IMPORT_PROFIT_ROUTE_ID, None), ("外资与重点席位", "外资与重点席位", None), ("运行监控", "运行监控", None))),
-)
+WORKSPACE_PAGES = list(internal_workspace_pages())
+SIDEBAR_NAVIGATION = NAVIGATION_GROUPS
 FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
 BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "品种间套利"]
@@ -565,7 +552,6 @@ def main() -> None:
     st.set_page_config(page_title="油脂油料研究工作台", layout="wide")
     if "selected_workspace_page" not in st.session_state:
         st.session_state.selected_workspace_page = "首页"
-    apply_home_navigation_request()
     apply_workspace_navigation_request()
     inject_workspace_theme()
 

@@ -43,30 +43,29 @@ def test_streamlit_entries_start_without_exceptions(monkeypatch) -> None:
         assert not app.exception
 
 
-def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -> None:
+def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> None:
     monkeypatch.setenv("USDA_DASHBOARD_URL", "http://127.0.0.1:5173/usda/")
     monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", "http://127.0.0.1:5175/oil-world/")
     home = _import_home()
-    home.load_home_statuses.clear()
+    navigation = importlib.import_module("navigation")
+    ui_theme = importlib.import_module("ui_theme")
+    research_groups = navigation.research_navigation_groups()
+    research_items = [item for group in research_groups for item in group.items]
 
-    modules = home.home_modules()
-    assert [module.title for module in modules] == [
-        "市场价格",
-        "国内现货",
+    assert [item.label for item in research_items] == [
+        "价差动态",
+        "国内现货（基差与一口价）",
         "美豆周度跟踪",
-        "作物天气研究",
-        "USDA 供需平衡",
-        "Oil World 供需平衡",
+        "大豆天气",
+        "菜籽天气",
+        "棕榈油天气",
+        "印度作物天气",
+        "USDA供需平衡",
+        "Oil World供需平衡",
+        "进口大豆榨利",
+        "外资与重点席位",
+        "运行监控",
     ]
-    statuses = home.get_home_statuses()
-    assert statuses["basis_domestic"].label == "数据可用"
-    assert statuses["basis_domestic"].state == "success"
-    assert statuses["basis_domestic"].attention is None
-    assert statuses["soybean_crop_progress"].label == "每周更新"
-    assert statuses["crop_weather"].label == ""
-    assert statuses["crop_weather"].detail == ""
-    assert statuses["crop_weather"].latest_value.startswith("天气数据更新至 ")
-    assert statuses["foreign_seats"].label != "正常"
 
     workspace = _import_workspace()
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
@@ -75,83 +74,77 @@ def test_homepage_fixed_modules_states_and_no_deprecated_features(monkeypatch) -
     assert "最近访问" not in home_source
     assert "自定义首页" not in home_source
     assert "清除记录" not in home_source
-    assert [group for group, _items in workspace.SIDEBAR_NAVIGATION] == [
+    assert [group.title for group in workspace.SIDEBAR_NAVIGATION] == [
         "工作台", "市场行情", "周度跟踪", "天气研究", "国际供需", "研究工具"
     ]
-    cards_markup = "\n".join(
-        __import__("ui_theme").render_dashboard_card(module, statuses[module.module_id])
-        for module in modules
-    )
-    assert cards_markup.count('class="agri-card"') == 6
-    assert '?home_target=spreads_dashboard' in cards_markup
-    assert '?home_target=basis_domestic' in cards_markup
-    assert '?home_target=soybean_crop_progress' in cards_markup
-    assert '?home_target=crop_weather' in cards_markup
-    assert '?home_target=status' not in cards_markup
-    assert "foreign_seats" not in [module.module_id for module in modules]
-    assert "市场价格" in cards_markup
-    assert "数据状态概览" in home_source
-    assert "?home_target=status" in home_source
-    assert home.PAGE_TARGETS["crop_weather"] == "大豆天气"
-    assert home.PAGE_TARGETS["status"] == "运行监控"
+    sidebar_research_items = [
+        item for group in workspace.SIDEBAR_NAVIGATION if group.title != "工作台" for item in group.items
+    ]
+    assert research_items == sidebar_research_items
+    assert set(workspace.WORKSPACE_PAGES) == {
+        item.target
+        for group in workspace.SIDEBAR_NAVIGATION
+        for item in group.items
+        if not item.external_env
+    }
 
+    cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
+    assert cards_markup.count('class="agri-card"') == 12
+    assert cards_markup.count('class="agri-card-keyword"') == 20
+    assert cards_markup.count('class="agri-card-detail-label"') == 5
+    assert "?home_target=" not in cards_markup
+    assert "?workspace_page=" in cards_markup
+    assert '<strong class="agri-card-keyword">跨期价差</strong>' in cards_markup
+    assert '<strong class="agri-card-keyword">现货基差</strong>' in cards_markup
+    assert '<span class="agri-card-detail-label">包含：</span>' in cards_markup
+    assert '<strong class="agri-card-keyword">种植进度</strong>' in cards_markup
+    assert '<strong class="agri-card-keyword">美国</strong>' in cards_markup
+    assert '<strong class="agri-card-keyword">棉花</strong>' in cards_markup
+    for forbidden in (
+        "需要关注", "数据状态概览", "核心研究入口", "最新业务日", "自动更新",
+        "每周更新", "数据可用", "Cron", "天气数据更新至",
+    ):
+        assert forbidden not in home_source
 
-def test_crop_weather_home_status_reads_runtime_parquet_and_degrades_without_data(monkeypatch) -> None:
-    home = _import_home()
-    home.load_home_statuses.clear()
-    weather_observed = home._weather_observed_latest()
-    statuses = home.get_home_statuses()
+    rendered_headers = []
+    monkeypatch.setattr(home, "render_home_header", lambda **kwargs: rendered_headers.append(kwargs))
+    monkeypatch.setattr(home, "render_section_heading", lambda *_args: None)
+    monkeypatch.setattr(home, "render_home_footer", lambda *_args: None)
+    monkeypatch.setattr(home.st, "html", lambda *_args: None)
+    home.render_home()
+    assert rendered_headers == [{
+        "title": "农产品研究工作台",
+        "researcher_name": "徐晓冉",
+        "phone": "13305642778",
+        "email": "xx20236@outlook.com",
+    }]
+    assert "Agricultural Commodities Research" not in home_source
+    assert "汇集市场行情、国内现货、周度跟踪、作物天气与国际供需研究" not in home_source
+    assert "&lt;script&gt;" in ui_theme._emphasize_keywords("<script>跨期价差</script>", ("跨期价差",))
+    assert "<script>" not in ui_theme._emphasize_keywords("<script>跨期价差</script>", ("跨期价差",))
 
-    expected = f"天气数据更新至 {weather_observed}"
-    assert statuses["crop_weather"].latest_value == expected
-    assert statuses["crop_weather"].attention == expected
-    weather_module = next(module for module in home.home_modules() if module.module_id == "crop_weather")
-    weather_markup = __import__("ui_theme").render_dashboard_card(weather_module, statuses["crop_weather"])
-    assert "全球主产区" in weather_markup
-    assert "大豆 · 菜籽 · 棕榈油 · 印度作物" in weather_markup
-    assert expected in weather_markup
-    for forbidden in ("历史快照", "非实时数据", "EC预测", "GFS预测"):
-        assert forbidden not in weather_markup
-    assert "SOYBEAN_WEATHER_FIXTURE" not in Path(home.__file__).read_text(encoding="utf-8")
-
-    monkeypatch.setattr(home, "_weather_runtime_files", lambda: ())
-    home.load_home_statuses.clear()
-    degraded = home.get_home_statuses()["crop_weather"]
-    assert degraded.label == ""
-    assert degraded.detail == ""
-    assert degraded.latest_value == "天气数据更新时间不可用"
-    assert degraded.attention == "天气数据更新时间不可用"
-
-
-def test_crop_weather_home_status_rejects_missing_runtime_observed_date(monkeypatch) -> None:
-    home = _import_home()
-    monkeypatch.setattr(home, "_weather_runtime_files", lambda: ())
-    home.load_home_statuses.clear()
-    status = home.get_home_statuses()["crop_weather"]
-    assert status.latest_value == "天气数据更新时间不可用"
-    assert status.attention == "天气数据更新时间不可用"
-
-
-def test_crop_weather_home_status_uses_parquet_date_not_legacy_status_json(monkeypatch) -> None:
-    home = _import_home()
-    monkeypatch.setattr(home, "_weather_observed_latest", lambda: "2026-07-20")
-    home.load_home_statuses.clear()
-
-    status = home.get_home_statuses()["crop_weather"]
-    assert status.latest_value == "天气数据更新至 2026-07-20"
-    assert status.attention == status.latest_value
+    details = {item.label: item.detail_text for item in research_items}
+    assert details["美豆周度跟踪"] == "种植进度 · 生长状况 · 出口销售 · 出口装船"
+    assert details["大豆天气"] == "美国 · 巴西 · 阿根廷"
+    assert details["菜籽天气"] == "加拿大 · 澳大利亚 · 欧盟 · 俄罗斯 · 乌克兰"
+    assert details["棕榈油天气"] == "印度尼西亚 · 马来西亚"
+    assert details["印度作物天气"] == "棉花 · 甘蔗"
 
 
 def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) -> None:
     workspace = _import_workspace()
     weather_page = importlib.import_module("weather_research_page")
-    groups = {group: items for group, items in workspace.SIDEBAR_NAVIGATION}
+    groups = {group.title: group.items for group in workspace.SIDEBAR_NAVIGATION}
 
-    assert groups["周度跟踪"] == (("美豆周度跟踪", workspace.SOYBEAN_CROP_PAGE_TITLE, None),)
-    assert [label for label, _target, _env in groups["天气研究"]] == [
+    assert [(item.label, item.target, item.external_env) for item in groups["周度跟踪"]] == [
+        ("美豆周度跟踪", workspace.SOYBEAN_CROP_PAGE_TITLE, None)
+    ]
+    assert [item.label for item in groups["天气研究"]] == [
         "大豆天气", "菜籽天气", "棕榈油天气", "印度作物天气"
     ]
-    assert "美国大豆天气研究" not in [label for _group, items in workspace.SIDEBAR_NAVIGATION for label, _target, _env in items]
+    assert "美国大豆天气研究" not in [
+        item.label for group in workspace.SIDEBAR_NAVIGATION for item in group.items
+    ]
     assert workspace.WEATHER_PAGE_ROUTES == {
         "大豆天气": "soybean_weather",
         "菜籽天气": "rapeseed_weather",
@@ -391,38 +384,41 @@ def test_external_urls_are_environment_only_and_degrade_without_configuration(mo
     home = _import_home()
     monkeypatch.delenv("USDA_DASHBOARD_URL", raising=False)
     monkeypatch.delenv("OIL_WORLD_DASHBOARD_URL", raising=False)
-    home.load_home_statuses.clear()
 
     assert home.get_external_url({"url_env": "USDA_DASHBOARD_URL", "url": "http://example.test"}) == ""
     assert home.get_external_app_url(PROJECT_ROOT / "02_configs" / "report_catalog.yaml", "USDA平衡表") == ""
-    statuses = home.get_home_statuses()
-    assert statuses["usda_dashboard"].label == "暂不可用"
-    assert statuses["oil_world_dashboard"].label == "暂不可用"
 
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
     assert not app.exception
-    modules_by_id = {module.module_id: module for module in home.home_modules()}
+    navigation = importlib.import_module("navigation")
+    items_by_key = {
+        item.key for group in navigation.research_navigation_groups() for item in group.items
+    }
+    assert "usda_dashboard" in items_by_key
+    oil_world = next(
+        item
+        for group in navigation.research_navigation_groups()
+        for item in group.items
+        if item.key == "oil_world_dashboard"
+    )
     ui_theme = __import__("ui_theme")
-    assert 'aria-disabled="true"' in ui_theme.render_dashboard_card(
-        modules_by_id["usda_dashboard"], statuses["usda_dashboard"]
-    )
-    assert 'aria-disabled="true"' in ui_theme.render_dashboard_card(
-        modules_by_id["oil_world_dashboard"], statuses["oil_world_dashboard"]
-    )
+    assert 'aria-disabled="true"' in ui_theme.render_navigation_card(oil_world)
 
 
 def test_internal_home_card_links_preserve_existing_route_targets(monkeypatch) -> None:
     monkeypatch.setenv("USDA_DASHBOARD_URL", "http://127.0.0.1:5173/usda/")
     monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", "http://127.0.0.1:5175/oil-world/")
     home = _import_home()
-    home.load_home_statuses.clear()
-
-    module = next(item for item in home.home_modules() if item.module_id == "spreads_dashboard")
-    markup = __import__("ui_theme").render_dashboard_card(
-        module, home.get_home_statuses()[module.module_id]
+    navigation = importlib.import_module("navigation")
+    item = next(
+        item
+        for group in navigation.research_navigation_groups()
+        for item in group.items
+        if item.key == "spreads_dashboard"
     )
-    assert '?home_target=spreads_dashboard' in markup
-    assert home.PAGE_TARGETS[module.module_id] == "价差动态看板"
+    markup = __import__("ui_theme").render_navigation_card(item)
+    assert '?workspace_page=%E4%BB%B7%E5%B7%AE%E5%8A%A8%E6%80%81%E7%9C%8B%E6%9D%BF' in markup
+    assert item.target == "价差动态看板"
 
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
     app.session_state["selected_workspace_page"] = "价差动态看板"
