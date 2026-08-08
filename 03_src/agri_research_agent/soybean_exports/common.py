@@ -100,7 +100,13 @@ def write_raw_snapshot(
     batch_id: str,
     records: Iterable[Mapping[str, Any]],
     manifest: Mapping[str, Any],
+    source_file_name: str | None = None,
+    source_file_bytes: bytes | None = None,
 ) -> dict[str, Any]:
+    if (source_file_name is None) != (source_file_bytes is None):
+        raise ValueError("source_file_name and source_file_bytes must be provided together")
+    if source_file_name is not None and Path(source_file_name).name != source_file_name:
+        raise ValueError("source_file_name must be a plain file name")
     snapshot_dir = raw_root / pipeline_name / batch_id
     if snapshot_dir.exists():
         raise FileExistsError(f"Immutable raw snapshot already exists: {snapshot_dir}")
@@ -109,6 +115,17 @@ def write_raw_snapshot(
     count = 0
     canonical_digest = hashlib.sha256()
     try:
+        source_file_identity: dict[str, Any] = {}
+        if source_file_name is not None and source_file_bytes is not None:
+            source_path = snapshot_dir / source_file_name
+            with source_path.open("xb") as source_handle:
+                source_handle.write(source_file_bytes)
+                _fsync_file(source_handle)
+            source_file_identity = {
+                "source_file": source_file_name,
+                "source_file_byte_size": len(source_file_bytes),
+                "source_file_sha256": sha256_bytes(source_file_bytes),
+            }
         with data_path.open("xb") as raw_handle:
             with gzip.GzipFile(
                 filename="records.jsonl",
@@ -124,6 +141,7 @@ def write_raw_snapshot(
             _fsync_file(raw_handle)
         completed = {
             **dict(manifest),
+            **source_file_identity,
             "schema_version": SCHEMA_VERSION,
             "pipeline": pipeline_name,
             "batch_id": batch_id,

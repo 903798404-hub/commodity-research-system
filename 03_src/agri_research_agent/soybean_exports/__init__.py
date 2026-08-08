@@ -3,6 +3,7 @@
 from .fgis import (
     FgisAdapter,
     FgisAdapterError,
+    FgisYearlyAdapter,
     build_fgis_research_view,
     normalize_fgis_records,
     run_fgis_pipeline,
@@ -19,6 +20,7 @@ from .research import (
 __all__ = [
     "FgisAdapter",
     "FgisAdapterError",
+    "FgisYearlyAdapter",
     "build_fgis_research_view",
     "normalize_fgis_records",
     "run_fgis_pipeline",
