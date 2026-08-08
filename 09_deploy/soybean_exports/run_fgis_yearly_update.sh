@@ -2,10 +2,15 @@
 
 set -euo pipefail
 
+PATH="${MARKET_DATA_WRAPPER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+export PATH
+
 LOCK_FILE="${MARKET_DATA_FGIS_LOCK_FILE:-/run/lock/fgis_yearly_update.lock}"
 CONTAINER_NAME="${MARKET_DATA_SPREAD_CONTAINER:-spread-dashboard}"
 RUNTIME_ROOT="${MARKET_DATA_FGIS_RUNTIME_HOST_ROOT:-/home/ubuntu/market-data}"
 SOURCE_ROOT="${MARKET_DATA_FGIS_SOURCE_ROOT:-/home/ubuntu/market-data-runtime/fgis-yearly}"
+LOG_ROOT="${MARKET_DATA_FGIS_LOG_ROOT:-/home/ubuntu/market-data-runtime/soybean-exports/logs}"
+LOG_FILE="${MARKET_DATA_FGIS_LOG_FILE:-${LOG_ROOT}/fgis_yearly_update.log}"
 CONTAINER_ENTRYPOINT="${MARKET_DATA_FGIS_ENTRYPOINT:-/app/04_scripts/soybean_exports/run_fgis_export_inspections.py}"
 CALENDAR_YEAR="${MARKET_DATA_FGIS_CALENDAR_YEAR:-$(date -u +%Y)}"
 MAX_DOWNLOAD_ATTEMPTS="${MARKET_DATA_FGIS_MAX_DOWNLOAD_ATTEMPTS:-10}"
@@ -14,7 +19,7 @@ RANGE_CHUNK_BYTES=1048576
 YEARLY_BASE_URL="https://fgisonline.ams.usda.gov/exportgrainreport"
 
 cleanup() {
-    unset MARKET_DATA_GIT_HEAD CONTAINER_IMAGE_ID
+    unset MARKET_DATA_GIT_HEAD CONTAINER_IMAGE_ID OCI_REVISION
 }
 
 trap cleanup EXIT
@@ -27,10 +32,18 @@ fail() {
     exit 1
 }
 
-for required_command in awk curl date docker flock mkdir mv python3 sha256sum stat wc; do
+for required_command in awk chmod curl date docker flock mkdir mv python3 sha256sum stat touch wc; do
     command -v "${required_command}" >/dev/null 2>&1 || \
         fail "missing required command ${required_command}"
 done
+
+umask 077
+mkdir -p "${LOG_ROOT}" || fail "cannot create FGIS log directory"
+chmod 0700 "${LOG_ROOT}" || fail "cannot protect FGIS log directory"
+touch "${LOG_FILE}" || fail "cannot create FGIS log file"
+chmod 0600 "${LOG_FILE}" || fail "cannot protect FGIS log file"
+exec >>"${LOG_FILE}" 2>&1
+echo "FGIS Yearly wrapper started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 [[ "${CALENDAR_YEAR}" =~ ^[0-9]{4}$ ]] || fail "calendar year must have four digits"
 (( 10#${CALENDAR_YEAR} >= 1983 )) || fail "calendar year is outside the FGIS Yearly range"
@@ -91,6 +104,18 @@ if ! CONTAINER_IMAGE_ID="$(
 fi
 [[ "${CONTAINER_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]] || \
     fail "configured spread image identity is invalid"
+
+if ! OCI_REVISION="$(
+    docker image inspect \
+        --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+        "${CONTAINER_IMAGE_ID}" 2>/dev/null
+)"; then
+    fail "cannot read formal image OCI revision"
+fi
+[[ "${OCI_REVISION}" =~ ^[0-9a-fA-F]{40}$ ]] || fail "formal image OCI revision is invalid"
+OCI_REVISION="${OCI_REVISION,,}"
+[[ "${OCI_REVISION}" == "${MARKET_DATA_GIT_HEAD}" ]] || \
+    fail "formal image OCI revision and runtime Git identity disagree"
 
 header_status() {
     awk '/^HTTP\// { code=$2 } END { print code }' "$1"
