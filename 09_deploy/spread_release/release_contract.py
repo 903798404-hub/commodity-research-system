@@ -36,8 +36,10 @@ SUPPORTED_CANDIDATE_RESULT_SCHEMA_VERSIONS = {
     LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION,
     CANDIDATE_RESULT_SCHEMA_VERSION,
 }
-DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.5.0"
-DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.4.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.6.0"
+LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.5.0"
+DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.5.0"
+LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.4.0"
 DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION = "1.0.0"
 DEPLOYMENT_RESULT_BUNDLE_FILENAME = "deployment_result.bundle.manifest.json"
 DEPLOYMENT_RESULT_BUNDLE_MEMBER_FILENAMES = (
@@ -1226,6 +1228,29 @@ def validate_git_state(
     return validate_full_git_commit(tree)
 
 
+def capture_git_identity(
+    repository: Path,
+    runner: CommandRunner | None = None,
+) -> dict[str, str]:
+    """Capture a clean deployment-tool checkout independently of the app release."""
+    command_runner = runner or CommandRunner()
+    status = command_runner.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"], cwd=repository
+    )
+    if status.strip():
+        raise ContractError("deployment tool checkout must be clean before sealing a plan")
+    commit = command_runner.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository
+    ).strip()
+    tree = command_runner.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=repository
+    ).strip()
+    return {
+        "git_commit": validate_full_git_commit(commit),
+        "git_tree": validate_full_git_commit(tree),
+    }
+
+
 def validate_compose_result(
     compose: Mapping[str, Any],
     raw_config: str,
@@ -1342,6 +1367,9 @@ def validate_repository_static(repository: Path) -> None:
     plan_creator_path = (
         repository / "09_deploy/spread_release/create_deployment_plan.py"
     )
+    env_transition_path = (
+        repository / "09_deploy/spread_release/transition_production_env.py"
+    )
     plan_schema_path = (
         repository / "09_deploy/spread_release/deployment_plan.schema.json"
     )
@@ -1369,6 +1397,7 @@ def validate_repository_static(repository: Path) -> None:
         deploy_path,
         rollback_path,
         plan_creator_path,
+        env_transition_path,
         plan_schema_path,
         candidate_creator_path,
         candidate_schema_path,
@@ -1458,9 +1487,12 @@ def validate_repository_static(repository: Path) -> None:
         ("deploy", deploy_text),
         ("rollback", rollback_text),
     ):
-        if "--no-build" not in script or "--no-deps" not in script:
+        if any(
+            flag not in script
+            for flag in ("--no-build", "--pull never", "--no-deps", "--force-recreate")
+        ):
             raise ContractError(
-                f"{description} command must include --no-build and --no-deps"
+                f"{description} command must include the sealed no-build switch flags"
             )
         if "--env-file" not in script or "--deployment-plan" not in script:
             raise ContractError(
@@ -1473,7 +1505,8 @@ def validate_repository_static(repository: Path) -> None:
                 "verified deployment plan"
             )
         if not re.search(
-            r'up\s+-d\s+--no-build\s+--no-deps\s+"\$\{production_service\}"',
+            r'up\s+-d\s+--no-build\s+--pull\s+never\s+--no-deps\s+'
+            r'--force-recreate\s+"\$\{production_service\}"',
             script,
         ):
             raise ContractError(
@@ -1496,6 +1529,10 @@ def validate_repository_static(repository: Path) -> None:
         if re.search(r"(?i)(?::|=)(latest|new)(?:\s|['\"]|$)", script):
             raise ContractError(
                 f"{description} script must not use latest or new image tags"
+            )
+        if "transition_production_env.py" not in script:
+            raise ContractError(
+                f"{description} script must use the governed production env transition"
             )
 
 
@@ -1647,6 +1684,10 @@ def create_artifact_manifest(
     accepted_target_versions = {expected_schema_version}
     if artifact_type == "candidate_result":
         accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
+    elif artifact_type == "deployment_plan":
+        accepted_target_versions.add(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSION)
+    elif artifact_type == "deployment_result":
+        accepted_target_versions.add(LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION)
     if target_schema_version not in accepted_target_versions:
         raise ContractError(
             f"{artifact_type} manifest target schema version must be "
@@ -1757,6 +1798,10 @@ def validate_artifact_manifest(
     accepted_target_versions = {expected_schema_version}
     if artifact_type == "candidate_result":
         accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
+    elif artifact_type == "deployment_plan":
+        accepted_target_versions.add(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSION)
+    elif artifact_type == "deployment_result":
+        accepted_target_versions.add(LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION)
     if manifest.get("target_schema_version") not in accepted_target_versions:
         raise ContractError(
             f"{artifact_type} manifest target_schema_version mismatch"
@@ -2388,16 +2433,25 @@ def validate_production_env(
     environment: Mapping[str, str],
     manifest: Mapping[str, Any],
 ) -> None:
-    if set(environment) != set(PRODUCTION_ENV_KEYS):
-        raise ContractError(
-            f"production environment must contain exactly {list(PRODUCTION_ENV_KEYS)}"
-        )
+    validate_current_production_env(environment)
     if environment["SPREAD_IMAGE"] != manifest["image_ref"]:
         raise ContractError("production SPREAD_IMAGE does not match release image_ref")
     if environment["MARKET_DATA_GIT_HEAD"] != manifest["git_commit"]:
         raise ContractError(
             "production MARKET_DATA_GIT_HEAD does not match release git_commit"
         )
+
+
+def validate_current_production_env(
+    environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Validate a production env without pretending it is already the target release."""
+    if set(environment) != set(PRODUCTION_ENV_KEYS):
+        raise ContractError(
+            f"production environment must contain exactly {list(PRODUCTION_ENV_KEYS)}"
+        )
+    validate_rollback_image_ref(environment["SPREAD_IMAGE"])
+    validate_full_git_commit(environment["MARKET_DATA_GIT_HEAD"])
     validate_production_url(
         environment["USDA_DASHBOARD_URL"],
         "USDA_DASHBOARD_URL",
@@ -2409,6 +2463,123 @@ def validate_production_env(
     validate_weather_runtime_dir(
         environment[WEATHER_RUNTIME_ENV_KEY], expected=PRODUCTION_WEATHER_RUNTIME_DIR
     )
+    if environment[WEATHER_DATA_DIR_ENV_KEY] != WEATHER_CONTAINER_CURRENT_PATH:
+        raise ContractError(
+            f"{WEATHER_DATA_DIR_ENV_KEY} must equal {WEATHER_CONTAINER_CURRENT_PATH}"
+        )
+    assert_no_sensitive_values(environment, "production environment")
+    return dict(environment)
+
+
+def target_production_environment(
+    current_environment: Mapping[str, str],
+    manifest: Mapping[str, Any],
+) -> dict[str, str]:
+    target = validate_current_production_env(current_environment)
+    target["SPREAD_IMAGE"] = str(manifest["image_ref"])
+    target["MARKET_DATA_GIT_HEAD"] = str(manifest["git_commit"])
+    validate_production_env(target, manifest)
+    return target
+
+
+def render_production_env(environment: Mapping[str, str]) -> str:
+    values = validate_current_production_env(environment)
+    return "".join(f"{key}={values[key]}\n" for key in PRODUCTION_ENV_KEYS)
+
+
+def production_env_sha256(environment: Mapping[str, str]) -> str:
+    return hash_text(render_production_env(environment))
+
+
+def _replace_production_env_atomically(
+    path: Path,
+    environment: Mapping[str, str],
+) -> None:
+    """Replace the production env in-place while preserving owner and mode."""
+    path = path.resolve()
+    try:
+        original = path.stat()
+    except OSError as exc:
+        raise ContractError(f"cannot stat production environment {path}: {exc}") from exc
+    rendered = render_production_env(environment)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(rendered)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, stat.S_IMODE(original.st_mode))
+        if os.name == "posix":
+            os.chown(temporary, original.st_uid, original.st_gid)
+        os.replace(temporary, path)
+        temporary = None
+        if os.name == "posix":
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    except OSError as exc:
+        raise ContractError(f"cannot atomically replace production environment: {exc}") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def transition_production_env(
+    deployment_plan: Mapping[str, Any],
+    *,
+    to_target: bool,
+) -> dict[str, Any]:
+    """Apply one sealed env transition, rejecting drift in either direction."""
+    path = Path(str(deployment_plan.get("production_env_file", ""))).resolve()
+    current = deployment_plan.get("current_production")
+    target = deployment_plan.get("target_release")
+    if not isinstance(current, dict) or not isinstance(target, dict):
+        raise ContractError("deployment plan does not contain a sealed env transition")
+    source = current if to_target else target
+    destination = target if to_target else current
+    source_environment = source.get("environment")
+    destination_environment = destination.get("environment")
+    if not isinstance(source_environment, dict) or not isinstance(
+        destination_environment, dict
+    ):
+        raise ContractError("deployment plan env transition is incomplete")
+    actual_sha256 = hash_file(path)
+    destination_sha256 = str(destination.get("env_sha256", ""))
+    if actual_sha256 == destination_sha256:
+        if parse_production_env(path) != destination_environment:
+            raise ContractError("production env hash matched but sealed values changed")
+        return {
+            "status": "already-target" if to_target else "already-rollback",
+            "production_env_file": str(path),
+            "production_env_sha256": actual_sha256,
+        }
+    if actual_sha256 != source.get("env_sha256"):
+        raise ContractError(
+            "production environment drifted from the sealed transition baseline"
+        )
+    if parse_production_env(path) != source_environment:
+        raise ContractError("production environment values drifted from the sealed baseline")
+    _replace_production_env_atomically(path, destination_environment)
+    if hash_file(path) != destination_sha256:
+        raise ContractError("production environment transition SHA-256 mismatch")
+    if parse_production_env(path) != destination_environment:
+        raise ContractError("production environment transition values mismatch")
+    return {
+        "status": "target-applied" if to_target else "rollback-restored",
+        "production_env_file": str(path),
+        "production_env_sha256": destination_sha256,
+    }
 
 
 def _normalize_project_path(value: Any, project_root: Path) -> Any:
@@ -3069,6 +3240,53 @@ def write_candidate_result(result: Mapping[str, Any], path: Path) -> Path:
     return target
 
 
+def _compose_switch_argv(
+    production_env_file: Path,
+    production_project_dir: Path,
+    production_compose_file: Path,
+) -> list[str]:
+    return [
+        "docker",
+        "compose",
+        "--env-file",
+        str(production_env_file),
+        "--project-name",
+        COMPOSE_PROJECT,
+        "--project-directory",
+        str(production_project_dir),
+        "-f",
+        str(production_compose_file),
+        "up",
+        "-d",
+        "--no-build",
+        "--pull",
+        "never",
+        "--no-deps",
+        "--force-recreate",
+        COMPOSE_SERVICE,
+    ]
+
+
+def _validate_sealed_environment_identity(
+    identity: Mapping[str, Any],
+    *,
+    description: str,
+) -> dict[str, str]:
+    environment = identity.get("environment")
+    if not isinstance(environment, dict):
+        raise ContractError(f"deployment plan {description} environment is missing")
+    values = validate_current_production_env(environment)
+    if identity.get("env_sha256") != production_env_sha256(values):
+        raise ContractError(f"deployment plan {description} env SHA-256 mismatch")
+    if identity.get("image_ref") != values["SPREAD_IMAGE"]:
+        raise ContractError(f"deployment plan {description} image_ref mismatch")
+    if identity.get("git_commit") != values["MARKET_DATA_GIT_HEAD"]:
+        raise ContractError(f"deployment plan {description} git_commit mismatch")
+    validate_image_id(identity.get("image_id"), f"{description} image_id")
+    validate_sha256(identity.get("compose_sha256"), f"{description} compose_sha256")
+    return values
+
+
 def validate_deployment_plan(
     plan: Mapping[str, Any],
     manifest: Mapping[str, Any],
@@ -3202,14 +3420,59 @@ def validate_deployment_plan(
     production_env_file = Path(str(plan.get("production_env_file", "")))
     if not production_env_file.is_absolute():
         raise ContractError("deployment plan production_env_file must be absolute")
+    current_identity = plan.get("current_production")
+    target_identity = plan.get("target_release")
+    if not isinstance(current_identity, dict) or not isinstance(target_identity, dict):
+        raise ContractError("deployment plan current/target identities are missing")
+    current_values = _validate_sealed_environment_identity(
+        current_identity,
+        description="current_production",
+    )
+    target_values = _validate_sealed_environment_identity(
+        target_identity,
+        description="target_release",
+    )
+    if current_identity.get("image_ref") != manifest["rollback_image_ref"]:
+        raise ContractError("deployment plan current production image_ref changed")
+    if current_identity.get("image_id") != manifest["rollback_image_id"]:
+        raise ContractError("deployment plan current production Image ID changed")
+    if current_identity.get("git_commit") != manifest["formal_git_commit"]:
+        raise ContractError("deployment plan current production Git commit changed")
+    expected_target_identity = {
+        "release_id": manifest["release_id"],
+        "image_ref": manifest["image_ref"],
+        "image_id": manifest["image_id"],
+        "git_commit": manifest["git_commit"],
+        "git_tree": manifest["git_tree"],
+        "oci_revision": manifest["git_commit"],
+    }
+    for key, expected in expected_target_identity.items():
+        if target_identity.get(key) != expected:
+            raise ContractError(f"deployment plan target_release {key} mismatch")
+    validate_production_env(target_values, manifest)
+    if current_values == target_values:
+        raise ContractError("deployment plan cannot seal an already-deployed no-op")
+    if plan.get("production_env_baseline_sha256") != current_identity["env_sha256"]:
+        raise ContractError("deployment plan production env baseline SHA-256 mismatch")
+    if plan.get("production_env_sha256") != target_identity["env_sha256"]:
+        raise ContractError("deployment plan target production env SHA-256 mismatch")
     environment = (
         dict(production_environment)
         if production_environment is not None
         else parse_production_env(production_env_file)
     )
-    validate_production_env(environment, manifest)
+    validate_current_production_env(environment)
+    actual_env_sha256 = hash_file(production_env_file)
+    if environment == current_values:
+        expected_env_sha256 = current_identity["env_sha256"]
+    elif environment == target_values:
+        expected_env_sha256 = target_identity["env_sha256"]
+    else:
+        raise ContractError("production environment drifted outside the sealed transition")
+    if actual_env_sha256 != expected_env_sha256:
+        raise ContractError("production environment file does not match its sealed state")
     expected_candidate_runtime = {
-        **candidate_user_url_environment(environment),
+        **candidate_user_url_environment(target_values),
         WEATHER_DATA_DIR_ENV_KEY: weather_candidate_data_dir(
             manifest["weather_candidate_mode"]
         ),
@@ -3223,21 +3486,19 @@ def validate_deployment_plan(
         if plan.get(key) != expected_value:
             raise ContractError(f"deployment plan {key} mismatch")
     expected_weather_contract = weather_runtime_contract(
-        environment[WEATHER_RUNTIME_ENV_KEY],
+        target_values[WEATHER_RUNTIME_ENV_KEY],
         weather_facts["weather_candidate_mode"],
     )
     if plan.get("weather_runtime_contract") != expected_weather_contract:
         raise ContractError("deployment plan weather runtime contract changed")
-    if hash_file(production_env_file) != plan.get("production_env_sha256"):
-        raise ContractError("production environment file changed after plan sealing")
     for key in RUNTIME_URL_KEYS:
-        if plan.get(key) != environment[key]:
-            raise ContractError(f"deployment plan {key} does not match production env")
-        if production_runtime.get(key) != environment[key]:
+        if plan.get(key) != target_values[key]:
+            raise ContractError(f"deployment plan {key} does not match target env")
+        if production_runtime.get(key) != target_values[key]:
             raise ContractError(
-                f"deployment plan production runtime {key} does not match production env"
+                f"deployment plan production runtime {key} does not match target env"
             )
-    if production_runtime.get(WEATHER_DATA_DIR_ENV_KEY) != environment[
+    if production_runtime.get(WEATHER_DATA_DIR_ENV_KEY) != target_values[
         WEATHER_DATA_DIR_ENV_KEY
     ]:
         raise ContractError(
@@ -3252,10 +3513,32 @@ def validate_deployment_plan(
         raise ContractError(
             "deployment plan runtime differences do not match the allowlisted facts"
         )
-    if plan.get("MARKET_DATA_GIT_HEAD") != environment["MARKET_DATA_GIT_HEAD"]:
+    if plan.get("MARKET_DATA_GIT_HEAD") != target_values["MARKET_DATA_GIT_HEAD"]:
         raise ContractError(
-            "deployment plan MARKET_DATA_GIT_HEAD does not match production env"
+            "deployment plan MARKET_DATA_GIT_HEAD does not match target env"
         )
+    if plan.get("current_production_compose_sha256") != current_identity[
+        "compose_sha256"
+    ]:
+        raise ContractError("deployment plan current production Compose SHA mismatch")
+    if plan.get("production_compose_sha256") != target_identity["compose_sha256"]:
+        raise ContractError("deployment plan target production Compose SHA mismatch")
+    tool_revision = plan.get("deployment_tool_revision")
+    if not isinstance(tool_revision, dict):
+        raise ContractError("deployment plan deployment_tool_revision is missing")
+    validate_full_git_commit(tool_revision.get("git_commit"))
+    validate_full_git_commit(tool_revision.get("git_tree"))
+    expected_argv = _compose_switch_argv(
+        production_env_file,
+        production_project_dir,
+        production_compose_file,
+    )
+    if plan.get("deployment_argv") != expected_argv:
+        raise ContractError("deployment plan deployment argv changed")
+    if plan.get("rollback_argv") != expected_argv:
+        raise ContractError("deployment plan rollback argv changed")
+    if plan.get("deployment_action") != "upgrade":
+        raise ContractError("deployment plan action must be upgrade")
     assert_no_sensitive_values(plan, "deployment plan")
     return environment
 
@@ -3271,6 +3554,7 @@ def create_deployment_plan(
     runtime: ReleaseRuntime,
     schema: Mapping[str, Any],
     created_at: str | None = None,
+    deployment_tool_git_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     tool_repo_root = tool_repo_root.resolve()
     production_compose_file = production_compose_file.resolve()
@@ -3305,14 +3589,56 @@ def create_deployment_plan(
             "tool repository Compose and production Compose file identities differ"
         )
 
-    production_environment = parse_production_env(production_env_file)
-    validate_production_env(production_environment, manifest)
+    deployment_tool_revision = capture_git_identity(
+        tool_repo_root, deployment_tool_git_runner
+    )
+    current_environment = parse_production_env(production_env_file)
+    validate_current_production_env(current_environment)
+    target_environment = target_production_environment(
+        current_environment, manifest
+    )
     candidate_result = load_candidate_result(candidate_result_file, manifest)
     if runtime.container_exists(manifest["candidate_container_name"]):
         raise ContractError(
             "candidate container still exists; remove it before sealing deployment plan"
         )
     _verify_image_identity(manifest, runtime)
+    current_container = runtime.container_record(PRODUCTION_CONTAINER)
+    if current_environment == target_environment:
+        if (
+            current_container.get("image_id") == manifest["image_id"]
+            and current_container.get("config_image") == manifest["image_ref"]
+            and current_container.get("runtime_git_commit") == manifest["git_commit"]
+        ):
+            raise ContractError(
+                "production already matches target release; deployment is already-deployed/no-op"
+            )
+        raise ContractError(
+            "production env names the target release but the running container identity differs"
+        )
+    if current_environment["SPREAD_IMAGE"] != manifest["rollback_image_ref"]:
+        raise ContractError(
+            "current production SPREAD_IMAGE does not match the candidate-sealed rollback ref"
+        )
+    if current_environment["MARKET_DATA_GIT_HEAD"] != manifest["formal_git_commit"]:
+        raise ContractError(
+            "current production Git commit does not match the candidate-sealed baseline"
+        )
+    if current_container.get("image_id") != manifest["rollback_image_id"]:
+        raise ContractError(
+            "current production container Image ID does not match the sealed baseline"
+        )
+    if current_container.get("config_image") != manifest["rollback_image_ref"]:
+        raise ContractError(
+            "current production container image ref does not match the sealed baseline"
+        )
+    if current_container.get("runtime_git_commit") != manifest["formal_git_commit"]:
+        raise ContractError(
+            "current production runtime Git commit does not match the sealed baseline"
+        )
+    rollback_image = runtime.image_record(manifest["rollback_image_ref"])
+    if rollback_image.get("id") != manifest["rollback_image_id"]:
+        raise ContractError("sealed rollback tag no longer resolves to its Image ID")
     pre_deploy_formal_snapshot = capture_formal_container_snapshot(runtime)
     formal_containers = compare_formal_container_snapshots(
         candidate_result["formal_containers"]["after"],
@@ -3327,7 +3653,7 @@ def create_deployment_plan(
         manifest["image_ref"],
         environment=candidate_compose_environment(
             manifest["git_commit"],
-            production_environment,
+            target_environment,
             manifest["weather_candidate_mode"],
         ),
         project_directory=tool_repo_root,
@@ -3340,10 +3666,31 @@ def create_deployment_plan(
         manifest["image_ref"],
     )
 
+    current_compose, current_raw, current_images = runtime.compose_config(
+        tool_repo_root,
+        current_environment["SPREAD_IMAGE"],
+        environment=current_environment,
+        project_directory=production_project_dir,
+        compose_file=production_compose_file,
+    )
+    current_compose_sha = validate_compose_result(
+        current_compose,
+        current_raw,
+        current_images,
+        current_environment["SPREAD_IMAGE"],
+    )
+    _validate_formal_spread_semantics(
+        current_compose,
+        production_project_dir,
+        current_environment["SPREAD_IMAGE"],
+        current_environment["MARKET_DATA_GIT_HEAD"],
+        current_environment[WEATHER_RUNTIME_ENV_KEY],
+    )
+
     production_compose, production_raw, production_images = runtime.compose_config(
         tool_repo_root,
         manifest["image_ref"],
-        environment=production_environment,
+        environment=target_environment,
         project_directory=production_project_dir,
         compose_file=production_compose_file,
     )
@@ -3358,7 +3705,7 @@ def create_deployment_plan(
         production_project_dir,
         manifest["image_ref"],
         manifest["git_commit"],
-        production_environment[WEATHER_RUNTIME_ENV_KEY],
+        target_environment[WEATHER_RUNTIME_ENV_KEY],
     )
     _validate_weather_runtime_compose(
         candidate_compose,
@@ -3384,7 +3731,7 @@ def create_deployment_plan(
         if candidate_runtime[key] != production_runtime[key]
     ]
     for key in (*RUNTIME_URL_KEYS, WEATHER_DATA_DIR_ENV_KEY):
-        if production_runtime[key] != production_environment[key]:
+        if production_runtime[key] != target_environment[key]:
             raise ContractError(
                 f"production Compose did not render the explicit {key} value"
             )
@@ -3407,24 +3754,27 @@ def create_deployment_plan(
         "candidate_container_removed": True,
         "formal_containers": formal_containers,
         "production_env_file": str(production_env_file),
-        "production_env_sha256": hash_file(production_env_file),
-        "USDA_DASHBOARD_URL": production_environment["USDA_DASHBOARD_URL"],
-        "OIL_WORLD_DASHBOARD_URL": production_environment[
+        "production_env_baseline_sha256": hash_file(production_env_file),
+        "production_env_sha256": production_env_sha256(target_environment),
+        "USDA_DASHBOARD_URL": target_environment["USDA_DASHBOARD_URL"],
+        "OIL_WORLD_DASHBOARD_URL": target_environment[
             "OIL_WORLD_DASHBOARD_URL"
         ],
-        "MARKET_DATA_GIT_HEAD": production_environment["MARKET_DATA_GIT_HEAD"],
+        "MARKET_DATA_GIT_HEAD": target_environment["MARKET_DATA_GIT_HEAD"],
         "weather_runtime_contract": weather_runtime_contract(
-            production_environment[WEATHER_RUNTIME_ENV_KEY],
+            target_environment[WEATHER_RUNTIME_ENV_KEY],
             manifest["weather_candidate_mode"],
         ),
         **weather_candidate_facts(manifest["weather_candidate_mode"]),
         "tool_repo_root": str(tool_repo_root),
+        "deployment_tool_revision": deployment_tool_revision,
         "compose_project": COMPOSE_PROJECT,
         "production_service": COMPOSE_SERVICE,
         "production_compose_file": str(production_compose_file),
         "production_project_dir": str(production_project_dir),
         "compose_template_sha256": template_sha,
         "candidate_compose_sha256": candidate_sha,
+        "current_production_compose_sha256": current_compose_sha,
         "production_compose_sha256": production_sha,
         "candidate_runtime_environment": dict(candidate_runtime),
         "production_runtime_environment": dict(production_runtime),
@@ -3435,6 +3785,36 @@ def create_deployment_plan(
             "production_semantic_sha256": semantic_sha,
         },
         "production_service_scope": list(PRODUCTION_SERVICE_SCOPE),
+        "current_production": {
+            "environment": dict(current_environment),
+            "env_sha256": hash_file(production_env_file),
+            "image_ref": current_environment["SPREAD_IMAGE"],
+            "image_id": manifest["rollback_image_id"],
+            "git_commit": current_environment["MARKET_DATA_GIT_HEAD"],
+            "compose_sha256": current_compose_sha,
+        },
+        "target_release": {
+            "environment": dict(target_environment),
+            "env_sha256": production_env_sha256(target_environment),
+            "release_id": manifest["release_id"],
+            "image_ref": manifest["image_ref"],
+            "image_id": manifest["image_id"],
+            "git_commit": manifest["git_commit"],
+            "git_tree": manifest["git_tree"],
+            "oci_revision": manifest["git_commit"],
+            "compose_sha256": production_sha,
+        },
+        "deployment_action": "upgrade",
+        "deployment_argv": _compose_switch_argv(
+            production_env_file,
+            production_project_dir,
+            production_compose_file,
+        ),
+        "rollback_argv": _compose_switch_argv(
+            production_env_file,
+            production_project_dir,
+            production_compose_file,
+        ),
         "rollback_git_commit": manifest["formal_git_commit"],
         "rollback_image_ref": manifest["rollback_image_ref"],
         "rollback_image_id": manifest["rollback_image_id"],
@@ -3446,7 +3826,7 @@ def create_deployment_plan(
         plan,
         manifest,
         schema,
-        production_environment=production_environment,
+        production_environment=current_environment,
     )
     return plan
 
@@ -3590,16 +3970,9 @@ def verify_pre_deploy(
         )
     tool_repo_root = tool_repo_root.resolve()
     validate_repository_static(tool_repo_root)
-    actual_tree = validate_git_state(
-        tool_repo_root,
-        manifest["git_commit"],
-        git_runner,
-    )
-    if actual_tree != manifest["git_tree"]:
-        raise ContractError(
-            f"tool repository Tree SHA mismatch: expected {manifest['git_tree']}, "
-            f"got {actual_tree}"
-        )
+    actual_tool_revision = capture_git_identity(tool_repo_root, git_runner)
+    if actual_tool_revision != deployment_plan.get("deployment_tool_revision"):
+        raise ContractError("deployment tool revision changed after plan sealing")
     for path, field in (
         (tool_repo_root / "Dockerfile", "dockerfile_sha256"),
         (tool_repo_root / ".dockerignore", "dockerignore_sha256"),
@@ -3613,7 +3986,14 @@ def verify_pre_deploy(
         if actual != manifest[field]:
             raise ContractError(f"{field} mismatch: expected {manifest[field]}, got {actual}")
 
-    validate_production_env(production_environment, manifest)
+    validate_current_production_env(production_environment)
+    current_identity = deployment_plan.get("current_production") or {}
+    target_identity = deployment_plan.get("target_release") or {}
+    if production_environment != current_identity.get("environment"):
+        raise ContractError("production environment drifted after plan sealing")
+    production_env_file = Path(deployment_plan["production_env_file"])
+    if hash_file(production_env_file) != current_identity.get("env_sha256"):
+        raise ContractError("production environment SHA-256 drifted after plan sealing")
     if deployment_plan.get("plan_status") != "deployment_plan_sealed":
         raise ContractError("production deployment requires a sealed deployment_plan")
     if deployment_plan.get("production_service_scope") != list(
@@ -3644,16 +4024,30 @@ def verify_pre_deploy(
         ("candidate_image_id", manifest["image_id"]),
         ("compose_project", COMPOSE_PROJECT),
         ("production_service", COMPOSE_SERVICE),
-        ("production_env_sha256", hash_file(Path(deployment_plan["production_env_file"]))),
+        ("production_env_baseline_sha256", hash_file(production_env_file)),
     ):
         if deployment_plan.get(key) != expected:
             raise ContractError(f"deployment plan {key} changed before deployment")
 
     image_evidence = _verify_image_identity(manifest, runtime)
+    current_container = runtime.container_record(PRODUCTION_CONTAINER)
+    for key, expected in (
+        ("config_image", current_identity.get("image_ref")),
+        ("image_id", current_identity.get("image_id")),
+        ("runtime_git_commit", current_identity.get("git_commit")),
+    ):
+        if current_container.get(key) != expected:
+            raise ContractError(f"current production container {key} drifted")
+    current_image = runtime.image_record(str(current_identity.get("image_ref", "")))
+    if current_image.get("id") != current_identity.get("image_id"):
+        raise ContractError("current production image tag drifted from its sealed Image ID")
+    target_environment = target_identity.get("environment")
+    if not isinstance(target_environment, dict):
+        raise ContractError("deployment plan target environment is missing")
     compose, raw_config, images = runtime.compose_config(
         tool_repo_root,
         manifest["image_ref"],
-        environment=production_environment,
+        environment=target_environment,
         project_directory=production_project_dir,
         compose_file=production_compose_file,
     )
@@ -3669,7 +4063,7 @@ def verify_pre_deploy(
         production_project_dir,
         manifest["image_ref"],
         manifest["git_commit"],
-        production_environment[WEATHER_RUNTIME_ENV_KEY],
+        target_environment[WEATHER_RUNTIME_ENV_KEY],
     )
     semantics, rendered_environment = _compose_spread_semantics(
         compose,
@@ -3680,7 +4074,7 @@ def verify_pre_deploy(
     ]:
         raise ContractError("production Compose semantics changed after plan sealing")
     for key in RUNTIME_URL_KEYS:
-        if rendered_environment[key] != production_environment[key]:
+        if rendered_environment[key] != target_environment[key]:
             raise ContractError(f"production Compose rendered unexpected {key}")
     formal_containers = compare_formal_container_snapshots(
         deployment_plan["formal_containers"]["after"],
@@ -3773,15 +4167,24 @@ def verify_post_deploy(
     runtime: ReleaseRuntime,
     *,
     deployment_plan: Mapping[str, Any] | None = None,
+    production_environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     if (
         manifest.get("schema_version") != SCHEMA_VERSION
         or deployment_plan is None
         or deployment_plan.get("plan_status") != "deployment_plan_sealed"
+        or production_environment is None
     ):
         raise ContractError(
             "post-deploy verification requires a sealed deployment_plan"
         )
+    target_environment = deployment_plan.get("target_release", {}).get("environment")
+    if production_environment != target_environment:
+        raise ContractError("post-deploy production env does not match the sealed target")
+    if hash_file(Path(deployment_plan["production_env_file"])) != deployment_plan[
+        "production_env_sha256"
+    ]:
+        raise ContractError("post-deploy production env SHA-256 does not match target")
     for key, expected in (
         ("git_commit", manifest["git_commit"]),
         ("git_tree", manifest["git_tree"]),
@@ -3849,6 +4252,7 @@ def verify_pre_rollback(
     *,
     deployment_plan: Mapping[str, Any] | None = None,
     production_environment: Mapping[str, str] | None = None,
+    git_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     if deployment_plan is None or production_environment is None:
         raise ContractError("rollback requires a sealed deployment_plan")
@@ -3858,10 +4262,28 @@ def verify_pre_rollback(
         PRODUCTION_SERVICE_SCOPE
     ):
         raise ContractError("rollback service scope changed")
-    validate_production_env(production_environment, manifest)
+    validate_current_production_env(production_environment)
+    current_environment = deployment_plan.get("current_production", {}).get(
+        "environment"
+    )
+    target_environment = deployment_plan.get("target_release", {}).get(
+        "environment"
+    )
+    if production_environment == target_environment:
+        expected_env_sha256 = deployment_plan["production_env_sha256"]
+    elif production_environment == current_environment:
+        expected_env_sha256 = deployment_plan["production_env_baseline_sha256"]
+    else:
+        raise ContractError("rollback production env drifted outside the sealed transition")
+    if hash_file(Path(deployment_plan["production_env_file"])) != expected_env_sha256:
+        raise ContractError("rollback production env SHA-256 drifted")
     tool_repo_root = tool_repo_root.resolve()
     if Path(str(deployment_plan.get("tool_repo_root", ""))).resolve() != tool_repo_root:
         raise ContractError("rollback tool_repo_root changed")
+    if capture_git_identity(tool_repo_root, git_runner) != deployment_plan.get(
+        "deployment_tool_revision"
+    ):
+        raise ContractError("rollback deployment tool revision changed")
     production_compose_file = Path(
         str(deployment_plan.get("production_compose_file", ""))
     ).resolve()
@@ -3882,11 +4304,7 @@ def verify_pre_rollback(
         raise ContractError(
             f"rollback tag ID mismatch: expected {expected_id}, got {record.get('id')}"
         )
-    rollback_environment = {
-        **production_environment,
-        "SPREAD_IMAGE": image_ref,
-        "MARKET_DATA_GIT_HEAD": manifest["formal_git_commit"],
-    }
+    rollback_environment = dict(current_environment)
     compose, raw_config, images = runtime.compose_config(
         tool_repo_root,
         image_ref,
@@ -3920,7 +4338,21 @@ def verify_pre_rollback(
 def verify_post_rollback(
     manifest: Mapping[str, Any],
     runtime: ReleaseRuntime,
+    *,
+    deployment_plan: Mapping[str, Any] | None = None,
+    production_environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    if deployment_plan is None or production_environment is None:
+        raise ContractError("post-rollback verification requires a sealed deployment plan")
+    current_environment = deployment_plan.get("current_production", {}).get(
+        "environment"
+    )
+    if production_environment != current_environment:
+        raise ContractError("rolled-back production env does not match the sealed baseline")
+    if hash_file(Path(deployment_plan["production_env_file"])) != deployment_plan[
+        "production_env_baseline_sha256"
+    ]:
+        raise ContractError("rolled-back production env SHA-256 mismatch")
     expected_ref = validate_rollback_image_ref(manifest["rollback_image_ref"])
     expected_id = validate_image_id(
         manifest["rollback_image_id"], "rollback_image_id"
@@ -4255,10 +4687,17 @@ def validate_deployment_result(
         "compose_project": deployment_plan["compose_project"],
         "production_service": deployment_plan["production_service"],
         "production_env_file": deployment_plan["production_env_file"],
+        "production_env_before_sha256": deployment_plan[
+            "production_env_baseline_sha256"
+        ],
+        "production_env_after_sha256": deployment_plan["production_env_sha256"],
         "production_env_sha256": deployment_plan["production_env_sha256"],
         "production_compose_sha256": deployment_plan[
             "production_compose_sha256"
         ],
+        "deployment_tool_revision": deployment_plan["deployment_tool_revision"],
+        "current_production": deployment_plan["current_production"],
+        "target_release": deployment_plan["target_release"],
         "status": "production_verified",
     }
     for key, expected_value in expected.items():

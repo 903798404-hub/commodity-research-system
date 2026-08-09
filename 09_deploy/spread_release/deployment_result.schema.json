@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.4.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-result-1.5.0.json",
   "title": "spread-dashboard verified production deployment result",
   "type": "object",
   "additionalProperties": false,
@@ -25,8 +25,13 @@
     "deployment_plan",
     "deployment_plan_sha256",
     "production_env_file",
+    "production_env_before_sha256",
+    "production_env_after_sha256",
     "production_env_sha256",
     "production_compose_sha256",
+    "deployment_tool_revision",
+    "current_production",
+    "target_release",
     "weather_runtime_contract",
     "weather_candidate_mode",
     "weather_candidate_source",
@@ -45,7 +50,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.4.0"
+      "const": "1.5.0"
     },
     "application": {
       "const": "spread-dashboard"
@@ -112,8 +117,23 @@
     "production_env_sha256": {
       "$ref": "#/$defs/sha256"
     },
+    "production_env_before_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "production_env_after_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
     "production_compose_sha256": {
       "$ref": "#/$defs/sha256"
+    },
+    "deployment_tool_revision": {
+      "$ref": "#/$defs/gitRevision"
+    },
+    "current_production": {
+      "$ref": "#/$defs/currentProduction"
+    },
+    "target_release": {
+      "$ref": "#/$defs/targetRelease"
     },
     "weather_runtime_contract": {
       "$ref": "#/$defs/weatherRuntimeContract"
@@ -148,6 +168,57 @@
     }
   },
   "$defs": {
+    "gitRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "git_tree"],
+      "properties": {
+        "git_commit": { "$ref": "#/$defs/fullGitCommit" },
+        "git_tree": { "$ref": "#/$defs/fullGitCommit" }
+      }
+    },
+    "productionEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["SPREAD_IMAGE", "MARKET_DATA_GIT_HEAD", "USDA_DASHBOARD_URL", "OIL_WORLD_DASHBOARD_URL", "WEATHER_RUNTIME_CURRENT_DIR", "WEATHER_DATA_DIR"],
+      "properties": {
+        "SPREAD_IMAGE": { "type": "string", "minLength": 1 },
+        "MARKET_DATA_GIT_HEAD": { "$ref": "#/$defs/fullGitCommit" },
+        "USDA_DASHBOARD_URL": { "type": "string", "minLength": 8 },
+        "OIL_WORLD_DASHBOARD_URL": { "type": "string", "minLength": 8 },
+        "WEATHER_RUNTIME_CURRENT_DIR": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
+        "WEATHER_DATA_DIR": { "const": "/app/runtime/weather/current" }
+      }
+    },
+    "currentProduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "env_sha256", "image_ref", "image_id", "git_commit", "compose_sha256"],
+      "properties": {
+        "environment": { "$ref": "#/$defs/productionEnvironment" },
+        "env_sha256": { "$ref": "#/$defs/sha256" },
+        "image_ref": { "type": "string", "minLength": 1 },
+        "image_id": { "$ref": "#/$defs/imageId" },
+        "git_commit": { "$ref": "#/$defs/fullGitCommit" },
+        "compose_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "targetRelease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "env_sha256", "release_id", "image_ref", "image_id", "git_commit", "git_tree", "oci_revision", "compose_sha256"],
+      "properties": {
+        "environment": { "$ref": "#/$defs/productionEnvironment" },
+        "env_sha256": { "$ref": "#/$defs/sha256" },
+        "release_id": { "type": "string", "minLength": 1 },
+        "image_ref": { "type": "string", "minLength": 1 },
+        "image_id": { "$ref": "#/$defs/imageId" },
+        "git_commit": { "$ref": "#/$defs/fullGitCommit" },
+        "git_tree": { "$ref": "#/$defs/fullGitCommit" },
+        "oci_revision": { "$ref": "#/$defs/fullGitCommit" },
+        "compose_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
     "formalContainerEvidence": {
       "type": "object",
       "additionalProperties": false,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.5.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.6.0.json",
   "title": "spread-dashboard sealed production deployment plan",
   "type": "object",
   "additionalProperties": false,
@@ -17,6 +17,7 @@
     "candidate_container_removed",
     "formal_containers",
     "production_env_file",
+    "production_env_baseline_sha256",
     "production_env_sha256",
     "USDA_DASHBOARD_URL",
     "OIL_WORLD_DASHBOARD_URL",
@@ -31,18 +32,25 @@
     "processed_next_created",
     "processed_current_modified",
     "tool_repo_root",
+    "deployment_tool_revision",
     "compose_project",
     "production_service",
     "production_compose_file",
     "production_project_dir",
     "compose_template_sha256",
     "candidate_compose_sha256",
+    "current_production_compose_sha256",
     "production_compose_sha256",
     "candidate_runtime_environment",
     "production_runtime_environment",
     "allowed_candidate_production_differences",
     "semantic_comparison",
     "production_service_scope",
+    "current_production",
+    "target_release",
+    "deployment_action",
+    "deployment_argv",
+    "rollback_argv",
     "rollback_git_commit",
     "rollback_image_ref",
     "rollback_image_id",
@@ -52,7 +60,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.5.0"
+      "const": "1.6.0"
     },
     "release_id": {
       "type": "string",
@@ -94,6 +102,9 @@
     "production_env_sha256": {
       "$ref": "#/$defs/sha256"
     },
+    "production_env_baseline_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
     "USDA_DASHBOARD_URL": {
       "type": "string",
       "minLength": 8
@@ -120,6 +131,9 @@
       "type": "string",
       "minLength": 1
     },
+    "deployment_tool_revision": {
+      "$ref": "#/$defs/gitRevision"
+    },
     "compose_project": {
       "const": "market-data"
     },
@@ -138,6 +152,9 @@
       "$ref": "#/$defs/sha256"
     },
     "candidate_compose_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "current_production_compose_sha256": {
       "$ref": "#/$defs/sha256"
     },
     "production_compose_sha256": {
@@ -188,6 +205,21 @@
         "const": "spread-dashboard"
       }
     },
+    "current_production": {
+      "$ref": "#/$defs/currentProduction"
+    },
+    "target_release": {
+      "$ref": "#/$defs/targetRelease"
+    },
+    "deployment_action": {
+      "const": "upgrade"
+    },
+    "deployment_argv": {
+      "$ref": "#/$defs/composeArgv"
+    },
+    "rollback_argv": {
+      "$ref": "#/$defs/composeArgv"
+    },
     "rollback_git_commit": {
       "$ref": "#/$defs/fullGitCommit"
     },
@@ -210,6 +242,63 @@
     }
   },
   "$defs": {
+    "gitRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "git_tree"],
+      "properties": {
+        "git_commit": { "$ref": "#/$defs/fullGitCommit" },
+        "git_tree": { "$ref": "#/$defs/fullGitCommit" }
+      }
+    },
+    "productionEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["SPREAD_IMAGE", "MARKET_DATA_GIT_HEAD", "USDA_DASHBOARD_URL", "OIL_WORLD_DASHBOARD_URL", "WEATHER_RUNTIME_CURRENT_DIR", "WEATHER_DATA_DIR"],
+      "properties": {
+        "SPREAD_IMAGE": { "type": "string", "minLength": 1 },
+        "MARKET_DATA_GIT_HEAD": { "$ref": "#/$defs/fullGitCommit" },
+        "USDA_DASHBOARD_URL": { "type": "string", "minLength": 8 },
+        "OIL_WORLD_DASHBOARD_URL": { "type": "string", "minLength": 8 },
+        "WEATHER_RUNTIME_CURRENT_DIR": { "const": "/home/ubuntu/market-data-runtime/weather/processed" },
+        "WEATHER_DATA_DIR": { "const": "/app/runtime/weather/current" }
+      }
+    },
+    "currentProduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "env_sha256", "image_ref", "image_id", "git_commit", "compose_sha256"],
+      "properties": {
+        "environment": { "$ref": "#/$defs/productionEnvironment" },
+        "env_sha256": { "$ref": "#/$defs/sha256" },
+        "image_ref": { "type": "string", "minLength": 1 },
+        "image_id": { "$ref": "#/$defs/imageId" },
+        "git_commit": { "$ref": "#/$defs/fullGitCommit" },
+        "compose_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "targetRelease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "env_sha256", "release_id", "image_ref", "image_id", "git_commit", "git_tree", "oci_revision", "compose_sha256"],
+      "properties": {
+        "environment": { "$ref": "#/$defs/productionEnvironment" },
+        "env_sha256": { "$ref": "#/$defs/sha256" },
+        "release_id": { "type": "string", "minLength": 1 },
+        "image_ref": { "type": "string", "minLength": 1 },
+        "image_id": { "$ref": "#/$defs/imageId" },
+        "git_commit": { "$ref": "#/$defs/fullGitCommit" },
+        "git_tree": { "$ref": "#/$defs/fullGitCommit" },
+        "oci_revision": { "$ref": "#/$defs/fullGitCommit" },
+        "compose_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "composeArgv": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 18,
+      "items": { "type": "string", "minLength": 1 }
+    },
     "formalContainerEvidence": {
       "type": "object",
       "additionalProperties": false,

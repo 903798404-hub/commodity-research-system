@@ -124,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
                     manifest,
                     runtime,
                     deployment_plan=plan,
+                    production_environment=production_environment,
                 )
                 if args.phase == "record-deployment":
                     if args.readiness_result is None:
@@ -178,10 +179,21 @@ def main(argv: list[str] | None = None) -> int:
                         "deployment_plan": str(plan_path),
                         "deployment_plan_sha256": plan_sha256,
                         "production_env_file": plan["production_env_file"],
+                        "production_env_before_sha256": plan[
+                            "production_env_baseline_sha256"
+                        ],
+                        "production_env_after_sha256": plan[
+                            "production_env_sha256"
+                        ],
                         "production_env_sha256": plan["production_env_sha256"],
                         "production_compose_sha256": plan[
                             "production_compose_sha256"
                         ],
+                        "deployment_tool_revision": plan[
+                            "deployment_tool_revision"
+                        ],
+                        "current_production": plan["current_production"],
+                        "target_release": plan["target_release"],
                         "weather_runtime_contract": plan[
                             "weather_runtime_contract"
                         ],
@@ -246,7 +258,12 @@ def main(argv: list[str] | None = None) -> int:
                     production_environment=production_environment,
                 )
             else:
-                evidence = verify_post_rollback(manifest, runtime)
+                evidence = verify_post_rollback(
+                    manifest,
+                    runtime,
+                    deployment_plan=plan,
+                    production_environment=production_environment,
+                )
                 evidence["deployment_plan_sha256"] = plan_sha256
     except ContractError as exc:
         print(f"release contract rejected: {exc}", file=sys.stderr)

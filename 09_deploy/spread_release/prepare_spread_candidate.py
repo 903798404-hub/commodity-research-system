@@ -74,7 +74,6 @@ CANDIDATE_SERVICE = "spread-dashboard-candidate"
 DEFAULT_CLEANUP_POLICY = "on-failure"
 AFTER_PLAN_CLEANUP_POLICY = "after-plan"
 SNAPSHOT_MAX_AGE_SECONDS = 300
-TARGET_PRODUCTION_ENV_FILENAME = "production-target.env"
 CANDIDATE_DATA_CONTAINER_PATH = "/app/01_data"
 CANDIDATE_BASIS_RELATIVE_PATH = Path("database/basis/basis_quotes.parquet")
 CANDIDATE_BASIS_CONTAINER_PATH = (
@@ -1171,12 +1170,9 @@ def _default_deployment_plan_sealer(
 ) -> Mapping[str, str]:
     """Seal deployment_plan only after the candidate container is gone.
 
-    The supplied production environment identifies the *currently running*
-    formal service.  A candidate plan instead needs the immutable target
-    environment that Compose will use for the eventual one-service switch.
-    Seal that small derived environment in the release bundle rather than
-    mutating the operator-managed production environment file during a
-    candidate gate.
+    The supplied environment is the read-only current production baseline.
+    create_deployment_plan derives and seals the target environment without
+    changing the operator-managed production file.
     """
     manifest_path = release_directory / "release.json"
     manifest, _ = load_manifest_bundle(
@@ -1184,15 +1180,13 @@ def _default_deployment_plan_sealer(
         release_directory / "release.env",
         SCRIPT_DIR / "release.schema.json",
     )
-    target_environment = _target_production_environment(production_environment, manifest)
-    target_environment_path = release_directory / TARGET_PRODUCTION_ENV_FILENAME
-    _write_target_production_environment(target_environment_path, target_environment)
+    del production_environment
     plan = create_deployment_plan(
         tool_repo_root=options.build_context,
         production_compose_file=options.production_compose_file,
         production_project_dir=options.production_compose_file.parent,
         candidate_result_file=candidate_result_path,
-        production_env_file=target_environment_path,
+        production_env_file=options.production_env_file,
         manifest=manifest,
         runtime=runtime,
         schema=load_schema(SCRIPT_DIR / "deployment_plan.schema.json"),
@@ -1208,33 +1202,12 @@ def _default_deployment_plan_sealer(
     return {
         "deployment_plan_path": str(deployment_plan_path),
         "deployment_plan_sha256": hash_file(deployment_plan_path),
-        "target_production_env_file": str(target_environment_path),
-        "target_production_env_sha256": hash_file(target_environment_path),
+        "production_env_file": str(options.production_env_file),
+        "production_env_baseline_sha256": plan[
+            "production_env_baseline_sha256"
+        ],
+        "target_production_env_sha256": plan["production_env_sha256"],
     }
-
-
-def _write_target_production_environment(
-    path: Path, environment: Mapping[str, str]
-) -> None:
-    """Write and re-parse the sealed deployment environment without secrets."""
-    if path.exists():
-        raise ContractError("target production environment already exists")
-    content = "".join(f"{key}={value}\n" for key, value in environment.items())
-    path.write_text(content, encoding="utf-8")
-    if os.name != "nt":
-        path.chmod(0o600)
-    if parse_production_env(path) != dict(environment):
-        raise ContractError("sealed target production environment did not round-trip")
-
-
-def _target_production_environment(
-    production_environment: Mapping[str, str], manifest: Mapping[str, Any]
-) -> dict[str, str]:
-    """Derive the target-only overlay while preserving formal URL/data inputs."""
-    target = dict(production_environment)
-    target["SPREAD_IMAGE"] = str(manifest["image_ref"])
-    target["MARKET_DATA_GIT_HEAD"] = str(manifest["git_commit"])
-    return target
 
 
 def _remove_candidate_container(

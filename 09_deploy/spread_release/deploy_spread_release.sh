@@ -16,6 +16,7 @@ environment_file="${release_directory}/release.env"
 verifier="${script_dir}/verify_release_contract.py"
 rollback_script="${script_dir}/rollback_spread_release.sh"
 readiness_waiter="${script_dir}/wait_for_service_ready.py"
+env_transition="${script_dir}/transition_production_env.py"
 readiness_result="${release_directory}/production_readiness.json"
 readiness_failure="${release_directory}/production_readiness.failure.json"
 bundle_filename="$(
@@ -75,12 +76,18 @@ rollback_on_failure() {
 trap rollback_on_failure ERR
 
 switch_started=1
+python3 "${env_transition}" \
+    --manifest "${manifest}" \
+    --release-env "${environment_file}" \
+    --deployment-plan "${deployment_plan}" \
+    --action target
+
 docker compose \
     --env-file "${production_env_file}" \
     --project-name "${compose_project}" \
     --project-directory "${production_project_dir}" \
     -f "${production_compose_file}" \
-    up -d --no-build --no-deps "${production_service}"
+    up -d --no-build --pull never --no-deps --force-recreate "${production_service}"
 
 initial_restart_count="$(
     docker inspect --format '{{.RestartCount}}' spread-dashboard

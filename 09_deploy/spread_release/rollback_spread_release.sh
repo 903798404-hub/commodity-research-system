@@ -15,6 +15,7 @@ manifest="${release_directory}/release.json"
 environment_file="${release_directory}/release.env"
 verifier="${script_dir}/verify_release_contract.py"
 readiness_waiter="${script_dir}/wait_for_service_ready.py"
+env_transition="${script_dir}/transition_production_env.py"
 readiness_result="${release_directory}/rollback_readiness.json"
 readiness_failure="${release_directory}/rollback_readiness.failure.json"
 
@@ -55,14 +56,18 @@ production_project_dir="${rollback_identity[5]}"
 compose_project="${rollback_identity[6]}"
 production_service="${rollback_identity[7]}"
 
-SPREAD_IMAGE="${rollback_image_ref}" \
-MARKET_DATA_GIT_HEAD="${rollback_git_commit}" \
+python3 "${env_transition}" \
+    --manifest "${manifest}" \
+    --release-env "${environment_file}" \
+    --deployment-plan "${deployment_plan}" \
+    --action rollback
+
 docker compose \
     --env-file "${production_env_file}" \
     --project-name "${compose_project}" \
     --project-directory "${production_project_dir}" \
     -f "${production_compose_file}" \
-    up -d --no-build --no-deps "${production_service}"
+    up -d --no-build --pull never --no-deps --force-recreate "${production_service}"
 
 initial_restart_count="$(
     docker inspect --format '{{.RestartCount}}' spread-dashboard

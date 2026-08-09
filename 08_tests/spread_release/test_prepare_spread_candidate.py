@@ -1010,7 +1010,7 @@ def test_execute_obeys_the_formal_evidence_and_cleanup_order(tmp_path: Path) -> 
     assert result["deployment_plan_path"].endswith("deployment_plan.json")
 
 
-def test_plan_sealer_uses_a_release_sealed_target_environment(
+def test_plan_sealer_reads_current_env_and_seals_target_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     options, runner = _options(tmp_path, mode="execute")
@@ -1031,7 +1031,11 @@ def test_plan_sealer_uses_a_release_sealed_target_environment(
 
     def fake_create_plan(**kwargs):
         captured.update(kwargs)
-        return {"plan_status": "deployment_plan_sealed"}
+        return {
+            "plan_status": "deployment_plan_sealed",
+            "production_env_baseline_sha256": "a" * 64,
+            "production_env_sha256": "b" * 64,
+        }
 
     def fake_write_plan(_plan, path: Path) -> Path:
         path.write_text("{}\n", encoding="utf-8")
@@ -1063,20 +1067,20 @@ def test_plan_sealer_uses_a_release_sealed_target_environment(
         release / "candidate_result.json",
     )
 
-    target_env = Path(captured["production_env_file"])
-    text = target_env.read_text(encoding="utf-8")
-    assert target_env == release / "production-target.env"
-    assert f"SPREAD_IMAGE={options.image_ref}" in text
-    assert f"MARKET_DATA_GIT_HEAD={options.git_commit}" in text
-    assert "USDA_DASHBOARD_URL=https://dashboard.example/usda/" in text
+    production_env = Path(captured["production_env_file"])
+    original_text = production_env.read_text(encoding="utf-8")
+    assert production_env == options.production_env_file
+    assert f"SPREAD_IMAGE={options.image_ref}" not in original_text
+    assert f"MARKET_DATA_GIT_HEAD={options.git_commit}" not in original_text
     assert captured["production_compose_file"] == options.production_compose_file
     assert captured["production_project_dir"] == options.production_compose_file.parent
     assert str(options.candidate_data_host_root) not in json.dumps(
         captured, default=str, sort_keys=True
     )
     assert captured["schema_path"].name == "deployment_plan.schema.json"
-    assert evidence["target_production_env_file"] == str(target_env)
-    assert len(evidence["target_production_env_sha256"]) == 64
+    assert evidence["production_env_file"] == str(production_env)
+    assert evidence["production_env_baseline_sha256"] == "a" * 64
+    assert evidence["target_production_env_sha256"] == "b" * 64
 
 
 def test_snapshot_failure_records_phase_and_never_calls_docker(tmp_path: Path) -> None:

@@ -1,12 +1,8 @@
 # spread-dashboard 发布环境契约
 
-本目录是 `spread-dashboard` 预定的唯一正式切换与回滚入口，但当前工具状态
-仍为**候选**。代码和模拟契约测试已经完成；真实 `docker compose config`
-验证尚未完成。pyarrow 曾受 Windows 应用控制策略阻断，但 2026-07-19 最终
-复审已在仓库 `.venv` 和另一套独立 Python 环境通过相关测试；当前指定测试
-结果为 154 passed、3 skipped，3 个 skipped 均因本机没有 Docker Compose。
-pyarrow 已不再是当前环境阻塞项。真实 Compose 门槛通过前，不得把本目录称为
-正式生产发布工具，也不得用它执行生产部署。
+本目录是 `spread-dashboard` 唯一正式切换与回滚入口。任何工具修订都必须
+先完成定向契约测试、必要影响范围测试和独立发布授权；未获得当次正式部署授权时，
+不得使用本目录修改生产环境。
 
 本工具只管理 spread 服务，不重建或切换 USDA、Oil World，也不改变业务数据
 更新方式。USDA 和 Oil World 的一条式发布工具仍待实现。
@@ -139,13 +135,15 @@ Stage B 只能通过 `create_candidate_result.py --prior-waiting-candidate-resul
 
 ## 运行环境契约
 
-生产 Compose 要求显式提供以下四个非敏感变量：
+生产 Compose 要求显式提供以下六个非敏感变量：
 
 ```text
 SPREAD_IMAGE
 MARKET_DATA_GIT_HEAD
 USDA_DASHBOARD_URL
 OIL_WORLD_DASHBOARD_URL
+WEATHER_RUNTIME_CURRENT_DIR
+WEATHER_DATA_DIR
 ```
 
 推荐唯一生产环境文件：
@@ -154,16 +152,17 @@ OIL_WORLD_DASHBOARD_URL
 /home/ubuntu/.config/market-data/spread-production.env
 ```
 
-该文件必须只包含上述四项，由部署用户拥有，并禁止组用户和其他用户读取。
-`SPREAD_IMAGE` 必须等于 `release.json.image_ref`，
-`MARKET_DATA_GIT_HEAD` 必须等于 `release.json.git_commit`。两个 URL 必须显式
+该文件必须只包含上述六项，由部署用户拥有，并禁止组用户和其他用户读取。
+生成计划时，`SPREAD_IMAGE` 和 `MARKET_DATA_GIT_HEAD` 表示当前生产基线；
+它们不得被预先改成目标 Release。只有在密封计划的正式执行阶段，
+才会原子切换为 `release.json.image_ref` 和 `release.json.git_commit`。两个 URL 必须显式
 提供实际生产地址，禁止 localhost、回环地址、凭据、查询参数和片段。
 根 Compose 仅向 `spread-dashboard` 注入 `MARKET_DATA_GIT_HEAD`，并使用缺失
 即失败的插值；USDA 和 Oil World 的运行环境不因本工具而改变。
 
 ## 生产部署计划
 
-候选最终验收通过后，使用目标 Release SHA 的独立只读浅克隆中的契约代码、正式
+候选最终验收通过后，使用已批准的独立只读发布工具检出中的契约代码、正式
 Compose 文件、正式 Compose 项目目录和唯一生产环境文件生成计划。候选结果及
 其 Manifest 必须已验证，且候选容器已经删除：
 
@@ -177,29 +176,34 @@ python3 09_deploy/spread_release/create_deployment_plan.py \
   --production-env-file /home/ubuntu/.config/market-data/spread-production.env
 ```
 
-`deployment_plan.json` 显式记录 `tool_repo_root`、
+`deployment_plan.json` 显式记录 `tool_repo_root`、`deployment_tool_revision`、
 `production_compose_file`、`production_project_dir`、Compose 项目名、
 服务名、Git SHA、Tree SHA、候选 Image ID、生产环境文件 SHA-256、实际
 USDA/Oil World URL、候选与生产各自的 Compose SHA-256、候选结果 SHA-256、
-候选容器删除状态、语义哈希、正式服务范围和精确回滚 Git/Image ID。状态固定
+候选容器删除状态、语义哈希、正式服务范围、`current_production`、
+`target_release`、精确执行 argv 和回滚 Git/Image ID。A 与 B 不同是正常升级；
+生成器只读密封 A → B，不修改 env、Compose、容器或 Docker tag。状态固定
 为 `deployment_plan_sealed`，并由 `deployment_plan.manifest.json` 密封。
 
 四个目录/身份不得混淆：
 
-- `tool_repo_root`：包含目标 Release SHA 和发布工具的独立只读浅克隆；
+- `tool_repo_root`：包含已批准发布工具的独立只读检出；
 - `production_compose_file`：正式切换实际使用且经过哈希验证的绝对 Compose 路径；
 - `production_project_dir`：Compose 相对挂载源的解析基准；
 - `candidate_image_id`：候选已经验收并在正式切换中复用的精确 Image ID。
 
-正式仓库 HEAD 可以仍是旧提交。预部署只验证 `tool_repo_root` 的 HEAD 和 Tree
-SHA；不会也不得在 `/home/ubuntu/market-data` 执行 checkout、依赖安装、测试
+业务 Release 的 Git/Tree 来自已验收镜像，发布工具的 Git/Tree 单独记录在
+`deployment_tool_revision`；两者可以不同。正式仓库 HEAD 也可以仍是旧提交。
+预部署只验证 `tool_repo_root` 仍等于计划密封的工具 revision；不会也不得在
+`/home/ubuntu/market-data` 执行 checkout、依赖安装、测试
 或镜像构建。
 
-候选与生产允许不同的字段只有：
+候选与目标生产运行环境允许不同的字段只有：
 
 ```text
 USDA_DASHBOARD_URL
 OIL_WORLD_DASHBOARD_URL
+WEATHER_DATA_DIR
 ```
 
 镜像引用、Image ID、构建定义、命令、工作目录、挂载、正式端口、restart
@@ -225,14 +229,15 @@ bash 09_deploy/spread_release/deploy_spread_release.sh \
 `deployment_plan.manifest.json`，再校验生产环境、隔离工具仓库 Git/Tree、
 计划指定的正式 Compose 路径、版本化镜像到 Image ID、OCI revision 和镜像内
 版本文件。脚本从计划读取 Compose 文件、项目目录、项目名、服务名和候选
-Image ID，然后仅执行：
+Image ID，并在任何写入前确认实际 env、Compose 和容器仍等于密封基线 A。
+随后通过官方原子 helper 将 env 切换为 B，然后仅执行：
 
 ```text
 docker compose --env-file <production-env> \
   --project-name <compose-project> \
   --project-directory <production-project-dir> \
   -f <production-compose-file> \
-  up -d --no-build --no-deps <production-service>
+  up -d --no-build --pull never --no-deps --force-recreate <production-service>
 ```
 
 切换后先证明实际容器 Image ID 与候选结果和计划中的 Image ID 完全相同，
@@ -251,8 +256,9 @@ bash 09_deploy/spread_release/rollback_spread_release.sh \
   "09_deploy/releases/${RELEASE_ID}/deployment_plan.json"
 ```
 
-回滚只接受 `release.json` 中固定的回滚镜像引用和完整 Image ID，切换后再次
-校验实际容器 Image ID。回滚不会恢复或修改宿主机业务数据。
+回滚只接受计划中固定的旧 env、回滚镜像引用和完整 Image ID。
+它先原子恢复 A，再仅重建 `spread-dashboard`，并校验实际容器 Image ID。
+回滚不会恢复或修改宿主机业务数据。
 
 ## 候选 `01_data` 隔离
 
@@ -303,8 +309,10 @@ Compose 只用于候选验收；后续 `deployment_plan.json` 仍由正式
 宿主路径的 runtime mount 身份。Manifest Schema 自身将
 `artifact_type`、`target_file` 和 `target_schema_version` 一一绑定。当前
 当前实现常量指定的版本分别为：`release.json` 2.6.0、
-`candidate_result.json` 1.6.0、`deployment_plan.json` 1.5.0、
-`deployment_result.json` 1.4.0，以及四类 Manifest 共用的 1.5.0。
+`candidate_result.json` 1.6.0、`deployment_plan.json` 1.6.0、
+`deployment_result.json` 1.5.0，以及四类 Manifest 共用的 1.5.0。
+历史 `deployment_plan.json` 1.5.0 和 `deployment_result.json` 1.4.0 仍可由 Artifact Manifest
+做只读识别，但旧计划没有完整 A → B 与工具 revision，不得由新执行器执行。
 候选结果 1.5.0 与 Artifact Manifest 1.4.0 继续作为只读兼容输入；新产物只写新版本。
 
 四类 JSON 和四类 Manifest 使用同一排他发布实现：内容先在内存中完成
