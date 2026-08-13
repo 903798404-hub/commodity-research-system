@@ -90,10 +90,10 @@ matrix、前月 snapshot 和 presentation 全部固定到
 `supported_data_schema_version=1`。Bundle manifest 的 `data_schema_version` 必须受支持，
 且 `minimum_app_contract_version` 不得高于运行 Image；兼容性门禁失败时不得 promote。
 
-每个 bundle 自包含 `index.json`、`report_version.json`、`presentation_changes.json`、
-当前 `matrix/` 和 `snapshots/usda_psd/<previous>/`。Bundle 不包含 raw PSD、`_runs`、
-`_legacy`、API Key、代理、日志或开发报告；`soybean_oil_US.json` 不是当前页面读取闭包，
-不属于 Runtime 永久契约。
+每个 bundle 必须逐文件、逐字节包含本次正式 build 产生的完整 `public/data/` 发布树，
+包括根 JSON、当前 `matrix/`、全部正式 snapshot 和年度供需等兼容资产。Manifest 路径集、
+大小和 SHA 必须与输入 `public/data/` 完全一致。Bundle 不包含 raw PSD、`_runs`、
+`_legacy`、API Key、代理、日志或开发报告，因为这些内容本来就不属于 `public/data/`。
 
 本地正式工具位于 `09_deploy/usda_release/usda_runtime_data.py`。打包命令必须显式提供
 已成功的 fetch manifest，并在 USDA 数据链全部通过后执行：
@@ -113,7 +113,10 @@ Validator 仅使用 Python 标准库，逐文件检查大小/SHA、稳定 bundle
 build:data、前端 build 或安装 Node/pnpm。
 
 宿主 Runtime 根为 `/home/ubuntu/market-data-runtime/usda/data/`，包含 `incoming/`、
-`releases/`、`failed/`、`evidence/`、`current.json`、`current`、`previous`。Compose 仅把
+`releases/`、`failed/`、`evidence/`、`current.json`、`current`、`previous`、`legacy`。首次
+embedded → Runtime 迁移时，`legacy` 只允许一次性指向已验证的 immutable migration seed；
+正常 promote 和 rollback 均不得改变它。旧客户端 `/usda/data/...` 请求由 Nginx 读取该固定
+release，新客户端继续使用 `current.json` 和 immutable release URL。Compose 仅把
 这个稳定父目录只读挂载到 `/runtime/usda`，不得直接 bind `current` 子目录。Release
 目录不可覆盖；候选完整验证后同盘 rename，immutable HTTP 验证后才原子切换 pointer。
 失败候选隔离到 `failed/`，旧 current 保持不变。Rollback 只切 Runtime pointer，不切

@@ -39,6 +39,10 @@ def source_data(root: Path, month: str = "2026-08", previous: str = "2026-07") -
     write_json(source / "snapshots" / "usda_psd" / previous / "index.json", {"matrices": matrices})
     for item in matrices:
         write_json(source / "snapshots" / "usda_psd" / previous / item["file"], {"commodity": item["commodity"], "country": item["country"], "years": [2026], "rows": []})
+    older = "2026-06"
+    write_json(source / "snapshots" / "usda_psd" / older / "index.json", {"matrices": matrices})
+    for item in matrices:
+        write_json(source / "snapshots" / "usda_psd" / older / item["file"], {"commodity": item["commodity"], "country": item["country"], "years": [2026], "rows": []})
     write_json(source / "soybean_oil_US.json", {"legacy": True})
     return source
 
@@ -100,7 +104,7 @@ def stage(release: Path, root: Path) -> Path:
     return target
 
 
-def test_manifest_identity_is_stable_minimal_and_seed_uses_exact_input_bytes(tmp_path: Path) -> None:
+def test_manifest_identity_is_stable_and_package_preserves_complete_public_data_tree(tmp_path: Path) -> None:
     first = package(tmp_path / "a")
     second_root = tmp_path / "b"
     second = package(second_root)
@@ -110,14 +114,11 @@ def test_manifest_identity_is_stable_minimal_and_seed_uses_exact_input_bytes(tmp
     assert first.name == second.name
     assert one["matrix_count"] == 2
     paths = {item["path"] for item in one["files"]}
-    assert "soybean_oil_US.json" not in paths
-    assert paths == {
-        "index.json", "report_version.json", "presentation_changes.json",
-        "matrix/2222000_US.json", "matrix/4243000_GL.json",
-        "snapshots/usda_psd/2026-07/index.json",
-        "snapshots/usda_psd/2026-07/matrix/2222000_US.json",
-        "snapshots/usda_psd/2026-07/matrix/4243000_GL.json",
-    }
+    source = source_data(tmp_path / "expected")
+    assert paths == {item["path"] for item in runtime.file_records(source)}
+    assert runtime.file_records(first / "data") == runtime.file_records(source)
+    assert "soybean_oil_US.json" in paths
+    assert one["snapshot_months"] == ["2026-06", "2026-07"]
     semantic_copy = tmp_path / "semantic-copy"
     shutil.copytree(first / "data", semantic_copy)
     assert runtime.compare_json_semantics(first / "data", semantic_copy)["status"] == "equivalent"
@@ -422,6 +423,49 @@ def test_rollback_switches_data_only_and_post_check_failure_restores_current(tmp
     assert (root / "current").read_text(encoding="utf-8").strip() == release_a.name
 
 
+def test_legacy_pointer_is_fixed_across_promote_and_rollback(tmp_path: Path) -> None:
+    root = runtime_root(tmp_path)
+    release_a = package(tmp_path / "a", source_data(tmp_path / "a", "2026-07", "2026-06"))
+    release_b = package(tmp_path / "b", source_data(tmp_path / "b", "2026-08", "2026-07"))
+    shutil.copytree(release_a, root / "releases" / release_a.name)
+    manifest_a = runtime.validate_runtime_release(release_a, app_contract_version=1, supported_data_schema_version=1)
+    write_json(root / "current.json", runtime.current_pointer(manifest_a, updated_at="2026-08-13T00:00:00Z"))
+    (root / "current").write_text(release_a.name + "\n", encoding="utf-8")
+    try:
+        legacy = runtime.initialize_legacy_release(
+            runtime_root=root,
+            release_id=release_a.name,
+            app_contract_version=1,
+            supported_data_schema_version=1,
+        )
+    except OSError:
+        pytest.skip("this Windows account cannot create directory symlinks")
+    assert legacy.is_symlink()
+    assert legacy.resolve() == (root / "releases" / release_a.name).resolve()
+    runtime.promote_runtime_release(
+        runtime_root=root,
+        candidate=stage(release_b, root),
+        app_contract_version=1,
+        supported_data_schema_version=1,
+        http_check=lambda _release: True,
+        evidence_path=root / "evidence" / "legacy-promote.json",
+    )
+    assert legacy.resolve() == (root / "releases" / release_a.name).resolve()
+    runtime.rollback_runtime_release(
+        runtime_root=root,
+        app_contract_version=1,
+        supported_data_schema_version=1,
+        http_check=lambda _release: True,
+        evidence_path=root / "evidence" / "legacy-rollback.json",
+    )
+    assert legacy.resolve() == (root / "releases" / release_a.name).resolve()
+    with pytest.raises(runtime.RuntimeDataError, match="immutable"):
+        runtime.initialize_legacy_release(
+            runtime_root=root,
+            release_id=release_b.name,
+            app_contract_version=1,
+            supported_data_schema_version=1,
+        )
 def test_ab_release_switch_keeps_old_pinned_url_readable_without_server_restart(tmp_path: Path) -> None:
     root = runtime_root(tmp_path)
     release_a = package(tmp_path / "a", source_data(tmp_path / "a", "2026-07", "2026-06"))

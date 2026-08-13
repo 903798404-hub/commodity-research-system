@@ -203,6 +203,52 @@ def wait_for_candidate(
         sleep(2)
 
 
+def validate_runtime_data_closure(
+    *,
+    port: int,
+    request: Callable[..., Any] = urlopen,
+) -> list[dict[str, Any]]:
+    base = f"http://127.0.0.1:{port}/usda/data"
+
+    def get_json(url: str) -> Any:
+        with request(url, timeout=5) as response:
+            if int(response.status) != 200:
+                raise RuntimeError(f"Runtime data URL returned HTTP {response.status}: {url}")
+            return json.loads(response.read().decode("utf-8"))
+
+    current = get_json(f"{base}/current.json")
+    release_id = str(current.get("release_id", ""))
+    if not re.fullmatch(r"usda-[0-9]{4}-(?:0[1-9]|1[0-2])-[0-9a-f]{16}", release_id):
+        raise RuntimeError("current.json contains an invalid release_id")
+    legacy_index = get_json(f"{base}/index.json")
+    release_index = get_json(f"{base}/releases/{release_id}/data/index.json")
+    legacy_paths = [str(item.get("file", "")) for item in legacy_index.get("matrices", [])]
+    release_paths = [str(item.get("file", "")) for item in release_index.get("matrices", [])]
+    if not legacy_paths or len(set(legacy_paths)) != len(legacy_paths):
+        raise RuntimeError("legacy matrix catalog is missing or duplicated")
+    if not release_paths or len(set(release_paths)) != len(release_paths):
+        raise RuntimeError("release matrix catalog is missing or duplicated")
+    checks: list[dict[str, Any]] = []
+    fixed_paths = ["report_version.json", "presentation_changes.json", "soybean_oil_US.json"]
+    legacy_report = get_json(f"{base}/report_version.json")
+    previous = str(legacy_report.get("previousReportMonth", ""))
+    if not re.fullmatch(r"[0-9]{4}-(?:0[1-9]|1[0-2])", previous):
+        raise RuntimeError("legacy report_version has an invalid previous month")
+    fixed_paths.append(f"snapshots/usda_psd/{previous}/index.json")
+    for kind, paths, prefix in (
+        ("legacy", [*fixed_paths, *legacy_paths], f"{base}/"),
+        ("release", [*fixed_paths, *release_paths], f"{base}/releases/{release_id}/data/"),
+    ):
+        for relative in paths:
+            url = prefix + relative
+            with request(url, timeout=5) as response:
+                status = int(response.status)
+                checks.append({"kind": kind, "path": relative, "http_status": status})
+                if status != 200:
+                    raise RuntimeError(f"{kind} Runtime data URL returned HTTP {status}: {relative}")
+    return checks
+
+
 def _candidate_result(
     *,
     values: Mapping[str, str],
@@ -291,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
                 port=int(values["USDA_CANDIDATE_HOST_PORT"]),
                 timeout_seconds=args.timeout_seconds,
             )
+            checks.extend(validate_runtime_data_closure(port=int(values["USDA_CANDIDATE_HOST_PORT"])))
             log_summary = collect_log_summary(values["USDA_CANDIDATE_CONTAINER_NAME"], subprocess.run)
             result = _candidate_result(
                 values=values,

@@ -21,6 +21,7 @@ ENTRYPOINT = RELEASE_DIRECTORY / "usda_compose.sh"
 ENV_EXAMPLE = RELEASE_DIRECTORY / "usda-production.env.example"
 CAPTURE = RELEASE_DIRECTORY / "capture_usda_runtime.py"
 CANDIDATE_RUNNER = RELEASE_DIRECTORY / "run_usda_candidate.py"
+MIGRATION_VALIDATOR = RELEASE_DIRECTORY / "validate_usda_migration.py"
 SEALER = RELEASE_DIRECTORY / "seal_usda_migration.py"
 NGINX = REPOSITORY / "11_独立应用" / "USDA平衡表" / "deploy" / "nginx.conf"
 DOCKERFILE = REPOSITORY / "11_独立应用" / "USDA平衡表" / "Dockerfile"
@@ -50,6 +51,7 @@ def load_module(name: str, path: Path):
 
 CAPTURE_MODULE = load_module("capture_usda_runtime", CAPTURE)
 CANDIDATE_MODULE = load_module("run_usda_candidate", CANDIDATE_RUNNER)
+MIGRATION_MODULE = load_module("validate_usda_migration", MIGRATION_VALIDATOR)
 SEAL_MODULE = load_module("seal_usda_migration", SEALER)
 
 
@@ -221,6 +223,77 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         )
         self.assertEqual([item.get("http_status") for item in checks], [200, 200, 200, 200, 200])
         self.assertEqual(checks[-1]["kind"], "static_asset")
+
+    def test_candidate_runtime_closure_requires_all_legacy_and_release_matrices(self) -> None:
+        class Response:
+            status = 200
+
+            def __init__(self, payload: object) -> None:
+                self.payload = payload
+
+            def read(self) -> bytes:
+                return json.dumps(self.payload).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        release_id = "usda-2026-08-1234567890abcdef"
+        matrices = [
+            {"file": "matrix/4243000_MY.json"},
+            {"file": "matrix/4243000_ID.json"},
+            {"file": "matrix/4232000_AR.json"},
+        ]
+
+        def request(url: str, timeout: int):
+            del timeout
+            if url.endswith("current.json"):
+                return Response({"release_id": release_id})
+            if url.endswith("index.json") and "snapshots/" not in url:
+                return Response({"matrices": matrices})
+            if url.endswith("report_version.json"):
+                return Response({"currentReportMonth": "2026-08", "previousReportMonth": "2026-07"})
+            return Response({})
+
+        checks = CANDIDATE_MODULE.validate_runtime_data_closure(port=18080, request=request)
+        matrix_checks = [item for item in checks if item["path"].startswith("matrix/")]
+        self.assertEqual(len(matrix_checks), 6)
+        self.assertEqual({item["kind"] for item in matrix_checks}, {"legacy", "release"})
+
+    def test_standalone_migration_gate_checks_legacy_and_release_catalogs(self) -> None:
+        release_id = "usda-2026-08-1234567890abcdef"
+        matrices = [
+            {"file": "matrix/4243000_MY.json"},
+            {"file": "matrix/4243000_ID.json"},
+            {"file": "matrix/4232000_AR.json"},
+        ]
+
+        def get_json(url: str):
+            if url.endswith("current.json"):
+                return {"release_id": release_id}
+            if url.endswith("report_version.json"):
+                return {"currentReportMonth": "2026-08", "previousReportMonth": "2026-07"}
+            if url.endswith("index.json") and "snapshots/" not in url:
+                return {"matrices": matrices}
+            return {}
+
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        with mock.patch.object(MIGRATION_MODULE, "get_json", side_effect=get_json), mock.patch.object(
+            MIGRATION_MODULE, "urlopen", return_value=Response()
+        ):
+            result = MIGRATION_MODULE.validate("http://127.0.0.1:18380")
+        self.assertEqual(result["matrix_http_200"], {"legacy": 3, "release": 3})
+        self.assertEqual(result["report_month"], "2026-08")
 
     def test_candidate_log_summary_rejects_runtime_errors_without_storing_log_text(self) -> None:
         def fake_runner(command, **_kwargs):
@@ -421,6 +494,8 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             )
             with mock.patch.object(CANDIDATE_MODULE.subprocess, "run", side_effect=fake_run), mock.patch.object(
                 CANDIDATE_MODULE, "wait_for_candidate", return_value=[{"http_status": 200}]
+            ), mock.patch.object(
+                CANDIDATE_MODULE, "validate_runtime_data_closure", return_value=[{"http_status": 200}]
             ):
                 exit_code = CANDIDATE_MODULE.main(
                     [
@@ -457,6 +532,10 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         )
         self.assertIn("alias /runtime/usda/releases/$1/data/$2", text)
         self.assertIn('Cache-Control "public, max-age=31536000, immutable"', text)
+        self.assertIn("alias /runtime/usda/legacy/data/$1", text)
+        self.assertGreater(text.index("alias /runtime/usda/legacy/data/$1"), text.index("alias /runtime/usda/releases/$1/data/$2"))
+        self.assertIn('Cache-Control "no-store, no-cache, must-revalidate"', text)
+        self.assertIn('if ($request_uri ~* "(?:%2e|\\.\\.)")', text)
         self.assertIn("location /usda/data/", text)
         self.assertNotIn("location ^~ /usda/data/", text)
         self.assertIn("return 404", text)

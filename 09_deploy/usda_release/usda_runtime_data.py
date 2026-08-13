@@ -310,20 +310,23 @@ def _build_runtime_release(
     previous_paths = sorted({str(item.get("file", "")) for item in previous_catalog.get("matrices", [])})
     if not previous_paths:
         raise RuntimeDataError("previous snapshot contains no matrices")
+    source_records = file_records(source_data)
+    source_paths = {str(item["path"]) for item in source_records}
+    snapshot_months = sorted({
+        parts[2]
+        for relative in source_paths
+        for parts in [PurePosixPath(relative).parts]
+        if len(parts) >= 4 and parts[:2] == ("snapshots", "usda_psd") and MONTH_RE.fullmatch(parts[2])
+    })
     temporary = Path(tempfile.mkdtemp(prefix=".usda-runtime-package-", dir=output_parent))
     try:
         data = temporary / "data"
-        for name in REQUIRED_ROOT_FILES:
-            _copy_file(source_data / name, data / name)
-        for relative in matrix_paths:
-            safe = _safe_relative(relative)
+        for item in source_records:
+            safe = _safe_relative(str(item["path"]))
             _copy_file(source_data / Path(*safe.parts), data / Path(*safe.parts))
-        snapshot_prefix = PurePosixPath("snapshots") / "usda_psd" / previous
-        _copy_file(previous_index, data / Path(*snapshot_prefix.parts) / "index.json")
-        for relative in previous_paths:
-            safe = _safe_relative(relative)
-            _copy_file(source_data / Path(*snapshot_prefix.parts) / Path(*safe.parts), data / Path(*snapshot_prefix.parts) / Path(*safe.parts))
         records = file_records(data)
+        if file_records(source_data) != source_records or records != source_records:
+            raise RuntimeDataError("source public/data changed during packaging or was not copied exactly")
         identity = bundle_sha256(records)
         release_id = f"usda-{current}-{identity[:16]}"
         manifest = {
@@ -340,18 +343,23 @@ def _build_runtime_release(
             "source_batch_identity": source_batch_identity,
             "file_count": len(records),
             "matrix_count": len(matrix_paths),
-            "snapshot_months": [previous],
+            "snapshot_months": snapshot_months,
             "comparison_current": current,
             "comparison_previous": previous,
             "bundle_sha256": identity,
             "files": records,
         }
         (temporary / "release_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        validate_runtime_release(
+            temporary,
+            app_contract_version=MINIMUM_APP_CONTRACT_VERSION,
+            supported_data_schema_version=DATA_SCHEMA_VERSION,
+            require_directory_identity=False,
+        )
         target = output_parent / release_id
         if target.exists():
             raise RuntimeDataError(f"release already exists: {release_id}")
         temporary.rename(target)
-        validate_runtime_release(target, app_contract_version=MINIMUM_APP_CONTRACT_VERSION, supported_data_schema_version=DATA_SCHEMA_VERSION)
         return target
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
@@ -391,8 +399,10 @@ def validate_runtime_release(
         raise RuntimeDataError("manifest report months are invalid")
     if manifest["comparison_current"] != manifest["report_month"] or manifest["comparison_previous"] != manifest["previous_report_month"]:
         raise RuntimeDataError("comparison identity does not match report months")
-    if manifest["snapshot_months"] != [manifest["previous_report_month"]]:
-        raise RuntimeDataError("snapshot closure must contain exactly the previous report month")
+    if not isinstance(manifest["snapshot_months"], list) or manifest["snapshot_months"] != sorted(set(manifest["snapshot_months"])):
+        raise RuntimeDataError("snapshot_months must be a sorted unique list")
+    if manifest["previous_report_month"] not in manifest["snapshot_months"]:
+        raise RuntimeDataError("snapshot closure must contain the previous report month")
     data = release / "data"
     actual = file_records(data)
     declared = manifest["files"]
@@ -412,15 +422,29 @@ def validate_runtime_release(
     paths = {item["path"] for item in actual}
     if not REQUIRED_ROOT_FILES.issubset(paths):
         raise RuntimeDataError("required root JSON is missing")
+    index = strict_json(data / "index.json")
+    indexed_matrices = {str(item.get("file", "")) for item in index.get("matrices", [])}
     current_matrices = {path for path in paths if path.startswith("matrix/") and path.endswith(".json")}
-    if len(current_matrices) != manifest["matrix_count"]:
-        raise RuntimeDataError("matrix_count does not match current matrix files")
-    previous_prefix = f'snapshots/usda_psd/{manifest["previous_report_month"]}/'
-    if previous_prefix + "index.json" not in paths or not any(path.startswith(previous_prefix + "matrix/") for path in paths):
-        raise RuntimeDataError("previous snapshot closure is incomplete")
-    allowed = REQUIRED_ROOT_FILES | current_matrices | {path for path in paths if path.startswith(previous_prefix)}
-    if paths != allowed:
-        raise RuntimeDataError("release contains undeclared contract files")
+    if indexed_matrices != current_matrices or len(indexed_matrices) != manifest["matrix_count"]:
+        raise RuntimeDataError("matrix_count or current index matrix closure is invalid")
+    actual_snapshot_months = sorted({
+        parts[2]
+        for relative in paths
+        for parts in [PurePosixPath(relative).parts]
+        if len(parts) >= 4 and parts[:2] == ("snapshots", "usda_psd") and MONTH_RE.fullmatch(parts[2])
+    })
+    if actual_snapshot_months != manifest["snapshot_months"]:
+        raise RuntimeDataError("snapshot_months does not match the sealed data tree")
+    for month in actual_snapshot_months:
+        prefix = f"snapshots/usda_psd/{month}/"
+        snapshot_index_path = data / "snapshots" / "usda_psd" / month / "index.json"
+        if not snapshot_index_path.is_file():
+            raise RuntimeDataError(f"snapshot index is missing: {month}")
+        snapshot_index = strict_json(snapshot_index_path)
+        indexed = {prefix + str(item.get("file", "")) for item in snapshot_index.get("matrices", [])}
+        actual_matrices = {path for path in paths if path.startswith(prefix + "matrix/") and path.endswith(".json")}
+        if not indexed or not indexed.issubset(actual_matrices):
+            raise RuntimeDataError(f"snapshot matrix closure is incomplete: {month}")
     for relative, path in _iter_regular_files(data):
         if relative.endswith(".json"):
             try:
@@ -521,6 +545,45 @@ def _atomic_text(path: Path, value: str) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, path)
+
+
+def initialize_legacy_release(
+    *,
+    runtime_root: Path,
+    release_id: str,
+    app_contract_version: int,
+    supported_data_schema_version: int,
+) -> Path:
+    """Create the one-time legacy pointer without ever retargeting it."""
+    release_id = validate_release_id(release_id)
+    target = runtime_root / "releases" / release_id
+    validate_runtime_release(
+        target,
+        app_contract_version=app_contract_version,
+        supported_data_schema_version=supported_data_schema_version,
+    )
+    validate_release_permissions(target)
+    legacy = runtime_root / "legacy"
+    expected_link = Path("releases") / release_id
+    if os.path.lexists(legacy):
+        if not legacy.is_symlink():
+            raise RuntimeDataError("legacy must be a controlled symbolic link")
+        if Path(os.readlink(legacy)) != expected_link or legacy.resolve() != target.resolve():
+            raise RuntimeDataError("legacy is immutable and already points to another release")
+        return legacy
+    temporary = runtime_root / f".legacy.{os.getpid()}.tmp"
+    if os.path.lexists(temporary):
+        raise RuntimeDataError("temporary legacy pointer already exists")
+    try:
+        os.symlink(expected_link, temporary, target_is_directory=True)
+        if temporary.resolve() != target.resolve():
+            raise RuntimeDataError("temporary legacy pointer escaped the validated release")
+        os.replace(temporary, legacy)
+    except Exception:
+        if os.path.lexists(temporary):
+            temporary.unlink()
+        raise
+    return legacy
 
 
 HttpCheck = Callable[[str], bool]
@@ -671,6 +734,10 @@ def main(argv: list[str] | None = None) -> int:
     compare = sub.add_parser("compare-json")
     compare.add_argument("--expected", type=Path, required=True)
     compare.add_argument("--actual", type=Path, required=True)
+    legacy = sub.add_parser("initialize-legacy")
+    legacy.add_argument("--runtime-root", type=Path, required=True)
+    legacy.add_argument("--release-id", required=True)
+    legacy.add_argument("--app-contract", type=Path, required=True)
     for name in ("promote", "rollback"):
         command = sub.add_parser(name)
         command.add_argument("--runtime-root", type=Path, required=True)
@@ -710,6 +777,15 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, sort_keys=True))
             if result["status"] != "equivalent":
                 return 2
+        elif args.command == "initialize-legacy":
+            app, schema = _app_contract(args.app_contract)
+            result = initialize_legacy_release(
+                runtime_root=args.runtime_root,
+                release_id=args.release_id,
+                app_contract_version=app,
+                supported_data_schema_version=schema,
+            )
+            print(json.dumps({"status": "initialized", "legacy": str(result), "release_id": args.release_id}, sort_keys=True))
         elif args.command == "promote":
             app, schema = _app_contract(args.app_contract)
             result = promote_runtime_release(runtime_root=args.runtime_root, candidate=args.candidate, app_contract_version=app, supported_data_schema_version=schema, http_check=lambda release_id: http_release_check(args.base_url, release_id), evidence_path=args.evidence)
