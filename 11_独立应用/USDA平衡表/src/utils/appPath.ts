@@ -1,4 +1,4 @@
-const basePath = import.meta.env.BASE_URL
+const basePath = import.meta.env?.BASE_URL ?? '/'
 
 export function appPath(path = ''): string {
   return `${basePath}${path.replace(/^\/+/, '')}`

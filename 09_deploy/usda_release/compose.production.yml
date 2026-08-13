@@ -11,6 +11,11 @@ services:
     ports:
       - "${USDA_HOST_PORT:?USDA_HOST_PORT must be set}:80"
     restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ${USDA_RUNTIME_DATA_ROOT:?USDA_RUNTIME_DATA_ROOT must be set}
+        target: /runtime/usda
+        read_only: true
     networks:
       - usda-network
 

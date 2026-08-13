@@ -12,7 +12,7 @@ USDA 平衡表位于：
 
 它与主工作台由同一 Git 仓库管理，但运行时是独立应用和独立容器，不互相启动。
 
-本文只负责本地依赖、数据构建、测试、预览和入口配置，不提供绕过候选流程的生产构建命令。
+本文负责本地依赖、数据构建、Runtime bundle、测试、预览和入口配置，不提供绕过候选流程的生产构建命令。
 
 ## 2. 本地安装和启动
 
@@ -69,11 +69,64 @@ pnpm run test
 - 其他页面和 Oil World 入口不受影响；
 - 不抛出未处理异常。
 
-## 5. 数据发布和代码发布
+## 5. Runtime 月度数据契约
 
-- 重新生成并提交正式 `public/data/` 和必要配置属于 USDA 发布数据更新。
+普通 USDA 月度数据更新使用独立 Runtime data channel，不再把 `public/data/` 烘焙进镜像：
+
+```text
+本地 fetch/build:data/check:data/compare:data/test
+→ package immutable Runtime bundle
+→ server validate/stage
+→ immutable release URL 验证
+→ 原子切换 current.json
+```
+
+应用启动时只读取一次 `/usda/data/current.json`，取得严格格式的
+`usda-YYYY-MM-<16位小写十六进制>` release ID；该页面实例的 index、report version、
+matrix、前月 snapshot 和 presentation 全部固定到
+`/usda/data/releases/<release_id>/data/`。只有刷新或重新打开页面才读取新的 current。
+
+应用合同由 `/usda/app-contract.json` 暴露，当前 `app_contract_version=1`、
+`supported_data_schema_version=1`。Bundle manifest 的 `data_schema_version` 必须受支持，
+且 `minimum_app_contract_version` 不得高于运行 Image；兼容性门禁失败时不得 promote。
+
+每个 bundle 自包含 `index.json`、`report_version.json`、`presentation_changes.json`、
+当前 `matrix/` 和 `snapshots/usda_psd/<previous>/`。Bundle 不包含 raw PSD、`_runs`、
+`_legacy`、API Key、代理、日志或开发报告；`soybean_oil_US.json` 不是当前页面读取闭包，
+不属于 Runtime 永久契约。
+
+本地正式工具位于 `09_deploy/usda_release/usda_runtime_data.py`。打包命令必须显式提供
+已成功的 fetch manifest，并在 USDA 数据链全部通过后执行：
+
+```powershell
+python 09_deploy/usda_release/usda_runtime_data.py package `
+  --source-data '11_独立应用/USDA平衡表/public/data' `
+  --output-parent '<本地唯一输出目录>' `
+  --builder-git-sha '<完整 Git SHA>' `
+  --builder-tree-sha '<完整 Tree SHA>' `
+  --source-fetch-manifest '11_独立应用/USDA平衡表/data/raw/usda_psd_api/YYYY-MM/manifest.json'
+```
+
+Validator 仅使用 Python 标准库，逐文件检查大小/SHA、稳定 bundle SHA、JSON、非有限值、
+必要闭包、matrix count、前月 snapshot、非法额外文件、路径逃逸、symlink、hardlink 和
+兼容性。服务器只执行 `validate`、`stage`、`promote`、`rollback` 和证据密封；不得 fetch、
+build:data、前端 build 或安装 Node/pnpm。
+
+宿主 Runtime 根为 `/home/ubuntu/market-data-runtime/usda/data/`，包含 `incoming/`、
+`releases/`、`failed/`、`evidence/`、`current.json`、`current`、`previous`。Compose 仅把
+这个稳定父目录只读挂载到 `/runtime/usda`，不得直接 bind `current` 子目录。Release
+目录不可覆盖；候选完整验证后同盘 rename，immutable HTTP 验证后才原子切换 pointer。
+失败候选隔离到 `failed/`，旧 current 保持不变。Rollback 只切 Runtime pointer，不切
+Image，post-check 失败时自动恢复原 current。
+
+正式首次 seed 必须从明确指定的生产 Image data 目录按实际字节提取；Windows
+`public/data` 只能做 JSON 语义对照，不能宣称与 Image 字节 SHA 相同。
+
+## 6. 数据发布和代码发布
+
+- 普通月度数据只走 Runtime bundle，不提交数据、不 push、不构建 Image、不切 Image、不重启容器。
 - 修改 `src/`、脚本、依赖、Dockerfile 或 Nginx 属于代码更新。
-- USDA 发布数据进入静态镜像时，即使前端源码未变，也需要生成新的候选镜像。
+- 修改数据 Schema、app contract、页面、算法、serving contract、Compose 或 Runtime 工具属于代码更新，必须走 main-first 和候选 Image 链。
 
 生产发布必须：
 
@@ -89,7 +142,7 @@ pnpm run test
 
 USDA 自动化工具未完善时，必须记录工具缺口并采用受控步骤，不得降低上述原则。
 
-## 6. 停止条件
+## 7. 停止条件
 
 - 目标月份原始数据不唯一或不可读；
 - 原始数据进入未批准的 Git 变更；
@@ -99,3 +152,5 @@ USDA 自动化工具未完善时，必须记录工具缺口并采用受控步骤
 - 候选和正式 Image ID 不一致；
 - 正式切换命令包含 build；
 - 部署结果或 Manifest 缺失。
+- Runtime manifest 不完整、release ID 非法、逐文件身份不符或兼容性门禁失败；
+- Runtime data 请求回退到 SPA、父目录挂载不是只读，或 incoming/releases 不在同一文件系统。

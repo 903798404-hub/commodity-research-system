@@ -41,8 +41,9 @@ def environment_identity(path: Path) -> dict[str, Any]:
         line = raw.strip()
         if line and not line.startswith("#"):
             names.append(line.split("=", 1)[0])
-    if set(names) - {"USDA_IMAGE", "USDA_HOST_PORT", "USDA_NETWORK_NAME"}:
-        raise ValueError("production environment contains non-USDA variables")
+    expected = {"USDA_IMAGE", "USDA_HOST_PORT", "USDA_NETWORK_NAME", "USDA_RUNTIME_DATA_ROOT"}
+    if set(names) != expected:
+        raise ValueError("production environment must contain the exact USDA variables")
     return {"path": str(path), "sha256": sha256_file(path), "variable_names": sorted(names)}
 
 

@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "tsx --test src/utils/marketYear.test.ts src/utils/monthlyRevision.test.ts src/utils/sourceCompatibility.test.ts scripts/usdaFetchCore.test.ts scripts/buildDataSourcePolicy.test.ts scripts/snapshotPolicy.test.ts",
+    "test": "tsx --test src/utils/marketYear.test.ts src/utils/monthlyRevision.test.ts src/utils/sourceCompatibility.test.ts src/utils/runtimeDataClient.test.ts scripts/usdaFetchCore.test.ts scripts/buildDataSourcePolicy.test.ts scripts/snapshotPolicy.test.ts",
+    "test:runtime": "tsx --test src/utils/runtimeDataClient.test.ts",
     "test:build-data": "tsx --test scripts/buildDataSourcePolicy.test.ts",
     "test:fetch": "tsx --test scripts/usdaFetchCore.test.ts",
     "build:data": "tsx scripts/buildData.ts",

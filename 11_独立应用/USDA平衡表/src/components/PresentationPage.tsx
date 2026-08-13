@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { presentationLayouts, type PresentationLayoutConfig, type PresentationReportKey } from '../config/presentationLayout'
 import type { Catalog, MatrixData, MatrixReference } from '../types/dashboard'
 import { CompactBalanceTable } from './CompactBalanceTable'
-import { appPath } from '../utils/appPath'
+import { getRuntimeDataClient, type RuntimeDataClient } from '../utils/runtimeDataClient'
 
 type LoadedMatrices = Record<string, MatrixData | null>
 type PresentationChanges = {
@@ -19,11 +19,8 @@ function splitIntoSlides<T>(items: T[], size: number): T[][] {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size))
 }
 
-async function readJson<T>(path: string): Promise<T | null> {
-  const response = await fetch(appPath(path))
-  const contentType = response.headers.get('content-type') ?? ''
-  if (!response.ok || !contentType.includes('application/json')) return null
-  return response.json() as Promise<T>
+async function readJson<T>(client: RuntimeDataClient, path: string): Promise<T | null> {
+  return client.readJson<T>(path)
 }
 
 function changeRows(changes: PresentationChanges | null, commodity: string, country: string) {
@@ -48,14 +45,14 @@ export function PresentationPage() {
   useEffect(() => {
     let active = true
     setStatus('loading')
-    Promise.all([readJson<Catalog>('data/index.json'), readJson<PresentationChanges>('data/presentation_changes.json')]).then(async ([catalog, changeData]) => {
+    getRuntimeDataClient().then(async (client) => Promise.all([readJson<Catalog>(client, 'index.json'), readJson<PresentationChanges>(client, 'presentation_changes.json')]).then(async ([catalog, changeData]) => {
       if (!catalog) throw new Error('无法读取数据索引')
       const requested = layout.region_pairs.flatMap(({ region }) => [
         { commodity: layout.seed_commodity, country: region },
         { commodity: layout.oil_commodity, country: region },
       ])
       const references = new Map<string, MatrixReference | undefined>(requested.map(({ commodity, country }) => [matrixKey(commodity, country), catalog.matrices.find((item) => item.commodity === commodity && item.country === country)]))
-      const loadedEntries = await Promise.all([...references.entries()].map(async ([key, reference]) => [key, reference ? await readJson<MatrixData>(`data/${reference.file}`) : null] as const))
+      const loadedEntries = await Promise.all([...references.entries()].map(async ([key, reference]) => [key, reference ? await readJson<MatrixData>(client, reference.file) : null] as const))
       if (!active) return
       const loaded = Object.fromEntries(loadedEntries)
       const allYears = Object.values(loaded).flatMap((matrix) => matrix?.years ?? []).filter((year, index, values) => values.indexOf(year) === index).sort((a, b) => a - b)
@@ -63,7 +60,7 @@ export function PresentationPage() {
       setYears(allYears.filter((year) => year >= layout.start_market_year))
       setChanges(changeData)
       setStatus('ready')
-    }).catch(() => { if (active) setStatus('error') })
+    })).catch(() => { if (active) setStatus('error') })
     return () => { active = false }
   }, [activeReport, layout])
 

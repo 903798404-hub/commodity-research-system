@@ -13,18 +13,15 @@ import { filterVisibleMetrics } from './utils/metrics'
 import { buildMonthlyRevisionLookup, buildPalmG2MonthlyRevisionLookup, type MonthlyRevisionLookup } from './utils/monthlyRevision'
 import { normalizeSeries } from './utils/number'
 import { sourceCompatibility, type SourceBasis } from './utils/sourceCompatibility'
-import { appPath } from './utils/appPath'
+import { getRuntimeDataClient, type RuntimeDataClient } from './utils/runtimeDataClient'
 import provenance from '../configs/usda_source_provenance.json'
 
 function uniqueByCode<T extends { commodityCode?: string; countryCode?: string }>(items: T[], key: 'commodityCode' | 'countryCode'): T[] {
   return [...new Map(items.map((item) => [item[key] ?? '', item])).values()]
 }
 
-async function fetchMatrixJson(path: string, signal: AbortSignal): Promise<MatrixData | null> {
-  const response = await fetch(appPath(path), { signal })
-  const contentType = response.headers.get('content-type') ?? ''
-  if (!response.ok || !contentType.includes('application/json')) return null
-  return response.json() as Promise<MatrixData>
+async function fetchMatrixJson(client: RuntimeDataClient, path: string, signal: AbortSignal): Promise<MatrixData | null> {
+  return client.readJson<MatrixData>(path, signal)
 }
 
 function App() {
@@ -37,26 +34,21 @@ function App() {
   const [chartMode, setChartMode] = useState<ChartMode>('raw')
   const [reportVersion, setReportVersion] = useState<{ currentReportMonth: string; previousReportMonth: string } | null>(null)
   const [monthlyRevisions, setMonthlyRevisions] = useState<MonthlyRevisionLookup | null>(null)
+  const [runtimeClient, setRuntimeClient] = useState<RuntimeDataClient | null>(null)
 
   useEffect(() => {
-    fetch(appPath('data/index.json')).then((response) => {
-      if (!response.ok) throw new Error(`无法读取数据索引（${response.status}）`)
-      return response.json() as Promise<Catalog>
-    }).then((index) => {
+    getRuntimeDataClient().then(async (client) => {
+      const [index, version] = await Promise.all([
+        client.readJson<Catalog>('index.json'),
+        client.readJson<{ currentReportMonth: string; previousReportMonth: string }>('report_version.json'),
+      ])
+      if (!index) throw new Error('无法读取数据索引')
+      setRuntimeClient(client)
+      setReportVersion(version)
       setCatalog(index)
       const initial = index.matrices.find((item) => item.category === index.defaultSelection.category && item.commodity === index.defaultSelection.commodityDescription && item.country === index.defaultSelection.countryName) ?? index.matrices[0]
       setSelection(initial ? { category: initial.category, commodityDescription: initial.commodity, countryName: initial.country } : null)
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : '无法读取数据索引'))
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetch(appPath('data/report_version.json'), { signal: controller.signal }).then((response) => {
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!response.ok || !contentType.includes('application/json')) return null
-      return response.json() as Promise<{ currentReportMonth: string; previousReportMonth: string }>
-    }).then((version) => setReportVersion(version)).catch(() => setReportVersion(null))
-    return () => controller.abort()
   }, [])
 
   const categoryMatrices = useMemo(() => catalog && selection ? catalog.matrices.filter((item) => item.category === selection.category) : [], [catalog, selection])
@@ -72,23 +64,19 @@ function App() {
   }, [catalog, categoryMatrices, selection])
 
   useEffect(() => {
-    if (!catalog || !selection) return
+    if (!catalog || !selection || !runtimeClient) return
     const matrix = catalog.matrices.find((item) => item.category === selection.category && item.commodity === selection.commodityDescription && item.country === selection.countryName)
     if (!matrix) { setData(null); setError(null); setIsLoading(false); return }
     const controller = new AbortController()
     setIsLoading(true); setData(null); setError(null)
-    fetch(appPath(`data/${matrix.file}`), { signal: controller.signal }).then((response) => {
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!response.ok || !contentType.includes('application/json')) return null
-      return response.json() as Promise<MatrixData>
-    }).then((loaded) => setData(loaded)).catch((reason: unknown) => {
+    runtimeClient.readJson<MatrixData>(matrix.file, controller.signal).then((loaded) => setData(loaded)).catch((reason: unknown) => {
       if ((reason as DOMException).name !== 'AbortError') { setData(null); setError(null) }
     }).finally(() => setIsLoading(false))
     return () => controller.abort()
-  }, [catalog, selection])
+  }, [catalog, runtimeClient, selection])
 
   useEffect(() => {
-    if (!data || !catalog || !selection || !reportVersion) { setMonthlyRevisions(null); return }
+    if (!data || !catalog || !selection || !reportVersion || !runtimeClient) { setMonthlyRevisions(null); return }
     const matrix = catalog.matrices.find((item) => item.category === selection.category && item.commodity === selection.commodityDescription && item.country === selection.countryName)
     if (!matrix) { setMonthlyRevisions(null); return }
     const controller = new AbortController()
@@ -98,15 +86,15 @@ function App() {
       const indonesia = catalog.matrices.find((item) => item.commodity === 'Oil, Palm' && item.countryCode === 'ID')
       if (!malaysia || !indonesia) { setMonthlyRevisions(null); return () => controller.abort() }
       Promise.all([
-        fetchMatrixJson(`data/${malaysia.file}`, controller.signal),
-        fetchMatrixJson(`data/snapshots/usda_psd/${reportVersion.previousReportMonth}/${malaysia.file}`, controller.signal),
-        fetchMatrixJson(`data/${indonesia.file}`, controller.signal),
-        fetchMatrixJson(`data/snapshots/usda_psd/${reportVersion.previousReportMonth}/${indonesia.file}`, controller.signal),
+        fetchMatrixJson(runtimeClient, malaysia.file, controller.signal),
+        fetchMatrixJson(runtimeClient, `snapshots/usda_psd/${reportVersion.previousReportMonth}/${malaysia.file}`, controller.signal),
+        fetchMatrixJson(runtimeClient, indonesia.file, controller.signal),
+        fetchMatrixJson(runtimeClient, `snapshots/usda_psd/${reportVersion.previousReportMonth}/${indonesia.file}`, controller.signal),
       ]).then(([currentMalaysia, previousMalaysia, currentIndonesia, previousIndonesia]) => {
         setMonthlyRevisions(buildPalmG2MonthlyRevisionLookup(data, currentMalaysia, previousMalaysia, currentIndonesia, previousIndonesia))
       }).catch(() => setMonthlyRevisions(null))
     } else {
-      fetchMatrixJson(`data/snapshots/usda_psd/${reportVersion.previousReportMonth}/${matrix.file}`, controller.signal)
+      fetchMatrixJson(runtimeClient, `snapshots/usda_psd/${reportVersion.previousReportMonth}/${matrix.file}`, controller.signal)
         .then((previous) => {
           const previousLegacyBasis = (provenance.legacyGlobalSourceBasis as Record<string, SourceBasis>)[reportVersion.previousReportMonth] ?? null
           const compatible = previous ? sourceCompatibility(data, previous, null, previousLegacyBasis).comparable : false
@@ -115,7 +103,7 @@ function App() {
         .catch(() => setMonthlyRevisions(null))
     }
     return () => controller.abort()
-  }, [catalog, data, reportVersion, selection])
+  }, [catalog, data, reportVersion, runtimeClient, selection])
 
   useEffect(() => {
     if (!data) return

@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 from urllib.error import URLError
 from urllib.parse import urljoin
@@ -37,6 +37,7 @@ REQUIRED_NAMES = frozenset(
         "USDA_CANDIDATE_CONTAINER_NAME",
         "USDA_CANDIDATE_HOST_PORT",
         "USDA_CANDIDATE_PROJECT_NAME",
+        "USDA_RUNTIME_DATA_ROOT",
     }
 )
 CONTAINER_RE = re.compile(r"^usda-candidate-[a-z0-9][a-z0-9-]{2,62}$")
@@ -92,6 +93,10 @@ def validate_candidate_environment(values: Mapping[str, str]) -> dict[str, str]:
     normalized["USDA_CANDIDATE_CONTAINER_NAME"] = container
     normalized["USDA_CANDIDATE_PROJECT_NAME"] = project
     normalized["USDA_CANDIDATE_HOST_PORT"] = str(port)
+    runtime_root = PurePosixPath(values["USDA_RUNTIME_DATA_ROOT"])
+    if not runtime_root.is_absolute():
+        raise ValueError("USDA_RUNTIME_DATA_ROOT must be absolute")
+    normalized["USDA_RUNTIME_DATA_ROOT"] = str(runtime_root)
     return normalized
 
 
@@ -151,7 +156,8 @@ def wait_for_candidate(
     endpoints = (
         root_url,
         f"http://127.0.0.1:{port}/usda/presentation",
-        f"http://127.0.0.1:{port}/usda/data/index.json",
+        f"http://127.0.0.1:{port}/usda/app-contract.json",
+        f"http://127.0.0.1:{port}/usda/data/current.json",
     )
     deadline = time.monotonic() + timeout_seconds
     checks: list[dict[str, Any]] = []
@@ -219,6 +225,9 @@ def _candidate_result(
         raise RuntimeError("candidate Compose project is invalid")
     if inspected["compose"]["config_files"] != str(CANDIDATE_COMPOSE):
         raise RuntimeError("candidate Compose path is invalid")
+    runtime_mounts = [item for item in inspected["mounts"] if item.get("destination") == "/runtime/usda"]
+    if len(runtime_mounts) != 1 or runtime_mounts[0].get("source") != values["USDA_RUNTIME_DATA_ROOT"] or runtime_mounts[0].get("read_write") is not False:
+        raise RuntimeError("candidate Runtime data parent mount is missing or not read-only")
     ports = inspected["ports"].get("80/tcp") or []
     if not ports or any(item.get("HostIp") not in {"127.0.0.1", "::1"} for item in ports):
         raise RuntimeError("candidate port is not localhost-only")

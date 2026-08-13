@@ -174,8 +174,13 @@ class ApplicationCatalogTests(unittest.TestCase):
             (ROOT / apps["usda_dashboard"]["project_path"] / "package.json").read_text(encoding="utf-8")
         )
         for command in apps["usda_dashboard"]["update_command"].values():
-            script_name = command.removeprefix("pnpm run ")
-            self.assertIn(script_name, package["scripts"])
+            if command.startswith("pnpm run "):
+                script_name = command.removeprefix("pnpm run ")
+                self.assertIn(script_name, package["scripts"])
+            else:
+                script = re.search(r"python\s+(\S+\.py)", command)
+                self.assertIsNotNone(script)
+                self.assertTrue((ROOT / script.group(1)).is_file())
 
     def test_current_handbook_and_workflow_match_catalog_and_link_each_other(self) -> None:
         for app in self.applications:

@@ -9,7 +9,7 @@ COPY . .
 
 ARG VITE_BASE_PATH=/usda/
 ENV VITE_BASE_PATH=${VITE_BASE_PATH}
-RUN pnpm run build
+RUN pnpm run build && rm -rf dist/data
 
 FROM nginx:1.27-alpine
 

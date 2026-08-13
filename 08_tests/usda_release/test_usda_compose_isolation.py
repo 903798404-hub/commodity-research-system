@@ -22,6 +22,8 @@ ENV_EXAMPLE = RELEASE_DIRECTORY / "usda-production.env.example"
 CAPTURE = RELEASE_DIRECTORY / "capture_usda_runtime.py"
 CANDIDATE_RUNNER = RELEASE_DIRECTORY / "run_usda_candidate.py"
 SEALER = RELEASE_DIRECTORY / "seal_usda_migration.py"
+NGINX = REPOSITORY / "11_独立应用" / "USDA平衡表" / "deploy" / "nginx.conf"
+DOCKERFILE = REPOSITORY / "11_独立应用" / "USDA平衡表" / "Dockerfile"
 
 SPREAD_ONLY_VARIABLES = {
     "SPREAD_IMAGE",
@@ -77,7 +79,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         self.assertEqual(service["restart"], "unless-stopped")
         self.assertEqual(service["networks"], ["usda-network"])
         self.assertNotIn("build", service)
-        self.assertNotIn("volumes", service)
+        self.assertEqual(service["volumes"], [{"type": "bind", "source": "${USDA_RUNTIME_DATA_ROOT:?USDA_RUNTIME_DATA_ROOT must be set}", "target": "/runtime/usda", "read_only": True}])
         self.assertNotIn("environment", service)
         self.assertNotIn("healthcheck", service)
 
@@ -89,11 +91,11 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             if line and not line.startswith("#")
         }
 
-        self.assertEqual(names, {"USDA_IMAGE", "USDA_HOST_PORT", "USDA_NETWORK_NAME"})
+        self.assertEqual(names, {"USDA_IMAGE", "USDA_HOST_PORT", "USDA_NETWORK_NAME", "USDA_RUNTIME_DATA_ROOT"})
         self.assertFalse(SPREAD_ONLY_VARIABLES & names)
         self.assertEqual(
             compose_variables(PRODUCTION_COMPOSE.read_text(encoding="utf-8")),
-            {"USDA_IMAGE", "USDA_HOST_PORT", "USDA_NETWORK_NAME"},
+            {"USDA_IMAGE", "USDA_HOST_PORT", "USDA_NETWORK_NAME", "USDA_RUNTIME_DATA_ROOT"},
         )
 
     def test_candidate_is_usda_only_localhost_and_never_reuses_formal_resources(self) -> None:
@@ -117,7 +119,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         self.assertEqual(service["restart"], "no")
         self.assertNotIn("build", service)
         self.assertNotIn("depends_on", service)
-        self.assertNotIn("volumes", service)
+        self.assertEqual(service["volumes"], [{"type": "bind", "source": "${USDA_RUNTIME_DATA_ROOT:?USDA_RUNTIME_DATA_ROOT must be set}", "target": "/runtime/usda", "read_only": True}])
         self.assertFalse(SPREAD_ONLY_VARIABLES & compose_variables(text))
         self.assertNotIn("0.0.0.0", text)
         self.assertNotIn("8080:80", text)
@@ -155,6 +157,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             "USDA_CANDIDATE_CONTAINER_NAME": "usda-candidate-abc123",
             "USDA_CANDIDATE_PROJECT_NAME": "market-data-usda-candidate-abc123",
             "USDA_CANDIDATE_HOST_PORT": "18080",
+            "USDA_RUNTIME_DATA_ROOT": "/home/ubuntu/market-data-runtime/usda/data",
         }
         self.assertEqual(
             CANDIDATE_MODULE.validate_candidate_environment(valid),
@@ -175,6 +178,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             "USDA_CANDIDATE_CONTAINER_NAME": "usda-candidate-abc123",
             "USDA_CANDIDATE_PROJECT_NAME": "market-data-usda-candidate-abc123",
             "USDA_CANDIDATE_HOST_PORT": "18080",
+            "USDA_RUNTIME_DATA_ROOT": "/home/ubuntu/market-data-runtime/usda/data",
         }
         command = CANDIDATE_MODULE.compose_command(values, "up")
         self.assertEqual(command[:4], ["docker", "compose", "--project-name", "market-data-usda-candidate-abc123"])
@@ -206,7 +210,8 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         responses = {
             "http://127.0.0.1:18080/usda/": Response(200, '<script src="/usda/assets/main.js"></script>'),
             "http://127.0.0.1:18080/usda/presentation": Response(200, "presentation"),
-            "http://127.0.0.1:18080/usda/data/index.json": Response(200, "{}"),
+            "http://127.0.0.1:18080/usda/app-contract.json": Response(200, "{}"),
+            "http://127.0.0.1:18080/usda/data/current.json": Response(200, "{}"),
             "http://127.0.0.1:18080/usda/assets/main.js": Response(200, "console.log('ok')"),
         }
         checks = CANDIDATE_MODULE.wait_for_candidate(
@@ -214,7 +219,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             timeout_seconds=10,
             request=lambda url, timeout: responses[url],
         )
-        self.assertEqual([item.get("http_status") for item in checks], [200, 200, 200, 200])
+        self.assertEqual([item.get("http_status") for item in checks], [200, 200, 200, 200, 200])
         self.assertEqual(checks[-1]["kind"], "static_asset")
 
     def test_candidate_log_summary_rejects_runtime_errors_without_storing_log_text(self) -> None:
@@ -341,7 +346,13 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         cleanup = {"candidate_container_removed": True}
         with tempfile.TemporaryDirectory() as temporary:
             env_file = Path(temporary) / "usda-production.env"
-            env_file.write_text("USDA_IMAGE=market-data-usda-dashboard:immutable\nUSDA_HOST_PORT=8080\n", encoding="utf-8")
+            env_file.write_text(
+                "USDA_IMAGE=market-data-usda-dashboard:immutable\n"
+                "USDA_HOST_PORT=8080\n"
+                "USDA_NETWORK_NAME=market-data_default\n"
+                "USDA_RUNTIME_DATA_ROOT=/home/ubuntu/market-data-runtime/usda/data\n",
+                encoding="utf-8",
+            )
             result = SEAL_MODULE.build_migration_result(
                 git_commit="a" * 40,
                 git_tree="b" * 40,
@@ -379,7 +390,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
             "HostConfig": {"NetworkMode": "market-data_default", "RestartPolicy": {"Name": "no"}},
             "State": {"Running": True, "Status": "running", "StartedAt": "2026-07-26T00:00:00Z"},
             "NetworkSettings": {"Ports": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18080"}]}},
-            "Mounts": [],
+            "Mounts": [{"Type": "bind", "Source": "/home/ubuntu/market-data-runtime/usda/data", "Destination": "/runtime/usda", "RW": False}],
         }
         calls: list[list[str]] = []
 
@@ -402,6 +413,7 @@ class UsdaComposeIsolationTests(unittest.TestCase):
                         "USDA_CANDIDATE_CONTAINER_NAME=usda-candidate-abc123",
                         "USDA_CANDIDATE_PROJECT_NAME=market-data-usda-candidate-abc123",
                         "USDA_CANDIDATE_HOST_PORT=18080",
+                        "USDA_RUNTIME_DATA_ROOT=/home/ubuntu/market-data-runtime/usda/data",
                     ]
                 )
                 + "\n",
@@ -433,6 +445,29 @@ class UsdaComposeIsolationTests(unittest.TestCase):
         )
         self.assertTrue(all("spread-dashboard" not in command for command in calls))
         self.assertTrue(all("oil-world-dashboard" not in command for command in calls))
+
+    def test_nginx_runtime_data_contract_never_falls_back_to_spa(self) -> None:
+        text = NGINX.read_text(encoding="utf-8")
+        self.assertIn("location = /usda/data/current.json", text)
+        self.assertIn("alias /runtime/usda/current.json", text)
+        self.assertIn('Cache-Control "no-store, no-cache, must-revalidate"', text)
+        self.assertRegex(
+            text,
+            r'location ~ "\^/usda/data/releases/\(usda-\[0-9\]\{4\}-.+\[0-9a-f\]\{16\}\).+\\\.json\)\$"',
+        )
+        self.assertIn("alias /runtime/usda/releases/$1/data/$2", text)
+        self.assertIn('Cache-Control "public, max-age=31536000, immutable"', text)
+        self.assertIn("location /usda/data/", text)
+        self.assertNotIn("location ^~ /usda/data/", text)
+        self.assertIn("return 404", text)
+        data_section = text[text.index("location = /usda/data/current.json"):text.index("location /usda/")]
+        self.assertNotIn("index.html", data_section)
+
+    def test_final_image_exposes_app_contract_but_does_not_bake_monthly_data(self) -> None:
+        text = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertIn("pnpm run build && rm -rf dist/data", text)
+        self.assertIn("COPY --from=build /app/dist /usr/share/nginx/html/usda", text)
+        self.assertTrue((REPOSITORY / "11_独立应用" / "USDA平衡表" / "public" / "app-contract.json").is_file())
 
 
 if __name__ == "__main__":
