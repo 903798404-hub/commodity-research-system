@@ -1,0 +1,578 @@
+{
+  "categories": [
+    "Oilseeds",
+    "Oils",
+    "Meals"
+  ],
+  "commodities": [
+    {
+      "commodityCode": "0813600",
+      "commodityDescription": "Meal, Rapeseed",
+      "category": "Meals",
+      "displayName": "Rapeseed"
+    },
+    {
+      "commodityCode": "0813100",
+      "commodityDescription": "Meal, Soybean",
+      "category": "Meals",
+      "displayName": "Soybean"
+    },
+    {
+      "commodityCode": "4243000",
+      "commodityDescription": "Oil, Palm",
+      "category": "Oils",
+      "displayName": "Palm"
+    },
+    {
+      "commodityCode": "4239100",
+      "commodityDescription": "Oil, Rapeseed",
+      "category": "Oils",
+      "displayName": "Rapeseed"
+    },
+    {
+      "commodityCode": "4232000",
+      "commodityDescription": "Oil, Soybean",
+      "category": "Oils",
+      "displayName": "Soybean"
+    },
+    {
+      "commodityCode": "4236000",
+      "commodityDescription": "Oil, Sunflowerseed",
+      "category": "Oils",
+      "displayName": "Sunflowerseed"
+    },
+    {
+      "commodityCode": "2226000",
+      "commodityDescription": "Oilseed, Rapeseed",
+      "category": "Oilseeds",
+      "displayName": "Rapeseed"
+    },
+    {
+      "commodityCode": "2222000",
+      "commodityDescription": "Oilseed, Soybean",
+      "category": "Oilseeds",
+      "displayName": "Soybean"
+    },
+    {
+      "commodityCode": "2224000",
+      "commodityDescription": "Oilseed, Sunflowerseed",
+      "category": "Oilseeds",
+      "displayName": "Sunflowerseed"
+    }
+  ],
+  "countries": [
+    {
+      "countryCode": "AR",
+      "countryName": "Argentina"
+    },
+    {
+      "countryCode": "AS",
+      "countryName": "Australia"
+    },
+    {
+      "countryCode": "BR",
+      "countryName": "Brazil"
+    },
+    {
+      "countryCode": "CA",
+      "countryName": "Canada"
+    },
+    {
+      "countryCode": "CH",
+      "countryName": "China"
+    },
+    {
+      "countryCode": "E4",
+      "countryName": "European Union"
+    },
+    {
+      "countryCode": "G2",
+      "countryName": "G2",
+      "displayName": "G2（马来西亚 + 印度尼西亚）"
+    },
+    {
+      "countryCode": "G3",
+      "countryName": "G3",
+      "displayName": "G3（美国 + 巴西 + 阿根廷）"
+    },
+    {
+      "countryCode": "GL",
+      "countryName": "Global"
+    },
+    {
+      "countryCode": "IN",
+      "countryName": "India"
+    },
+    {
+      "countryCode": "ID",
+      "countryName": "Indonesia"
+    },
+    {
+      "countryCode": "MY",
+      "countryName": "Malaysia"
+    },
+    {
+      "countryCode": "RS",
+      "countryName": "Russia"
+    },
+    {
+      "countryCode": "TH",
+      "countryName": "Thailand"
+    },
+    {
+      "countryCode": "UP",
+      "countryName": "Ukraine"
+    },
+    {
+      "countryCode": "US",
+      "countryName": "United States"
+    }
+  ],
+  "matrices": [
+    {
+      "category": "Meals",
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "AS",
+      "country": "Australia",
+      "file": "matrix/0813600_AS.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "CA",
+      "country": "Canada",
+      "file": "matrix/0813600_CA.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "file": "matrix/0813600_E4.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/0813600_GL.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "file": "matrix/0813600_RS.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813600",
+      "commodity": "Meal, Rapeseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "file": "matrix/0813600_UP.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "file": "matrix/0813100_AR.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "BR",
+      "country": "Brazil",
+      "file": "matrix/0813100_BR.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/0813100_CH.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/0813100_GL.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "IN",
+      "country": "India",
+      "file": "matrix/0813100_IN.json"
+    },
+    {
+      "category": "Meals",
+      "commodityCode": "0813100",
+      "commodity": "Meal, Soybean",
+      "countryCode": "US",
+      "country": "United States",
+      "file": "matrix/0813100_US.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "G2",
+      "country": "G2",
+      "file": "matrix/4243000_G2.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/4243000_GL.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "ID",
+      "country": "Indonesia",
+      "file": "matrix/4243000_ID.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "MY",
+      "country": "Malaysia",
+      "file": "matrix/4243000_MY.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4243000",
+      "commodity": "Oil, Palm",
+      "countryCode": "TH",
+      "country": "Thailand",
+      "file": "matrix/4243000_TH.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "AS",
+      "country": "Australia",
+      "file": "matrix/4239100_AS.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "CA",
+      "country": "Canada",
+      "file": "matrix/4239100_CA.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/4239100_CH.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "file": "matrix/4239100_E4.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/4239100_GL.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "file": "matrix/4239100_RS.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4239100",
+      "commodity": "Oil, Rapeseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "file": "matrix/4239100_UP.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "file": "matrix/4232000_AR.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "BR",
+      "country": "Brazil",
+      "file": "matrix/4232000_BR.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/4232000_CH.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "G3",
+      "country": "G3",
+      "file": "matrix/4232000_G3.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/4232000_GL.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "IN",
+      "country": "India",
+      "file": "matrix/4232000_IN.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4232000",
+      "commodity": "Oil, Soybean",
+      "countryCode": "US",
+      "country": "United States",
+      "file": "matrix/4232000_US.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "file": "matrix/4236000_AR.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "file": "matrix/4236000_E4.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/4236000_GL.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "file": "matrix/4236000_RS.json"
+    },
+    {
+      "category": "Oils",
+      "commodityCode": "4236000",
+      "commodity": "Oil, Sunflowerseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "file": "matrix/4236000_UP.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "AS",
+      "country": "Australia",
+      "file": "matrix/2226000_AS.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "CA",
+      "country": "Canada",
+      "file": "matrix/2226000_CA.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/2226000_CH.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "file": "matrix/2226000_E4.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/2226000_GL.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "file": "matrix/2226000_RS.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2226000",
+      "commodity": "Oilseed, Rapeseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "file": "matrix/2226000_UP.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "file": "matrix/2222000_AR.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "BR",
+      "country": "Brazil",
+      "file": "matrix/2222000_BR.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "CH",
+      "country": "China",
+      "file": "matrix/2222000_CH.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "G3",
+      "country": "G3",
+      "file": "matrix/2222000_G3.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/2222000_GL.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "IN",
+      "country": "India",
+      "file": "matrix/2222000_IN.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2222000",
+      "commodity": "Oilseed, Soybean",
+      "countryCode": "US",
+      "country": "United States",
+      "file": "matrix/2222000_US.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "AR",
+      "country": "Argentina",
+      "file": "matrix/2224000_AR.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "E4",
+      "country": "European Union",
+      "file": "matrix/2224000_E4.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "GL",
+      "country": "Global",
+      "file": "matrix/2224000_GL.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "RS",
+      "country": "Russia",
+      "file": "matrix/2224000_RS.json"
+    },
+    {
+      "category": "Oilseeds",
+      "commodityCode": "2224000",
+      "commodity": "Oilseed, Sunflowerseed",
+      "countryCode": "UP",
+      "country": "Ukraine",
+      "file": "matrix/2224000_UP.json"
+    }
+  ],
+  "defaultSelection": {
+    "category": "Oils",
+    "commodityDescription": "Oil, Soybean",
+    "countryName": "United States"
+  }
+}

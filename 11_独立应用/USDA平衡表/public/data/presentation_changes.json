@@ -1,6 +1,6 @@
 {
-  "snapshotCurrent": "2026-07",
-  "snapshotPrevious": "2026-06",
+  "snapshotCurrent": "2026-08",
+  "snapshotPrevious": "2026-07",
   "matrices": [
     {
       "commodityCode": "0813100",
@@ -12,7 +12,7 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 0,
+          "latestYoY": 50,
           "monthlyRevision": 0
         },
         {
@@ -22,8 +22,8 @@
         },
         {
           "name": "期初库存",
-          "latestYoY": -1,
-          "monthlyRevision": 0
+          "latestYoY": 4,
+          "monthlyRevision": 5
         },
         {
           "name": "产量",
@@ -32,8 +32,8 @@
         },
         {
           "name": "进口量",
-          "latestYoY": -13,
-          "monthlyRevision": 0
+          "latestYoY": -5,
+          "monthlyRevision": 13
         },
         {
           "name": "压榨量",
@@ -42,8 +42,8 @@
         },
         {
           "name": "出口量",
-          "latestYoY": 40,
-          "monthlyRevision": 0
+          "latestYoY": 60,
+          "monthlyRevision": 20
         },
         {
           "name": "消费量",
@@ -67,13 +67,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 18,
-          "monthlyRevision": 0
+          "latestYoY": 11,
+          "monthlyRevision": -2
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.40000000000000036,
-          "monthlyRevision": 0
+          "latestYoY": 0.1999999999999993,
+          "monthlyRevision": -0.10000000000000142
         }
       ]
     },
@@ -87,22 +87,22 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 600,
+          "latestYoY": 550,
           "monthlyRevision": 0
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 350,
+          "latestYoY": 300,
           "monthlyRevision": 0
         },
         {
           "name": "期初库存",
-          "latestYoY": 68.80000000000001,
-          "monthlyRevision": 0
+          "latestYoY": 45.19999999999999,
+          "monthlyRevision": -23.600000000000023
         },
         {
           "name": "产量",
-          "latestYoY": 253.30000000000018,
+          "latestYoY": 251.90000000000055,
           "monthlyRevision": 0
         },
         {
@@ -112,13 +112,13 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 350,
+          "latestYoY": 300,
           "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": 190,
-          "monthlyRevision": 0
+          "latestYoY": 185,
+          "monthlyRevision": 20
         },
         {
           "name": "消费量",
@@ -142,13 +142,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 12.099999999999966,
-          "monthlyRevision": 0
+          "latestYoY": -7.899999999999977,
+          "monthlyRevision": -43.599999999999966
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.3000000000000007,
-          "monthlyRevision": 0
+          "latestYoY": -0.6000000000000005,
+          "monthlyRevision": -0.8999999999999995
         }
       ]
     },
@@ -168,17 +168,17 @@
         {
           "name": "大豆压榨",
           "latestYoY": 200,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "期初库存",
           "latestYoY": 32.8,
-          "monthlyRevision": -0.8000000000000114
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
           "latestYoY": 158.40000000000146,
-          "monthlyRevision": 79.20000000000073
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
@@ -188,7 +188,7 @@
         {
           "name": "压榨量",
           "latestYoY": 200,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
@@ -198,7 +198,7 @@
         {
           "name": "消费量",
           "latestYoY": 160,
-          "monthlyRevision": 80
+          "monthlyRevision": 0
         },
         {
           "name": "工业消费",
@@ -213,17 +213,17 @@
         {
           "name": "饲用及损耗消费",
           "latestYoY": 160,
-          "monthlyRevision": 80
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 16.200000000000017,
-          "monthlyRevision": -1.5999999999999943
+          "monthlyRevision": 0
         },
         {
           "name": "库存/总使用比",
           "latestYoY": 0.10000000000000009,
-          "monthlyRevision": -0.09999999999999987
+          "monthlyRevision": 0
         }
       ]
     },
@@ -237,68 +237,68 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 1224,
-          "monthlyRevision": 36.400000000001455
+          "latestYoY": 1279.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 1168.2000000000044,
-          "monthlyRevision": 108.20000000000437
+          "latestYoY": 1084.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "期初库存",
-          "latestYoY": 138.5999999999999,
-          "monthlyRevision": 17.90000000000009
+          "latestYoY": 130.4000000000001,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 854.9000000000015,
-          "monthlyRevision": 83
+          "latestYoY": 823.2999999999993,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 351.60000000000036,
-          "monthlyRevision": 26.100000000000364
+          "latestYoY": 290.2999999999993,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 1168.2000000000044,
-          "monthlyRevision": 108.20000000000437
+          "latestYoY": 1084.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": 378.6999999999989,
-          "monthlyRevision": 27.19999999999891
+          "latestYoY": 367.59999999999854,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 865.9000000000015,
-          "monthlyRevision": 72.20000000000073
+          "latestYoY": 831.1999999999971,
+          "monthlyRevision": null
         },
         {
           "name": "工业消费",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
           "latestYoY": -2.5,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 868.3999999999978,
-          "monthlyRevision": 72.20000000000073
+          "latestYoY": 833.7000000000007,
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": 100.5,
-          "monthlyRevision": 27.59999999999991
+          "latestYoY": 45.200000000000045,
+          "monthlyRevision": null
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.09999999999999964,
-          "monthlyRevision": 0.09999999999999964
+          "latestYoY": 0,
+          "monthlyRevision": null
         }
       ]
     },
@@ -317,17 +317,17 @@
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 22.5,
+          "latestYoY": 2.5,
           "monthlyRevision": 0
         },
         {
           "name": "期初库存",
-          "latestYoY": -11,
-          "monthlyRevision": 0
+          "latestYoY": -10,
+          "monthlyRevision": 1
         },
         {
           "name": "产量",
-          "latestYoY": 18,
+          "latestYoY": 2,
           "monthlyRevision": 0
         },
         {
@@ -337,12 +337,12 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 22.5,
+          "latestYoY": 2.5,
           "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": 15,
+          "latestYoY": 0,
           "monthlyRevision": 0
         },
         {
@@ -368,12 +368,12 @@
         {
           "name": "期末库存",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": 1
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.10000000000000009,
-          "monthlyRevision": 0
+          "latestYoY": 0,
+          "monthlyRevision": 0.20000000000000018
         }
       ]
     },
@@ -387,13 +387,13 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 580.1000000000004,
-          "monthlyRevision": 108.89999999999964
+          "latestYoY": 699.8999999999996,
+          "monthlyRevision": 119.79999999999927
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 272.1999999999998,
-          "monthlyRevision": 0
+          "latestYoY": 340.1999999999998,
+          "monthlyRevision": 81.59999999999945
         },
         {
           "name": "期初库存",
@@ -402,28 +402,28 @@
         },
         {
           "name": "产量",
-          "latestYoY": 176.69999999999982,
-          "monthlyRevision": -3.699999999999818
+          "latestYoY": 226.60000000000036,
+          "monthlyRevision": 74
         },
         {
           "name": "进口量",
-          "latestYoY": 0,
-          "monthlyRevision": 3.6000000000000085
+          "latestYoY": -2.1999999999999886,
+          "monthlyRevision": 3.200000000000003
         },
         {
           "name": "压榨量",
-          "latestYoY": 272.1999999999998,
-          "monthlyRevision": 0
+          "latestYoY": 340.1999999999998,
+          "monthlyRevision": 81.59999999999945
         },
         {
           "name": "出口量",
-          "latestYoY": 154.20000000000005,
-          "monthlyRevision": 27.200000000000045
+          "latestYoY": 199.60000000000014,
+          "monthlyRevision": 63.50000000000023
         },
         {
           "name": "消费量",
-          "latestYoY": 27.199999999999818,
-          "monthlyRevision": -27.300000000000182
+          "latestYoY": 29.5,
+          "monthlyRevision": 13.700000000000273
         },
         {
           "name": "工业消费",
@@ -437,8 +437,8 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 27.199999999999818,
-          "monthlyRevision": -27.300000000000182
+          "latestYoY": 29.5,
+          "monthlyRevision": 13.700000000000273
         },
         {
           "name": "期末库存",
@@ -537,23 +537,23 @@
       "rows": [
         {
           "name": "菜籽产量",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": 50,
+          "monthlyRevision": 50
         },
         {
           "name": "菜籽压榨",
-          "latestYoY": 80,
-          "monthlyRevision": 20
+          "latestYoY": 100,
+          "monthlyRevision": 50
         },
         {
           "name": "期初库存",
           "latestYoY": 1.9999999999999982,
-          "monthlyRevision": 0.8999999999999986
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
-          "latestYoY": 37.799999999999955,
-          "monthlyRevision": 11.5
+          "latestYoY": 49.200000000000045,
+          "monthlyRevision": 28.90000000000009
         },
         {
           "name": "进口量",
@@ -562,18 +562,18 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 80,
-          "monthlyRevision": 20
+          "latestYoY": 100,
+          "monthlyRevision": 50
         },
         {
           "name": "出口量",
-          "latestYoY": 25,
-          "monthlyRevision": 0
+          "latestYoY": 30,
+          "monthlyRevision": 20
         },
         {
           "name": "消费量",
-          "latestYoY": 14,
-          "monthlyRevision": 12
+          "latestYoY": 22.5,
+          "monthlyRevision": 11
         },
         {
           "name": "工业消费",
@@ -587,18 +587,18 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 14,
-          "monthlyRevision": 12
+          "latestYoY": 22.5,
+          "monthlyRevision": 11
         },
         {
           "name": "期末库存",
-          "latestYoY": 0.8000000000000007,
-          "monthlyRevision": 0.3999999999999986
+          "latestYoY": -1.2999999999999972,
+          "monthlyRevision": -2.099999999999998
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": -0.3999999999999999,
+          "monthlyRevision": -0.3999999999999999
         }
       ]
     },
@@ -623,7 +623,7 @@
         {
           "name": "期初库存",
           "latestYoY": 7.799999999999997,
-          "monthlyRevision": -0.10000000000000142
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
@@ -668,7 +668,7 @@
         {
           "name": "期末库存",
           "latestYoY": 5.700000000000003,
-          "monthlyRevision": -0.10000000000000142
+          "monthlyRevision": 0
         },
         {
           "name": "库存/总使用比",
@@ -687,68 +687,68 @@
       "rows": [
         {
           "name": "菜籽产量",
-          "latestYoY": 202.6999999999989,
-          "monthlyRevision": 68.5
+          "latestYoY": 241.79999999999927,
+          "monthlyRevision": null
         },
         {
           "name": "菜籽压榨",
-          "latestYoY": 292.2000000000007,
-          "monthlyRevision": 33.5
+          "latestYoY": 313.60000000000036,
+          "monthlyRevision": null
         },
         {
           "name": "期初库存",
-          "latestYoY": 17.5,
-          "monthlyRevision": 2.5
+          "latestYoY": 19.200000000000017,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 162.30000000000018,
-          "monthlyRevision": 19.800000000000182
+          "latestYoY": 174.59999999999945,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": -3.900000000000091,
-          "monthlyRevision": 0
+          "latestYoY": -10.400000000000091,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 292.2000000000007,
-          "monthlyRevision": 33.5
+          "latestYoY": 313.60000000000036,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": -3.400000000000091,
-          "monthlyRevision": 0
+          "latestYoY": -24.5,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 163.80000000000018,
-          "monthlyRevision": 20.300000000000182
+          "latestYoY": 193.69999999999982,
+          "monthlyRevision": null
         },
         {
           "name": "工业消费",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": 1,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 163.80000000000018,
-          "monthlyRevision": 20.300000000000182
+          "latestYoY": 192.69999999999982,
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": 15.5,
-          "monthlyRevision": 2
+          "latestYoY": 14.199999999999989,
+          "monthlyRevision": null
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.20000000000000018,
-          "monthlyRevision": 0
+          "latestYoY": 0.10000000000000009,
+          "monthlyRevision": null
         }
       ]
     },
@@ -763,7 +763,7 @@
         {
           "name": "菜籽产量",
           "latestYoY": 90,
-          "monthlyRevision": 40
+          "monthlyRevision": 0
         },
         {
           "name": "菜籽压榨",
@@ -847,8 +847,8 @@
         },
         {
           "name": "期初库存",
-          "latestYoY": 2.9999999999999996,
-          "monthlyRevision": 1.2999999999999998
+          "latestYoY": 2.8000000000000003,
+          "monthlyRevision": -0.1999999999999993
         },
         {
           "name": "产量",
@@ -867,12 +867,12 @@
         },
         {
           "name": "出口量",
-          "latestYoY": 17.5,
+          "latestYoY": 18.299999999999997,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 2,
+          "latestYoY": 1,
           "monthlyRevision": 0
         },
         {
@@ -887,18 +887,18 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 2,
+          "latestYoY": 1,
           "monthlyRevision": 0
         },
         {
           "name": "期末库存",
-          "latestYoY": 0.7000000000000002,
-          "monthlyRevision": 1.2999999999999998
+          "latestYoY": 0.6999999999999993,
+          "monthlyRevision": -0.20000000000000018
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -1,
-          "monthlyRevision": 1.2999999999999998
+          "latestYoY": -0.9000000000000004,
+          "monthlyRevision": -0.1999999999999993
         }
       ]
     },
@@ -917,7 +917,7 @@
         },
         {
           "name": "产量",
-          "latestYoY": 0,
+          "latestYoY": 50,
           "monthlyRevision": 0
         },
         {
@@ -932,13 +932,13 @@
         },
         {
           "name": "出口量",
-          "latestYoY": -280,
-          "monthlyRevision": 0
+          "latestYoY": -255,
+          "monthlyRevision": 25
         },
         {
           "name": "消费量",
-          "latestYoY": 100,
-          "monthlyRevision": 0
+          "latestYoY": 125,
+          "monthlyRevision": -25
         },
         {
           "name": "食用消费",
@@ -947,8 +947,8 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": 25,
+          "monthlyRevision": -25
         },
         {
           "name": "期末库存",
@@ -957,7 +957,7 @@
         },
         {
           "name": "收获面积",
-          "latestYoY": 800,
+          "latestYoY": 900,
           "monthlyRevision": 0
         },
         {
@@ -967,7 +967,7 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 2.1000000000000014,
+          "latestYoY": 1.7000000000000028,
           "monthlyRevision": 0
         }
       ]
@@ -987,7 +987,7 @@
         },
         {
           "name": "产量",
-          "latestYoY": 600,
+          "latestYoY": 550,
           "monthlyRevision": 0
         },
         {
@@ -997,17 +997,17 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 350,
+          "latestYoY": 300,
           "monthlyRevision": 0
         },
         {
           "name": "出口量",
           "latestYoY": 300,
-          "monthlyRevision": 50
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 370,
+          "latestYoY": 320,
           "monthlyRevision": 0
         },
         {
@@ -1023,7 +1023,7 @@
         {
           "name": "期末库存",
           "latestYoY": -80,
-          "monthlyRevision": -50
+          "monthlyRevision": 0
         },
         {
           "name": "收获面积",
@@ -1038,7 +1038,7 @@
         {
           "name": "库存/总使用比",
           "latestYoY": -1.1000000000000014,
-          "monthlyRevision": -0.3000000000000007
+          "monthlyRevision": 0
         }
       ]
     },
@@ -1052,8 +1052,8 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": -12,
-          "monthlyRevision": 0
+          "latestYoY": -13,
+          "monthlyRevision": -1
         },
         {
           "name": "产量",
@@ -1063,22 +1063,22 @@
         {
           "name": "进口量",
           "latestYoY": 200,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "压榨量",
           "latestYoY": 200,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": -2,
+          "latestYoY": -3,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
           "latestYoY": 210,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
@@ -1093,7 +1093,7 @@
         {
           "name": "期末库存",
           "latestYoY": -10,
-          "monthlyRevision": 0
+          "monthlyRevision": -1
         },
         {
           "name": "收获面积",
@@ -1108,7 +1108,7 @@
         {
           "name": "库存/总使用比",
           "latestYoY": -0.6000000000000014,
-          "monthlyRevision": -0.29999999999999716
+          "monthlyRevision": 0
         }
       ]
     },
@@ -1122,13 +1122,13 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": -71.19999999999982,
-          "monthlyRevision": -27.19999999999891
+          "latestYoY": -84.29999999999927,
+          "monthlyRevision": -13.100000000000364
         },
         {
           "name": "产量",
-          "latestYoY": 1180.0999999999985,
-          "monthlyRevision": 108.90000000000146
+          "latestYoY": 1299.9000000000015,
+          "monthlyRevision": 119.80000000000291
         },
         {
           "name": "进口量",
@@ -1137,18 +1137,18 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 722.2000000000007,
-          "monthlyRevision": 0
+          "latestYoY": 740.2000000000007,
+          "monthlyRevision": 81.60000000000218
         },
         {
           "name": "出口量",
-          "latestYoY": 401,
-          "monthlyRevision": 131.70000000000073
+          "latestYoY": 426,
+          "monthlyRevision": 25
         },
         {
           "name": "消费量",
-          "latestYoY": 737.2000000000007,
-          "monthlyRevision": 0.5999999999985448
+          "latestYoY": 778.1999999999971,
+          "monthlyRevision": 54.099999999998545
         },
         {
           "name": "食用消费",
@@ -1157,18 +1157,18 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 15,
-          "monthlyRevision": 0.6000000000001364
+          "latestYoY": 38,
+          "monthlyRevision": -27.5
         },
         {
           "name": "期末库存",
-          "latestYoY": -94.30000000000018,
-          "monthlyRevision": -50.600000000000364
+          "latestYoY": -53.600000000000364,
+          "monthlyRevision": 27.600000000000364
         },
         {
           "name": "库存/总使用比",
           "latestYoY": -0.8000000000000007,
-          "monthlyRevision": -0.20714734729237705
+          "monthlyRevision": 0.034283594412897855
         }
       ]
     },
@@ -1182,53 +1182,53 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": -60.79999999999927,
-          "monthlyRevision": -19.700000000000728
+          "latestYoY": -82.79999999999927,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 1224,
-          "monthlyRevision": 36.400000000001455
+          "latestYoY": 1279.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 292.59999999999854,
-          "monthlyRevision": 125
+          "latestYoY": 210.20000000000073,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 1168.2000000000044,
-          "monthlyRevision": 108.20000000000437
+          "latestYoY": 1084.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": 333.1000000000022,
-          "monthlyRevision": 119.20000000000073
+          "latestYoY": 322.3000000000029,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 1238.199999999997,
-          "monthlyRevision": 93.80000000000291
+          "latestYoY": 1175.199999999997,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
-          "latestYoY": 11.700000000000273,
-          "monthlyRevision": 0.5
+          "latestYoY": 24.700000000000273,
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 58.30000000000018,
-          "monthlyRevision": -14.900000000000091
+          "latestYoY": 66.30000000000018,
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": -115.5,
-          "monthlyRevision": -71.29999999999927
+          "latestYoY": -90.90000000000146,
+          "monthlyRevision": null
         },
         {
           "name": "收获面积",
-          "latestYoY": 3493,
-          "monthlyRevision": -66
+          "latestYoY": 3901,
+          "monthlyRevision": null
         },
         {
           "name": "单产",
@@ -1238,7 +1238,7 @@
         {
           "name": "库存/总使用比",
           "latestYoY": -0.6999999999999993,
-          "monthlyRevision": -0.1999999999999993
+          "monthlyRevision": null
         }
       ]
     },
@@ -1262,12 +1262,12 @@
         },
         {
           "name": "进口量",
-          "latestYoY": -50,
+          "latestYoY": -70,
           "monthlyRevision": 0
         },
         {
           "name": "压榨量",
-          "latestYoY": 22.5,
+          "latestYoY": 2.5,
           "monthlyRevision": 0
         },
         {
@@ -1277,7 +1277,7 @@
         },
         {
           "name": "消费量",
-          "latestYoY": 25,
+          "latestYoY": 5,
           "monthlyRevision": 0
         },
         {
@@ -1307,7 +1307,7 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -1.9000000000000004,
+          "latestYoY": -1.7999999999999998,
           "monthlyRevision": 0
         }
       ]
@@ -1322,13 +1322,13 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 13.799999999999955,
-          "monthlyRevision": -27.200000000000045
+          "latestYoY": 0.7000000000000455,
+          "monthlyRevision": -13.099999999999909
         },
         {
           "name": "产量",
-          "latestYoY": 580.1000000000004,
-          "monthlyRevision": 108.89999999999964
+          "latestYoY": 699.8999999999996,
+          "monthlyRevision": 119.79999999999927
         },
         {
           "name": "进口量",
@@ -1337,18 +1337,18 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 272.1999999999998,
-          "monthlyRevision": 0
+          "latestYoY": 340.1999999999998,
+          "monthlyRevision": 81.59999999999945
         },
         {
           "name": "出口量",
           "latestYoY": 381,
-          "monthlyRevision": 81.69999999999982
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 267.1999999999998,
-          "monthlyRevision": 0.6000000000003638
+          "latestYoY": 333.2000000000007,
+          "monthlyRevision": 79.10000000000036
         },
         {
           "name": "食用消费",
@@ -1357,28 +1357,28 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": -5,
-          "monthlyRevision": 0.5999999999999659
+          "latestYoY": -7,
+          "monthlyRevision": -2.5
         },
         {
           "name": "期末库存",
-          "latestYoY": -54.299999999999955,
-          "monthlyRevision": -0.6000000000000227
+          "latestYoY": -13.600000000000023,
+          "monthlyRevision": 27.600000000000023
         },
         {
           "name": "收获面积",
-          "latestYoY": 1604,
-          "monthlyRevision": 284
+          "latestYoY": 2162,
+          "monthlyRevision": 558
         },
         {
           "name": "单产",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": -0.10000000000000009,
+          "monthlyRevision": -0.10000000000000009
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.7999999999999998,
-          "monthlyRevision": 0
+          "latestYoY": -0.5999999999999996,
+          "monthlyRevision": 0.09999999999999964
         }
       ]
     },
@@ -1393,11 +1393,11 @@
         {
           "name": "期初库存",
           "latestYoY": 18.5,
-          "monthlyRevision": -4.1000000000000085
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
-          "latestYoY": 60,
+          "latestYoY": 50,
           "monthlyRevision": 0
         },
         {
@@ -1412,7 +1412,7 @@
         },
         {
           "name": "出口量",
-          "latestYoY": 15,
+          "latestYoY": 5,
           "monthlyRevision": 0
         },
         {
@@ -1433,7 +1433,7 @@
         {
           "name": "期末库存",
           "latestYoY": 20.10000000000001,
-          "monthlyRevision": -4.099999999999994
+          "monthlyRevision": 0
         },
         {
           "name": "收获面积",
@@ -1447,8 +1447,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 1.799999999999999,
-          "monthlyRevision": -0.5
+          "latestYoY": 2,
+          "monthlyRevision": 0
         }
       ]
     },
@@ -1463,32 +1463,32 @@
         {
           "name": "期初库存",
           "latestYoY": 9,
-          "monthlyRevision": 8.5
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
-          "latestYoY": 114.5,
-          "monthlyRevision": -10
+          "latestYoY": 84.5,
+          "monthlyRevision": -30
         },
         {
           "name": "进口量",
-          "latestYoY": -10,
-          "monthlyRevision": 20
-        },
-        {
-          "name": "压榨量",
-          "latestYoY": 160,
+          "latestYoY": -15,
           "monthlyRevision": 10
         },
         {
+          "name": "压榨量",
+          "latestYoY": 130,
+          "monthlyRevision": -20
+        },
+        {
           "name": "出口量",
-          "latestYoY": -65,
+          "latestYoY": -70,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 165,
-          "monthlyRevision": 16
+          "latestYoY": 135,
+          "monthlyRevision": -20
         },
         {
           "name": "食用消费",
@@ -1498,27 +1498,27 @@
         {
           "name": "饲用及损耗消费",
           "latestYoY": 5,
-          "monthlyRevision": 6
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 13.5,
-          "monthlyRevision": 2.5
-        },
-        {
-          "name": "收获面积",
-          "latestYoY": 326,
-          "monthlyRevision": 54
-        },
-        {
-          "name": "单产",
-          "latestYoY": 0.10000000000000009,
           "monthlyRevision": 0
         },
         {
+          "name": "收获面积",
+          "latestYoY": 322,
+          "monthlyRevision": -4
+        },
+        {
+          "name": "单产",
+          "latestYoY": 0,
+          "monthlyRevision": -0.10000000000000009
+        },
+        {
           "name": "库存/总使用比",
-          "latestYoY": 0.7999999999999998,
-          "monthlyRevision": 0.10000000000000053
+          "latestYoY": 1,
+          "monthlyRevision": 0.09999999999999964
         }
       ]
     },
@@ -1532,53 +1532,53 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 33.099999999999966,
-          "monthlyRevision": 0.5
+          "latestYoY": 39.39999999999998,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 737.5,
-          "monthlyRevision": 59.30000000000018
+          "latestYoY": 757.1000000000004,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": -66.80000000000001,
-          "monthlyRevision": 20
+          "latestYoY": -90.80000000000001,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 580.3000000000002,
-          "monthlyRevision": 20
+          "latestYoY": 600.3000000000002,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": -57.700000000000045,
-          "monthlyRevision": 20
+          "latestYoY": -63.400000000000034,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 628.8999999999996,
-          "monthlyRevision": 34.899999999999636
+          "latestYoY": 636.5,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
           "latestYoY": 12.5,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 36.099999999999966,
-          "monthlyRevision": 14.899999999999977
+          "latestYoY": 23.69999999999999,
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
           "latestYoY": 132.60000000000002,
-          "monthlyRevision": 24.899999999999977
+          "monthlyRevision": null
         },
         {
           "name": "收获面积",
-          "latestYoY": 2553,
-          "monthlyRevision": 649
+          "latestYoY": 2649,
+          "monthlyRevision": null
         },
         {
           "name": "单产",
@@ -1588,7 +1588,7 @@
         {
           "name": "库存/总使用比",
           "latestYoY": 1.5999999999999996,
-          "monthlyRevision": 0.2999999999999998
+          "monthlyRevision": null
         }
       ]
     },
@@ -1602,33 +1602,33 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 5,
-          "monthlyRevision": 0
+          "latestYoY": 7,
+          "monthlyRevision": 2
         },
         {
           "name": "产量",
           "latestYoY": 320,
-          "monthlyRevision": 120
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
-          "latestYoY": -2,
+          "latestYoY": -4,
           "monthlyRevision": 0
         },
         {
           "name": "压榨量",
           "latestYoY": 200,
-          "monthlyRevision": 50
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
           "latestYoY": 30,
-          "monthlyRevision": 30
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
           "latestYoY": 216,
-          "monthlyRevision": 60
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
@@ -1638,17 +1638,17 @@
         {
           "name": "饲用及损耗消费",
           "latestYoY": 16,
-          "monthlyRevision": 10
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 76.99999999999999,
-          "monthlyRevision": 29.999999999999986
+          "monthlyRevision": 2
         },
         {
           "name": "收获面积",
           "latestYoY": 1500,
-          "monthlyRevision": 800
+          "monthlyRevision": 0
         },
         {
           "name": "单产",
@@ -1658,7 +1658,7 @@
         {
           "name": "库存/总使用比",
           "latestYoY": 3.3,
-          "monthlyRevision": 1.1999999999999993
+          "monthlyRevision": 0.10000000000000053
         }
       ]
     },
@@ -1672,33 +1672,33 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": -15.5,
-          "monthlyRevision": 0
+          "latestYoY": -10.5,
+          "monthlyRevision": 5
         },
         {
           "name": "产量",
-          "latestYoY": 200,
-          "monthlyRevision": -50
+          "latestYoY": 230,
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
-          "latestYoY": 0,
+          "latestYoY": -0.5,
           "monthlyRevision": 0
         },
         {
           "name": "压榨量",
-          "latestYoY": 160,
-          "monthlyRevision": -50
+          "latestYoY": 210,
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": 6.5,
+          "latestYoY": 6,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 162.5,
-          "monthlyRevision": -50
+          "latestYoY": 197.5,
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
@@ -1707,28 +1707,28 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 2.5,
+          "latestYoY": -12.5,
           "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 15.5,
-          "monthlyRevision": 0
+          "monthlyRevision": 5
         },
         {
           "name": "收获面积",
-          "latestYoY": 200,
-          "monthlyRevision": -200
+          "latestYoY": 300,
+          "monthlyRevision": 0
         },
         {
           "name": "单产",
-          "latestYoY": 0.20000000000000018,
-          "monthlyRevision": -0.09999999999999964
+          "latestYoY": 0.30000000000000027,
+          "monthlyRevision": 0
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 1.0999999999999999,
-          "monthlyRevision": 0.10000000000000009
+          "latestYoY": 0.9999999999999998,
+          "monthlyRevision": 0.3999999999999999
         }
       ]
     },
@@ -1812,13 +1812,13 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 95,
-          "monthlyRevision": -60.00000000000003
+          "latestYoY": 55,
+          "monthlyRevision": -40
         },
         {
           "name": "产量",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": 50,
+          "monthlyRevision": 50
         },
         {
           "name": "进口量",
@@ -1827,18 +1827,18 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 80,
-          "monthlyRevision": 20
+          "latestYoY": 100,
+          "monthlyRevision": 50
         },
         {
           "name": "出口量",
-          "latestYoY": -35,
-          "monthlyRevision": -35
+          "latestYoY": -45,
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 90,
-          "monthlyRevision": 5
+          "latestYoY": 110,
+          "monthlyRevision": 50
         },
         {
           "name": "食用消费",
@@ -1848,12 +1848,12 @@
         {
           "name": "饲用及损耗消费",
           "latestYoY": 10,
-          "monthlyRevision": -15
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
-          "latestYoY": 40.00000000000003,
-          "monthlyRevision": -30
+          "latestYoY": 40,
+          "monthlyRevision": -40.00000000000003
         },
         {
           "name": "收获面积",
@@ -1862,13 +1862,13 @@
         },
         {
           "name": "单产",
-          "latestYoY": -0.20000000000000018,
-          "monthlyRevision": 0
+          "latestYoY": -0.10000000000000009,
+          "monthlyRevision": 0.10000000000000009
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 1.5999999999999996,
-          "monthlyRevision": -1.1999999999999993
+          "latestYoY": 1.5,
+          "monthlyRevision": -2.0999999999999996
         }
       ]
     },
@@ -1883,62 +1883,62 @@
         {
           "name": "期初库存",
           "latestYoY": -62.5,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
           "latestYoY": 20,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
-          "latestYoY": 100,
-          "monthlyRevision": null
+          "latestYoY": 120,
+          "monthlyRevision": 0
         },
         {
           "name": "压榨量",
-          "latestYoY": 40,
-          "monthlyRevision": null
+          "latestYoY": 60,
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
           "latestYoY": 0,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 40,
-          "monthlyRevision": null
+          "latestYoY": 60,
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
           "latestYoY": 0,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "饲用及损耗消费",
           "latestYoY": 0,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 17.5,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "收获面积",
           "latestYoY": 50,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "单产",
-          "latestYoY": 0.10000000000000009,
-          "monthlyRevision": null
+          "latestYoY": 0,
+          "monthlyRevision": -0.10000000000000009
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.5,
-          "monthlyRevision": null
+          "latestYoY": 0.3000000000000007,
+          "monthlyRevision": 0
         }
       ]
     },
@@ -1952,8 +1952,8 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 17.19999999999999,
-          "monthlyRevision": 20
+          "latestYoY": 27.19999999999999,
+          "monthlyRevision": 4.099999999999994
         },
         {
           "name": "产量",
@@ -1962,8 +1962,8 @@
         },
         {
           "name": "进口量",
-          "latestYoY": -75,
-          "monthlyRevision": 0
+          "latestYoY": -80,
+          "monthlyRevision": 10
         },
         {
           "name": "压榨量",
@@ -1977,8 +1977,8 @@
         },
         {
           "name": "消费量",
-          "latestYoY": -32.5,
-          "monthlyRevision": 7.5
+          "latestYoY": -37.5,
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
@@ -1987,13 +1987,13 @@
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": -2.5,
-          "monthlyRevision": 7.5
+          "latestYoY": -7.5,
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
-          "latestYoY": -12.5,
-          "monthlyRevision": 12.5
+          "latestYoY": -2.5,
+          "monthlyRevision": 14.099999999999994
         },
         {
           "name": "收获面积",
@@ -2007,7 +2007,7 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.3000000000000007,
+          "latestYoY": 0.09999999999999964,
           "monthlyRevision": 0.5
         }
       ]
@@ -2022,53 +2022,53 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 160.60000000000002,
-          "monthlyRevision": -30.700000000000045
+          "latestYoY": 138.80000000000007,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 202.6999999999989,
-          "monthlyRevision": 68.5
+          "latestYoY": 241.79999999999927,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 29.299999999999955,
-          "monthlyRevision": -3.5
+          "latestYoY": 27.100000000000136,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 292.2000000000007,
-          "monthlyRevision": 33.5
+          "latestYoY": 313.60000000000036,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": 8,
-          "monthlyRevision": 8.299999999999955
+          "latestYoY": 3.2000000000000455,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 321.09999999999854,
-          "monthlyRevision": 25.399999999999636
+          "latestYoY": 331,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
-          "latestYoY": 28.900000000000034,
-          "monthlyRevision": -8.099999999999966
+          "latestYoY": 17.400000000000034,
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": 63.5,
-          "monthlyRevision": 0.6000000000001364
+          "latestYoY": 73.5,
+          "monthlyRevision": null
         },
         {
           "name": "收获面积",
-          "latestYoY": 1868,
-          "monthlyRevision": 332
+          "latestYoY": 1810,
+          "monthlyRevision": null
         },
         {
           "name": "单产",
@@ -2077,8 +2077,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.29999999999999893,
-          "monthlyRevision": 0
+          "latestYoY": 0.40000000000000036,
+          "monthlyRevision": null
         }
       ]
     },
@@ -2098,7 +2098,7 @@
         {
           "name": "产量",
           "latestYoY": 90,
-          "monthlyRevision": 40
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
@@ -2113,12 +2113,12 @@
         {
           "name": "出口量",
           "latestYoY": 40,
-          "monthlyRevision": 30
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
           "latestYoY": 47.5,
-          "monthlyRevision": 2
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
@@ -2128,17 +2128,17 @@
         {
           "name": "饲用及损耗消费",
           "latestYoY": 7.5,
-          "monthlyRevision": 2
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 13.999999999999996,
-          "monthlyRevision": 7.9999999999999964
+          "monthlyRevision": 0
         },
         {
           "name": "收获面积",
           "latestYoY": 500,
-          "monthlyRevision": 200
+          "monthlyRevision": 0
         },
         {
           "name": "单产",
@@ -2148,7 +2148,7 @@
         {
           "name": "库存/总使用比",
           "latestYoY": 1.5999999999999996,
-          "monthlyRevision": 1
+          "monthlyRevision": 0
         }
       ]
     },
@@ -2162,8 +2162,8 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 9.8,
-          "monthlyRevision": 5
+          "latestYoY": 19.6,
+          "monthlyRevision": 9.8
         },
         {
           "name": "产量",
@@ -2172,7 +2172,7 @@
         },
         {
           "name": "进口量",
-          "latestYoY": 0.2,
+          "latestYoY": 0.09999999999999998,
           "monthlyRevision": 0
         },
         {
@@ -2182,7 +2182,7 @@
         },
         {
           "name": "出口量",
-          "latestYoY": 60,
+          "latestYoY": 69.69999999999999,
           "monthlyRevision": 0
         },
         {
@@ -2203,7 +2203,7 @@
         {
           "name": "期末库存",
           "latestYoY": 5,
-          "monthlyRevision": 5
+          "monthlyRevision": 9.8
         },
         {
           "name": "收获面积",
@@ -2217,8 +2217,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.20000000000000018,
-          "monthlyRevision": 1.1999999999999997
+          "latestYoY": -0.5999999999999996,
+          "monthlyRevision": 2.2
         }
       ]
     },
@@ -2232,7 +2232,7 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 0,
+          "latestYoY": 50,
           "monthlyRevision": 0
         },
         {
@@ -2242,8 +2242,8 @@
         },
         {
           "name": "期初库存",
-          "latestYoY": 6.900000000000006,
-          "monthlyRevision": 0
+          "latestYoY": 8.900000000000006,
+          "monthlyRevision": 2
         },
         {
           "name": "产量",
@@ -2253,7 +2253,7 @@
         {
           "name": "进口量",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": 2
         },
         {
           "name": "压榨量",
@@ -2287,13 +2287,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 5.899999999999999,
-          "monthlyRevision": 0
+          "latestYoY": 7.899999999999999,
+          "monthlyRevision": 4
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.5,
-          "monthlyRevision": 0
+          "latestYoY": 0.7999999999999998,
+          "monthlyRevision": 0.5
         }
       ]
     },
@@ -2307,22 +2307,22 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 600,
+          "latestYoY": 550,
           "monthlyRevision": 0
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 350,
+          "latestYoY": 300,
           "monthlyRevision": 0
         },
         {
           "name": "期初库存",
-          "latestYoY": -1,
-          "monthlyRevision": 0
+          "latestYoY": -0.8000000000000007,
+          "monthlyRevision": 0.1999999999999993
         },
         {
           "name": "产量",
-          "latestYoY": 72,
+          "latestYoY": 61.799999999999955,
           "monthlyRevision": 0
         },
         {
@@ -2332,22 +2332,22 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 350,
+          "latestYoY": 300,
           "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": 10,
+          "latestYoY": -10,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 35,
+          "latestYoY": 45,
           "monthlyRevision": 0
         },
         {
           "name": "工业消费",
-          "latestYoY": 30,
+          "latestYoY": 40,
           "monthlyRevision": 0
         },
         {
@@ -2362,8 +2362,8 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 26.000000000000004,
-          "monthlyRevision": 0
+          "latestYoY": 26,
+          "monthlyRevision": 0.19999999999999574
         },
         {
           "name": "库存/总使用比",
@@ -2388,17 +2388,17 @@
         {
           "name": "大豆压榨",
           "latestYoY": 200,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "期初库存",
           "latestYoY": 6.800000000000011,
-          "monthlyRevision": -0.5999999999999943
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
           "latestYoY": 38.79999999999973,
-          "monthlyRevision": 19.40000000000009
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
@@ -2408,12 +2408,12 @@
         {
           "name": "压榨量",
           "latestYoY": 200,
-          "monthlyRevision": 100
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
           "latestYoY": 0,
-          "monthlyRevision": 20
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
@@ -2438,12 +2438,12 @@
         {
           "name": "期末库存",
           "latestYoY": 15.599999999999994,
-          "monthlyRevision": -1.2000000000000028
+          "monthlyRevision": 0
         },
         {
           "name": "库存/总使用比",
           "latestYoY": 0.7000000000000002,
-          "monthlyRevision": -0.09999999999999964
+          "monthlyRevision": 0
         }
       ]
     },
@@ -2457,53 +2457,53 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 1180.0999999999985,
-          "monthlyRevision": 108.90000000000146
+          "latestYoY": 1299.9000000000015,
+          "monthlyRevision": 119.80000000000291
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 722.2000000000007,
-          "monthlyRevision": 0
+          "latestYoY": 740.2000000000007,
+          "monthlyRevision": 81.60000000000218
         },
         {
           "name": "期初库存",
-          "latestYoY": 10,
-          "monthlyRevision": 0
+          "latestYoY": 12.200000000000017,
+          "monthlyRevision": 2.1999999999999886
         },
         {
           "name": "产量",
-          "latestYoY": 170.69999999999982,
-          "monthlyRevision": 0
+          "latestYoY": 171.4000000000001,
+          "monthlyRevision": 16.09999999999991
         },
         {
           "name": "进口量",
-          "latestYoY": 12.200000000000003,
-          "monthlyRevision": 0
+          "latestYoY": 9.100000000000001,
+          "monthlyRevision": 2
         },
         {
           "name": "压榨量",
-          "latestYoY": 722.2000000000007,
-          "monthlyRevision": 0
+          "latestYoY": 740.2000000000007,
+          "monthlyRevision": 81.60000000000218
         },
         {
           "name": "出口量",
-          "latestYoY": 2.7000000000000455,
+          "latestYoY": -16.100000000000023,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 156.5,
-          "monthlyRevision": 0
+          "latestYoY": 173.0999999999999,
+          "monthlyRevision": 16.09999999999991
         },
         {
           "name": "工业消费",
-          "latestYoY": 177.4000000000001,
+          "latestYoY": 180.60000000000014,
           "monthlyRevision": 0
         },
         {
           "name": "食用消费",
-          "latestYoY": -20.899999999999864,
-          "monthlyRevision": 0
+          "latestYoY": -7.5,
+          "monthlyRevision": 16.09999999999991
         },
         {
           "name": "饲用及损耗消费",
@@ -2512,13 +2512,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 33.70000000000002,
-          "monthlyRevision": 0
+          "latestYoY": 35.69999999999999,
+          "monthlyRevision": 4.199999999999989
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.7999999999999998,
-          "monthlyRevision": 0
+          "latestYoY": 0.8000000000000007,
+          "monthlyRevision": 0.09285711794464113
         }
       ]
     },
@@ -2532,68 +2532,68 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 1224,
-          "monthlyRevision": 36.400000000001455
+          "latestYoY": 1279.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 1168.2000000000044,
-          "monthlyRevision": 108.20000000000437
+          "latestYoY": 1084.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "期初库存",
-          "latestYoY": -15.100000000000023,
-          "monthlyRevision": 27.799999999999955
+          "latestYoY": 0.7999999999999545,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 254.59999999999945,
-          "monthlyRevision": 21.199999999999818
+          "latestYoY": 236.5,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 24.40000000000009,
-          "monthlyRevision": 20
+          "latestYoY": -8.899999999999864,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 1168.2000000000044,
-          "monthlyRevision": 108.20000000000437
+          "latestYoY": 1084.2000000000044,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": 20.5,
-          "monthlyRevision": 20
+          "latestYoY": -4.7999999999999545,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 195,
-          "monthlyRevision": 12
+          "latestYoY": 183.80000000000018,
+          "monthlyRevision": null
         },
         {
           "name": "工业消费",
-          "latestYoY": 172.10000000000014,
-          "monthlyRevision": 0
+          "latestYoY": 175.80000000000018,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
-          "latestYoY": 22.899999999999636,
-          "monthlyRevision": 12
+          "latestYoY": 8,
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": 48.39999999999998,
-          "monthlyRevision": 37
+          "latestYoY": 49.39999999999998,
+          "monthlyRevision": null
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.2999999999999998,
-          "monthlyRevision": 0.2999999999999998
+          "latestYoY": 0.40000000000000036,
+          "monthlyRevision": null
         }
       ]
     },
@@ -2612,38 +2612,38 @@
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 22.5,
+          "latestYoY": 2.5,
           "monthlyRevision": 0
         },
         {
           "name": "期初库存",
-          "latestYoY": -20,
-          "monthlyRevision": 20
+          "latestYoY": -2.9000000000000057,
+          "monthlyRevision": 17.099999999999994
         },
         {
           "name": "产量",
-          "latestYoY": 4,
+          "latestYoY": 0.4000000000000057,
           "monthlyRevision": 0
         },
         {
           "name": "进口量",
-          "latestYoY": -15,
-          "monthlyRevision": 20
+          "latestYoY": -30,
+          "monthlyRevision": 30
         },
         {
           "name": "压榨量",
-          "latestYoY": 22.5,
+          "latestYoY": 2.5,
           "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": -0.5,
+          "latestYoY": -2,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": -31,
-          "monthlyRevision": 10
+          "latestYoY": -35,
+          "monthlyRevision": 26
         },
         {
           "name": "工业消费",
@@ -2652,8 +2652,8 @@
         },
         {
           "name": "食用消费",
-          "latestYoY": -31,
-          "monthlyRevision": 10
+          "latestYoY": -35,
+          "monthlyRevision": 26
         },
         {
           "name": "饲用及损耗消费",
@@ -2662,13 +2662,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 0.5,
-          "monthlyRevision": 30
+          "latestYoY": 4.5,
+          "monthlyRevision": 21.099999999999994
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 1.1000000000000014,
-          "monthlyRevision": 4.5
+          "latestYoY": 2,
+          "monthlyRevision": 2.3999999999999986
         }
       ]
     },
@@ -2682,13 +2682,13 @@
       "rows": [
         {
           "name": "大豆产量",
-          "latestYoY": 580.1000000000004,
-          "monthlyRevision": 108.89999999999964
+          "latestYoY": 699.8999999999996,
+          "monthlyRevision": 119.79999999999927
         },
         {
           "name": "大豆压榨",
-          "latestYoY": 272.1999999999998,
-          "monthlyRevision": 0
+          "latestYoY": 340.1999999999998,
+          "monthlyRevision": 81.59999999999945
         },
         {
           "name": "期初库存",
@@ -2697,38 +2697,38 @@
         },
         {
           "name": "产量",
-          "latestYoY": 78.70000000000005,
-          "monthlyRevision": 0
+          "latestYoY": 89.60000000000014,
+          "monthlyRevision": 16.100000000000136
         },
         {
           "name": "进口量",
-          "latestYoY": 12.2,
+          "latestYoY": 9.099999999999998,
           "monthlyRevision": 0
         },
         {
           "name": "压榨量",
-          "latestYoY": 272.1999999999998,
-          "monthlyRevision": 0
+          "latestYoY": 340.1999999999998,
+          "monthlyRevision": 81.59999999999945
         },
         {
           "name": "出口量",
-          "latestYoY": -27.299999999999997,
+          "latestYoY": -26.1,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 120.5,
-          "monthlyRevision": 0
+          "latestYoY": 127.10000000000014,
+          "monthlyRevision": 16.100000000000136
         },
         {
           "name": "工业消费",
-          "latestYoY": 147.39999999999998,
+          "latestYoY": 140.60000000000002,
           "monthlyRevision": 0
         },
         {
           "name": "食用消费",
-          "latestYoY": -26.899999999999977,
-          "monthlyRevision": 0
+          "latestYoY": -13.5,
+          "monthlyRevision": 16.09999999999991
         },
         {
           "name": "饲用及损耗消费",
@@ -2742,8 +2742,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.20000000000000018,
-          "monthlyRevision": 0
+          "latestYoY": -0.3000000000000007,
+          "monthlyRevision": -0.10000000000000053
         }
       ]
     },
@@ -2757,7 +2757,7 @@
       "rows": [
         {
           "name": "葵籽产量",
-          "latestYoY": 60,
+          "latestYoY": 50,
           "monthlyRevision": 0
         },
         {
@@ -2832,23 +2832,23 @@
       "rows": [
         {
           "name": "葵籽产量",
-          "latestYoY": 114.5,
-          "monthlyRevision": -10
+          "latestYoY": 84.5,
+          "monthlyRevision": -30
         },
         {
           "name": "葵籽压榨",
-          "latestYoY": 160,
-          "monthlyRevision": 10
+          "latestYoY": 130,
+          "monthlyRevision": -20
         },
         {
           "name": "期初库存",
-          "latestYoY": -1.7999999999999972,
-          "monthlyRevision": 0
+          "latestYoY": 2.5,
+          "monthlyRevision": 4.299999999999997
         },
         {
           "name": "产量",
-          "latestYoY": 67.60000000000002,
-          "monthlyRevision": 4.300000000000011
+          "latestYoY": 54.80000000000001,
+          "monthlyRevision": -8.5
         },
         {
           "name": "进口量",
@@ -2857,8 +2857,8 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 160,
-          "monthlyRevision": 10
+          "latestYoY": 130,
+          "monthlyRevision": -20
         },
         {
           "name": "出口量",
@@ -2868,7 +2868,7 @@
         {
           "name": "消费量",
           "latestYoY": 47.49999999999994,
-          "monthlyRevision": 5
+          "monthlyRevision": 0
         },
         {
           "name": "工业消费",
@@ -2878,7 +2878,7 @@
         {
           "name": "食用消费",
           "latestYoY": 45,
-          "monthlyRevision": 5
+          "monthlyRevision": 0
         },
         {
           "name": "饲用及损耗消费",
@@ -2887,13 +2887,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 10.799999999999997,
-          "monthlyRevision": -0.7000000000000028
+          "latestYoY": 2.3000000000000043,
+          "monthlyRevision": -4.199999999999996
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.9000000000000004,
-          "monthlyRevision": -0.1999999999999993
+          "latestYoY": -0.39999999999999947,
+          "monthlyRevision": -0.5999999999999996
         }
       ]
     },
@@ -2907,68 +2907,68 @@
       "rows": [
         {
           "name": "葵籽产量",
-          "latestYoY": 737.5,
-          "monthlyRevision": 59.30000000000018
+          "latestYoY": 757.1000000000004,
+          "monthlyRevision": null
         },
         {
           "name": "葵籽压榨",
-          "latestYoY": 580.3000000000002,
-          "monthlyRevision": 20
+          "latestYoY": 600.3000000000002,
+          "monthlyRevision": null
         },
         {
           "name": "期初库存",
-          "latestYoY": -12.900000000000006,
-          "monthlyRevision": -1.200000000000017
+          "latestYoY": -6.099999999999994,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 246.5999999999999,
-          "monthlyRevision": 7.599999999999909
+          "latestYoY": 255.30000000000018,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 250,
-          "monthlyRevision": 0
+          "latestYoY": 229.29999999999995,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 580.2999999999993,
-          "monthlyRevision": 20
+          "latestYoY": 600.2999999999993,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": 194.70000000000005,
-          "monthlyRevision": 0
+          "latestYoY": 216.20000000000005,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 237.4000000000001,
-          "monthlyRevision": 3.5
+          "latestYoY": 222.20000000000027,
+          "monthlyRevision": null
         },
         {
           "name": "工业消费",
           "latestYoY": 2.5,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
-          "latestYoY": 234.9000000000001,
-          "monthlyRevision": 3.5
+          "latestYoY": 219.70000000000027,
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
           "latestYoY": 0,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": 51.60000000000002,
-          "monthlyRevision": 2.900000000000034
+          "latestYoY": 40.099999999999966,
+          "monthlyRevision": null
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.6000000000000005,
-          "monthlyRevision": 0.10000000000000053
+          "latestYoY": 0.20000000000000018,
+          "monthlyRevision": null
         }
       ]
     },
@@ -2983,12 +2983,12 @@
         {
           "name": "葵籽产量",
           "latestYoY": 320,
-          "monthlyRevision": 120
+          "monthlyRevision": 0
         },
         {
           "name": "葵籽压榨",
           "latestYoY": 200,
-          "monthlyRevision": 50
+          "monthlyRevision": 0
         },
         {
           "name": "期初库存",
@@ -2998,7 +2998,7 @@
         {
           "name": "产量",
           "latestYoY": 82.59999999999991,
-          "monthlyRevision": 20.59999999999991
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
@@ -3008,17 +3008,17 @@
         {
           "name": "压榨量",
           "latestYoY": 200,
-          "monthlyRevision": 50
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
           "latestYoY": 80,
-          "monthlyRevision": 15
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
           "latestYoY": 12.5,
-          "monthlyRevision": 2.5
+          "monthlyRevision": 0
         },
         {
           "name": "工业消费",
@@ -3028,7 +3028,7 @@
         {
           "name": "食用消费",
           "latestYoY": 12.5,
-          "monthlyRevision": 2.5
+          "monthlyRevision": 0
         },
         {
           "name": "饲用及损耗消费",
@@ -3038,12 +3038,12 @@
         {
           "name": "期末库存",
           "latestYoY": 2.400000000000002,
-          "monthlyRevision": 3.1000000000000014
+          "monthlyRevision": 0
         },
         {
           "name": "库存/总使用比",
           "latestYoY": -0.2999999999999998,
-          "monthlyRevision": 0.3000000000000007
+          "monthlyRevision": 0
         }
       ]
     },
@@ -3057,23 +3057,23 @@
       "rows": [
         {
           "name": "葵籽产量",
-          "latestYoY": 200,
-          "monthlyRevision": -50
-        },
-        {
-          "name": "葵籽压榨",
-          "latestYoY": 160,
-          "monthlyRevision": -50
-        },
-        {
-          "name": "期初库存",
-          "latestYoY": -10.000000000000002,
+          "latestYoY": 230,
           "monthlyRevision": 0
         },
         {
+          "name": "葵籽压榨",
+          "latestYoY": 210,
+          "monthlyRevision": 0
+        },
+        {
+          "name": "期初库存",
+          "latestYoY": -4,
+          "monthlyRevision": 6.000000000000002
+        },
+        {
           "name": "产量",
-          "latestYoY": 68.79999999999995,
-          "monthlyRevision": -21.5
+          "latestYoY": 90.29999999999995,
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
@@ -3082,13 +3082,13 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 160,
-          "monthlyRevision": -50
+          "latestYoY": 210,
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": 52.5,
-          "monthlyRevision": -20
+          "latestYoY": 85,
+          "monthlyRevision": 5
         },
         {
           "name": "消费量",
@@ -3112,13 +3112,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": 4.799999999999999,
-          "monthlyRevision": -1.5
+          "latestYoY": -0.20000000000000284,
+          "monthlyRevision": 1
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.6000000000000001,
-          "monthlyRevision": -0.20000000000000018
+          "latestYoY": -0.7000000000000002,
+          "monthlyRevision": 0.20000000000000018
         }
       ]
     },
@@ -3207,23 +3207,23 @@
       "rows": [
         {
           "name": "菜籽产量",
-          "latestYoY": 0,
-          "monthlyRevision": 0
+          "latestYoY": 50,
+          "monthlyRevision": 50
         },
         {
           "name": "菜籽压榨",
-          "latestYoY": 80,
-          "monthlyRevision": 20
+          "latestYoY": 100,
+          "monthlyRevision": 50
         },
         {
           "name": "期初库存",
-          "latestYoY": 6,
-          "monthlyRevision": 4.5
+          "latestYoY": 7.799999999999997,
+          "monthlyRevision": 1.7999999999999972
         },
         {
           "name": "产量",
-          "latestYoY": 31.299999999999955,
-          "monthlyRevision": 8.5
+          "latestYoY": 39.700000000000045,
+          "monthlyRevision": 21.200000000000045
         },
         {
           "name": "进口量",
@@ -3232,28 +3232,28 @@
         },
         {
           "name": "压榨量",
-          "latestYoY": 80,
-          "monthlyRevision": 20
+          "latestYoY": 100,
+          "monthlyRevision": 50
         },
         {
           "name": "出口量",
-          "latestYoY": 45,
+          "latestYoY": 55,
           "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 1.5,
-          "monthlyRevision": 0
+          "latestYoY": 2,
+          "monthlyRevision": 21.5
         },
         {
           "name": "工业消费",
-          "latestYoY": -2.5,
-          "monthlyRevision": 0
+          "latestYoY": 1.5,
+          "monthlyRevision": 25
         },
         {
           "name": "食用消费",
-          "latestYoY": 4,
-          "monthlyRevision": 0
+          "latestYoY": 0.5,
+          "monthlyRevision": -3.5
         },
         {
           "name": "饲用及损耗消费",
@@ -3262,13 +3262,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": -9.200000000000003,
-          "monthlyRevision": 13
+          "latestYoY": -9.5,
+          "monthlyRevision": 1.5
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -2.8000000000000007,
-          "monthlyRevision": 2.299999999999999
+          "latestYoY": -3,
+          "monthlyRevision": -0.1999999999999993
         }
       ]
     },
@@ -3283,67 +3283,67 @@
         {
           "name": "菜籽产量",
           "latestYoY": 20,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "菜籽压榨",
-          "latestYoY": 40,
-          "monthlyRevision": null
+          "latestYoY": 60,
+          "monthlyRevision": 0
         },
         {
           "name": "期初库存",
-          "latestYoY": -22.099999999999994,
-          "monthlyRevision": null
+          "latestYoY": -22.400000000000006,
+          "monthlyRevision": -0.30000000000001137
         },
         {
           "name": "产量",
-          "latestYoY": 15.600000000000023,
-          "monthlyRevision": null
+          "latestYoY": 23.399999999999977,
+          "monthlyRevision": 0
         },
         {
           "name": "进口量",
           "latestYoY": 10,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "压榨量",
-          "latestYoY": 40,
-          "monthlyRevision": null
+          "latestYoY": 60,
+          "monthlyRevision": 0
         },
         {
           "name": "出口量",
           "latestYoY": -5,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "消费量",
-          "latestYoY": 7.5,
-          "monthlyRevision": null
+          "latestYoY": 15,
+          "monthlyRevision": 0
         },
         {
           "name": "工业消费",
           "latestYoY": 0,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
-          "latestYoY": 7.5,
-          "monthlyRevision": null
+          "latestYoY": 15,
+          "monthlyRevision": 0
         },
         {
           "name": "饲用及损耗消费",
           "latestYoY": 0,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         },
         {
           "name": "期末库存",
           "latestYoY": 1,
-          "monthlyRevision": null
+          "monthlyRevision": -0.30000000000001137
         },
         {
           "name": "库存/总使用比",
           "latestYoY": 0,
-          "monthlyRevision": null
+          "monthlyRevision": 0
         }
       ]
     },
@@ -3368,7 +3368,7 @@
         {
           "name": "期初库存",
           "latestYoY": 21.8,
-          "monthlyRevision": 14.399999999999999
+          "monthlyRevision": 0
         },
         {
           "name": "产量",
@@ -3393,17 +3393,17 @@
         {
           "name": "消费量",
           "latestYoY": 0,
-          "monthlyRevision": 15
+          "monthlyRevision": 0
         },
         {
           "name": "工业消费",
           "latestYoY": 0,
-          "monthlyRevision": 10
+          "monthlyRevision": 0
         },
         {
           "name": "食用消费",
           "latestYoY": 0,
-          "monthlyRevision": 5
+          "monthlyRevision": 0
         },
         {
           "name": "饲用及损耗消费",
@@ -3413,12 +3413,12 @@
         {
           "name": "期末库存",
           "latestYoY": -15.800000000000004,
-          "monthlyRevision": -0.6000000000000014
+          "monthlyRevision": 0
         },
         {
           "name": "库存/总使用比",
           "latestYoY": -1.4000000000000004,
-          "monthlyRevision": -0.10000000000000009
+          "monthlyRevision": 0
         }
       ]
     },
@@ -3432,68 +3432,68 @@
       "rows": [
         {
           "name": "菜籽产量",
-          "latestYoY": 202.6999999999989,
-          "monthlyRevision": 68.5
+          "latestYoY": 241.79999999999927,
+          "monthlyRevision": null
         },
         {
           "name": "菜籽压榨",
-          "latestYoY": 292.2000000000007,
-          "monthlyRevision": 33.5
+          "latestYoY": 313.60000000000036,
+          "monthlyRevision": null
         },
         {
           "name": "期初库存",
-          "latestYoY": 20.5,
-          "monthlyRevision": 19.400000000000034
+          "latestYoY": 23.5,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
-          "latestYoY": 116.19999999999982,
-          "monthlyRevision": 14.699999999999818
+          "latestYoY": 125.09999999999991,
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 57.10000000000002,
-          "monthlyRevision": 0
+          "latestYoY": 60.60000000000002,
+          "monthlyRevision": null
         },
         {
           "name": "压榨量",
-          "latestYoY": 292.2000000000007,
-          "monthlyRevision": 33.5
+          "latestYoY": 313.60000000000036,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": 72,
-          "monthlyRevision": 0
+          "latestYoY": 83.60000000000002,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 135.9000000000001,
-          "monthlyRevision": 21.5
+          "latestYoY": 137.69999999999982,
+          "monthlyRevision": null
         },
         {
           "name": "工业消费",
-          "latestYoY": 79.09999999999991,
-          "monthlyRevision": 10
+          "latestYoY": 83.09999999999991,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
-          "latestYoY": 54.399999999999636,
-          "monthlyRevision": 11.5
+          "latestYoY": 52.20000000000027,
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
           "latestYoY": 2.3999999999999986,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": -14.100000000000023,
-          "monthlyRevision": 12.600000000000023
+          "latestYoY": -12.100000000000023,
+          "monthlyRevision": null
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.7000000000000002,
-          "monthlyRevision": 0.20000000000000018
+          "latestYoY": -0.5999999999999996,
+          "monthlyRevision": null
         }
       ]
     },
@@ -3508,7 +3508,7 @@
         {
           "name": "菜籽产量",
           "latestYoY": 90,
-          "monthlyRevision": 40
+          "monthlyRevision": 0
         },
         {
           "name": "菜籽压榨",
@@ -3592,8 +3592,8 @@
         },
         {
           "name": "期初库存",
-          "latestYoY": 3.8,
-          "monthlyRevision": 2.0999999999999996
+          "latestYoY": 5.3,
+          "monthlyRevision": 1.5
         },
         {
           "name": "产量",
@@ -3612,7 +3612,7 @@
         },
         {
           "name": "出口量",
-          "latestYoY": 16.5,
+          "latestYoY": 18,
           "monthlyRevision": 0
         },
         {
@@ -3638,12 +3638,12 @@
         {
           "name": "期末库存",
           "latestYoY": -0.5999999999999996,
-          "monthlyRevision": 2.1
+          "monthlyRevision": 1.5
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -3.6999999999999993,
-          "monthlyRevision": 3
+          "latestYoY": -4.800000000000001,
+          "monthlyRevision": 2.1999999999999993
         }
       ]
     },
@@ -3657,8 +3657,8 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 19,
-          "monthlyRevision": 0
+          "latestYoY": -21,
+          "monthlyRevision": -40
         },
         {
           "name": "产量",
@@ -3667,28 +3667,28 @@
         },
         {
           "name": "进口量",
-          "latestYoY": -5,
-          "monthlyRevision": 0
-        },
-        {
-          "name": "出口量",
           "latestYoY": -10,
           "monthlyRevision": 0
         },
         {
+          "name": "出口量",
+          "latestYoY": -60,
+          "monthlyRevision": -35
+        },
+        {
           "name": "消费量",
-          "latestYoY": 48.5,
-          "monthlyRevision": 0
+          "latestYoY": 64.5,
+          "monthlyRevision": 46
         },
         {
           "name": "工业消费",
-          "latestYoY": 32.5,
-          "monthlyRevision": 0
+          "latestYoY": 53.5,
+          "monthlyRevision": 51
         },
         {
           "name": "食用消费",
-          "latestYoY": 17,
-          "monthlyRevision": 0
+          "latestYoY": 12,
+          "monthlyRevision": -5
         },
         {
           "name": "饲用及损耗消费",
@@ -3697,13 +3697,13 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": -4.5,
-          "monthlyRevision": 0
+          "latestYoY": -15.5,
+          "monthlyRevision": -51
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.20000000000000107,
-          "monthlyRevision": 0
+          "latestYoY": -0.1999999999999993,
+          "monthlyRevision": -0.7699029839701481
         }
       ]
     },
@@ -3717,53 +3717,53 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 50,
-          "monthlyRevision": 13.199999999999818
+          "latestYoY": 36.600000000000136,
+          "monthlyRevision": null
         },
         {
           "name": "产量",
           "latestYoY": -2,
-          "monthlyRevision": 8
+          "monthlyRevision": null
         },
         {
           "name": "进口量",
-          "latestYoY": 11.900000000000546,
-          "monthlyRevision": 0
+          "latestYoY": 35.100000000000364,
+          "monthlyRevision": null
         },
         {
           "name": "出口量",
-          "latestYoY": -9.399999999999636,
-          "monthlyRevision": 0
+          "latestYoY": -61.399999999999636,
+          "monthlyRevision": null
         },
         {
           "name": "消费量",
-          "latestYoY": 119.39999999999964,
-          "monthlyRevision": 9.5
+          "latestYoY": 206.69999999999982,
+          "monthlyRevision": null
         },
         {
           "name": "工业消费",
-          "latestYoY": 39.19999999999982,
-          "monthlyRevision": 2
+          "latestYoY": 67.69999999999982,
+          "monthlyRevision": null
         },
         {
           "name": "食用消费",
-          "latestYoY": 82.19999999999982,
-          "monthlyRevision": 7.5
+          "latestYoY": 141,
+          "monthlyRevision": null
         },
         {
           "name": "饲用及损耗消费",
           "latestYoY": -2,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "期末库存",
-          "latestYoY": -50.09999999999991,
-          "monthlyRevision": 11.700000000000045
+          "latestYoY": -75.60000000000014,
+          "monthlyRevision": null
         },
         {
           "name": "收获面积",
           "latestYoY": 90,
-          "monthlyRevision": 0
+          "monthlyRevision": null
         },
         {
           "name": "单产",
@@ -3772,8 +3772,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.5,
-          "monthlyRevision": 0.09999999999999964
+          "latestYoY": -0.7000000000000011,
+          "monthlyRevision": null
         }
       ]
     },
@@ -3787,8 +3787,8 @@
       "rows": [
         {
           "name": "期初库存",
-          "latestYoY": 7.5,
-          "monthlyRevision": 0
+          "latestYoY": -32.5,
+          "monthlyRevision": -40
         },
         {
           "name": "产量",
@@ -3802,23 +3802,23 @@
         },
         {
           "name": "出口量",
-          "latestYoY": 45,
-          "monthlyRevision": 0
+          "latestYoY": -10,
+          "monthlyRevision": -45
         },
         {
           "name": "消费量",
-          "latestYoY": 45,
-          "monthlyRevision": 0
+          "latestYoY": 60,
+          "monthlyRevision": 45
         },
         {
           "name": "工业消费",
-          "latestYoY": 30,
-          "monthlyRevision": 0
+          "latestYoY": 50,
+          "monthlyRevision": 50
         },
         {
           "name": "食用消费",
-          "latestYoY": 15,
-          "monthlyRevision": 0
+          "latestYoY": 10,
+          "monthlyRevision": -5
         },
         {
           "name": "饲用及损耗消费",
@@ -3828,7 +3828,7 @@
         {
           "name": "期末库存",
           "latestYoY": -2.5,
-          "monthlyRevision": 0
+          "monthlyRevision": -40
         },
         {
           "name": "收获面积",
@@ -3842,8 +3842,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": -0.1999999999999993,
-          "monthlyRevision": 0
+          "latestYoY": -0.09999999999999964,
+          "monthlyRevision": -0.8000000000000007
         }
       ]
     },
@@ -3867,23 +3867,23 @@
         },
         {
           "name": "进口量",
-          "latestYoY": -5,
+          "latestYoY": -10,
           "monthlyRevision": 0
         },
         {
           "name": "出口量",
-          "latestYoY": -55,
-          "monthlyRevision": 0
+          "latestYoY": -50,
+          "monthlyRevision": 10
         },
         {
           "name": "消费量",
-          "latestYoY": 3.5,
-          "monthlyRevision": 0
+          "latestYoY": 4.5,
+          "monthlyRevision": 1
         },
         {
           "name": "工业消费",
-          "latestYoY": 2.5,
-          "monthlyRevision": 0
+          "latestYoY": 3.5,
+          "monthlyRevision": 1
         },
         {
           "name": "食用消费",
@@ -3897,8 +3897,8 @@
         },
         {
           "name": "期末库存",
-          "latestYoY": -2,
-          "monthlyRevision": 0
+          "latestYoY": -13,
+          "monthlyRevision": -11
         },
         {
           "name": "收获面积",
@@ -3912,8 +3912,8 @@
         },
         {
           "name": "库存/总使用比",
-          "latestYoY": 0.1999999999999993,
-          "monthlyRevision": 0
+          "latestYoY": -0.40000000000000036,
+          "monthlyRevision": -0.5999999999999996
         }
       ]
     },
