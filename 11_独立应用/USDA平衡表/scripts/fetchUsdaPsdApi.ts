@@ -4,24 +4,26 @@ import { join } from 'node:path'
 import { SocksProxyAgent } from 'socks-proxy-agent'
 import { RESEARCH_SCOPE } from './researchScope'
 import { readUsdaApiConfig } from './usdaApiConfig'
+import {
+  RequestPacer, createPlannedManifest, createRateLimitEvidence, createRunId, promoteRunAtomically, readFetchSettings,
+  redactSecret, requestWithRetry, runWithConcurrency, validateManifest, writeJsonAtomic,
+  type FetchManifest, type ManifestRequest, type RateLimitEvidence, type TransportResponse,
+} from './usdaFetchCore'
 
 type ApiItem = Record<string, unknown>
-type ApiResponse = { status: number; body: unknown }
 type AuthMode = 'X-Api-Key header' | 'api_key query parameter'
 type Mapping = { requested: string; code: string | null; matchedName: string | null }
 type RequestFailure = { endpoint: string; status: number | null; message: string }
-type DownloadResult = { commodity: string; country: string; marketYear: number; status: 'downloaded' | 'empty' | 'failed'; failure?: RequestFailure }
 
 const API_BASE = 'https://api.fas.usda.gov'
+const METADATA_ENDPOINTS = ['/api/psd/commodities', '/api/psd/countries', '/api/psd/commodityAttributes', '/api/psd/unitsOfMeasure'] as const
+const RAW_ROOT = join(process.cwd(), 'data', 'raw', 'usda_psd_api')
 const OUTPUT_DIRECTORY = join(process.cwd(), 'output')
 
-function maskKey(key: string): string {
-  return key.length <= 8 ? '***' : `${key.slice(0, 4)}***${key.slice(-4)}`
-}
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 function safeMessage(value: unknown, apiKey: string): string {
-  const message = value instanceof Error ? value.message : String(value)
-  return message.replaceAll(apiKey, maskKey(apiKey)).replace(/api_key=[^&\s]+/gi, 'api_key=***')
+  return redactSecret(value, apiKey)
 }
 
 function unwrapItems(body: unknown): ApiItem[] {
@@ -51,7 +53,7 @@ function mapMetadata(items: ApiItem[], requestedNames: string[], descriptionFiel
   })
 }
 
-function requestJson(endpoint: string, apiKey: string, authMode: AuthMode, proxyUrl: string | undefined, requestCounter: { value: number }): Promise<ApiResponse> {
+function requestJson(endpoint: string, apiKey: string, authMode: AuthMode, proxyUrl: string | undefined, requestCounter: { value: number }): Promise<TransportResponse> {
   const url = new URL(`${API_BASE}${endpoint}`)
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (authMode === 'X-Api-Key header') headers['X-Api-Key'] = apiKey
@@ -59,23 +61,23 @@ function requestJson(endpoint: string, apiKey: string, authMode: AuthMode, proxy
   const agent = proxyUrl?.toLowerCase().startsWith('socks') ? new SocksProxyAgent(proxyUrl) : undefined
   requestCounter.value += 1
   return new Promise((resolve, reject) => {
-    const requestHandle = request(url, { method: 'GET', headers, agent, timeout: 30000 }, (response) => {
+    const handle = request(url, { method: 'GET', headers, agent, timeout: 30000 }, (response) => {
       const chunks: Buffer[] = []
       response.on('data', (chunk: Buffer) => chunks.push(chunk))
       response.on('end', () => {
         const text = Buffer.concat(chunks).toString('utf8')
-        let body: unknown = null
-        try { body = text === '' ? null : JSON.parse(text) } catch { reject(new Error(`接口 ${endpoint} 返回了非 JSON 内容。`)); return }
-        resolve({ status: response.statusCode ?? 0, body })
+        try {
+          resolve({ status: response.statusCode ?? 0, body: text === '' ? null : JSON.parse(text), headers: response.headers })
+        } catch { reject(new Error(`Endpoint ${endpoint} returned non-JSON content.`)) }
       })
     })
-    requestHandle.on('timeout', () => requestHandle.destroy(new Error(`接口 ${endpoint} 请求超时。`)))
-    requestHandle.on('error', reject)
-    requestHandle.end()
+    handle.on('timeout', () => handle.destroy(new Error(`Endpoint ${endpoint} timed out.`)))
+    handle.on('error', reject)
+    handle.end()
   })
 }
 
-async function requestWithAuthFallback(endpoint: string, apiKey: string, state: { authMode: AuthMode; proxyUrl?: string; requestCounter: { value: number } }): Promise<ApiResponse> {
+async function requestWithAuthFallback(endpoint: string, apiKey: string, state: { authMode: AuthMode; proxyUrl?: string; requestCounter: { value: number } }): Promise<TransportResponse> {
   const response = await requestJson(endpoint, apiKey, state.authMode, state.proxyUrl, state.requestCounter)
   if ((response.status === 401 || response.status === 403) && state.authMode === 'X-Api-Key header') {
     state.authMode = 'api_key query parameter'
@@ -84,155 +86,174 @@ async function requestWithAuthFallback(endpoint: string, apiKey: string, state: 
   return response
 }
 
-async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
-  const results: T[] = []
-  let nextIndex = 0
-  async function worker() {
-    while (nextIndex < tasks.length) {
-      const index = nextIndex++
-      results[index] = await tasks[index]()
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
-  return results
+function requestEntry(manifest: FetchManifest, key: string): ManifestRequest {
+  const entry = manifest.requests.find((item) => item.key === key)
+  if (!entry) throw new Error(`Manifest request is missing: ${key}`)
+  return entry
 }
 
-function writeReport(report: Record<string, unknown>) {
+function updateEntry(entry: ManifestRequest, response: TransportResponse, attempts: number, outputFile: string | null, apiKey: string) {
+  const items = unwrapItems(response.body)
+  entry.attempts = attempts
+  entry.httpStatus = response.status
+  entry.rowCount = items.length
+  entry.months = [...new Set(items.map((item) => valueFor(item, ['month'])).filter((value): value is string => value !== null))].sort()
+  if (response.status >= 200 && response.status < 300) {
+    entry.status = items.length === 0 && entry.kind === 'psd' ? 'empty' : 'success'
+    entry.success = true
+    entry.finalOutputFile = outputFile
+  } else {
+    entry.status = 'failed'
+    entry.error = safeMessage(`HTTP ${response.status}`, apiKey)
+  }
+}
+
+function writeRunReport(runDirectory: string, report: Record<string, unknown>) {
+  writeJsonAtomic(join(runDirectory, 'fetch_report.json'), report)
   mkdirSync(OUTPUT_DIRECTORY, { recursive: true })
-  writeFileSync(join(OUTPUT_DIRECTORY, 'usda_api_fetch_report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
-  const commodityMappings = report.commodityMappings as Mapping[]
-  const countryMappings = report.countryMappings as Mapping[]
-  const failures = report.failedRequests as RequestFailure[]
-  const emptyRequests = report.emptyDataRequests as DownloadResult[]
-  const yearsByCommodity = report.marketYearsByCommodity as Record<string, number[]>
+  writeJsonAtomic(join(OUTPUT_DIRECTORY, 'usda_api_fetch_report.json'), report)
+  const rateLimit = report.rateLimit as RateLimitEvidence
   const lines = [
-    '# USDA FAS PSD API 拉取报告', '',
-    `- 报告月份：${report.reportMonth}`,
-    `- 拉取时间：${report.fetchedAt}`,
-    `- API key：${report.apiKeyStatus}`,
-    `- 代理：${report.proxyUsed ? '已使用 SOCKS5 代理' : '未使用代理'}`,
-    `- 认证方式：${report.authMode}`,
-    `- API 请求数量：${report.apiRequestCount}`,
-    '', '## 商品映射', '', '| 研究商品 | API 名称 | Commodity Code |', '| --- | --- | --- |',
-    ...commodityMappings.map((item) => `| ${item.requested} | ${item.matchedName ?? '未匹配'} | ${item.code ?? '未匹配'} |`),
-    '', '## 国家映射', '', '| 研究国家 | API 名称 | Country Code |', '| --- | --- | --- |',
-    ...countryMappings.map((item) => `| ${item.requested} | ${item.matchedName ?? '未匹配'} | ${item.code ?? '未匹配'} |`),
-    '', '## 各商品拉取的市场年度', '',
-    ...Object.entries(yearsByCommodity).map(([commodity, years]) => `- ${commodity}: ${years.join(', ') || '无'}`),
-    '', `## 失败接口（${failures.length}）`, '',
-    ...(failures.length ? failures.map((item) => `- ${item.endpoint}: ${item.status ?? '无 HTTP 响应'}，${item.message}`) : ['无。']),
-    '', `## 空数据接口（${emptyRequests.length}）`, '',
-    ...(emptyRequests.length ? emptyRequests.map((item) => `- ${item.commodity} / ${item.country} / ${item.marketYear}`) : ['无。']),
+    '# USDA FAS PSD API fetch report', '',
+    `- Report month: ${report.reportMonth}`,
+    `- Run ID: ${report.runId}`,
+    `- Status: ${report.status}`,
+    `- API requests including retries: ${report.apiRequestCount}`,
+    `- Metadata success: ${report.successfulMetadataRequests}/${report.expectedMetadataRequests}`,
+    `- PSD success: ${report.successfulPsdRequests}/${report.expectedPsdRequests}`,
+    `- Failed requests: ${(report.failedRequests as RequestFailure[]).length}`,
+    `- Retries: ${rateLimit.retryCount}`,
+    `- First observed rate limit: ${rateLimit.firstLimit ?? 'not returned'}`,
+    `- Minimum remaining: ${rateLimit.minimumRemaining ?? 'not returned'}`,
+    `- First 429 remaining: ${rateLimit.first429Remaining ?? 'not returned'}`,
+    `- First 429 Retry-After: ${rateLimit.first429RetryAfter ?? 'not returned'}`,
+    `- Promoted: ${report.promoted}`,
   ]
+  writeFileSync(join(runDirectory, 'fetch_report.md'), `${lines.join('\n')}\n`, 'utf8')
   writeFileSync(join(OUTPUT_DIRECTORY, 'usda_api_fetch_report.md'), `${lines.join('\n')}\n`, 'utf8')
 }
 
 async function fetchUsdaPsdApi() {
   const apiKey = process.env.USDA_API_KEY
-  if (!apiKey) throw new Error('未设置 USDA_API_KEY 环境变量。')
+  if (!apiKey) throw new Error('USDA_API_KEY is not configured.')
   const config = readUsdaApiConfig()
+  const settings = readFetchSettings(process.env)
+  const reportMonth = process.env.USDA_FETCH_REPORT_MONTH ?? config.reportMonth
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(reportMonth)) throw new Error('USDA_FETCH_REPORT_MONTH must use YYYY-MM format.')
+  const startYear = process.env.USDA_FETCH_START_YEAR ? Number(process.env.USDA_FETCH_START_YEAR) : config.startYear
+  const endYear = process.env.USDA_FETCH_END_YEAR ? Number(process.env.USDA_FETCH_END_YEAR) : config.endYear
+  if (!Number.isInteger(startYear) || !Number.isInteger(endYear) || startYear > endYear) throw new Error('Smoke-test year range is invalid.')
+  const smokeCommodity = process.env.USDA_FETCH_COMMODITY
+  const smokeCountry = process.env.USDA_FETCH_COUNTRY
+  const includeWorld = process.env.USDA_FETCH_INCLUDE_WORLD !== 'false'
+  const scope: Record<string, readonly string[]> = smokeCommodity
+    ? { [smokeCommodity]: smokeCountry ? [smokeCountry] : (RESEARCH_SCOPE[smokeCommodity] ?? []) }
+    : RESEARCH_SCOPE
+  if (Object.keys(scope).length === 0 || Object.values(scope).some((countries) => countries.length === 0)) throw new Error('Fetch scope is empty or invalid.')
+  const promote = process.env.USDA_FETCH_PROMOTE !== 'false' && smokeCommodity === undefined && smokeCountry === undefined
+  const runId = createRunId()
+  const runDirectory = join(RAW_ROOT, '_runs', reportMonth, runId)
+  const metadataDirectory = join(runDirectory, 'metadata')
+  const psdDirectory = join(runDirectory, 'psd')
+  mkdirSync(runDirectory, { recursive: true })
+  mkdirSync(metadataDirectory, { recursive: false })
+  mkdirSync(psdDirectory, { recursive: false })
+  const commodityNames = Object.keys(scope)
+  const manifest = createPlannedManifest(reportMonth, runId, METADATA_ENDPOINTS, commodityNames, scope, startYear, endYear, includeWorld)
+  const manifestPath = join(runDirectory, 'manifest.json')
+  writeJsonAtomic(manifestPath, manifest)
+
   const proxyUrl = process.env.ALL_PROXY || process.env.all_proxy
   const state = { authMode: 'X-Api-Key header' as AuthMode, proxyUrl, requestCounter: { value: 0 } }
-  const rawRoot = join(process.cwd(), 'data', 'raw', 'usda_psd_api', config.reportMonth)
-  const metadataDirectory = join(rawRoot, 'metadata')
-  const psdDirectory = join(rawRoot, 'psd')
-  mkdirSync(metadataDirectory, { recursive: true })
-  mkdirSync(psdDirectory, { recursive: true })
-  console.log(`USDA API key 已启用：${maskKey(apiKey)}`)
-
-  const metadataEndpoints = ['/api/psd/commodities', '/api/psd/countries', '/api/psd/commodityAttributes', '/api/psd/unitsOfMeasure']
-  const metadata = new Map<string, ApiItem[]>()
+  const evidence = createRateLimitEvidence()
+  const pacer = new RequestPacer(settings.intervalMs, sleep)
   const failedRequests: RequestFailure[] = []
-  for (const endpoint of metadataEndpoints) {
+  const metadata = new Map<string, ApiItem[]>()
+  console.log(`USDA fetch run ${runId}: concurrency=${settings.concurrency}, intervalMs=${settings.intervalMs}, maxRetries=${settings.maxRetries}`)
+
+  for (const endpoint of METADATA_ENDPOINTS) {
+    const entry = requestEntry(manifest, `metadata:${endpoint.split('/').at(-1)}`)
     try {
-      const response = await requestWithAuthFallback(endpoint, apiKey, state)
-      if (response.status < 200 || response.status >= 300) {
-        failedRequests.push({ endpoint, status: response.status, message: '接口未返回成功状态。' })
-        continue
-      }
-      writeFileSync(join(metadataDirectory, `${endpoint.split('/').at(-1)}.json`), `${JSON.stringify(response.body, null, 2)}\n`, 'utf8')
-      metadata.set(endpoint, unwrapItems(response.body))
-    } catch (error: unknown) {
-      failedRequests.push({ endpoint, status: null, message: safeMessage(error, apiKey) })
+      const result = await requestWithRetry(() => requestWithAuthFallback(endpoint, apiKey, state), settings, evidence, { sleep, pacer })
+      const relative = entry.expectedOutputFile
+      updateEntry(entry, result.response, result.attempts, relative, apiKey)
+      if (entry.success) {
+        writeFileSync(join(runDirectory, relative), `${JSON.stringify(result.response.body, null, 2)}\n`, 'utf8')
+        metadata.set(endpoint, unwrapItems(result.response.body))
+      } else failedRequests.push({ endpoint, status: result.response.status, message: entry.error ?? 'Request failed.' })
+    } catch (error) {
+      entry.status = 'failed'; entry.error = safeMessage(error, apiKey)
+      failedRequests.push({ endpoint, status: null, message: entry.error })
     }
+    writeJsonAtomic(manifestPath, manifest)
   }
 
-  const commodityNames = Object.keys(RESEARCH_SCOPE)
-  const countryNames = [...new Set(Object.values(RESEARCH_SCOPE).flat())]
   const commodityMappings = mapMetadata(metadata.get('/api/psd/commodities') ?? [], commodityNames, ['commodityDescription', 'description', 'commodityName'], ['commodityCode', 'code'])
+  const countryNames = [...new Set(Object.values(scope).flat())]
   const countryMappings = mapMetadata(metadata.get('/api/psd/countries') ?? [], countryNames, ['countryName', 'description', 'name'], ['countryCode', 'code'])
-  const commodityByName = new Map(commodityMappings.filter((item): item is Mapping & { code: string } => item.code !== null).map((item) => [item.requested, item]))
-  const countryByName = new Map(countryMappings.filter((item): item is Mapping & { code: string } => item.code !== null).map((item) => [item.requested, item]))
-  const downloads: DownloadResult[] = []
-  const marketYearsByCommodity: Record<string, number[]> = Object.fromEntries(commodityNames.map((commodity) => [commodity, []]))
-  const tasks: Array<() => Promise<DownloadResult>> = []
-  for (const [commodity, countries] of Object.entries(RESEARCH_SCOPE)) {
-    const commodityCode = commodityByName.get(commodity)?.code
-    if (!commodityCode) continue
-    for (const country of countries) {
-      const countryCode = countryByName.get(country)?.code
-      if (!countryCode) continue
-      for (let year = config.startYear; year <= config.endYear; year += 1) {
-        tasks.push(async () => {
-          const endpoint = `/api/psd/commodity/${encodeURIComponent(commodityCode)}/country/${encodeURIComponent(countryCode)}/year/${year}`
-          try {
-            const response = await requestWithAuthFallback(endpoint, apiKey, state)
-            if (response.status < 200 || response.status >= 300) return { commodity, country, marketYear: year, status: 'failed', failure: { endpoint, status: response.status, message: '接口未返回成功状态。' } }
-            const items = unwrapItems(response.body)
-            writeFileSync(join(psdDirectory, `${commodityCode}_${countryCode}_${year}.json`), `${JSON.stringify(response.body, null, 2)}\n`, 'utf8')
-            return { commodity, country, marketYear: year, status: items.length === 0 ? 'empty' : 'downloaded' }
-          } catch (error: unknown) {
-            return { commodity, country, marketYear: year, status: 'failed', failure: { endpoint, status: null, message: safeMessage(error, apiKey) } }
-          }
-        })
-      }
-    }
-  }
-  for (const commodity of commodityNames) {
-    const commodityCode = commodityByName.get(commodity)?.code
-    if (!commodityCode) continue
-    for (let year = config.startYear; year <= config.endYear; year += 1) {
-      tasks.push(async () => {
-        const endpoint = `/api/psd/commodity/${encodeURIComponent(commodityCode)}/world/year/${year}`
-        try {
-          const response = await requestWithAuthFallback(endpoint, apiKey, state)
-          if (response.status < 200 || response.status >= 300) return { commodity, country: 'World', marketYear: year, status: 'failed', failure: { endpoint, status: response.status, message: '接口未返回成功状态。' } }
-          const items = unwrapItems(response.body)
-          writeFileSync(join(psdDirectory, `${commodityCode}_WORLD_${year}.json`), `${JSON.stringify(response.body, null, 2)}\n`, 'utf8')
-          return { commodity, country: 'World', marketYear: year, status: items.length === 0 ? 'empty' : 'downloaded' }
-        } catch (error: unknown) {
-          return { commodity, country: 'World', marketYear: year, status: 'failed', failure: { endpoint, status: null, message: safeMessage(error, apiKey) } }
-        }
-      })
-    }
-  }
-  downloads.push(...await runWithConcurrency(tasks, 4))
-  for (const item of downloads.filter((item) => item.status === 'downloaded' || item.status === 'empty')) marketYearsByCommodity[item.commodity].push(item.marketYear)
-  for (const item of downloads.filter((item) => item.status === 'failed' && item.failure)) failedRequests.push(item.failure!)
-  for (const commodity of Object.keys(marketYearsByCommodity)) marketYearsByCommodity[commodity] = [...new Set(marketYearsByCommodity[commodity])].sort((a, b) => a - b)
+  const commodityCodes = new Map(commodityMappings.filter((item): item is Mapping & { code: string } => item.code !== null).map((item) => [item.requested, item.code]))
+  const countryCodes = new Map(countryMappings.filter((item): item is Mapping & { code: string } => item.code !== null).map((item) => [item.requested, item.code]))
 
-  const report = {
-    reportMonth: config.reportMonth,
-    fetchedAt: new Date().toISOString(),
-    apiKeyStatus: `已使用（${maskKey(apiKey)}）`,
-    proxyUsed: Boolean(proxyUrl),
-    proxyProtocol: proxyUrl?.split(':')[0] ?? null,
-    authMode: state.authMode,
-    commodityMappings,
-    countryMappings,
-    marketYearsByCommodity,
-    failedRequests,
-    emptyDataRequests: downloads.filter((item) => item.status === 'empty'),
-    apiRequestCount: state.requestCounter.value,
-    rawDataDirectory: rawRoot,
+  for (const entry of manifest.requests.filter((item) => item.kind === 'psd')) {
+    const commodityCode = commodityCodes.get(entry.commodity ?? '')
+    const countryCode = entry.country === 'World' ? 'WORLD' : countryCodes.get(entry.country ?? '')
+    if (commodityCode && countryCode && entry.marketYear !== null) {
+      entry.endpoint = entry.country === 'World'
+        ? `/api/psd/commodity/${encodeURIComponent(commodityCode)}/world/year/${entry.marketYear}`
+        : `/api/psd/commodity/${encodeURIComponent(commodityCode)}/country/${encodeURIComponent(countryCode)}/year/${entry.marketYear}`
+    }
   }
-  writeReport(report)
-  console.log(`USDA API 拉取完成：${state.requestCounter.value} 个请求，失败 ${failedRequests.length} 个，空数据 ${report.emptyDataRequests.length} 个。`)
-  if (failedRequests.length > 0) process.exitCode = 1
+  writeJsonAtomic(manifestPath, manifest)
+
+  const tasks = manifest.requests.filter((item) => item.kind === 'psd').map((entry) => async () => {
+    if (entry.endpoint === null) {
+      entry.status = 'failed'; entry.error = 'Metadata mapping is unavailable.'
+      failedRequests.push({ endpoint: entry.key, status: null, message: entry.error })
+      writeJsonAtomic(manifestPath, manifest)
+      return
+    }
+    try {
+      const result = await requestWithRetry(() => requestWithAuthFallback(entry.endpoint!, apiKey, state), settings, evidence, { sleep, pacer })
+      updateEntry(entry, result.response, result.attempts, entry.expectedOutputFile, apiKey)
+      if (entry.success) writeFileSync(join(runDirectory, entry.expectedOutputFile), `${JSON.stringify(result.response.body, null, 2)}\n`, 'utf8')
+      else failedRequests.push({ endpoint: entry.endpoint, status: result.response.status, message: entry.error ?? 'Request failed.' })
+    } catch (error) {
+      entry.status = 'failed'; entry.error = safeMessage(error, apiKey)
+      failedRequests.push({ endpoint: entry.endpoint, status: null, message: entry.error })
+    }
+    writeJsonAtomic(manifestPath, manifest)
+  })
+  await runWithConcurrency(tasks, settings.concurrency)
+
+  manifest.completedAt = new Date().toISOString()
+  const preliminaryErrors = validateManifest(manifest, runDirectory)
+  manifest.status = failedRequests.length === 0 && preliminaryErrors.length === 0 ? 'success' : 'failed'
+  writeJsonAtomic(manifestPath, manifest)
+  const validationErrors = validateManifest(manifest, runDirectory)
+  const report = {
+    reportMonth, runId, runDirectory, fetchedAt: manifest.completedAt, status: manifest.status,
+    settings, proxyUsed: Boolean(proxyUrl), proxyProtocol: proxyUrl?.split(':')[0] ?? null,
+    authMode: state.authMode, apiRequestCount: state.requestCounter.value,
+    expectedMetadataRequests: manifest.expectedMetadataRequests, expectedPsdRequests: manifest.expectedPsdRequests,
+    successfulMetadataRequests: manifest.requests.filter((item) => item.kind === 'metadata' && item.success).length,
+    successfulPsdRequests: manifest.requests.filter((item) => item.kind === 'psd' && item.success).length,
+    emptyDataRequests: manifest.requests.filter((item) => item.kind === 'psd' && item.status === 'empty').map((item) => item.key),
+    failedRequests, validationErrors, commodityMappings, countryMappings, rateLimit: evidence,
+    apiKeyStatus: 'configured (redacted)', promoted: false, officialRawDirectory: join(RAW_ROOT, reportMonth), legacyPath: null as string | null,
+  }
+  writeRunReport(runDirectory, report)
+  if (manifest.status === 'success' && promote) {
+    const promoted = promoteRunAtomically(runDirectory, join(RAW_ROOT, reportMonth), join(RAW_ROOT, '_legacy'))
+    report.promoted = true
+    report.legacyPath = promoted.legacyPath
+    report.runDirectory = join(RAW_ROOT, reportMonth)
+    writeRunReport(report.runDirectory, report)
+  }
+  console.log(`USDA fetch ${manifest.status}: PSD ${report.successfulPsdRequests}/${manifest.expectedPsdRequests}, failures ${failedRequests.length}, retries ${evidence.retryCount}, promoted ${report.promoted}.`)
+  if (manifest.status !== 'success') process.exitCode = 1
 }
 
 fetchUsdaPsdApi().catch((error: unknown) => {
-  const apiKey = process.env.USDA_API_KEY ?? ''
-  console.error(safeMessage(error, apiKey))
+  console.error(safeMessage(error, process.env.USDA_API_KEY ?? ''))
   process.exitCode = 1
 })

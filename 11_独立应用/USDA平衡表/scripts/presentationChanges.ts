@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { buildMonthlyRevisionLookup, buildPalmG2MonthlyRevisionLookup, buildSoybeanG3MonthlyRevisionLookup } from '../src/utils/monthlyRevision'
 import { normalizeSeries, safeDifference } from '../src/utils/number'
 import type { Catalog, MatrixData, MatrixReference } from '../src/types/dashboard'
+import { sourceCompatibility, type SourceBasis } from '../src/utils/sourceCompatibility'
 
 type PresentationChangeRow = { name: string; latestYoY: number | null; monthlyRevision: number | null }
 type PresentationChangeMatrix = { commodityCode: string; commodity: string; countryCode: string; country: string; latestMarketYear: number | null; previousMarketYear: number | null; rows: PresentationChangeRow[] }
@@ -33,6 +34,8 @@ export function writePresentationChanges(dataDirectory: string) {
   const snapshotDirectory = join(dataDirectory, 'snapshots', 'usda_psd')
   const [snapshotPrevious, snapshotCurrent] = snapshotMonths(snapshotDirectory).slice(-2)
   const matrices: PresentationChangeMatrix[] = []
+  const provenancePath = join(process.cwd(), 'configs', 'usda_source_provenance.json')
+  const provenance = existsSync(provenancePath) ? JSON.parse(readFileSync(provenancePath, 'utf8')) as { legacyGlobalSourceBasis?: Record<string, SourceBasis> } : {}
   const catalog = readMatrix(join(dataDirectory, 'index.json')) as unknown as Catalog | null
   if (!catalog || !Array.isArray(catalog.matrices)) throw new Error('Unable to read index.json while preparing presentation changes.')
   const currentMalaysia = readMatrix(join(matrixDirectory, '4243000_MY.json'))
@@ -46,7 +49,9 @@ export function writePresentationChanges(dataDirectory: string) {
     const latestMarketYear = current.years.at(-1) ?? null
     const previousMarketYear = current.years.at(-2) ?? null
     const previous = snapshotPrevious ? readMatrix(join(snapshotDirectory, snapshotPrevious, 'matrix', file)) : null
-    const monthlyLookup = current.commodity === 'Oil, Palm' && current.countryCode === 'G2'
+    const compatible = previous ? sourceCompatibility(current, previous, snapshotCurrent ? provenance.legacyGlobalSourceBasis?.[snapshotCurrent] ?? null : null, snapshotPrevious ? provenance.legacyGlobalSourceBasis?.[snapshotPrevious] ?? null : null).comparable : false
+    const monthlyLookup = !compatible ? {}
+      : current.commodity === 'Oil, Palm' && current.countryCode === 'G2'
       ? buildPalmG2MonthlyRevisionLookup(current, currentMalaysia, previousMalaysia, currentIndonesia, previousIndonesia)
       : current.countryCode === 'G3' && ['Oilseed, Soybean', 'Oil, Soybean'].includes(current.commodity)
         ? buildSoybeanG3MonthlyRevisionLookup(

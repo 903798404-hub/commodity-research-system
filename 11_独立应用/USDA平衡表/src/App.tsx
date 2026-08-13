@@ -12,7 +12,9 @@ import { buildMetricCsv, downloadCsv } from './utils/csv'
 import { filterVisibleMetrics } from './utils/metrics'
 import { buildMonthlyRevisionLookup, buildPalmG2MonthlyRevisionLookup, type MonthlyRevisionLookup } from './utils/monthlyRevision'
 import { normalizeSeries } from './utils/number'
+import { sourceCompatibility, type SourceBasis } from './utils/sourceCompatibility'
 import { appPath } from './utils/appPath'
+import provenance from '../configs/usda_source_provenance.json'
 
 function uniqueByCode<T extends { commodityCode?: string; countryCode?: string }>(items: T[], key: 'commodityCode' | 'countryCode'): T[] {
   return [...new Map(items.map((item) => [item[key] ?? '', item])).values()]
@@ -105,7 +107,11 @@ function App() {
       }).catch(() => setMonthlyRevisions(null))
     } else {
       fetchMatrixJson(`data/snapshots/usda_psd/${reportVersion.previousReportMonth}/${matrix.file}`, controller.signal)
-        .then((previous) => setMonthlyRevisions(buildMonthlyRevisionLookup(data, previous)))
+        .then((previous) => {
+          const previousLegacyBasis = (provenance.legacyGlobalSourceBasis as Record<string, SourceBasis>)[reportVersion.previousReportMonth] ?? null
+          const compatible = previous ? sourceCompatibility(data, previous, null, previousLegacyBasis).comparable : false
+          setMonthlyRevisions(compatible ? buildMonthlyRevisionLookup(data, previous) : null)
+        })
         .catch(() => setMonthlyRevisions(null))
     }
     return () => controller.abort()

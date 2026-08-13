@@ -5,6 +5,8 @@ import { G3_COMMODITIES, G3_COUNTRIES, isResearchCombination, RESEARCH_SCOPE, re
 import { readReportVersion } from './reportVersion'
 import { readUsdaApiConfig } from './usdaApiConfig'
 import { writePresentationChanges } from './presentationChanges'
+import { formatMissingResearchMatrices, isWorldApiPsdFile, reconcileResearchMatrices, validateApiBatchManifest, type ReconciliationResult } from './buildDataSourcePolicy'
+import { synchronizeCurrentSnapshotRatioRows } from './snapshotPolicy'
 
 type Category = 'Oilseeds' | 'Oils' | 'Meals'
 
@@ -29,6 +31,7 @@ type MatrixData = {
   country: string
   years: number[]
   rows: DataRow[]
+  sourceBasis?: 'usda_psd_world' | 'legacy_csv_synthetic_global' | 'synthetic_sum'
 }
 
 type IndexData = {
@@ -199,6 +202,16 @@ function findSingleSourceFile(reportMonth: string): string {
   return join(sourceDirectory, files[0])
 }
 
+function findOptionalSourceFile(reportMonth: string): string | null {
+  const versionedDirectory = join(VERSIONED_RAW_DIRECTORY, reportMonth)
+  const sourceDirectory = existsSync(versionedDirectory) ? versionedDirectory : RAW_DIRECTORY
+  if (!existsSync(sourceDirectory)) return null
+  const files = readdirSync(sourceDirectory).filter((file) => file.toLowerCase().endsWith('.csv'))
+  if (files.length === 0) return null
+  if (files.length > 1) throw new Error(`raw folder contains multiple CSV files: ${files.join(', ')}`)
+  return join(sourceDirectory, files[0])
+}
+
 function saveProcessedSnapshot(reportMonth: string) {
   const snapshotRoot = join(SNAPSHOT_DIRECTORY, reportMonth)
   const snapshotMatrixDirectory = join(snapshotRoot, 'matrix')
@@ -261,14 +274,6 @@ type MatrixCollection = { matrices: Map<string, MatrixStore>; unknownCommodities
 
 function createMatrixCollection(): MatrixCollection {
   return { matrices: new Map<string, MatrixStore>(), unknownCommodities: new Set<string>(), missingKeyFields: 0 }
-}
-
-function supplementMissingResearchMatrices(primary: Map<string, MatrixStore>, fallback: Map<string, MatrixStore>) {
-  for (const store of fallback.values()) {
-    if (!isResearchCombination(store.commodity, store.country)) continue
-    const key = matrixKey(store.commodityCode, store.countryCode)
-    if (!primary.has(key)) primary.set(key, store)
-  }
 }
 
 function ingestRecord(record: RawRecord, collection: MatrixCollection) {
@@ -364,9 +369,9 @@ function readApiMatrices(directory: string): MatrixCollection {
   const unitNames = apiMetadataLookup(join(metadataDirectory, 'unitsOfMeasure.json'), ['unitId'], ['unitDescription'])
   for (const file of readdirSync(directory).filter((name) => name.toLowerCase().endsWith('.json'))) {
     const parts = file.replace(/\.json$/i, '').split('_')
-    const isWorld = parts[1] === 'WORLD'
+    const isWorld = isWorldApiPsdFile(file)
     const fallbackCommodityCode = parts[0]
-    const fallbackCountryCode = isWorld ? 'WORLD' : parts[1]
+    const fallbackCountryCode = isWorld ? '00' : parts[1]
     const fallbackYear = parts.at(-1)
     const fallbackCountry = isWorld ? 'World' : undefined
     const parsed = JSON.parse(readFileSync(join(directory, file), 'utf8')) as unknown
@@ -616,7 +621,7 @@ function writeGlobalAggregationReport(audits: GlobalAggregationAudit[]) {
   writeFileSync(GLOBAL_AGGREGATION_REPORT_MARKDOWN_FILE, `${lines.join('\n')}\n`, 'utf8')
 }
 
-function writeReport(sourceFile: string, reportMonth: string, index: IndexData, matrixCount: number, defaultCreated: boolean, unknownCommodities: Set<string>, missingKeyFields: number, globalSources: Map<string, GlobalSourceType>, g2Store: MatrixStore | null, g2Audit: G2AggregationAudit, g2Sources: MatrixStore[], g3Stores: Map<string, MatrixStore>, g3Audits: G3AggregationAudit[]) {
+function writeReport(sourceFile: string, reportMonth: string, index: IndexData, matrixCount: number, defaultCreated: boolean, unknownCommodities: Set<string>, missingKeyFields: number, globalSources: Map<string, GlobalSourceType>, g2Store: MatrixStore | null, g2Audit: G2AggregationAudit, g2Sources: MatrixStore[], g3Stores: Map<string, MatrixStore>, g3Audits: G3AggregationAudit[], sourceCoverage: ReconciliationResult | null) {
   mkdirSync(join(process.cwd(), 'output'), { recursive: true })
   const lines = [
     '# 数据构建报告',
@@ -665,6 +670,13 @@ function writeReport(sourceFile: string, reportMonth: string, index: IndexData, 
     '',
     '说明：matrix 文件按 Commodity_Code + Country_Code 拆分；数量单位为 (1000 MT) 或 1000 MT 时已转换为万吨。',
   ]
+  if (sourceCoverage) lines.splice(2, 0,
+    `- Research matrix expected: ${sourceCoverage.expectedCount}`,
+    `- API matrices: ${sourceCoverage.apiMatrixCount}`,
+    `- CSV supplements: ${sourceCoverage.csvSupplementCount}`,
+    `- Final research matrices: ${sourceCoverage.finalMatrixCount}`,
+    `- Missing research matrices: ${sourceCoverage.missing.length}`,
+  )
   writeFileSync(REPORT_FILE, `${lines.join('\n')}\n`, 'utf8')
 }
 
@@ -715,17 +727,24 @@ async function buildData() {
   const reportVersion = readReportVersion()
   const apiConfig = readUsdaApiConfig()
   const apiDataDirectory = join(API_RAW_DIRECTORY, apiConfig.reportMonth, 'psd')
+  const apiMonthDirectory = join(API_RAW_DIRECTORY, apiConfig.reportMonth)
   const useApiSource = apiConfig.useApi && existsSync(apiDataDirectory) && readdirSync(apiDataDirectory).some((file) => file.toLowerCase().endsWith('.json'))
   const sourceFile = useApiSource ? join(apiDataDirectory, 'API_PSD_JSON') : findSingleSourceFile(reportVersion.currentReportMonth)
+  if (useApiSource) {
+    const manifestErrors = validateApiBatchManifest(apiMonthDirectory, apiConfig.reportMonth)
+    if (manifestErrors.length > 0) throw new Error(`API batch manifest validation failed:\n${manifestErrors.map((error) => `- ${error}`).join('\n')}`)
+  }
   const collection = useApiSource ? readApiMatrices(apiDataDirectory) : await readMatrices(sourceFile)
   const { matrices, unknownCommodities, missingKeyFields } = collection
+  let sourceCoverage: ReconciliationResult | null = null
   if (useApiSource) {
-    const csvFallback = await readMatrices(findSingleSourceFile(reportVersion.currentReportMonth))
-    supplementMissingResearchMatrices(matrices, csvFallback.matrices)
+    sourceCoverage = await reconcileResearchMatrices(matrices, async () => {
+      const csvPath = findOptionalSourceFile(reportVersion.currentReportMonth)
+      return csvPath ? (await readMatrices(csvPath)).matrices : null
+    })
+    if (sourceCoverage.missing.length > 0) throw new Error(formatMissingResearchMatrices(sourceCoverage.missing))
   }
   const activeReportMonth = useApiSource ? apiConfig.reportMonth : reportVersion.currentReportMonth
-  rmSync(MATRIX_DIRECTORY, { recursive: true, force: true })
-  mkdirSync(MATRIX_DIRECTORY, { recursive: true })
 
   const commodityIndex = new Map<string, IndexData['commodities'][number]>()
   const countryIndex = new Map<string, IndexData['countries'][number]>()
@@ -775,13 +794,13 @@ async function buildData() {
     }
   }
 
-  let generatedMatrixCount = 0
+  const preparedMatrices: Array<{ matrix: MatrixData; file: string }> = []
   for (const store of renderStores.values()) {
     const matrix = buildMatrix(store, renderStores)
     if (matrix.years.length === 0) continue
     const file = `matrix/${safeFileName(store.commodityCode, store.countryCode)}`
-    writeFileSync(join(DATA_DIRECTORY, file), `${JSON.stringify(matrix, null, 2)}\n`, 'utf8')
-    generatedMatrixCount += 1
+    if (store.country === 'Global') matrix.sourceBasis = globalSources.get(store.commodity) === 'USDA World' ? 'usda_psd_world' : 'synthetic_sum'
+    preparedMatrices.push({ matrix, file })
     matrixIndex.push({ category: matrix.category, commodityCode: matrix.commodityCode, commodity: matrix.commodity, countryCode: matrix.countryCode, country: matrix.country, file })
     commodityIndex.set(store.commodityCode, {
       commodityCode: store.commodityCode,
@@ -792,6 +811,23 @@ async function buildData() {
     countryIndex.set(store.countryCode, { countryCode: store.countryCode, countryName: store.country, displayName: countryDisplayName(store.countryCode, store.country) })
     if (matrix.commodity === 'Oil, Soybean' && matrix.country === 'United States') defaultMatrix = matrix
   }
+
+  const matrixValidationErrors = preparedMatrices.flatMap(({ matrix, file }) => {
+    const errors: string[] = []
+    if (new Set(matrix.rows.map((row) => row.name)).size !== matrix.rows.length) errors.push(`${file}: duplicate metric rows`)
+    for (const row of matrix.rows) {
+      if (row.values.length !== matrix.years.length) errors.push(`${file}: ${row.name} values/years length mismatch`)
+      if (row.values.some((value) => value !== null && !Number.isFinite(value))) errors.push(`${file}: ${row.name} contains NaN/Infinity`)
+    }
+    return errors
+  })
+  if (!defaultMatrix) matrixValidationErrors.push('missing default matrix Oil, Soybean | United States')
+  if (matrixValidationErrors.length > 0) throw new Error(`Pre-publish data quality validation failed:\n${matrixValidationErrors.map((error) => `- ${error}`).join('\n')}`)
+
+  rmSync(MATRIX_DIRECTORY, { recursive: true, force: true })
+  mkdirSync(MATRIX_DIRECTORY, { recursive: true })
+  for (const { matrix, file } of preparedMatrices) writeFileSync(join(DATA_DIRECTORY, file), `${JSON.stringify(matrix, null, 2)}\n`, 'utf8')
+  const generatedMatrixCount = preparedMatrices.length
 
   const index: IndexData = {
     categories: CATEGORIES,
@@ -809,14 +845,14 @@ async function buildData() {
     writeFileSync(join(DATA_DIRECTORY, 'soybean_oil_US.json'), `${JSON.stringify(legacyMatrix, null, 2)}\n`, 'utf8')
   }
   saveProcessedSnapshot(activeReportMonth)
+  synchronizeCurrentSnapshotRatioRows(join(SNAPSHOT_DIRECTORY, activeReportMonth))
   publishSnapshotForFrontend(activeReportMonth)
   publishSnapshotForFrontend(reportVersion.previousReportMonth)
-  synchronizeSnapshotRatioRows(SNAPSHOT_DIRECTORY)
-  synchronizeSnapshotRatioRows(PUBLIC_SNAPSHOT_DIRECTORY)
   writePresentationChanges(DATA_DIRECTORY)
   writeFileSync(join(DATA_DIRECTORY, 'report_version.json'), `${JSON.stringify({ currentReportMonth: activeReportMonth, previousReportMonth: reportVersion.previousReportMonth }, null, 2)}\n`, 'utf8')
-  writeReport(sourceFile, activeReportMonth, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields, globalSources, palmG2, palmG2Audit, palmG2Sources, g3Stores, g3Audits)
+  writeReport(sourceFile, activeReportMonth, index, generatedMatrixCount, defaultMatrix !== null, unknownCommodities, missingKeyFields, globalSources, palmG2, palmG2Audit, palmG2Sources, g3Stores, g3Audits, sourceCoverage)
   writeGlobalAggregationReport(globalAudits)
+  if (sourceCoverage) console.log(`Research matrix coverage: expected=${sourceCoverage.expectedCount}, api=${sourceCoverage.apiMatrixCount}, csvSupplement=${sourceCoverage.csvSupplementCount}, final=${sourceCoverage.finalMatrixCount}, missing=${sourceCoverage.missing.length}`)
   console.log(`已生成 ${generatedMatrixCount} 个 matrix JSON、${index.commodities.length} 个商品和 ${index.countries.length} 个国家。`)
 }
 

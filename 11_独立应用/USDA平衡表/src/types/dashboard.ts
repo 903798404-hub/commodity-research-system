@@ -1,4 +1,5 @@
 import type { ChartMode } from '../utils/chart'
+import type { SourceBasis } from '../utils/sourceCompatibility'
 
 export type Category = 'Oilseeds' | 'Oils' | 'Meals'
 export type BalanceRow = { name: string; values: unknown }
@@ -10,6 +11,7 @@ export type MatrixData = {
   country: string
   years: number[]
   rows: BalanceRow[]
+  sourceBasis?: SourceBasis
 }
 export type Commodity = { commodityCode: string; commodityDescription: string; category: Category; displayName: string }
 export type Country = { countryCode: string; countryName: string; displayName?: string }
