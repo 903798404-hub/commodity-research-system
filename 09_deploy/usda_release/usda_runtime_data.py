@@ -27,6 +27,10 @@ RELEASE_ID_RE = re.compile(r"^usda-\d{4}-(?:0[1-9]|1[0-2])-[0-9a-f]{16}$")
 MONTH_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+EXTRACTION_METHOD_RE = re.compile(r"^[a-z][a-z0-9_-]{2,63}$")
+API_SOURCE_TYPE = "usda_psd_api"
+SEED_SOURCE_TYPE = "production_image_migration_seed"
 REQUIRED_ROOT_FILES = frozenset({"index.json", "report_version.json", "presentation_changes.json"})
 
 
@@ -181,6 +185,48 @@ def _validate_finite(value: Any, label: str = "JSON") -> None:
             _validate_finite(child, label)
 
 
+def validate_source_identity(source_type: str, identity: Any) -> dict[str, Any]:
+    if not isinstance(identity, dict):
+        raise RuntimeDataError("source_batch_identity must be an object")
+    if source_type == API_SOURCE_TYPE:
+        if set(identity) != {"fetch_run_id", "source_manifest_sha256"}:
+            raise RuntimeDataError("USDA API source identity is invalid or mixed with another source type")
+        if not identity["fetch_run_id"] or not isinstance(identity["fetch_run_id"], str):
+            raise RuntimeDataError("USDA API fetch_run_id is missing")
+        if not SHA256_RE.fullmatch(str(identity["source_manifest_sha256"])):
+            raise RuntimeDataError("USDA API source manifest SHA-256 is invalid")
+    elif source_type == SEED_SOURCE_TYPE:
+        required = {"source_image_id", "source_oci_revision", "source_git_sha", "source_git_tree", "extraction_identity"}
+        if set(identity) != required:
+            raise RuntimeDataError("production image seed source identity is incomplete or mixed")
+        if not IMAGE_ID_RE.fullmatch(str(identity["source_image_id"])):
+            raise RuntimeDataError("source_image_id must be a complete sha256 image digest")
+        for field in ("source_oci_revision", "source_git_sha", "source_git_tree"):
+            if not SHA1_RE.fullmatch(str(identity[field])):
+                raise RuntimeDataError(f"{field} must be a complete lowercase Git SHA")
+        extraction = identity["extraction_identity"]
+        extraction_keys = {"extraction_method", "extracted_data_tree_sha256", "extracted_file_count"}
+        if not isinstance(extraction, dict) or set(extraction) != extraction_keys:
+            raise RuntimeDataError("production image seed extraction identity is incomplete")
+        if not EXTRACTION_METHOD_RE.fullmatch(str(extraction["extraction_method"])):
+            raise RuntimeDataError("extraction_method is invalid")
+        if not SHA256_RE.fullmatch(str(extraction["extracted_data_tree_sha256"])):
+            raise RuntimeDataError("extracted_data_tree_sha256 is invalid")
+        if type(extraction["extracted_file_count"]) is not int or extraction["extracted_file_count"] <= 0:
+            raise RuntimeDataError("extracted_file_count must be a positive integer")
+    else:
+        raise RuntimeDataError(f"unknown source_type: {source_type}")
+    return identity
+
+
+def extracted_data_identity(source_data: Path) -> dict[str, Any]:
+    records = file_records(source_data)
+    return {
+        "extracted_data_tree_sha256": bundle_sha256(records),
+        "extracted_file_count": len(records),
+    }
+
+
 def build_runtime_release(
     *,
     source_data: Path,
@@ -191,10 +237,59 @@ def build_runtime_release(
     source_manifest_sha256: str,
     created_at: str | None = None,
 ) -> Path:
+    source_identity = validate_source_identity(API_SOURCE_TYPE, {
+        "fetch_run_id": fetch_run_id,
+        "source_manifest_sha256": source_manifest_sha256,
+    })
+    return _build_runtime_release(
+        source_data=source_data,
+        output_parent=output_parent,
+        builder_git_sha=builder_git_sha,
+        builder_tree_sha=builder_tree_sha,
+        source_type=API_SOURCE_TYPE,
+        source_batch_identity=source_identity,
+        created_at=created_at,
+    )
+
+
+def build_runtime_seed_release(
+    *,
+    source_data: Path,
+    output_parent: Path,
+    builder_git_sha: str,
+    builder_tree_sha: str,
+    source_batch_identity: Mapping[str, Any],
+    created_at: str | None = None,
+) -> Path:
+    identity = validate_source_identity(SEED_SOURCE_TYPE, dict(source_batch_identity))
+    actual = extracted_data_identity(source_data)
+    declared = identity["extraction_identity"]
+    if declared["extracted_data_tree_sha256"] != actual["extracted_data_tree_sha256"] or declared["extracted_file_count"] != actual["extracted_file_count"]:
+        raise RuntimeDataError("production image seed extraction identity does not match source data")
+    return _build_runtime_release(
+        source_data=source_data,
+        output_parent=output_parent,
+        builder_git_sha=builder_git_sha,
+        builder_tree_sha=builder_tree_sha,
+        source_type=SEED_SOURCE_TYPE,
+        source_batch_identity=identity,
+        created_at=created_at,
+    )
+
+
+def _build_runtime_release(
+    *,
+    source_data: Path,
+    output_parent: Path,
+    builder_git_sha: str,
+    builder_tree_sha: str,
+    source_type: str,
+    source_batch_identity: Mapping[str, Any],
+    created_at: str | None = None,
+) -> Path:
     if not SHA1_RE.fullmatch(builder_git_sha) or not SHA1_RE.fullmatch(builder_tree_sha):
         raise RuntimeDataError("builder Git commit and tree must be complete lowercase SHA-1 values")
-    if not fetch_run_id or not SHA256_RE.fullmatch(source_manifest_sha256):
-        raise RuntimeDataError("source batch identity is incomplete")
+    validate_source_identity(source_type, dict(source_batch_identity))
     output_parent.mkdir(parents=True, exist_ok=True)
     for name in REQUIRED_ROOT_FILES:
         if not (source_data / name).is_file():
@@ -241,8 +336,8 @@ def build_runtime_release(
             "builder_tree_sha": builder_tree_sha,
             "data_schema_version": DATA_SCHEMA_VERSION,
             "minimum_app_contract_version": MINIMUM_APP_CONTRACT_VERSION,
-            "source_type": "usda_psd_api",
-            "source_batch_identity": {"fetch_run_id": fetch_run_id, "source_manifest_sha256": source_manifest_sha256},
+            "source_type": source_type,
+            "source_batch_identity": source_batch_identity,
             "file_count": len(records),
             "matrix_count": len(matrix_paths),
             "snapshot_months": [previous],
@@ -284,6 +379,7 @@ def validate_runtime_release(
     }
     if set(manifest) != required or manifest["schema_version"] != MANIFEST_SCHEMA_VERSION:
         raise RuntimeDataError("release manifest schema is invalid")
+    validate_source_identity(str(manifest["source_type"]), manifest["source_batch_identity"])
     release_id = validate_release_id(str(manifest["release_id"]))
     if require_directory_identity and release.name != release_id:
         raise RuntimeDataError("release directory does not match release_id")
@@ -559,6 +655,12 @@ def main(argv: list[str] | None = None) -> int:
     package.add_argument("--builder-git-sha", required=True)
     package.add_argument("--builder-tree-sha", required=True)
     package.add_argument("--source-fetch-manifest", type=Path, required=True)
+    seed = sub.add_parser("package-seed")
+    seed.add_argument("--source-data", type=Path, required=True)
+    seed.add_argument("--output-parent", type=Path, required=True)
+    seed.add_argument("--builder-git-sha", required=True)
+    seed.add_argument("--builder-tree-sha", required=True)
+    seed.add_argument("--source-identity", type=Path, required=True)
     validate = sub.add_parser("validate")
     validate.add_argument("--release", type=Path, required=True)
     validate.add_argument("--app-contract", type=Path, required=True)
@@ -589,6 +691,10 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(requests, list) or len(requests) != 472 or any(item.get("status") != "success" or item.get("success") is not True for item in requests):
                 raise RuntimeDataError("source fetch manifest does not prove 472 successful requests")
             result = build_runtime_release(source_data=args.source_data, output_parent=args.output_parent, builder_git_sha=args.builder_git_sha, builder_tree_sha=args.builder_tree_sha, fetch_run_id=str(source_batch.get("runId", "")), source_manifest_sha256=sha256_file(args.source_fetch_manifest))
+            manifest = strict_json(result / "release_manifest.json")
+            print(json.dumps({"release": str(result), "manifest_sha256": sha256_file(result / "release_manifest.json"), "current_pointer_candidate": current_pointer(manifest)}, sort_keys=True))
+        elif args.command == "package-seed":
+            result = build_runtime_seed_release(source_data=args.source_data, output_parent=args.output_parent, builder_git_sha=args.builder_git_sha, builder_tree_sha=args.builder_tree_sha, source_batch_identity=strict_json(args.source_identity))
             manifest = strict_json(result / "release_manifest.json")
             print(json.dumps({"release": str(result), "manifest_sha256": sha256_file(result / "release_manifest.json"), "current_pointer_candidate": current_pointer(manifest)}, sort_keys=True))
         elif args.command == "validate":

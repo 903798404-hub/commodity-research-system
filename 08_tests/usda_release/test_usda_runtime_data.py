@@ -57,6 +57,36 @@ def package(root: Path, source: Path | None = None) -> Path:
     )
 
 
+def seed_identity(source: Path, **overrides: object) -> dict[str, object]:
+    extracted = runtime.extracted_data_identity(source)
+    identity: dict[str, object] = {
+        "source_image_id": "sha256:" + "1" * 64,
+        "source_oci_revision": "2" * 40,
+        "source_git_sha": "3" * 40,
+        "source_git_tree": "4" * 40,
+        "extraction_identity": {
+            "extraction_method": "docker_cp_exact_image",
+            **extracted,
+        },
+    }
+    identity.update(overrides)
+    return identity
+
+
+def seed_package(root: Path, source: Path | None = None, identity: dict[str, object] | None = None) -> Path:
+    data = source or source_data(root)
+    output = root / "seed-packages"
+    output.mkdir(parents=True)
+    return runtime.build_runtime_seed_release(
+        source_data=data,
+        output_parent=output,
+        builder_git_sha="a" * 40,
+        builder_tree_sha="b" * 40,
+        source_batch_identity=identity or seed_identity(data),
+        created_at="2026-08-13T00:00:00Z",
+    )
+
+
 def runtime_root(root: Path) -> Path:
     result = root / "runtime"
     for name in ("incoming", "releases", "failed", "evidence"):
@@ -93,6 +123,124 @@ def test_manifest_identity_is_stable_minimal_and_seed_uses_exact_input_bytes(tmp
     assert runtime.compare_json_semantics(first / "data", semantic_copy)["status"] == "equivalent"
     write_json(semantic_copy / "matrix" / "2222000_US.json", {"changed": True})
     assert runtime.compare_json_semantics(first / "data", semantic_copy)["changed"] == ["matrix/2222000_US.json"]
+
+
+def test_seed_package_validates_without_fetch_identity_and_preserves_content_address(tmp_path: Path) -> None:
+    source = source_data(tmp_path / "source")
+    api = package(tmp_path / "api", source)
+    first = seed_package(tmp_path / "seed-a", source)
+    alternate = seed_identity(source, source_image_id="sha256:" + "5" * 64, source_git_sha="6" * 40)
+    second = seed_package(tmp_path / "seed-b", source, alternate)
+    api_manifest = runtime.validate_runtime_release(api, app_contract_version=1, supported_data_schema_version=1)
+    seed_manifest = runtime.validate_runtime_release(first, app_contract_version=1, supported_data_schema_version=1)
+    second_manifest = runtime.validate_runtime_release(second, app_contract_version=1, supported_data_schema_version=1)
+    assert seed_manifest["source_type"] == runtime.SEED_SOURCE_TYPE
+    assert set(seed_manifest["source_batch_identity"]) == {
+        "source_image_id", "source_oci_revision", "source_git_sha", "source_git_tree", "extraction_identity"
+    }
+    assert "fetch_run_id" not in json.dumps(seed_manifest)
+    assert api_manifest["bundle_sha256"] == seed_manifest["bundle_sha256"] == second_manifest["bundle_sha256"]
+    assert api.name == first.name == second.name
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("source_image_id", None, "incomplete"),
+        ("source_image_id", "usda:latest", "complete sha256"),
+        ("source_oci_revision", None, "incomplete"),
+        ("source_git_sha", None, "incomplete"),
+        ("source_git_tree", None, "incomplete"),
+    ],
+)
+def test_seed_identity_requires_complete_exact_provenance(tmp_path: Path, field: str, value: object, message: str) -> None:
+    source = source_data(tmp_path)
+    identity = seed_identity(source)
+    if value is None:
+        identity.pop(field)
+    else:
+        identity[field] = value
+    with pytest.raises(runtime.RuntimeDataError, match=message):
+        seed_package(tmp_path, source, identity)
+
+
+def test_seed_rejects_incomplete_extraction_mismatch_unknown_and_mixed_source_identity(tmp_path: Path) -> None:
+    source = source_data(tmp_path / "source")
+    incomplete = seed_identity(source)
+    incomplete["extraction_identity"] = {"extraction_method": "docker_cp_exact_image"}
+    with pytest.raises(runtime.RuntimeDataError, match="extraction identity is incomplete"):
+        seed_package(tmp_path / "incomplete", source, incomplete)
+    mismatch = seed_identity(source)
+    mismatch["extraction_identity"]["extracted_file_count"] += 1  # type: ignore[index,operator]
+    with pytest.raises(runtime.RuntimeDataError, match="does not match source data"):
+        seed_package(tmp_path / "mismatch", source, mismatch)
+    mixed = seed_identity(source)
+    mixed["fetch_run_id"] = "fake"
+    with pytest.raises(runtime.RuntimeDataError, match="incomplete or mixed"):
+        seed_package(tmp_path / "mixed", source, mixed)
+    with pytest.raises(runtime.RuntimeDataError, match="unknown source_type"):
+        runtime.validate_source_identity("unknown", {})
+
+
+def test_validator_rejects_api_seed_provenance_mix_and_seed_manifest_secret(tmp_path: Path) -> None:
+    release = seed_package(tmp_path)
+    manifest_path = release / "release_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "api_key" not in json.dumps(manifest).lower()
+    manifest["source_batch_identity"]["fetch_run_id"] = "fake"
+    write_json(manifest_path, manifest)
+    with pytest.raises(runtime.RuntimeDataError, match="incomplete or mixed"):
+        runtime.validate_runtime_release(release, app_contract_version=1, supported_data_schema_version=1)
+
+
+def test_api_cli_still_requires_successful_fetch_manifest_and_seed_cli_does_not(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = source_data(tmp_path / "source")
+    with pytest.raises(SystemExit):
+        runtime.main(["package", "--source-data", str(source), "--output-parent", str(tmp_path / "api"), "--builder-git-sha", "a" * 40, "--builder-tree-sha", "b" * 40])
+    fetch_manifest = tmp_path / "fetch_manifest.json"
+    write_json(fetch_manifest, {
+        "status": "success",
+        "reportMonth": "2026-08",
+        "runId": "20260813T020147607Z",
+        "expectedMetadataRequests": 4,
+        "expectedPsdRequests": 468,
+        "requests": [{"status": "success", "success": True} for _ in range(472)],
+    })
+    assert runtime.main(["package", "--source-data", str(source), "--output-parent", str(tmp_path / "api"), "--builder-git-sha", "a" * 40, "--builder-tree-sha", "b" * 40, "--source-fetch-manifest", str(fetch_manifest)]) == 0
+    identity_path = tmp_path / "identity.json"
+    write_json(identity_path, seed_identity(source))
+    code = runtime.main(["package-seed", "--source-data", str(source), "--output-parent", str(tmp_path / "seed"), "--builder-git-sha", "a" * 40, "--builder-tree-sha", "b" * 40, "--source-identity", str(identity_path)])
+    assert code == 0
+    output = json.loads(capsys.readouterr().out.splitlines()[-1])
+    release = Path(output["release"])
+    assert runtime.validate_runtime_release(release, app_contract_version=1, supported_data_schema_version=1)["source_type"] == runtime.SEED_SOURCE_TYPE
+
+
+@pytest.mark.parametrize("mutation", ["missing_matrix", "missing_previous", "invalid_json", "nan"])
+def test_seed_input_passes_all_existing_data_integrity_gates(tmp_path: Path, mutation: str) -> None:
+    source = source_data(tmp_path)
+    identity = seed_identity(source)
+    if mutation == "missing_matrix":
+        (source / "matrix" / "2222000_US.json").unlink()
+    elif mutation == "missing_previous":
+        (source / "snapshots" / "usda_psd" / "2026-07" / "matrix" / "2222000_US.json").unlink()
+    elif mutation == "invalid_json":
+        (source / "index.json").write_text("{", encoding="utf-8")
+    else:
+        (source / "index.json").write_text('{"value":NaN}\n', encoding="utf-8")
+    identity["extraction_identity"] = {"extraction_method": "docker_cp_exact_image", **runtime.extracted_data_identity(source)}
+    with pytest.raises((runtime.RuntimeDataError, json.JSONDecodeError, ValueError)):
+        seed_package(tmp_path, source, identity)
+
+
+def test_seed_tamper_and_permissions_contract(tmp_path: Path) -> None:
+    release = seed_package(tmp_path)
+    runtime.prepare_formal_release_permissions(release)
+    runtime.validate_release_permissions(release)
+    runtime.validate_runtime_release(release, app_contract_version=1, supported_data_schema_version=1)
+    write_json(release / "data" / "matrix" / "2222000_US.json", {"tampered": True})
+    with pytest.raises(runtime.RuntimeDataError, match="sealed manifest"):
+        runtime.validate_runtime_release(release, app_contract_version=1, supported_data_schema_version=1)
 
 
 def test_stage_copies_validated_bytes_and_run_directories_remain_isolated(tmp_path: Path) -> None:
