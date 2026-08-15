@@ -75,10 +75,21 @@ DEFAULT_CLEANUP_POLICY = "on-failure"
 AFTER_PLAN_CLEANUP_POLICY = "after-plan"
 SNAPSHOT_MAX_AGE_SECONDS = 300
 CANDIDATE_DATA_CONTAINER_PATH = "/app/01_data"
-CANDIDATE_BASIS_RELATIVE_PATH = Path("database/basis/basis_quotes.parquet")
-CANDIDATE_BASIS_CONTAINER_PATH = (
-    f"{CANDIDATE_DATA_CONTAINER_PATH}/{CANDIDATE_BASIS_RELATIVE_PATH.as_posix()}"
-)
+CANDIDATE_OUTPUTS_CONTAINER_PATH = "/app/06_outputs"
+CANDIDATE_LOGS_CONTAINER_PATH = "/app/10_logs"
+CANDIDATE_USER_CACHE_CONTAINER_PATH = "/root/.cache"
+CANDIDATE_TMP_CONTAINER_PATH = "/tmp"
+CANDIDATE_RUNTIME_LAYOUT = {
+    CANDIDATE_OUTPUTS_CONTAINER_PATH: "06_outputs",
+    CANDIDATE_LOGS_CONTAINER_PATH: "10_logs",
+    CANDIDATE_USER_CACHE_CONTAINER_PATH: "user-cache",
+    CANDIDATE_TMP_CONTAINER_PATH: "tmp",
+}
+CANDIDATE_REPLACED_FORMAL_TARGETS = {
+    CANDIDATE_OUTPUTS_CONTAINER_PATH,
+    CANDIDATE_LOGS_CONTAINER_PATH,
+}
+DOCKER_SOCKET_PATH = "/var/run/docker.sock"
 
 
 class CandidateValidator(Protocol):
@@ -138,9 +149,6 @@ class CandidateOptions:
     cleanup_policy: str
     execute_build: bool
     execute_start: bool
-    candidate_data_host_root: Path | None = None
-    candidate_data_approved_root: Path | None = None
-    candidate_basis_sha256: str | None = None
     import_profit_runtime_host: Path | None = None
     import_profit_runtime_approved_root: Path | None = None
     formal_import_profit_runtime_host: Path | None = None
@@ -369,41 +377,16 @@ def _formal_candidate_data_mount(
     return mount
 
 
-def validate_candidate_data_paths(
+def validate_candidate_data_path(
     options: CandidateOptions,
     formal_service: Mapping[str, Any],
-) -> tuple[Path, Path, Mapping[str, Any]] | None:
-    """Prove that the candidate data tree cannot alias production data."""
+) -> tuple[Path, Mapping[str, Any]]:
+    """Resolve the formal data source that the candidate may mount only read-only."""
     formal_mount = _formal_candidate_data_mount(formal_service)
-    supplied = (
-        options.candidate_data_host_root,
-        options.candidate_data_approved_root,
-        options.candidate_basis_sha256,
-    )
     if formal_mount is None:
-        if any(supplied):
-            raise ContractError(
-                "candidate data isolation was requested but formal Compose has no /app/01_data mount"
-            )
-        return None
-    if not all(supplied):
-        raise ContractError(
-            "formal /app/01_data requires candidate data host root, approved root, and basis SHA-256"
-        )
-    candidate_root = options.candidate_data_host_root
-    approved_root = options.candidate_data_approved_root
-    expected_sha = options.candidate_basis_sha256
-    assert candidate_root is not None and approved_root is not None and expected_sha is not None
-    if not candidate_root.is_absolute() or not approved_root.is_absolute():
-        raise ContractError("candidate data paths must be absolute")
-    if not candidate_root.is_dir() or not approved_root.is_dir():
-        raise ContractError("candidate data root and approved root must be existing directories")
-    resolved_candidate = candidate_root.resolve(strict=True)
-    resolved_approved = approved_root.resolve(strict=True)
-    if resolved_candidate == resolved_approved or not _is_relative_to(
-        resolved_candidate, resolved_approved
-    ):
-        raise ContractError("candidate data root must be below the approved candidate root")
+        raise ContractError("formal Compose is missing the required /app/01_data mount")
+    if options.data_host_root is None or not options.data_host_root.is_dir():
+        raise ContractError("candidate requires the existing formal data host root")
     formal_source = Path(str(formal_mount["source"]))
     if not formal_source.is_absolute():
         raise ContractError("formal /app/01_data source must be absolute after Compose rendering")
@@ -411,32 +394,54 @@ def validate_candidate_data_paths(
         resolved_formal = formal_source.resolve(strict=True)
     except OSError as exc:
         raise ContractError("formal /app/01_data source is missing") from exc
-    if (
-        resolved_candidate == resolved_formal
-        or _is_relative_to(resolved_candidate, resolved_formal)
-        or _is_relative_to(resolved_formal, resolved_candidate)
-    ):
-        raise ContractError("candidate and production /app/01_data paths must not overlap")
-    build_context = options.build_context.resolve(strict=True)
-    if resolved_candidate == build_context or _is_relative_to(resolved_candidate, build_context):
-        raise ContractError("candidate data root must not be inside the Git checkout")
-    if options.data_host_root is not None:
-        manifest_root = options.data_host_root.resolve(strict=True)
-        if resolved_candidate != (manifest_root / "01_data").resolve(strict=True):
-            raise ContractError(
-                "candidate data mount must equal <data-host-root>/01_data used for Manifest inspection"
-            )
-    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
-        raise ContractError("candidate basis SHA-256 must be 64 lowercase hexadecimal characters")
+    manifest_root = options.data_host_root.resolve(strict=True)
     try:
-        basis_path = (resolved_candidate / CANDIDATE_BASIS_RELATIVE_PATH).resolve(strict=True)
+        expected_formal = (manifest_root / "01_data").resolve(strict=True)
     except OSError as exc:
-        raise ContractError("candidate basis file is missing") from exc
-    if not basis_path.is_file() or not _is_relative_to(basis_path, resolved_candidate):
-        raise ContractError("candidate basis file is missing or escapes the candidate data root")
-    if hash_file(basis_path) != expected_sha:
-        raise ContractError("candidate basis SHA-256 does not match the sealed data artifact")
-    return resolved_candidate, basis_path, formal_mount
+        raise ContractError("formal data host root is missing 01_data") from exc
+    if resolved_formal != expected_formal:
+        raise ContractError(
+            "formal /app/01_data source must equal <data-host-root>/01_data"
+        )
+    return resolved_formal, formal_mount
+
+
+def candidate_runtime_paths(output_directory: Path) -> dict[str, Path]:
+    """Return the fixed candidate-only writable mount layout."""
+    runtime_root = output_directory.resolve() / "runtime"
+    return {
+        target: runtime_root / relative
+        for target, relative in CANDIDATE_RUNTIME_LAYOUT.items()
+    }
+
+
+def _create_candidate_runtime(paths: Mapping[str, Path]) -> None:
+    for path in paths.values():
+        path.mkdir(parents=True, exist_ok=False)
+
+
+def validate_candidate_runtime_location(
+    options: CandidateOptions, formal_service: Mapping[str, Any]
+) -> dict[str, Path]:
+    """Keep every candidate-writable host path outside production and the checkout."""
+    output = options.output_directory.resolve()
+    protected = [options.build_context.resolve(strict=True)]
+    if options.data_host_root is not None:
+        protected.append(options.data_host_root.resolve(strict=True))
+    for mount in formal_service.get("volumes") or []:
+        if not isinstance(mount, dict) or normalized_mount_mode(mount) != "rw":
+            continue
+        source = mount.get("source")
+        if isinstance(source, str) and Path(source).is_absolute():
+            protected.append(Path(source).resolve(strict=True))
+    for protected_path in protected:
+        if (
+            output == protected_path
+            or _is_relative_to(output, protected_path)
+            or _is_relative_to(protected_path, output)
+        ):
+            raise ContractError("candidate output/runtime must not overlap production or the Git checkout")
+    return candidate_runtime_paths(output)
 
 
 def build_candidate_compose(
@@ -447,8 +452,8 @@ def build_candidate_compose(
     image_ref: str,
     candidate_container_name: str,
     candidate_port: int,
-    candidate_data_host_root: Path | None = None,
-    candidate_basis_path: Path | None = None,
+    formal_data_host_root: Path,
+    candidate_runtime_mounts: Mapping[str, Path],
     import_profit_runtime_host: Path | None = None,
     import_profit_runtime_container: str = IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
 ) -> dict[str, Any]:
@@ -497,30 +502,53 @@ def build_candidate_compose(
     ]
     candidate_service["environment"] = candidate_environment
     formal_volumes = copy.deepcopy(formal_service.get("volumes") or [])
-    candidate_volumes = copy.deepcopy(formal_volumes)
-    formal_data_mount = _formal_candidate_data_mount(formal_service)
-    if formal_data_mount is not None:
-        if candidate_data_host_root is None or candidate_basis_path is None:
-            raise ContractError("formal /app/01_data mount requires isolated candidate data")
-        data_mount_indexes = [
-            index
-            for index, volume in enumerate(candidate_volumes)
-            if isinstance(volume, dict)
-            and volume.get("target") == CANDIDATE_DATA_CONTAINER_PATH
-        ]
-        if len(data_mount_indexes) != 1:
-            raise ContractError("candidate /app/01_data mount identity is ambiguous")
-        candidate_volumes[data_mount_indexes[0]]["source"] = str(candidate_data_host_root)
+    expected_runtime_targets = set(CANDIDATE_RUNTIME_LAYOUT)
+    if set(candidate_runtime_mounts) != expected_runtime_targets:
+        raise ContractError("candidate writable runtime mount set is incomplete")
+    candidate_volumes: list[dict[str, Any]] = []
+    seen_formal_targets: set[str] = set()
+    for formal_mount in formal_volumes:
+        if not isinstance(formal_mount, dict):
+            raise ContractError("formal spread volume entry is invalid")
+        source = formal_mount.get("source")
+        target = formal_mount.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            raise ContractError("formal spread volume identity is invalid")
+        if source == DOCKER_SOCKET_PATH or target == DOCKER_SOCKET_PATH:
+            raise ContractError("candidate must not mount the Docker socket")
+        if target in seen_formal_targets:
+            raise ContractError("formal spread Compose contains duplicate mount targets")
+        seen_formal_targets.add(target)
+        candidate_mount = copy.deepcopy(formal_mount)
+        if target == CANDIDATE_DATA_CONTAINER_PATH:
+            candidate_mount["source"] = str(formal_data_host_root)
+            candidate_mount["read_only"] = True
+        elif target in CANDIDATE_REPLACED_FORMAL_TARGETS:
+            candidate_mount["source"] = str(candidate_runtime_mounts[target])
+            candidate_mount["read_only"] = False
+        elif target != WEATHER_CONTAINER_PATH:
+            raise ContractError("formal spread Compose contains an unapproved candidate mount")
+        candidate_volumes.append(candidate_mount)
+    required_formal_targets = {
+        CANDIDATE_DATA_CONTAINER_PATH,
+        CANDIDATE_OUTPUTS_CONTAINER_PATH,
+        CANDIDATE_LOGS_CONTAINER_PATH,
+        WEATHER_CONTAINER_PATH,
+    }
+    if seen_formal_targets != required_formal_targets:
+        raise ContractError("formal spread mount set is incomplete or unexpected")
+    for target in (
+        CANDIDATE_USER_CACHE_CONTAINER_PATH,
+        CANDIDATE_TMP_CONTAINER_PATH,
+    ):
         candidate_volumes.append(
             {
                 "type": "bind",
-                "source": str(candidate_basis_path),
-                "target": CANDIDATE_BASIS_CONTAINER_PATH,
-                "read_only": True,
+                "source": str(candidate_runtime_mounts[target]),
+                "target": target,
+                "read_only": False,
             }
         )
-    elif candidate_data_host_root is not None or candidate_basis_path is not None:
-        raise ContractError("candidate data isolation has no matching formal /app/01_data mount")
     if import_profit_runtime_host is not None:
         targets = {
             volume.get("target")
@@ -575,12 +603,10 @@ def build_candidate_compose(
         expected_weather_source=expected_weather_source,
         expected_git_commit=git_commit,
         formal_volumes=formal_volumes,
-        expected_candidate_data_host_root=(
-            str(candidate_data_host_root) if candidate_data_host_root is not None else None
-        ),
-        expected_candidate_basis_path=(
-            str(candidate_basis_path) if candidate_basis_path is not None else None
-        ),
+        expected_formal_data_host_root=str(formal_data_host_root),
+        expected_candidate_runtime_mounts={
+            target: str(path) for target, path in candidate_runtime_mounts.items()
+        },
         expected_import_profit_runtime_host=(
             str(import_profit_runtime_host) if import_profit_runtime_host is not None else None
         ),
@@ -598,8 +624,8 @@ def validate_candidate_compose(
     expected_weather_source: str,
     expected_git_commit: str,
     formal_volumes: Sequence[Any],
-    expected_candidate_data_host_root: str | None = None,
-    expected_candidate_basis_path: str | None = None,
+    expected_formal_data_host_root: str,
+    expected_candidate_runtime_mounts: Mapping[str, str],
     expected_import_profit_runtime_host: str | None = None,
     expected_import_profit_runtime_container: str = IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
 ) -> None:
@@ -660,30 +686,21 @@ def validate_candidate_compose(
     if mounts[0].get("type") != "bind" or mounts[0].get("read_only") is not True:
         raise ContractError("candidate weather mount must remain read-only")
     volumes = service.get("volumes") or []
-    has_candidate_data = expected_candidate_data_host_root is not None
-    if has_candidate_data != (expected_candidate_basis_path is not None):
-        raise ContractError("candidate data mount expectations are incomplete")
-    expected_count = (
-        len(formal_volumes)
-        + (1 if has_candidate_data else 0)
-        + (1 if expected_import_profit_runtime_host else 0)
-    )
+    expected_count = len(formal_volumes) + 2 + (1 if expected_import_profit_runtime_host else 0)
     if not isinstance(volumes, list) or len(volumes) != expected_count:
         raise ContractError("candidate mount set differs from the approved formal mount set")
     inherited = volumes[: len(formal_volumes)]
     for formal_mount, candidate_mount in zip(formal_volumes, inherited, strict=True):
         if not isinstance(formal_mount, dict) or not isinstance(candidate_mount, dict):
-            if candidate_mount != formal_mount:
-                raise ContractError("candidate changed an inherited formal mount")
-            continue
-        if formal_mount.get("target") != CANDIDATE_DATA_CONTAINER_PATH:
-            if candidate_mount != formal_mount:
-                raise ContractError("candidate changed an inherited formal mount")
-            continue
-        if not has_candidate_data:
-            raise ContractError("formal /app/01_data was inherited without candidate isolation")
+            raise ContractError("candidate mount entries must be objects")
+        target = formal_mount.get("target")
         expected_mount = copy.deepcopy(formal_mount)
-        expected_mount["source"] = expected_candidate_data_host_root
+        if target == CANDIDATE_DATA_CONTAINER_PATH:
+            expected_mount["source"] = expected_formal_data_host_root
+            expected_mount["read_only"] = True
+        elif target in CANDIDATE_REPLACED_FORMAL_TARGETS:
+            expected_mount["source"] = expected_candidate_runtime_mounts[target]
+            expected_mount["read_only"] = False
         expected_mode = normalized_mount_mode(expected_mount)
         candidate_mode = normalized_mount_mode(candidate_mount)
         expected_comparable = {
@@ -693,17 +710,25 @@ def validate_candidate_compose(
             key: value for key, value in candidate_mount.items() if key != "read_only"
         }
         if candidate_comparable != expected_comparable or candidate_mode != expected_mode:
-            raise ContractError("candidate /app/01_data mount differs outside its host source")
+            raise ContractError("candidate mount differs from the approved read-only/runtime contract")
+        if target == CANDIDATE_DATA_CONTAINER_PATH and candidate_mode != "ro":
+            raise ContractError("candidate /app/01_data mount must be read-only")
+        if target in CANDIDATE_REPLACED_FORMAL_TARGETS and candidate_mode != "rw":
+            raise ContractError("candidate outputs and logs mounts must be read-write")
     next_index = len(formal_volumes)
-    if has_candidate_data:
-        basis_mount = volumes[next_index]
-        if basis_mount != {
-            "type": "bind",
-            "source": expected_candidate_basis_path,
-            "target": CANDIDATE_BASIS_CONTAINER_PATH,
-            "read_only": True,
-        }:
-            raise ContractError("candidate basis file must be an exact read-only bind mount")
+    for target in (
+        CANDIDATE_USER_CACHE_CONTAINER_PATH,
+        CANDIDATE_TMP_CONTAINER_PATH,
+    ):
+        runtime_mount = volumes[next_index]
+        if not isinstance(runtime_mount, dict) or runtime_mount.get("type") != "bind":
+            raise ContractError("candidate cache/tmp runtime mount is invalid")
+        if (
+            runtime_mount.get("source") != expected_candidate_runtime_mounts[target]
+            or runtime_mount.get("target") != target
+            or normalized_mount_mode(runtime_mount) != "rw"
+        ):
+            raise ContractError("candidate cache/tmp runtime mount is invalid")
         next_index += 1
     if expected_import_profit_runtime_host is not None:
         runtime_mount = volumes[next_index]
@@ -722,11 +747,73 @@ def validate_candidate_compose(
             or normalized_mount_mode(runtime_mount) != "rw"
         ):
             raise ContractError("candidate import profit runtime mount is invalid")
+    for mount in volumes:
+        if not isinstance(mount, dict):
+            raise ContractError("candidate mount entry is invalid")
+        if mount.get("source") == DOCKER_SOCKET_PATH or mount.get("target") == DOCKER_SOCKET_PATH:
+            raise ContractError("candidate must not mount the Docker socket")
     networks = candidate.get("networks")
     if not isinstance(networks, dict) or not networks:
         raise ContractError("candidate must explicitly join the formal network")
     if any(not isinstance(value, dict) or value.get("external") is not True for value in networks.values()):
         raise ContractError("candidate networks must be external formal networks")
+
+
+def validate_candidate_runtime_mounts(
+    container_record: Mapping[str, Any],
+    *,
+    formal_data_host_root: Path,
+    weather_host_root: Path,
+    candidate_runtime_mounts: Mapping[str, Path],
+    import_profit_runtime_host: Path | None = None,
+    import_profit_runtime_container: str = IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
+) -> list[dict[str, Any]]:
+    """Re-prove the candidate mount contract from live Docker inspect evidence."""
+    raw_mounts = container_record.get("mounts")
+    if not isinstance(raw_mounts, list):
+        raise ContractError("candidate container mount evidence is missing")
+    actual: dict[str, Mapping[str, Any]] = {}
+    for mount in raw_mounts:
+        if not isinstance(mount, dict):
+            raise ContractError("candidate container mount evidence is invalid")
+        source = mount.get("source")
+        destination = mount.get("destination")
+        if source == DOCKER_SOCKET_PATH or destination == DOCKER_SOCKET_PATH:
+            raise ContractError("candidate must not mount the Docker socket")
+        if not isinstance(destination, str) or destination in actual:
+            raise ContractError("candidate container mount targets are invalid")
+        actual[destination] = mount
+    expected: dict[str, tuple[Path, bool]] = {
+        CANDIDATE_DATA_CONTAINER_PATH: (formal_data_host_root, True),
+        WEATHER_CONTAINER_PATH: (weather_host_root, True),
+        **{
+            target: (path, False)
+            for target, path in candidate_runtime_mounts.items()
+        },
+    }
+    if import_profit_runtime_host is not None:
+        expected[import_profit_runtime_container] = (import_profit_runtime_host, False)
+    if set(actual) != set(expected):
+        raise ContractError("candidate container mount set differs from the sealed contract")
+    evidence: list[dict[str, Any]] = []
+    for destination, (expected_source, expected_read_only) in expected.items():
+        mount = actual[destination]
+        source = mount.get("source")
+        if (
+            mount.get("type") != "bind"
+            or not isinstance(source, str)
+            or Path(source).resolve(strict=False) != expected_source.resolve(strict=False)
+            or mount.get("read_only") is not expected_read_only
+        ):
+            raise ContractError(f"candidate container mount contract failed for {destination}")
+        evidence.append(
+            {
+                "target": destination,
+                "source": str(expected_source.resolve(strict=False)),
+                "read_only": expected_read_only,
+            }
+        )
+    return sorted(evidence, key=lambda item: item["target"])
 
 
 def _compose_command(options: CandidateOptions, compose_path: Path, project_name: str) -> list[str]:
@@ -750,7 +837,8 @@ def _validate_generated_candidate_compose(
     compose_path: Path,
     candidate_compose: Mapping[str, Any],
     formal_compose: Mapping[str, Any],
-    candidate_data: tuple[Path, Path, Mapping[str, Any]] | None,
+    formal_data_host_root: Path,
+    candidate_runtime_mounts: Mapping[str, Path],
     runtime_host: Path | None,
     candidate_port: int,
 ) -> None:
@@ -784,12 +872,10 @@ def _validate_generated_candidate_compose(
         ),
         expected_git_commit=options.git_commit,
         formal_volumes=copy.deepcopy(formal_service.get("volumes") or []),
-        expected_candidate_data_host_root=(
-            str(candidate_data[0]) if candidate_data is not None else None
-        ),
-        expected_candidate_basis_path=(
-            str(candidate_data[1]) if candidate_data is not None else None
-        ),
+        expected_formal_data_host_root=str(formal_data_host_root),
+        expected_candidate_runtime_mounts={
+            target: str(path) for target, path in candidate_runtime_mounts.items()
+        },
         expected_import_profit_runtime_host=(str(runtime_host) if runtime_host else None),
         expected_import_profit_runtime_container=options.import_profit_runtime_container,
     )
@@ -1281,7 +1367,10 @@ def prepare_candidate(
     formal_service = services[COMPOSE_SERVICE]
     if not isinstance(formal_service, dict):
         raise ContractError("formal spread-dashboard service is invalid")
-    candidate_data = validate_candidate_data_paths(options, formal_service)
+    formal_data_host_root, formal_data_mount = validate_candidate_data_path(
+        options, formal_service
+    )
+    runtime_mounts = validate_candidate_runtime_location(options, formal_service)
     import_profit_runtime_host = validate_import_profit_runtime_paths(options)
     port = select_candidate_port(
         options.candidate_port,
@@ -1295,14 +1384,15 @@ def prepare_candidate(
         image_ref=options.image_ref,
         candidate_container_name=options.candidate_container_name,
         candidate_port=port,
-        candidate_data_host_root=(candidate_data[0] if candidate_data else None),
-        candidate_basis_path=(candidate_data[1] if candidate_data else None),
+        formal_data_host_root=formal_data_host_root,
+        candidate_runtime_mounts=runtime_mounts,
         import_profit_runtime_host=import_profit_runtime_host,
         import_profit_runtime_container=options.import_profit_runtime_container,
     )
     if options.output_directory.exists():
         raise ContractError("candidate output directory must not already exist")
     options.output_directory.mkdir(parents=True)
+    _create_candidate_runtime(runtime_mounts)
     compose_path = options.output_directory / "candidate-compose.json"
     validating_compose_path = options.output_directory / ".candidate-compose.validating.json"
     _write_json_exclusive(validating_compose_path, candidate_compose)
@@ -1313,7 +1403,8 @@ def prepare_candidate(
             validating_compose_path,
             candidate_compose,
             formal_compose,
-            candidate_data,
+            formal_data_host_root,
+            runtime_mounts,
             import_profit_runtime_host,
             port,
         )
@@ -1361,17 +1452,20 @@ def prepare_candidate(
         },
         "candidate_data_mount": (
             {
-                "source": str(candidate_data[0]),
+                "source": str(formal_data_host_root),
                 "target": CANDIDATE_DATA_CONTAINER_PATH,
-                "production_source": str(candidate_data[2]["source"]),
-                "basis_source": str(candidate_data[1]),
-                "basis_target": CANDIDATE_BASIS_CONTAINER_PATH,
-                "basis_mode": "ro",
-                "basis_sha256": options.candidate_basis_sha256,
+                "production_source": str(formal_data_mount["source"]),
+                "mode": "ro",
             }
-            if candidate_data is not None
-            else None
         ),
+        "candidate_writable_mounts": [
+            {
+                "source": str(runtime_mounts[target]),
+                "target": target,
+                "mode": "rw",
+            }
+            for target in sorted(runtime_mounts)
+        ],
         "import_profit_runtime_mount": (
             {
                 "mount_id": IMPORT_PROFIT_RUNTIME_MOUNT_ID,
@@ -1385,6 +1479,7 @@ def prepare_candidate(
         ),
         "candidate_image_id": None,
         "candidate_container_id": None,
+        "candidate_runtime_mounts": None,
         "formal_snapshot_path": str(snapshot_path),
         "formal_snapshot_sha256": None,
         "formal_snapshot_captured_at": None,
@@ -1458,17 +1553,20 @@ def prepare_candidate(
             raise ContractError("candidate container did not return a full container ID")
         result["candidate_container_id"] = container_id
         phase = "seal-release"
-        # Data identity must be inspected through the running isolated
-        # candidate mount, never through the formal production container.
-        if candidate_data is not None:
-            revalidated_candidate_data = validate_candidate_data_paths(
-                options, formal_service
-            )
-            if revalidated_candidate_data is None or (
-                revalidated_candidate_data[0] != candidate_data[0]
-                or revalidated_candidate_data[1] != candidate_data[1]
-            ):
-                raise ContractError("candidate data identity changed before release sealing")
+        phase = "candidate-mount-validation"
+        revalidated_data_root, _ = validate_candidate_data_path(options, formal_service)
+        if revalidated_data_root != formal_data_host_root:
+            raise ContractError("formal data identity changed before release sealing")
+        candidate_record = candidate_runtime.container_record(options.candidate_container_name)
+        result["candidate_runtime_mounts"] = validate_candidate_runtime_mounts(
+            candidate_record,
+            formal_data_host_root=formal_data_host_root,
+            weather_host_root=Path(production_environment["WEATHER_RUNTIME_CURRENT_DIR"]),
+            candidate_runtime_mounts=runtime_mounts,
+            import_profit_runtime_host=import_profit_runtime_host,
+            import_profit_runtime_container=options.import_profit_runtime_container,
+        )
+        phase = "seal-release"
         release_directory = release_sealer(options, candidate_runtime, production_environment)
         result["release_directory"] = str(release_directory)
         phase = "candidate-validation"
@@ -1566,26 +1664,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--execute-build", action="store_true")
     parser.add_argument("--execute-start", action="store_true")
-    # Manifest inspection root; this remains distinct from the actual candidate
-    # /app/01_data bind source below.
     parser.add_argument(
         "--data-host-root",
         type=Path,
-        help="Host root used only for release Manifest dataset identity inspection.",
-    )
-    parser.add_argument(
-        "--candidate-data-host-root",
-        type=Path,
-        help="Isolated host 01_data directory mounted into the candidate container.",
-    )
-    parser.add_argument(
-        "--candidate-data-approved-root",
-        type=Path,
-        help="Existing candidate-only root that must contain candidate-data-host-root.",
-    )
-    parser.add_argument(
-        "--candidate-basis-sha256",
-        help="Expected SHA-256 of the candidate basis_quotes.parquet artifact.",
+        help=(
+            "Existing formal project root whose 01_data is mounted read-only into "
+            "the candidate and inspected for the release Manifest."
+        ),
     )
     parser.add_argument("--rollback-image-ref")
     parser.add_argument("--rollback-image-id")
@@ -1628,21 +1713,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         cleanup_policy=args.cleanup_policy,
         execute_build=args.execute_build,
         execute_start=args.execute_start,
-        candidate_data_host_root=(
-            args.candidate_data_host_root
-            if args.candidate_data_host_root
-            else None
-        ),
-        candidate_data_approved_root=(
-            args.candidate_data_approved_root
-            if args.candidate_data_approved_root
-            else None
-        ),
-        candidate_basis_sha256=(
-            args.candidate_basis_sha256.lower()
-            if args.candidate_basis_sha256
-            else None
-        ),
         import_profit_runtime_host=(
             args.import_profit_runtime_host.resolve()
             if args.import_profit_runtime_host

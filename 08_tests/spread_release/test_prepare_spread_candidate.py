@@ -17,12 +17,19 @@ sys.path.insert(0, str(CONTRACT_DIR))
 
 import prepare_spread_candidate as candidate_prepare  # noqa: E402
 from prepare_spread_candidate import (  # noqa: E402
+    CANDIDATE_DATA_CONTAINER_PATH,
+    CANDIDATE_LOGS_CONTAINER_PATH,
+    CANDIDATE_OUTPUTS_CONTAINER_PATH,
+    CANDIDATE_TMP_CONTAINER_PATH,
+    CANDIDATE_USER_CACHE_CONTAINER_PATH,
     CANDIDATE_SERVICE,
     CandidateOptions,
     build_candidate_compose,
+    candidate_runtime_paths,
     normalized_mount_mode,
     prepare_candidate,
     select_candidate_port,
+    validate_candidate_runtime_mounts,
 )
 from release_contract import CommandRunner, ContractError  # noqa: E402
 
@@ -67,7 +74,13 @@ def _copy_contract_repository(tmp_path: Path) -> tuple[Path, str, str]:
     )
 
 
-def _formal_compose(*, weather_read_only: bool = True, include_spread: bool = True) -> dict:
+def _formal_compose(
+    data_host_root: Path | None = None,
+    *,
+    weather_read_only: bool = True,
+    include_spread: bool = True,
+) -> dict:
+    root = (data_host_root or Path("/home/ubuntu/market-data")).resolve()
     services: dict[str, object] = {
         "usda-dashboard": {
             "image": "usda:test",
@@ -98,6 +111,24 @@ def _formal_compose(*, weather_read_only: bool = True, include_spread: bool = Tr
             "volumes": [
                 {
                     "type": "bind",
+                    "source": str(root / "01_data"),
+                    "target": CANDIDATE_DATA_CONTAINER_PATH,
+                    "read_only": False,
+                },
+                {
+                    "type": "bind",
+                    "source": str(root / "06_outputs"),
+                    "target": CANDIDATE_OUTPUTS_CONTAINER_PATH,
+                    "read_only": False,
+                },
+                {
+                    "type": "bind",
+                    "source": str(root / "10_logs"),
+                    "target": CANDIDATE_LOGS_CONTAINER_PATH,
+                    "read_only": False,
+                },
+                {
+                    "type": "bind",
                     "source": "/home/ubuntu/market-data-runtime/weather/processed",
                     "target": "/app/runtime/weather",
                     "read_only": weather_read_only,
@@ -123,6 +154,7 @@ class FakeRunner(CommandRunner):
         self.container_removed = False
         self.image_removed = False
         self.events: list[str] = []
+        self.rendered_candidate: dict | None = None
 
     def run(self, command, *, cwd=None, env=None):  # type: ignore[override]
         command = list(command)
@@ -138,6 +170,7 @@ class FakeRunner(CommandRunner):
                 runtime_mount = rendered["services"][CANDIDATE_SERVICE]["volumes"][-1]
                 if runtime_mount.get("target") == "/app/runtime/import_profit":
                     runtime_mount.pop("read_only", None)
+            self.rendered_candidate = rendered
             return json.dumps(rendered)
         if command[:2] == ["docker", "build"]:
             self.built = True
@@ -191,6 +224,19 @@ class FakeRuntime:
 
     def container_record(self, container_name: str):
         if container_name != "spread-dashboard":
+            if container_name.startswith("spread-dashboard-candidate-") and self.runner.rendered_candidate:
+                volumes = self.runner.rendered_candidate["services"][CANDIDATE_SERVICE]["volumes"]
+                return {
+                    "mounts": [
+                        {
+                            "type": mount["type"],
+                            "source": mount["source"],
+                            "destination": mount["target"],
+                            "read_only": normalized_mount_mode(mount) == "ro",
+                        }
+                        for mount in volumes
+                    ]
+                }
             raise ContractError(f"unexpected container record: {container_name}")
         return {
             "image_id": "sha256:" + "d" * 64,
@@ -207,6 +253,9 @@ def _options(
     cleanup_policy: str = "on-failure",
 ) -> tuple[CandidateOptions, FakeRunner]:
     repository, commit, tree = _copy_contract_repository(tmp_path)
+    data_host_root = tmp_path / "formal-data"
+    for relative in ("01_data", "06_outputs", "10_logs"):
+        (data_host_root / relative).mkdir(parents=True, exist_ok=True)
     formal_compose = tmp_path / "formal-compose.yml"
     formal_compose.write_text("name: market-data\nservices: {}\n", encoding="utf-8")
     environment = tmp_path / "spread-production.env"
@@ -225,8 +274,6 @@ def _options(
         encoding="utf-8",
     )
     release_id = f"spread-20260725-{commit[:12]}-b01"
-    data_host_root = tmp_path / "data"
-    data_host_root.mkdir()
     options = CandidateOptions(
         mode=mode,
         git_commit=commit,
@@ -250,7 +297,18 @@ def _options(
         execute_build=mode == "execute",
         execute_start=mode == "execute",
     )
-    return options, FakeRunner(compose or _formal_compose())
+    selected_compose = json.loads(json.dumps(compose)) if compose is not None else _formal_compose(data_host_root)
+    spread = selected_compose.get("services", {}).get("spread-dashboard")
+    if isinstance(spread, dict):
+        for mount in spread.get("volumes", []):
+            target = mount.get("target")
+            if target == CANDIDATE_DATA_CONTAINER_PATH:
+                mount["source"] = str((data_host_root / "01_data").resolve())
+            elif target == CANDIDATE_OUTPUTS_CONTAINER_PATH:
+                mount["source"] = str((data_host_root / "06_outputs").resolve())
+            elif target == CANDIDATE_LOGS_CONTAINER_PATH:
+                mount["source"] = str((data_host_root / "10_logs").resolve())
+    return options, FakeRunner(selected_compose)
 
 
 def _snapshot(_runtime: FakeRuntime, output: Path) -> tuple[Path, dict[str, str]]:
@@ -278,39 +336,6 @@ def _with_import_profit_runtime(options: CandidateOptions, tmp_path: Path) -> Ca
             "earliest_expected_business_date": "2026-08-03",
         }
     )
-
-
-def _with_candidate_data(
-    options: CandidateOptions,
-    runner: FakeRunner,
-    tmp_path: Path,
-) -> tuple[CandidateOptions, Path, Path]:
-    production_data = tmp_path / "formal-data" / "01_data"
-    production_data.mkdir(parents=True)
-    candidate_manifest_root = tmp_path / "candidate-data"
-    candidate_data = candidate_manifest_root / "01_data"
-    basis = candidate_data / "database" / "basis" / "basis_quotes.parquet"
-    basis.parent.mkdir(parents=True)
-    basis.write_bytes(b"sealed candidate basis\n")
-    runner.compose["services"]["spread-dashboard"]["volumes"].insert(
-        0,
-        {
-            "type": "bind",
-            "source": str(production_data.resolve()),
-            "target": "/app/01_data",
-            "read_only": False,
-        },
-    )
-    changed = CandidateOptions(
-        **{
-            **options.__dict__,
-            "data_host_root": candidate_manifest_root,
-            "candidate_data_host_root": candidate_data,
-            "candidate_data_approved_root": candidate_manifest_root,
-            "candidate_basis_sha256": hashlib.sha256(basis.read_bytes()).hexdigest(),
-        }
-    )
-    return changed, production_data, basis
 
 
 def _seal_candidate_result(
@@ -346,6 +371,34 @@ def _seal_deployment_plan(
     }
 
 
+def _build_candidate_direct(
+    options: CandidateOptions,
+    runner: FakeRunner,
+    *,
+    image_ref: str | None = None,
+) -> tuple[dict, dict[str, Path]]:
+    runtime_mounts = candidate_runtime_paths(options.output_directory)
+    for path in runtime_mounts.values():
+        path.mkdir(parents=True, exist_ok=True)
+    environment = candidate_prepare.parse_production_env(options.production_env_file)
+    candidate = build_candidate_compose(
+        runner.compose,
+        environment,
+        git_commit=options.git_commit,
+        image_ref=image_ref or options.image_ref,
+        candidate_container_name=options.candidate_container_name,
+        candidate_port=18502,
+        formal_data_host_root=(options.data_host_root / "01_data").resolve(),
+        candidate_runtime_mounts=runtime_mounts,
+        import_profit_runtime_host=(
+            options.import_profit_runtime_host.resolve()
+            if options.import_profit_runtime_host is not None
+            else None
+        ),
+    )
+    return candidate, runtime_mounts
+
+
 def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: Path) -> None:
     options, runner = _options(tmp_path)
 
@@ -371,143 +424,147 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert "market-data.artifact.promotable=true" in result["build_command"]
 
 
-def test_candidate_data_mount_replaces_only_host_source_and_overlays_basis_read_only(
+def test_candidate_mounts_formal_data_read_only_and_isolates_all_writable_paths(
     tmp_path: Path,
 ) -> None:
     options, runner = _options(tmp_path)
-    options, production_data, basis = _with_candidate_data(options, runner, tmp_path)
+    formal_sha = hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest()
 
     result = prepare_candidate(options, runner=runner, port_probe=lambda _: True)
 
     compose = json.loads(Path(result["candidate_compose_file"]).read_text(encoding="utf-8"))
     volumes = compose["services"][CANDIDATE_SERVICE]["volumes"]
-    data_mount = next(item for item in volumes if item["target"] == "/app/01_data")
-    basis_mount = next(
-        item
-        for item in volumes
-        if item["target"] == "/app/01_data/database/basis/basis_quotes.parquet"
-    )
+    by_target = {item["target"]: item for item in volumes}
+    data_mount = by_target[CANDIDATE_DATA_CONTAINER_PATH]
     assert data_mount == {
         "type": "bind",
-        "source": str(options.candidate_data_host_root.resolve()),
-        "target": "/app/01_data",
-        "read_only": False,
-    }
-    assert basis_mount == {
-        "type": "bind",
-        "source": str(basis.resolve()),
-        "target": "/app/01_data/database/basis/basis_quotes.parquet",
+        "source": str((options.data_host_root / "01_data").resolve()),
+        "target": CANDIDATE_DATA_CONTAINER_PATH,
         "read_only": True,
     }
-    assert all(item.get("source") != str(production_data.resolve()) for item in volumes)
-    assert result["candidate_data_mount"]["basis_sha256"] == options.candidate_basis_sha256
-    assert result["production_compose_file"] == str(options.production_compose_file)
-    assert str(options.candidate_data_host_root) not in options.production_compose_file.read_text(
-        encoding="utf-8"
-    )
+    runtime = options.output_directory.resolve() / "runtime"
+    assert by_target[CANDIDATE_OUTPUTS_CONTAINER_PATH]["source"] == str(runtime / "06_outputs")
+    assert by_target[CANDIDATE_LOGS_CONTAINER_PATH]["source"] == str(runtime / "10_logs")
+    assert by_target[CANDIDATE_USER_CACHE_CONTAINER_PATH]["source"] == str(runtime / "user-cache")
+    assert by_target[CANDIDATE_TMP_CONTAINER_PATH]["source"] == str(runtime / "tmp")
+    for target in (
+        CANDIDATE_OUTPUTS_CONTAINER_PATH,
+        CANDIDATE_LOGS_CONTAINER_PATH,
+        CANDIDATE_USER_CACHE_CONTAINER_PATH,
+        CANDIDATE_TMP_CONTAINER_PATH,
+    ):
+        assert normalized_mount_mode(by_target[target]) == "rw"
+        assert Path(by_target[target]["source"]).is_relative_to(runtime)
+    assert result["candidate_data_mount"]["mode"] == "ro"
+    assert len(result["candidate_writable_mounts"]) == 4
+    assert hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest() == formal_sha
 
 
-def test_formal_data_mount_requires_explicit_candidate_isolation(tmp_path: Path) -> None:
+def test_candidate_rejects_writable_formal_data_mount_after_generation(tmp_path: Path) -> None:
     options, runner = _options(tmp_path)
-    formal_data = tmp_path / "formal-data"
-    formal_data.mkdir()
-    runner.compose["services"]["spread-dashboard"]["volumes"].insert(
-        0,
+    result = prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+    candidate = json.loads(Path(result["candidate_compose_file"]).read_text(encoding="utf-8"))
+    data_mount = next(
+        mount
+        for mount in candidate["services"][CANDIDATE_SERVICE]["volumes"]
+        if mount["target"] == CANDIDATE_DATA_CONTAINER_PATH
+    )
+    data_mount["read_only"] = False
+    runtime_mounts = candidate_runtime_paths(options.output_directory)
+    with pytest.raises(ContractError, match="read-only/runtime contract|must be read-only"):
+        candidate_prepare.validate_candidate_compose(
+            candidate,
+            image_ref=options.image_ref,
+            candidate_container_name=options.candidate_container_name,
+            candidate_port=18502,
+            expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
+            expected_git_commit=options.git_commit,
+            formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_formal_data_host_root=str((options.data_host_root / "01_data").resolve()),
+            expected_candidate_runtime_mounts={
+                target: str(path) for target, path in runtime_mounts.items()
+            },
+        )
+
+
+def test_candidate_rejects_data_root_identity_mismatch(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    wrong_root = tmp_path / "wrong-formal-root"
+    (wrong_root / "01_data").mkdir(parents=True)
+    changed = CandidateOptions(**{**options.__dict__, "data_host_root": wrong_root})
+    with pytest.raises(ContractError, match="must equal"):
+        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
+
+
+def test_candidate_cli_no_longer_requires_a_copied_data_tree() -> None:
+    help_text = candidate_prepare.build_parser().format_help()
+    assert "--data-host-root" in help_text
+    assert "--candidate-data-host-root" not in help_text
+    assert "--candidate-data-approved-root" not in help_text
+    assert "--candidate-basis-sha256" not in help_text
+
+
+def test_candidate_runtime_rejects_production_or_checkout_overlap(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    for output in (options.data_host_root / "candidate", options.build_context / "candidate"):
+        changed = CandidateOptions(**{**options.__dict__, "output_directory": output})
+        with pytest.raises(ContractError, match="must not overlap"):
+            prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
+
+
+def test_live_mount_inspect_rejects_writable_production_data(tmp_path: Path) -> None:
+    options, _runner = _options(tmp_path)
+    runtime_mounts = candidate_runtime_paths(options.output_directory)
+    for path in runtime_mounts.values():
+        path.mkdir(parents=True, exist_ok=True)
+    weather = tmp_path / "weather"
+    weather.mkdir()
+    record = {
+        "mounts": [
+            {
+                "type": "bind",
+                "source": str((options.data_host_root / "01_data").resolve()),
+                "destination": CANDIDATE_DATA_CONTAINER_PATH,
+                "read_only": False,
+            },
+            {
+                "type": "bind",
+                "source": str(weather.resolve()),
+                "destination": "/app/runtime/weather",
+                "read_only": True,
+            },
+            *[
+                {
+                    "type": "bind",
+                    "source": str(path.resolve()),
+                    "destination": target,
+                    "read_only": False,
+                }
+                for target, path in runtime_mounts.items()
+            ],
+        ]
+    }
+    with pytest.raises(ContractError, match="mount contract failed"):
+        validate_candidate_runtime_mounts(
+            record,
+            formal_data_host_root=options.data_host_root / "01_data",
+            weather_host_root=weather,
+            candidate_runtime_mounts=runtime_mounts,
+        )
+
+
+def test_candidate_rejects_docker_socket_mount(tmp_path: Path) -> None:
+    options, runner = _options(tmp_path)
+    runner.compose["services"]["spread-dashboard"]["volumes"].append(
         {
             "type": "bind",
-            "source": str(formal_data.resolve()),
-            "target": "/app/01_data",
-            "read_only": False,
-        },
-    )
-    with pytest.raises(ContractError, match="requires candidate data host root"):
-        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
-
-
-@pytest.mark.parametrize("relationship", ["equal", "candidate-below-formal", "formal-below-candidate"])
-def test_candidate_data_rejects_production_path_overlap(
-    tmp_path: Path, relationship: str
-) -> None:
-    options, runner = _options(tmp_path)
-    options, production_data, basis = _with_candidate_data(options, runner, tmp_path)
-    if relationship == "equal":
-        candidate_data = production_data
-    elif relationship == "candidate-below-formal":
-        candidate_data = production_data / "candidate"
-        candidate_data.mkdir()
-    else:
-        candidate_data = tmp_path / "overlap-root"
-        candidate_data.mkdir()
-        production_data = candidate_data / "production"
-        production_data.mkdir()
-        runner.compose["services"]["spread-dashboard"]["volumes"][0]["source"] = str(
-            production_data.resolve()
-        )
-    candidate_basis = candidate_data / "database" / "basis" / "basis_quotes.parquet"
-    candidate_basis.parent.mkdir(parents=True, exist_ok=True)
-    candidate_basis.write_bytes(basis.read_bytes())
-    changed = CandidateOptions(
-        **{
-            **options.__dict__,
-            "data_host_root": candidate_data.parent,
-            "candidate_data_host_root": candidate_data,
-            "candidate_data_approved_root": tmp_path,
-            "candidate_basis_sha256": hashlib.sha256(candidate_basis.read_bytes()).hexdigest(),
+            "source": "/var/run/docker.sock",
+            "target": "/var/run/docker.sock",
+            "read_only": True,
         }
     )
-    with pytest.raises(ContractError, match="must not overlap"):
-        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
-
-
-def test_candidate_data_rejects_missing_or_wrong_basis_identity(tmp_path: Path) -> None:
-    options, runner = _options(tmp_path)
-    options, _production_data, basis = _with_candidate_data(options, runner, tmp_path)
-    basis.unlink()
-    with pytest.raises(ContractError, match="basis"):
+    with pytest.raises(ContractError, match="Docker socket"):
         prepare_candidate(options, runner=runner, port_probe=lambda _: True)
-
-    basis.parent.mkdir(parents=True, exist_ok=True)
-    basis.write_bytes(b"different")
-    with pytest.raises(ContractError, match="SHA-256"):
-        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
-
-
-def test_candidate_data_rejects_path_traversal_or_symlink_escape(tmp_path: Path) -> None:
-    options, runner = _options(tmp_path)
-    options, _production_data, basis = _with_candidate_data(options, runner, tmp_path)
-    outside = tmp_path / "outside-data"
-    outside.mkdir()
-    escaped = outside / "database" / "basis" / "basis_quotes.parquet"
-    escaped.parent.mkdir(parents=True)
-    escaped.write_bytes(basis.read_bytes())
-    link = options.candidate_data_approved_root / "escaped-01_data"
-    try:
-        link.symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("directory symlinks are unavailable")
-    changed = CandidateOptions(
-        **{
-            **options.__dict__,
-            "data_host_root": link.parent,
-            "candidate_data_host_root": link,
-            "candidate_basis_sha256": hashlib.sha256(escaped.read_bytes()).hexdigest(),
-        }
-    )
-    with pytest.raises(ContractError, match="approved candidate root"):
-        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
-
-
-def test_candidate_data_rejects_relative_path_traversal(tmp_path: Path) -> None:
-    options, runner = _options(tmp_path)
-    options, _production_data, _basis = _with_candidate_data(options, runner, tmp_path)
-    changed = CandidateOptions(
-        **{
-            **options.__dict__,
-            "candidate_data_host_root": Path("candidate-data/../candidate-data/01_data"),
-        }
-    )
-    with pytest.raises(ContractError, match="must be absolute"):
-        prepare_candidate(changed, runner=runner, port_probe=lambda _: True)
 
 
 def test_dry_run_adds_only_the_approved_import_profit_rw_mount(tmp_path: Path) -> None:
@@ -519,7 +576,14 @@ def test_dry_run_adds_only_the_approved_import_profit_rw_mount(tmp_path: Path) -
 
     compose = json.loads(Path(result["candidate_compose_file"]).read_text(encoding="utf-8"))
     service = compose["services"][CANDIDATE_SERVICE]
-    assert service["volumes"][:-1] == _formal_compose()["services"]["spread-dashboard"]["volumes"]
+    by_target = {mount["target"]: mount for mount in service["volumes"]}
+    assert by_target[CANDIDATE_DATA_CONTAINER_PATH]["read_only"] is True
+    assert Path(by_target[CANDIDATE_OUTPUTS_CONTAINER_PATH]["source"]).is_relative_to(
+        options.output_directory / "runtime"
+    )
+    assert Path(by_target[CANDIDATE_LOGS_CONTAINER_PATH]["source"]).is_relative_to(
+        options.output_directory / "runtime"
+    )
     assert service["volumes"][-1] == {
         "type": "bind",
         "source": str(options.import_profit_runtime_host.resolve()),
@@ -564,16 +628,7 @@ def test_import_profit_runtime_rejects_non_rw_or_non_boolean_read_only(
 ) -> None:
     options, runner = _options(tmp_path)
     options = _with_import_profit_runtime(options, tmp_path)
-    environment = candidate_prepare.parse_production_env(options.production_env_file)
-    candidate = build_candidate_compose(
-        runner.compose,
-        environment,
-        git_commit=options.git_commit,
-        image_ref=options.image_ref,
-        candidate_container_name=options.candidate_container_name,
-        candidate_port=18502,
-        import_profit_runtime_host=options.import_profit_runtime_host.resolve(),
-    )
+    candidate, runtime_mounts = _build_candidate_direct(options, runner)
     candidate["services"][CANDIDATE_SERVICE]["volumes"][-1]["read_only"] = read_only
     with pytest.raises(ContractError):
         candidate_prepare.validate_candidate_compose(
@@ -584,6 +639,10 @@ def test_import_profit_runtime_rejects_non_rw_or_non_boolean_read_only(
             expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
             expected_git_commit=options.git_commit,
             formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_formal_data_host_root=str((options.data_host_root / "01_data").resolve()),
+            expected_candidate_runtime_mounts={
+                target: str(path) for target, path in runtime_mounts.items()
+            },
             expected_import_profit_runtime_host=str(options.import_profit_runtime_host.resolve()),
         )
 
@@ -597,16 +656,7 @@ def test_import_profit_runtime_rejects_wrong_mount_identity(
 ) -> None:
     options, runner = _options(tmp_path)
     options = _with_import_profit_runtime(options, tmp_path)
-    environment = candidate_prepare.parse_production_env(options.production_env_file)
-    candidate = build_candidate_compose(
-        runner.compose,
-        environment,
-        git_commit=options.git_commit,
-        image_ref=options.image_ref,
-        candidate_container_name=options.candidate_container_name,
-        candidate_port=18502,
-        import_profit_runtime_host=options.import_profit_runtime_host.resolve(),
-    )
+    candidate, runtime_mounts = _build_candidate_direct(options, runner)
     candidate["services"][CANDIDATE_SERVICE]["volumes"][-1][field] = value
     with pytest.raises(ContractError, match="runtime mount is invalid"):
         candidate_prepare.validate_candidate_compose(
@@ -617,6 +667,10 @@ def test_import_profit_runtime_rejects_wrong_mount_identity(
             expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
             expected_git_commit=options.git_commit,
             formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_formal_data_host_root=str((options.data_host_root / "01_data").resolve()),
+            expected_candidate_runtime_mounts={
+                target: str(path) for target, path in runtime_mounts.items()
+            },
             expected_import_profit_runtime_host=str(options.import_profit_runtime_host.resolve()),
         )
 
@@ -626,16 +680,7 @@ def test_import_profit_runtime_rejects_wrong_resolved_source(tmp_path: Path) -> 
     options = _with_import_profit_runtime(options, tmp_path)
     wrong_source = tmp_path / "wrong-source"
     wrong_source.mkdir()
-    environment = candidate_prepare.parse_production_env(options.production_env_file)
-    candidate = build_candidate_compose(
-        runner.compose,
-        environment,
-        git_commit=options.git_commit,
-        image_ref=options.image_ref,
-        candidate_container_name=options.candidate_container_name,
-        candidate_port=18502,
-        import_profit_runtime_host=options.import_profit_runtime_host.resolve(),
-    )
+    candidate, runtime_mounts = _build_candidate_direct(options, runner)
     candidate["services"][CANDIDATE_SERVICE]["volumes"][-1]["source"] = str(wrong_source)
     with pytest.raises(ContractError, match="runtime mount is invalid"):
         candidate_prepare.validate_candidate_compose(
@@ -646,6 +691,10 @@ def test_import_profit_runtime_rejects_wrong_resolved_source(tmp_path: Path) -> 
             expected_weather_source="/home/ubuntu/market-data-runtime/weather/processed",
             expected_git_commit=options.git_commit,
             formal_volumes=runner.compose["services"]["spread-dashboard"]["volumes"],
+            expected_formal_data_host_root=str((options.data_host_root / "01_data").resolve()),
+            expected_candidate_runtime_mounts={
+                target: str(path) for target, path in runtime_mounts.items()
+            },
             expected_import_profit_runtime_host=str(options.import_profit_runtime_host.resolve()),
         )
 
@@ -748,20 +797,21 @@ def test_candidate_compose_config_failure_leaves_no_candidate_artifact(tmp_path:
     assert not (options.output_directory / ".candidate-compose.validating.json").exists()
 
 
-def test_import_profit_mount_rejects_existing_target_overlap(tmp_path: Path) -> None:
+def test_candidate_rejects_unapproved_formal_mount_before_runtime_overlap(tmp_path: Path) -> None:
     options, runner = _options(tmp_path)
     options = _with_import_profit_runtime(options, tmp_path)
-    compose = _formal_compose()
+    compose = runner.compose
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
     compose["services"]["spread-dashboard"]["volumes"].append(
         {
             "type": "bind",
-            "source": str(tmp_path / "unrelated"),
+            "source": str(unrelated),
             "target": "/app/runtime",
             "read_only": True,
         }
     )
-    runner.compose = compose
-    with pytest.raises(ContractError, match="conflicts"):
+    with pytest.raises(ContractError, match="unapproved candidate mount"):
         prepare_candidate(options, runner=runner, port_probe=lambda _: True)
 
 
@@ -808,7 +858,12 @@ def test_rejects_missing_spread_service_and_writable_weather_mount(tmp_path: Pat
         prepare_candidate(options, runner=mount_runner)
 
     missing_read_only = _formal_compose()
-    missing_read_only["services"]["spread-dashboard"]["volumes"][0].pop("read_only")
+    weather_mount = next(
+        mount
+        for mount in missing_read_only["services"]["spread-dashboard"]["volumes"]
+        if mount["target"] == "/app/runtime/weather"
+    )
+    weather_mount.pop("read_only")
     options, omitted_runner = _options(tmp_path / "omitted", compose=missing_read_only)
     with pytest.raises(ContractError, match="read-only"):
         prepare_candidate(options, runner=omitted_runner)
@@ -831,22 +886,17 @@ def test_rejects_formal_image_as_candidate_and_candidate_name_collision(tmp_path
         "WEATHER_DATA_DIR": "/app/runtime/weather/current",
     }
     with pytest.raises(ContractError, match="must not reuse"):
-        build_candidate_compose(
-            _formal_compose(),
-            production_environment,
-            git_commit=options.git_commit,
+        _build_candidate_direct(
+            options,
+            runner,
             image_ref=production_environment["SPREAD_IMAGE"],
-            candidate_container_name=options.candidate_container_name,
-            candidate_port=18502,
         )
-    execute_options = CandidateOptions(
-        **{**options.__dict__, "mode": "execute", "execute_build": True, "execute_start": True}
-    )
+    execute_options, execute_runner = _options(tmp_path / "collision", mode="execute")
     with pytest.raises(ContractError, match="container name already exists"):
         prepare_candidate(
             execute_options,
-            runner=runner,
-            runtime=FakeRuntime(runner, existing_container=True),
+            runner=execute_runner,
+            runtime=FakeRuntime(execute_runner, existing_container=True),
             port_probe=lambda _: True,
         )
 
@@ -884,6 +934,19 @@ def test_execute_uses_fake_docker_build_start_and_existing_validator(tmp_path: P
     assert validated == [(options.output_directory / "releases" / options.release_id, result["candidate_health_url"])]
     assert any(command[:2] == ["docker", "build"] for command in runner.commands)
     assert any(command[:2] == ["docker", "compose"] and "up" in command for command in runner.commands)
+    inspected = {mount["target"]: mount for mount in result["candidate_runtime_mounts"]}
+    assert inspected[CANDIDATE_DATA_CONTAINER_PATH]["read_only"] is True
+    assert inspected["/app/runtime/weather"]["read_only"] is True
+    for target in (
+        CANDIDATE_OUTPUTS_CONTAINER_PATH,
+        CANDIDATE_LOGS_CONTAINER_PATH,
+        CANDIDATE_USER_CACHE_CONTAINER_PATH,
+        CANDIDATE_TMP_CONTAINER_PATH,
+    ):
+        assert inspected[target]["read_only"] is False
+        assert Path(inspected[target]["source"]).is_relative_to(
+            options.output_directory / "runtime"
+        )
 
 
 def test_execute_waiting_candidate_probes_runtime_and_never_seals_deployment_plan(
@@ -1014,7 +1077,6 @@ def test_plan_sealer_reads_current_env_and_seals_target_without_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     options, runner = _options(tmp_path, mode="execute")
-    options, _production_data, _basis = _with_candidate_data(options, runner, tmp_path)
     release = options.output_directory / "releases" / options.release_id
     release.mkdir(parents=True)
     manifest = {
@@ -1074,7 +1136,7 @@ def test_plan_sealer_reads_current_env_and_seals_target_without_mutation(
     assert f"MARKET_DATA_GIT_HEAD={options.git_commit}" not in original_text
     assert captured["production_compose_file"] == options.production_compose_file
     assert captured["production_project_dir"] == options.production_compose_file.parent
-    assert str(options.candidate_data_host_root) not in json.dumps(
+    assert str(options.output_directory / "runtime") not in json.dumps(
         captured, default=str, sort_keys=True
     )
     assert captured["schema_path"].name == "deployment_plan.schema.json"
