@@ -27,6 +27,7 @@ def _entry(lock: str, name: str) -> str:
 def test_runtime_input_declares_exact_akshare_platform_dependencies() -> None:
     runtime_input = (ROOT / "requirements.in").read_text(encoding="utf-8")
     assert "akshare==1.18.64" in runtime_input
+    assert "pyarrow==24.0.0" in runtime_input
     assert 'mini-racer==0.14.1 ; platform_system != "Linux"' in runtime_input
     assert 'py-mini-racer==0.6.0 ; platform_system == "Linux"' in runtime_input
     assert 'akracer==0.0.14 ; platform_system == "Linux"' in runtime_input
