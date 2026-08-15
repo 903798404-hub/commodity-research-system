@@ -24,6 +24,7 @@ from navigation import (
     NAVIGATION_GROUPS,
     PALM_OIL_WEATHER_PAGE_TITLE,
     RAPESEED_WEATHER_PAGE_TITLE,
+    RESEARCH_OVERVIEW_PAGE_TITLE,
     SOYBEAN_CROP_PAGE_TITLE,
     SOYBEAN_WEATHER_PAGE_TITLE,
     USDA_PAGE_TITLE,
@@ -32,6 +33,7 @@ from navigation import (
 from soybean_weekly_page import render_soybean_weekly_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
+from research_overview_page import render_research_overview
 
 
 PAGE_TITLE = "油脂油料价差动态看板"
@@ -567,6 +569,8 @@ def render_selected_workspace_page(selected_page: str) -> None:
 
     if selected_page == "首页":
         render_home(REPORT_CATALOG_FILE)
+    elif selected_page == RESEARCH_OVERVIEW_PAGE_TITLE:
+        render_research_overview()
     elif selected_page == "基差/一口价":
         render_basis_page(BASIS_DATABASE_FILE, BASIS_RUNTIME_FALLBACK_FILE)
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:

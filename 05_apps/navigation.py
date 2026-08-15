@@ -12,6 +12,7 @@ RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
 INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 IMPORT_PROFIT_ROUTE_ID = "import_profit"
+RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,13 @@ NAVIGATION_GROUPS = (
     NavigationGroup(
         "工作台",
         (
+            NavigationItem(
+                "research_overview",
+                RESEARCH_OVERVIEW_PAGE_TITLE,
+                RESEARCH_OVERVIEW_PAGE_TITLE,
+                "chart",
+                "按各模块独立时间身份汇总确定性的最新变化",
+            ),
             NavigationItem(
                 "home",
                 "工作台首页",

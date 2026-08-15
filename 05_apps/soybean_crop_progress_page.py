@@ -19,6 +19,9 @@ from agri_research_agent.pipelines.soybean_crop_comparison import (  # noqa: E40
     load_display_config,
     style_comparison_table,
 )
+from agri_research_agent.summary_engine.crop import build_crop_summary  # noqa: E402
+from agri_research_agent.summary_engine.io import file_identity  # noqa: E402
+from summary_panel import render_summary_panel  # noqa: E402
 
 
 PROCESSED_DIR = (
@@ -133,6 +136,12 @@ def render_soybean_crop_progress_page() -> None:
         condition_file.stat().st_mtime_ns,
     )
     comparisons = build_dashboard_comparisons(progress, condition, config)
+    try:
+        render_summary_panel(build_crop_summary(progress, condition, source_identity={
+            "progress": file_identity(progress_file), "condition": file_identity(condition_file)
+        }, display_config=config))
+    except (OSError, ValueError) as exc:
+        st.warning(f"美豆种植生长摘要暂不可用：{exc}")
 
     tabs = st.tabs([comparison.definition.tab_label for comparison in comparisons])
     for tab, comparison in zip(tabs, comparisons, strict=True):

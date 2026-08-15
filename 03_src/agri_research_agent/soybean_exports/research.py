@@ -19,6 +19,69 @@ PSD_EXPORT_ROW = "出口量"
 SALES_PROGRESS_NULL_REASON = "年度出口预测暂不可用"
 
 
+def format_export_pct(value: Any, *, signed: bool = True) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{float(value):+.1f}%" if signed else f"{float(value):.1f}%"
+
+
+def format_export_wan(value: Any) -> str:
+    return "—" if value is None or pd.isna(value) else f"{float(value) / 10_000:,.1f} 万吨"
+
+
+def export_market_year_label(market_year_end: int) -> str:
+    return f"{int(market_year_end) - 1}/{str(int(market_year_end))[-2:]}"
+
+
+def format_soybean_export_weekly_observation(
+    payload: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Format the page's deterministic weekly observation from shared facts."""
+
+    lines: list[str] = []
+    fgis = payload.get("fgis")
+    fas = payload.get("fas")
+    if fgis:
+        item = fgis["summary"]
+        previous = format_export_wan(item.get("previous_week_world_mt"))
+        revision = (
+            f"前一周初值 {format_export_wan(item['previous_week_initial_mt'])}。"
+            if item.get("previous_week_initial_observed")
+            else "尚无由本系统观察到的前一周初值/修订证据。"
+        )
+        lines.append(
+            f"**出口检验**  截至 {item['latest_week']} （MY {item['market_year_label']} 第{item['my_week']}周），"
+            f"本周 World {format_export_wan(item['weekly_world_mt'])}，前一周 {previous}；"
+            f"累计 {format_export_wan(item['cumulative_world_mt'])}，累计同比 {format_export_pct(item['cumulative_yoy_pct'])}。"
+            f"中国本周 {format_export_wan(item['weekly_china_mt'])}，占比 {format_export_pct(item['china_share_pct'], signed=False)}。{revision}"
+        )
+    else:
+        lines.append("**出口检验**  FGIS 数据暂不可用。")
+    if fas:
+        current = fas["current_summary"]
+        next_item = fas["next_summary"]
+        progress_sentence = (
+            f"销售完成率 {format_export_pct(current['sales_progress_pct'], signed=False)}。"
+            if current.get("sales_progress_pct") is not None
+            else f"{current.get('sales_progress_null_reason') or SALES_PROGRESS_NULL_REASON}。"
+        )
+        lines.append(
+            f"**本年度销售**  截至 {current['latest_week']} （Report MY {current['report_market_year_label']} 第{current['report_week']}周），"
+            f"本周净销售 {format_export_wan(current['world_weekly_net_sales_mt'])}，累计销售 {format_export_wan(current['world_total_commitments_mt'])}，"
+            f"累计出口 {format_export_wan(current['world_accumulated_exports_mt'])}，待执行销售 {format_export_wan(current['world_outstanding_sales_mt'])}，"
+            f"{progress_sentence}"
+        )
+        lines.append(
+            f"**下一年度销售**  在 Report MY {next_item['report_market_year_label']} 第{next_item['report_week']}周，"
+            f"对目标 MY {export_market_year_label(next_item['target_market_year_end'])} 的本周净销售为 {format_export_wan(next_item['world_weekly_net_sales_mt'])}，"
+            f"累计预售 {format_export_wan(next_item['world_total_presales_mt'])}；中国本周净销售 {format_export_wan(next_item['china_weekly_net_sales_mt'])}，"
+            f"非中国本周净销售 {format_export_wan(next_item['non_china_weekly_net_sales_mt'])}，中国累计预售 {format_export_wan(next_item['china_total_presales_mt'])}。"
+        )
+    else:
+        lines.append("**本年度/下一年度销售**  FAS 数据暂不可用。")
+    return tuple(lines)
+
+
 def read_usda_psd_soybean_exports_mt(
     usda_project_root: Path, *, target_market_year_end: int
 ) -> dict[str, Any]:

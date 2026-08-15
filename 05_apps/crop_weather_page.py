@@ -27,6 +27,8 @@ from agri_research_agent.weather.crop_weather import (  # noqa: E402
     weekly_metric_summary,
     weighted_values,
 )
+from agri_research_agent.summary_engine.weather_cache import load_weather_summary_cached  # noqa: E402
+from summary_panel import render_summary_panel  # noqa: E402
 
 
 CONFIG_FILE = PROJECT_ROOT / "02_configs" / "soybean_weather_us.yaml"
@@ -1060,6 +1062,16 @@ def render_weather_page(route_key: str = "USA") -> None:
     if not module_keys:
         st.info("当前国家尚未配置可展示的天气研究模块。")
         return
+    try:
+        with st.spinner("天气摘要加载中…"):
+            summary = load_weather_summary_cached(
+                data_path,
+                config_file,
+                _normal_path(files),
+            )
+        render_summary_panel(summary)
+    except (OSError, ValueError, ImportError) as exc:
+        st.warning(f"天气摘要暂不可用：{exc}")
     module_key = st.radio(
         "页面章节",
         module_keys,
@@ -1136,7 +1148,7 @@ def render_weather_page(route_key: str = "USA") -> None:
     elif kind == "temperature":
         _render_grid(records, config, kind=kind, columns=2, metric=metric)
     else:
-        st.caption("土壤墒情单位：原始值，单位待确认；本模块不展示预测曲线。")
+        st.caption("土壤墒情：0—100厘米土层土壤含水率，单位%；本模块不展示预测曲线。")
         _render_grid(records, config, kind=kind, columns=3, metric=metric)
 
 

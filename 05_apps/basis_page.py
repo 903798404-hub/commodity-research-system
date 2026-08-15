@@ -148,6 +148,36 @@ def prepare_cash_price_data(dataframe: pd.DataFrame) -> pd.DataFrame:
     return prepared
 
 
+def prepare_latest_basis_table(summary: object) -> pd.DataFrame:
+    """Render structured Summary facts without recalculating basis comparisons."""
+    payload = summary.to_dict() if hasattr(summary, "to_dict") else dict(summary)
+    rows = []
+    for quote in payload.get("facts", {}).get("quotes", []):
+        comparison = (
+            ("0" if quote["change"] == 0 else f'{quote["change"]:+g}')
+            if quote.get("change") is not None
+            else str(quote.get("missing_reason") or "无前值")
+        )
+        row = {
+            "品种": quote.get("commodity"),
+            "地区": quote.get("region"),
+            "报价类型": quote.get("quote_type"),
+            "交货月": quote.get("delivery_month"),
+            "期货合约": quote.get("futures_contract"),
+            "现货价": "—" if quote.get("cash_price") is None else f'{quote["cash_price"]:g}',
+            "期货价": "—" if quote.get("futures_price") is None else f'{quote["futures_price"]:g}',
+            "基差": f'{quote["current_basis"]:g}（{comparison}）',
+        }
+        if quote.get("quote_point"):
+            row = {"品种": row.pop("品种"), "地区": row.pop("地区"), "工厂/报价点": quote["quote_point"], **row}
+        rows.append(row)
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result["__品种顺序"] = result["品种"].map(lambda value: _commodity_sort_key(str(value)))
+        result = result.sort_values(["__品种顺序", "地区"], kind="mergesort").drop(columns="__品种顺序").reset_index(drop=True)
+    return result
+
+
 def _commodity_sort_key(commodity: str) -> tuple[int, str]:
     try:
         return COMMODITY_ORDER.index(commodity), commodity
@@ -844,11 +874,9 @@ def render_basis_page(
     runtime_fallback_path: Path,
 ) -> None:
     st.markdown(
-        "<h1 style='text-align:center;'>国内现货基差、一口价及价差</h1>",
+        "<h1 style='text-align:center;'>国内基差研究</h1>",
         unsafe_allow_html=True,
     )
-    _render_upload_update()
-
     if formal_database_path.exists():
         database_path = formal_database_path
         source_label = "正式数据"
@@ -867,34 +895,28 @@ def render_basis_page(
         st.warning(f"基差数据库读取失败：{exc}")
         return
 
+    try:
+        from agri_research_agent.summary_engine.basis import build_basis_summary
+        from agri_research_agent.summary_engine.io import file_identity
+        summary = build_basis_summary(data, source_identity=file_identity(database_path))
+    except (OSError, ValueError, KeyError) as exc:
+        st.warning(f"基差摘要暂不可用：{exc}")
+        summary = None
+
     latest_date = data["date"].max()
-    st.success(
-        f"当前读取：{source_label}（{database_path.name}），"
-        f"共 {len(data)} 行。"
-    )
     if source_label == "正式数据":
         st.caption(
-            "数据源：2026-06-01前为历史基差库；"
-            "2026-06-01起为basis_price现货基差。"
+            "数据源：正式国内基差数据库｜"
+            f"更新至 {latest_date:%Y-%m-%d}｜"
+            "2026-06-01前为历史数据库，之后为basis_price现货基差"
         )
-    if source_label == "正式数据" and runtime_fallback_path.exists():
-        try:
-            fallback_rows = len(pd.read_parquet(runtime_fallback_path))
-            st.success(
-                "本地回退文件可用（当前未读取），"
-                f"共 {fallback_rows} 行。"
-            )
-        except Exception:  # noqa: BLE001
-            pass
-    status_columns = st.columns(3)
-    status_columns[0].metric("数据状态", source_label)
-    status_columns[1].metric("总行数", f"{len(data):,}")
-    status_columns[2].metric(
-        "最新日期",
-        latest_date.strftime("%Y-%m-%d")
-        if pd.notna(latest_date)
-        else "-",
-    )
+    else:
+        st.caption(f"数据源：本地回退数据｜更新至 {latest_date:%Y-%m-%d}")
+    st.subheader("最新基差")
+    if summary is not None:
+        latest_table = prepare_latest_basis_table(summary)
+        st.dataframe(latest_table, hide_index=True, width="stretch")
+        st.caption(summary.detail_text)
     years = _latest_three_years(data)
 
     basis_tab, cash_tab, spread_tab = st.tabs(

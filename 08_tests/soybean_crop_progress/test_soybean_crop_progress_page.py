@@ -57,6 +57,11 @@ def test_main_workspace_renders_six_soybean_tabs_and_harvested_empty_state() -> 
         item.value for item in app.caption if item.value == MATCHING_METHODOLOGY_NOTE
     ]
     assert len(matching_notes) == 5
+    visible_summary = "\n".join(str(item.value) for item in app.markdown)
+    assert "### 综合" in visible_summary
+    assert "### 重点变化" not in visible_summary
+    assert "### 当前有效指标" not in visible_summary
+    assert "### 州级变化" not in visible_summary
 
 
 def test_parquet_cache_key_changes_when_file_mtime_changes(tmp_path: Path) -> None:

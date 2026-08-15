@@ -19,6 +19,10 @@ if str(SRC_DIR) not in sys.path:
 
 from agri_research_agent.soybean_exports.research import (  # noqa: E402
     SALES_PROGRESS_NULL_REASON,
+    export_market_year_label as _market_year_label,
+    format_export_pct as _format_pct,
+    format_export_wan as _format_wan,
+    format_soybean_export_weekly_observation,
     load_soybean_export_page_payload,
 )
 
@@ -72,6 +76,14 @@ def load_export_page_payload(
     )
 
 
+def load_current_export_page_payload() -> dict[str, Any]:
+    """Load the current page payload through the one identity-aware cache."""
+
+    runtime_root = resolve_export_runtime_root()
+    paths = _consumer_paths(runtime_root)
+    return load_export_page_payload(str(runtime_root), *(_mtime(path) for path in paths))
+
+
 def render_soybean_exports_page(payload: dict[str, Any] | None = None) -> None:
     """Render one source-tolerant page; all business facts arrive precomputed."""
 
@@ -81,11 +93,7 @@ def render_soybean_exports_page(payload: dict[str, Any] | None = None) -> None:
         "USDA FGIS 出口检验与 FAS 出口销售的周度研究视图；两个来源独立更新、独立降级。"
     )
     if payload is None:
-        runtime_root = resolve_export_runtime_root()
-        paths = _consumer_paths(runtime_root)
-        payload = load_export_page_payload(
-            str(runtime_root), *(_mtime(path) for path in paths)
-        )
+        payload = load_current_export_page_payload()
 
     _render_source_status(payload)
     _render_kpis(payload)
@@ -556,47 +564,9 @@ def _render_kpis(payload: dict[str, Any]) -> None:
 
 def _render_weekly_observation(payload: dict[str, Any]) -> None:
     st.markdown("### 本周观察")
-    fgis = payload.get("fgis")
-    fas = payload.get("fas")
     with st.container(border=True):
-        if fgis:
-            item = fgis["summary"]
-            previous = _format_wan(item.get("previous_week_world_mt"))
-            revision = (
-                f"前一周初值 {_format_wan(item['previous_week_initial_mt'])}。"
-                if item.get("previous_week_initial_observed")
-                else "尚无由本系统观察到的前一周初值/修订证据。"
-            )
-            st.markdown(
-                f"**出口检验**  截至 {item['latest_week']} （MY {item['market_year_label']} 第{item['my_week']}周），"
-                f"本周 World {_format_wan(item['weekly_world_mt'])}，前一周 {previous}；"
-                f"累计 {_format_wan(item['cumulative_world_mt'])}，累计同比 {_format_pct(item['cumulative_yoy_pct'])}。"
-                f"中国本周 {_format_wan(item['weekly_china_mt'])}，占比 {_format_pct(item['china_share_pct'], signed=False)}。{revision}"
-            )
-        else:
-            st.markdown("**出口检验**  FGIS 数据暂不可用。")
-        if fas:
-            current = fas["current_summary"]
-            next_item = fas["next_summary"]
-            progress_sentence = (
-                f"销售完成率 {_format_pct(current['sales_progress_pct'], signed=False)}。"
-                if current.get("sales_progress_pct") is not None
-                else f"{current.get('sales_progress_null_reason') or SALES_PROGRESS_NULL_REASON}。"
-            )
-            st.markdown(
-                f"**本年度销售**  截至 {current['latest_week']} （Report MY {current['report_market_year_label']} 第{current['report_week']}周），"
-                f"本周净销售 {_format_wan(current['world_weekly_net_sales_mt'])}，累计销售 {_format_wan(current['world_total_commitments_mt'])}，"
-                f"累计出口 {_format_wan(current['world_accumulated_exports_mt'])}，待执行销售 {_format_wan(current['world_outstanding_sales_mt'])}，"
-                f"{progress_sentence}"
-            )
-            st.markdown(
-                f"**下一年度销售**  在 Report MY {next_item['report_market_year_label']} 第{next_item['report_week']}周，"
-                f"对目标 MY {_market_year_label(next_item['target_market_year_end'])} 的本周净销售为 {_format_wan(next_item['world_weekly_net_sales_mt'])}，"
-                f"累计预售 {_format_wan(next_item['world_total_presales_mt'])}；中国本周净销售 {_format_wan(next_item['china_weekly_net_sales_mt'])}，"
-                f"非中国本周净销售 {_format_wan(next_item['non_china_weekly_net_sales_mt'])}，中国累计预售 {_format_wan(next_item['china_total_presales_mt'])}。"
-            )
-        else:
-            st.markdown("**本年度/下一年度销售**  FAS 数据暂不可用。")
+        for line in format_soybean_export_weekly_observation(payload):
+            st.markdown(line)
 
 
 def _render_next_year_numbers(summary: dict[str, Any]) -> None:
@@ -804,20 +774,6 @@ def _consumer_paths(runtime_root: Path) -> tuple[Path, ...]:
 
 def _mtime(path: Path) -> int | None:
     return path.stat().st_mtime_ns if path.is_file() else None
-
-
-def _format_pct(value: Any, *, signed: bool = True) -> str:
-    if value is None or pd.isna(value):
-        return "—"
-    return f"{float(value):+.1f}%" if signed else f"{float(value):.1f}%"
-
-
-def _format_wan(value: Any) -> str:
-    return "—" if value is None or pd.isna(value) else f"{float(value) / 10_000:,.1f} 万吨"
-
-
-def _market_year_label(market_year_end: int) -> str:
-    return f"{int(market_year_end) - 1}/{str(int(market_year_end))[-2:]}"
 
 
 def _inject_export_styles() -> None:

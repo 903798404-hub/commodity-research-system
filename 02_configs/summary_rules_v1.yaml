@@ -1,0 +1,77 @@
+schema_version: 1
+rule_version: summary-rules-v1
+calculation_version: summary-calc-v1
+
+freshness_days:
+  weather: 10
+  basis: 7
+  soybean_crop: 14
+
+rainfall:
+  neutral_pct: 20
+  moderate_pct: 40
+  strong_pct: 60
+  absolute_guard_mm: 5
+
+temperature_max:
+  neutral_c: 1
+  moderate_c: 2
+  strong_c: 3
+
+model_consistency:
+  close_difference_pct_points: 25
+
+soil_moisture:
+  unit: "%"
+  depth: 0-100cm
+  classification: classification_pending
+
+basis:
+  comparison_key: [commodity, region, quote_type, delivery_month, futures_contract]
+  optional_quote_point_fields: [quote_point, factory, plant, city]
+  top_changes: 5
+  display_names:
+    一豆: 豆油
+    24度: 棕榈油
+    三菜: 菜油
+    豆粕: 豆粕
+    菜粕: 菜粕
+
+soybean_crop:
+  metrics:
+    - PLANTED
+    - EMERGED
+    - BLOOMING
+    - SETTING_PODS
+    - FULLY_PODDED
+    - COLORING
+    - DROPPING_LEAVES
+    - MATURE
+    - HARVESTED
+    - GOOD_EXCELLENT
+  cumulative_metrics: [PLANTED, EMERGED, BLOOMING, SETTING_PODS, FULLY_PODDED, COLORING, DROPPING_LEAVES, MATURE, HARVESTED]
+  state_weights_role: display_only
+  additional_display_names:
+    FULLY_PODDED: 完全结荚率
+    COLORING: 转色率
+    DROPPING_LEAVES: 落叶率
+    MATURE: 成熟率
+  history_direction_pct_points: 2
+  focus_change_pct_points: 2
+  focus_target: 3
+  max_focus_metrics: 4
+  state_change_pct_points: 3
+  max_state_anomalies: 5
+  season_stages:
+    - name: late_season
+      trigger_metrics: [HARVESTED, MATURE, DROPPING_LEAVES, COLORING, FULLY_PODDED]
+      core_progress_metrics: [HARVESTED, MATURE, DROPPING_LEAVES]
+      priority_metrics: [GOOD_EXCELLENT, HARVESTED, MATURE, DROPPING_LEAVES, COLORING, FULLY_PODDED, SETTING_PODS, BLOOMING]
+    - name: reproductive
+      trigger_metrics: [SETTING_PODS, BLOOMING]
+      core_progress_metrics: [BLOOMING, SETTING_PODS]
+      priority_metrics: [GOOD_EXCELLENT, SETTING_PODS, BLOOMING, EMERGED, PLANTED]
+    - name: establishment
+      trigger_metrics: [EMERGED, PLANTED]
+      core_progress_metrics: [PLANTED, EMERGED]
+      priority_metrics: [GOOD_EXCELLENT, EMERGED, PLANTED]

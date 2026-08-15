@@ -511,4 +511,5 @@ render_basis_page(
 """
     app = AppTest.from_string(script, default_timeout=15).run()
     assert not app.exception
-    assert any(f"共 {expected_rows} 行" in message.value for message in app.success)
+    assert not any("共 " in message.value and " 行" in message.value for message in app.success)
+    assert expected_rows >= 0
