@@ -394,11 +394,49 @@ class DockerReleaseRuntime:
             payload,
             f"container {container_name}",
         )
-        return {
+        record = {
             "image_id": image_id,
             "config_image": config_image,
             "runtime_git_commit": runtime_git_commit,
         }
+        if "Mounts" not in payload:
+            return record
+        raw_mounts = payload["Mounts"]
+        if not isinstance(raw_mounts, list):
+            raise ContractError(f"container {container_name} mounts are invalid")
+        mounts: list[dict[str, Any]] = []
+        for mount in raw_mounts:
+            if not isinstance(mount, dict):
+                raise ContractError(f"container {container_name} mount is invalid")
+            mount_type = mount.get("Type")
+            source = mount.get("Source")
+            destination = mount.get("Destination")
+            rw = mount.get("RW")
+            if (
+                mount_type not in {"bind", "volume", "tmpfs", "npipe", "cluster"}
+                or not isinstance(source, str)
+                or not isinstance(destination, str)
+                or not isinstance(rw, bool)
+            ):
+                raise ContractError(f"container {container_name} mount fields are invalid")
+            mounts.append(
+                {
+                    "type": mount_type,
+                    "source": source,
+                    "destination": destination,
+                    "read_only": not rw,
+                }
+            )
+        record["mounts"] = sorted(
+            mounts,
+            key=lambda item: (
+                item["type"],
+                item["source"],
+                item["destination"],
+                item["read_only"],
+            ),
+        )
+        return record
 
     def formal_container_identity(self, container_name: str) -> dict[str, Any]:
         if container_name not in FORMAL_CONTAINER_NAMES:

@@ -31,13 +31,15 @@ from prepare_spread_candidate import (  # noqa: E402
     select_candidate_port,
     validate_candidate_runtime_mounts,
 )
-from release_contract import CommandRunner, ContractError  # noqa: E402
+from release_contract import CommandRunner, ContractError, DockerReleaseRuntime  # noqa: E402
 
 
 IMAGE_ID = "sha256:" + "a" * 64
 CONTAINER_ID = "b" * 64
 SOURCE = "https://github.com/903798404-hub/commodity-research-system"
 BUILD_TIME = "2026-07-25T12:00:00Z"
+RUNTIME_GIT_COMMIT = "b704a2933fecc667695d5a31065abeea1fda7492"
+RUNTIME_IMAGE_REF = "market-data-spread-dashboard:spread-20260723-b704a2933fec-b01"
 
 
 def _run_git(repository: Path, *args: str) -> str:
@@ -226,8 +228,12 @@ class FakeRuntime:
     def container_record(self, container_name: str):
         if container_name != "spread-dashboard":
             if container_name.startswith("spread-dashboard-candidate-") and self.runner.rendered_candidate:
-                volumes = self.runner.rendered_candidate["services"][CANDIDATE_SERVICE]["volumes"]
+                service = self.runner.rendered_candidate["services"][CANDIDATE_SERVICE]
+                volumes = service["volumes"]
                 return {
+                    "image_id": IMAGE_ID,
+                    "config_image": service["image"],
+                    "runtime_git_commit": service["environment"]["MARKET_DATA_GIT_HEAD"],
                     "mounts": [
                         {
                             "type": mount["type"],
@@ -241,9 +247,224 @@ class FakeRuntime:
             raise ContractError(f"unexpected container record: {container_name}")
         return {
             "image_id": "sha256:" + "d" * 64,
-            "config_image": "market-data-spread-dashboard:spread-20260723-b704a2933fec-b01",
-            "runtime_git_commit": "b704a2933fecc667695d5a31065abeea1fda7492",
+            "config_image": RUNTIME_IMAGE_REF,
+            "runtime_git_commit": RUNTIME_GIT_COMMIT,
         }
+
+
+class DockerInspectFixtureRunner:
+    def __init__(self, container_name: str, payload: dict) -> None:
+        self.container_name = container_name
+        self.payload = payload
+
+    def run(self, command, *, cwd=None, env=None):
+        del cwd, env
+        assert command == ["docker", "inspect", self.container_name]
+        return json.dumps([self.payload])
+
+
+def _docker_mount(source: Path | str, destination: str, *, read_only: bool) -> dict:
+    return {
+        "Type": "bind",
+        "Source": str(source.resolve()) if isinstance(source, Path) else source,
+        "Destination": destination,
+        "Mode": "ro" if read_only else "rw",
+        "RW": not read_only,
+        "Propagation": "rprivate",
+    }
+
+
+def _real_runtime_mount_fixture(
+    tmp_path: Path,
+) -> tuple[dict, Path, Path, dict[str, Path]]:
+    formal_data = tmp_path / "formal-data" / "01_data"
+    weather = tmp_path / "weather"
+    formal_data.mkdir(parents=True)
+    weather.mkdir()
+    runtime_mounts = candidate_runtime_paths(tmp_path / "candidate-output")
+    for path in runtime_mounts.values():
+        path.mkdir(parents=True)
+    mounts = [
+        _docker_mount(formal_data, CANDIDATE_DATA_CONTAINER_PATH, read_only=True),
+        _docker_mount(weather, "/app/runtime/weather", read_only=True),
+        *[
+            _docker_mount(path, target, read_only=False)
+            for target, path in runtime_mounts.items()
+        ],
+    ]
+    payload = {
+        "Image": IMAGE_ID,
+        "Config": {
+            "Image": RUNTIME_IMAGE_REF,
+            "Env": [f"MARKET_DATA_GIT_HEAD={RUNTIME_GIT_COMMIT}"],
+        },
+        "Mounts": mounts,
+    }
+    return payload, formal_data, weather, runtime_mounts
+
+
+def _runtime_record(container_name: str, payload: dict) -> dict:
+    return DockerReleaseRuntime(
+        runner=DockerInspectFixtureRunner(container_name, payload)
+    ).container_record(container_name)
+
+
+def test_real_docker_inspect_mounts_pass_candidate_runtime_contract(
+    tmp_path: Path,
+) -> None:
+    payload, formal_data, weather, runtime_mounts = _real_runtime_mount_fixture(
+        tmp_path
+    )
+
+    record = _runtime_record("spread-dashboard-candidate-real-c01", payload)
+    evidence = validate_candidate_runtime_mounts(
+        record,
+        formal_data_host_root=formal_data,
+        weather_host_root=weather,
+        candidate_runtime_mounts=runtime_mounts,
+    )
+
+    assert record["image_id"] == IMAGE_ID
+    assert record["config_image"] == RUNTIME_IMAGE_REF
+    assert record["runtime_git_commit"] == RUNTIME_GIT_COMMIT
+    by_target = {mount["target"]: mount for mount in evidence}
+    assert by_target[CANDIDATE_DATA_CONTAINER_PATH]["read_only"] is True
+    assert by_target["/app/runtime/weather"]["read_only"] is True
+    for target in (
+        CANDIDATE_OUTPUTS_CONTAINER_PATH,
+        CANDIDATE_LOGS_CONTAINER_PATH,
+        CANDIDATE_USER_CACHE_CONTAINER_PATH,
+        CANDIDATE_TMP_CONTAINER_PATH,
+    ):
+        assert by_target[target]["read_only"] is False
+
+
+def test_real_docker_inspect_writable_production_data_fails(
+    tmp_path: Path,
+) -> None:
+    payload, formal_data, weather, runtime_mounts = _real_runtime_mount_fixture(
+        tmp_path
+    )
+    data_mount = next(
+        mount
+        for mount in payload["Mounts"]
+        if mount["Destination"] == CANDIDATE_DATA_CONTAINER_PATH
+    )
+    data_mount["Mode"] = "rw"
+    data_mount["RW"] = True
+
+    record = _runtime_record("spread-dashboard-candidate-real-c01", payload)
+    with pytest.raises(ContractError, match="mount contract failed"):
+        validate_candidate_runtime_mounts(
+            record,
+            formal_data_host_root=formal_data,
+            weather_host_root=weather,
+            candidate_runtime_mounts=runtime_mounts,
+        )
+
+
+def test_real_docker_inspect_missing_mount_evidence_fails(tmp_path: Path) -> None:
+    payload, formal_data, weather, runtime_mounts = _real_runtime_mount_fixture(
+        tmp_path
+    )
+    payload.pop("Mounts")
+
+    record = _runtime_record("spread-dashboard-candidate-real-c01", payload)
+    with pytest.raises(ContractError, match="mount evidence is missing"):
+        validate_candidate_runtime_mounts(
+            record,
+            formal_data_host_root=formal_data,
+            weather_host_root=weather,
+            candidate_runtime_mounts=runtime_mounts,
+        )
+
+
+def test_real_docker_inspect_missing_required_mount_fails(tmp_path: Path) -> None:
+    payload, formal_data, weather, runtime_mounts = _real_runtime_mount_fixture(
+        tmp_path
+    )
+    payload["Mounts"] = [
+        mount
+        for mount in payload["Mounts"]
+        if mount["Destination"] != CANDIDATE_LOGS_CONTAINER_PATH
+    ]
+
+    record = _runtime_record("spread-dashboard-candidate-real-c01", payload)
+    with pytest.raises(ContractError, match="mount set differs"):
+        validate_candidate_runtime_mounts(
+            record,
+            formal_data_host_root=formal_data,
+            weather_host_root=weather,
+            candidate_runtime_mounts=runtime_mounts,
+        )
+
+
+def test_real_docker_inspect_unknown_writable_mount_fails(tmp_path: Path) -> None:
+    payload, formal_data, weather, runtime_mounts = _real_runtime_mount_fixture(
+        tmp_path
+    )
+    unknown_production = tmp_path / "formal-data" / "unexpected"
+    unknown_production.mkdir()
+    payload["Mounts"].append(
+        _docker_mount(
+            unknown_production,
+            "/app/unapproved-production-data",
+            read_only=False,
+        )
+    )
+
+    record = _runtime_record("spread-dashboard-candidate-real-c01", payload)
+    with pytest.raises(ContractError, match="mount set differs"):
+        validate_candidate_runtime_mounts(
+            record,
+            formal_data_host_root=formal_data,
+            weather_host_root=weather,
+            candidate_runtime_mounts=runtime_mounts,
+        )
+
+
+def test_fake_and_real_runtime_container_records_share_mount_contract(
+    tmp_path: Path,
+) -> None:
+    options, runner = _options(tmp_path)
+    candidate, _ = _build_candidate_direct(options, runner)
+    runner.rendered_candidate = candidate
+    fake_record = FakeRuntime(runner).container_record(
+        options.candidate_container_name
+    )
+    service = candidate["services"][CANDIDATE_SERVICE]
+    payload = {
+        "Image": IMAGE_ID,
+        "Config": {
+            "Image": service["image"],
+            "Env": [
+                f'MARKET_DATA_GIT_HEAD={service["environment"]["MARKET_DATA_GIT_HEAD"]}'
+            ],
+        },
+        "Mounts": [
+            _docker_mount(
+                mount["source"],
+                mount["target"],
+                read_only=normalized_mount_mode(mount) == "ro",
+            )
+            for mount in service["volumes"]
+        ],
+    }
+    real_record = _runtime_record(options.candidate_container_name, payload)
+
+    assert set(fake_record) == set(real_record) == {
+        "image_id",
+        "config_image",
+        "runtime_git_commit",
+        "mounts",
+    }
+    assert {
+        (item["type"], item["source"], item["destination"], item["read_only"])
+        for item in fake_record["mounts"]
+    } == {
+        (item["type"], item["source"], item["destination"], item["read_only"])
+        for item in real_record["mounts"]
+    }
 
 
 def _options(
