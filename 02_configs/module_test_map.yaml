@@ -1,0 +1,53 @@
+schema_version: 1
+modules:
+  market_data.contracts:
+    code_paths: [03_src/agri_research_agent/market_data/contracts.py]
+    direct_tests: [08_tests/market_data/test_contracts.py]
+    impact_tests: [08_tests/market_data/test_quotes.py, 08_tests/market_data/test_providers_akshare.py]
+    dependents: [market_data.quotes, market_data.providers.akshare]
+    full_regression_when_changed: false
+    contract: true
+  market_data.quotes:
+    code_paths: [03_src/agri_research_agent/market_data/quotes.py]
+    direct_tests: [08_tests/market_data/test_quotes.py]
+    impact_tests: [08_tests/market_data/test_loader.py, 08_tests/market_data/test_providers_akshare.py]
+    dependents: [market_data.loader, market_data.providers.akshare]
+    full_regression_when_changed: false
+    contract: true
+  market_data.calendars:
+    code_paths: [03_src/agri_research_agent/market_data/calendars.py]
+    direct_tests: [08_tests/market_data/test_calendars.py]
+    impact_tests: []
+    dependents: []
+    full_regression_when_changed: false
+    contract: true
+  market_data.loader:
+    code_paths: [03_src/agri_research_agent/market_data/loader.py]
+    direct_tests: [08_tests/market_data/test_loader.py]
+    impact_tests: [08_tests/market_data/test_quotes.py]
+    dependents: []
+    full_regression_when_changed: false
+  market_data.providers.akshare:
+    code_paths: [03_src/agri_research_agent/market_data/providers/akshare.py]
+    direct_tests: [08_tests/market_data/test_providers_akshare.py]
+    impact_tests: [08_tests/market_data/test_contracts.py, 08_tests/market_data/test_quotes.py]
+    dependents: []
+    full_regression_when_changed: false
+  shared.file_identity:
+    code_paths: [03_src/agri_research_agent/shared/file_identity.py]
+    direct_tests: [08_tests/shared/test_file_identity.py]
+    impact_tests: [08_tests/shared/test_atomic_storage.py, 08_tests/shared/test_runtime_context.py]
+    dependents: [shared.atomic_storage, shared.runtime_context]
+    full_regression_when_changed: false
+  shared.atomic_storage:
+    code_paths: [03_src/agri_research_agent/shared/atomic_storage.py]
+    direct_tests: [08_tests/shared/test_atomic_storage.py]
+    impact_tests: [08_tests/shared/test_runtime_context.py]
+    dependents: []
+    full_regression_when_changed: false
+  shared.runtime_context:
+    code_paths: [03_src/agri_research_agent/shared/runtime_context.py]
+    direct_tests: [08_tests/shared/test_runtime_context.py]
+    impact_tests: [08_tests/shared/test_atomic_storage.py]
+    dependents: []
+    full_regression_when_changed: true
