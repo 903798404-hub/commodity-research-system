@@ -9,6 +9,27 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from agri_research_agent.domains.spreads.calculation import add_plot_value
+from agri_research_agent.domains.spreads.history import (
+    FIVE_YEAR_MEAN_LABEL,
+    FIVE_YEAR_MEAN_SMOOTH_WINDOW,
+    five_year_mean_seasons,
+    is_forbidden_mean_trace_name,
+    is_non_season_name,
+    latest_plot_value,
+    latest_summary,
+    prepare_history_view,
+    season_sort_key,
+)
+from agri_research_agent.domains.spreads.parsing import (
+    BOARD_OPTIONS,
+    classify_board,
+    configured_spreads,
+    display_spread_name,
+    parse_spread_name,
+    spread_sort_key,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APPS_DIR = PROJECT_ROOT / "05_apps"
 if str(APPS_DIR) not in sys.path:
@@ -58,18 +79,6 @@ WEATHER_PAGE_ROUTES = {
 WORKSPACE_PAGES = list(internal_workspace_pages())
 SIDEBAR_NAVIGATION = NAVIGATION_GROUPS
 FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
-
-BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "品种间套利"]
-INSTRUMENT_LABELS = {"M": "豆粕", "Y": "豆油", "RM": "菜粕", "OI": "菜油", "P": "棕榈油"}
-SOY_INSTRUMENTS = {"M", "Y"}
-PALM_RAPESEED_INSTRUMENTS = {"P", "OI", "RM"}
-OIL_INSTRUMENTS = {"Y", "OI", "P"}
-MEAL_INSTRUMENTS = {"M", "RM"}
-FIVE_YEAR_MEAN_LABEL = "五年均值"
-FIVE_YEAR_MEAN_SMOOTH_WINDOW = 7
-NON_SEASON_KEYWORDS = ["历史均值", "十年均值", "五年均值", "均值", "mean", "avg", "average", "five_year", "五年", "十年"]
-FORBIDDEN_MEAN_TRACE_KEYWORDS = ["历史均值", "十年均值", "全部历史", "mean", "avg", "average", "five_year"]
-
 
 def get_database_path() -> Path:
     return DATABASE_PARQUET_FILE if DATABASE_PARQUET_FILE.exists() else DATABASE_XLSX_FILE
@@ -137,118 +146,6 @@ def render_update_status() -> None:
         st.info(message)
 
 
-def season_sort_key(season: str) -> int:
-    try:
-        return int(str(season).split("/")[0])
-    except (TypeError, ValueError):
-        return -1
-
-
-def parse_spread_name(spread_name: str) -> tuple[list[str], list[int]] | None:
-    name, _, delivery = str(spread_name).partition(" ")
-    instruments = name.split("-")
-    if not delivery:
-        return None
-    month_parts = delivery.split("-")
-    try:
-        months = [int(month) for month in month_parts]
-    except ValueError:
-        return None
-    if not instruments or not all(instrument in INSTRUMENT_LABELS for instrument in instruments):
-        return None
-    return instruments, months
-
-
-def classify_board(spread_name: str) -> tuple[str, str]:
-    """Classify configured spreads from their instrument legs; unknowns remain visible."""
-    name = str(spread_name)
-    if "/" in name or any(keyword in name.lower() for keyword in ["压榨", "crush", "ratio"]):
-        return "排除", "比值或利润"
-    parsed = parse_spread_name(name)
-    if parsed is None:
-        return "品种间套利", "其他"
-    instruments, months = parsed
-    if len(instruments) == 1 and len(months) == 2:
-        if instruments[0] in SOY_INSTRUMENTS:
-            return "豆系月差", "月差"
-        if instruments[0] in PALM_RAPESEED_INSTRUMENTS:
-            return "棕榈油与菜系月差", "月差"
-        return "品种间套利", "其他"
-    if len(instruments) == 2 and len(months) == 1:
-        instrument_set = set(instruments)
-        if instrument_set <= OIL_INSTRUMENTS:
-            return "品种间套利", "油脂之间套利"
-        if instrument_set <= MEAL_INSTRUMENTS:
-            return "品种间套利", "粕之间套利"
-        if instrument_set & OIL_INSTRUMENTS and instrument_set & MEAL_INSTRUMENTS:
-            return "排除", "油粕跨类"
-    return "品种间套利", "其他"
-
-
-def display_spread_name(spread_name: str) -> str:
-    parsed = parse_spread_name(spread_name)
-    if parsed is None:
-        return str(spread_name)
-    instruments, months = parsed
-    labels = [INSTRUMENT_LABELS[instrument] for instrument in instruments]
-    if len(instruments) == 1 and len(months) == 2:
-        return f"{labels[0]} {months[0]:02d}-{months[1]:02d}"
-    if len(instruments) == 2 and len(months) == 1:
-        preferred_order = {"Y": 0, "OI": 1, "P": 2, "M": 0, "RM": 1}
-        labels = [label for _, label in sorted(zip(instruments, labels), key=lambda item: preferred_order[item[0]])]
-        return f"{'-'.join(labels)} {months[0]:02d}"
-    return str(spread_name)
-
-
-def spread_sort_key(spread_name: str) -> tuple[int, int, int, str]:
-    """Use dashboard order instead of source/config-file row order."""
-    parsed = parse_spread_name(spread_name)
-    if parsed is None:
-        return (9, 9, 9, str(spread_name))
-    instruments, months = parsed
-    if len(instruments) == 1 and len(months) == 2:
-        instrument_order = {"Y": 0, "M": 1, "P": 0, "OI": 1, "RM": 2}
-        month_order = {(9, 1): 0, (1, 5): 1, (5, 9): 2}
-        return (0, instrument_order.get(instruments[0], 9), month_order.get(tuple(months), 9), str(spread_name))
-    if len(instruments) == 2 and len(months) == 1:
-        pair_order = {
-            frozenset({"Y", "P"}): 0,
-            frozenset({"Y", "OI"}): 1,
-            frozenset({"OI", "P"}): 2,
-            frozenset({"M", "RM"}): 3,
-        }
-        month_order = {1: 0, 5: 1, 9: 2}
-        return (1, pair_order.get(frozenset(instruments), 9), month_order.get(months[0], 9), str(spread_name))
-    return (9, 9, 9, str(spread_name))
-
-
-def configured_spreads(data: pd.DataFrame, config: pd.DataFrame) -> dict[str, list[str]]:
-    available = set(data["spread_name"].dropna().astype(str))
-    configured = config.get("spread_name", pd.Series(dtype=str)).dropna().astype(str).tolist()
-    names = [name for name in configured if name in available]
-    names.extend(sorted(available - set(names)))
-    grouped = {board: [] for board in BOARD_OPTIONS}
-    for name in names:
-        board, _ = classify_board(name)
-        if board in grouped:
-            grouped[board].append(name)
-    for board in grouped:
-        grouped[board] = sorted(grouped[board], key=spread_sort_key)
-    return grouped
-
-
-def add_plot_value(data: pd.DataFrame, method: str) -> pd.DataFrame:
-    plotted = data.copy()
-    if method == "商品比值 A/B":
-        plotted["plot_value"] = plotted["leg1_price"] / plotted["leg2_price"]
-        plotted.loc[plotted["leg2_price"] == 0, "plot_value"] = pd.NA
-        plotted["value_label"] = "商品比值 A/B"
-    else:
-        plotted["plot_value"] = plotted["spread_value"]
-        plotted["value_label"] = "绝对价差 A-B"
-    return plotted.dropna(subset=["plot_value"])
-
-
 def format_market_number(value: object) -> str:
     if pd.isna(value):
         return ""
@@ -256,31 +153,6 @@ def format_market_number(value: object) -> str:
     if number.is_integer():
         return f"{number:.0f}"
     return f"{number:.1f}"
-
-
-def latest_plot_value(data: pd.DataFrame) -> object:
-    """Return the most recent plotted value without changing the source data."""
-    seasons = sorted(data["season"].unique().tolist(), key=season_sort_key)
-    if not seasons:
-        return pd.NA
-    latest_data = data[data["season"] == seasons[-1]].sort_values("calendar_offset")
-    latest_values = latest_data["plot_value"].dropna()
-    return latest_values.iloc[-1] if not latest_values.empty else pd.NA
-
-
-def is_non_season_name(name: object) -> bool:
-    lowered = str(name).lower()
-    return any(keyword.lower() in lowered for keyword in NON_SEASON_KEYWORDS)
-
-
-def five_year_mean_seasons(history_seasons: list[str]) -> list[str]:
-    sample_size = 5
-    return history_seasons[-sample_size:]
-
-
-def is_forbidden_mean_trace_name(name: object) -> bool:
-    lowered = str(name).lower()
-    return any(keyword.lower() in lowered for keyword in FORBIDDEN_MEAN_TRACE_KEYWORDS)
 
 
 def validate_five_year_mean_trace(fig: go.Figure) -> None:
@@ -301,22 +173,12 @@ def build_figure(
     mean_source_data: pd.DataFrame | None = None,
 ) -> go.Figure:
     fig = go.Figure()
-    data = data[
-        ~data["season"].astype(str).str.contains("|".join(NON_SEASON_KEYWORDS), case=False, na=False)
-    ].copy()
-    if mean_source_data is None:
-        mean_source_data = data.copy()
-    else:
-        mean_source_data = mean_source_data[
-            ~mean_source_data["season"].astype(str).str.contains("|".join(NON_SEASON_KEYWORDS), case=False, na=False)
-        ].copy()
-    seasons = sorted(data["season"].unique().tolist(), key=season_sort_key)
-    mean_source_seasons = sorted(mean_source_data["season"].unique().tolist(), key=season_sort_key)
-    latest_season = mean_source_seasons[-1] if mean_source_seasons else (seasons[-1] if seasons else "")
+    history_view = prepare_history_view(data, mean_source_data)
+    data = history_view.data
 
-    for season in seasons:
+    for season in history_view.seasons:
         season_data = data[data["season"] == season].sort_values("calendar_offset")
-        is_latest = season == latest_season
+        is_latest = season == history_view.latest_season
         line_color = None
         line_width = 2.25
         if is_latest:
@@ -337,32 +199,19 @@ def build_figure(
             )
         )
 
-    if len(mean_source_seasons) >= 2:
-        history_seasons = [season for season in mean_source_seasons if season != latest_season]
-        selected_mean_seasons = five_year_mean_seasons(history_seasons)
-        history = mean_source_data[mean_source_data["season"].isin(selected_mean_seasons)].copy()
-        mean_data = (
-            history.groupby("calendar_offset", as_index=False)
-            .agg(raw_five_year_mean=("plot_value", "mean"), month_day=("month_day", "first"))
-            .sort_values("calendar_offset")
+    mean_data = history_view.mean_curve
+    if not mean_data.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=mean_data["calendar_offset"],
+                y=mean_data["smooth_five_year_mean"],
+                mode="lines",
+                name=FIVE_YEAR_MEAN_LABEL,
+                line={"width": 3, "dash": "dash", "color": "#2CA02C"},
+                customdata=mean_data[["month_day"]],
+                hovertemplate="%{customdata[0]}<br>五年均值：%{y:.0f}<extra></extra>",
+            )
         )
-        if not mean_data.empty:
-            mean_data["smooth_five_year_mean"] = (
-                mean_data["raw_five_year_mean"]
-                .rolling(window=FIVE_YEAR_MEAN_SMOOTH_WINDOW, center=True, min_periods=2)
-                .mean()
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=mean_data["calendar_offset"],
-                    y=mean_data["smooth_five_year_mean"],
-                    mode="lines",
-                    name=FIVE_YEAR_MEAN_LABEL,
-                    line={"width": 3, "dash": "dash", "color": "#2CA02C"},
-                    customdata=mean_data[["month_day"]],
-                    hovertemplate="%{customdata[0]}<br>五年均值：%{y:.0f}<extra></extra>",
-                )
-            )
 
     tick_source = data[["calendar_offset", "month_day"]].drop_duplicates().sort_values("calendar_offset")
     tick_source = tick_source[tick_source["calendar_offset"] % 14 == 0]
@@ -400,41 +249,20 @@ def build_figure(
 
 
 def latest_metrics(data: pd.DataFrame, mean_source_data: pd.DataFrame | None = None) -> pd.DataFrame:
-    seasons = sorted(data["season"].unique().tolist(), key=season_sort_key)
-    if not seasons:
+    summary = latest_summary(data, mean_source_data)
+    if summary is None:
         return pd.DataFrame()
-    latest_season = seasons[-1]
-    latest_season_data = data[data["season"] == latest_season].sort_values("date")
-    latest_row = latest_season_data.iloc[-1]
-
-    if mean_source_data is None:
-        mean_source_data = data
-    source_seasons = sorted(mean_source_data["season"].unique().tolist(), key=season_sort_key)
-    source_latest_season = source_seasons[-1] if source_seasons else latest_season
-    history_seasons = [season for season in source_seasons if season != source_latest_season]
-    selected_mean_seasons = five_year_mean_seasons(history_seasons)
-    history_same_offset = mean_source_data[
-        (mean_source_data["season"].isin(selected_mean_seasons))
-        & (mean_source_data["calendar_offset"] == latest_row["calendar_offset"])
-    ]["plot_value"].dropna()
-    five_year_mean = history_same_offset.mean() if not history_same_offset.empty else pd.NA
-    mean_diff = latest_row["plot_value"] - five_year_mean if pd.notna(five_year_mean) else pd.NA
-    percentile = (
-        (history_same_offset <= latest_row["plot_value"]).mean()
-        if not history_same_offset.empty
-        else pd.NA
-    )
 
     return pd.DataFrame(
         [
             {
-                "价差": latest_row["spread_name"],
-                "最新 season": latest_season,
-                "最新日期": latest_row["date"].strftime("%Y-%m-%d"),
-                "最新值": format_market_number(latest_row["plot_value"]),
-                "五年均值": format_market_number(five_year_mean),
-                "较五年均值": format_market_number(mean_diff),
-                "历史分位数": percentile,
+                "价差": summary.spread_name,
+                "最新 season": summary.latest_season,
+                "最新日期": summary.latest_date.strftime("%Y-%m-%d"),
+                "最新值": format_market_number(summary.latest_value),
+                "五年均值": format_market_number(summary.five_year_mean),
+                "较五年均值": format_market_number(summary.difference_from_mean),
+                "历史分位数": summary.historical_percentile,
             }
         ]
     )
