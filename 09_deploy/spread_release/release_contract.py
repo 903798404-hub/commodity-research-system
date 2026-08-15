@@ -159,6 +159,11 @@ PRODUCTION_DATA_MOUNTS = {
     "06_outputs": "/app/06_outputs",
     "10_logs": "/app/10_logs",
 }
+PRODUCTION_DATA_MOUNT_READ_ONLY = {
+    "/app/01_data": True,
+    "/app/06_outputs": False,
+    "/app/10_logs": False,
+}
 IMPORT_PROFIT_RUNTIME_ENV_KEY = "IMPORT_PROFIT_RUNTIME_ROOT"
 IMPORT_PROFIT_RUNTIME_CONTAINER_PATH = "/app/runtime/import_profit"
 IMPORT_PROFIT_RUNTIME_MOUNT_ID = "import_profit_candidate_runtime"
@@ -1434,6 +1439,8 @@ def validate_repository_static(repository: Path) -> None:
     )
     if weather_mount_marker not in compose_text:
         raise ContractError("spread Compose must require the read-only weather runtime mount")
+    if "./01_data:/app/01_data:ro" not in compose_text:
+        raise ContractError("spread Compose must mount /app/01_data read-only")
     if not re.search(
         r"(?ms)^\s{2}spread-dashboard:\s*\n.*?^\s{4}build:\s*$", compose_text
     ):
@@ -2722,7 +2729,7 @@ def _validate_formal_spread_semantics(
         target: (
             str((project_root / relative).resolve()),
             "bind",
-            False,
+            PRODUCTION_DATA_MOUNT_READ_ONLY[target],
         )
         for relative, target in PRODUCTION_DATA_MOUNTS.items()
     }

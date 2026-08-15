@@ -373,7 +373,8 @@ def _formal_candidate_data_mount(
     mount = matches[0]
     if mount.get("type") != "bind" or not isinstance(mount.get("source"), str):
         raise ContractError("formal /app/01_data mount must be a host bind")
-    normalized_mount_mode(mount)
+    if normalized_mount_mode(mount) != "ro":
+        raise ContractError("formal /app/01_data mount must be read-only")
     return mount
 
 

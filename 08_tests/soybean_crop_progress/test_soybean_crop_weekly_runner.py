@@ -18,6 +18,7 @@ RUNNER = (
 FAKE_SECRET = "runner-fixture-secret"
 CONTROL_REPO_GIT_HEAD = "426aa28ec815bb3d2c95855430d2bd3dde2031c0"
 RUNTIME_GIT_HEAD = "b704a2933fecc667695d5a31065abeea1fda7492"
+RUNTIME_IMAGE_ID = "sha256:" + "a" * 64
 
 
 def _bash_executable() -> Path:
@@ -62,6 +63,8 @@ def _runner_environment(
     repository = tmp_path / "repository"
     repository.mkdir()
     (repository / ".git").mkdir()
+    for runtime_dir in ("01_data", "06_outputs", "10_logs"):
+        (repository / runtime_dir).mkdir()
     secret_file = tmp_path / "nass.env"
     secret_file.write_text(
         f"NASS_API_KEY={FAKE_SECRET}\n",
@@ -95,7 +98,15 @@ if [[ "$1" == "inspect" ]]; then
     if [[ "${MOCK_INSPECT_EXIT_CODE}" != "0" ]]; then
     exit "${MOCK_INSPECT_EXIT_CODE}"
     fi
-    printf '%s\n' "${MOCK_CONTAINER_RUNNING}"
+    if [[ "$*" == *"{{.Image}}"* ]]; then
+        printf '%s\n' "${MOCK_RUNTIME_IMAGE_ID}"
+    else
+        printf '%s\n' "${MOCK_CONTAINER_RUNNING}"
+    fi
+    exit 0
+fi
+if [[ "$1" == "image" && "${2-}" == "inspect" ]]; then
+    printf '%s\n' "${MOCK_RUNTIME_GIT_HEAD}"
     exit 0
 fi
 if [[ "$1" == "exec" ]]; then
@@ -103,6 +114,9 @@ if [[ "$1" == "exec" ]]; then
         printf '%s\n' "${MOCK_RUNTIME_GIT_HEAD}"
         exit 0
     fi
+    exit 2
+fi
+if [[ "$1" == "run" ]]; then
     printf '%s\n' "$@" >"${MOCK_DOCKER_ARGS}"
     printf '%s' "${NASS_API_KEY-}" >"${MOCK_CONTAINER_SECRET}"
     printf '%s' "${MARKET_DATA_GIT_HEAD-}" >"${MOCK_CONTAINER_GIT_HEAD}"
@@ -128,6 +142,7 @@ exit 2
             "MOCK_CONTAINER_RUNNING": container_running,
             "MOCK_CONTROL_REPO_GIT_HEAD": control_repo_git_head,
             "MOCK_RUNTIME_GIT_HEAD": runtime_git_head,
+            "MOCK_RUNTIME_IMAGE_ID": RUNTIME_IMAGE_ID,
             "MOCK_FLOCK_ARGS": _bash_path(records / "flock-args.txt"),
             "MOCK_GIT_ARGS": _bash_path(records / "git-args.txt"),
             "MOCK_DOCKER_CALLS": _bash_path(records / "docker-calls.txt"),
@@ -175,6 +190,10 @@ def test_runner_static_syntax_and_environment_only_secret_injection() -> None:
     assert "/home/ubuntu/.config/market-data/nass.env" in content
     assert "/run/lock/soybean_crop_progress_update.lock" in content
     assert 'docker exec "${CONTAINER_NAME}" printenv MARKET_DATA_GIT_HEAD' in content
+    assert "docker run --rm" in content
+    assert 'src=${REPOSITORY_PATH}/01_data,dst=/app/01_data' in content
+    assert 'src=${REPOSITORY_PATH}/06_outputs,dst=/app/06_outputs' in content
+    assert 'src=${REPOSITORY_PATH}/10_logs,dst=/app/10_logs' in content
     assert 'git -C "${REPOSITORY_PATH}" rev-parse HEAD' in content
     assert "--env NASS_API_KEY" in content
     assert "--env MARKET_DATA_GIT_HEAD" in content
@@ -195,7 +214,11 @@ def test_runner_uses_matching_runtime_identity_without_putting_values_in_argumen
     assert "rev-parse HEAD" in git_args
     assert "--env\nNASS_API_KEY\n" in docker_args
     assert "--env\nMARKET_DATA_GIT_HEAD\n" in docker_args
-    assert "spread-dashboard" in docker_args
+    assert RUNTIME_IMAGE_ID in docker_args
+    assert "type=bind,src=" in docker_args
+    assert "/01_data,dst=/app/01_data" in docker_args
+    assert "/06_outputs,dst=/app/06_outputs" in docker_args
+    assert "/10_logs,dst=/app/10_logs" in docker_args
     assert (
         "/app/04_scripts/soybean_crop_progress/"
         "update_soybeans_crop_weekly.py"
@@ -292,7 +315,7 @@ def test_runner_lock_contention_skips_docker(tmp_path: Path) -> None:
     assert not (records / "docker-calls.txt").exists()
 
 
-def test_runner_preserves_docker_exec_failure_exit_code(tmp_path: Path) -> None:
+def test_runner_preserves_one_shot_container_failure_exit_code(tmp_path: Path) -> None:
     environment, records = _runner_environment(
         tmp_path,
         docker_exit_code=37,
@@ -303,4 +326,4 @@ def test_runner_preserves_docker_exec_failure_exit_code(tmp_path: Path) -> None:
     assert result.returncode == 37
     assert (records / "docker-calls.txt").read_text(
         encoding="utf-8"
-    ).splitlines() == ["inspect", "exec", "exec", "exec"]
+    ).splitlines() == ["inspect", "inspect", "exec", "image", "run"]

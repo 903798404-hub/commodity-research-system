@@ -19,7 +19,7 @@ services:
       OIL_WORLD_DASHBOARD_URL: ${OIL_WORLD_DASHBOARD_URL:?OIL_WORLD_DASHBOARD_URL must be explicitly set}
       WEATHER_DATA_DIR: ${WEATHER_DATA_DIR:?WEATHER_DATA_DIR must be explicitly set}
     volumes:
-      - ./01_data:/app/01_data
+      - ./01_data:/app/01_data:ro
       - ./06_outputs:/app/06_outputs
       - ./10_logs:/app/10_logs
       - ${WEATHER_RUNTIME_CURRENT_DIR:?WEATHER_RUNTIME_CURRENT_DIR must be explicitly set}:/app/runtime/weather:ro

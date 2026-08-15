@@ -174,28 +174,28 @@ dry-run 只抓取和生成报告，不写入 `historical_price_long.xlsx`，也�
 
 ```bash
 cd /home/ubuntu/market-data
-docker compose exec spread-dashboard python 04_scripts/server_update_spreads.py
+.venv/bin/python 04_scripts/server_update_spreads.py
 ```
 
 如果服务器上已经有最新的 `01_data/historical_price_long.xlsx`，并确认可以重算数据库：
 
 ```bash
 cd /home/ubuntu/market-data
-docker compose exec spread-dashboard python 04_scripts/server_update_spreads.py --recalculate-from-existing-price-long
+.venv/bin/python 04_scripts/server_update_spreads.py --recalculate-from-existing-price-long
 ```
 
 服务器 AkShare dry-run：
 
 ```bash
 cd /home/ubuntu/market-data
-docker compose exec spread-dashboard python 04_scripts/server_update_spreads.py --update-from-akshare --dry-run
+.venv/bin/python 04_scripts/server_update_spreads.py --update-from-akshare --dry-run
 ```
 
 服务器 AkShare 真实运行：
 
 ```bash
 cd /home/ubuntu/market-data
-docker compose exec spread-dashboard python 04_scripts/server_update_spreads.py --update-from-akshare
+.venv/bin/python 04_scripts/server_update_spreads.py --update-from-akshare
 ```
 
 如果本次代码更新包含 `requirements.txt` 变化，例如新增 `pyarrow`，必须进入隔离候选构建和不可变发布流程；不得在正式仓库直接重新构建：
@@ -231,8 +231,8 @@ bash 09_deploy/spread_release/deploy_spread_release.sh \
 `trade_date + exchange + variety + seat_name_normalized` 去重，20:30 的补偿执行不会制造重复记录。
 
 ```cron
-30 18 * * 1-5 cd /home/ubuntu/market-data && /usr/bin/docker compose exec -T spread-dashboard python 04_scripts/update_foreign_seats.py --recent >> 10_logs/cron_foreign_seats.log 2>&1
-30 20 * * 1-5 cd /home/ubuntu/market-data && /usr/bin/docker compose exec -T spread-dashboard python 04_scripts/update_foreign_seats.py --recent >> 10_logs/cron_foreign_seats.log 2>&1
+30 18 * * 1-5 cd /home/ubuntu/market-data && .venv/bin/python 04_scripts/update_foreign_seats.py --recent >> 10_logs/cron_foreign_seats.log 2>&1
+30 20 * * 1-5 cd /home/ubuntu/market-data && .venv/bin/python 04_scripts/update_foreign_seats.py --recent >> 10_logs/cron_foreign_seats.log 2>&1
 ```
 
 先不要直接启用 cron。确认手动运行没有问题后，再配置。
@@ -240,15 +240,15 @@ bash 09_deploy/spread_release/deploy_spread_release.sh \
 默认安全检查示例：
 
 ```cron
-30 16 * * 1-5 cd /home/ubuntu/market-data && /usr/bin/docker compose exec -T spread-dashboard python 04_scripts/server_update_spreads.py >> 10_logs/cron_update_spreads.log 2>&1
+30 16 * * 1-5 cd /home/ubuntu/market-data && .venv/bin/python 04_scripts/server_update_spreads.py >> 10_logs/cron_update_spreads.log 2>&1
 ```
 
-注意：cron 里必须使用 `exec -T`，避免 Docker 分配 TTY 导致定时任务挂住。
+注意：cron 中使用项目专用 `.venv/bin/python`，不通过正式 Web 容器执行更新。
 
 AkShare 自动更新示例：
 
 ```cron
-30 16 * * 1-5 cd /home/ubuntu/market-data && /usr/bin/docker compose exec -T spread-dashboard python 04_scripts/server_update_spreads.py --update-from-akshare >> 10_logs/cron_update_spreads.log 2>&1
+30 16 * * 1-5 cd /home/ubuntu/market-data && .venv/bin/python 04_scripts/server_update_spreads.py --update-from-akshare >> 10_logs/cron_update_spreads.log 2>&1
 ```
 
 ## 查看日志

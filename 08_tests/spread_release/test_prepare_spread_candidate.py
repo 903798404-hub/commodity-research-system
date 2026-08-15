@@ -77,6 +77,7 @@ def _copy_contract_repository(tmp_path: Path) -> tuple[Path, str, str]:
 def _formal_compose(
     data_host_root: Path | None = None,
     *,
+    data_read_only: bool = True,
     weather_read_only: bool = True,
     include_spread: bool = True,
 ) -> dict:
@@ -113,7 +114,7 @@ def _formal_compose(
                     "type": "bind",
                     "source": str(root / "01_data"),
                     "target": CANDIDATE_DATA_CONTAINER_PATH,
-                    "read_only": False,
+                    "read_only": data_read_only,
                 },
                 {
                     "type": "bind",
@@ -458,6 +459,16 @@ def test_candidate_mounts_formal_data_read_only_and_isolates_all_writable_paths(
     assert result["candidate_data_mount"]["mode"] == "ro"
     assert len(result["candidate_writable_mounts"]) == 4
     assert hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest() == formal_sha
+
+
+def test_candidate_rejects_writable_formal_data_mount(tmp_path: Path) -> None:
+    options, runner = _options(
+        tmp_path,
+        compose=_formal_compose(data_read_only=False),
+    )
+
+    with pytest.raises(ContractError, match="formal /app/01_data mount must be read-only"):
+        prepare_candidate(options, runner=runner, port_probe=lambda _: True)
 
 
 def test_candidate_rejects_writable_formal_data_mount_after_generation(tmp_path: Path) -> None:
@@ -819,6 +830,13 @@ def test_root_compose_declares_future_production_runtime_role() -> None:
     compose_text = (REPOSITORY / "docker-compose.yml").read_text(encoding="utf-8")
     assert "market-data.deployment.role: production" in compose_text
     assert "market-data.deployment.git_sha: ${MARKET_DATA_GIT_HEAD" in compose_text
+    assert "./01_data:/app/01_data:ro" in compose_text
+    assert "./06_outputs:/app/06_outputs\n" in compose_text
+    assert "./10_logs:/app/10_logs\n" in compose_text
+    assert (
+        "${WEATHER_RUNTIME_CURRENT_DIR:?WEATHER_RUNTIME_CURRENT_DIR must be explicitly set}"
+        ":/app/runtime/weather:ro"
+    ) in compose_text
 
 
 @pytest.mark.parametrize("commit", ["deadbeef", "g" * 40])

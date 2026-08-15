@@ -9,7 +9,7 @@ CONTAINER_NAME="${MARKET_DATA_SPREAD_CONTAINER:-spread-dashboard}"
 CONTAINER_ENTRYPOINT="${MARKET_DATA_SOYBEAN_ENTRYPOINT:-/app/04_scripts/soybean_crop_progress/update_soybeans_crop_weekly.py}"
 
 cleanup() {
-    unset NASS_API_KEY MARKET_DATA_GIT_HEAD CONTROL_REPO_GIT_HEAD
+    unset NASS_API_KEY MARKET_DATA_GIT_HEAD CONTROL_REPO_GIT_HEAD CONTAINER_IMAGE_ID OCI_REVISION
 }
 
 trap cleanup EXIT
@@ -71,20 +71,46 @@ if [[ "${container_running}" != "true" ]]; then
     exit 1
 fi
 
+if ! CONTAINER_IMAGE_ID="$(
+    docker inspect --format '{{.Image}}' "${CONTAINER_NAME}" 2>/dev/null
+)"; then
+    echo "无法读取运行容器Image身份，未执行更新。" >&2
+    exit 1
+fi
+if [[ ! "${CONTAINER_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "运行容器Image身份无效，未执行更新。" >&2
+    exit 1
+fi
+
 if ! MARKET_DATA_GIT_HEAD="$(
     docker exec "${CONTAINER_NAME}" printenv MARKET_DATA_GIT_HEAD 2>/dev/null
 )"; then
     echo "无法读取运行容器Git身份，未执行更新。" >&2
     exit 1
 fi
-runtime_git_head_line_count="$(
-    docker exec "${CONTAINER_NAME}" printenv MARKET_DATA_GIT_HEAD 2>/dev/null | wc -l
-)"
-if [[ "${runtime_git_head_line_count}" != "1" || ! "${MARKET_DATA_GIT_HEAD}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+if [[ ! "${MARKET_DATA_GIT_HEAD}" =~ ^[0-9a-fA-F]{40}$ ]]; then
     echo "运行容器Git身份缺失或不是40位十六进制哈希，未执行更新。" >&2
     exit 1
 fi
 MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD,,}"
+
+if ! OCI_REVISION="$(
+    docker image inspect \
+        --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+        "${CONTAINER_IMAGE_ID}" 2>/dev/null
+)"; then
+    echo "无法读取运行镜像OCI revision，未执行更新。" >&2
+    exit 1
+fi
+if [[ ! "${OCI_REVISION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "运行镜像OCI revision无效，未执行更新。" >&2
+    exit 1
+fi
+OCI_REVISION="${OCI_REVISION,,}"
+if [[ "${OCI_REVISION}" != "${MARKET_DATA_GIT_HEAD}" ]]; then
+    echo "运行镜像OCI revision与容器Git身份不一致，未执行更新。" >&2
+    exit 1
+fi
 
 CONTROL_REPO_GIT_HEAD=""
 if CONTROL_REPO_GIT_HEAD="$(
@@ -105,11 +131,22 @@ echo "identity_match=${identity_match}"
 
 export NASS_API_KEY MARKET_DATA_GIT_HEAD
 
-docker exec \
+for runtime_dir in 01_data 06_outputs 10_logs; do
+    if [[ ! -d "${REPOSITORY_PATH}/${runtime_dir}" ]]; then
+        echo "宿主机运行目录不存在：${REPOSITORY_PATH}/${runtime_dir}" >&2
+        exit 1
+    fi
+done
+
+docker run --rm \
     --env NASS_API_KEY \
     --env MARKET_DATA_GIT_HEAD \
-    "${CONTAINER_NAME}" \
-    python "${CONTAINER_ENTRYPOINT}" "$@"
+    --mount "type=bind,src=${REPOSITORY_PATH}/01_data,dst=/app/01_data" \
+    --mount "type=bind,src=${REPOSITORY_PATH}/06_outputs,dst=/app/06_outputs" \
+    --mount "type=bind,src=${REPOSITORY_PATH}/10_logs,dst=/app/10_logs" \
+    --entrypoint python \
+    "${CONTAINER_IMAGE_ID}" \
+    "${CONTAINER_ENTRYPOINT}" "$@"
 exit_code=$?
 
 exit "${exit_code}"

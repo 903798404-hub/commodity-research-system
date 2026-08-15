@@ -439,6 +439,7 @@ class FakeReleaseRuntime:
                     "source": str((project_root / relative).resolve()),
                     "target": target,
                     "bind": {"create_host_path": True},
+                    "read_only": target == "/app/01_data",
                 }
                 for relative, target in (
                     ("01_data", "/app/01_data"),
@@ -2707,6 +2708,56 @@ def test_deployment_plan_rejects_mount_difference(tmp_path: Path) -> None:
         )
 
 
+def test_deployment_plan_rejects_writable_formal_data_mount(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    production_env_file, _ = create_production_env(tmp_path, manifest)
+    candidate_result_file = write_candidate_result_fixture(
+        tmp_path, manifest, runtime
+    )
+    production_project_dir, production_compose_file = create_production_project(
+        tmp_path
+    )
+    runtime.production_mounts_override = [
+        {
+            "type": "bind",
+            "source": str((production_project_dir / relative).resolve()),
+            "target": target,
+            "bind": {"create_host_path": True},
+            "read_only": False,
+        }
+        for relative, target in (
+            ("01_data", "/app/01_data"),
+            ("06_outputs", "/app/06_outputs"),
+            ("10_logs", "/app/10_logs"),
+        )
+    ]
+    runtime.production_mounts_override.append(
+        {
+            "type": "bind",
+            "source": PRODUCTION_WEATHER_RUNTIME_DIR,
+            "target": "/app/runtime/weather",
+            "read_only": True,
+        }
+    )
+
+    with pytest.raises(ContractError, match="mount contract changed"):
+        create_deployment_plan(
+            tool_repo_root=REPOSITORY,
+            production_compose_file=production_compose_file,
+            production_project_dir=production_project_dir,
+            candidate_result_file=candidate_result_file,
+            production_env_file=production_env_file,
+            manifest=manifest,
+            runtime=runtime,
+            schema=load_schema(CONTRACT_DIR / "deployment_plan.schema.json"),
+            deployment_tool_git_runner=FakeGitRunner(
+                head=TOOL_GIT_COMMIT, tree=TOOL_GIT_TREE
+            ),
+        )
+
+
 def test_deployment_plan_rejects_command_difference(tmp_path: Path) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     production_env_file, _ = create_production_env(tmp_path, manifest)
@@ -3912,6 +3963,49 @@ def test_rollback_requires_explicit_tag_to_image_id_match(tmp_path: Path) -> Non
         )
     runtime.rollback_image_id = IMAGE_ID
     with pytest.raises(ContractError, match="rollback tag ID mismatch"):
+        verify_pre_rollback(
+            manifest,
+            REPOSITORY,
+            runtime,
+            deployment_plan=plan,
+            production_environment=production_environment,
+            git_runner=FakeGitRunner(
+                head=TOOL_GIT_COMMIT, tree=TOOL_GIT_TREE
+            ),
+        )
+
+
+def test_pre_rollback_rejects_writable_formal_data_mount(tmp_path: Path) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+    plan, _, production_environment = build_deployment_plan(
+        tmp_path, manifest, runtime
+    )
+    runtime.compose_image = ROLLBACK_REF
+    production_project_dir = Path(str(plan["production_project_dir"]))
+    runtime.production_mounts_override = [
+        {
+            "type": "bind",
+            "source": str((production_project_dir / relative).resolve()),
+            "target": target,
+            "bind": {"create_host_path": True},
+            "read_only": False,
+        }
+        for relative, target in (
+            ("01_data", "/app/01_data"),
+            ("06_outputs", "/app/06_outputs"),
+            ("10_logs", "/app/10_logs"),
+        )
+    ]
+    runtime.production_mounts_override.append(
+        {
+            "type": "bind",
+            "source": PRODUCTION_WEATHER_RUNTIME_DIR,
+            "target": "/app/runtime/weather",
+            "read_only": True,
+        }
+    )
+
+    with pytest.raises(ContractError, match="mount contract changed"):
         verify_pre_rollback(
             manifest,
             REPOSITORY,

@@ -208,7 +208,8 @@ WEATHER_DATA_DIR
 
 镜像引用、Image ID、构建定义、命令、工作目录、挂载、正式端口、restart
 policy、网络、健康检查和其他环境变量必须一致。正式挂载必须仍是项目目录下的
-`01_data`、`06_outputs`、`10_logs`；正式端口必须仍是 `8501:8501`；服务范围
+只读 `01_data`、读写 `06_outputs`、读写 `10_logs`，天气 runtime 继续只读；
+挂载模式属于 Compose 语义哈希和部署/回滚前置验证的一部分。正式端口必须仍是 `8501:8501`；服务范围
 只能是 `spread-dashboard`。任何未声明差异都会拒绝密封计划。
 
 候选 Compose SHA-256 和生产 Compose SHA-256可以不同，因为 URL 是部署环境
