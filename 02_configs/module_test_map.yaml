@@ -104,3 +104,14 @@ modules:
       - 08_tests/research_data/test_catalog.py
     dependents: []
     full_regression_when_changed: false
+  data_sources.lutou:
+    code_paths:
+      - 03_src/agri_research_agent/data_sources/lutou/__init__.py
+      - 03_src/agri_research_agent/data_sources/lutou/snapshot.py
+      - 03_src/agri_research_agent/data_sources/lutou/acl.py
+    direct_tests: [08_tests/data_sources/lutou/test_snapshot_acl.py]
+    impact_tests:
+      - 08_tests/research_data/test_identities.py
+      - 08_tests/research_data/test_catalog.py
+    dependents: []
+    full_regression_when_changed: false
