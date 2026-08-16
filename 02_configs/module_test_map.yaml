@@ -75,3 +75,18 @@ modules:
     impact_tests: []
     dependents: []
     full_regression_when_changed: false
+  research_data.identities:
+    code_paths:
+      - 03_src/agri_research_agent/research_data/__init__.py
+      - 03_src/agri_research_agent/research_data/identities.py
+    direct_tests: [08_tests/research_data/test_identities.py]
+    impact_tests: [08_tests/research_data/test_catalog.py]
+    dependents: [research_data.catalog]
+    full_regression_when_changed: false
+    contract: true
+  research_data.catalog:
+    code_paths: [03_src/agri_research_agent/research_data/catalog.py]
+    direct_tests: [08_tests/research_data/test_catalog.py]
+    impact_tests: [08_tests/shared/test_public_research_candidate_catalog.py]
+    dependents: []
+    full_regression_when_changed: false

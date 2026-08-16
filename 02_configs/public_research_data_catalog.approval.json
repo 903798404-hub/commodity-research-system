@@ -1,0 +1,26 @@
+{
+  "approval_schema_version": 1,
+  "status": "HUMAN_GATE_A_APPROVED",
+  "approved_on": "2026-08-16",
+  "candidate_catalog_path": "02_configs/public_research_data_catalog.candidate.json",
+  "candidate_catalog_sha256": "ceb1844a8c8ae7d570881d92f8904a992fa752df8d55f6457264a389a3cfcd29",
+  "candidate_catalog_sha256_mode": "utf8_lf_normalized",
+  "candidate_catalog_schema_version": "0.1-candidate",
+  "dataset_count": 652,
+  "provider_series_candidate_count": 6432,
+  "approval_scope": "Identity model, catalog structure, source classification and canonical contract boundaries only.",
+  "approval_does_not_mean": [
+    "Every candidate dataset or provider series is canonicalized.",
+    "Unclassified assets are approved for business consumption.",
+    "Candidate data is promoted or production-ready.",
+    "A Tankan or Lutou provider implementation has been approved without tests."
+  ],
+  "frozen_identity_invariants": [
+    "origin_system is distinct from acquisition_channel",
+    "dataset_id is stable across acquisition-channel changes",
+    "series_id is provider-neutral and assigned only after semantic verification",
+    "provider_series_id preserves provider-native mapping identity",
+    "existing Tankan source_series_id maps to provider_series_id compatibility evidence",
+    "source_locator and hashes are provenance and never canonical identity"
+  ]
+}

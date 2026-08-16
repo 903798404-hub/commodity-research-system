@@ -2,7 +2,7 @@
 
 ## 结论先行
 
-HUMAN GATE A 所需的全量资产审计、Candidate Catalog、资产分类和 Identity 候选已完成。当前状态是 `HUMAN_GATE_A_PENDING`，未开始 Tankan Provider、Lutou Snapshot Provider 或新 Canonical Contract 实现。
+HUMAN GATE A 所需的全量资产审计、Candidate Catalog、资产分类和 Identity 候选已完成。2026-08-16 已获人工批准，批准证据位于 `02_configs/public_research_data_catalog.approval.json`。批准只冻结 Identity、Catalog 结构、资产分类和 contract 边界，不表示所有 candidate 已 canonicalize、promote 或可用于生产。
 
 本轮建议冻结的核心决策是：
 
@@ -268,9 +268,9 @@ optional snapshot_sha256 / source_row_sha256
 6. Tankan operational/config 对象：`domestic_contract_rule`、`ric_mapping`、`scheduler_job`、`sync_log`、`sync_queue`、`feedback` 等不应自动进入研究 contract。
 7. 当前未证明的 FAME/HVO/UCO/POME/PME/SAF dataset。
 
-## Gate A 待批准项
+## Gate A 已批准冻结项
 
-请批准或指定修改以下冻结项：
+以下冻结项已于 2026-08-16 获得批准：
 
 1. 采用 `dataset_id` + canonical `series_id` + optional `provider_series_id` 的三层身份结构。
 2. 将现有 Tankan `source_series_id` 定位为 provider identity，通迁移兼容映射进入 `provider_series_id`。
@@ -278,4 +278,4 @@ optional snapshot_sha256 / source_row_sha256
 4. 准许 Candidate Catalog `0.1-candidate` 作为 Gate B 实现输入，后续仅在有真实消费者时进行 canonicalization。
 5. 同意 MarketQuote / FX / Weather / Fundamental / Basis-Freight-CNF 的上述边界。
 
-在 Gate A 获得批准前，不实现 Tankan Provider、Lutou Provider、Psycopg 依赖或新 canonical contracts。
+Gate A 批准后可按照上述冻结边界实现 Provider 和真实消费者需要的最小 canonical contracts；任何未标准化资产仍必须保持 candidate-only。
