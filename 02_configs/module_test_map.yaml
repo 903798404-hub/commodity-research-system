@@ -90,6 +90,18 @@ modules:
     impact_tests: [08_tests/shared/test_public_research_candidate_catalog.py]
     dependents: []
     full_regression_when_changed: false
+  research_data.canonical_spreads:
+    code_paths:
+      - 03_src/agri_research_agent/research_data/canonical_spreads.py
+      - 02_configs/international_palm_core_six.sealed.json
+    direct_tests: [08_tests/research_data/test_canonical_spreads.py]
+    impact_tests:
+      - 08_tests/research_data/test_identities.py
+      - 08_tests/research_data/test_catalog.py
+      - 08_tests/shared/test_public_research_candidate_catalog.py
+    dependents: []
+    full_regression_when_changed: false
+    contract: true
   data_sources.tankan:
     code_paths:
       - 03_src/agri_research_agent/data_sources/tankan/__init__.py

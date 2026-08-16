@@ -1,5 +1,18 @@
 """Provider-neutral identities and catalog access for public research data."""
 
+from .canonical_spreads import (
+    CanonicalPhysicalSeries,
+    CanonicalSpreadDefinition,
+    CanonicalSpreadError,
+    CollapsedObservation,
+    DuplicateConflictError,
+    PalmCoreSixCatalog,
+    ResolvedSeries,
+    SpreadObservation,
+    calculate_exact_inner_spread,
+    collapse_source_native_duplicates,
+    load_palm_core_six,
+)
 from .catalog import CatalogDataset, CatalogError, DataAssetCatalog, ProviderSeriesCandidate
 from .identities import (
     AcquisitionChannel,
@@ -17,18 +30,29 @@ from .identities import (
 
 __all__ = [
     "AcquisitionChannel",
+    "CanonicalPhysicalSeries",
+    "CanonicalSpreadDefinition",
+    "CanonicalSpreadError",
     "CatalogDataset",
     "CatalogError",
+    "CollapsedObservation",
     "DataAssetCatalog",
     "DatasetId",
     "DatasetRef",
+    "DuplicateConflictError",
     "OriginSystem",
+    "PalmCoreSixCatalog",
     "Provenance",
     "ProviderDatasetId",
     "ProviderIdentity",
     "ProviderSeriesId",
     "ProviderSeriesCandidate",
+    "ResolvedSeries",
     "SeriesId",
     "SeriesRef",
     "SourceLocator",
+    "SpreadObservation",
+    "calculate_exact_inner_spread",
+    "collapse_source_native_duplicates",
+    "load_palm_core_six",
 ]
