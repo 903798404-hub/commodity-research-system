@@ -33,8 +33,8 @@ MARKET_WINDOW_QUERY = QuerySpec(
         "tankan.market.foreign_futures_price_raw", "foreign_futures_price_raw"
     ),
     parameter_count=2,
-    max_window_days=370,
-    max_plan_rows=2_000_000,
+    max_window_days=93,
+    max_plan_rows=250_000,
     max_total_cost=2_000_000.0,
     sql="""
 SELECT trade_date, exchange, product_name, contract, close_price, updated_at
@@ -49,7 +49,7 @@ FX_WINDOW_QUERY = QuerySpec(
     version="2",
     provider=_provider("tankan.market.exchange_rate", "exchange_rate"),
     parameter_count=2,
-    max_window_days=370,
+    max_window_days=93,
     max_plan_rows=100_000,
     max_total_cost=250_000.0,
     sql="""

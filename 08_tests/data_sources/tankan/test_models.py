@@ -22,7 +22,7 @@ def test_query_spec_is_bounded_versioned_and_provider_identified() -> None:
     query = MARKET_WINDOW_QUERY
     assert query.version == "2"
     assert query.parameter_count == 2
-    assert query.max_window_days == 370
+    assert query.max_window_days == 93
     assert len(query.sha256) == 64
     assert query.identity() == {
         "query_name": "market.foreign_futures_price_raw.window",

@@ -121,3 +121,13 @@ modules:
       - 08_tests/research_data/test_catalog.py
     dependents: []
     full_regression_when_changed: false
+  pipelines.tankan_candidate:
+    code_paths: [03_src/agri_research_agent/pipelines/tankan_candidate.py]
+    direct_tests: [08_tests/pipelines/test_tankan_candidate.py]
+    impact_tests:
+      - 08_tests/data_sources/tankan/test_client.py
+      - 08_tests/data_sources/tankan/test_market_price_adapter.py
+      - 08_tests/data_sources/tankan/test_fx_adapter.py
+      - 08_tests/shared/test_immutable_candidate.py
+    dependents: []
+    full_regression_when_changed: false

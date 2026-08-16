@@ -255,10 +255,39 @@ ORDER BY ordinal_position
         *,
         batch_size: int = 10_000,
     ) -> Iterator[SourceBatch]:
+        _, batches = self.plan_stream(
+            query, parameters, batch_size=batch_size
+        )
+        yield from batches
+
+    def plan_stream(
+        self,
+        query: QuerySpec,
+        parameters: Sequence[object],
+        *,
+        batch_size: int = 10_000,
+    ) -> tuple[QueryPlanProof, Iterator[SourceBatch]]:
+        """Return the verified plan and a single-use iterator using that plan."""
+
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
         bound_parameters = self._validate_parameters(query, parameters)
         plan = self.explain(query, bound_parameters)
+        return plan, self._stream_after_plan(
+            query,
+            bound_parameters,
+            plan,
+            batch_size=batch_size,
+        )
+
+    def _stream_after_plan(
+        self,
+        query: QuerySpec,
+        bound_parameters: tuple[object, ...],
+        plan: QueryPlanProof,
+        *,
+        batch_size: int,
+    ) -> Iterator[SourceBatch]:
         connection = self._require_connection()
         extracted_at = datetime.now(timezone.utc)
         cursor_name = f"tankan_{query.sha256[:12]}"
