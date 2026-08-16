@@ -90,3 +90,17 @@ modules:
     impact_tests: [08_tests/shared/test_public_research_candidate_catalog.py]
     dependents: []
     full_regression_when_changed: false
+  data_sources.tankan:
+    code_paths:
+      - 03_src/agri_research_agent/data_sources/tankan/__init__.py
+      - 03_src/agri_research_agent/data_sources/tankan/models.py
+      - 03_src/agri_research_agent/data_sources/tankan/queries.py
+      - 03_src/agri_research_agent/data_sources/tankan/client.py
+    direct_tests:
+      - 08_tests/data_sources/tankan/test_models.py
+      - 08_tests/data_sources/tankan/test_client.py
+    impact_tests:
+      - 08_tests/research_data/test_identities.py
+      - 08_tests/research_data/test_catalog.py
+    dependents: []
+    full_regression_when_changed: false
