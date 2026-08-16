@@ -60,6 +60,12 @@ def test_contract_is_immutable() -> None:
         contract.month = 2  # type: ignore[misc]
 
 
+@pytest.mark.parametrize("exchange", [Exchange.BMD, Exchange.ICE, Exchange.EURONEXT])
+def test_standard_contract_identity_supports_international_exchanges(exchange: Exchange) -> None:
+    contract = ContractId(exchange, "CANOLA", 2026, 11)
+    assert parse_standard_instrument(str(contract)) == contract
+
+
 def test_raw_parser_rejects_ambiguous_or_wrong_exchange_symbols() -> None:
     parser = ChinaFuturesSymbolParser()
     with pytest.raises(ValueError, match="unsupported"):

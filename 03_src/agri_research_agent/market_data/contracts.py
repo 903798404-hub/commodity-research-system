@@ -12,6 +12,9 @@ class Exchange(StrEnum):
     DCE = "DCE"
     CZCE = "CZCE"
     CBOT = "CBOT"
+    BMD = "BMD"
+    ICE = "ICE"
+    EURONEXT = "EURONEXT"
 
 
 class InstrumentType(StrEnum):

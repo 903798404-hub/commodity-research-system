@@ -78,3 +78,20 @@ def test_continuous_and_delivery_are_distinct_even_with_same_market_values() -> 
     p0 = quote(instrument=ContinuousInstrumentId(Exchange.DCE, "P"))
     p2609 = quote(instrument=ContractId(Exchange.DCE, "P", 2026, 9))
     assert quote_business_key(p0) != quote_business_key(p2609)
+
+
+@pytest.mark.parametrize(
+    ("currency", "unit"),
+    [
+        (Currency.USD, PriceUnit.USD_PER_SHORT_TON),
+        (Currency.USD, PriceUnit.US_CENTS_PER_POUND),
+        (Currency.CAD, PriceUnit.CAD_PER_METRIC_TONNE),
+        (Currency.MYR, PriceUnit.MYR_PER_METRIC_TONNE),
+        (Currency.EUR, PriceUnit.EUR_PER_METRIC_TONNE),
+    ],
+)
+def test_supported_currency_unit_pairs_reuse_market_quote(
+    currency: Currency,
+    unit: PriceUnit,
+) -> None:
+    assert quote(currency=currency, unit=unit).unit is unit

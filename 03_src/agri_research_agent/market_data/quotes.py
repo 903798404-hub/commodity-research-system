@@ -25,17 +25,33 @@ class TradingSession(StrEnum):
 class Currency(StrEnum):
     CNY = "CNY"
     USD = "USD"
+    CAD = "CAD"
+    MYR = "MYR"
+    EUR = "EUR"
 
 
 class PriceUnit(StrEnum):
     CNY_PER_METRIC_TONNE = "CNY/metric_tonne"
     USD_PER_METRIC_TONNE = "USD/metric_tonne"
     US_CENTS_PER_BUSHEL = "US_cents/bushel"
+    USD_PER_SHORT_TON = "USD/short_ton"
+    US_CENTS_PER_POUND = "US_cents/pound"
+    CAD_PER_METRIC_TONNE = "CAD/metric_tonne"
+    MYR_PER_METRIC_TONNE = "MYR/metric_tonne"
+    EUR_PER_METRIC_TONNE = "EUR/metric_tonne"
 
 
 _CURRENCY_UNITS = {
     Currency.CNY: {PriceUnit.CNY_PER_METRIC_TONNE},
-    Currency.USD: {PriceUnit.USD_PER_METRIC_TONNE, PriceUnit.US_CENTS_PER_BUSHEL},
+    Currency.USD: {
+        PriceUnit.USD_PER_METRIC_TONNE,
+        PriceUnit.US_CENTS_PER_BUSHEL,
+        PriceUnit.USD_PER_SHORT_TON,
+        PriceUnit.US_CENTS_PER_POUND,
+    },
+    Currency.CAD: {PriceUnit.CAD_PER_METRIC_TONNE},
+    Currency.MYR: {PriceUnit.MYR_PER_METRIC_TONNE},
+    Currency.EUR: {PriceUnit.EUR_PER_METRIC_TONNE},
 }
 
 
