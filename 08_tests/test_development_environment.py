@@ -25,12 +25,14 @@ def test_direct_pin_parser_accepts_only_fixed_linux_platform_markers(tmp_path: P
     valid = tmp_path / "valid.in"
     valid.write_text(
         'mini-racer==0.14.1 ; platform_system != "Linux"\n'
-        'py-mini-racer==0.6.0 ; platform_system == "Linux"\n',
+        'py-mini-racer==0.6.0 ; platform_system == "Linux"\n'
+        'psycopg[binary]==3.3.4\n',
         encoding="utf-8",
     )
     assert environment._pinned_requirements(valid) == {
         "mini-racer": "0.14.1",
         "py-mini-racer": "0.6.0",
+        "psycopg": "3.3.4",
     }
 
     invalid = tmp_path / "invalid.in"

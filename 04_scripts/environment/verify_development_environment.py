@@ -45,7 +45,7 @@ def _pinned_requirements(path: Path) -> dict[str, str]:
         if not line or line.startswith(("#", "-")):
             continue
         match = re.fullmatch(
-            r'([A-Za-z0-9_.-]+)==([^\\\s;]+)'
+            r'([A-Za-z0-9_.-]+)(?:\[[A-Za-z0-9_.,-]+\])?==([^\\\s;]+)'
             r'(?:\s*;\s*platform_system\s*(?:==|!=)\s*"Linux")?',
             line,
         )
