@@ -102,6 +102,22 @@ modules:
     dependents: []
     full_regression_when_changed: false
     contract: true
+  research_data.three_oil_v1:
+    code_paths:
+      - 03_src/agri_research_agent/research_data/three_oil_v1.py
+      - 02_configs/international_three_oil_v1.sealed.json
+    direct_tests:
+      - 08_tests/research_data/test_three_oil_v1.py
+      - 08_tests/research_data/test_canonical_spreads.py
+    impact_tests:
+      - 08_tests/research_data/test_identities.py
+      - 08_tests/research_data/test_catalog.py
+      - 08_tests/shared/test_public_research_candidate_catalog.py
+      - 08_tests/domains/spreads/test_page_contract.py
+      - 08_tests/test_streamlit_dashboard.py
+    dependents: [research_data.canonical_spreads, apps.streamlit_dashboard]
+    full_regression_when_changed: true
+    contract: true
   data_sources.tankan:
     code_paths:
       - 03_src/agri_research_agent/data_sources/tankan/__init__.py

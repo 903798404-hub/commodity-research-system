@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "status": "THREE_OIL_V1_READY",
+  "approved_on": "2026-08-16",
+  "scope": "Approved PALM V1, SOY V1 pages 1-2, and RAPE V1 page 1 canonical contracts; no UI or deferred crude-oil page",
+  "base_manifest": "international_palm_core_six.sealed.json",
+  "source_snapshot_sha256": "3ba324daf243af762b86bb9f283a3427bda17b8b3646b2e8295c1554249acc7e",
+  "duplicate_policy": {
+    "business_key": ["provider_series_id", "business_date"],
+    "identity_fields_when_applicable": ["contract", "tenor"],
+    "null_price": "exclude_from_observation",
+    "identical_non_null_prices": "collapse_and_record_duplicate_count",
+    "conflicting_non_null_prices": "fail_closed",
+    "forbidden_resolvers": ["mean", "median", "first", "last"]
+  },
+  "seasonality_policy": {
+    "complete_years": [2021, 2022, 2023, 2024, 2025],
+    "ytd_year": 2026,
+    "join": "exact_business_date_inner_join",
+    "missing_dates": "remain_missing"
+  },
+  "conversion_rules": [
+    {
+      "conversion_id": "conversion.us_cents_per_lb_to_usd_per_metric_tonne",
+      "operation": "multiply",
+      "operand": "22.0462",
+      "input_unit": "US_cents_per_lb",
+      "output_unit": "metric_tonne",
+      "deterministic": true,
+      "layer": "canonical_contract"
+    },
+    {
+      "conversion_id": "conversion.soybean_oil_basis_raw_x100_to_us_cents_per_lb",
+      "operation": "divide",
+      "operand": "100",
+      "input_unit": "raw_basis_x100",
+      "output_unit": "US_cents_per_lb",
+      "deterministic": true,
+      "layer": "series_mapping"
+    },
+    {
+      "conversion_id": "conversion.rin_d4_raw_x100_to_usd_per_gallon",
+      "operation": "divide",
+      "operand": "100",
+      "input_unit": "raw_credit_x100",
+      "output_unit": "gallon",
+      "deterministic": true,
+      "layer": "series_mapping"
+    }
+  ],
+  "series": [
+    {
+      "series_id": "market.physical.hydrogenated_vegetable_oil.india.mumbai.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-3604d2c178fa",
+      "provider_series_id": "lutou:oils:印度_棕榈油_价格:氢化植物油(菜油)_现货_印度_孟买(Mumbai) (INR/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=印度_棕榈油_价格",
+      "source_native_table": "印度_棕榈油_价格", "source_native_series": "氢化植物油(菜油)_现货_印度_孟买(Mumbai) (INR/T)",
+      "product": "Hydrogenated Vegetable Oil", "product_grade": "Hydrogenated", "country": "India", "region": "UNKNOWN", "location_native": "Mumbai",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "INR", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2007-05-23", "latest_date": "2026-08-12", "observation_count": 4806,
+      "observations_by_year": {"2021": 244, "2022": 245, "2023": 253, "2024": 239, "2025": 253, "2026": 157},
+      "same_value_duplicate_count": 13, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.physical.soybean_oil.india.sea.refined.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-69750cce4b06",
+      "provider_series_id": "lutou:oils:印度_豆油_价格:豆油_现货_印度_SEA精炼豆油 (INR/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=印度_豆油_价格",
+      "source_native_table": "印度_豆油_价格", "source_native_series": "豆油_现货_印度_SEA精炼豆油 (INR/T)",
+      "product": "Soybean Oil", "product_grade": "Refined", "country": "India", "region": "UNKNOWN", "location_native": "SEA",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "INR", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2002-02-04", "latest_date": "2026-08-12", "observation_count": 4697,
+      "observations_by_year": {"2021": 243, "2022": 244, "2023": 244, "2024": 246, "2025": 248, "2026": 155},
+      "same_value_duplicate_count": 13, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.physical.palm_oil.india.mumbai.refined.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-3604d2c178fa",
+      "provider_series_id": "lutou:oils:印度_棕榈油_价格:棕榈油(精)_现货_印度_孟买(Mumbai) (INR/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=印度_棕榈油_价格",
+      "source_native_table": "印度_棕榈油_价格", "source_native_series": "棕榈油(精)_现货_印度_孟买(Mumbai) (INR/T)",
+      "product": "Palm Oil", "product_grade": "Refined", "country": "India", "region": "UNKNOWN", "location_native": "Mumbai",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "INR", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2006-12-27", "latest_date": "2026-08-12", "observation_count": 4871,
+      "observations_by_year": {"2021": 244, "2022": 186, "2023": 253, "2024": 228, "2025": 253, "2026": 157},
+      "same_value_duplicate_count": 13, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.physical.sunflower_oil.india.refined.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-69750cce4b06",
+      "provider_series_id": "lutou:oils:印度_豆油_价格:葵花籽油_现货_印度_精炼 (INR/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=印度_豆油_价格",
+      "source_native_table": "印度_豆油_价格", "source_native_series": "葵花籽油_现货_印度_精炼 (INR/T)",
+      "product": "Sunflower Oil", "product_grade": "Refined", "country": "India", "region": "UNKNOWN", "location_native": "India",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "INR", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2002-02-04", "latest_date": "2026-08-12", "observation_count": 4695,
+      "observations_by_year": {"2021": 243, "2022": 241, "2023": 244, "2024": 246, "2025": 248, "2026": 155},
+      "same_value_duplicate_count": 13, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.physical.palm_oil.indonesia.cpo.fob.p1",
+      "status": "READY", "dataset_id": "lutou.oils.native-1101e7dde112",
+      "provider_series_id": "lutou:oils:印度尼西亚_棕榈油_价格:棕榈油(毛)_离岸价_印度尼西亚_毛棕榈油-P1 (USD/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=印度尼西亚_棕榈油_价格",
+      "source_native_table": "印度尼西亚_棕榈油_价格", "source_native_series": "棕榈油(毛)_离岸价_印度尼西亚_毛棕榈油-P1 (USD/T)",
+      "product": "Crude Palm Oil", "product_grade": "Crude Palm Oil", "country": "Indonesia", "region": "UNKNOWN", "location_native": "Indonesia",
+      "quote_basis": "FOB", "tenor": "P1", "price_type": "Physical Prompt Flat Price", "currency": "USD", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2004-05-04", "latest_date": "2026-08-12", "observation_count": 5423,
+      "observations_by_year": {"2021": 243, "2022": 216, "2023": 244, "2024": 247, "2025": 243, "2026": 149},
+      "same_value_duplicate_count": 13, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.energy.diesel.ice.continuous_1",
+      "status": "READY", "dataset_id": "lutou.oils.native-254fc36640bb",
+      "provider_series_id": "lutou:oils:生物柴油_价格:ICE_柴油 (USD/吨)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=生物柴油_价格",
+      "source_native_table": "生物柴油_价格", "source_native_series": "ICE_柴油 (USD/吨)",
+      "product": "ICE Diesel", "product_grade": "UNKNOWN", "country": "UNKNOWN", "region": "Europe", "location_native": "ICE",
+      "quote_basis": "Futures", "tenor": "Continuous 1", "price_type": "Futures Continuous Flat Price", "currency": "USD", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "1987-06-22", "latest_date": "2026-08-12", "observation_count": 9953,
+      "observations_by_year": {"2021": 259, "2022": 258, "2023": 256, "2024": 259, "2025": 258, "2026": 108},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "RECOVERED_HISTORICAL_FORMULA"
+    },
+    {
+      "series_id": "market.basis.soybean_oil.us.central_illinois.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-dd8bc75b0726",
+      "provider_series_id": "lutou:oils:美国_豆油_价格:豆油_现货_美国_伊利诺伊州中部 (USC/LB)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=美国_豆油_价格",
+      "source_native_table": "美国_豆油_价格", "source_native_series": "豆油_现货_美国_伊利诺伊州中部 (USC/LB)",
+      "product": "Soybean Oil", "product_grade": "UNKNOWN", "country": "United States", "region": "Central Illinois", "location_native": "Central Illinois",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Basis", "currency": "USD", "unit": "US_cents_per_lb", "source_unit": "US_cents_per_lb", "conversion_id": null,
+      "earliest_date": "2013-02-11", "latest_date": "2026-08-12", "observation_count": 3170,
+      "observations_by_year": {"2021": 250, "2022": 248, "2023": 240, "2024": 247, "2025": 250, "2026": 153},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "RECOVERED_HISTORICAL_FORMULA"
+    },
+    {
+      "series_id": "market.futures.soybean_oil.cbot.continuous_1",
+      "status": "READY", "dataset_id": "lutou.oils.native-dd8bc75b0726",
+      "provider_series_id": "lutou:oils:美国_豆油_价格:CBOT_豆油_主力",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=美国_豆油_价格",
+      "source_native_table": "美国_豆油_价格", "source_native_series": "CBOT_豆油_主力",
+      "product": "Soybean Oil", "product_grade": "Futures", "country": "United States", "region": "CBOT", "location_native": "CBOT",
+      "quote_basis": "Futures", "tenor": "Continuous 1", "price_type": "Futures Continuous Flat Price", "currency": "USD", "unit": "US_cents_per_lb", "source_unit": "US_cents_per_lb", "conversion_id": null,
+      "earliest_date": "1995-11-09", "latest_date": "2026-08-12", "observation_count": 7565,
+      "observations_by_year": {"2021": 240, "2022": 242, "2023": 238, "2024": 235, "2025": 240, "2026": 146},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "RECOVERED_HISTORICAL_FORMULA"
+    },
+    {
+      "series_id": "market.physical.soybean_oil.brazil.paranagua.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-d91130c2496d",
+      "provider_series_id": "lutou:oils:巴西_豆油_价格:豆油_现货价格_巴西_帕拉那瓜港 (USD/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=巴西_豆油_价格",
+      "source_native_table": "巴西_豆油_价格", "source_native_series": "豆油_现货价格_巴西_帕拉那瓜港 (USD/T)",
+      "product": "Soybean Oil", "product_grade": "UNKNOWN", "country": "Brazil", "region": "UNKNOWN", "location_native": "Paranagua Port",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "USD", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2004-02-19", "latest_date": "2026-08-10", "observation_count": 5265,
+      "observations_by_year": {"2021": 229, "2022": 207, "2023": 223, "2024": 218, "2025": 233, "2026": 139},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.basis.soybean_oil.argentina.upper_river.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-7cf22d2b0e75",
+      "provider_series_id": "lutou:oils:阿根廷_豆油_价格:豆油_现货基差_阿根廷_上河 (USC/LB)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=阿根廷_豆油_价格",
+      "source_native_table": "阿根廷_豆油_价格", "source_native_series": "豆油_现货基差_阿根廷_上河 (USC/LB)",
+      "product": "Soybean Oil", "product_grade": "UNKNOWN", "country": "Argentina", "region": "UNKNOWN", "location_native": "Upper River",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Basis", "currency": "USD", "unit": "US_cents_per_lb", "source_unit": "raw_basis_x100", "conversion_id": "conversion.soybean_oil_basis_raw_x100_to_us_cents_per_lb",
+      "earliest_date": "2017-03-01", "latest_date": "2026-08-10", "observation_count": 1372,
+      "observations_by_year": {"2021": 150, "2022": 133, "2023": 136, "2024": 167, "2025": 178, "2026": 125},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.basis.soybean_oil.brazil.paranagua.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-d91130c2496d",
+      "provider_series_id": "lutou:oils:巴西_豆油_价格:豆油_现货基差_巴西_帕拉那瓜港 (USC/LB)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=巴西_豆油_价格",
+      "source_native_table": "巴西_豆油_价格", "source_native_series": "豆油_现货基差_巴西_帕拉那瓜港 (USC/LB)",
+      "product": "Soybean Oil", "product_grade": "UNKNOWN", "country": "Brazil", "region": "UNKNOWN", "location_native": "Paranagua Port",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Basis", "currency": "USD", "unit": "US_cents_per_lb", "source_unit": "raw_basis_x100", "conversion_id": "conversion.soybean_oil_basis_raw_x100_to_us_cents_per_lb",
+      "earliest_date": "2004-02-19", "latest_date": "2026-08-11", "observation_count": 5388,
+      "observations_by_year": {"2021": 241, "2022": 215, "2023": 235, "2024": 235, "2025": 244, "2026": 147},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.environmental_credit.rin.d4",
+      "status": "READY", "dataset_id": "lutou.oils.native-254fc36640bb",
+      "provider_series_id": "lutou:oils:生物柴油_价格:RINs_D4 (USD/GAL)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=生物柴油_价格",
+      "source_native_table": "生物柴油_价格", "source_native_series": "RINs_D4 (USD/GAL)",
+      "product": "Renewable Identification Number", "product_grade": "D4", "country": "United States", "region": "UNKNOWN", "location_native": "United States",
+      "quote_basis": "UNKNOWN", "tenor": "UNKNOWN", "price_type": "Environmental Credit Quote", "currency": "USD", "unit": "gallon", "source_unit": "raw_credit_x100", "conversion_id": "conversion.rin_d4_raw_x100_to_usd_per_gallon",
+      "earliest_date": "2014-05-28", "latest_date": "2026-08-12", "observation_count": 2733,
+      "observations_by_year": {"2021": 227, "2022": 220, "2023": 247, "2024": 250, "2025": 244, "2026": 104},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.biofuel.rme.europe.ara.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-254fc36640bb",
+      "provider_series_id": "lutou:oils:生物柴油_价格:RME菜油生物柴油_现货_欧洲_ARA (USD/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=生物柴油_价格",
+      "source_native_table": "生物柴油_价格", "source_native_series": "RME菜油生物柴油_现货_欧洲_ARA (USD/T)",
+      "product": "RME Biodiesel", "product_grade": "RME", "country": "UNKNOWN", "region": "Europe", "location_native": "ARA",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "USD", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2010-11-30", "latest_date": "2026-08-11", "observation_count": 3970,
+      "observations_by_year": {"2021": 252, "2022": 234, "2023": 256, "2024": 247, "2025": 254, "2026": 109},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.energy.diesel.europe.ara.spot",
+      "status": "READY", "dataset_id": "lutou.oils.native-254fc36640bb",
+      "provider_series_id": "lutou:oils:生物柴油_价格:低硫柴油_现货_欧洲_阿姆斯特丹-鹿特丹-安特卫普 (USD/T)",
+      "provider": "Reuters", "origin_system": "lutou", "acquisition_channel": "manual_snapshot",
+      "source_locator": "snapshot:01_data/manual/榨利表/油脂油料价格.sql#table=生物柴油_价格",
+      "source_native_table": "生物柴油_价格", "source_native_series": "低硫柴油_现货_欧洲_阿姆斯特丹-鹿特丹-安特卫普 (USD/T)",
+      "product": "Low Sulfur Diesel", "product_grade": "Low Sulfur Diesel", "country": "UNKNOWN", "region": "Europe", "location_native": "Amsterdam-Rotterdam-Antwerp",
+      "quote_basis": "UNKNOWN", "tenor": "Spot", "price_type": "Physical Spot Flat Price", "currency": "USD", "unit": "metric_tonne", "source_unit": "metric_tonne", "conversion_id": null,
+      "earliest_date": "2002-09-26", "latest_date": "2026-08-12", "observation_count": 6035,
+      "observations_by_year": {"2021": 253, "2022": 251, "2023": 251, "2024": 254, "2025": 253, "2026": 103},
+      "same_value_duplicate_count": 0, "conflicting_duplicate_date_count": 0, "metadata_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    }
+  ],
+  "derived_series": [
+    {
+      "series_id": "market.derived.soybean_oil.cbot.continuous_1.usd_per_metric_tonne",
+      "display_name": "CBOT Soybean Oil Continuous 1 USD/T", "status": "READY",
+      "formula": "BOc1 * 22.0462",
+      "terms": [{"series_id": "market.futures.soybean_oil.cbot.continuous_1", "multiplier": "22.0462"}],
+      "constant": "0", "conversion_ids": ["conversion.us_cents_per_lb_to_usd_per_metric_tonne"],
+      "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne",
+      "earliest_date": "1995-11-09", "latest_date": "2026-08-12", "observation_count": 7565,
+      "observations_by_year": {"2021": 240, "2022": 242, "2023": 238, "2024": 235, "2025": 240, "2026": 146},
+      "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    },
+    {
+      "series_id": "market.derived.soybean_oil.us.central_illinois.spot",
+      "display_name": "US Central Illinois Soybean Oil Flat Price USD/T", "status": "READY",
+      "formula": "(SOY-CTILL-US + BOc1) * 22.0462",
+      "terms": [
+        {"series_id": "market.basis.soybean_oil.us.central_illinois.spot", "multiplier": "22.0462"},
+        {"series_id": "market.futures.soybean_oil.cbot.continuous_1", "multiplier": "22.0462"}
+      ],
+      "constant": "0", "conversion_ids": ["conversion.us_cents_per_lb_to_usd_per_metric_tonne"],
+      "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne",
+      "earliest_date": "2013-02-11", "latest_date": "2026-08-12", "observation_count": 3054,
+      "observations_by_year": {"2021": 238, "2022": 239, "2023": 229, "2024": 230, "2025": 239, "2026": 145},
+      "definition_evidence": "RECOVERED_HISTORICAL_FORMULA"
+    }
+  ],
+  "fixed_assumptions": [
+    {
+      "assumption_id": "assumption.freight.cbot_board_to_argentina",
+      "value": "30", "currency": "USD", "unit": "metric_tonne",
+      "purpose": "Fixed freight deduction in CBOT board minus Argentina soybean oil",
+      "evidence": "USER_APPROVED_BUSINESS_DEFINITION"
+    }
+  ],
+  "spreads": [
+    {"spread_id": "spread.energy.pogo.indonesia_cpo_ice_diesel", "display_name": "POGO：印尼毛棕 - ICE柴油", "status": "READY", "formula": "Indonesia CPO FOB P1 - ICE Diesel", "terms": [{"series_id": "market.physical.palm_oil.indonesia.cpo.fob.p1", "multiplier": "1"}, {"series_id": "market.energy.diesel.ice.continuous_1", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2004-05-04", "latest_common_date": "2026-08-12", "common_observation_count": 5341, "common_observations_by_year": {"2021": 242, "2022": 215, "2023": 242, "2024": 246, "2025": 242, "2026": 100}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.international.rape_soy", "display_name": "国际菜豆价差", "status": "READY", "formula": "Europe Rapeseed Oil Spot - Argentina Upper River Soybean Oil Spot", "terms": [{"series_id": "market.physical.rapeseed_oil.europe.spot", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.argentina.upper_river.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2017-03-01", "latest_common_date": "2026-08-10", "common_observation_count": 1264, "common_observations_by_year": {"2021": 138, "2022": 124, "2023": 127, "2024": 150, "2025": 164, "2026": 116}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.europe.rape_soy", "display_name": "欧洲菜豆价差", "status": "READY", "formula": "Europe Rapeseed Oil Spot - Oil World Dutch Soybean Oil FOB ex-mill", "terms": [{"series_id": "market.physical.rapeseed_oil.europe.spot", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.netherlands.ex_mill_fob", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2015-11-19", "latest_common_date": "2026-08-10", "common_observation_count": 2351, "common_observations_by_year": {"2021": 203, "2022": 223, "2023": 202, "2024": 201, "2025": 210, "2026": 122}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.india.hvo_refined_soy", "display_name": "印度国内菜豆价差：氢化菜油 - 精炼豆油", "status": "READY", "formula": "Mumbai Hydrogenated Vegetable Oil - SEA Refined Soybean Oil", "terms": [{"series_id": "market.physical.hydrogenated_vegetable_oil.india.mumbai.spot", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.india.sea.refined.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "INR", "unit": "metric_tonne", "common_earliest_date": "2007-05-23", "latest_common_date": "2026-08-12", "common_observation_count": 4207, "common_observations_by_year": {"2021": 232, "2022": 234, "2023": 240, "2024": 229, "2025": 242, "2026": 153}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.india.refined_soy_refined_palm", "display_name": "印度国内豆棕价差", "status": "READY", "formula": "SEA Refined Soybean Oil - Mumbai Refined Palm Oil", "terms": [{"series_id": "market.physical.soybean_oil.india.sea.refined.spot", "multiplier": "1"}, {"series_id": "market.physical.palm_oil.india.mumbai.refined.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "INR", "unit": "metric_tonne", "common_earliest_date": "2006-12-27", "latest_common_date": "2026-08-12", "common_observation_count": 4270, "common_observations_by_year": {"2021": 232, "2022": 177, "2023": 240, "2024": 218, "2025": 242, "2026": 153}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.international.sunflower_soy", "display_name": "国际葵豆价差", "status": "READY", "formula": "Europe Six Ports Sunflower Oil Spot - Argentina Upper River Soybean Oil Spot", "terms": [{"series_id": "market.physical.sunflower_oil.europe.six_ports.ex_tank.spot", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.argentina.upper_river.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2017-03-01", "latest_common_date": "2026-08-10", "common_observation_count": 1229, "common_observations_by_year": {"2021": 136, "2022": 98, "2023": 120, "2024": 149, "2025": 165, "2026": 116}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.india.refined_sunflower_refined_soy", "display_name": "印度国内葵豆价差", "status": "READY", "formula": "India Refined Sunflower Oil - SEA Refined Soybean Oil", "terms": [{"series_id": "market.physical.sunflower_oil.india.refined.spot", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.india.sea.refined.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "INR", "unit": "metric_tonne", "common_earliest_date": "2002-02-04", "latest_common_date": "2026-08-12", "common_observation_count": 4693, "common_observations_by_year": {"2021": 243, "2022": 241, "2023": 244, "2024": 246, "2025": 248, "2026": 155}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.energy.boho.us_soy_ice_diesel", "display_name": "BOHO：美豆油 - ICE柴油", "status": "READY", "formula": "((SOY-CTILL-US + BOc1) * 22.0462) - LGOc1", "terms": [{"series_id": "market.derived.soybean_oil.us.central_illinois.spot", "multiplier": "1"}, {"series_id": "market.energy.diesel.ice.continuous_1", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2013-02-11", "latest_common_date": "2026-08-12", "common_observation_count": 3007, "common_observations_by_year": {"2021": 238, "2022": 239, "2023": 228, "2024": 230, "2025": 239, "2026": 99}, "seasonality_eligibility": "FULL", "definition_evidence": "RECOVERED_HISTORICAL_FORMULA"},
+    {"spread_id": "spread.soybean_oil.argentina_brazil", "display_name": "阿根廷上河豆油 - 巴西帕拉那瓜港豆油", "status": "READY", "formula": "Argentina Upper River Soybean Oil Spot - Brazil Paranagua Soybean Oil Spot", "terms": [{"series_id": "market.physical.soybean_oil.argentina.upper_river.spot", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.brazil.paranagua.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2017-03-01", "latest_common_date": "2026-08-10", "common_observation_count": 1221, "common_observations_by_year": {"2021": 133, "2022": 108, "2023": 120, "2024": 146, "2025": 166, "2026": 114}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.soybean_oil.argentina_us_central_illinois", "display_name": "阿根廷上河豆油 - 美国中伊利诺伊豆油", "status": "READY", "formula": "Argentina Upper River Soybean Oil Spot - US Central Illinois Soybean Oil Flat Price", "terms": [{"series_id": "market.physical.soybean_oil.argentina.upper_river.spot", "multiplier": "1"}, {"series_id": "market.derived.soybean_oil.us.central_illinois.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2017-03-01", "latest_common_date": "2026-08-10", "common_observation_count": 1268, "common_observations_by_year": {"2021": 138, "2022": 124, "2023": 123, "2024": 150, "2025": 167, "2026": 117}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.soybean_oil.cbot_board_argentina.freight_30", "display_name": "美豆油盘面 - 阿根廷豆油（30 USD/T freight）", "status": "READY", "formula": "BOc1 * 22.0462 - Argentina Upper River Soybean Oil Spot - 30 USD/T", "terms": [{"series_id": "market.derived.soybean_oil.cbot.continuous_1.usd_per_metric_tonne", "multiplier": "1"}, {"series_id": "market.physical.soybean_oil.argentina.upper_river.spot", "multiplier": "-1"}], "constant": "-30", "fixed_assumption_ids": ["assumption.freight.cbot_board_to_argentina"], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2017-03-01", "latest_common_date": "2026-08-10", "common_observation_count": 1286, "common_observations_by_year": {"2021": 140, "2022": 125, "2023": 128, "2024": 153, "2025": 168, "2026": 117}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.india.hvo_refined_palm", "display_name": "印度国内菜棕价差：氢化菜油 - 精炼棕榈油", "status": "READY", "formula": "Mumbai Hydrogenated Vegetable Oil - Mumbai Refined Palm Oil", "terms": [{"series_id": "market.physical.hydrogenated_vegetable_oil.india.mumbai.spot", "multiplier": "1"}, {"series_id": "market.physical.palm_oil.india.mumbai.refined.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "INR", "unit": "metric_tonne", "common_earliest_date": "2007-05-23", "latest_common_date": "2026-08-12", "common_observation_count": 4724, "common_observations_by_year": {"2021": 244, "2022": 186, "2023": 253, "2024": 221, "2025": 253, "2026": 157}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.europe.sunflower_rape", "display_name": "欧洲葵菜价差", "status": "READY", "formula": "Europe Six Ports Sunflower Oil Ex-tank Spot - Europe Rapeseed Oil Spot", "terms": [{"series_id": "market.physical.sunflower_oil.europe.six_ports.ex_tank.spot", "multiplier": "1"}, {"series_id": "market.physical.rapeseed_oil.europe.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "1996-01-02", "latest_common_date": "2026-08-12", "common_observation_count": 6932, "common_observations_by_year": {"2021": 254, "2022": 206, "2023": 238, "2024": 252, "2025": 252, "2026": 154}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"},
+    {"spread_id": "spread.europe.rme_ara_diesel_premium", "display_name": "RME 生柴溢价", "status": "READY", "formula": "RME Biodiesel Spot ARA - ARA Low Sulfur Diesel Spot", "terms": [{"series_id": "market.biofuel.rme.europe.ara.spot", "multiplier": "1"}, {"series_id": "market.energy.diesel.europe.ara.spot", "multiplier": "-1"}], "constant": "0", "fixed_assumption_ids": [], "join": "exact_business_date_inner_join", "currency": "USD", "unit": "metric_tonne", "common_earliest_date": "2010-11-30", "latest_common_date": "2026-08-11", "common_observation_count": 3874, "common_observations_by_year": {"2021": 247, "2022": 226, "2023": 250, "2024": 246, "2025": 253, "2026": 102}, "seasonality_eligibility": "FULL", "definition_evidence": "USER_APPROVED_BUSINESS_DEFINITION"}
+  ],
+  "pages": [
+    {
+      "page_id": "page.palm.v1", "display_name": "国际棕榈油价差 V1",
+      "rows": [
+        {"row_number": 1, "purpose": "international relative value", "metrics": [{"metric_type": "spread", "contract_id": "spread.international.soy_palm", "display_name": "国际豆棕"}, {"metric_type": "spread", "contract_id": "spread.international.rape_palm", "display_name": "国际菜棕"}, {"metric_type": "spread", "contract_id": "spread.international.sunflower_palm", "display_name": "国际葵棕"}]},
+        {"row_number": 2, "purpose": "Europe relative value", "metrics": [{"metric_type": "spread", "contract_id": "spread.europe.soy_palm", "display_name": "欧洲豆棕"}, {"metric_type": "spread", "contract_id": "spread.europe.rape_palm", "display_name": "欧洲菜棕"}, {"metric_type": "spread", "contract_id": "spread.europe.sunflower_palm", "display_name": "欧洲葵棕"}]},
+        {"row_number": 3, "purpose": "energy", "metrics": [{"metric_type": "spread", "contract_id": "spread.energy.pogo.indonesia_cpo_ice_diesel", "display_name": "POGO：印尼毛棕 - ICE柴油"}]}
+      ]
+    },
+    {
+      "page_id": "page.soy.v1.page1", "display_name": "国际豆油相关价差 V1 第一页",
+      "rows": [
+        {"row_number": 1, "purpose": "rape-soy", "metrics": [{"metric_type": "spread", "contract_id": "spread.international.rape_soy", "display_name": "国际菜豆"}, {"metric_type": "spread", "contract_id": "spread.europe.rape_soy", "display_name": "欧洲菜豆"}, {"metric_type": "spread", "contract_id": "spread.india.hvo_refined_soy", "display_name": "印度国内菜豆：氢化菜油 - 精炼豆油"}]},
+        {"row_number": 2, "purpose": "soy-palm", "metrics": [{"metric_type": "spread", "contract_id": "spread.international.soy_palm", "display_name": "国际豆棕"}, {"metric_type": "spread", "contract_id": "spread.europe.soy_palm", "display_name": "欧洲豆棕"}, {"metric_type": "spread", "contract_id": "spread.india.refined_soy_refined_palm", "display_name": "印度国内豆棕"}]},
+        {"row_number": 3, "purpose": "sunflower-soy / energy", "metrics": [{"metric_type": "spread", "contract_id": "spread.international.sunflower_soy", "display_name": "国际葵豆"}, {"metric_type": "spread", "contract_id": "spread.india.refined_sunflower_refined_soy", "display_name": "印度国内葵豆"}, {"metric_type": "spread", "contract_id": "spread.energy.boho.us_soy_ice_diesel", "display_name": "BOHO：美豆油 - ICE柴油"}]}
+      ]
+    },
+    {
+      "page_id": "page.soy.v1.page2", "display_name": "国际豆油相关价差 V1 第二页",
+      "rows": [
+        {"row_number": 1, "purpose": "Argentina / Brazil / US relative value", "metrics": [{"metric_type": "series", "contract_id": "market.basis.soybean_oil.argentina.upper_river.spot", "display_name": "阿根廷豆油基差"}, {"metric_type": "spread", "contract_id": "spread.soybean_oil.argentina_brazil", "display_name": "阿根廷上河豆油 - 巴西帕拉那瓜港豆油"}, {"metric_type": "spread", "contract_id": "spread.soybean_oil.argentina_us_central_illinois", "display_name": "阿根廷上河豆油 - 美国中伊利诺伊豆油"}]},
+        {"row_number": 2, "purpose": "US basis / RIN / board-vs-Argentina", "metrics": [{"metric_type": "series", "contract_id": "market.basis.soybean_oil.us.central_illinois.spot", "display_name": "美国豆油基差"}, {"metric_type": "series", "contract_id": "market.environmental_credit.rin.d4", "display_name": "RINS-D4"}, {"metric_type": "spread", "contract_id": "spread.soybean_oil.cbot_board_argentina.freight_30", "display_name": "美豆油盘面 - 阿根廷豆油（30 USD/T freight）"}]}
+      ]
+    },
+    {
+      "page_id": "page.rape.v1.page1", "display_name": "国际菜油相关价差 V1 第一页",
+      "rows": [
+        {"row_number": 1, "purpose": "rape-soy", "metrics": [{"metric_type": "spread", "contract_id": "spread.international.rape_soy", "display_name": "国际菜豆"}, {"metric_type": "spread", "contract_id": "spread.europe.rape_soy", "display_name": "欧洲菜豆"}, {"metric_type": "spread", "contract_id": "spread.india.hvo_refined_soy", "display_name": "印度国内菜豆：氢化菜油 - 精炼豆油"}]},
+        {"row_number": 2, "purpose": "rape-palm", "metrics": [{"metric_type": "spread", "contract_id": "spread.international.rape_palm", "display_name": "国际菜棕"}, {"metric_type": "spread", "contract_id": "spread.europe.rape_palm", "display_name": "欧洲菜棕"}, {"metric_type": "spread", "contract_id": "spread.india.hvo_refined_palm", "display_name": "印度国内菜棕：氢化菜油 - 精炼棕榈油"}]},
+        {"row_number": 3, "purpose": "RME / sunflower-rape / biofuel premium", "metrics": [{"metric_type": "series", "contract_id": "market.biofuel.rme.europe.ara.spot", "display_name": "欧洲 RME 生物柴油现货"}, {"metric_type": "spread", "contract_id": "spread.europe.sunflower_rape", "display_name": "欧洲葵菜价差"}, {"metric_type": "spread", "contract_id": "spread.europe.rme_ara_diesel_premium", "display_name": "RME 生柴溢价"}]}
+      ]
+    }
+  ]
+}
