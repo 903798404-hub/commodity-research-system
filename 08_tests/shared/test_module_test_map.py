@@ -31,6 +31,7 @@ FOUNDATION_REQUIRED_MODULES = {
     "shared.file_identity",
     "shared.atomic_storage",
     "shared.runtime_context",
+    "shared.immutable_candidate",
 }
 
 

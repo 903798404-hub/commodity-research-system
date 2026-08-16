@@ -69,3 +69,9 @@ modules:
     impact_tests: [08_tests/shared/test_atomic_storage.py]
     dependents: []
     full_regression_when_changed: true
+  shared.immutable_candidate:
+    code_paths: [03_src/agri_research_agent/shared/immutable_candidate.py]
+    direct_tests: [08_tests/shared/test_immutable_candidate.py]
+    impact_tests: []
+    dependents: []
+    full_regression_when_changed: false
