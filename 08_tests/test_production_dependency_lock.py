@@ -28,9 +28,18 @@ def test_runtime_input_declares_exact_akshare_platform_dependencies() -> None:
     runtime_input = (ROOT / "requirements.in").read_text(encoding="utf-8")
     assert "akshare==1.18.64" in runtime_input
     assert "pyarrow==24.0.0" in runtime_input
+    assert "psycopg[binary]==3.3.4" in runtime_input
     assert 'mini-racer==0.14.1 ; platform_system != "Linux"' in runtime_input
     assert 'py-mini-racer==0.6.0 ; platform_system == "Linux"' in runtime_input
     assert 'akracer==0.0.14 ; platform_system == "Linux"' in runtime_input
+
+
+def test_tankan_postgres_runtime_dependencies_are_pinned_and_hashed() -> None:
+    lock = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    for name in ("psycopg", "psycopg-binary"):
+        block = _entry(lock, name)
+        assert block.startswith(f"{name}==3.3.4")
+        assert "--hash=sha256:" in block
 
 
 def test_shared_lock_has_pinned_hashed_mutually_exclusive_platform_entries() -> None:
