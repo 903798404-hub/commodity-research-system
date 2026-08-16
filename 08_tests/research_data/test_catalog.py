@@ -96,7 +96,8 @@ def test_catalog_rejects_sensitive_fields(tmp_path: Path) -> None:
 
 def test_gate_a_approval_hash_is_cross_platform_line_ending_safe(tmp_path: Path) -> None:
     path = tmp_path / "catalog.json"
-    path.write_bytes(CATALOG_PATH.read_bytes().replace(b"\n", b"\r\n"))
+    normalized = CATALOG_PATH.read_bytes().replace(b"\r\n", b"\n")
+    path.write_bytes(normalized.replace(b"\n", b"\r\n"))
 
     catalog = DataAssetCatalog.load_gate_a_approved(path, APPROVAL_PATH)
     assert len(catalog.datasets) == 652
