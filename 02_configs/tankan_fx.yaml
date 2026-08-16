@@ -1,0 +1,19 @@
+schema_version: 1
+base_currency: USD
+quote_currency: CNH
+rate_unit: CNH_per_USD
+rate_type: unspecified
+tenors:
+  - {source_column: spot, tenor: SPOT, tenor_months: 0}
+  - {source_column: fx_1m, tenor: 1M, tenor_months: 1}
+  - {source_column: fx_2m, tenor: 2M, tenor_months: 2}
+  - {source_column: fx_3m, tenor: 3M, tenor_months: 3}
+  - {source_column: fx_4m, tenor: 4M, tenor_months: 4}
+  - {source_column: fx_5m, tenor: 5M, tenor_months: 5}
+  - {source_column: fx_6m, tenor: 6M, tenor_months: 6}
+  - {source_column: fx_7m, tenor: 7M, tenor_months: 7}
+  - {source_column: fx_8m, tenor: 8M, tenor_months: 8}
+  - {source_column: fx_9m, tenor: 9M, tenor_months: 9}
+  - {source_column: fx_10m, tenor: 10M, tenor_months: 10}
+  - {source_column: fx_11m, tenor: 11M, tenor_months: 11}
+  - {source_column: fx_12m, tenor: 12M, tenor_months: 12}
