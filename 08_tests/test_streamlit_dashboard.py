@@ -53,6 +53,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     research_items = [item for group in research_groups for item in group.items]
 
     assert [item.label for item in research_items] == [
+        "国际价差",
         "价差动态",
         "国内现货（基差与一口价）",
         "美豆周度跟踪",
@@ -89,7 +90,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 12
+    assert cards_markup.count('class="agri-card"') == 13
     assert cards_markup.count('class="agri-card-keyword"') == 20
     assert cards_markup.count('class="agri-card-detail-label"') == 5
     assert "?home_target=" not in cards_markup

@@ -39,8 +39,10 @@ from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import get_external_app_url, render_home
 from import_profit_runtime_page import render_import_profit_runtime_page
+from international_spread_page import render_international_spread_page
 from navigation import (
     IMPORT_PROFIT_ROUTE_ID,
+    INTERNATIONAL_SPREAD_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
     NAVIGATION_GROUPS,
     PALM_OIL_WEATHER_PAGE_TITLE,
@@ -413,6 +415,8 @@ def render_selected_workspace_page(selected_page: str) -> None:
         render_foreign_seats_page(FOREIGN_SEATS_DATABASE_FILE)
     elif selected_page == IMPORT_PROFIT_ROUTE_ID:
         render_import_profit_route()
+    elif selected_page == INTERNATIONAL_SPREAD_PAGE_TITLE:
+        render_international_spread_page(project_root=PROJECT_ROOT)
     else:
         render_spread_dashboard()
 

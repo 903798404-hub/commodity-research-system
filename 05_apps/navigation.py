@@ -12,6 +12,7 @@ RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
 INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 IMPORT_PROFIT_ROUTE_ID = "import_profit"
+INTERNATIONAL_SPREAD_PAGE_TITLE = "国际价差"
 RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
 
 
@@ -60,6 +61,13 @@ NAVIGATION_GROUPS = (
     NavigationGroup(
         "市场行情",
         (
+            NavigationItem(
+                "international_spread",
+                INTERNATIONAL_SPREAD_PAGE_TITLE,
+                INTERNATIONAL_SPREAD_PAGE_TITLE,
+                "chart",
+                "比较棕榈油、豆油与菜油的国际现货、能源与生柴相对价值",
+            ),
             NavigationItem(
                 "spreads_dashboard",
                 "价差动态",
