@@ -35,6 +35,12 @@ from agri_research_agent.data_sources.tankan.queries import (
     FX_WINDOW_QUERY,
     MARKET_WINDOW_QUERY,
 )
+from agri_research_agent.market_data.soybean_shadow import (
+    CBOT_SHADOW_SERIES_ID,
+    FX_SPOT_SHADOW_SERIES_ID,
+    build_cbot_soybean_shadow,
+    build_usd_cnh_spot_shadow,
+)
 from agri_research_agent.shared.file_identity import FileIdentity, identify_file
 from agri_research_agent.shared.immutable_candidate import (
     seal_immutable_candidate,
@@ -207,6 +213,24 @@ def _build_candidate(
         quality_path = directory / "quality_report.json"
         _write_json(quality_path, adapted.quality_report)
         quality_identity = identify_file(quality_path)
+        shadow_table: pa.Table
+        shadow_filename: str
+        canonical_series_id: str
+        if isinstance(adapted, MarketAdapterResult):
+            shadow = build_cbot_soybean_shadow(adapted.table)
+            shadow_filename = "cbot_soybean_shadow.parquet"
+            canonical_series_id = CBOT_SHADOW_SERIES_ID
+        else:
+            shadow = build_usd_cnh_spot_shadow(adapted.table)
+            shadow_filename = "fx_spot_shadow.parquet"
+            canonical_series_id = FX_SPOT_SHADOW_SERIES_ID
+        shadow_table = shadow.table
+        shadow_path = directory / shadow_filename
+        pq.write_table(shadow_table, shadow_path, compression="zstd")
+        shadow_identity = identify_file(shadow_path)
+        shadow_policy_path = directory / "shadow_source_policy.json"
+        _write_json(shadow_policy_path, shadow.source_policy)
+        shadow_policy_identity = identify_file(shadow_policy_path)
         collision_identity: FileIdentity | None = None
         if isinstance(adapted, MarketAdapterResult):
             collision_path = directory / "collision_report.json"
@@ -235,6 +259,19 @@ def _build_candidate(
                 "arrow_schema_sha256": _schema_sha(adapted.table.schema),
             },
             "quality_report": _identity_fields("quality_report.json", quality_identity),
+            "shadow_outputs": {
+                "candidate_only": True,
+                "promotion_authorized": False,
+                "standard_file": {
+                    **_identity_fields(shadow_filename, shadow_identity),
+                    "arrow_schema_sha256": _schema_sha(shadow_table.schema),
+                    "row_count": shadow_table.num_rows,
+                },
+                "source_policy_file": _identity_fields(
+                    "shadow_source_policy.json", shadow_policy_identity
+                ),
+                "source_policy": shadow.source_policy,
+            },
             "collision_report": (
                 None
                 if collision_identity is None
@@ -244,7 +281,9 @@ def _build_candidate(
             "provider_series_ids": sorted(
                 set(adapted.table.column("provider_series_id").to_pylist())
             ),
-            "canonical_series_ids": [],
+            "canonical_series_ids": (
+                [canonical_series_id] if shadow_table.num_rows else []
+            ),
         }
         _write_json(directory / "manifest.json", manifest)
         return manifest

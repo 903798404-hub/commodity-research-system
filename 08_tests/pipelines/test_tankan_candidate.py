@@ -97,7 +97,7 @@ def test_fx_candidate_is_bounded_sealed_and_manifested_without_promotion(tmp_pat
     assert manifest["provider_dataset_id"] == "tankan:market.exchange_rate"
     assert manifest["candidate_only"] is True
     assert manifest["promotion_authorized"] is False
-    assert manifest["canonical_series_ids"] == []
+    assert manifest["canonical_series_ids"] == ["fx.usd.cnh.spot"]
     assert len(manifest["provider_series_ids"]) == 13
     assert manifest["query_parameters"] == {
         "start_date": "2026-08-01",
@@ -106,6 +106,11 @@ def test_fx_candidate_is_bounded_sealed_and_manifested_without_promotion(tmp_pat
     assert manifest["connection_proof"]["transaction_read_only"] == "on"
     assert manifest["query_plan"]["explain_analyze"] is False
     assert pq.read_table(result.candidate_directory / "fx_candidate.parquet").num_rows == 13
+    spot = pq.read_table(result.candidate_directory / "fx_spot_shadow.parquet").to_pylist()
+    assert len(spot) == 1
+    assert spot[0]["rate_type"] == "spot"
+    assert manifest["shadow_outputs"]["source_policy"]["forward_canonical_promotion"] is False
+    assert manifest["shadow_outputs"]["source_policy"]["blocked_forward_row_count"] == 12
     serialized = json.dumps(manifest, ensure_ascii=False)
     assert str(tmp_path) not in serialized
     assert "password" not in serialized.casefold()
@@ -243,3 +248,52 @@ series:
         item["provider_series_id"]
         for item in collision["samples"][0]["observations"]
     } == {"tankan.ffpr.ice.canola.zh", "tankan.ffpr.ice.canola.en"}
+
+
+def test_market_candidate_seals_exact_cbot_soybean_shadow_without_cutover(
+    tmp_path: Path,
+) -> None:
+    mapping = tmp_path / "market.yaml"
+    mapping.write_text(
+        """schema_version: 1
+max_forward_years: 5
+required_products: [SOYBEAN]
+series:
+  - {source_exchange: CBOT, source_product_name: 大豆, source_series_id: tankan.ffpr.cbot.soybean.zh, exchange: CBOT, product: SOYBEAN, currency: USD, price_unit: US_cents/bushel, quantity_unit: bushel, contract_size: 5000, contract_size_unit: bushel}
+  - {source_exchange: CBOT, source_product_name: soybean, source_series_id: tankan.ffpr.cbot.soybean.en, exchange: CBOT, product: SOYBEAN, currency: USD, price_unit: US_cents/bushel, quantity_unit: bushel, contract_size: 5000, contract_size_unit: bushel}
+""",
+        encoding="utf-8",
+    )
+    rows = [
+        {
+            "trade_date": date(2026, 8, 13),
+            "exchange": "CBOT",
+            "product_name": product,
+            "contract": "2611",
+            "close_price": price,
+            "updated_at": datetime(2026, 8, 14, 8, 30),
+        }
+        for product, price in (("大豆", 1_025.5), ("soybean", 1_025.5))
+    ]
+    result = build_market_candidate(
+        FakeReader(rows),
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 13),
+        candidate_root=candidate_root(tmp_path),
+        candidate_id="cbot-soybean-20260813",
+        mapping_config=mapping,
+    )
+    manifest = result.manifest
+    shadow = pq.read_table(
+        result.candidate_directory / "cbot_soybean_shadow.parquet"
+    ).to_pylist()
+    assert len(shadow) == 2
+    assert {row["provider_role"] for row in shadow} == {
+        "current_candidate",
+        "legacy_comparison",
+    }
+    assert manifest["canonical_series_ids"] == [
+        "market.quote.cbot.soybean.delivery.close.unknown"
+    ]
+    assert manifest["shadow_outputs"]["source_policy"]["cutover_authorized"] is False
+    assert manifest["shadow_outputs"]["source_policy"]["overlap_equal_key_count"] == 1
