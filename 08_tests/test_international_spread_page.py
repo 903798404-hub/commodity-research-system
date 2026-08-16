@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+from html import unescape
 from pathlib import Path
 
 import pytest
@@ -20,11 +22,16 @@ def _reference_root() -> str:
 
 
 def _titles(app: AppTest) -> list[str]:
-    return [
-        str(item.value).removeprefix("#### ")
-        for item in app.markdown
-        if str(item.value).startswith("#### ")
-    ]
+    titles = []
+    for item in app.markdown:
+        match = re.search(r'data-title="([^"]+)"', str(item.value))
+        if match:
+            titles.append(unescape(match.group(1)))
+    return titles
+
+
+def _base_titles(app: AppTest) -> list[str]:
+    return [item.split("｜", maxsplit=1)[0] for item in _titles(app)]
 
 
 def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
@@ -37,10 +44,14 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
 
     assert not app.exception
     assert len(app.get("plotly_chart")) == 7
-    assert any("数据截至：2026-08-12" in str(item.value) for item in app.markdown)
-    assert any("数据来源：Reuters / Oil World" in str(item.value) for item in app.markdown)
-    assert any("更新方式：人工快照" in str(item.value) for item in app.markdown)
-    assert _titles(app) == [
+    assert any(
+        "数据截至 2026-08-12 ｜ Reuters / Oil World ｜ 人工快照"
+        in str(item.value)
+        for item in app.markdown
+    )
+    assert re.fullmatch(r"国际豆棕｜-?[\d,.]+ USD/T", _titles(app)[0])
+    assert any("截至 2026-08-10" in str(item.value) for item in app.markdown)
+    assert _base_titles(app) == [
         "国际豆棕",
         "国际菜棕",
         "国际葵棕",
@@ -52,13 +63,13 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
 
     app.button_group[0].set_value("豆油").run(timeout=35)
     assert not app.exception
-    assert len(app.get("plotly_chart")) == 15
-    assert _titles(app)[:3] == [
+    assert len(app.get("plotly_chart")) == 14
+    assert _base_titles(app)[:3] == [
         "国际菜豆",
         "欧洲菜豆",
         "印度国内菜豆：氢化菜油 - 精炼豆油",
     ]
-    assert _titles(app)[-3:] == [
+    assert _base_titles(app)[-3:] == [
         "美国豆油基差",
         "RINS-D4",
         "美豆油盘面 - 阿根廷豆油（30 USD/T freight）",
@@ -66,8 +77,8 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
 
     app.button_group[0].set_value("菜油").run(timeout=35)
     assert not app.exception
-    assert len(app.get("plotly_chart")) == 9
-    assert _titles(app)[-3:] == [
+    assert len(app.get("plotly_chart")) == 7
+    assert _base_titles(app)[-3:] == [
         "欧洲 RME 生物柴油现货",
         "欧洲葵菜价差",
         "RME 生柴溢价",
@@ -86,6 +97,9 @@ def test_page_source_has_no_business_formula_or_provider_coupling() -> None:
     assert "data_sources" not in source
     assert "connectgaps=False" in source
     assert "2026 YTD" in source
+    assert "st.expander" not in source
+    assert "st.popover" in source
+    assert "SOURCE_DATA_UNDER_REVIEW" in source
     assert "load_international_spread_reference_records" in source
     assert 'st.columns(len(row.metrics), gap="small")' in source
 

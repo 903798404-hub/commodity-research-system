@@ -99,7 +99,7 @@ def test_units_ytd_provider_formula_and_fixed_assumption_come_from_contracts() -
     assert {item.display_unit for item in soy_metrics.values()} == {
         "USD/T",
         "INR/T",
-        "US cents/lb",
+        "USC/LB",
         "USD/GAL",
     }
     assert {
@@ -137,6 +137,43 @@ def test_exact_date_missing_observation_remains_missing() -> None:
 
     assert 2023 not in soy_palm.available_years
     assert all(item.year != 2023 for item in soy_palm.observations)
+
+
+def test_latest_value_and_date_come_from_the_same_exact_date_observation() -> None:
+    catalog, records = _synthetic_records()
+    for values in records.values():
+        values.reverse()
+
+    payload = build_international_spread_payload(catalog, "palm", records)
+
+    for metric in _metrics(payload):
+        latest = max(metric.observations, key=lambda item: item.business_date)
+        assert metric.latest_observation_date == latest.business_date
+        assert metric.latest_value == latest.value
+        assert any(item.year_label == "2026 YTD" for item in metric.observations)
+
+
+def test_hvo_dependency_is_automatically_suppressed_without_losing_positions() -> None:
+    catalog, records = _synthetic_records()
+    soy = build_international_spread_payload(catalog, "soy", records)
+    rape = build_international_spread_payload(catalog, "rape", records)
+    affected = [
+        item
+        for payload in (soy, rape)
+        for item in _metrics(payload)
+        if item.status is MetricStatus.SOURCE_DATA_UNDER_REVIEW
+    ]
+
+    assert (soy.metric_count, rape.metric_count) == (15, 9)
+    assert [item.contract_id for item in affected] == [
+        "spread.india.hvo_refined_soy",
+        "spread.india.hvo_refined_soy",
+        "spread.india.hvo_refined_palm",
+    ]
+    assert all(not item.observations for item in affected)
+    assert all(item.latest_value is None for item in affected)
+    assert all(item.latest_observation_date is None for item in affected)
+    assert all(item.status is not MetricStatus.NO_DATA for item in affected)
 
 
 def test_duplicate_conflict_isolated_to_affected_card() -> None:
@@ -224,5 +261,10 @@ def test_real_reference_payload_matches_all_sealed_latest_dates() -> None:
     for oil in ("palm", "soy", "rape"):
         payload = build_international_spread_payload(catalog, oil, records)
         for metric in _metrics(payload):
-            assert metric.status is MetricStatus.READY
-            assert metric.latest_observation_date == metric.expected_latest_date
+            if metric.status is MetricStatus.SOURCE_DATA_UNDER_REVIEW:
+                assert not metric.observations
+                assert metric.latest_observation_date is None
+            else:
+                assert metric.status is MetricStatus.READY
+                assert metric.latest_observation_date == metric.expected_latest_date
+                assert metric.latest_value is not None

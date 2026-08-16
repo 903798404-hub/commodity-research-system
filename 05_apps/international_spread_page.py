@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
+from decimal import Decimal
+from html import escape
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -122,32 +124,37 @@ def build_seasonality_figure(metric: MetricPayload) -> go.Figure:
             )
         )
     figure.update_layout(
-        height=300,
-        margin={"l": 48, "r": 12, "t": 10, "b": 42},
+        height=260,
+        margin={"l": 42, "r": 8, "t": 30, "b": 30},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#FFFFFF",
         hovermode="x unified",
         legend={
             "orientation": "h",
-            "x": 0,
-            "y": 1.02,
-            "xanchor": "left",
+            "x": 0.5,
+            "y": 1.01,
+            "xanchor": "center",
             "yanchor": "bottom",
-            "font": {"size": 10},
+            "font": {"size": 9},
         },
         xaxis={
             "tickmode": "array",
             "tickvals": MONTH_TICKS,
             "ticktext": MONTH_LABELS,
-            "tickfont": {"size": 10},
+            "tickfont": {"size": 9},
             "showgrid": False,
+            "showline": True,
+            "linecolor": "#B7C0C9",
             "range": [datetime(2000, 1, 1), datetime(2000, 12, 31)],
         },
         yaxis={
-            "title": {"text": metric.display_unit, "font": {"size": 11}},
-            "tickfont": {"size": 10},
-            "gridcolor": "#E8EDF3",
-            "zerolinecolor": "#CAD3DE",
+            "tickfont": {"size": 9},
+            "gridcolor": "#E1E5E9",
+            "showline": True,
+            "linecolor": "#B7C0C9",
+            "zeroline": True,
+            "zerolinecolor": "#8E99A5",
+            "zerolinewidth": 1,
         },
     )
     return figure
@@ -182,7 +189,10 @@ def render_international_spread_page(*, project_root: str | Path) -> None:
     for section_index, section in enumerate(payload.sections):
         if oil == "soy":
             heading = "核心相对价值" if section_index == 0 else "基差、环保信用与盘面比较"
-            st.subheader(heading)
+            st.markdown(
+                f'<div class="international-spread-section">{escape(heading)}</div>',
+                unsafe_allow_html=True,
+            )
         for row in section.rows:
             columns = st.columns(len(row.metrics), gap="small")
             for column, metric in zip(columns, row.metrics, strict=False):
@@ -194,9 +204,8 @@ def _render_freshness(payload: InternationalSpreadPayload) -> None:
     as_of = payload.as_of_date.isoformat() if payload.as_of_date else "暂无有效数据"
     st.markdown(
         '<div class="international-spread-freshness">'
-        f'<strong>数据截至：{as_of}</strong>'
-        f'<span>数据来源：{payload.source_summary}</span>'
-        f'<span>更新方式：{payload.acquisition_summary}</span>'
+        f'数据截至 {as_of} ｜ {escape(payload.source_summary)} ｜ '
+        f'{escape(payload.acquisition_summary)}'
         "</div>",
         unsafe_allow_html=True,
     )
@@ -206,40 +215,79 @@ def _render_freshness(payload: InternationalSpreadPayload) -> None:
 
 def _render_metric_card(metric: MetricPayload) -> None:
     with st.container(border=True):
-        st.markdown(f"#### {metric.display_title}")
+        st.markdown(_metric_heading(metric), unsafe_allow_html=True)
+        _render_provenance(metric)
+        if metric.status in (MetricStatus.READY, MetricStatus.STALE):
+            st.plotly_chart(
+                build_seasonality_figure(metric),
+                width="stretch",
+                config={"displayModeBar": False, "responsive": True},
+                key=f"international_spread_{metric.contract_id}",
+            )
+        else:
+            label = (
+                "数据核查中"
+                if metric.status is MetricStatus.SOURCE_DATA_UNDER_REVIEW
+                else "暂无可展示数据"
+            )
+            st.markdown(
+                '<div class="international-spread-empty">'
+                f"{escape(label)}</div>",
+                unsafe_allow_html=True,
+            )
+        if metric.status is MetricStatus.STALE:
+            st.caption("数据晚于合同预期更新日，展示最近有效观测。")
+
+
+def _render_provenance(metric: MetricPayload) -> None:
+    with st.popover("口径", type="tertiary", width="content"):
         latest = (
             metric.latest_observation_date.isoformat()
             if metric.latest_observation_date
             else "—"
         )
-        st.caption(f"{metric.display_unit} · 最新有效日期 {latest}")
-        if metric.status is MetricStatus.READY:
-            st.plotly_chart(
-                build_seasonality_figure(metric),
-                width="stretch",
-                config={"displayModeBar": False, "responsive": True},
-                key=f"international_spread_{metric.contract_id}",
-            )
-        elif metric.status is MetricStatus.STALE:
-            st.warning("数据晚于合同预期更新日，当前展示截至最近有效日期。")
-            st.plotly_chart(
-                build_seasonality_figure(metric),
-                width="stretch",
-                config={"displayModeBar": False, "responsive": True},
-                key=f"international_spread_{metric.contract_id}",
-            )
-        elif metric.status is MetricStatus.NO_DATA:
-            st.info("暂无可展示数据。")
-        else:
-            st.warning(metric.quality_summary)
-        with st.expander("来源与口径", expanded=False):
-            st.markdown(f"**来源**：{metric.provider_summary}")
-            st.markdown(f"**公式/类型**：{metric.formula_summary}")
-            if metric.leg_summary:
-                st.markdown("**组成**：  \n" + "  \n".join(metric.leg_summary))
-            for assumption in metric.fixed_assumptions:
-                st.markdown(f"**固定业务假设**：{assumption}")
-            st.caption(metric.quality_summary)
+        st.markdown(
+            f"**公式/类型**：{metric.formula_summary}  \n"
+            f"**来源**：{metric.provider_summary}  \n"
+            f"**单位**：{metric.display_unit}  \n"
+            f"**最新观测**：{latest}"
+        )
+        if metric.leg_summary:
+            st.markdown("**组成**：  \n" + "  \n".join(metric.leg_summary))
+        for assumption in metric.fixed_assumptions:
+            st.markdown(f"**固定业务假设**：{assumption}")
+        st.markdown(f"**定义依据**：{metric.definition_evidence}")
+        st.caption(metric.quality_summary)
+
+
+def _metric_heading(metric: MetricPayload) -> str:
+    under_review = metric.status is MetricStatus.SOURCE_DATA_UNDER_REVIEW
+    if under_review:
+        title = f"{metric.display_title}｜数据核查中"
+        date_label = "源数据核查中"
+    else:
+        value = _format_latest_value(metric.latest_value, metric.display_unit)
+        suffix = f"｜{value} {metric.display_unit}" if value is not None else ""
+        title = f"{metric.display_title}{suffix}"
+        date_label = (
+            f"截至 {metric.latest_observation_date.isoformat()}"
+            if metric.latest_observation_date
+            else "暂无有效观测"
+        )
+    return (
+        '<div class="international-spread-chart-header">'
+        f'<div class="international-spread-chart-title" data-title="{escape(title)}">'
+        f"{escape(title)}</div>"
+        f'<div class="international-spread-chart-date">{escape(date_label)}</div>'
+        "</div>"
+    )
+
+
+def _format_latest_value(value: Decimal | None, unit: str) -> str | None:
+    if value is None:
+        return None
+    decimals = 2 if unit in {"USC/LB", "USD/GAL"} else 1
+    return f"{value:,.{decimals}f}"
 
 
 def _reference_date(value: date) -> datetime:
@@ -250,33 +298,85 @@ def _inject_page_style() -> None:
     st.html(
         """
 <style>
-[data-testid="stVerticalBlockBorderWrapper"] {
-  border-color: #E1E7EE;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(23, 32, 51, .045);
+[data-testid="stMainBlockContainer"] {
+  max-width: none;
+  padding-top: 1.65rem;
+  padding-left: 1.2rem;
+  padding-right: 1.2rem;
 }
-[data-testid="stVerticalBlockBorderWrapper"] h4 {
-  min-height: 2.8em;
-  margin-bottom: .15rem;
-  color: #172C43;
-  font-size: 1rem;
-  line-height: 1.4;
+[data-testid="stMainBlockContainer"] h1 {
+  margin-bottom: .05rem;
+  font-size: 1.75rem;
+}
+[data-testid="stHorizontalBlock"] {
+  gap: .55rem;
+}
+[data-testid="stVerticalBlock"]:has(.international-spread-chart-header) {
+  position: relative;
+  gap: 0 !important;
+  padding: .38rem .45rem .3rem !important;
+  border-color: #CBD2D9 !important;
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+.international-spread-section {
+  margin: .42rem 0 .16rem;
+  padding-bottom: .15rem;
+  border-bottom: 1px solid #AEB7C0;
+  color: #263746;
+  font-size: .92rem;
+  font-weight: 650;
 }
 .international-spread-freshness {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .45rem 1.25rem;
-  margin: .2rem 0 .35rem;
-  padding: .7rem .9rem;
-  border: 1px solid #DCE5ED;
-  border-radius: 10px;
-  background: #F7FAFC;
-  color: #40556B;
-  font-size: .9rem;
+  margin: .1rem 0 .28rem;
+  color: #68737D;
+  font-size: .78rem;
+  line-height: 1.2;
 }
-.international-spread-freshness strong {
-  color: #173A5E;
+.international-spread-chart-header {
+  min-height: 3.05rem;
+  padding: 0 3rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+.international-spread-chart-title {
+  color: #243543;
+  font-size: .91rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.international-spread-chart-date {
+  margin-top: .12rem;
+  color: #7A838C;
+  font-size: .69rem;
+  line-height: 1.15;
+}
+.international-spread-empty {
+  height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid #E0E4E8;
+  color: #8A939B;
+  font-size: .82rem;
+  letter-spacing: .04em;
+}
+[data-testid="stVerticalBlock"]:has(.international-spread-chart-header) > [data-testid="stLayoutWrapper"]:has(> [data-testid="stPopover"]) {
+  position: absolute;
+  top: .45rem;
+  right: .45rem;
+  z-index: 2;
+}
+[data-testid="stPopover"] button {
+  min-height: 1.65rem;
+  padding: .1rem .28rem;
+  color: #68737D;
+  font-size: .7rem;
+}
+[data-testid="stPlotlyChart"] {
+  margin-top: -.15rem;
 }
 </style>
 """

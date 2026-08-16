@@ -43,6 +43,7 @@ class MetricStatus(StrEnum):
     CONTRACT_ERROR = "CONTRACT_ERROR"
     DUPLICATE_CONFLICT = "DUPLICATE_CONFLICT"
     REFERENCE_DATA_UNAVAILABLE = "REFERENCE_DATA_UNAVAILABLE"
+    SOURCE_DATA_UNDER_REVIEW = "SOURCE_DATA_UNDER_REVIEW"
 
 
 class InternationalSpreadReferenceError(RuntimeError):
@@ -69,6 +70,7 @@ class MetricPayload:
     observations: tuple[SeasonalityObservation, ...]
     available_years: tuple[int, ...]
     latest_observation_date: date | None
+    latest_value: Decimal | None
     expected_latest_date: date
     provider_summary: str
     formula_summary: str
@@ -245,6 +247,22 @@ def _build_metric(
         catalog, metric
     )
     providers = _providers(catalog, terms)
+    if _terms_use_product(catalog, terms, "Hydrogenated Vegetable Oil"):
+        return _unavailable_metric(
+            metric,
+            row_index,
+            column_index,
+            expected_latest,
+            unit,
+            formula,
+            terms,
+            providers,
+            assumptions,
+            evidence,
+            MetricStatus.SOURCE_DATA_UNDER_REVIEW,
+            "源数据核查中，暂不展示。",
+            catalog,
+        )
     try:
         observations = _resolve_metric(catalog, metric, records_by_series_id)
     except DuplicateConflictError:
@@ -311,8 +329,11 @@ def _build_metric(
         status = MetricStatus.NO_DATA
         quality = "没有可展示的 exact-date observation。"
         latest = None
+        latest_value = None
     else:
-        latest = max(item.business_date for item in observations)
+        latest_observation = max(observations, key=lambda item: item.business_date)
+        latest = latest_observation.business_date
+        latest_value = latest_observation.value
         status = (
             MetricStatus.STALE if latest < expected_latest else MetricStatus.READY
         )
@@ -334,6 +355,7 @@ def _build_metric(
         selected,
         tuple(sorted({item.year for item in selected})),
         latest,
+        latest_value,
         expected_latest,
         _provider_summary(providers),
         formula,
@@ -385,6 +407,18 @@ def _source_dependencies(
             for source_id in _source_dependencies(catalog, term.series_id)
         )
     return (series_id,)
+
+
+def _terms_use_product(
+    catalog: ThreeOilV1Catalog,
+    terms: tuple[LinearTerm, ...],
+    product: str,
+) -> bool:
+    return any(
+        catalog.series_by_id(source_id).product == product
+        for term in terms
+        for source_id in _source_dependencies(catalog, term.series_id)
+    )
 
 
 def _catalog_source_summary(catalog: ThreeOilV1Catalog) -> str:
@@ -495,7 +529,7 @@ def _display_unit(currency: str, unit: str) -> str:
     if unit == "metric_tonne":
         return f"{currency}/T"
     if unit == "US_cents_per_lb":
-        return "US cents/lb"
+        return "USC/LB"
     if unit == "gallon":
         return f"{currency}/GAL"
     return f"{currency}/{unit}"
@@ -529,6 +563,7 @@ def _unavailable_metric(
         column_index,
         (),
         (),
+        None,
         None,
         expected_latest,
         _provider_summary(providers),
