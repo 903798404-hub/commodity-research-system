@@ -63,9 +63,9 @@ def test_payload_has_all_31_approved_placements_in_sealed_row_order() -> None:
     assert palm.acquisition_summary == "人工快照"
     assert palm.as_of_date == date(2026, 8, 10)
     assert palm.metric_latest_dates == (date(2026, 8, 10),)
-    assert [item.contract_id for item in palm.sections[0].rows[2].metrics] == [
-        "spread.energy.pogo.indonesia_cpo_ice_diesel"
-    ]
+    pogo = palm.sections[0].rows[2].metrics[0]
+    assert pogo.contract_id == "spread.energy.pogo.indonesia_cpo_ice_diesel"
+    assert (pogo.row_index, pogo.column_index) == (3, 1)
 
 
 def test_payload_reuses_contract_ids_and_excludes_rejected_metrics() -> None:

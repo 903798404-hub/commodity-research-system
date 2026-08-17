@@ -118,6 +118,10 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
         in str(item.value)
         for item in app.markdown
     )
+    assert any(
+        'class="international-spread-freshness-note"' in str(item.value)
+        for item in app.markdown
+    )
     assert re.fullmatch(r"国际豆棕｜-?[\d,.]+ USD/T", _titles(app)[0])
     assert any("截至 2026-08-10" in str(item.value) for item in app.markdown)
     assert _base_titles(app) == [
@@ -170,7 +174,27 @@ def test_page_source_has_no_business_formula_or_provider_coupling() -> None:
     assert "st.popover" in source
     assert "SOURCE_DATA_UNDER_REVIEW" in source
     assert "load_international_spread_reference_records" in source
-    assert 'st.columns(len(row.metrics), gap="small")' in source
+    assert 'st.columns(GRID_COLUMN_COUNT, gap="small")' in source
+    assert "GRID_COLUMN_COUNT = 3" in source
+    assert "st.columns(len(row.metrics)" not in source
+    assert ".international-spread-freshness-note" in source
+    assert ".international-spread-freshness {" in source
+    assert "international-spread-freshness-note\">" in source
+    assert "pogo" not in source.lower()
+    assert "column_span" not in source
+
+    for selector in (
+        ".international-spread-freshness",
+        ".international-spread-freshness-note",
+    ):
+        rule = re.search(rf"{re.escape(selector)}\s*\{{([^}}]+)\}}", source)
+        assert rule is not None
+        declarations = rule.group(1)
+        assert "position: absolute" not in declarations
+        assert "transform:" not in declarations
+        assert not re.search(r"margin(?:-[a-z]+)?:\s*[^;]*-\d", declarations)
+
+    assert '[data-testid="stPlotlyChart"] {\n  margin-top: -' not in source
 
 
 def test_unavailable_reference_degrades_without_internal_path(monkeypatch, tmp_path: Path) -> None:

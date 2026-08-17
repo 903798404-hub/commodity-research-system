@@ -31,6 +31,7 @@ LEGACY_REFERENCE_ROOT_ENV = "SPREAD_REFERENCE_DATA_ROOT"
 CURRENT_YEAR_COLOR = "#C1493F"
 MONTH_TICKS = [datetime(2000, month, 1) for month in range(1, 13)]
 MONTH_LABELS = [f"{month}月" for month in range(1, 13)]
+GRID_COLUMN_COUNT = 3
 
 
 def _reference_root(project_root: Path) -> Path:
@@ -190,7 +191,7 @@ def render_international_spread_page(*, project_root: str | Path) -> None:
                 unsafe_allow_html=True,
             )
         for row in section.rows:
-            columns = st.columns(len(row.metrics), gap="small")
+            columns = st.columns(GRID_COLUMN_COUNT, gap="small")
             for column, metric in zip(columns, row.metrics, strict=False):
                 with column:
                     _render_metric_card(metric)
@@ -198,15 +199,21 @@ def render_international_spread_page(*, project_root: str | Path) -> None:
 
 def _render_freshness(payload: InternationalSpreadPayload) -> None:
     as_of = payload.as_of_date.isoformat() if payload.as_of_date else "暂无有效数据"
+    note = (
+        '<div class="international-spread-freshness-note">'
+        "不同指标截至日期可能不同；每张图保留自身最新有效日期。"
+        "</div>"
+        if len(payload.metric_latest_dates) > 1
+        else ""
+    )
     st.markdown(
         '<div class="international-spread-freshness">'
         f'数据截至 {as_of} ｜ {escape(payload.source_summary)} ｜ '
         f'{escape(payload.acquisition_summary)}'
-        "</div>",
+        "</div>"
+        f"{note}",
         unsafe_allow_html=True,
     )
-    if len(payload.metric_latest_dates) > 1:
-        st.caption("不同指标截至日期可能不同；每张图保留自身最新有效日期。")
 
 
 def _render_metric_card(metric: MetricPayload) -> None:
@@ -307,7 +314,7 @@ def _inject_page_style() -> None:
 [data-testid="stHorizontalBlock"] {
   gap: .55rem;
 }
-[data-testid="stVerticalBlock"]:has(.international-spread-chart-header) {
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .international-spread-chart-header) {
   position: relative;
   gap: 0 !important;
   padding: .38rem .45rem .3rem !important;
@@ -324,10 +331,16 @@ def _inject_page_style() -> None:
   font-weight: 650;
 }
 .international-spread-freshness {
-  margin: .1rem 0 .28rem;
+  margin: .1rem 0 0;
   color: #68737D;
   font-size: .78rem;
-  line-height: 1.2;
+  line-height: 1.4;
+}
+.international-spread-freshness-note {
+  margin: .3rem 0 .65rem;
+  color: #7A838C;
+  font-size: .76rem;
+  line-height: 1.4;
 }
 .international-spread-chart-header {
   min-height: 3.05rem;
@@ -359,7 +372,7 @@ def _inject_page_style() -> None:
   font-size: .82rem;
   letter-spacing: .04em;
 }
-[data-testid="stVerticalBlock"]:has(.international-spread-chart-header) > [data-testid="stLayoutWrapper"]:has(> [data-testid="stPopover"]) {
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .international-spread-chart-header) > [data-testid="stLayoutWrapper"]:has(> [data-testid="stPopover"]) {
   position: absolute;
   top: .45rem;
   right: .45rem;
@@ -370,9 +383,6 @@ def _inject_page_style() -> None:
   padding: .1rem .28rem;
   color: #68737D;
   font-size: .7rem;
-}
-[data-testid="stPlotlyChart"] {
-  margin-top: -.15rem;
 }
 </style>
 """
