@@ -28,14 +28,7 @@ PAGE_TITLE = "国际价差"
 OIL_OPTIONS = {"棕榈油": "palm", "豆油": "soy", "菜油": "rape"}
 REFERENCE_ROOT_ENV = "INTERNATIONAL_SPREAD_REFERENCE_DATA_ROOT"
 LEGACY_REFERENCE_ROOT_ENV = "SPREAD_REFERENCE_DATA_ROOT"
-YEAR_COLORS = {
-    2021: "#91A7C4",
-    2022: "#7895B8",
-    2023: "#5F83AC",
-    2024: "#3F6F9E",
-    2025: "#244F7C",
-    2026: "#C1493F",
-}
+CURRENT_YEAR_COLOR = "#C1493F"
 MONTH_TICKS = [datetime(2000, month, 1) for month in range(1, 13)]
 MONTH_LABELS = [f"{month}月" for month in range(1, 13)]
 
@@ -109,9 +102,12 @@ def build_seasonality_figure(metric: MetricPayload) -> go.Figure:
                 mode="lines",
                 name="2026 YTD" if is_current else str(year),
                 line={
-                    "color": YEAR_COLORS[year],
-                    "width": 3.5 if is_current else 1.6,
+                    # Historical years intentionally inherit the same Streamlit
+                    # categorical colorway used by the soybean month-spread page.
+                    "color": CURRENT_YEAR_COLOR if is_current else None,
+                    "width": 3.4 if is_current else 2.0,
                 },
+                opacity=1,
                 connectgaps=False,
                 customdata=[item.business_date.isoformat() for item in points],
                 hovertemplate=(

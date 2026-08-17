@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import os
 import re
+import importlib.util
+from datetime import date
+from decimal import Decimal
 from html import unescape
 from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
+
+from agri_research_agent.application.international_spreads import (
+    MetricPayload,
+    MetricStatus,
+    SeasonalityObservation,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +41,66 @@ def _titles(app: AppTest) -> list[str]:
 
 def _base_titles(app: AppTest) -> list[str]:
     return [item.split("｜", maxsplit=1)[0] for item in _titles(app)]
+
+
+def _page_module():
+    spec = importlib.util.spec_from_file_location(
+        "international_spread_page_style_test", PAGE_SOURCE
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_seasonality_lines_reuse_month_spread_colorway_and_emphasize_ytd() -> None:
+    page = _page_module()
+    observations = tuple(
+        SeasonalityObservation(
+            date(year, 8, 1),
+            year,
+            "2026 YTD" if year == 2026 else str(year),
+            "08-01",
+            Decimal(year),
+        )
+        for year in range(2021, 2027)
+    )
+    metric = MetricPayload(
+        "spread",
+        "spread.test",
+        "测试价差",
+        "USD/T",
+        1,
+        1,
+        observations,
+        tuple(range(2021, 2027)),
+        date(2026, 8, 1),
+        Decimal("2026"),
+        date(2026, 8, 1),
+        "Reuters",
+        "A - B",
+        (),
+        (),
+        "USER_APPROVED_BUSINESS_DEFINITION",
+        MetricStatus.READY,
+        "exact business-date",
+    )
+
+    figure = page.build_seasonality_figure(metric)
+
+    assert [trace.name for trace in figure.data] == [
+        "2021",
+        "2022",
+        "2023",
+        "2024",
+        "2025",
+        "2026 YTD",
+    ]
+    assert all(trace.line.color is None for trace in figure.data[:-1])
+    assert all(trace.line.width == 2.0 for trace in figure.data[:-1])
+    assert all(trace.opacity == 1 for trace in figure.data)
+    assert figure.data[-1].line.color == page.CURRENT_YEAR_COLOR
+    assert figure.data[-1].line.width == 3.4
 
 
 def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
