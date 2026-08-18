@@ -20,13 +20,13 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def test_query_spec_is_bounded_versioned_and_provider_identified() -> None:
     query = MARKET_WINDOW_QUERY
-    assert query.version == "2"
+    assert query.version == "3-goal-a"
     assert query.parameter_count == 2
     assert query.max_window_days == 93
     assert len(query.sha256) == 64
     assert query.identity() == {
         "query_name": "market.foreign_futures_price_raw.window",
-        "query_version": "2",
+        "query_version": "3-goal-a",
         "query_sha256": query.sha256,
         "dataset_id": "tankan.market.foreign_futures_price_raw",
         "provider_dataset_id": "tankan:market.foreign_futures_price_raw",

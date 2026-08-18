@@ -127,6 +127,7 @@ modules:
       - 03_src/agri_research_agent/data_sources/tankan/market_price_adapter.py
       - 03_src/agri_research_agent/data_sources/tankan/fx_adapter.py
       - 02_configs/tankan_market_price.yaml
+      - 02_configs/tankan_goal_a_market_price.yaml
       - 02_configs/tankan_fx.yaml
     direct_tests:
       - 08_tests/data_sources/tankan/test_models.py
@@ -157,5 +158,17 @@ modules:
       - 08_tests/data_sources/tankan/test_market_price_adapter.py
       - 08_tests/data_sources/tankan/test_fx_adapter.py
       - 08_tests/shared/test_immutable_candidate.py
+    dependents: []
+    full_regression_when_changed: false
+  pipelines.tankan_goal_a:
+    code_paths: [03_src/agri_research_agent/pipelines/tankan_goal_a.py]
+    direct_tests: [08_tests/pipelines/test_tankan_goal_a.py]
+    impact_tests:
+      - 08_tests/data_sources/tankan/test_client.py
+      - 08_tests/data_sources/tankan/test_market_price_adapter.py
+      - 08_tests/data_sources/tankan/test_fx_adapter.py
+      - 08_tests/shared/test_atomic_storage.py
+      - 08_tests/shared/test_immutable_candidate.py
+      - 08_tests/test_international_spread_page.py
     dependents: []
     full_regression_when_changed: false

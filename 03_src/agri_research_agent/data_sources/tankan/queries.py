@@ -28,7 +28,7 @@ def _provider(dataset_id: str, relation: str) -> ProviderIdentity:
 
 MARKET_WINDOW_QUERY = QuerySpec(
     name="market.foreign_futures_price_raw.window",
-    version="2",
+    version="3-goal-a",
     provider=_provider(
         "tankan.market.foreign_futures_price_raw", "foreign_futures_price_raw"
     ),
@@ -40,6 +40,10 @@ MARKET_WINDOW_QUERY = QuerySpec(
 SELECT trade_date, exchange, product_name, contract, close_price, updated_at
 FROM market.foreign_futures_price_raw
 WHERE trade_date >= %s AND trade_date <= %s
+  AND (
+    (exchange = 'CBOT' AND product_name IN ('大豆', 'soybean', '豆粕', 'soymeal', '豆油', 'soyoil'))
+    OR (exchange = 'BMD' AND product_name IN ('棕榈油', 'palm'))
+  )
 ORDER BY trade_date, exchange, product_name, contract
 """,
 )
