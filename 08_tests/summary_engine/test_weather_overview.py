@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 import inspect
-import pandas as pd
+from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 import research_overview_page
-from agri_research_agent.summary_engine.weather import build_weather_summary
-from agri_research_agent.weather.crop_weather import load_weather_config
 from summary_panel import (
     _focus_current_state_html,
     _focus_reason_html,
@@ -275,10 +273,20 @@ def test_weather_overview_loads_all_groups_and_countries() -> None:
 
 def test_one_missing_country_does_not_hide_other_weather(monkeypatch) -> None:
     original = research_overview_page.WEATHER_OVERVIEW_SOURCES
+    original_loader = research_overview_page.load_weather_current_summary_cached
     monkeypatch.setattr(
         research_overview_page,
         "WEATHER_OVERVIEW_SOURCES",
-        (("大豆天气", "MISSING", "missing.parquet", "soybean_weather_us.yaml", None), *original[:1]),
+        (("大豆天气", "MISSING", "missing.yaml"), *original[:1]),
+    )
+    monkeypatch.setattr(
+        research_overview_page,
+        "load_weather_current_summary_cached",
+        lambda root, config: (
+            (_ for _ in ()).throw(FileNotFoundError(config))
+            if Path(config).name == "missing.yaml"
+            else original_loader(root, config)
+        ),
     )
     groups, warnings = research_overview_page.load_weather_overview_summaries()
     assert len(groups["大豆天气"]) == 1
@@ -286,13 +294,37 @@ def test_one_missing_country_does_not_hide_other_weather(monkeypatch) -> None:
 
 
 def test_weather_summary_ui_hides_technical_traceability() -> None:
-    config = load_weather_config(research_overview_page.PROJECT_ROOT / "02_configs" / "soybean_weather_us.yaml")
-    records = pd.read_parquet(research_overview_page.PROJECT_ROOT / "01_data/processed/weather/soybean/us/soybean_weather_us.parquet")
-    normals = pd.read_parquet(research_overview_page.PROJECT_ROOT / "01_data/processed/weather/soybean/us/soybean_weather_us_30y_normal.parquet")
-    summary = build_weather_summary(records, normals, config, source_identity={"fixture": "ui"})
+    summary = {
+        "module": "weather",
+        "headline": "美国大豆天气",
+        "source_date": "2026-08-17",
+        "facts": {
+            "forecast_end": {"ECMWF": "2026-09-01", "GFS": "2026-08-31"},
+            "source_identity": {"manifest_sha256": "must-not-render"},
+            "weather_render": {
+                "comprehensive": "当前主要产区天气整体平稳。",
+                "focus_regions": [{
+                    "region": "Iowa（25%）",
+                    "status": "平稳",
+                    "current_state": "土墒接近5年同期（+0.5个百分点）",
+                    "recent_change": "7日持平",
+                    "short_term": "接近正常",
+                    "medium_term": "接近正常",
+                    "reason": "当前暂无复合异常，研究优先级较低",
+                }],
+                "rain_markdown": "| 地区 | 近7日 |\n|---|---:|\n| Iowa | 12 mm |",
+                "temperature_markdown": "| 地区 | 最高气温 |\n|---|---:|\n| Iowa | 30℃ |",
+                "soil_markdown": "| 地区 | 0—100cm土壤含水率 |\n|---|---:|\n| Iowa | 23.6% |",
+            },
+        },
+        "short_text": "天气摘要。",
+        "detail_text": "天气详情。",
+        "missing_reason": None,
+        "rule_version": "summary-rules-v1",
+    }
     app = AppTest.from_string(f"""
 from summary_panel import render_summary_panel
-payload = {summary.to_dict()!r}
+payload = {summary!r}
 render_summary_panel(payload)
 """, default_timeout=20)
     app.run()

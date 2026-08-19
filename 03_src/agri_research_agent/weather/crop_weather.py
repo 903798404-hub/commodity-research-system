@@ -148,9 +148,25 @@ def select_latest_forecasts(records: pd.DataFrame, latest_observed: pd.Timestamp
     forecasts = records[records["data_type"] == "forecast"].copy()
     if forecasts.empty:
         return forecasts
-    forecasts["_batch_at"] = forecasts["forecast_run_at"].fillna(forecasts["source_updated_at"])
-    latest_batch = forecasts.groupby("model")["_batch_at"].transform("max")
-    selected = forecasts[forecasts["_batch_at"] == latest_batch].drop(columns="_batch_at")
+    is_public_current = (
+        "current_manifest_sha256" in forecasts.columns
+        and forecasts["current_manifest_sha256"].notna().all()
+        and "forecast_run_id" in forecasts.columns
+        and forecasts["forecast_run_id"].notna().all()
+    )
+    if is_public_current:
+        # Producer Current has already selected one immutable run per source
+        # series.  Source tables are extracted at different times, so applying
+        # the legacy global timestamp heuristic here would silently discard
+        # otherwise valid regions.
+        run_counts = forecasts.groupby("series_id")["forecast_run_id"].nunique()
+        if (run_counts > 1).any():
+            raise ValueError("Public Weather Current contains multiple forecast runs per series")
+        selected = forecasts
+    else:
+        forecasts["_batch_at"] = forecasts["forecast_run_at"].fillna(forecasts["source_updated_at"])
+        latest_batch = forecasts.groupby("model")["_batch_at"].transform("max")
+        selected = forecasts[forecasts["_batch_at"] == latest_batch].drop(columns="_batch_at")
     if latest_observed is not None:
         selected = selected[selected["date"] > latest_observed]
     return selected.reset_index(drop=True)

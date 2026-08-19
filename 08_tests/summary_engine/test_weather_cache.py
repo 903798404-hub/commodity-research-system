@@ -1,40 +1,82 @@
 from __future__ import annotations
 
-from pathlib import Path
+from datetime import date
 import os
+from types import SimpleNamespace
 
 import pandas as pd
 
 from agri_research_agent.summary_engine import weather_cache
-from agri_research_agent.summary_engine.weather import build_weather_summary
-from agri_research_agent.weather.crop_weather import load_weather_config
+def test_formal_weather_summary_cache_reuses_current_identity_and_preserves_content(
+    monkeypatch,
+) -> None:
+    records = pd.DataFrame({"value": [11.0, 22.0]})
+    normals = pd.DataFrame({"normal_value": [16.5]})
+    identity = SimpleNamespace(
+        release_id="release-a",
+        manifest_sha256="manifest-a",
+        content_sha256="content-a",
+        schema_version="lutou-public-weather-current/1",
+        observation_source_max=date(2026, 8, 18),
+        forecast_valid_max=date(2026, 9, 2),
+    )
+    snapshot = SimpleNamespace(records=records, normals=normals, identity=identity)
+    calls = 0
 
+    monkeypatch.setattr(
+        weather_cache,
+        "load_weather_config",
+        lambda path: {
+            "crop": "rapeseed",
+            "country": "CAN",
+            "regions": [{"key": "Ontario"}],
+        },
+    )
 
-ROOT = Path(__file__).resolve().parents[2]
-WEATHER_ROOT = ROOT / "01_data" / "processed" / "weather"
+    def load_current(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return snapshot
 
-
-def test_formal_weather_summary_cache_reuses_identity_and_preserves_content() -> None:
-    data = WEATHER_ROOT / "rapeseed/can/rapeseed_weather_can.parquet"
-    normal = WEATHER_ROOT / "rapeseed/can/rapeseed_weather_can_30y_normal.parquet"
-    config_path = ROOT / "02_configs/rapeseed_weather_can.yaml"
-    config = load_weather_config(config_path)
-    direct = build_weather_summary(
-        pd.read_parquet(data),
-        pd.read_parquet(normal),
-        config,
-        source_identity={"comparison": "CAN"},
+    monkeypatch.setattr(weather_cache, "load_public_weather_current", load_current)
+    monkeypatch.setattr(
+        weather_cache,
+        "build_weather_summary",
+        lambda selected, selected_normals, config, **kwargs: {
+            "record_values": selected["value"].tolist(),
+            "normal_values": selected_normals["normal_value"].tolist(),
+            "country": config["country"],
+            "source_identity": kwargs["source_identity"],
+        },
     )
 
     weather_cache.clear_weather_summary_cache()
-    first = weather_cache.load_weather_summary_cached(data, config_path, normal)
-    second = weather_cache.load_weather_summary_cached(data, config_path, normal)
+    load = weather_cache._load_weather_current_summary_versioned
+    args = (
+        "current",
+        identity.release_id,
+        identity.manifest_sha256,
+        identity.observation_source_max.isoformat(),
+        ("config.yaml", 10, 1_700_000_000_000_000_000),
+        ("rules.yaml", 10, 1_700_000_000_000_000_000),
+        "rules-v1",
+        "calc-v1",
+    )
+    first = load(*args)
+    second = load(*args)
 
-    assert first.summary_id == second.summary_id
-    assert first.generated_at == second.generated_at
-    assert first.facts == direct.facts
-    assert first.detail_text == direct.detail_text
-    assert first.short_text == direct.short_text
+    assert first == second
+    assert calls == 1
+    assert first["record_values"] == [11.0, 22.0]
+    assert first["normal_values"] == [16.5]
+    assert first["source_identity"]["weather_current"] == {
+        "release_id": "release-a",
+        "manifest_sha256": "manifest-a",
+        "content_sha256": "content-a",
+        "schema_version": "lutou-public-weather-current/1",
+        "observation_source_max": "2026-08-18",
+        "forecast_valid_max": "2026-09-02",
+    }
 
 
 def test_every_identity_component_invalidates_without_cross_country_leakage(monkeypatch) -> None:
@@ -104,12 +146,12 @@ def test_atomic_file_replacement_changes_lightweight_identity(tmp_path) -> None:
     assert before[0] == after[0]
 
 
-def test_detail_and_overview_import_the_same_shared_cache() -> None:
+def test_detail_and_overview_import_the_same_public_current_cache() -> None:
     import crop_weather_page
     import research_overview_page
 
-    assert crop_weather_page.load_weather_summary_cached is weather_cache.load_weather_summary_cached
-    assert research_overview_page.load_weather_summary_cached is weather_cache.load_weather_summary_cached
+    assert crop_weather_page.load_weather_current_summary_cached is weather_cache.load_weather_current_summary_cached
+    assert research_overview_page.load_weather_current_summary_cached is weather_cache.load_weather_current_summary_cached
 
 
 def test_missing_object_exception_is_not_cached_or_shared(monkeypatch) -> None:

@@ -103,10 +103,13 @@ def test_route_keys_and_cache_identity_are_isolated() -> None:
     sugar = crop_weather_page._country_files("IND_SUGARCANE")
 
     assert cotton["config"] != sugar["config"]
-    assert cotton["data"] != sugar["data"]
+    assert set(cotton) == {"config"} and set(sugar) == {"config"}
     assert "status" not in cotton and "status" not in sugar
-    parameters = inspect.signature(crop_weather_page._load_selected_records.__wrapped__).parameters
-    assert {"data_path", "data_mtime_ns", "data_size", "crop", "country", "metric", "route_key"} <= set(parameters)
+    parameters = inspect.signature(crop_weather_page._load_public_snapshot.__wrapped__).parameters
+    assert {
+        "public_current_root", "release_id", "manifest_sha256", "crop", "country",
+        "metrics", "regions", "start_date", "route_key",
+    } <= set(parameters)
 
 
 def _india_weather_records() -> pd.DataFrame:

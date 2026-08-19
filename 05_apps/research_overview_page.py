@@ -10,7 +10,8 @@ import streamlit as st
 from agri_research_agent.summary_engine.basis import build_basis_summary
 from agri_research_agent.summary_engine.crop import build_crop_summary
 from agri_research_agent.summary_engine.io import file_identity
-from agri_research_agent.summary_engine.weather_cache import load_weather_summary_cached
+from agri_research_agent.market_data.public_weather_current import PublicWeatherCurrentError
+from agri_research_agent.summary_engine.weather_cache import load_weather_current_summary_cached
 from agri_research_agent.soybean_exports.research import (
     format_soybean_export_weekly_observation,
 )
@@ -28,19 +29,25 @@ WEATHER_GROUP_NAMES = (
 _LOAD_FROM_SOURCE = object()
 
 WEATHER_OVERVIEW_SOURCES = (
-    (WEATHER_GROUP_NAMES[0], "USA", "soybean/us/soybean_weather_us.parquet", "soybean_weather_us.yaml", "soybean/us/soybean_weather_us_30y_normal.parquet"),
-    (WEATHER_GROUP_NAMES[0], "BRA", "soybean/br/soybean_weather_br.parquet", "soybean_weather_br.yaml", "soybean/br/soybean_weather_br_30y_normal.parquet"),
-    (WEATHER_GROUP_NAMES[0], "ARG", "soybean/ar/soybean_weather_ar.parquet", "soybean_weather_ar.yaml", "soybean/ar/soybean_weather_ar_30y_normal.parquet"),
-    (WEATHER_GROUP_NAMES[1], "CAN", "rapeseed/can/rapeseed_weather_can.parquet", "rapeseed_weather_can.yaml", "rapeseed/can/rapeseed_weather_can_30y_normal.parquet"),
-    (WEATHER_GROUP_NAMES[1], "AUS", "rapeseed/aus/rapeseed_weather_aus.parquet", "rapeseed_weather_aus.yaml", None),
-    (WEATHER_GROUP_NAMES[1], "EU", "rapeseed/eu/rapeseed_weather_eu.parquet", "rapeseed_weather_eu.yaml", None),
-    (WEATHER_GROUP_NAMES[1], "RUS", "rapeseed/rus/rapeseed_weather_rus.parquet", "rapeseed_weather_rus.yaml", None),
-    (WEATHER_GROUP_NAMES[1], "UKR", "rapeseed/ukr/rapeseed_weather_ukr.parquet", "rapeseed_weather_ukr.yaml", None),
-    (WEATHER_GROUP_NAMES[2], "MYS", "palm_oil/mys/palm_oil_weather_mys.parquet", "palm_oil_weather_mys.yaml", None),
-    (WEATHER_GROUP_NAMES[2], "IDN", "palm_oil/idn/palm_oil_weather_idn.parquet", "palm_oil_weather_idn.yaml", None),
-    (WEATHER_GROUP_NAMES[3], "IND_COTTON", "cotton/ind/cotton_weather_ind.parquet", "cotton_weather_ind.yaml", None),
-    (WEATHER_GROUP_NAMES[3], "IND_SUGARCANE", "sugarcane/ind/sugarcane_weather_ind.parquet", "sugarcane_weather_ind.yaml", None),
+    (WEATHER_GROUP_NAMES[0], "USA", "soybean_weather_us.yaml"),
+    (WEATHER_GROUP_NAMES[0], "BRA", "soybean_weather_br.yaml"),
+    (WEATHER_GROUP_NAMES[0], "ARG", "soybean_weather_ar.yaml"),
+    (WEATHER_GROUP_NAMES[1], "CAN", "rapeseed_weather_can.yaml"),
+    (WEATHER_GROUP_NAMES[1], "AUS", "rapeseed_weather_aus.yaml"),
+    (WEATHER_GROUP_NAMES[1], "EU", "rapeseed_weather_eu.yaml"),
+    (WEATHER_GROUP_NAMES[1], "RUS", "rapeseed_weather_rus.yaml"),
+    (WEATHER_GROUP_NAMES[1], "UKR", "rapeseed_weather_ukr.yaml"),
+    (WEATHER_GROUP_NAMES[2], "MYS", "palm_oil_weather_mys.yaml"),
+    (WEATHER_GROUP_NAMES[2], "IDN", "palm_oil_weather_idn.yaml"),
+    (WEATHER_GROUP_NAMES[3], "IND_COTTON", "cotton_weather_ind.yaml"),
+    (WEATHER_GROUP_NAMES[3], "IND_SUGARCANE", "sugarcane_weather_ind.yaml"),
 )
+
+
+def _public_weather_current_root(project_root: Path = PROJECT_ROOT) -> Path:
+    runtime_value = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
+    runtime_root = Path(runtime_value) if runtime_value else project_root.parents[1] / "market-data-worktree-runtime" / "international-spread"
+    return runtime_root / "public-market-data" / "lutou-weather"
 
 
 def _summary_payload(summary: object | None) -> dict[str, Any]:
@@ -63,27 +70,17 @@ def _summary_available(summary: object | None) -> bool:
 def load_weather_overview_summaries() -> tuple[dict[str, list[object]], list[str]]:
     groups = {name: [] for name in WEATHER_GROUP_NAMES}
     warnings: list[str] = []
-    weather_root = Path(
-        os.getenv("WEATHER_DATA_DIR", "").strip()
-        or PROJECT_ROOT / "01_data/processed/weather"
-    )
-    for group, code, relative, config_name, normal_relative in WEATHER_OVERVIEW_SOURCES:
-        path = weather_root / relative
-        if not path.is_file():
-            warnings.append(f"{code}\u5929\u6c14\u6458\u8981\u6682\u4e0d\u53ef\u7528")
-            continue
+    weather_root = _public_weather_current_root()
+    for group, code, config_name in WEATHER_OVERVIEW_SOURCES:
         try:
-            normal_path = weather_root / normal_relative if normal_relative else None
-            summary = load_weather_summary_cached(
-                path,
-                PROJECT_ROOT / "02_configs" / config_name,
-                normal_path if normal_path is not None and normal_path.is_file() else None,
+            summary = load_weather_current_summary_cached(
+                weather_root, PROJECT_ROOT / "02_configs" / config_name
             )
             if _summary_available(summary):
                 groups[group].append(summary)
             else:
                 warnings.append(f"{code}\u5929\u6c14\u6458\u8981\u6682\u4e0d\u53ef\u7528")
-        except (OSError, ValueError, KeyError, ImportError):
+        except (OSError, ValueError, KeyError, ImportError, PublicWeatherCurrentError):
             warnings.append(f"{code}\u5929\u6c14\u6458\u8981\u6682\u4e0d\u53ef\u7528")
     return groups, warnings
 

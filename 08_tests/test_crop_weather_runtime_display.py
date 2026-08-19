@@ -126,10 +126,10 @@ def test_freshness_comes_from_parquet_records_not_legacy_update_status(tmp_path:
 
 def test_selected_record_cache_is_keyed_by_runtime_path_and_file_identity(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setenv(crop_weather_page.WEATHER_DATA_DIR_ENV, "/runtime-a")
-    assert crop_weather_page._weather_data_file("rapeseed/eu.parquet") == Path("/runtime-a/rapeseed/eu.parquet")
-    monkeypatch.setenv(crop_weather_page.WEATHER_DATA_DIR_ENV, "/runtime-b")
-    assert crop_weather_page._weather_data_file("rapeseed/eu.parquet") == Path("/runtime-b/rapeseed/eu.parquet")
+    monkeypatch.setenv(crop_weather_page.PUBLIC_RUNTIME_ROOT_ENV, "/runtime-a")
+    assert crop_weather_page._public_weather_current_root() == Path("/runtime-a/public-market-data/lutou-weather")
+    monkeypatch.setenv(crop_weather_page.PUBLIC_RUNTIME_ROOT_ENV, "/runtime-b")
+    assert crop_weather_page._public_weather_current_root() == Path("/runtime-b/public-market-data/lutou-weather")
     monkeypatch.setattr(
         crop_weather_page,
         "load_weather_records",

@@ -486,13 +486,26 @@ def test_weather_page_degrades_without_stable_data_or_fixture(monkeypatch) -> No
     apps_dir = str(PROJECT_ROOT / "05_apps")
     if apps_dir not in sys.path:
         sys.path.insert(0, apps_dir)
-    import soybean_weather_page
+    import crop_weather_page
 
-    usa_files = dict(soybean_weather_page.WEATHER_COUNTRY_FILES["USA"])
-    monkeypatch.setitem(usa_files, "data", PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "missing.parquet")
-    monkeypatch.setitem(soybean_weather_page.WEATHER_COUNTRY_FILES, "USA", usa_files)
-    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
-    app.session_state["selected_workspace_page"] = "大豆天气"
-    app.run(timeout=20)
-    assert not app.exception
-    assert any("稳定天气数据未接入" in item.value for item in app.error)
+    from agri_research_agent.market_data.public_weather_current import (
+        PublicWeatherCurrentError,
+        PublicWeatherCurrentErrorCode,
+    )
+
+    monkeypatch.setattr(
+        crop_weather_page,
+        "resolve_weather_current_identity",
+        lambda _root: (_ for _ in ()).throw(
+            PublicWeatherCurrentError(
+                PublicWeatherCurrentErrorCode.PUBLIC_CURRENT_UNAVAILABLE,
+                "fixture current unavailable",
+            )
+        ),
+    )
+    errors: list[str] = []
+    monkeypatch.setattr(crop_weather_page.st, "title", lambda _value: None)
+    monkeypatch.setattr(crop_weather_page.st, "error", lambda value: errors.append(str(value)))
+    crop_weather_page.render_weather_page("USA")
+    assert any("Public Current 不可用" in item for item in errors)
+    assert any("未加载任何 legacy 或数据库回退" in item for item in errors)

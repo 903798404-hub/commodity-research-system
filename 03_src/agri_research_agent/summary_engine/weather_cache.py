@@ -8,6 +8,10 @@ import pandas as pd
 import streamlit as st
 
 from agri_research_agent.data_sources.weather_adapter import validate_weather_records
+from agri_research_agent.market_data.public_weather_current import (
+    load_public_weather_current,
+    resolve_weather_current_identity,
+)
 from agri_research_agent.weather.crop_weather import load_weather_config
 
 from .rules import DEFAULT_CONFIG, load_summary_rules
@@ -121,7 +125,85 @@ def load_weather_summary_cached(
     )
 
 
+@st.cache_data(show_spinner=False, max_entries=48)
+def _load_weather_current_summary_versioned(
+    public_current_root: str,
+    release_id: str,
+    manifest_sha256: str,
+    observation_source_max: str,
+    config_identity: FileStatIdentity,
+    rules_identity: FileStatIdentity,
+    rule_version: str,
+    calculation_version: str,
+) -> Summary:
+    del rules_identity, rule_version, calculation_version
+    config = load_weather_config(config_identity[0])
+    regions = [str(item["key"]) for item in config["regions"]]
+    history_start = (
+        pd.Timestamp(observation_source_max) - pd.DateOffset(years=6)
+    ).date()
+    snapshot = load_public_weather_current(
+        public_current_root,
+        crop=str(config["crop"]),
+        country=str(config["country"]),
+        metrics=("precipitation", "temperature_max", "soil_moisture"),
+        regions=regions,
+        start_date=history_start,
+        expected_release_id=release_id,
+        expected_manifest_sha256=manifest_sha256,
+    )
+    identity = snapshot.identity
+    source_identity = {
+        "weather_current": {
+            "release_id": identity.release_id,
+            "manifest_sha256": identity.manifest_sha256,
+            "content_sha256": identity.content_sha256,
+            "schema_version": identity.schema_version,
+            "observation_source_max": identity.observation_source_max.isoformat(),
+            "forecast_valid_max": identity.forecast_valid_max.isoformat(),
+        },
+        "config": {
+            "path": config_identity[0],
+            "size": config_identity[1],
+            "mtime_ns": config_identity[2],
+        },
+    }
+    generated_at = datetime.combine(
+        identity.observation_source_max, datetime.min.time(), tzinfo=timezone.utc
+    )
+    return build_weather_summary(
+        snapshot.records,
+        snapshot.normals,
+        config,
+        source_identity=source_identity,
+        generated_at=generated_at,
+    )
+
+
+def load_weather_current_summary_cached(
+    public_current_root: str | Path,
+    config_path: str | Path,
+    *,
+    rules_path: str | Path = DEFAULT_CONFIG,
+) -> Summary:
+    identity = resolve_weather_current_identity(public_current_root)
+    config_identity = file_stat_identity(config_path)
+    rules_identity = file_stat_identity(rules_path)
+    rules = load_summary_rules(rules_path)
+    return _load_weather_current_summary_versioned(
+        str(Path(public_current_root).resolve()),
+        identity.release_id,
+        identity.manifest_sha256,
+        identity.observation_source_max.isoformat(),
+        config_identity,
+        rules_identity,
+        str(rules["rule_version"]),
+        str(rules["calculation_version"]),
+    )
+
+
 def clear_weather_summary_cache() -> None:
     """Test/diagnostic hook; production invalidation is identity-driven."""
 
     _load_weather_summary_versioned.clear()
+    _load_weather_current_summary_versioned.clear()

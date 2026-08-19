@@ -98,9 +98,11 @@ def _anomaly(value: float | None, normal: float | None) -> tuple[float | None, f
     return absolute, relative
 
 
-def _soil_percent(value: float | None) -> float | None:
+def _soil_percent(value: float | None, *, canonical_percent: bool = False) -> float | None:
     if value is None or pd.isna(value):
         return None
+    if canonical_percent:
+        return float(value)
     return float(value * 100 if abs(value) <= 1.5 else value)
 
 
@@ -353,6 +355,14 @@ def _region_fact_rows(
     latest: pd.Timestamp,
 ) -> list[dict[str, Any]]:
     observed = records[records.data_type.eq("observed")]
+    soil_records = observed[observed.metric.eq("soil_moisture")]
+    canonical_soil_percent = bool(
+        not soil_records.empty
+        and "value_semantics" in soil_records.columns
+        and "unit" in soil_records.columns
+        and soil_records["value_semantics"].eq("canonical").all()
+        and soil_records["unit"].eq("%").all()
+    )
     forecasts = select_latest_forecasts(records, latest)
     current_window = (latest - pd.Timedelta(days=6), latest)
     previous_window = (latest - pd.Timedelta(days=13), latest - pd.Timedelta(days=7))
@@ -442,11 +452,18 @@ def _region_fact_rows(
         region_soil = observed[observed.region.eq(region) & observed.metric.eq("soil_moisture") & observed.date.le(latest)]
         soil_date = None if region_soil.empty else pd.Timestamp(region_soil.date.max())
         soil_now_values = region_soil[region_soil.date.eq(soil_date)].value if soil_date is not None else pd.Series(dtype=float)
-        soil_now = None if soil_now_values.empty else _soil_percent(float(soil_now_values.mean()))
-        soil_history = _soil_percent(None if soil_date is None else _five_year_region(observed, region, "soil_moisture", soil_date, soil_date))
+        soil_now = None if soil_now_values.empty else _soil_percent(
+            float(soil_now_values.mean()), canonical_percent=canonical_soil_percent
+        )
+        soil_history = _soil_percent(
+            None if soil_date is None else _five_year_region(observed, region, "soil_moisture", soil_date, soil_date),
+            canonical_percent=canonical_soil_percent,
+        )
         seven_day_date = None if soil_date is None else soil_date - pd.Timedelta(days=7)
         soil_prior_values = region_soil[region_soil.date.eq(seven_day_date)].value if seven_day_date is not None else pd.Series(dtype=float)
-        soil_prior = None if soil_prior_values.empty else _soil_percent(float(soil_prior_values.mean()))
+        soil_prior = None if soil_prior_values.empty else _soil_percent(
+            float(soil_prior_values.mean()), canonical_percent=canonical_soil_percent
+        )
         row["soil_moisture"] = {
             "region_identity": region,
             "date": None if soil_date is None else soil_date.date().isoformat(),

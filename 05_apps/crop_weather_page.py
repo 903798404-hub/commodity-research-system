@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +19,13 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from agri_research_agent.data_sources.weather_adapter import load_weather_records  # noqa: E402
+from agri_research_agent.market_data.public_weather_current import (  # noqa: E402
+    PublicWeatherCurrentError,
+    PublicWeatherCurrentIdentity,
+    PublicWeatherCurrentSnapshot,
+    load_public_weather_current,
+    resolve_weather_current_identity,
+)
 from agri_research_agent.weather.crop_weather import (  # noqa: E402
     add_season_columns,
     latest_observation_date,
@@ -27,83 +35,59 @@ from agri_research_agent.weather.crop_weather import (  # noqa: E402
     weekly_metric_summary,
     weighted_values,
 )
-from agri_research_agent.summary_engine.weather_cache import load_weather_summary_cached  # noqa: E402
+from agri_research_agent.summary_engine.weather_cache import (  # noqa: E402
+    load_weather_current_summary_cached,
+    load_weather_summary_cached,
+)
 from summary_panel import render_summary_panel  # noqa: E402
 
 
 CONFIG_FILE = PROJECT_ROOT / "02_configs" / "soybean_weather_us.yaml"
-STABLE_DATA_FILE = PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "soybean_weather_us.parquet"
-NORMAL_DATA_FILE = PROJECT_ROOT / "01_data" / "processed" / "weather" / "soybean" / "us" / "soybean_weather_us_30y_normal.parquet"
 FIXTURE_ENV = "SOYBEAN_WEATHER_FIXTURE_PATH"
 NORMAL_FIXTURE_ENV = "SOYBEAN_WEATHER_NORMAL_FIXTURE_PATH"
-WEATHER_DATA_DIR_ENV = "WEATHER_DATA_DIR"
+PUBLIC_RUNTIME_ROOT_ENV = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
 PAGE_TITLE = "美国大豆天气研究"
 
 
-def _weather_data_file(relative_path: str) -> Path:
-    """Use the read-only runtime snapshot in production, with a local fallback."""
-
-    runtime_root = os.environ.get(WEATHER_DATA_DIR_ENV, "").strip()
-    if runtime_root:
-        return Path(runtime_root) / relative_path
-    return PROJECT_ROOT / "01_data" / "processed" / "weather" / relative_path
+def _public_weather_current_root(project_root: Path = PROJECT_ROOT) -> Path:
+    runtime_value = os.environ.get(PUBLIC_RUNTIME_ROOT_ENV, "").strip()
+    runtime_root = Path(runtime_value) if runtime_value else project_root.parents[1] / "market-data-worktree-runtime" / "international-spread"
+    return runtime_root / "public-market-data" / "lutou-weather"
 
 WEATHER_COUNTRY_FILES = {
-    "USA": {"config": CONFIG_FILE, "data": _weather_data_file("soybean/us/soybean_weather_us.parquet"), "normal": _weather_data_file("soybean/us/soybean_weather_us_30y_normal.parquet"), "fixture_enabled": True},
+    "USA": {"config": CONFIG_FILE, "fixture_enabled": True},
     "BRA": {
         "config": PROJECT_ROOT / "02_configs" / "soybean_weather_br.yaml",
-        "data": _weather_data_file("soybean/br/soybean_weather_br.parquet"),
-        "normal": _weather_data_file("soybean/br/soybean_weather_br_30y_normal.parquet"),
     },
     "ARG": {
         "config": PROJECT_ROOT / "02_configs" / "soybean_weather_ar.yaml",
-        "data": _weather_data_file("soybean/ar/soybean_weather_ar.parquet"),
-        "normal": _weather_data_file("soybean/ar/soybean_weather_ar_30y_normal.parquet"),
     },
     "CAN": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_can.yaml",
-        "data": _weather_data_file("rapeseed/can/rapeseed_weather_can.parquet"),
-        "normal": _weather_data_file("rapeseed/can/rapeseed_weather_can_30y_normal.parquet"),
     },
     "AUS": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_aus.yaml",
-        "data": _weather_data_file("rapeseed/aus/rapeseed_weather_aus.parquet"),
-        "normal": None,
     },
     "EU": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_eu.yaml",
-        "data": _weather_data_file("rapeseed/eu/rapeseed_weather_eu.parquet"),
-        "normal": None,
     },
     "RUS": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_rus.yaml",
-        "data": _weather_data_file("rapeseed/rus/rapeseed_weather_rus.parquet"),
-        "normal": None,
     },
     "UKR": {
         "config": PROJECT_ROOT / "02_configs" / "rapeseed_weather_ukr.yaml",
-        "data": _weather_data_file("rapeseed/ukr/rapeseed_weather_ukr.parquet"),
-        "normal": None,
     },
     "MYS": {
         "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_mys.yaml",
-        "data": _weather_data_file("palm_oil/mys/palm_oil_weather_mys.parquet"),
-        "normal": None,
     },
     "IDN": {
         "config": PROJECT_ROOT / "02_configs" / "palm_oil_weather_idn.yaml",
-        "data": _weather_data_file("palm_oil/idn/palm_oil_weather_idn.parquet"),
-        "normal": None,
     },
     "IND_COTTON": {
         "config": PROJECT_ROOT / "02_configs" / "cotton_weather_ind.yaml",
-        "data": _weather_data_file("cotton/ind/cotton_weather_ind.parquet"),
-        "normal": None,
     },
     "IND_SUGARCANE": {
         "config": PROJECT_ROOT / "02_configs" / "sugarcane_weather_ind.yaml",
-        "data": _weather_data_file("sugarcane/ind/sugarcane_weather_ind.parquet"),
-        "normal": None,
     },
 }
 
@@ -175,10 +159,7 @@ def _data_path(files: dict[str, object]) -> tuple[Path | None, str]:
     fixture_path = os.environ.get(FIXTURE_ENV, "").strip() if bool(files.get("fixture_enabled")) else ""
     if fixture_path:
         return Path(fixture_path), "本地测试 fixture"
-    data_file = files["data"]
-    if isinstance(data_file, Path) and data_file.is_file():
-        return data_file, "稳定天气数据"
-    return None, "稳定天气数据未接入"
+    return None, "Public Weather Current"
 
 
 def _normal_path(files: dict[str, object]) -> Path | None:
@@ -187,8 +168,7 @@ def _normal_path(files: dict[str, object]) -> Path | None:
     fixture_path = os.environ.get(NORMAL_FIXTURE_ENV, "").strip() if bool(files.get("fixture_enabled")) else ""
     if fixture_path:
         return Path(fixture_path)
-    normal_file = files.get("normal")
-    return normal_file if isinstance(normal_file, Path) and normal_file.is_file() else None
+    return None
 
 
 @st.cache_data(show_spinner=False)
@@ -203,6 +183,31 @@ def _load_selected_records(
 ) -> pd.DataFrame:
     del route_key, data_mtime_ns, data_size
     return load_weather_records(data_path, crop=crop, country=country, metric=metric)
+
+
+@st.cache_data(show_spinner=False, max_entries=96)
+def _load_public_snapshot(
+    public_current_root: str,
+    release_id: str,
+    manifest_sha256: str,
+    crop: str,
+    country: str,
+    metrics: tuple[str, ...],
+    regions: tuple[str, ...],
+    start_date: date,
+    route_key: str = "",
+) -> PublicWeatherCurrentSnapshot:
+    del route_key
+    return load_public_weather_current(
+        public_current_root,
+        crop=crop,
+        country=country,
+        metrics=metrics,
+        regions=regions,
+        start_date=start_date,
+        expected_release_id=release_id,
+        expected_manifest_sha256=manifest_sha256,
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -279,8 +284,11 @@ def _daily_rain_default_window(records: pd.DataFrame) -> tuple[pd.Timestamp, pd.
     return latest - pd.Timedelta(days=13), latest + pd.Timedelta(days=14)
 
 
-def _weather_freshness(records: pd.DataFrame, data_path: Path) -> dict[str, str]:
-    """Return page-facing dates from the mounted Parquet, never a stale status JSON."""
+def _weather_freshness(
+    records: pd.DataFrame,
+    source: Path | PublicWeatherCurrentIdentity,
+) -> dict[str, str]:
+    """Return page-facing dates from the loaded immutable source identity."""
 
     dates = pd.to_datetime(records["date"], errors="raise").dt.normalize()
     observed = dates[records["data_type"] == "observed"]
@@ -290,12 +298,16 @@ def _weather_freshness(records: pd.DataFrame, data_path: Path) -> dict[str, str]
     def latest(values: pd.Series) -> str:
         return pd.Timestamp(values.max()).date().isoformat() if not values.empty else "—"
 
-    refreshed = pd.Timestamp(data_path.stat().st_mtime_ns, unit="ns", tz="UTC")
+    if isinstance(source, PublicWeatherCurrentIdentity):
+        refreshed_at = source.observation_source_max.isoformat()
+    else:
+        refreshed = pd.Timestamp(source.stat().st_mtime_ns, unit="ns", tz="UTC")
+        refreshed_at = refreshed.strftime("%Y-%m-%d %H:%M UTC")
     return {
         "observed": latest(observed),
         "ecmwf": latest(forecast_dates[forecasts["model"] == "ECMWF"]),
         "gfs": latest(forecast_dates[forecasts["model"] == "GFS"]),
-        "refreshed_at": refreshed.strftime("%Y-%m-%d %H:%M UTC"),
+        "refreshed_at": refreshed_at,
     }
 
 
@@ -848,7 +860,12 @@ def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region
         start_month_day, end_month_day = str(config_window["start"]), str(config_window["end"])
         display_name = str(dict(config.get("metrics", {})).get(metric, {}).get("display_name", legacy_windows[kind][2]))
         unit_value = str(dict(config.get("metrics", {})).get(metric, {}).get("unit", ""))
-        unit = f"{display_name}（℃）" if unit_value == "degC" else legacy_windows[kind][2]
+        if metric == "soil_moisture":
+            unit = f"{display_name}（%）"
+        elif unit_value == "degC":
+            unit = f"{display_name}（℃）"
+        else:
+            unit = legacy_windows[kind][2]
     else:
         start_month_day, end_month_day, unit = legacy_windows[kind]
     observed, years, current_year = _aligned_history(records, region.key, start_month_day, end_month_day, config)
@@ -1034,7 +1051,7 @@ def _render_weekly(
 
 
 def render_weather_page(route_key: str = "USA") -> None:
-    """Render a country page solely from its local country configuration."""
+    """Render a country page from Public Weather Current or an explicit fixture."""
 
     try:
         files = _country_files(route_key)
@@ -1049,12 +1066,22 @@ def render_weather_page(route_key: str = "USA") -> None:
     config = _load_config(str(config_file), config_stat.st_mtime_ns, config_stat.st_size)
     data_path, source_label = _data_path(files)
     st.title(str(config.get("page_title", PAGE_TITLE)))
-    if data_path is None or not data_path.is_file():
-        st.error(
-            f"{config.get('country_display_name', route_key)}天气稳定数据不可用："
-            f"{source_label}。当前模块未加载任何回退业务数据。"
-        )
-        return
+    fixture_mode = data_path is not None
+    public_root = _public_weather_current_root()
+    current_identity: PublicWeatherCurrentIdentity | None = None
+    if fixture_mode:
+        if not data_path.is_file():
+            st.error(f"显式天气测试 fixture 不可用：{data_path}")
+            return
+    else:
+        try:
+            current_identity = resolve_weather_current_identity(public_root)
+        except PublicWeatherCurrentError as exc:
+            st.error(
+                f"{config.get('country_display_name', route_key)}天气 Public Current 不可用：{exc}。"
+                "当前模块未加载任何 legacy 或数据库回退。"
+            )
+            return
     enabled = dict(config.get("enabled_sections", {}))
     # Minimum temperature is opt-in: historic country configurations predate
     # this optional chart and must retain their approved module set.
@@ -1064,13 +1091,16 @@ def render_weather_page(route_key: str = "USA") -> None:
         return
     try:
         with st.spinner("天气摘要加载中…"):
-            summary = load_weather_summary_cached(
-                data_path,
-                config_file,
-                _normal_path(files),
-            )
+            if fixture_mode:
+                summary = load_weather_summary_cached(
+                    data_path,
+                    config_file,
+                    _normal_path(files),
+                )
+            else:
+                summary = load_weather_current_summary_cached(public_root, config_file)
         render_summary_panel(summary)
-    except (OSError, ValueError, ImportError) as exc:
+    except (OSError, ValueError, ImportError, PublicWeatherCurrentError) as exc:
         st.warning(f"天气摘要暂不可用：{exc}")
     module_key = st.radio(
         "页面章节",
@@ -1081,15 +1111,40 @@ def render_weather_page(route_key: str = "USA") -> None:
     )
     module_name, kind, metric = MODULES[module_key]
     try:
-        data_stat = data_path.stat()
-        records = _load_selected_records(str(data_path), data_stat.st_mtime_ns, str(config["crop"]), str(config["country"]), metric, data_stat.st_size, route_key)
-    except (OSError, ValueError, ImportError) as exc:
+        if fixture_mode:
+            data_stat = data_path.stat()
+            records = _load_selected_records(
+                str(data_path), data_stat.st_mtime_ns, str(config["crop"]),
+                str(config["country"]), metric, data_stat.st_size, route_key,
+            )
+            normals = pd.DataFrame()
+        else:
+            assert current_identity is not None
+            regions = tuple(str(item["key"]) for item in config["regions"])
+            requested_metrics = (
+                tuple(WEEKLY_TABLE_METRICS) if kind == "weekly" else (metric,)
+            )
+            snapshot = _load_public_snapshot(
+                str(public_root.resolve()), current_identity.release_id,
+                current_identity.manifest_sha256, str(config["crop"]),
+                str(config["country"]), requested_metrics, regions,
+                (
+                    pd.Timestamp(current_identity.observation_source_max)
+                    - pd.DateOffset(years=13)
+                ).date(),
+                route_key,
+            )
+            records = snapshot.records[snapshot.records["metric"].eq(metric)].copy()
+            normals = snapshot.normals[snapshot.normals["metric"].eq(metric)].copy()
+    except (OSError, ValueError, ImportError, PublicWeatherCurrentError) as exc:
         st.error(f"天气数据读取失败：{exc}")
         return
     if records.empty:
         st.info(f"当前选择没有可用的{config['metrics'][metric]['display_name']}数据。")
         return
-    freshness = _weather_freshness(records, data_path)
+    freshness = _weather_freshness(
+        records, data_path if fixture_mode else current_identity
+    )
     st.caption(
         " · ".join(
             (
@@ -1100,6 +1155,11 @@ def render_weather_page(route_key: str = "USA") -> None:
             )
         )
     )
+    if current_identity is not None:
+        st.caption(
+            f"Public Current：{current_identity.release_id} · "
+            f"manifest {current_identity.manifest_sha256[:12]}…"
+        )
     if bool(config.get("weighted_aggregation", True)):
         coverage_note = str(config.get("coverage_caption", f"覆盖{len(config['regions'])}个主要产区，权重{float(config['weighted_coverage_percent']):.1f}%"))
         st.caption(coverage_note)
@@ -1113,33 +1173,37 @@ def render_weather_page(route_key: str = "USA") -> None:
     _inject_weather_styles()
     _section_heading(module_name)
     if kind == "weekly":
-        normal_path = _normal_path(files)
-        if normal_path is None or not normal_path.is_file():
-            st.error("30年历史同期基准稳定数据不可用。")
-            return
-        try:
-            normal_stat = normal_path.stat()
-            normals = _load_normals(str(normal_path), normal_stat.st_mtime_ns, normal_stat.st_size)
-        except (OSError, ValueError, ImportError) as exc:
-            st.error(f"30年历史同期基准读取失败：{exc}")
-            return
-        forecast_records_by_metric = {metric: records}
-        try:
-            for forecast_metric in WEEKLY_TABLE_METRICS:
-                if forecast_metric == metric:
-                    continue
-                forecast_records_by_metric[forecast_metric] = _load_selected_records(
-                    str(data_path),
-                    data_stat.st_mtime_ns,
-                    str(config["crop"]),
-                    str(config["country"]),
-                    forecast_metric,
-                    data_stat.st_size,
-                    route_key,
-                )
-        except (OSError, ValueError, ImportError) as exc:
-            st.error(f"完整预测窗口校验失败：{exc}")
-            return
+        if fixture_mode:
+            normal_path = _normal_path(files)
+            if normal_path is None or not normal_path.is_file():
+                st.error("显式 30 年历史同期 fixture 不可用。")
+                return
+            try:
+                normal_stat = normal_path.stat()
+                normals = _load_normals(str(normal_path), normal_stat.st_mtime_ns, normal_stat.st_size)
+            except (OSError, ValueError, ImportError) as exc:
+                st.error(f"30年历史同期基准读取失败：{exc}")
+                return
+            forecast_records_by_metric = {metric: records}
+            try:
+                for forecast_metric in WEEKLY_TABLE_METRICS:
+                    if forecast_metric == metric:
+                        continue
+                    forecast_records_by_metric[forecast_metric] = _load_selected_records(
+                        str(data_path), data_stat.st_mtime_ns, str(config["crop"]),
+                        str(config["country"]), forecast_metric, data_stat.st_size,
+                        route_key,
+                    )
+            except (OSError, ValueError, ImportError) as exc:
+                st.error(f"完整预测窗口校验失败：{exc}")
+                return
+        else:
+            forecast_records_by_metric = {
+                forecast_metric: snapshot.records[
+                    snapshot.records["metric"].eq(forecast_metric)
+                ].copy()
+                for forecast_metric in WEEKLY_TABLE_METRICS
+            }
         _render_weekly(records, normals, config, metric=metric, forecast_records_by_metric=forecast_records_by_metric, snapshot_date=freshness["refreshed_at"])
     elif kind == "daily_rain":
         _render_grid(records, config, kind=kind, columns=3, metric=metric)
