@@ -7,25 +7,29 @@ import json
 import socket
 import subprocess
 from collections import defaultdict
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Callable, Mapping
 
 from agri_research_agent.data_sources.lutou.live import (
     LutouClient,
     LutouConnectionError,
     LutouConnectionSettings,
+    LutouQuery,
     LutouReadOnlyError,
     LutouSchemaError,
     LutouSourceUnavailableError,
-    LutouQuery,
 )
 from agri_research_agent.data_sources.lutou.soil_moisture_live import (
     LUTOU_WEATHER_SCHEMA,
     load_soil_moisture_series,
 )
 from agri_research_agent.data_sources.lutou.three_oil_live import LUTOU_SCHEMA
+from agri_research_agent.data_sources.lutou.weather_live import (
+    WeatherSourceCatalog,
+    load_weather_source_catalog,
+)
 from agri_research_agent.data_sources.tankan.client import (
     TankanClient,
     TankanConnectionError,
@@ -36,13 +40,21 @@ from agri_research_agent.data_sources.tankan.client import (
 )
 from agri_research_agent.pipelines.lutou_goal_b import (
     LutouGoalBError,
-    load_current as load_lutou_current,
     run_goal_b,
+)
+from agri_research_agent.pipelines.lutou_goal_b import (
+    load_current as load_lutou_current,
 )
 from agri_research_agent.pipelines.lutou_goal_b_soil import (
     LutouGoalBSoilError,
     load_soil_current,
     run_goal_b_soil,
+)
+from agri_research_agent.pipelines.lutou_weather import (
+    LutouWeatherError,
+    load_weather_current,
+    run_lutou_weather,
+    validate_weather_normal_baselines,
 )
 from agri_research_agent.pipelines.public_data_refresh import (
     CurrentIdentity,
@@ -52,12 +64,13 @@ from agri_research_agent.pipelines.public_data_refresh import (
 )
 from agri_research_agent.pipelines.tankan_goal_a import (
     TankanGoalAError,
-    load_current as load_tankan_current,
     run_goal_a,
+)
+from agri_research_agent.pipelines.tankan_goal_a import (
+    load_current as load_tankan_current,
 )
 from agri_research_agent.research_data.three_oil_v1 import load_three_oil_v1
 from agri_research_agent.shared.runtime_context import RuntimeContext
-
 
 Connector = Callable[[str, int, float], bool]
 NetworkCheck = Callable[[], bool]
@@ -194,25 +207,42 @@ class LutouRefreshAdapter:
     end_date: date
     soil_catalog_path: Path
     three_oil_catalog_path: Path | None = None
+    weather_policy_path: Path | None = None
+    weather_baseline_root: Path | None = None
     connector: Connector = tcp_reachable
     network_check: NetworkCheck = tailscale_ready
     name: str = "lutou"
     _client: LutouClient | None = field(default=None, init=False, repr=False)
     _preflight_source_max: Mapping[str, str] = field(default_factory=dict, init=False, repr=False)
+    _weather_catalog: WeatherSourceCatalog | None = field(default=None, init=False, repr=False)
 
     def current_identity(self) -> CurrentIdentity:
         oil_root = self.runtime.runtime_root / "public-market-data" / "lutou-three-oil"
         soil_root = self.runtime.runtime_root / "public-market-data" / "lutou-soil-moisture"
+        weather_root = self.runtime.runtime_root / "public-market-data" / "lutou-weather"
         oil = load_lutou_current(oil_root)
         soil = load_soil_current(soil_root)
+        weather = load_weather_current(weather_root)
         identities: dict[str, object] = {}
         maxima: dict[str, str] = {}
         releases: list[str] = []
-        for domain, current, root in (("three_oil", oil, oil_root), ("soil_moisture", soil, soil_root)):
+        for domain, current, root in (
+            ("three_oil", oil, oil_root),
+            ("soil_moisture", soil, soil_root),
+            ("weather", weather, weather_root),
+        ):
             if current is not None:
                 pointer = _pointer(root)
                 identities[domain] = pointer["manifest_sha256"]
-                maxima[domain] = str(current.manifest["source_max_date"])
+                if domain == "weather":
+                    maxima["weather_observation"] = str(
+                        current.manifest["source_max_dates"]["observation"]
+                    )
+                    maxima["weather_forecast_valid"] = str(
+                        current.manifest["source_max_dates"]["forecast_valid"]
+                    )
+                else:
+                    maxima[domain] = str(current.manifest["source_max_date"])
                 releases.append(f"{domain}:{current.release_id}")
         digest = None
         if identities:
@@ -235,6 +265,27 @@ class LutouRefreshAdapter:
                 previous = maxima.get(domain)
                 if previous is None or latest > previous:
                     maxima[domain] = latest
+            if self.weather_policy_path is not None:
+                if self.weather_baseline_root is None:
+                    raise LutouSchemaError("Weather normal baseline root is missing")
+                validate_weather_normal_baselines(
+                    self.weather_policy_path, self.weather_baseline_root
+                )
+                self._weather_catalog = load_weather_source_catalog(
+                    self._client, self.weather_policy_path
+                )
+                observations = [
+                    item.max_date
+                    for item in self._weather_catalog.tables
+                    if item.data_family == "observation"
+                ]
+                forecasts = [
+                    item.max_date
+                    for item in self._weather_catalog.tables
+                    if item.data_family == "forecast"
+                ]
+                maxima["weather_observation"] = max(observations).isoformat()
+                maxima["weather_forecast_valid"] = max(forecasts).isoformat()
             self._preflight_source_max = maxima
             return {"read_only": True, "source_max_dates": maxima}
         except LutouSourceUnavailableError:
@@ -290,6 +341,34 @@ class LutouRefreshAdapter:
                 failure = _pipeline_failure(exc, "Lutou soil-moisture")
                 domains["soil_moisture"] = failure.status.value
                 failures.append(failure)
+            if self.weather_policy_path is not None:
+                try:
+                    weather = run_lutou_weather(
+                        self._client,
+                        runtime=self.runtime,
+                        run_id=f"{self.run_id}-lutou-weather",
+                        as_of_date=self.end_date,
+                        full_load=False,
+                        policy_path=self.weather_policy_path,
+                        baseline_root=self.weather_baseline_root,
+                        source_catalog=self._weather_catalog,
+                    )
+                    domains["weather"] = (
+                        ProviderStatus.UPDATED
+                        if weather.promoted
+                        else ProviderStatus.NO_CHANGE
+                    ).value
+                    maxima["weather_observation"] = str(
+                        weather.candidate_manifest["source_max_dates"]["observation"]
+                    )
+                    maxima["weather_forecast_valid"] = str(
+                        weather.candidate_manifest["source_max_dates"]["forecast_valid"]
+                    )
+                    promoted = promoted or weather.promoted
+                except LutouWeatherError as exc:
+                    failure = _pipeline_failure(exc, "Lutou Weather")
+                    domains["weather"] = failure.status.value
+                    failures.append(failure)
             if failures:
                 status = failures[0].status
                 return RefreshResult(
@@ -304,6 +383,7 @@ class LutouRefreshAdapter:
         if self._client is not None:
             self._client.close()
             self._client = None
+        self._weather_catalog = None
 
     def _approved_queries(self) -> tuple[tuple[str, LutouQuery], ...]:
         output: list[tuple[str, LutouQuery]] = []

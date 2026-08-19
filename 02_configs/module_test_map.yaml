@@ -168,10 +168,13 @@ modules:
       - 03_src/agri_research_agent/data_sources/lutou/live.py
       - 03_src/agri_research_agent/data_sources/lutou/three_oil_live.py
       - 03_src/agri_research_agent/data_sources/lutou/soil_moisture_live.py
+      - 03_src/agri_research_agent/data_sources/lutou/weather_live.py
+      - 02_configs/lutou_weather_current.yaml
     direct_tests:
       - 08_tests/data_sources/lutou/test_snapshot_acl.py
       - 08_tests/data_sources/lutou/test_live.py
       - 08_tests/data_sources/lutou/test_three_oil_live.py
+      - 08_tests/data_sources/lutou/test_weather_live.py
       - 08_tests/pipelines/test_lutou_goal_b_soil.py
     impact_tests:
       - 08_tests/research_data/test_identities.py
@@ -224,10 +227,29 @@ modules:
       - 04_scripts/refresh_public_data.py
     direct_tests:
       - 08_tests/pipelines/test_public_data_refresh.py
+      - 08_tests/pipelines/test_public_data_weather_provider.py
     impact_tests:
       - 08_tests/pipelines/test_tankan_goal_a.py
       - 08_tests/pipelines/test_lutou_goal_b.py
       - 08_tests/pipelines/test_lutou_goal_b_soil.py
+      - 08_tests/test_international_spread_page.py
+    dependents: []
+    full_regression_when_changed: false
+  pipelines.lutou_weather:
+    code_paths:
+      - 03_src/agri_research_agent/pipelines/lutou_weather.py
+      - 03_src/agri_research_agent/data_sources/lutou/weather_live.py
+      - 02_configs/lutou_weather_current.yaml
+    direct_tests:
+      - 08_tests/data_sources/lutou/test_weather_live.py
+      - 08_tests/pipelines/test_lutou_weather.py
+      - 08_tests/pipelines/test_public_data_weather_provider.py
+    impact_tests:
+      - 08_tests/pipelines/test_lutou_goal_b_soil.py
+      - 08_tests/pipelines/test_public_data_refresh.py
+      - 08_tests/test_soybean_weather_30y_normal_import.py
+      - 08_tests/data_sources/lutou/test_live.py
+      - 08_tests/test_crop_weather_migration.py
       - 08_tests/test_international_spread_page.py
     dependents: []
     full_regression_when_changed: false

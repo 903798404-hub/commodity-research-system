@@ -1,0 +1,121 @@
+schema_version: lutou-public-weather-source-policy/1
+source_schema: 天气2.0
+scope: current-weather-consumers
+observation_lookback_days: 31
+source_inventory_audit:
+  status: LIVE_DB_VERIFIED
+  audited_at: 2026-08-19
+  table_count: 565
+  consumer_soil_table_count: 11
+source_bounds_audit:
+  status: LIVE_DB_VERIFIED
+  audited_at: 2026-08-19
+  observation_max_date: "2026-08-18"
+  forecast_valid_date_min: "2026-08-19"
+  forecast_valid_date_max: "2026-09-02"
+  historical_start_by_table_prefix:
+    乌克兰: "1995-01-01"
+    俄罗斯: "1994-01-01"
+    加拿大: "1995-01-01"
+    印度: "1994-01-01"
+    印尼: "1994-01-01"
+    巴西: "1994-01-01"
+    澳洲: "1994-01-01"
+    美国: "1994-01-01"
+    阿根廷: "1994-01-01"
+    欧盟: "1995-01-01"
+    马来: "1994-01-01"
+forecast_horizon_days: 15
+forecast_issue_policy:
+  issue_date_field: null
+  issue_date_status: SOURCE_NOT_PROVIDED
+  run_identity: source_content_sha256
+  valid_date_field: 日期
+normal_baselines:
+  - config: soybean_weather_us.yaml
+    relative_path: soybean/us/soybean_weather_us_30y_normal.parquet
+  - config: soybean_weather_br.yaml
+    relative_path: soybean/br/soybean_weather_br_30y_normal.parquet
+  - config: soybean_weather_ar.yaml
+    relative_path: soybean/ar/soybean_weather_ar_30y_normal.parquet
+  - config: rapeseed_weather_can.yaml
+    relative_path: rapeseed/can/rapeseed_weather_can_30y_normal.parquet
+metric_contracts:
+  precipitation:
+    source_unit: mm
+    canonical_unit: mm
+    interval: P1D
+    aggregation: daily_total
+    transformation: identity
+    metadata_source_type: existing_formal_consumer_mapping
+  temperature_max:
+    source_unit: degC
+    canonical_unit: degC
+    interval: P1D
+    aggregation: daily_maximum
+    transformation: identity
+    metadata_source_type: existing_formal_consumer_mapping
+  temperature_min:
+    source_unit: degC
+    canonical_unit: degC
+    interval: P1D
+    aggregation: daily_minimum
+    transformation: identity
+    metadata_source_type: existing_formal_consumer_mapping
+routes:
+  - config: soybean_weather_us.yaml
+    source_table_prefix: 美国
+    sealed_column_style: table_prefix_expanded
+    minimum_temperature: true
+  - config: soybean_weather_br.yaml
+    minimum_temperature: true
+  - config: soybean_weather_ar.yaml
+    minimum_temperature: true
+  - config: rapeseed_weather_can.yaml
+    minimum_temperature: true
+  - config: rapeseed_weather_aus.yaml
+    minimum_temperature: true
+  - config: rapeseed_weather_eu.yaml
+    minimum_temperature: true
+  - config: rapeseed_weather_rus.yaml
+    minimum_temperature: true
+  - config: rapeseed_weather_ukr.yaml
+    minimum_temperature: true
+  - config: palm_oil_weather_mys.yaml
+    minimum_temperature: false
+  - config: palm_oil_weather_idn.yaml
+    minimum_temperature: false
+  - config: cotton_weather_ind.yaml
+    minimum_temperature: false
+  - config: sugarcane_weather_ind.yaml
+    minimum_temperature: false
+derived_contracts:
+  - identity: weather.derived.weekly_precipitation
+    formula: sum(daily precipitation over exact seven-day window)
+    materialized_by_producer: false
+  - identity: weather.derived.cumulative_precipitation
+    formula: cumulative sum of daily precipitation over the configured season window
+    materialized_by_producer: false
+  - identity: weather.derived.weekly_temperature
+    formula: arithmetic mean of daily temperature over exact seven-day window
+    materialized_by_producer: false
+  - identity: weather.derived.forecast_two_seven_day_windows
+    formula: two contiguous seven-day windows over common complete daily EC/GFS valid dates
+    materialized_by_producer: false
+  - identity: weather.derived.canada_weighted_summary
+    formula: (saskatchewan_weighted*55 + alberta_weighted*28 + manitoba_weighted*16) / 99
+    materialized_by_producer: false
+canada_region_policy:
+  source_provided_weighted_regions:
+    - saskatchewan_weighted
+    - alberta_weighted
+    - manitoba_weighted
+  separate_source_regions:
+    - {region: saskatchewan_raw, source_column: Saskatchewan, region_type: province_total}
+    - {region: sk9a_raw, source_column: "Canadian Agricultural Region SK.9A", region_type: agricultural_region}
+    - {region: alberta_raw, source_column: Alberta, region_type: province_total}
+    - {region: ab6_raw, source_column: "Canadian Agricultural Region AB.6", region_type: agricultural_region}
+    - {region: ab7_raw, source_column: "Canadian Agricultural Region AB.7", region_type: agricultural_region}
+    - {region: manitoba_raw, source_column: Manitoba, region_type: province_total}
+    - {region: mb12_raw, source_column: "Canadian Agricultural Region MB.12", region_type: agricultural_region}
+  source_weighted_derivation_status: SOURCE_NOT_PROVIDED

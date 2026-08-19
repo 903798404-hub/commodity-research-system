@@ -267,6 +267,88 @@ class LutouClient:
             raise LutouSchemaError("Lutou approved source columns are missing")
         return rows
 
+    def inspect_relation(
+        self, schema: str, table: str
+    ) -> tuple[dict[str, object], ...]:
+        """Return ordered column metadata for one explicitly named relation."""
+        for value in (schema, table):
+            if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
+                raise ValueError("Lutou relation identifier is invalid")
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, ORDINAL_POSITION, "
+                    "COLUMN_COMMENT FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                    "ORDER BY ORDINAL_POSITION",
+                    (schema, table),
+                )
+                rows = tuple(dict(item) for item in cursor.fetchall())
+        except Exception as exc:
+            raise LutouSchemaError(
+                f"Lutou relation inspection failed: {type(exc).__name__}"
+            ) from None
+        if not rows:
+            raise LutouSchemaError("Lutou approved relation is missing")
+        return rows
+
+    def inspect_schema_inventory(
+        self, schema: str
+    ) -> tuple[dict[str, object], ...]:
+        """Return metadata-only table inventory without reading business rows."""
+        if not isinstance(schema, str) or _IDENTIFIER.fullmatch(schema) is None:
+            raise ValueError("Lutou schema identifier is invalid")
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT, UPDATE_TIME "
+                    "FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = %s "
+                    "ORDER BY TABLE_NAME",
+                    (schema,),
+                )
+                return tuple(dict(item) for item in cursor.fetchall())
+        except Exception as exc:
+            raise LutouSchemaError(
+                f"Lutou schema inventory failed: {type(exc).__name__}"
+            ) from None
+
+    def date_bounds(
+        self, query: LutouQuery, *, inspect: bool = True
+    ) -> tuple[date, date]:
+        """Read exact minimum and maximum dates from a validated relation."""
+        if inspect:
+            self.inspect_query(query)
+        connection = self._require_connection()
+        relation = f"{_quote(query.schema)}.{_quote(query.table)}"
+        column = _quote(query.date_column)
+        statement = (
+            f"SELECT MIN({column}) AS min_date, MAX({column}) AS max_date "
+            f"FROM {relation}"
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(statement)
+                row = cursor.fetchone()
+            minimum = row.get("min_date") if row else None
+            maximum = row.get("max_date") if row else None
+            if isinstance(minimum, datetime):
+                minimum = minimum.date()
+            if isinstance(maximum, datetime):
+                maximum = maximum.date()
+            if type(minimum) is not date or type(maximum) is not date:
+                raise LutouSourceUnavailableError(
+                    "approved Lutou source has no date bounds"
+                )
+            return minimum, maximum
+        except LutouClientError:
+            raise
+        except Exception as exc:
+            raise LutouSchemaError(
+                f"Lutou source-date bounds probe failed: {type(exc).__name__}"
+            ) from None
+
     def latest_date(self, query: LutouQuery) -> date:
         """Read one newest date from a validated approved-query relation."""
         self.inspect_query(query)

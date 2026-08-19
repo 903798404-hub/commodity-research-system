@@ -29,6 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh isolated public data Currents")
     parser.add_argument("--source", action="append", choices=("tankan", "lutou"), dest="sources")
     parser.add_argument("--runtime-root", type=Path, required=True)
+    parser.add_argument("--weather-baseline-root", type=Path)
     parser.add_argument("--end-date", type=date.fromisoformat, default=date.today())
     parser.add_argument("--run-id")
     parser.add_argument(
@@ -47,6 +48,12 @@ def main(argv: list[str] | None = None) -> int:
         mode=RuntimeMode.ISOLATED_DEV,
         module_id="international-spread",
         runtime_root=args.runtime_root,
+    )
+    weather_baseline_root = args.weather_baseline_root or Path(
+        os.environ.get(
+            "WEATHER_DATA_DIR",
+            str(ROOT / "01_data" / "processed" / "weather"),
+        )
     )
     adapters = []
     if "tankan" in sources:
@@ -69,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.end_date,
                 ROOT / "02_configs" / "public_research_data_catalog.candidate.json",
                 ROOT / "02_configs" / "international_three_oil_v1.sealed.json",
+                ROOT / "02_configs" / "lutou_weather_current.yaml",
+                weather_baseline_root,
             )
         )
     result = run_unified_refresh(

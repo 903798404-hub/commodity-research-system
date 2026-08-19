@@ -55,16 +55,29 @@ class FakeCursor:
                 }
             ]
         elif statement.startswith("SELECT COLUMN_NAME"):
-            names = tuple(parameters[2:])
+            names = tuple(parameters[2:]) or ("Date", "value")
             self._rows = [
                 {
                     "COLUMN_NAME": name,
                     "DATA_TYPE": "date" if index == 0 else "decimal",
                     "IS_NULLABLE": "YES",
                     "ORDINAL_POSITION": index + 1,
+                    "COLUMN_COMMENT": "",
                 }
                 for index, name in enumerate(names)
             ]
+        elif statement.startswith("SELECT TABLE_NAME"):
+            self._rows = [
+                {
+                    "TABLE_NAME": "weather",
+                    "TABLE_TYPE": "BASE TABLE",
+                    "TABLE_ROWS": 10,
+                    "TABLE_COMMENT": "",
+                    "UPDATE_TIME": None,
+                }
+            ]
+        elif statement.startswith("SELECT MIN("):
+            self._rows = [{"min_date": date(2026, 8, 1), "max_date": date(2026, 8, 18)}]
         elif statement.startswith("SELECT `Date`"):
             self._rows = list(self.connection.source_rows)
 
@@ -182,6 +195,23 @@ def test_latest_date_inspects_approved_columns_and_reads_one_row() -> None:
     assert latest == [
         "SELECT `Date` FROM `油脂油料价格`.`oil_world_prices` ORDER BY `Date` DESC LIMIT 1"
     ]
+
+
+def test_metadata_inventory_and_date_bounds_are_read_only() -> None:
+    connection = FakeConnection()
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        relation = client.inspect_relation("天气2.0", "weather")
+        inventory = client.inspect_schema_inventory("天气2.0")
+        bounds = client.date_bounds(query())
+    assert [item["COLUMN_NAME"] for item in relation] == ["Date", "value"]
+    assert inventory[0]["TABLE_TYPE"] == "BASE TABLE"
+    assert bounds == (date(2026, 8, 1), date(2026, 8, 18))
+    assert all(
+        not statement.lstrip().upper().startswith(
+            ("INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP")
+        )
+        for statement, _ in connection.statements
+    )
 
 
 def test_plan_bound_and_identifier_validation_fail_closed() -> None:
