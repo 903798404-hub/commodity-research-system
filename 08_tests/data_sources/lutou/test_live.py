@@ -54,6 +54,17 @@ class FakeCursor:
                     )
                 }
             ]
+        elif statement.startswith("SELECT COLUMN_NAME"):
+            names = tuple(parameters[2:])
+            self._rows = [
+                {
+                    "COLUMN_NAME": name,
+                    "DATA_TYPE": "date" if index == 0 else "decimal",
+                    "IS_NULLABLE": "YES",
+                    "ORDINAL_POSITION": index + 1,
+                }
+                for index, name in enumerate(names)
+            ]
         elif statement.startswith("SELECT `Date`"):
             self._rows = list(self.connection.source_rows)
 
@@ -160,6 +171,17 @@ def test_query_is_bounded_parameterized_and_planned_before_read() -> None:
     assert "ANALYZE" not in operational[0][0]
     assert operational[0][1] == (day, day)
     assert operational[1][1] == (day, day)
+
+
+def test_latest_date_inspects_approved_columns_and_reads_one_row() -> None:
+    day = date(2026, 8, 18)
+    connection = FakeConnection(source_rows=({"Date": day},))
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        assert client.latest_date(query()) == day
+    latest = [statement for statement, _ in connection.statements if "ORDER BY `Date` DESC" in statement]
+    assert latest == [
+        "SELECT `Date` FROM `油脂油料价格`.`oil_world_prices` ORDER BY `Date` DESC LIMIT 1"
+    ]
 
 
 def test_plan_bound_and_identifier_validation_fail_closed() -> None:

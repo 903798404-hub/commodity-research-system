@@ -7,6 +7,7 @@ from .live import (
     LutouConnectionProof,
     LutouConnectionSettings,
     LutouQuery,
+    LutouSourceUnavailableError,
 )
 from .snapshot import (
     LutouSnapshotError,
@@ -29,6 +30,7 @@ __all__ = [
     "LutouQuery",
     "LutouSnapshotAcl",
     "LutouSnapshotError",
+    "LutouSourceUnavailableError",
     "LutouSnapshotRegistry",
     "SoilMoistureLiveError",
     "extract_soil_moisture_live",

@@ -33,6 +33,10 @@ class LutouSchemaError(LutouClientError):
     pass
 
 
+class LutouSourceUnavailableError(LutouClientError):
+    pass
+
+
 class LutouPlanRejectedError(LutouClientError):
     pass
 
@@ -262,6 +266,32 @@ class LutouClient:
         if names != expected:
             raise LutouSchemaError("Lutou approved source columns are missing")
         return rows
+
+    def latest_date(self, query: LutouQuery) -> date:
+        """Read one newest date from a validated approved-query relation."""
+        self.inspect_query(query)
+        connection = self._require_connection()
+        relation = f"{_quote(query.schema)}.{_quote(query.table)}"
+        column = _quote(query.date_column)
+        statement = f"SELECT {column} FROM {relation} ORDER BY {column} DESC LIMIT 1"
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(statement)
+                row = cursor.fetchone()
+            value = None if row is None else row.get(query.date_column)
+            if isinstance(value, datetime):
+                value = value.date()
+            if type(value) is not date:
+                raise LutouSourceUnavailableError(
+                    "approved Lutou source has no latest date"
+                )
+            return value
+        except LutouClientError:
+            raise
+        except Exception as exc:
+            raise LutouSchemaError(
+                f"Lutou latest source-date probe failed: {type(exc).__name__}"
+            ) from None
 
     def plan(self, query: LutouQuery, start: date, end: date) -> LutouPlanProof:
         parameters = _window(query, start, end)

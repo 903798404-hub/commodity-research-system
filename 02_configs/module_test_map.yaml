@@ -196,3 +196,17 @@ modules:
       - 08_tests/test_international_spread_page.py
     dependents: []
     full_regression_when_changed: false
+  pipelines.public_data_refresh:
+    code_paths:
+      - 03_src/agri_research_agent/pipelines/public_data_refresh.py
+      - 03_src/agri_research_agent/pipelines/public_data_providers.py
+      - 04_scripts/refresh_public_data.py
+    direct_tests:
+      - 08_tests/pipelines/test_public_data_refresh.py
+    impact_tests:
+      - 08_tests/pipelines/test_tankan_goal_a.py
+      - 08_tests/pipelines/test_lutou_goal_b.py
+      - 08_tests/pipelines/test_lutou_goal_b_soil.py
+      - 08_tests/test_international_spread_page.py
+    dependents: []
+    full_regression_when_changed: false

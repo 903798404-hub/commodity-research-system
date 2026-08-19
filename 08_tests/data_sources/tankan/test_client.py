@@ -64,6 +64,8 @@ class FakeCursor:
                     }
                 ]
             }
+        if self.statement.startswith("SELECT trade_date FROM market."):
+            return {"trade_date": date(2026, 8, 18)}
         return values[self.statement]
 
     def fetchmany(self, _: int) -> list[dict[str, object]]:
@@ -140,6 +142,18 @@ def test_stream_explains_without_analyze_before_bounded_select() -> None:
     assert batches[0].rows == tuple(rows)
     assert batches[0].plan.estimated_rows == 50
     assert batches[0].query.provider.dataset.origin_system.value == "tankan"
+
+
+def test_latest_source_dates_are_lightweight_allowlisted_reads() -> None:
+    connection = FakeConnection()
+    with TankanClient(settings(), connector=lambda **_: connection) as client:
+        assert client.latest_source_dates() == {
+            "market": date(2026, 8, 18),
+            "fx": date(2026, 8, 18),
+        }
+    probes = [statement for statement, _, _ in connection.statements if "ORDER BY trade_date DESC" in statement]
+    assert len(probes) == 2
+    assert all("LIMIT 1" in statement for statement in probes)
 
 
 def test_plan_over_threshold_fails_before_named_cursor_execution() -> None:

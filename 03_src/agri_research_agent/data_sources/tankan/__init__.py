@@ -8,6 +8,7 @@ from .client import (
     TankanPlanRejectedError,
     TankanReadOnlyError,
     TankanSchemaError,
+    TankanSourceUnavailableError,
 )
 from .models import ConnectionProof, PostgresColumn, QueryPlanProof, QuerySpec, SourceBatch
 
@@ -24,4 +25,5 @@ __all__ = [
     "TankanPlanRejectedError",
     "TankanReadOnlyError",
     "TankanSchemaError",
+    "TankanSourceUnavailableError",
 ]

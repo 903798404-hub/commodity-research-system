@@ -31,6 +31,10 @@ class TankanSchemaError(TankanClientError):
     pass
 
 
+class TankanSourceUnavailableError(TankanClientError):
+    pass
+
+
 class TankanPlanRejectedError(TankanClientError):
     pass
 
@@ -217,6 +221,41 @@ ORDER BY ordinal_position
             )
             for row in rows
         )
+
+    def latest_source_dates(self) -> dict[str, date]:
+        """Read the newest approved source dates without extracting source rows."""
+        connection = self._require_connection()
+        statements = {
+            "market": (
+                "SELECT trade_date FROM market.foreign_futures_price_raw "
+                "ORDER BY trade_date DESC LIMIT 1"
+            ),
+            "fx": (
+                "SELECT trade_date FROM market.exchange_rate "
+                "ORDER BY trade_date DESC LIMIT 1"
+            ),
+        }
+        output: dict[str, date] = {}
+        try:
+            with connection.cursor() as cursor:
+                for domain, statement in statements.items():
+                    cursor.execute(statement)
+                    row = cursor.fetchone()
+                    value = None if row is None else row.get("trade_date")
+                    if isinstance(value, datetime):
+                        value = value.date()
+                    if type(value) is not date:
+                        raise TankanSourceUnavailableError(
+                            "approved Tankan source has no latest date"
+                        )
+                    output[domain] = value
+        except TankanClientError:
+            raise
+        except Exception as exc:
+            raise TankanSchemaError(
+                f"latest source-date probe failed: {type(exc).__name__}"
+            ) from None
+        return output
 
     def explain(
         self,
