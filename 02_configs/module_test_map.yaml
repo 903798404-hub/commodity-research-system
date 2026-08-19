@@ -144,7 +144,14 @@ modules:
       - 03_src/agri_research_agent/data_sources/lutou/__init__.py
       - 03_src/agri_research_agent/data_sources/lutou/snapshot.py
       - 03_src/agri_research_agent/data_sources/lutou/acl.py
-    direct_tests: [08_tests/data_sources/lutou/test_snapshot_acl.py]
+      - 03_src/agri_research_agent/data_sources/lutou/live.py
+      - 03_src/agri_research_agent/data_sources/lutou/three_oil_live.py
+      - 03_src/agri_research_agent/data_sources/lutou/soil_moisture_live.py
+    direct_tests:
+      - 08_tests/data_sources/lutou/test_snapshot_acl.py
+      - 08_tests/data_sources/lutou/test_live.py
+      - 08_tests/data_sources/lutou/test_three_oil_live.py
+      - 08_tests/pipelines/test_lutou_goal_b_soil.py
     impact_tests:
       - 08_tests/research_data/test_identities.py
       - 08_tests/research_data/test_catalog.py
@@ -167,6 +174,23 @@ modules:
       - 08_tests/data_sources/tankan/test_client.py
       - 08_tests/data_sources/tankan/test_market_price_adapter.py
       - 08_tests/data_sources/tankan/test_fx_adapter.py
+      - 08_tests/shared/test_atomic_storage.py
+      - 08_tests/shared/test_immutable_candidate.py
+      - 08_tests/test_international_spread_page.py
+    dependents: []
+    full_regression_when_changed: false
+  pipelines.lutou_goal_b:
+    code_paths:
+      - 03_src/agri_research_agent/pipelines/lutou_goal_b.py
+      - 03_src/agri_research_agent/pipelines/lutou_goal_b_soil.py
+    direct_tests:
+      - 08_tests/pipelines/test_lutou_goal_b.py
+      - 08_tests/pipelines/test_lutou_goal_b_soil.py
+    impact_tests:
+      - 08_tests/data_sources/lutou/test_live.py
+      - 08_tests/data_sources/lutou/test_three_oil_live.py
+      - 08_tests/research_data/test_canonical_spreads.py
+      - 08_tests/research_data/test_three_oil_v1.py
       - 08_tests/shared/test_atomic_storage.py
       - 08_tests/shared/test_immutable_candidate.py
       - 08_tests/test_international_spread_page.py
