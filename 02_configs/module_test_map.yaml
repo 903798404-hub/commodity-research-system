@@ -90,6 +90,26 @@ modules:
     impact_tests: [08_tests/shared/test_public_research_candidate_catalog.py]
     dependents: []
     full_regression_when_changed: false
+  market_data.public_current:
+    code_paths: [03_src/agri_research_agent/market_data/public_current.py]
+    direct_tests: [08_tests/market_data/test_public_current.py]
+    impact_tests:
+      - 08_tests/research_data/test_international_spread_payload.py
+      - 08_tests/test_international_spread_page.py
+    dependents: [application.international_spreads]
+    full_regression_when_changed: false
+    contract: true
+  application.international_spreads:
+    code_paths:
+      - 03_src/agri_research_agent/application/international_spreads.py
+      - 05_apps/international_spread_page.py
+    direct_tests:
+      - 08_tests/research_data/test_international_spread_payload.py
+      - 08_tests/test_international_spread_page.py
+    impact_tests:
+      - 08_tests/test_streamlit_dashboard.py
+    dependents: [apps.streamlit_dashboard]
+    full_regression_when_changed: false
   research_data.canonical_spreads:
     code_paths:
       - 03_src/agri_research_agent/research_data/canonical_spreads.py
@@ -114,6 +134,7 @@ modules:
       - 08_tests/research_data/test_catalog.py
       - 08_tests/shared/test_public_research_candidate_catalog.py
       - 08_tests/domains/spreads/test_page_contract.py
+      - 08_tests/research_data/test_international_spread_payload.py
       - 08_tests/test_streamlit_dashboard.py
     dependents: [research_data.canonical_spreads, apps.streamlit_dashboard]
     full_regression_when_changed: true

@@ -13,12 +13,15 @@ import streamlit as st
 
 from agri_research_agent.application.international_spreads import (
     InternationalSpreadPayload,
-    InternationalSpreadReferenceError,
     MetricPayload,
     MetricStatus,
     build_international_spread_payload,
-    load_international_spread_reference_records,
-    resolve_international_spread_snapshot,
+    load_international_spread_public_current,
+)
+from agri_research_agent.market_data.public_current import (
+    PublicCurrentError,
+    PublicCurrentErrorCode,
+    resolve_three_oil_current_identity,
 )
 from agri_research_agent.research_data.canonical_spreads import CanonicalSpreadError
 from agri_research_agent.research_data.three_oil_v1 import load_three_oil_v1
@@ -26,64 +29,59 @@ from agri_research_agent.research_data.three_oil_v1 import load_three_oil_v1
 
 PAGE_TITLE = "国际价差"
 OIL_OPTIONS = {"棕榈油": "palm", "豆油": "soy", "菜油": "rape"}
-REFERENCE_ROOT_ENV = "INTERNATIONAL_SPREAD_REFERENCE_DATA_ROOT"
-LEGACY_REFERENCE_ROOT_ENV = "SPREAD_REFERENCE_DATA_ROOT"
+PUBLIC_RUNTIME_ROOT_ENV = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
 CURRENT_YEAR_COLOR = "#C1493F"
 MONTH_TICKS = [datetime(2000, month, 1) for month in range(1, 13)]
 MONTH_LABELS = [f"{month}月" for month in range(1, 13)]
 GRID_COLUMN_COUNT = 3
 
 
-def _reference_root(project_root: Path) -> Path:
-    configured = (
-        os.getenv(REFERENCE_ROOT_ENV, "").strip()
-        or os.getenv(LEGACY_REFERENCE_ROOT_ENV, "").strip()
-    )
-    return Path(configured) if configured else project_root
-
-
-@st.cache_resource(show_spinner=False)
-def _cached_reference_records(
-    reference_root: str,
-    source_path: str,
-    source_size: int,
-    source_mtime_ns: int,
-):
-    del source_path, source_size, source_mtime_ns
-    catalog = load_three_oil_v1()
-    return load_international_spread_reference_records(catalog, reference_root)
+def _public_current_root(project_root: Path) -> Path:
+    configured = os.getenv(PUBLIC_RUNTIME_ROOT_ENV, "").strip()
+    runtime_root = Path(configured) if configured else project_root
+    return runtime_root / "public-market-data" / "lutou-three-oil"
 
 
 @st.cache_data(show_spinner=False)
 def _cached_page_payload(
     oil: str,
-    reference_root: str,
-    source_path: str,
-    source_size: int,
-    source_mtime_ns: int,
+    public_current_root: str,
+    release_id: str,
+    manifest_sha256: str,
 ) -> InternationalSpreadPayload:
     catalog = load_three_oil_v1()
-    records = _cached_reference_records(
-        reference_root, source_path, source_size, source_mtime_ns
+    current = load_international_spread_public_current(
+        catalog, public_current_root
     )
-    return build_international_spread_payload(catalog, oil, records)
+    if (
+        current.identity.release_id != release_id
+        or current.identity.manifest_sha256 != manifest_sha256
+    ):
+        raise PublicCurrentError(
+            PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST,
+            "Public Current changed while the page payload was loading",
+        )
+    return build_international_spread_payload(
+        catalog,
+        oil,
+        current.records_by_series_id,
+        current_identity=current.identity,
+        acquisition_summary="Public Current",
+    )
 
 
 def load_international_spread_payload(
     oil: str, *, project_root: str | Path
 ) -> InternationalSpreadPayload:
-    """Resolve the approved reference identity and cache one selected oil payload."""
+    """Resolve one immutable Public Current identity and build a selected payload."""
 
-    catalog = load_three_oil_v1()
-    reference_root = _reference_root(Path(project_root)).resolve(strict=True)
-    source = resolve_international_spread_snapshot(catalog, reference_root)
-    stat = source.stat()
+    current_root = _public_current_root(Path(project_root))
+    identity = resolve_three_oil_current_identity(current_root)
     return _cached_page_payload(
         oil,
-        str(reference_root),
-        str(source),
-        stat.st_size,
-        stat.st_mtime_ns,
+        str(current_root),
+        identity.release_id,
+        identity.manifest_sha256,
     )
 
 
@@ -175,8 +173,11 @@ def render_international_spread_page(*, project_root: str | Path) -> None:
             payload = load_international_spread_payload(
                 oil, project_root=project_root
             )
-    except InternationalSpreadReferenceError:
-        st.warning("国际价差只读参考数据暂不可用。")
+    except PublicCurrentError as exc:
+        if exc.code is PublicCurrentErrorCode.PUBLIC_CURRENT_UNAVAILABLE:
+            st.warning(f"国际价差 Public Current 暂不可用：{exc.code.value}")
+        else:
+            st.error(f"国际价差 Public Current 校验失败：{exc.code.value}")
         return
     except CanonicalSpreadError:
         st.error("国际价差 sealed contract 完整性校验失败，页面已停止加载。")

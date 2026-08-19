@@ -10,6 +10,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
+from agri_research_agent.market_data.public_current import (
+    PublicCurrentIdentity,
+    PublicCurrentSnapshot,
+    PublicSeriesRequirement,
+    load_three_oil_public_current,
+)
 from agri_research_agent.research_data.canonical_spreads import (
     CanonicalSpreadError,
     DuplicateConflictError,
@@ -103,6 +109,7 @@ class InternationalSpreadPayload:
     source_summary: str
     acquisition_summary: str
     sections: tuple[PayloadSection, ...]
+    current_identity: PublicCurrentIdentity | None = None
 
     @property
     def metric_count(self) -> int:
@@ -142,6 +149,9 @@ def build_international_spread_payload(
     records_by_series_id: Mapping[
         str, Iterable[Mapping[str, object]]
     ],
+    *,
+    current_identity: PublicCurrentIdentity | None = None,
+    acquisition_summary: str | None = None,
 ) -> InternationalSpreadPayload:
     """Build only the selected oil page from sealed row metadata and results."""
 
@@ -158,9 +168,28 @@ def build_international_spread_payload(
         DISPLAY_YEARS,
         YTD_YEAR,
         _catalog_source_summary(catalog),
-        _catalog_acquisition_summary(catalog),
+        acquisition_summary or _catalog_acquisition_summary(catalog),
         sections,
+        current_identity,
     )
+
+
+def load_international_spread_public_current(
+    catalog: ThreeOilV1Catalog,
+    public_current_root: str | Path,
+) -> PublicCurrentSnapshot:
+    """Resolve every approved source Series by stable Public Market identity."""
+
+    requirements = tuple(
+        PublicSeriesRequirement(
+            item.series_id,
+            item.currency,
+            item.unit,
+            item.price_type,
+        )
+        for item in catalog.series
+    )
+    return load_three_oil_public_current(public_current_root, requirements)
 
 
 def resolve_international_spread_snapshot(

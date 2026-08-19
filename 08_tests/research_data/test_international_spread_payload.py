@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -11,13 +12,17 @@ from agri_research_agent.application.international_spreads import (
     InternationalSpreadReferenceError,
     MetricStatus,
     build_international_spread_payload,
+    load_international_spread_public_current,
     load_international_spread_reference_records,
 )
 from agri_research_agent.data_sources.lutou.three_oil_snapshot import (
     ThreeOilSnapshotError,
 )
 from agri_research_agent.research_data.canonical_spreads import CanonicalSpreadError
-from agri_research_agent.research_data.three_oil_v1 import load_three_oil_v1
+from agri_research_agent.research_data.three_oil_v1 import (
+    load_three_oil_v1,
+    resolve_series_observations,
+)
 
 
 DISPLAY_DATES = tuple(date(year, 8, 10) for year in range(2021, 2027))
@@ -139,6 +144,32 @@ def test_exact_date_missing_observation_remains_missing() -> None:
     assert all(item.year != 2023 for item in soy_palm.observations)
 
 
+def test_public_current_canonical_values_are_not_converted_twice() -> None:
+    catalog, records = _synthetic_records()
+    series_id = "market.basis.soybean_oil.argentina.upper_river.spot"
+    records[series_id] = [
+        {
+            "provider_series_id": catalog.series_by_id(series_id).provider_series_id,
+            "business_date": date(2026, 8, 10),
+            "price": Decimal("1.25"),
+            "value_semantics": "canonical",
+        }
+    ]
+
+    observations = resolve_series_observations(catalog, series_id, records)
+
+    assert observations[0].value == Decimal("1.25")
+
+
+def test_mixed_source_native_and_canonical_values_fail_closed() -> None:
+    catalog, records = _synthetic_records()
+    series_id = "market.basis.soybean_oil.argentina.upper_river.spot"
+    records[series_id][0]["value_semantics"] = "canonical"
+
+    with pytest.raises(CanonicalSpreadError, match="mix canonical"):
+        resolve_series_observations(catalog, series_id, records)
+
+
 def test_latest_value_and_date_come_from_the_same_exact_date_observation() -> None:
     catalog, records = _synthetic_records()
     for values in records.values():
@@ -252,7 +283,10 @@ def test_sealed_manifest_integrity_failure_remains_fail_closed(
 
 
 def test_real_reference_payload_matches_all_sealed_latest_dates() -> None:
-    root = os.getenv("SPREAD_REFERENCE_DATA_ROOT", "").strip()
+    root = (
+        os.getenv("INTERNATIONAL_SPREAD_LEGACY_REFERENCE_ROOT", "").strip()
+        or os.getenv("SPREAD_REFERENCE_DATA_ROOT", "").strip()
+    )
     if not root:
         pytest.skip("SPREAD_REFERENCE_DATA_ROOT is required for read-only integration")
     catalog = load_three_oil_v1()
@@ -268,3 +302,97 @@ def test_real_reference_payload_matches_all_sealed_latest_dates() -> None:
                 assert metric.status is MetricStatus.READY
                 assert metric.latest_observation_date == metric.expected_latest_date
                 assert metric.latest_value is not None
+
+
+def test_real_legacy_and_public_current_match_on_every_common_observation() -> None:
+    legacy_root = (
+        os.getenv("INTERNATIONAL_SPREAD_LEGACY_REFERENCE_ROOT", "").strip()
+        or os.getenv("SPREAD_REFERENCE_DATA_ROOT", "").strip()
+    )
+    runtime_root = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
+    if not legacy_root or not runtime_root:
+        pytest.skip("legacy and Public Current roots are required for parity")
+    catalog = load_three_oil_v1()
+    legacy = load_international_spread_reference_records(catalog, legacy_root)
+    current = load_international_spread_public_current(
+        catalog,
+        Path(runtime_root) / "public-market-data" / "lutou-three-oil",
+    )
+
+    for contract in catalog.series:
+        legacy_values = {
+            item.business_date: item.value
+            for item in resolve_series_observations(
+                catalog, contract.series_id, legacy
+            )
+        }
+        public_values = {
+            item.business_date: item.value
+            for item in resolve_series_observations(
+                catalog, contract.series_id, current.records_by_series_id
+            )
+        }
+        common = legacy_values.keys() & public_values.keys()
+        assert common
+        assert {
+            business_date: legacy_values[business_date]
+            for business_date in common
+        } == {
+            business_date: public_values[business_date]
+            for business_date in common
+        }
+
+    for oil in ("palm", "soy", "rape"):
+        legacy_payload = build_international_spread_payload(catalog, oil, legacy)
+        public_payload = build_international_spread_payload(
+            catalog,
+            oil,
+            current.records_by_series_id,
+            current_identity=current.identity,
+            acquisition_summary="Public Current",
+        )
+        assert public_payload.current_identity == current.identity
+        assert public_payload.acquisition_summary == "Public Current"
+        legacy_metrics = _metrics(legacy_payload)
+        public_metrics = _metrics(public_payload)
+        assert len(legacy_metrics) == len(public_metrics)
+        for before, after in zip(legacy_metrics, public_metrics, strict=True):
+            assert (
+                before.metric_type,
+                before.contract_id,
+                before.display_title,
+                before.display_unit,
+                before.row_index,
+                before.column_index,
+                before.provider_summary,
+                before.formula_summary,
+                before.leg_summary,
+                before.fixed_assumptions,
+                before.definition_evidence,
+            ) == (
+                after.metric_type,
+                after.contract_id,
+                after.display_title,
+                after.display_unit,
+                after.row_index,
+                after.column_index,
+                after.provider_summary,
+                after.formula_summary,
+                after.leg_summary,
+                after.fixed_assumptions,
+                after.definition_evidence,
+            )
+            before_values = {
+                item.business_date: item.value for item in before.observations
+            }
+            after_values = {
+                item.business_date: item.value for item in after.observations
+            }
+            common = before_values.keys() & after_values.keys()
+            assert {
+                business_date: before_values[business_date]
+                for business_date in common
+            } == {
+                business_date: after_values[business_date]
+                for business_date in common
+            }

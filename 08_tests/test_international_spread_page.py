@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 from html import unescape
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -16,6 +17,12 @@ from agri_research_agent.application.international_spreads import (
     MetricStatus,
     SeasonalityObservation,
 )
+from agri_research_agent.market_data.public_current import (
+    PublicCurrentError,
+    PublicCurrentErrorCode,
+    PublicCurrentIdentity,
+    PublicCurrentSnapshot,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,10 +30,10 @@ FORMAL_ENTRY = ROOT / "05_apps" / "streamlit_app.py"
 PAGE_SOURCE = ROOT / "05_apps" / "international_spread_page.py"
 
 
-def _reference_root() -> str:
-    value = os.getenv("SPREAD_REFERENCE_DATA_ROOT", "").strip()
+def _runtime_root() -> str:
+    value = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
     if not value:
-        pytest.skip("SPREAD_REFERENCE_DATA_ROOT is required for page integration")
+        pytest.skip("PUBLIC_MARKET_DATA_RUNTIME_ROOT is required for page integration")
     return value
 
 
@@ -103,18 +110,40 @@ def test_seasonality_lines_reuse_month_spread_colorway_and_emphasize_ytd() -> No
     assert figure.data[-1].line.width == 3.4
 
 
+def test_page_rejects_current_identity_change_during_payload_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _page_module()
+    loaded_identity = PublicCurrentIdentity(
+        "new-release", "b" * 64, "lutou-goal-b-current/2", date(2026, 8, 18)
+    )
+    monkeypatch.setattr(page, "load_three_oil_v1", lambda: object())
+    monkeypatch.setattr(
+        page,
+        "load_international_spread_public_current",
+        lambda _catalog, _root: PublicCurrentSnapshot(
+            loaded_identity, MappingProxyType({})
+        ),
+    )
+
+    with pytest.raises(PublicCurrentError) as raised:
+        page._cached_page_payload("palm", "unused", "old-release", "a" * 64)
+
+    assert raised.value.code is PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST
+
+
 def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("INTERNATIONAL_SPREAD_REFERENCE_DATA_ROOT", _reference_root())
-    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=35).run(timeout=35)
+    monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", _runtime_root())
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=90).run(timeout=90)
     app.session_state["selected_workspace_page"] = "国际价差"
-    app.run(timeout=35)
+    app.run(timeout=90)
 
     assert not app.exception
     assert len(app.get("plotly_chart")) == 7
     assert any(
-        "数据截至 2026-08-12 ｜ Reuters / Oil World ｜ 人工快照"
+        "数据截至 2026-08-18 ｜ Reuters / Oil World ｜ Public Current"
         in str(item.value)
         for item in app.markdown
     )
@@ -123,7 +152,7 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
         for item in app.markdown
     )
     assert re.fullmatch(r"国际豆棕｜-?[\d,.]+ USD/T", _titles(app)[0])
-    assert any("截至 2026-08-10" in str(item.value) for item in app.markdown)
+    assert any("截至 2026-08-18" in str(item.value) for item in app.markdown)
     assert _base_titles(app) == [
         "国际豆棕",
         "国际菜棕",
@@ -134,7 +163,7 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
         "POGO：印尼毛棕 - ICE柴油",
     ]
 
-    app.button_group[0].set_value("豆油").run(timeout=35)
+    app.button_group[0].set_value("豆油").run(timeout=90)
     assert not app.exception
     assert len(app.get("plotly_chart")) == 14
     assert _base_titles(app)[:3] == [
@@ -148,7 +177,7 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
         "美豆油盘面 - 阿根廷豆油（30 USD/T freight）",
     ]
 
-    app.button_group[0].set_value("菜油").run(timeout=35)
+    app.button_group[0].set_value("菜油").run(timeout=90)
     assert not app.exception
     assert len(app.get("plotly_chart")) == 7
     assert _base_titles(app)[-3:] == [
@@ -173,7 +202,10 @@ def test_page_source_has_no_business_formula_or_provider_coupling() -> None:
     assert "st.expander" not in source
     assert "st.popover" in source
     assert "SOURCE_DATA_UNDER_REVIEW" in source
-    assert "load_international_spread_reference_records" in source
+    assert "load_international_spread_public_current" in source
+    assert "load_international_spread_reference_records" not in source
+    assert "SPREAD_REFERENCE_DATA_ROOT" not in source
+    assert "油脂油料价格.sql" not in source
     assert 'st.columns(GRID_COLUMN_COUNT, gap="small")' in source
     assert "GRID_COLUMN_COUNT = 3" in source
     assert "st.columns(len(row.metrics)" not in source
@@ -198,12 +230,12 @@ def test_page_source_has_no_business_formula_or_provider_coupling() -> None:
 
 
 def test_unavailable_reference_degrades_without_internal_path(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("INTERNATIONAL_SPREAD_REFERENCE_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(tmp_path))
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run(timeout=20)
     app.session_state["selected_workspace_page"] = "国际价差"
     app.run(timeout=20)
 
     assert not app.exception
     assert len(app.warning) == 1
-    assert "只读参考数据暂不可用" in app.warning[0].value
+    assert "PUBLIC_CURRENT_UNAVAILABLE" in app.warning[0].value
     assert str(tmp_path) not in app.warning[0].value

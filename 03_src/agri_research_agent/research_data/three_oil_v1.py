@@ -365,12 +365,23 @@ def _resolve_series(
         records = records_by_series_id[series_id]
     except KeyError:
         raise CanonicalSpreadError(f"missing source records for {series_id}") from None
+    records = tuple(records)
+    if any(not isinstance(item, Mapping) for item in records):
+        raise TypeError("price records must be mappings")
+    value_semantics = {
+        str(item.get("value_semantics", "source_native"))
+        for item in records
+    }
+    if not value_semantics <= {"source_native", "canonical"}:
+        raise CanonicalSpreadError("source records use unsupported value semantics")
+    if len(value_semantics) > 1:
+        raise CanonicalSpreadError("source records mix canonical and source-native values")
     collapsed = collapse_source_native_duplicates(
         records, provider_series_id=definition.provider_series_id
     )
     conversion = (
         None
-        if definition.conversion_id is None
+        if definition.conversion_id is None or value_semantics == {"canonical"}
         else catalog.conversion_by_id(definition.conversion_id)
     )
     return tuple(
