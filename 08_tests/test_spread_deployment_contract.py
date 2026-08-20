@@ -415,7 +415,11 @@ class FakeReleaseRuntime:
         assert repository.resolve() == self.repository_root
         assert image_ref in {self.image_ref, ROLLBACK_REF}
         project_root = (project_directory or repository).resolve()
-        assert (compose_file or repository / "docker-compose.yml").is_file()
+        active_compose_file = (compose_file or repository / "docker-compose.yml").resolve()
+        assert active_compose_file.is_file()
+        uses_target_template = active_compose_file == (
+            repository / "docker-compose.yml"
+        ).resolve()
         resolved_environment = {
             "USDA_DASHBOARD_URL": PRODUCTION_USDA_URL,
             "OIL_WORLD_DASHBOARD_URL": PRODUCTION_OIL_WORLD_URL,
@@ -487,7 +491,12 @@ class FakeReleaseRuntime:
                             "OIL_WORLD_DASHBOARD_URL",
                             "WEATHER_DATA_DIR",
                         )
-                    },
+                    }
+                    | (
+                        {"PUBLIC_MARKET_DATA_RUNTIME_ROOT": "/app/01_data/public-market-data"}
+                        if uses_target_template
+                        else {}
+                    ),
                     "volumes": volumes,
                     "restart": "unless-stopped",
                     "x-test-template-variant": self.compose_template_variant,
@@ -740,6 +749,13 @@ def create_production_project(tmp_path: Path) -> tuple[Path, Path]:
     production_project_dir.mkdir()
     production_compose_file = production_project_dir / "docker-compose.yml"
     shutil.copyfile(REPOSITORY / "docker-compose.yml", production_compose_file)
+    production_compose_file.write_text(
+        production_compose_file.read_text(encoding="utf-8").replace(
+            "      PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data/public-market-data\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
     for name in ("01_data", "06_outputs", "10_logs"):
         (production_project_dir / name).mkdir()
     return production_project_dir, production_compose_file
@@ -1366,6 +1382,8 @@ def test_artifact_manifest_schema_independently_binds_type_file_and_version() ->
     )
     validator.validate(deployment_plan)
     deployment_plan["target_schema_version"] = "1.6.0"
+    validator.validate(deployment_plan)
+    deployment_plan["target_schema_version"] = "1.7.0"
     validator.validate(deployment_plan)
 
 
@@ -2231,7 +2249,8 @@ def test_tool_repository_and_formal_project_are_separate_and_formal_head_stays_o
     assert Path(plan["tool_repo_root"]) == tool_repo_root
     assert Path(plan["production_project_dir"]) == production_project_dir
     assert Path(plan["production_project_dir"]) != tool_repo_root
-    assert Path(plan["production_compose_file"]).parent == Path(
+    assert Path(plan["production_compose_file"]).parent == tool_repo_root
+    assert Path(plan["current_production_compose_file"]).parent == Path(
         plan["production_project_dir"]
     )
     assert git(tool_repo_root, "rev-parse", "HEAD") == tool_head
@@ -2626,7 +2645,7 @@ def test_deployment_plan_rejects_compose_template_identity_change(
     )
     manifest["compose_template_sha256"] = "f" * 64
 
-    with pytest.raises(ContractError, match="Compose file SHA-256"):
+    with pytest.raises(ContractError, match="tool repository Compose SHA-256"):
         create_deployment_plan(
             tool_repo_root=REPOSITORY,
             production_compose_file=production_compose_file,
@@ -2866,6 +2885,14 @@ def test_deployment_plan_seals_distinct_current_and_target_read_only(
         "git_tree": TOOL_GIT_TREE,
     }
     assert plan["git_commit"] == GIT_COMMIT
+    assert Path(plan["current_production_compose_file"]) == (
+        production_env_file.parent / "production-project" / "docker-compose.yml"
+    )
+    assert Path(plan["production_compose_file"]) == REPOSITORY / "docker-compose.yml"
+    assert plan["current_production_compose_file_sha256"] != plan[
+        "compose_template_sha256"
+    ]
+    assert plan["rollback_argv"] != plan["deployment_argv"]
     assert parse_production_env(production_env_file) == current_environment
     assert runtime.production_record == before_container
     assert runtime.formal_records == before_side_services

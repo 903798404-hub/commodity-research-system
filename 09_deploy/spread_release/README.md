@@ -177,18 +177,21 @@ python3 09_deploy/spread_release/create_deployment_plan.py \
 ```
 
 `deployment_plan.json` 显式记录 `tool_repo_root`、`deployment_tool_revision`、
-`production_compose_file`、`production_project_dir`、Compose 项目名、
+`current_production_compose_file`、目标 `production_compose_file`、
+`production_project_dir`、Compose 项目名、
 服务名、Git SHA、Tree SHA、候选 Image ID、生产环境文件 SHA-256、实际
 USDA/Oil World URL、候选与生产各自的 Compose SHA-256、候选结果 SHA-256、
 候选容器删除状态、语义哈希、正式服务范围、`current_production`、
-`target_release`、精确执行 argv 和回滚 Git/Image ID。A 与 B 不同是正常升级；
+`target_release`、精确执行 argv 和回滚 Git/Image ID。计划将当前正式 Compose A
+的路径与文件 SHA 和目标工具检出中的 Compose B 分别密封；A 与 B 不同是正常升级；
 生成器只读密封 A → B，不修改 env、Compose、容器或 Docker tag。状态固定
 为 `deployment_plan_sealed`，并由 `deployment_plan.manifest.json` 密封。
 
 四个目录/身份不得混淆：
 
 - `tool_repo_root`：包含已批准发布工具的独立只读检出；
-- `production_compose_file`：正式切换实际使用且经过哈希验证的绝对 Compose 路径；
+- `current_production_compose_file`：只用于当前基线验证和精确回滚的 Compose A；
+- `production_compose_file`：目标工具检出中只读、哈希锁定且用于正式切换的 Compose B；
 - `production_project_dir`：Compose 相对挂载源的解析基准；
 - `candidate_image_id`：候选已经验收并在正式切换中复用的精确 Image ID。
 
@@ -228,7 +231,7 @@ bash 09_deploy/spread_release/deploy_spread_release.sh \
 
 脚本先验证 `release.manifest.json`、`candidate_result.manifest.json` 和
 `deployment_plan.manifest.json`，再校验生产环境、隔离工具仓库 Git/Tree、
-计划指定的正式 Compose 路径、版本化镜像到 Image ID、OCI revision 和镜像内
+计划指定的 Compose A/B 路径与文件 SHA、版本化镜像到 Image ID、OCI revision 和镜像内
 版本文件。脚本从计划读取 Compose 文件、项目目录、项目名、服务名和候选
 Image ID，并在任何写入前确认实际 env、Compose 和容器仍等于密封基线 A。
 随后通过官方原子 helper 将 env 切换为 B，然后仅执行：
@@ -322,7 +325,7 @@ Compose 只用于候选验收；后续 `deployment_plan.json` 仍由正式
 宿主路径的 runtime mount 身份。Manifest Schema 自身将
 `artifact_type`、`target_file` 和 `target_schema_version` 一一绑定。当前
 当前实现常量指定的版本分别为：`release.json` 2.6.0、
-`candidate_result.json` 1.6.0、`deployment_plan.json` 1.6.0、
+`candidate_result.json` 1.6.0、`deployment_plan.json` 1.7.0、
 `deployment_result.json` 1.5.0，以及四类 Manifest 共用的 1.5.0。
 历史 `deployment_plan.json` 1.5.0 和 `deployment_result.json` 1.4.0 仍可由 Artifact Manifest
 做只读识别，但旧计划没有完整 A → B 与工具 revision，不得由新执行器执行。

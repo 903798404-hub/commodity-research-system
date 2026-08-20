@@ -1272,7 +1272,8 @@ def _default_deployment_plan_sealer(
 
     The supplied environment is the read-only current production baseline.
     create_deployment_plan derives and seals the target environment without
-    changing the operator-managed production file.
+    changing the operator-managed production file. The current production Compose A
+    is sealed separately from the target Compose B in the trusted build context.
     """
     manifest_path = release_directory / "release.json"
     manifest, _ = load_manifest_bundle(

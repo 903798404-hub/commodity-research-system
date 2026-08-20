@@ -36,8 +36,8 @@ SUPPORTED_CANDIDATE_RESULT_SCHEMA_VERSIONS = {
     LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION,
     CANDIDATE_RESULT_SCHEMA_VERSION,
 }
-DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.6.0"
-LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.5.0"
+DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.7.0"
+LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSIONS = {"1.5.0", "1.6.0"}
 DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.5.0"
 LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.4.0"
 DEPLOYMENT_RESULT_BUNDLE_SCHEMA_VERSION = "1.0.0"
@@ -1739,7 +1739,7 @@ def create_artifact_manifest(
     if artifact_type == "candidate_result":
         accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
     elif artifact_type == "deployment_plan":
-        accepted_target_versions.add(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSION)
+        accepted_target_versions.update(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSIONS)
     elif artifact_type == "deployment_result":
         accepted_target_versions.add(LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION)
     if target_schema_version not in accepted_target_versions:
@@ -1853,7 +1853,7 @@ def validate_artifact_manifest(
     if artifact_type == "candidate_result":
         accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
     elif artifact_type == "deployment_plan":
-        accepted_target_versions.add(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSION)
+        accepted_target_versions.update(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSIONS)
     elif artifact_type == "deployment_result":
         accepted_target_versions.add(LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION)
     if manifest.get("target_schema_version") not in accepted_target_versions:
@@ -2727,6 +2727,8 @@ def _validate_formal_spread_semantics(
     expected_image_ref: str,
     expected_git_commit: str,
     expected_weather_runtime_dir: str,
+    *,
+    require_public_market_data_runtime: bool = True,
 ) -> None:
     service = compose["services"][COMPOSE_SERVICE]
     if service.get("image") != expected_image_ref:
@@ -2743,10 +2745,11 @@ def _validate_formal_spread_semantics(
         raise ContractError(
             "formal spread runtime MARKET_DATA_GIT_HEAD does not match the release"
         )
-    if (
-        environment.get(PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY)
-        != PUBLIC_MARKET_DATA_CONTAINER_ROOT
-    ):
+    public_runtime_root = environment.get(PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY)
+    allowed_public_runtime_roots = {PUBLIC_MARKET_DATA_CONTAINER_ROOT}
+    if not require_public_market_data_runtime:
+        allowed_public_runtime_roots.add(None)
+    if public_runtime_root not in allowed_public_runtime_roots:
         raise ContractError("formal Public Market Data runtime root is invalid")
     _validate_weather_runtime_compose(
         compose,
@@ -3414,8 +3417,32 @@ def validate_deployment_plan(
             "deployment plan tool_repo_root and production_project_dir must be "
             "different directories"
         )
-    if hash_file(production_compose_file) != plan.get("compose_template_sha256"):
-        raise ContractError("deployment plan production Compose file changed")
+    compose_template = (tool_repo_root / "docker-compose.yml").resolve()
+    if production_compose_file.resolve() != compose_template:
+        raise ContractError(
+            "deployment plan target production Compose must be the sealed tool template"
+        )
+    if (
+        hash_file(production_compose_file) != plan.get("compose_template_sha256")
+        or plan.get("compose_template_sha256") != manifest.get("compose_template_sha256")
+    ):
+        raise ContractError("deployment plan target production Compose file changed")
+    current_production_compose_file = Path(
+        str(plan.get("current_production_compose_file", ""))
+    )
+    if (
+        not current_production_compose_file.is_absolute()
+        or current_production_compose_file.name != "docker-compose.yml"
+        or not current_production_compose_file.is_file()
+    ):
+        raise ContractError(
+            "deployment plan current_production_compose_file must be an existing "
+            "absolute docker-compose.yml path"
+        )
+    if hash_file(current_production_compose_file) != plan.get(
+        "current_production_compose_file_sha256"
+    ):
+        raise ContractError("deployment plan current production Compose file changed")
     candidate_result_file = Path(str(plan.get("candidate_result_file", "")))
     if not candidate_result_file.is_absolute():
         raise ContractError("deployment plan candidate_result_file must be absolute")
@@ -3594,7 +3621,12 @@ def validate_deployment_plan(
     )
     if plan.get("deployment_argv") != expected_argv:
         raise ContractError("deployment plan deployment argv changed")
-    if plan.get("rollback_argv") != expected_argv:
+    expected_rollback_argv = _compose_switch_argv(
+        production_env_file,
+        production_project_dir,
+        current_production_compose_file,
+    )
+    if plan.get("rollback_argv") != expected_rollback_argv:
         raise ContractError("deployment plan rollback argv changed")
     if plan.get("deployment_action") != "upgrade":
         raise ContractError("deployment plan action must be upgrade")
@@ -3637,16 +3669,13 @@ def create_deployment_plan(
         raise ContractError(
             f"production Compose file is missing: {production_compose_file}"
         )
-    compose_template = tool_repo_root / "docker-compose.yml"
-    template_sha = hash_file(production_compose_file)
+    compose_template = (tool_repo_root / "docker-compose.yml").resolve()
+    template_sha = hash_file(compose_template)
     if template_sha != manifest.get("compose_template_sha256"):
         raise ContractError(
-            "production Compose file SHA-256 does not match release.json"
+            "tool repository Compose SHA-256 does not match release.json"
         )
-    if hash_file(compose_template) != template_sha:
-        raise ContractError(
-            "tool repository Compose and production Compose file identities differ"
-        )
+    current_compose_file_sha = hash_file(production_compose_file)
 
     deployment_tool_revision = capture_git_identity(
         tool_repo_root, deployment_tool_git_runner
@@ -3744,6 +3773,7 @@ def create_deployment_plan(
         current_environment["SPREAD_IMAGE"],
         current_environment["MARKET_DATA_GIT_HEAD"],
         current_environment[WEATHER_RUNTIME_ENV_KEY],
+        require_public_market_data_runtime=False,
     )
 
     production_compose, production_raw, production_images = runtime.compose_config(
@@ -3751,7 +3781,7 @@ def create_deployment_plan(
         manifest["image_ref"],
         environment=target_environment,
         project_directory=production_project_dir,
-        compose_file=production_compose_file,
+        compose_file=compose_template,
     )
     production_sha = validate_compose_result(
         production_compose,
@@ -3829,7 +3859,9 @@ def create_deployment_plan(
         "deployment_tool_revision": deployment_tool_revision,
         "compose_project": COMPOSE_PROJECT,
         "production_service": COMPOSE_SERVICE,
-        "production_compose_file": str(production_compose_file),
+        "production_compose_file": str(compose_template),
+        "current_production_compose_file": str(production_compose_file),
+        "current_production_compose_file_sha256": current_compose_file_sha,
         "production_project_dir": str(production_project_dir),
         "compose_template_sha256": template_sha,
         "candidate_compose_sha256": candidate_sha,
@@ -3867,7 +3899,7 @@ def create_deployment_plan(
         "deployment_argv": _compose_switch_argv(
             production_env_file,
             production_project_dir,
-            production_compose_file,
+            compose_template,
         ),
         "rollback_argv": _compose_switch_argv(
             production_env_file,
@@ -4064,6 +4096,9 @@ def verify_pre_deploy(
     production_compose_file = Path(
         str(deployment_plan.get("production_compose_file", ""))
     ).resolve()
+    current_production_compose_file = Path(
+        str(deployment_plan.get("current_production_compose_file", ""))
+    ).resolve()
     production_project_dir = Path(
         str(deployment_plan.get("production_project_dir", ""))
     ).resolve()
@@ -4073,7 +4108,11 @@ def verify_pre_deploy(
             "different directories"
         )
     if hash_file(production_compose_file) != manifest["compose_template_sha256"]:
-        raise ContractError("deployment plan production Compose file changed")
+        raise ContractError("deployment plan target production Compose file changed")
+    if hash_file(current_production_compose_file) != deployment_plan[
+        "current_production_compose_file_sha256"
+    ]:
+        raise ContractError("current production Compose file drifted after plan sealing")
     for key, expected in (
         ("release_id", manifest["release_id"]),
         ("git_commit", manifest["git_commit"]),
@@ -4244,6 +4283,10 @@ def verify_post_deploy(
         "production_env_sha256"
     ]:
         raise ContractError("post-deploy production env SHA-256 does not match target")
+    if hash_file(Path(deployment_plan["production_compose_file"])) != deployment_plan[
+        "compose_template_sha256"
+    ]:
+        raise ContractError("post-deploy target production Compose file changed")
     for key, expected in (
         ("git_commit", manifest["git_commit"]),
         ("git_tree", manifest["git_tree"]),
@@ -4344,8 +4387,12 @@ def verify_pre_rollback(
     ):
         raise ContractError("rollback deployment tool revision changed")
     production_compose_file = Path(
-        str(deployment_plan.get("production_compose_file", ""))
+        str(deployment_plan.get("current_production_compose_file", ""))
     ).resolve()
+    if hash_file(production_compose_file) != deployment_plan.get(
+        "current_production_compose_file_sha256"
+    ):
+        raise ContractError("rollback production Compose baseline changed")
     production_project_dir = Path(
         str(deployment_plan.get("production_project_dir", ""))
     ).resolve()
@@ -4383,6 +4430,7 @@ def verify_pre_rollback(
         image_ref,
         manifest["formal_git_commit"],
         production_environment[WEATHER_RUNTIME_ENV_KEY],
+        require_public_market_data_runtime=False,
     )
     return {
         "phase": "pre-rollback",

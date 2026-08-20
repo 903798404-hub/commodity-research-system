@@ -51,7 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--production-compose-file",
         type=Path,
         required=True,
-        help="Absolute Compose file used for the formal switch.",
+        help=(
+            "Absolute current production Compose A used for baseline validation and "
+            "rollback; the target switch uses docker-compose.yml from tool_repo_root."
+        ),
     )
     parser.add_argument(
         "--candidate-result",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.6.0.json",
+  "$id": "https://commodity-research-system.invalid/schemas/spread-deployment-plan-1.7.0.json",
   "title": "spread-dashboard sealed production deployment plan",
   "type": "object",
   "additionalProperties": false,
@@ -36,6 +36,8 @@
     "compose_project",
     "production_service",
     "production_compose_file",
+    "current_production_compose_file",
+    "current_production_compose_file_sha256",
     "production_project_dir",
     "compose_template_sha256",
     "candidate_compose_sha256",
@@ -60,7 +62,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.6.0"
+      "const": "1.7.0"
     },
     "release_id": {
       "type": "string",
@@ -143,6 +145,13 @@
     "production_compose_file": {
       "type": "string",
       "minLength": 1
+    },
+    "current_production_compose_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "current_production_compose_file_sha256": {
+      "$ref": "#/$defs/sha256"
     },
     "production_project_dir": {
       "type": "string",
