@@ -27,6 +27,8 @@ from release_contract import (
     IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
     IMPORT_PROFIT_RUNTIME_ENV_KEY,
     IMPORT_PROFIT_RUNTIME_MOUNT_ID,
+    PUBLIC_MARKET_DATA_CONTAINER_ROOT,
+    PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY,
     PRODUCTION_CONTAINER,
     REAL_NIGHT_SESSION_CLOSE_GATE_ID,
     WEATHER_CONTAINER_CURRENT_PATH,
@@ -663,6 +665,11 @@ def validate_candidate_compose(
         raise ContractError("candidate MARKET_DATA_GIT_HEAD does not match the target commit")
     if environment.get("WEATHER_DATA_DIR") != WEATHER_CONTAINER_CURRENT_PATH:
         raise ContractError("candidate WEATHER_DATA_DIR is invalid")
+    if (
+        environment.get(PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY)
+        != PUBLIC_MARKET_DATA_CONTAINER_ROOT
+    ):
+        raise ContractError("candidate Public Market Data runtime root is invalid")
     expected_runtime_environment = (
         expected_import_profit_runtime_container
         if expected_import_profit_runtime_host is not None

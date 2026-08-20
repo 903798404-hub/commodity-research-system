@@ -18,6 +18,7 @@ services:
       USDA_DASHBOARD_URL: ${USDA_DASHBOARD_URL:?USDA_DASHBOARD_URL must be explicitly set}
       OIL_WORLD_DASHBOARD_URL: ${OIL_WORLD_DASHBOARD_URL:?OIL_WORLD_DASHBOARD_URL must be explicitly set}
       WEATHER_DATA_DIR: ${WEATHER_DATA_DIR:?WEATHER_DATA_DIR must be explicitly set}
+      PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data/public-market-data
     volumes:
       - ./01_data:/app/01_data:ro
       - ./06_outputs:/app/06_outputs

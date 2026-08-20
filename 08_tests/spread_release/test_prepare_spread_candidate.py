@@ -108,6 +108,7 @@ def _formal_compose(
             "environment": {
                 "MARKET_DATA_GIT_HEAD": "b704a2933fecc667695d5a31065abeea1fda7492",
                 "WEATHER_DATA_DIR": "/app/runtime/weather/current",
+                "PUBLIC_MARKET_DATA_RUNTIME_ROOT": "/app/01_data/public-market-data",
                 "USDA_DASHBOARD_URL": "https://dashboard.example/usda/",
                 "OIL_WORLD_DASHBOARD_URL": "https://dashboard.example/oil-world/",
             },
@@ -639,6 +640,9 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert "depends_on" not in service
     assert service["volumes"][0]["read_only"] is True
     assert service["environment"]["WEATHER_DATA_DIR"] == "/app/runtime/weather/current"
+    assert service["environment"]["PUBLIC_MARKET_DATA_RUNTIME_ROOT"] == (
+        "/app/01_data/public-market-data"
+    )
     assert service["labels"]["market-data.deployment.role"] == "candidate"
     assert service["labels"]["market-data.deployment.git_sha"] == options.git_commit
     assert "market-data.release.type=candidate" not in result["build_command"]
@@ -1054,6 +1058,10 @@ def test_root_compose_declares_future_production_runtime_role() -> None:
     assert "./01_data:/app/01_data:ro" in compose_text
     assert "./06_outputs:/app/06_outputs\n" in compose_text
     assert "./10_logs:/app/10_logs\n" in compose_text
+    assert (
+        "PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data/public-market-data"
+        in compose_text
+    )
     assert (
         "${WEATHER_RUNTIME_CURRENT_DIR:?WEATHER_RUNTIME_CURRENT_DIR must be explicitly set}"
         ":/app/runtime/weather:ro"

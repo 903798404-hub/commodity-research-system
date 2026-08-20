@@ -92,6 +92,8 @@ RUNTIME_URL_KEYS = (
 )
 WEATHER_RUNTIME_ENV_KEY = "WEATHER_RUNTIME_CURRENT_DIR"
 WEATHER_DATA_DIR_ENV_KEY = "WEATHER_DATA_DIR"
+PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
+PUBLIC_MARKET_DATA_CONTAINER_ROOT = "/app/01_data/public-market-data"
 WEATHER_CONTAINER_PATH = "/app/runtime/weather"
 WEATHER_CONTAINER_CURRENT_PATH = f"{WEATHER_CONTAINER_PATH}/current"
 WEATHER_CONTAINER_NEXT_PATH = f"{WEATHER_CONTAINER_PATH}/next"
@@ -1471,6 +1473,13 @@ def validate_repository_static(repository: Path) -> None:
     )
     if weather_data_marker not in compose_text:
         raise ContractError("spread Compose WEATHER_DATA_DIR must be explicitly required")
+    public_market_data_marker = (
+        f"{PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY}: {PUBLIC_MARKET_DATA_CONTAINER_ROOT}"
+    )
+    if public_market_data_marker not in compose_text:
+        raise ContractError(
+            "spread Compose must declare the fixed Public Market Data runtime root"
+        )
     weather_mount_marker = (
         f"${{{WEATHER_RUNTIME_ENV_KEY}:?{WEATHER_RUNTIME_ENV_KEY} must be explicitly set}}:"
         f"{WEATHER_CONTAINER_PATH}:ro"
@@ -2734,6 +2743,11 @@ def _validate_formal_spread_semantics(
         raise ContractError(
             "formal spread runtime MARKET_DATA_GIT_HEAD does not match the release"
         )
+    if (
+        environment.get(PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY)
+        != PUBLIC_MARKET_DATA_CONTAINER_ROOT
+    ):
+        raise ContractError("formal Public Market Data runtime root is invalid")
     _validate_weather_runtime_compose(
         compose,
         expected_source=expected_weather_runtime_dir,
