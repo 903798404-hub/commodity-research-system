@@ -482,6 +482,12 @@ def build_candidate_compose(
     candidate_environment.update(
         candidate_compose_environment(git_commit, production_environment, "current")
     )
+    # The candidate validates the target repository's fixed Public Current
+    # contract even when the current production Compose predates that variable.
+    # validate_repository_static() has already sealed this exact target value.
+    candidate_environment[PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY] = (
+        PUBLIC_MARKET_DATA_CONTAINER_ROOT
+    )
     if import_profit_runtime_host is not None:
         candidate_environment[IMPORT_PROFIT_RUNTIME_ENV_KEY] = import_profit_runtime_container
     # WEATHER_RUNTIME_CURRENT_DIR is an interpolation input, never an application

@@ -108,7 +108,6 @@ def _formal_compose(
             "environment": {
                 "MARKET_DATA_GIT_HEAD": "b704a2933fecc667695d5a31065abeea1fda7492",
                 "WEATHER_DATA_DIR": "/app/runtime/weather/current",
-                "PUBLIC_MARKET_DATA_RUNTIME_ROOT": "/app/01_data/public-market-data",
                 "USDA_DASHBOARD_URL": "https://dashboard.example/usda/",
                 "OIL_WORLD_DASHBOARD_URL": "https://dashboard.example/oil-world/",
             },
