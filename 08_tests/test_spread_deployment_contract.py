@@ -493,7 +493,7 @@ class FakeReleaseRuntime:
                         )
                     }
                     | (
-                        {"PUBLIC_MARKET_DATA_RUNTIME_ROOT": "/app/01_data/public-market-data"}
+                        {"PUBLIC_MARKET_DATA_RUNTIME_ROOT": "/app/01_data"}
                         if uses_target_template
                         else {}
                     ),
@@ -751,7 +751,7 @@ def create_production_project(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copyfile(REPOSITORY / "docker-compose.yml", production_compose_file)
     production_compose_file.write_text(
         production_compose_file.read_text(encoding="utf-8").replace(
-            "      PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data/public-market-data\n",
+            "      PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data\n",
             "",
         ),
         encoding="utf-8",

@@ -640,7 +640,7 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert service["volumes"][0]["read_only"] is True
     assert service["environment"]["WEATHER_DATA_DIR"] == "/app/runtime/weather/current"
     assert service["environment"]["PUBLIC_MARKET_DATA_RUNTIME_ROOT"] == (
-        "/app/01_data/public-market-data"
+        "/app/01_data"
     )
     assert service["labels"]["market-data.deployment.role"] == "candidate"
     assert service["labels"]["market-data.deployment.git_sha"] == options.git_commit
@@ -1058,7 +1058,7 @@ def test_root_compose_declares_future_production_runtime_role() -> None:
     assert "./06_outputs:/app/06_outputs\n" in compose_text
     assert "./10_logs:/app/10_logs\n" in compose_text
     assert (
-        "PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data/public-market-data"
+        "PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data"
         in compose_text
     )
     assert (
