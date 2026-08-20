@@ -112,7 +112,7 @@ class FakeConnection:
         self.statements: list[tuple[str, tuple[object, ...]]] = []
         self.closed = False
 
-    def cursor(self) -> FakeCursor:
+    def cursor(self, *_args, **_kwargs) -> FakeCursor:
         return FakeCursor(self)
 
     def rollback(self) -> None:

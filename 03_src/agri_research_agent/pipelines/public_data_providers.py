@@ -21,6 +21,10 @@ from agri_research_agent.data_sources.lutou.live import (
     LutouSchemaError,
     LutouSourceUnavailableError,
 )
+from agri_research_agent.data_sources.lutou.domestic_basis import (
+    LutouDomesticBasisLiveAdapter,
+    load_domestic_basis_catalog,
+)
 from agri_research_agent.data_sources.lutou.soil_moisture_live import (
     LUTOU_WEATHER_SCHEMA,
     load_soil_moisture_series,
@@ -49,6 +53,11 @@ from agri_research_agent.pipelines.lutou_goal_b_soil import (
     LutouGoalBSoilError,
     load_soil_current,
     run_goal_b_soil,
+)
+from agri_research_agent.pipelines.lutou_domestic_basis import (
+    DomesticBasisPipelineError,
+    load_domestic_basis_current,
+    run_domestic_basis_live,
 )
 from agri_research_agent.pipelines.lutou_weather import (
     LutouWeatherError,
@@ -424,6 +433,139 @@ class LutouRefreshAdapter:
         return tuple(output)
 
 
+@dataclass(slots=True)
+class DomesticBasisPendingAdapter:
+    """D3A provider hook that cannot connect, refresh, or claim live evidence."""
+
+    runtime: RuntimeContext
+    mapping_path: Path
+    name: str = "lutou_domestic_basis"
+
+    def current_identity(self) -> CurrentIdentity:
+        root = self.runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+        current = load_domestic_basis_current(root)
+        if current is None:
+            return CurrentIdentity(None, None, {})
+        pointer = _pointer(root)
+        source_max = current.manifest.get("source_max_date")
+        maxima = {} if source_max is None else {"domestic_basis": str(source_max)}
+        return CurrentIdentity(
+            current.release_id,
+            str(pointer["manifest_sha256"]),
+            maxima,
+        )
+
+    def preflight(self) -> Mapping[str, object]:
+        catalog = load_domestic_basis_catalog(self.mapping_path)
+        if not catalog.live_verified:
+            raise ProviderFailure(
+                ProviderStatus.LIVE_VERIFICATION_PENDING,
+                "Domestic Basis live schema and source mapping verification is pending",
+            )
+        raise ProviderFailure(
+            ProviderStatus.SOURCE_UNAVAILABLE,
+            "Domestic Basis live source adapter is not configured",
+        )
+
+    def refresh(self) -> RefreshResult:
+        raise ProviderFailure(
+            ProviderStatus.LIVE_VERIFICATION_PENDING,
+            "Domestic Basis live verification must complete before refresh",
+        )
+
+
+@dataclass(slots=True)
+class DomesticBasisRefreshAdapter:
+    """Independent live Domestic Basis provider using the shared Lutou client contract."""
+
+    settings: LutouConnectionSettings = field(repr=False)
+    runtime: RuntimeContext
+    run_id: str
+    mapping_path: Path
+    connector: Connector = tcp_reachable
+    name: str = "lutou_domestic_basis"
+    _client: LutouClient | None = field(default=None, init=False, repr=False)
+    _adapter: LutouDomesticBasisLiveAdapter | None = field(default=None, init=False, repr=False)
+    _source_max: date | None = field(default=None, init=False, repr=False)
+
+    def current_identity(self) -> CurrentIdentity:
+        root = self.runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+        current = load_domestic_basis_current(root)
+        if current is None:
+            return CurrentIdentity(None, None, {})
+        pointer = _pointer(root)
+        return CurrentIdentity(
+            current.release_id,
+            str(pointer["manifest_sha256"]),
+            {"domestic_basis": str(current.manifest["source_max_date"])},
+        )
+
+    def preflight(self) -> Mapping[str, object]:
+        catalog = load_domestic_basis_catalog(self.mapping_path)
+        if not catalog.live_verified:
+            raise ProviderFailure(
+                ProviderStatus.LIVE_VERIFICATION_PENDING,
+                "Domestic Basis live schema and source mapping verification is pending",
+            )
+        if not self.connector(self.settings.host, self.settings.port, 5.0):
+            raise ProviderFailure(
+                ProviderStatus.NETWORK_UNAVAILABLE,
+                "Lutou Domestic Basis TCP endpoint is unavailable",
+            )
+        try:
+            self._client = LutouClient(self.settings)
+            self._client.__enter__()
+            self._adapter = LutouDomesticBasisLiveAdapter(self._client)
+            schema_proof = self._adapter.verify_schema()
+            _, self._source_max = self._adapter.date_bounds()
+            return {
+                "read_only": self._client.proof.transaction_read_only,
+                "write_privileges": list(self._client.proof.write_privileges),
+                "relations": 1,
+                "series": len(catalog.series),
+                "schema": schema_proof,
+                "source_max_dates": {"domestic_basis": self._source_max.isoformat()},
+            }
+        except LutouReadOnlyError:
+            self.close()
+            raise ProviderFailure(ProviderStatus.AUTH_FAILURE, "Lutou read-only verification failed") from None
+        except LutouSchemaError:
+            self.close()
+            raise ProviderFailure(ProviderStatus.SOURCE_SCHEMA_FAILURE, "Domestic Basis approved schema check failed") from None
+        except LutouSourceUnavailableError:
+            self.close()
+            raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Domestic Basis approved source is empty") from None
+        except LutouConnectionError:
+            self.close()
+            raise ProviderFailure(ProviderStatus.AUTH_FAILURE, "Lutou authentication failed") from None
+
+    def refresh(self) -> RefreshResult:
+        if self._adapter is None:
+            raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Domestic Basis preflight client is unavailable")
+        try:
+            result = run_domestic_basis_live(
+                runtime=self.runtime,
+                run_id=f"{self.run_id}-lutou-domestic-basis",
+                adapter=self._adapter,
+                mapping_path=self.mapping_path,
+            )
+            return RefreshResult(
+                result.promoted,
+                {"domestic_basis": result.query_end_date.isoformat()},
+                {"domestic_basis": (ProviderStatus.UPDATED if result.promoted else ProviderStatus.NO_CHANGE).value},
+            )
+        except DomesticBasisPipelineError as exc:
+            raise _pipeline_failure(exc, "Lutou Domestic Basis") from None
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+        self._client = None
+        self._adapter = None
+
+
 def _pipeline_failure(exc: Exception, provider: str) -> ProviderFailure:
     message = str(exc).lower()
     if "quality" in message or "collision" in message or "duplicate" in message:
@@ -442,5 +584,7 @@ def _pointer(root: Path) -> Mapping[str, object]:
 
 
 __all__ = [
-    "LutouRefreshAdapter", "TankanRefreshAdapter", "tailscale_ready", "tcp_reachable"
+    "DomesticBasisPendingAdapter", "DomesticBasisRefreshAdapter",
+    "LutouRefreshAdapter", "TankanRefreshAdapter",
+    "tailscale_ready", "tcp_reachable"
 ]

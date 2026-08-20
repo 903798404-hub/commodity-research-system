@@ -276,3 +276,29 @@ modules:
       - 08_tests/test_international_spread_page.py
     dependents: []
     full_regression_when_changed: false
+  market_data.domestic_basis:
+    code_paths:
+      - 02_configs/lutou_domestic_basis.yaml
+      - 03_src/agri_research_agent/market_data/basis.py
+      - 03_src/agri_research_agent/data_sources/lutou/domestic_basis.py
+      - 03_src/agri_research_agent/data_sources/lutou/live.py
+      - 03_src/agri_research_agent/pipelines/lutou_domestic_basis.py
+      - 03_src/agri_research_agent/pipelines/public_data_refresh.py
+      - 03_src/agri_research_agent/pipelines/public_data_providers.py
+      - 04_scripts/refresh_public_data.py
+    direct_tests:
+      - 08_tests/market_data/test_basis_contract.py
+      - 08_tests/data_sources/lutou/test_domestic_basis.py
+      - 08_tests/pipelines/test_lutou_domestic_basis.py
+      - 08_tests/pipelines/test_public_data_domestic_basis_provider.py
+    impact_tests:
+      - 08_tests/test_basis_sql_loader.py
+      - 08_tests/test_update_basis_from_sql.py
+      - 08_tests/summary_engine/test_summary_engine.py
+      - 08_tests/test_basis_page_formal.py
+      - 08_tests/pipelines/test_public_data_refresh.py
+      - 08_tests/pipelines/test_lutou_goal_b.py
+      - 08_tests/pipelines/test_lutou_weather.py
+      - 08_tests/test_international_spread_page.py
+    dependents: []
+    full_regression_when_changed: false

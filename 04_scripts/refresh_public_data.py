@@ -18,6 +18,7 @@ if str(SRC) not in sys.path:
 from agri_research_agent.data_sources.lutou.live import LutouConnectionSettings
 from agri_research_agent.data_sources.tankan.client import TankanConnectionSettings
 from agri_research_agent.pipelines.public_data_providers import (
+    DomesticBasisRefreshAdapter,
     LutouRefreshAdapter,
     TankanRefreshAdapter,
 )
@@ -78,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
                 ROOT / "02_configs" / "international_three_oil_v1.sealed.json",
                 ROOT / "02_configs" / "lutou_weather_current.yaml",
                 weather_baseline_root,
+            )
+        )
+        adapters.append(
+            DomesticBasisRefreshAdapter(
+                _lutou_settings(),
+                runtime,
+                run_id,
+                ROOT / "02_configs" / "lutou_domestic_basis.yaml",
             )
         )
     result = run_unified_refresh(

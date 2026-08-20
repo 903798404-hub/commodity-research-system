@@ -15,6 +15,7 @@ from agri_research_agent.shared.runtime_context import RuntimeContext, assert_ru
 
 class ProviderStatus(StrEnum):
     READY = "READY"
+    LIVE_VERIFICATION_PENDING = "LIVE_VERIFICATION_PENDING"
     SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
     NETWORK_UNAVAILABLE = "NETWORK_UNAVAILABLE"
     AUTH_FAILURE = "AUTH_FAILURE"
@@ -229,7 +230,11 @@ def _safe_current_identity(
 def _overall(outcomes: Sequence[ProviderOutcome]) -> OverallStatus:
     statuses = [item.status for item in outcomes]
     success = {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
-    unavailable = {ProviderStatus.SOURCE_UNAVAILABLE, ProviderStatus.NETWORK_UNAVAILABLE}
+    unavailable = {
+        ProviderStatus.SOURCE_UNAVAILABLE,
+        ProviderStatus.NETWORK_UNAVAILABLE,
+        ProviderStatus.LIVE_VERIFICATION_PENDING,
+    }
     if all(item is ProviderStatus.NO_CHANGE for item in statuses):
         return OverallStatus.NO_CHANGE
     if all(item in success for item in statuses):

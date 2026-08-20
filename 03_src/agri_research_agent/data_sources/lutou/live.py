@@ -99,6 +99,7 @@ class LutouQuery:
     version: str = "three-oil-v1-live/1"
     max_plan_rows: int = 100_000
     max_window_days: int = 20_000
+    order_by_date: bool = True
 
     def __post_init__(self) -> None:
         for value in (self.schema, self.table, self.date_column, *self.value_columns):
@@ -120,10 +121,10 @@ class LutouQuery:
         columns = ", ".join(_quote(item) for item in (self.date_column, *self.value_columns))
         relation = f"{_quote(self.schema)}.{_quote(self.table)}"
         date_column = _quote(self.date_column)
+        ordering = f" ORDER BY {date_column}" if self.order_by_date else ""
         return (
             f"SELECT {columns} FROM {relation} "
-            f"WHERE {date_column} >= %s AND {date_column} <= %s "
-            f"ORDER BY {date_column}"
+            f"WHERE {date_column} >= %s AND {date_column} <= %s{ordering}"
         )
 
     @property
@@ -138,6 +139,7 @@ class LutouQuery:
             "source_locator": f"database:lutou/schema:{self.schema}/relation:{self.table}",
             "max_plan_rows": self.max_plan_rows,
             "max_window_days": self.max_window_days,
+            "order_by_date": self.order_by_date,
         }
 
 
@@ -312,6 +314,29 @@ class LutouClient:
         except Exception as exc:
             raise LutouSchemaError(
                 f"Lutou schema inventory failed: {type(exc).__name__}"
+            ) from None
+
+    def inspect_relation_indexes(
+        self, schema: str, table: str
+    ) -> tuple[dict[str, object], ...]:
+        """Return metadata-only index structure for one explicitly named relation."""
+        for value in (schema, table):
+            if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
+                raise ValueError("Lutou relation identifier is invalid")
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE "
+                    "FROM INFORMATION_SCHEMA.STATISTICS "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+                    "ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+                    (schema, table),
+                )
+                return tuple(dict(item) for item in cursor.fetchall())
+        except Exception as exc:
+            raise LutouSchemaError(
+                f"Lutou relation index inspection failed: {type(exc).__name__}"
             ) from None
 
     def date_bounds(

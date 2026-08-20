@@ -1,0 +1,59 @@
+schema_version: lutou-domestic-basis-mapping/1
+mapping_version: domestic-basis-live-confirmed/1
+domain: domestic_basis
+provider: Lutou
+source_contract:
+  database_schema: 油脂油料价格
+  table: basis_price
+  table_status: LIVE_CONFIRMED
+  provider_dataset_id_expected: lutou:油脂油料价格:basis_price
+  date_column: 日期
+  product_column: 品种
+  region_column: 地区
+  quote_type_column: 报价类别
+  quote_type_value: 现货基差
+  contract_column: 期货合约
+  value_column: 基差
+  factory_column: 工厂
+  article_id_column: 文章ID
+  delivery_month_column: 基差合同月
+  source_row_identity_fields: [日期, 品种, 文章ID, 文章标题, 行类型, 地区, 省份, 工厂, 合同情况, 基差合同年, 基差合同月, 价格原始, 期货合约, 基差, 现货价, 成交量, created_at, 报价类别, 期货收盘价]
+  source_row_content_sha: all_19_source_columns
+  query_identity_status: LIVE_CONFIRMED
+  snapshot_identity_status: LIVE_CONFIRMED
+  currency: CNY
+  unit: CNY/metric_tonne
+  metadata_evidence: LIVE_DATABASE_SCHEMA_AND_21_SERIES_INVENTORY
+canonical_policy:
+  policy_version: domestic-basis-near-contract-median/1
+  series_stable_key: [series_id, business_date]
+  source_stable_key: [provider_series_id, business_date, source_row_identity]
+  contract_selection: nearest_nonexpired_delivery_contract
+  source_row_aggregation: median
+  missing_value_policy: retain_as_exception_and_block_if_required_series_has_no_usable_row
+  signed_basis_policy: negative_zero_positive_allowed
+  cash_futures_policy: preserve_in_standard_legacy_compatible_null_in_canonical
+  date_fill_policy: none
+  promotion_requires: LIVE_CONFIRMED
+series:
+  - {series_id: market.basis.domestic.china.palm_oil_24.east_china.spot, source_product: 棕榈油, consumer_product: 24度, product: palm_oil_24, region: 华东, region_id: east_china, underlying_exchange: DCE, underlying_product: P, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.palm_oil_24.north_china.spot, source_product: 棕榈油, consumer_product: 24度, product: palm_oil_24, region: 华北, region_id: north_china, underlying_exchange: DCE, underlying_product: P, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.palm_oil_24.south_china.spot, source_product: 棕榈油, consumer_product: 24度, product: palm_oil_24, region: 华南, region_id: south_china, underlying_exchange: DCE, underlying_product: P, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.northeast_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 东北, region_id: northeast_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.east_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 华东, region_id: east_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.central_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 华中, region_id: central_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.north_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 华北, region_id: north_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.south_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 华南, region_id: south_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.northwest_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 西北, region_id: northwest_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_oil.southwest_china.spot, source_product: 大豆油, consumer_product: 一豆, product: soybean_oil, region: 西南, region_id: southwest_china, underlying_exchange: DCE, underlying_product: Y, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.rapeseed_oil_3.east_china.spot, source_product: 菜籽油, consumer_product: 三菜, product: rapeseed_oil_3, region: 华东, region_id: east_china, underlying_exchange: CZCE, underlying_product: OI, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.rapeseed_oil_3.south_china.spot, source_product: 菜籽油, consumer_product: 三菜, product: rapeseed_oil_3, region: 华南, region_id: south_china, underlying_exchange: CZCE, underlying_product: OI, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.rapeseed_meal.east_china.spot, source_product: 菜粕, consumer_product: 菜粕, product: rapeseed_meal, region: 华东, region_id: east_china, underlying_exchange: CZCE, underlying_product: RM, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.rapeseed_meal.south_china.spot, source_product: 菜粕, consumer_product: 菜粕, product: rapeseed_meal, region: 华南, region_id: south_china, underlying_exchange: CZCE, underlying_product: RM, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.northeast_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 东北, region_id: northeast_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.east_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 华东, region_id: east_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.central_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 华中, region_id: central_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.north_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 华北, region_id: north_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.south_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 华南, region_id: south_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.northwest_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 西北, region_id: northwest_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
+  - {series_id: market.basis.domestic.china.soybean_meal.southwest_china.spot, source_product: 豆粕, consumer_product: 豆粕, product: soybean_meal, region: 西南, region_id: southwest_china, underlying_exchange: DCE, underlying_product: M, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
