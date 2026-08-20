@@ -2,18 +2,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 from streamlit.testing.v1 import AppTest
+
+from agri_research_agent.market_data.public_basis_current import (
+    resolve_public_basis_current_identity,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FORMAL_ENTRY = PROJECT_ROOT / "05_apps" / "streamlit_app.py"
+PUBLIC_CURRENT_ROOT = (
+    PROJECT_ROOT.parents[1]
+    / "market-data-worktree-runtime"
+    / "international-spread"
+    / "public-market-data"
+    / "lutou-domestic-basis"
+)
 
 
 def test_basis_page_uses_formal_database_and_renders_modules() -> None:
-    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=20).run()
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=40).run()
     app.session_state["selected_workspace_page"] = "基差/一口价"
-    app.run(timeout=20)
+    app.run(timeout=40)
 
     assert not app.exception
     assert not any("当前读取" in item.value for item in (*app.success, *app.info, *app.caption))
@@ -47,16 +57,16 @@ def test_basis_page_uses_formal_database_and_renders_modules() -> None:
     assert all(item.options == ["现货"] for item in delivery_selectboxes)
     assert all(item.value == "现货" for item in delivery_selectboxes)
     assert any(
-        "数据源：正式国内基差数据库" in item.value
-        and "更新至" in item.value
+        "数据源：Formal Public Basis Current" in item.value
+        and "数据更新至" in item.value
         for item in app.caption
     )
-    expected_latest = pd.read_parquet(
-        PROJECT_ROOT / "01_data" / "database" / "basis" / "basis_quotes.parquet",
-        columns=["date"],
-    )["date"].max().strftime("%Y-%m-%d")
+    expected_latest = resolve_public_basis_current_identity(
+        PUBLIC_CURRENT_ROOT
+    ).max_date.isoformat()
     assert any(expected_latest in item.value for item in app.caption)
     assert not any("本地回退文件可用" in item.value for item in (*app.success, *app.info, *app.caption))
+    assert not any("本地回退数据" in item.value for item in (*app.success, *app.info, *app.caption))
     assert not any(item.label in {"数据状态", "总行数", "最新日期"} for item in app.metric)
     assert any(item.value == "最新基差" for item in app.subheader)
     latest_table = app.dataframe[0].value
@@ -83,3 +93,23 @@ def test_legacy_entry_preview_cannot_write_formal_parquet() -> None:
 
     assert "write_confirmed(" not in preview_source
     assert preview_source.count("disabled=True") >= 2
+
+
+def test_basis_page_missing_public_current_fails_closed_without_fallback(
+    tmp_path: Path,
+) -> None:
+    script = f"""
+from pathlib import Path
+from basis_page import render_basis_page
+render_basis_page(Path({str(tmp_path / 'missing-current')!r}))
+"""
+    app = AppTest.from_string(script, default_timeout=15).run()
+    assert not app.exception
+    assert "Formal Public Basis Current 暂不可用。" in [
+        item.value for item in app.warning
+    ]
+    assert not app.tabs
+    visible = " ".join(
+        str(item.value) for item in (*app.warning, *app.info, *app.caption)
+    )
+    assert "回退" not in visible

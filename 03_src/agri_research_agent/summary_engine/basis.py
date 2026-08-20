@@ -20,14 +20,20 @@ def _number(value: object) -> float | None:
     return None if pd.isna(value) else float(value)
 
 
-def build_basis_summary(frame: pd.DataFrame, *, source_identity: Mapping[str, Any], generated_at: datetime | None = None) -> Summary:
+def build_basis_summary(
+    frame: pd.DataFrame,
+    *,
+    source_identity: Mapping[str, Any],
+    generated_at: datetime | None = None,
+    source_dataset: str = "basis_quotes",
+) -> Summary:
     rules = load_summary_rules(); data = frame.copy(); data["date"] = pd.to_datetime(data["date"], errors="raise")
     key = _comparison_key(data, rules)
     display_names = rules["basis"].get("display_names", {})
     data["commodity"] = data["commodity"].replace(display_names)
     data = data[data["basis"].notna()].sort_values([*key, "date"])
     if data.empty:
-        return Summary.create(module="basis", source_dataset="basis_quotes", source_identity=source_identity,
+        return Summary.create(module="basis", source_dataset=source_dataset, source_identity=source_identity,
             source_date=None, comparison_identity=None, generated_at=generated_at,
             calculation_version=rules["calculation_version"], rule_version=rules["rule_version"],
             freshness_status="missing", facts={"quotes": []}, classifications=[], headline="国内基差",
@@ -64,7 +70,7 @@ def build_basis_summary(frame: pd.DataFrame, *, source_identity: Mapping[str, An
         comparison = ("0" if q["change"] == 0 else f'{q["change"]:+g}') if q["change"] is not None else q["missing_reason"]
         return f'{q["commodity"]}｜{q["region"]}{point} {q["current_basis"]:g}（{comparison}）'
     detail = "；".join(format_quote(q) for q in top) or "最新报价均无连续可比前值。"
-    return Summary.create(module="basis", source_dataset="basis_quotes", source_identity=source_identity,
+    return Summary.create(module="basis", source_dataset=source_dataset, source_identity=source_identity,
         source_date=latest_date.date().isoformat(), comparison_identity={"key": key, "method": "previous_valid_quote"},
         generated_at=generated_at, calculation_version=rules["calculation_version"], rule_version=rules["rule_version"],
         freshness_status=freshness_status("basis", latest_date.date().isoformat(), rules), facts={"quotes": quotes, "top_changes": top},

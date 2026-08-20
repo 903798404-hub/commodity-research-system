@@ -67,9 +67,16 @@ DATABASE_PARQUET_FILE = DATA_DIR / "historical_spread_database.parquet"
 SPREAD_CONFIG_FILE = CONFIG_DIR / "historical_spread_config.xlsx"
 UPDATE_STATUS_FILE = DATA_DIR / "update_status.json"
 REPORT_CATALOG_FILE = CONFIG_DIR / "report_catalog.yaml"
-BASIS_DATABASE_FILE = DATA_DIR / "database" / "basis" / "basis_quotes.parquet"
-BASIS_RUNTIME_FALLBACK_FILE = (
-    DATA_DIR / "database" / "basis" / "basis_quotes_sample.parquet"
+_PUBLIC_RUNTIME_VALUE = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
+PUBLIC_RUNTIME_ROOT = (
+    Path(_PUBLIC_RUNTIME_VALUE)
+    if _PUBLIC_RUNTIME_VALUE
+    else PROJECT_ROOT.parents[1]
+    / "market-data-worktree-runtime"
+    / "international-spread"
+)
+PUBLIC_BASIS_CURRENT_ROOT = (
+    PUBLIC_RUNTIME_ROOT / "public-market-data" / "lutou-domestic-basis"
 )
 IMPORT_PROFIT_PAGE_TITLE = "日度进口大豆盘面净榨利"
 WEATHER_PAGE_ROUTES = {
@@ -402,7 +409,7 @@ def render_selected_workspace_page(selected_page: str) -> None:
     elif selected_page == RESEARCH_OVERVIEW_PAGE_TITLE:
         render_research_overview()
     elif selected_page == "基差/一口价":
-        render_basis_page(BASIS_DATABASE_FILE, BASIS_RUNTIME_FALLBACK_FILE)
+        render_basis_page(PUBLIC_BASIS_CURRENT_ROOT)
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
         render_soybean_weekly_page()
     elif selected_page in WEATHER_PAGE_ROUTES:

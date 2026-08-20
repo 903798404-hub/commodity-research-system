@@ -22,6 +22,12 @@ from agri_research_agent.data_sources.basis_database import build_basis_database
 from agri_research_agent.data_sources.basis_entry import (  # noqa: E402
     adapt_excel_result, classify_duplicates, config as entry_config, parse_fixed_rows, parse_paste, parse_text,
 )
+from agri_research_agent.market_data.public_basis_current import (  # noqa: E402
+    PublicBasisCurrentError,
+    load_public_basis_current,
+    resolve_public_basis_current_identity,
+)
+from agri_research_agent.summary_engine.basis import build_basis_summary  # noqa: E402
 from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
     configure_matplotlib_chinese_fonts,
 )
@@ -824,9 +830,7 @@ def _render_upload_update() -> None:
 def _render_shared_preview() -> None:
     preview=st.session_state.get("basis_preview")
     if not isinstance(preview,pd.DataFrame) or preview.empty:return
-    path=PROJECT_ROOT/"01_data"/"database"/"basis"/"basis_quotes.parquet"
-    existing=pd.read_parquet(path) if path.exists() else pd.DataFrame()
-    preview=classify_duplicates(preview,existing)
+    preview=classify_duplicates(preview,pd.DataFrame())
     edited=st.data_editor(preview,use_container_width=True,key="basis_shared_preview")
     st.caption(f"有效 {int((edited.parse_status=='parsed').sum())}｜待确认 {int((edited.parse_status=='needs_review').sum())}｜无效 {int((edited.parse_status=='invalid').sum())}｜重复 {int(edited.duplicate_status.str.startswith('duplicate').sum())}")
     st.checkbox(
@@ -841,8 +845,8 @@ def _render_shared_preview() -> None:
         disabled=True,
     )
     st.caption(
-        "正式基差已切换为 basis_price SQL；页面仅保留录入预览，"
-        "不得直接改写正式 Parquet。"
+        "正式基差只读消费 Formal Public Basis Current；页面仅保留录入预览，"
+        "不得直接改写正式 Current。"
     )
 
 
@@ -869,49 +873,59 @@ def _render_legacy_excel_upload() -> None:
                 st.error(f"Excel 解析失败：{exc}")
 
 
-def render_basis_page(
-    formal_database_path: Path,
-    runtime_fallback_path: Path,
-) -> None:
+@st.cache_data(show_spinner=False)
+def _cached_public_basis_page_data(
+    public_current_root: str,
+    release_id: str,
+    manifest_sha256: str,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    snapshot = load_public_basis_current(
+        public_current_root,
+        expected_release_id=release_id,
+        expected_manifest_sha256=manifest_sha256,
+    )
+    return snapshot.records, snapshot.source_identity
+
+
+def load_basis_page_data(
+    public_current_root: str | Path,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    identity = resolve_public_basis_current_identity(public_current_root)
+    return _cached_public_basis_page_data(
+        str(Path(public_current_root).resolve()),
+        identity.release_id,
+        identity.manifest_sha256,
+    )
+
+
+def render_basis_page(public_current_root: Path) -> None:
     st.markdown(
         "<h1 style='text-align:center;'>国内基差研究</h1>",
         unsafe_allow_html=True,
     )
-    if formal_database_path.exists():
-        database_path = formal_database_path
-        source_label = "正式数据"
-    elif runtime_fallback_path.exists():
-        database_path = runtime_fallback_path
-        source_label = "本地回退数据"
-    else:
-        st.info("暂未找到正式基差数据库或本地回退数据库。")
-        return
-
     try:
-        data = pd.read_parquet(database_path)
-        data["date"] = pd.to_datetime(data["date"], errors="coerce")
+        data, source_identity = load_basis_page_data(public_current_root)
         data = filter_display_data(data)
-    except Exception as exc:  # noqa: BLE001
-        st.warning(f"基差数据库读取失败：{exc}")
+    except (PublicBasisCurrentError, OSError, ValueError, KeyError):
+        st.warning("Formal Public Basis Current 暂不可用。")
         return
 
     try:
-        from agri_research_agent.summary_engine.basis import build_basis_summary
-        from agri_research_agent.summary_engine.io import file_identity
-        summary = build_basis_summary(data, source_identity=file_identity(database_path))
+        summary = build_basis_summary(
+            data,
+            source_identity=source_identity,
+            source_dataset="public_domestic_basis_current",
+        )
     except (OSError, ValueError, KeyError) as exc:
         st.warning(f"基差摘要暂不可用：{exc}")
         summary = None
 
     latest_date = data["date"].max()
-    if source_label == "正式数据":
-        st.caption(
-            "数据源：正式国内基差数据库｜"
-            f"更新至 {latest_date:%Y-%m-%d}｜"
-            "2026-06-01前为历史数据库，之后为basis_price现货基差"
-        )
-    else:
-        st.caption(f"数据源：本地回退数据｜更新至 {latest_date:%Y-%m-%d}")
+    st.caption(
+        "数据源：Formal Public Basis Current｜"
+        f"数据更新至 {latest_date:%Y-%m-%d}｜"
+        "2026-06-01前为密封历史数据，之后为Lutou canonical basis"
+    )
     st.subheader("最新基差")
     if summary is not None:
         latest_table = prepare_latest_basis_table(summary)

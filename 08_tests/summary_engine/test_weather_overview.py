@@ -3,6 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
+
+import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 import research_overview_page
@@ -172,6 +175,39 @@ def test_one_missing_overview_module_does_not_hide_the_other_two() -> None:
     assert "基差摘要暂不可用" in visible
     assert "天气短摘要正文" in visible
     assert "美豆种植短摘要正文" in visible
+
+
+def test_basis_overview_uses_shared_public_current_reader(monkeypatch) -> None:
+    identity = SimpleNamespace(
+        release_id="formal-release", manifest_sha256="a" * 64,
+    )
+    records = pd.DataFrame([{
+        "date": "2026-08-19", "commodity": "一豆", "region": "华东",
+        "quote_type": "基差报价", "delivery_month": "现货",
+        "futures_contract": "2609", "cash_price": None,
+        "futures_price": None, "basis": -10, "source_sheet": "basis_price:一豆",
+    }])
+    snapshot = SimpleNamespace(
+        records=records,
+        source_identity={"release_id": "formal-release", "manifest_sha256": "a" * 64},
+    )
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        research_overview_page, "resolve_public_basis_current_identity",
+        lambda _root: identity,
+    )
+    monkeypatch.setattr(
+        research_overview_page, "load_public_basis_current",
+        lambda root, *, expected_release_id, expected_manifest_sha256: (
+            calls.append((root, expected_release_id, expected_manifest_sha256)) or snapshot
+        ),
+    )
+    research_overview_page._cached_basis_overview_summary.clear()
+    summary = research_overview_page.load_basis_overview_summary()
+    assert calls and calls[0][1:] == ("formal-release", "a" * 64)
+    assert summary.source_dataset == "public_domestic_basis_current"
+    assert summary.source_identity["release_id"] == "formal-release"
+    assert summary.source_date == "2026-08-19"
 
 
 def test_all_missing_overview_modules_still_render_three_degraded_slots() -> None:

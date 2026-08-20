@@ -10,6 +10,11 @@ import streamlit as st
 from agri_research_agent.summary_engine.basis import build_basis_summary
 from agri_research_agent.summary_engine.crop import build_crop_summary
 from agri_research_agent.summary_engine.io import file_identity
+from agri_research_agent.market_data.public_basis_current import (
+    PublicBasisCurrentError,
+    load_public_basis_current,
+    resolve_public_basis_current_identity,
+)
 from agri_research_agent.market_data.public_weather_current import PublicWeatherCurrentError
 from agri_research_agent.summary_engine.weather_cache import load_weather_current_summary_cached
 from agri_research_agent.soybean_exports.research import (
@@ -50,6 +55,12 @@ def _public_weather_current_root(project_root: Path = PROJECT_ROOT) -> Path:
     return runtime_root / "public-market-data" / "lutou-weather"
 
 
+def _public_basis_current_root(project_root: Path = PROJECT_ROOT) -> Path:
+    runtime_value = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
+    runtime_root = Path(runtime_value) if runtime_value else project_root.parents[1] / "market-data-worktree-runtime" / "international-spread"
+    return runtime_root / "public-market-data" / "lutou-domestic-basis"
+
+
 def _summary_payload(summary: object | None) -> dict[str, Any]:
     if summary is None:
         return {}
@@ -85,13 +96,29 @@ def load_weather_overview_summaries() -> tuple[dict[str, list[object]], list[str
     return groups, warnings
 
 
-def load_basis_overview_summary() -> object | None:
-    basis_path = PROJECT_ROOT / "01_data/database/basis/basis_quotes.parquet"
-    if not basis_path.is_file():
-        return None
+@st.cache_data(show_spinner=False)
+def _cached_basis_overview_summary(
+    public_current_root: str,
+    release_id: str,
+    manifest_sha256: str,
+) -> object:
+    snapshot = load_public_basis_current(
+        public_current_root,
+        expected_release_id=release_id,
+        expected_manifest_sha256=manifest_sha256,
+    )
     return build_basis_summary(
-        pd.read_parquet(basis_path),
-        source_identity=file_identity(basis_path),
+        snapshot.records,
+        source_identity=snapshot.source_identity,
+        source_dataset="public_domestic_basis_current",
+    )
+
+
+def load_basis_overview_summary() -> object:
+    current_root = _public_basis_current_root()
+    identity = resolve_public_basis_current_identity(current_root)
+    return _cached_basis_overview_summary(
+        str(current_root.resolve()), identity.release_id, identity.manifest_sha256
     )
 
 
@@ -124,7 +151,7 @@ def load_research_overview_summaries() -> tuple[list[object], list[str]]:
     ):
         try:
             summary = loader()
-        except (OSError, ValueError, KeyError, ImportError):
+        except (OSError, ValueError, KeyError, ImportError, PublicBasisCurrentError):
             summary = None
         if _summary_available(summary):
             summaries.append(summary)
@@ -203,7 +230,7 @@ def render_research_overview(
                 if basis_summary is _LOAD_FROM_SOURCE
                 else basis_summary
             )
-        except (OSError, ValueError, KeyError, ImportError):
+        except (OSError, ValueError, KeyError, ImportError, PublicBasisCurrentError):
             resolved_basis = None
         _render_single_overview(
             resolved_basis, "\u57fa\u5dee\u6458\u8981\u6682\u4e0d\u53ef\u7528"

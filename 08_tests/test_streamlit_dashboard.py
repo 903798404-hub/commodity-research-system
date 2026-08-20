@@ -489,7 +489,7 @@ def test_streamlit_server_starts_and_answers_http(monkeypatch) -> None:
             process.wait(timeout=10)
 
 
-def test_basis_page_reads_three_rows_and_formulas_are_correct(tmp_path) -> None:
+def test_basis_page_reads_three_rows_and_formulas_are_correct() -> None:
     data = pd.read_parquet(BASIS_SAMPLE_FILE)
     assert len(data) == 3
     assert (data["basis"] == data["cash_price"] - data["futures_price"]).all()
@@ -500,17 +500,4 @@ def test_basis_page_reads_three_rows_and_formulas_are_correct(tmp_path) -> None:
     from basis_page import filter_display_data
 
     expected_rows = len(filter_display_data(data))
-
-    script = f"""
-from pathlib import Path
-from basis_page import render_basis_page
-
-render_basis_page(
-    Path({str(BASIS_SAMPLE_FILE)!r}),
-    Path({str(tmp_path / 'missing-fallback.parquet')!r}),
-)
-"""
-    app = AppTest.from_string(script, default_timeout=15).run()
-    assert not app.exception
-    assert not any("共 " in message.value and " 行" in message.value for message in app.success)
-    assert expected_rows >= 0
+    assert expected_rows == 2

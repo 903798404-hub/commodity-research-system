@@ -283,15 +283,21 @@ modules:
       - 03_src/agri_research_agent/data_sources/lutou/domestic_basis.py
       - 03_src/agri_research_agent/data_sources/lutou/live.py
       - 03_src/agri_research_agent/pipelines/lutou_domestic_basis.py
+      - 03_src/agri_research_agent/market_data/public_basis_current.py
       - 03_src/agri_research_agent/pipelines/public_data_refresh.py
       - 03_src/agri_research_agent/pipelines/public_data_providers.py
+      - 03_src/agri_research_agent/summary_engine/basis.py
       - 04_scripts/refresh_public_data.py
+      - 05_apps/basis_page.py
+      - 05_apps/research_overview_page.py
+      - 05_apps/streamlit_app.py
     direct_tests:
       - 08_tests/market_data/test_basis_contract.py
       - 08_tests/data_sources/lutou/test_domestic_basis.py
       - 08_tests/pipelines/test_lutou_domestic_basis.py
       - 08_tests/pipelines/test_lutou_domestic_basis_formal_current.py
       - 08_tests/pipelines/test_public_data_domestic_basis_provider.py
+      - 08_tests/market_data/test_public_basis_current.py
     impact_tests:
       - 08_tests/test_basis_sql_loader.py
       - 08_tests/test_update_basis_from_sql.py
