@@ -57,6 +57,7 @@ from agri_research_agent.pipelines.lutou_goal_b_soil import (
 from agri_research_agent.pipelines.lutou_domestic_basis import (
     DomesticBasisPipelineError,
     load_domestic_basis_current,
+    load_historical_basis_seed,
     run_domestic_basis_live,
 )
 from agri_research_agent.pipelines.lutou_weather import (
@@ -507,6 +508,18 @@ class DomesticBasisRefreshAdapter:
                 ProviderStatus.LIVE_VERIFICATION_PENDING,
                 "Domestic Basis live schema and source mapping verification is pending",
             )
+        public_root = self.runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+        current = load_domestic_basis_current(public_root)
+        seed = load_historical_basis_seed(public_root)
+        if (
+            current is None
+            or current.manifest.get("schema_version") != "lutou-domestic-basis-current/3"
+            or seed is None
+        ):
+            raise ProviderFailure(
+                ProviderStatus.SOURCE_SCHEMA_FAILURE,
+                "Formal Domestic Basis Current alignment and sealed history seed are required",
+            )
         if not self.connector(self.settings.host, self.settings.port, 5.0):
             raise ProviderFailure(
                 ProviderStatus.NETWORK_UNAVAILABLE,
@@ -548,6 +561,7 @@ class DomesticBasisRefreshAdapter:
                 run_id=f"{self.run_id}-lutou-domestic-basis",
                 adapter=self._adapter,
                 mapping_path=self.mapping_path,
+                require_formal_current=True,
             )
             return RefreshResult(
                 result.promoted,

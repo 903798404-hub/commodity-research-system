@@ -290,6 +290,7 @@ modules:
       - 08_tests/market_data/test_basis_contract.py
       - 08_tests/data_sources/lutou/test_domestic_basis.py
       - 08_tests/pipelines/test_lutou_domestic_basis.py
+      - 08_tests/pipelines/test_lutou_domestic_basis_formal_current.py
       - 08_tests/pipelines/test_public_data_domestic_basis_provider.py
     impact_tests:
       - 08_tests/test_basis_sql_loader.py

@@ -6,7 +6,7 @@ import hashlib
 import json
 import statistics
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -31,9 +31,17 @@ from agri_research_agent.shared.immutable_candidate import seal_immutable_candid
 from agri_research_agent.shared.runtime_context import RuntimeContext, assert_runtime_write
 
 LOOKBACK_DAYS = 31
+FORMAL_CUTOVER_DATE = date(2026, 6, 1)
+FORMAL_BASELINE_SHA256 = "0e3e8eadb848b3c804ce6c458ec8cc331f3b67831e70a3e619d6dfc65ac13411"
+HISTORICAL_SOURCE_SHA256 = "81fb31ed386528cf1ab703a9a5772e563356c3f1b3c649f7308f9dc56fd35dbb"
+HISTORICAL_EXCEL_SHA256 = "3478e175b4a8de6f10bccce0d9a70412c6e7e186587d4d9ec88583f8f3c5715a"
+HISTORICAL_SEED_ID = "basis-history-before-20260601-81fb31ed3865-v1"
 DECIMAL_TYPE = pa.decimal128(20, 4)
 STANDARD_STABLE_KEY = ("provider_series_id", "business_date", "source_row_identity")
 CANONICAL_STABLE_KEY = ("series_id", "business_date")
+FORMAL_STABLE_KEY = (
+    "series_id", "business_date", "quote_type", "delivery_month", "futures_contract",
+)
 
 STANDARD_SCHEMA = pa.schema([
     pa.field("schema_version", pa.string(), False), pa.field("series_id", pa.string(), False),
@@ -82,6 +90,29 @@ CANONICAL_SCHEMA = pa.schema([
     pa.field("live_status", pa.string(), False),
 ])
 
+FORMAL_CURRENT_SCHEMA = pa.schema([
+    pa.field("schema_version", pa.string(), False), pa.field("segment", pa.string(), False),
+    pa.field("series_id", pa.string(), False), pa.field("provider_dataset_id", pa.string(), False),
+    pa.field("provider_series_id", pa.string(), False), pa.field("source_series_id", pa.string(), False),
+    pa.field("provider", pa.string(), False), pa.field("business_date", pa.date32(), False),
+    pa.field("date", pa.date32(), False), pa.field("commodity", pa.string(), False),
+    pa.field("region", pa.string(), False),
+    pa.field("product", pa.string(), False), pa.field("consumer_product", pa.string(), False),
+    pa.field("location", pa.string(), False), pa.field("region_id", pa.string(), False),
+    pa.field("quote_type", pa.string(), False), pa.field("canonical_quote_type", pa.string(), False),
+    pa.field("delivery_month", pa.string(), False), pa.field("futures_contract", pa.string(), True),
+    pa.field("value", DECIMAL_TYPE, False), pa.field("cash_price", DECIMAL_TYPE, True),
+    pa.field("futures_price", DECIMAL_TYPE, True), pa.field("basis", DECIMAL_TYPE, True),
+    pa.field("currency", pa.string(), False), pa.field("unit", pa.string(), False),
+    pa.field("underlying_futures_reference", pa.string(), True), pa.field("source_sheet", pa.string(), False),
+    pa.field("source_locator", pa.string(), False), pa.field("source_row_count", pa.int32(), False),
+    pa.field("far_contract_row_count", pa.int32(), False), pa.field("source_group_sha256", pa.string(), False),
+    pa.field("aggregation_method", pa.string(), False), pa.field("query_identity", pa.string(), False),
+    pa.field("snapshot_identity", pa.string(), False), pa.field("captured_at", pa.timestamp("us", tz="UTC"), True),
+    pa.field("mapping_version", pa.string(), False), pa.field("evidence_type", pa.string(), False),
+    pa.field("live_status", pa.string(), False),
+])
+
 
 class DomesticBasisPipelineError(RuntimeError):
     pass
@@ -117,6 +148,23 @@ class DomesticBasisRunResult:
     promoted: bool
     candidate_quality: Mapping[str, object]
     canonical_quality: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class DomesticBasisHistoricalSeed:
+    seed_id: str
+    directory: Path
+    manifest: Mapping[str, object]
+    observations: pa.Table
+
+
+@dataclass(frozen=True, slots=True)
+class DomesticBasisAlignmentResult:
+    run_id: str
+    historical_seed: DomesticBasisHistoricalSeed
+    current: DomesticBasisCurrent
+    parity: Mapping[str, object]
+    promoted: bool = True
 
 
 def _parsed_contract(code: str | None, mapping: DomesticBasisSeries) -> ContractId | None:
@@ -338,9 +386,521 @@ def simulate_canonical_policy(table: pa.Table, catalog: DomesticBasisCatalog) ->
     return build_canonical_table(table, catalog)
 
 
+_HISTORICAL_PRODUCT_IDS = {
+    "一豆": "soybean_oil", "24度": "palm_oil_24", "三菜": "rapeseed_oil_3",
+    "豆粕": "soybean_meal", "菜粕": "rapeseed_meal", "一葵": "sunflower_oil_1",
+    "一级玉米油": "corn_oil_grade_1", "葵粕": "sunflower_meal",
+}
+_HISTORICAL_REGION_IDS = {
+    "华东": "east_china", "华南": "south_china", "华北": "north_china",
+    "东北": "northeast_china", "华中": "central_china", "西北": "northwest_china",
+    "西南": "southwest_china", "山东": "shandong", "广西": "guangxi", "成都": "chengdu",
+}
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    parsed = Decimal(str(value))
+    if not parsed.is_finite():
+        return None
+    return parsed.quantize(Decimal("0.0001"))
+
+
+def _historical_series_identity(
+    commodity: str, region: str, quote_type: str, catalog: DomesticBasisCatalog,
+) -> tuple[str, str, str]:
+    if quote_type == "基差报价":
+        matched = next(
+            (item for item in catalog.series if item.consumer_product == commodity and item.region == region),
+            None,
+        )
+        if matched is not None:
+            return matched.series_id, matched.product, matched.region_id
+    product = _HISTORICAL_PRODUCT_IDS.get(commodity)
+    region_id = _HISTORICAL_REGION_IDS.get(region)
+    if product is None or region_id is None:
+        raise DomesticBasisPipelineError("Historical Domestic Basis identity is not governed")
+    quote_id = "basis" if quote_type == "基差报价" else "cash_price"
+    return (
+        f"market.basis.domestic.china.historical.{product}.{region_id}.{quote_id}",
+        product,
+        region_id,
+    )
+
+
+def _historical_row_sha(row: Mapping[str, object]) -> str:
+    fields = (
+        "date", "commodity", "region", "quote_type", "delivery_month",
+        "futures_contract", "cash_price", "futures_price", "basis", "source_sheet",
+    )
+    payload = {
+        field: (
+            row[field].isoformat() if isinstance(row[field], (date, datetime))
+            else str(row[field]) if isinstance(row[field], Decimal) else row[field]
+        )
+        for field in fields
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def build_historical_seed_table(
+    source: pa.Table, catalog: DomesticBasisCatalog,
+) -> tuple[pa.Table, dict[str, object]]:
+    expected = {
+        "date", "commodity", "region", "quote_type", "delivery_month", "futures_contract",
+        "cash_price", "futures_price", "basis", "source_sheet",
+    }
+    if set(source.schema.names) != expected:
+        raise DomesticBasisPipelineError("Historical Domestic Basis seed source schema is invalid")
+    output: list[dict[str, object]] = []
+    for raw in source.to_pylist():
+        raw_date = raw["date"]
+        business_date = raw_date.date() if isinstance(raw_date, datetime) else raw_date
+        if type(business_date) is not date or business_date >= FORMAL_CUTOVER_DATE:
+            raise DomesticBasisPipelineError("Historical Domestic Basis seed crosses the cutover")
+        commodity, region, quote_type = str(raw["commodity"]), str(raw["region"]), str(raw["quote_type"])
+        if quote_type not in {"基差报价", "一口价"}:
+            raise DomesticBasisPipelineError("Historical Domestic Basis quote type is invalid")
+        cash, futures, basis = (
+            _decimal_or_none(raw["cash_price"]),
+            _decimal_or_none(raw["futures_price"]),
+            _decimal_or_none(raw["basis"]),
+        )
+        if quote_type == "基差报价":
+            if cash is None or futures is None or basis is None:
+                raise DomesticBasisPipelineError("Historical basis row is missing its sealed values")
+            if abs(cash - futures - basis) > Decimal("1"):
+                raise DomesticBasisPipelineError("Historical basis row violates its recovered value contract")
+            value, canonical_quote_type = basis, "DOMESTIC_BASIS"
+        else:
+            if cash is None or futures is not None or basis is not None:
+                raise DomesticBasisPipelineError("Historical cash-price row violates its recovered null contract")
+            value, canonical_quote_type = cash, "DOMESTIC_CASH_PRICE"
+        series_id, product, region_id = _historical_series_identity(commodity, region, quote_type, catalog)
+        source_sheet = str(raw["source_sheet"])
+        source_series = f"historical-excel:{source_sheet}:{commodity}:{region}:{quote_type}"
+        row_sha = _historical_row_sha(raw)
+        output.append({
+            "schema_version": "public-domestic-basis-current/3", "segment": "SEALED_HISTORICAL",
+            "series_id": series_id, "provider_dataset_id": f"sealed-history:{HISTORICAL_EXCEL_SHA256}",
+            "provider_series_id": source_series, "source_series_id": source_series,
+            "provider": "Historical Domestic Basis Excel", "business_date": business_date,
+            "date": business_date, "commodity": commodity, "region": region,
+            "product": product, "consumer_product": commodity, "location": region, "region_id": region_id,
+            "quote_type": quote_type, "canonical_quote_type": canonical_quote_type,
+            "delivery_month": str(raw["delivery_month"]),
+            "futures_contract": None if raw["futures_contract"] is None else str(raw["futures_contract"]),
+            "value": value, "cash_price": cash, "futures_price": futures, "basis": basis,
+            "currency": "CNY", "unit": "CNY/metric_tonne", "underlying_futures_reference": None,
+            "source_sheet": source_sheet,
+            "source_locator": f"sealed-history:{HISTORICAL_SOURCE_SHA256}#{source_sheet}",
+            "source_row_count": 1, "far_contract_row_count": 0, "source_group_sha256": row_sha,
+            "aggregation_method": "source_row_preserved_no_aggregation",
+            "query_identity": f"sealed-history:{HISTORICAL_SOURCE_SHA256}",
+            "snapshot_identity": HISTORICAL_SOURCE_SHA256, "captured_at": None,
+            "mapping_version": "formal-domestic-basis-history/1",
+            "evidence_type": "SEALED_HISTORICAL_ASSET", "live_status": "SEALED",
+        })
+    result = pa.Table.from_pylist(output, schema=FORMAL_CURRENT_SCHEMA).sort_by(
+        [(field, "ascending") for field in FORMAL_STABLE_KEY]
+    )
+    report = _validate_formal_current(result, catalog, require_live=False)
+    if result.num_rows != 16_331:
+        raise DomesticBasisPipelineError("Historical Domestic Basis seed row count is invalid")
+    return result, report
+
+
+def seal_historical_basis_seed(
+    *, runtime: RuntimeContext, source_path: str | Path, mapping_path: str | Path,
+) -> DomesticBasisHistoricalSeed:
+    catalog = load_domestic_basis_catalog(mapping_path)
+    public_root = assert_runtime_write(
+        runtime, runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+    )
+    public_root.mkdir(parents=True, exist_ok=True)
+    seed_pointer = public_root / "historical-seed.json"
+    pointer = _read_json(seed_pointer) if seed_pointer.is_file() else None
+    existing = (
+        load_historical_basis_seed(public_root)
+        if isinstance(pointer, Mapping) and pointer.get("seed_id") == HISTORICAL_SEED_ID
+        else None
+    )
+    if existing is not None:
+        return existing
+    source = Path(source_path)
+    if not source.is_file() or identify_file(source).sha256 != HISTORICAL_SOURCE_SHA256:
+        raise DomesticBasisPipelineError("Historical Domestic Basis sealed source identity mismatch")
+    table, quality = build_historical_seed_table(pq.read_table(source), catalog)
+    seed_root = assert_runtime_write(runtime, public_root / "historical-seeds")
+    manifest_holder: dict[str, object] = {}
+
+    def build(directory: Path) -> dict[str, object]:
+        pq.write_table(table, directory / "observations.parquet")
+        dates = table["business_date"].to_pylist()
+        manifest = {
+            "schema_version": "lutou-domestic-basis-historical-seed/1", "seed_id": HISTORICAL_SEED_ID,
+            "sealed": True, "source_asset": "basis_quotes_before_20260601.parquet",
+            "source_sha256": HISTORICAL_SOURCE_SHA256, "upstream_excel_sha256": HISTORICAL_EXCEL_SHA256,
+            "cutover_date": FORMAL_CUTOVER_DATE.isoformat(), "row_count": table.num_rows,
+            "min_date": min(dates).isoformat(), "max_date": max(dates).isoformat(),
+            "contract_schema_version": "public-domestic-basis-current/3",
+            "business_content_sha256": _business_sha(table), "quality_status": "PASS",
+            "quality": quality, "data_sha256": identify_file(directory / "observations.parquet").sha256,
+            "files": _file_identities(directory, ("observations.parquet",)),
+        }
+        _write_json(directory / "manifest.json", manifest)
+        manifest_holder.update(manifest)
+        return manifest
+
+    directory, _ = seal_immutable_candidate(seed_root, HISTORICAL_SEED_ID, build)
+    manifest_sha = identify_file(directory / "manifest.json").sha256
+    atomic_write_json(
+        assert_runtime_write(runtime, public_root / "historical-seed.json"),
+        {"schema_version": 1, "seed_id": HISTORICAL_SEED_ID, "manifest_sha256": manifest_sha},
+    )
+    loaded = load_historical_basis_seed(public_root)
+    if loaded is None:
+        raise DomesticBasisPipelineError("Historical Domestic Basis seed post-seal validation failed")
+    return loaded
+
+
+def load_historical_basis_seed(public_root: str | Path) -> DomesticBasisHistoricalSeed | None:
+    root = Path(public_root)
+    pointer_path = root / "historical-seed.json"
+    if not pointer_path.is_file():
+        return None
+    pointer = _read_json(pointer_path)
+    if set(pointer) != {"schema_version", "seed_id", "manifest_sha256"} or pointer.get("seed_id") != HISTORICAL_SEED_ID:
+        raise DomesticBasisPipelineError("Historical Domestic Basis seed pointer is invalid")
+    directory = root / "historical-seeds" / HISTORICAL_SEED_ID
+    manifest_path = directory / "manifest.json"
+    if identify_file(manifest_path).sha256 != pointer["manifest_sha256"]:
+        raise DomesticBasisPipelineError("Historical Domestic Basis seed manifest identity mismatch")
+    manifest = _read_json(manifest_path)
+    data_path = directory / "observations.parquet"
+    observations = pq.read_table(data_path)
+    if (
+        manifest.get("sealed") is not True
+        or manifest.get("source_sha256") != HISTORICAL_SOURCE_SHA256
+        or manifest.get("quality_status") != "PASS"
+        or manifest.get("data_sha256") != identify_file(data_path).sha256
+        or manifest.get("business_content_sha256") != _business_sha(observations)
+        or observations.schema != FORMAL_CURRENT_SCHEMA
+    ):
+        raise DomesticBasisPipelineError("Historical Domestic Basis seed contract is invalid")
+    _validate_formal_current(observations, None, require_live=False)
+    return DomesticBasisHistoricalSeed(HISTORICAL_SEED_ID, directory, manifest, observations)
+
+
+def _formal_live_rows(canonical: pa.Table, catalog: DomesticBasisCatalog) -> pa.Table:
+    by_series = {item.series_id: item for item in catalog.series}
+    output: list[dict[str, object]] = []
+    for row in canonical.to_pylist():
+        if row["business_date"] < FORMAL_CUTOVER_DATE:
+            continue
+        mapping = by_series.get(str(row["series_id"]))
+        if mapping is None:
+            raise DomesticBasisPipelineError("Live Domestic Basis series is not governed")
+        reference = _parse_reference(str(row["underlying_futures_reference"]))
+        contract = f"{reference.year % 100:02d}{reference.month:02d}"
+        if row["cash_price"] is not None or row["futures_price"] is not None:
+            raise DomesticBasisPipelineError("Live Domestic Basis cash/futures must remain null")
+        output.append({
+            "schema_version": "public-domestic-basis-current/3", "segment": "LIVE_LUTOU",
+            "series_id": row["series_id"], "provider_dataset_id": row["provider_dataset_id"],
+            "provider_series_id": row["provider_series_id"], "source_series_id": row["source_series_id"],
+            "provider": row["provider"], "business_date": row["business_date"], "product": row["product"],
+            "date": row["business_date"], "commodity": row["consumer_product"], "region": row["location"],
+            "consumer_product": row["consumer_product"], "location": row["location"],
+            "region_id": row["region_id"], "quote_type": "基差报价",
+            "canonical_quote_type": row["quote_type"], "delivery_month": "现货",
+            "futures_contract": contract, "value": row["value"], "cash_price": None,
+            "futures_price": None, "basis": row["value"], "currency": row["currency"], "unit": row["unit"],
+            "underlying_futures_reference": row["underlying_futures_reference"],
+            "source_sheet": f"basis_price:{mapping.source_product}", "source_locator": row["source_locator"],
+            "source_row_count": row["source_row_count"], "far_contract_row_count": row["far_contract_row_count"],
+            "source_group_sha256": row["source_group_sha256"], "aggregation_method": row["aggregation_method"],
+            "query_identity": row["query_identity"], "snapshot_identity": row["snapshot_identity"],
+            "captured_at": row["captured_at"], "mapping_version": row["mapping_version"],
+            "evidence_type": row["evidence_type"], "live_status": row["live_status"],
+        })
+    return pa.Table.from_pylist(output, schema=FORMAL_CURRENT_SCHEMA)
+
+
+def compose_formal_basis_current(
+    seed: DomesticBasisHistoricalSeed, live_canonical: pa.Table, catalog: DomesticBasisCatalog,
+) -> tuple[pa.Table, dict[str, object]]:
+    _validate_canonical(live_canonical, catalog)
+    live = _formal_live_rows(live_canonical, catalog)
+    combined = pa.concat_tables([seed.observations, live]).sort_by(
+        [(field, "ascending") for field in FORMAL_STABLE_KEY]
+    )
+    return combined, _validate_formal_current(combined, catalog, require_live=True)
+
+
+def _validate_formal_current(
+    table: pa.Table, catalog: DomesticBasisCatalog | None, *, require_live: bool,
+) -> dict[str, object]:
+    if table.schema != FORMAL_CURRENT_SCHEMA or table.num_rows == 0:
+        raise DomesticBasisPipelineError("Formal Domestic Basis schema is invalid")
+    if _duplicate_count(table, FORMAL_STABLE_KEY):
+        raise DomesticBasisPipelineError("Formal Domestic Basis stable-key collision")
+    rows = table.to_pylist()
+    legacy_key = (
+        "business_date", "consumer_product", "location", "quote_type", "delivery_month", "futures_contract",
+    )
+    seen: set[tuple[object, ...]] = set()
+    for row in rows:
+        if (
+            row["date"] != row["business_date"]
+            or row["commodity"] != row["consumer_product"]
+            or row["region"] != row["location"]
+        ):
+            raise DomesticBasisPipelineError("Formal Domestic Basis consumer aliases are inconsistent")
+        key = tuple(row[field] for field in legacy_key)
+        if key in seen:
+            raise DomesticBasisPipelineError("Formal Domestic Basis legacy contract collision")
+        seen.add(key)
+    historical = [row for row in rows if row["segment"] == "SEALED_HISTORICAL"]
+    live = [row for row in rows if row["segment"] == "LIVE_LUTOU"]
+    if len(historical) != 16_331 or any(row["business_date"] >= FORMAL_CUTOVER_DATE for row in historical):
+        raise DomesticBasisPipelineError("Formal Domestic Basis historical boundary is invalid")
+    if require_live and (not live or any(row["business_date"] < FORMAL_CUTOVER_DATE for row in live)):
+        raise DomesticBasisPipelineError("Formal Domestic Basis live boundary is invalid")
+    if set(table["currency"].to_pylist()) != {"CNY"} or set(table["unit"].to_pylist()) != {"CNY/metric_tonne"}:
+        raise DomesticBasisPipelineError("Formal Domestic Basis currency/unit is invalid")
+    for row in historical:
+        if row["quote_type"] == "基差报价":
+            if row["cash_price"] is None or row["futures_price"] is None or row["basis"] is None:
+                raise DomesticBasisPipelineError("Formal historical basis values are incomplete")
+            if abs(row["cash_price"] - row["futures_price"] - row["basis"]) > Decimal("1"):
+                raise DomesticBasisPipelineError("Formal historical basis relation is invalid")
+        elif row["quote_type"] == "一口价":
+            if row["cash_price"] is None or row["futures_price"] is not None or row["basis"] is not None:
+                raise DomesticBasisPipelineError("Formal historical cash-price null semantics are invalid")
+        else:
+            raise DomesticBasisPipelineError("Formal historical quote type is invalid")
+    if any(row["cash_price"] is not None or row["futures_price"] is not None or row["basis"] is None for row in live):
+        raise DomesticBasisPipelineError("Formal live cash/futures null semantics are invalid")
+    if catalog is not None and live and {str(row["series_id"]) for row in live} != {item.series_id for item in catalog.series}:
+        raise DomesticBasisPipelineError("Formal Domestic Basis live series coverage is incomplete")
+    return {
+        "quality_status": "PASS", "row_count": table.num_rows,
+        "historical_row_count": len(historical), "live_row_count": len(live),
+        "series_count": len(set(table["series_id"].to_pylist())), "stable_key_duplicate_count": 0,
+        "legacy_contract_collision_count": 0,
+        "historical_cash_non_null_count": sum(row["cash_price"] is not None for row in historical),
+        "historical_futures_non_null_count": sum(row["futures_price"] is not None for row in historical),
+        "live_cash_non_null_count": sum(row["cash_price"] is not None for row in live),
+        "live_futures_non_null_count": sum(row["futures_price"] is not None for row in live),
+        "cutover_date": FORMAL_CUTOVER_DATE.isoformat(),
+    }
+
+
+def compare_formal_basis_parity(table: pa.Table, baseline_path: str | Path) -> dict[str, object]:
+    baseline_file = Path(baseline_path)
+    if not baseline_file.is_file() or identify_file(baseline_file).sha256 != FORMAL_BASELINE_SHA256:
+        raise DomesticBasisPipelineError("Formal Domestic Basis baseline identity mismatch")
+    baseline = pq.read_table(baseline_file).to_pylist()
+    fields = (
+        "date", "commodity", "region", "quote_type", "delivery_month",
+        "futures_contract", "cash_price", "futures_price", "basis", "source_sheet",
+    )
+
+    def normalized(row: Mapping[str, object], *, public: bool) -> dict[str, object]:
+        business_date = row["business_date"] if public else row["date"]
+        if isinstance(business_date, datetime):
+            business_date = business_date.date()
+        return {
+            "date": business_date,
+            "commodity": row["consumer_product"] if public else row["commodity"],
+            "region": row["location"] if public else row["region"],
+            "quote_type": row["quote_type"], "delivery_month": row["delivery_month"],
+            "futures_contract": row["futures_contract"], "cash_price": _decimal_or_none(row["cash_price"]),
+            "futures_price": _decimal_or_none(row["futures_price"]), "basis": _decimal_or_none(row["basis"]),
+            "source_sheet": row["source_sheet"],
+        }
+
+    key_fields = ("date", "commodity", "region", "quote_type", "delivery_month", "futures_contract")
+    old = {}
+    for row in baseline:
+        value = normalized(row, public=False); key = tuple(value[field] for field in key_fields)
+        if key in old:
+            raise DomesticBasisPipelineError("Formal Domestic Basis baseline key is duplicated")
+        old[key] = value
+    new = {}
+    for row in table.to_pylist():
+        value = normalized(row, public=True); key = tuple(value[field] for field in key_fields)
+        if key in new:
+            raise DomesticBasisPipelineError("Formal Domestic Basis Current key is duplicated")
+        new[key] = value
+    common = set(old) & set(new)
+    differences = {
+        field: sum(old[key][field] != new[key][field] for key in common)
+        for field in fields
+    }
+    baseline_max = max(value["date"] for value in old.values())
+    public_only = set(new) - set(old)
+    nonextension = sum(new[key]["date"] <= baseline_max for key in public_only)
+    historical_keys = {key for key, value in old.items() if value["date"] < FORMAL_CUTOVER_DATE}
+    live_keys = set(old) - historical_keys
+    report = {
+        "quality_status": "PASS", "baseline_sha256": FORMAL_BASELINE_SHA256,
+        "baseline_rows": len(old), "public_rows": len(new), "common_rows": len(common),
+        "baseline_only_rows": len(set(old) - set(new)), "public_only_rows": len(public_only),
+        "authoritative_live_extension_rows": sum(new[key]["date"] > baseline_max for key in public_only),
+        "public_only_nonextension_rows": nonextension, "field_differences": differences,
+        "historical_segment": {
+            "baseline_rows": len(historical_keys), "common_rows": len(historical_keys & set(new)),
+            "baseline_only_rows": len(historical_keys - set(new)),
+        },
+        "live_sql_segment": {
+            "baseline_rows": len(live_keys), "common_rows": len(live_keys & set(new)),
+            "baseline_only_rows": len(live_keys - set(new)),
+        },
+        "baseline_max_date": baseline_max.isoformat(),
+    }
+    if (
+        len(old) != 17_042 or len(set(old) - set(new)) or nonextension
+        or any(differences.values())
+        or report["historical_segment"]["common_rows"] != 16_331
+        or report["live_sql_segment"]["common_rows"] != 711
+    ):
+        raise DomesticBasisPipelineError("Formal Domestic Basis 17,042-row contract parity failed")
+    return report
+
+
+def _extract_live_canonical(current: DomesticBasisCurrent) -> pa.Table:
+    if current.observations.schema == CANONICAL_SCHEMA:
+        return current.observations
+    if current.observations.schema != FORMAL_CURRENT_SCHEMA:
+        raise DomesticBasisPipelineError("Domestic Basis Current schema is unsupported")
+    output: list[dict[str, object]] = []
+    for row in current.observations.to_pylist():
+        if row["segment"] != "LIVE_LUTOU":
+            continue
+        output.append({
+            "schema_version": "public-basis-canonical/2", "series_id": row["series_id"],
+            "provider_dataset_id": row["provider_dataset_id"], "provider_series_id": row["provider_series_id"],
+            "source_series_id": row["source_series_id"], "provider": row["provider"],
+            "business_date": row["business_date"], "product": row["product"],
+            "consumer_product": row["consumer_product"], "location": row["location"],
+            "region_id": row["region_id"], "value": row["value"], "cash_price": row["cash_price"],
+            "futures_price": row["futures_price"], "currency": row["currency"], "unit": row["unit"],
+            "quote_type": row["canonical_quote_type"],
+            "underlying_futures_reference": row["underlying_futures_reference"],
+            "source_locator": row["source_locator"], "source_row_count": row["source_row_count"],
+            "far_contract_row_count": row["far_contract_row_count"],
+            "source_group_sha256": row["source_group_sha256"], "aggregation_method": row["aggregation_method"],
+            "query_identity": row["query_identity"], "snapshot_identity": row["snapshot_identity"],
+            "captured_at": row["captured_at"], "mapping_version": row["mapping_version"],
+            "evidence_type": row["evidence_type"], "live_status": row["live_status"],
+        })
+    return pa.Table.from_pylist(output, schema=CANONICAL_SCHEMA).sort_by(
+        [(field, "ascending") for field in CANONICAL_STABLE_KEY]
+    )
+
+
+def _seal_formal_release(
+    *, runtime: RuntimeContext, public_root: Path, run_id: str,
+    seed: DomesticBasisHistoricalSeed, live_canonical: pa.Table,
+    catalog: DomesticBasisCatalog, parity: Mapping[str, object],
+    canonical_manifest_sha256: str, candidate_manifest_sha256: str,
+    failure_hook: Callable[[str], None] | None = None,
+) -> DomesticBasisCurrent:
+    table, quality = compose_formal_basis_current(seed, live_canonical, catalog)
+    if parity.get("quality_status") != "PASS":
+        raise DomesticBasisPipelineError("Formal Domestic Basis parity is not promotion-authorized")
+    release_id = validate_candidate_id(run_id)
+    releases = assert_runtime_write(runtime, public_root / "releases")
+
+    def build(directory: Path) -> dict[str, object]:
+        pq.write_table(table, directory / "observations.parquet")
+        dates = table["business_date"].to_pylist()
+        live_dates = live_canonical["business_date"].to_pylist()
+        release_manifest = {
+            "schema_version": "lutou-domestic-basis-current/3", "release_id": release_id,
+            "source": "sealed_history_plus_lutou", "scope": "formal-domestic-basis",
+            "quality_status": "PASS", "mapping_version": catalog.mapping_version,
+            "cutover_date": FORMAL_CUTOVER_DATE.isoformat(),
+            "historical_seed_id": seed.seed_id,
+            "historical_seed_manifest_sha256": identify_file(seed.directory / "manifest.json").sha256,
+            "historical_seed_data_sha256": str(seed.manifest["data_sha256"]),
+            "historical_seed_business_sha256": str(seed.manifest["business_content_sha256"]),
+            "canonical_manifest_sha256": canonical_manifest_sha256,
+            "candidate_manifest_sha256": candidate_manifest_sha256,
+            "data_sha256": identify_file(directory / "observations.parquet").sha256,
+            "business_content_sha256": _business_sha(table),
+            "live_business_content_sha256": _business_sha(live_canonical),
+            "row_count": table.num_rows, "series_count": len(set(table["series_id"].to_pylist())),
+            "historical_row_count": int(quality["historical_row_count"]),
+            "live_row_count": int(quality["live_row_count"]),
+            "source_max_date": max(live_dates).isoformat(),
+            "min_date": min(dates).isoformat(), "max_date": max(dates).isoformat(),
+            "formal_contract_parity": dict(parity), "quality": quality,
+            "files": _file_identities(directory, ("observations.parquet",)),
+        }
+        _write_json(directory / "manifest.json", release_manifest)
+        return release_manifest
+
+    directory, _ = seal_immutable_candidate(releases, release_id, build)
+    manifest_sha = identify_file(directory / "manifest.json").sha256
+    if failure_hook:
+        failure_hook("release_sealed_before_pointer")
+    atomic_write_json(
+        assert_runtime_write(runtime, public_root / "current.json"),
+        {"schema_version": 1, "release_id": release_id, "manifest_sha256": manifest_sha},
+    )
+    loaded = load_domestic_basis_current(public_root)
+    if loaded is None or loaded.release_id != release_id:
+        raise DomesticBasisPipelineError("Formal Domestic Basis post-promotion verification failed")
+    return loaded
+
+
+def align_formal_domestic_basis_current(
+    *, runtime: RuntimeContext, run_id: str, mapping_path: str | Path,
+    historical_source_path: str | Path, formal_baseline_path: str | Path,
+    failure_hook: Callable[[str], None] | None = None,
+) -> DomesticBasisAlignmentResult:
+    safe_run_id = validate_candidate_id(run_id)
+    catalog = load_domestic_basis_catalog(mapping_path)
+    if not catalog.live_verified:
+        raise DomesticBasisPipelineError("Domestic Basis LIVE_CONFIRMED mapping is required")
+    public_root = assert_runtime_write(
+        runtime, runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+    )
+    before = load_domestic_basis_current(public_root)
+    if before is None or before.observations.schema != CANONICAL_SCHEMA:
+        raise DomesticBasisPipelineError("Formal alignment requires the sealed Goal D3A live Current")
+    seed = seal_historical_basis_seed(
+        runtime=runtime, source_path=historical_source_path, mapping_path=mapping_path,
+    )
+    live = pa.Table.from_pylist(
+        [row for row in before.observations.to_pylist() if row["business_date"] >= FORMAL_CUTOVER_DATE],
+        schema=CANONICAL_SCHEMA,
+    ).sort_by([(field, "ascending") for field in CANONICAL_STABLE_KEY])
+    _validate_canonical(live, catalog)
+    combined, _ = compose_formal_basis_current(seed, live, catalog)
+    parity = compare_formal_basis_parity(combined, formal_baseline_path)
+    if failure_hook:
+        failure_hook("formal_contract_validated")
+    current = _seal_formal_release(
+        runtime=runtime, public_root=public_root, run_id=safe_run_id, seed=seed,
+        live_canonical=live, catalog=catalog, parity=parity,
+        canonical_manifest_sha256=str(before.manifest.get("canonical_manifest_sha256", "goal-d3a-current")),
+        candidate_manifest_sha256=str(before.manifest.get("candidate_manifest_sha256", "goal-d3a-current")),
+        failure_hook=failure_hook,
+    )
+    return DomesticBasisAlignmentResult(safe_run_id, seed, current, parity)
+
+
 def run_domestic_basis_live(
     *, runtime: RuntimeContext, run_id: str, adapter: DomesticBasisSourceAdapter,
     mapping_path: str | Path, mode: str = "auto", failure_hook: Callable[[str], None] | None = None,
+    require_formal_current: bool = False,
 ) -> DomesticBasisRunResult:
     safe_run_id = validate_candidate_id(run_id)
     catalog = load_domestic_basis_catalog(mapping_path)
@@ -349,6 +909,13 @@ def run_domestic_basis_live(
     public_root = assert_runtime_write(runtime, runtime.runtime_root / "public-market-data" / "lutou-domestic-basis")
     public_root.mkdir(parents=True, exist_ok=True)
     before = load_domestic_basis_current(public_root)
+    if require_formal_current and (
+        before is None
+        or before.observations.schema != FORMAL_CURRENT_SCHEMA
+        or load_historical_basis_seed(public_root) is None
+    ):
+        raise DomesticBasisPipelineError("Formal Domestic Basis Current and sealed history seed are required")
+    before_live = None if before is None else _extract_live_canonical(before)
     if mode not in {"auto", "full", "incremental"}:
         raise ValueError("Domestic Basis mode is invalid")
     actual_mode = ("full" if before is None else "incremental") if mode == "auto" else mode
@@ -378,9 +945,9 @@ def run_domestic_basis_live(
         require_complete_series=True,
         require_complete_usable_series=actual_mode == "full",
     )
-    merged = _merge_current(before, window, start)
+    merged = _merge_current(before_live, window, start)
     _validate_canonical(merged, catalog)
-    if before is not None and _business_sha(before.observations) == _business_sha(merged):
+    if before_live is not None and _business_sha(before_live) == _business_sha(merged):
         return DomesticBasisRunResult(safe_run_id, actual_mode, start, source_max, candidate_dir, None, before, False, candidate_gate, canonical_gate)
     canonical_dir, manifest = _seal_canonical(runtime, public_root, safe_run_id, candidate_dir, merged, extraction, catalog, canonical_gate, source_max)
     if failure_hook:
@@ -444,6 +1011,23 @@ def promote_domestic_basis(*, runtime: RuntimeContext, canonical_directory: str 
         raise DomesticBasisPipelineError("Domestic Basis Canonical file identity is invalid")
     release_id = validate_candidate_id(str(manifest["run_id"]))
     public_root = assert_runtime_write(runtime, runtime.runtime_root / "public-market-data" / "lutou-domestic-basis")
+    seed = load_historical_basis_seed(public_root)
+    if seed is not None:
+        before = load_domestic_basis_current(public_root)
+        if before is None or before.observations.schema != FORMAL_CURRENT_SCHEMA:
+            raise DomesticBasisPipelineError("Formal Domestic Basis promotion requires an aligned Current")
+        parity = before.manifest.get("formal_contract_parity")
+        if not isinstance(parity, Mapping):
+            raise DomesticBasisPipelineError("Formal Domestic Basis parity evidence is missing")
+        live_canonical = pq.read_table(data_path)
+        _validate_canonical(live_canonical, catalog)
+        return _seal_formal_release(
+            runtime=runtime, public_root=public_root, run_id=release_id, seed=seed,
+            live_canonical=live_canonical, catalog=catalog, parity=parity,
+            canonical_manifest_sha256=identify_file(canonical_path / "manifest.json").sha256,
+            candidate_manifest_sha256=str(manifest["candidate_manifest_sha256"]),
+            failure_hook=failure_hook,
+        )
     releases = assert_runtime_write(runtime, public_root / "releases")
     def build(directory: Path) -> dict[str, object]:
         (directory / "observations.parquet").write_bytes(data_path.read_bytes())
@@ -486,13 +1070,49 @@ def load_domestic_basis_current(public_root: str | Path) -> DomesticBasisCurrent
     if identify_file(manifest_path).sha256 != pointer["manifest_sha256"]:
         raise DomesticBasisPipelineError("Domestic Basis Current manifest identity mismatch")
     manifest, observations = _read_json(manifest_path), pq.read_table(directory / "observations.parquet")
-    if manifest.get("quality_status") != "PASS" or observations.schema != CANONICAL_SCHEMA:
+    schema_version = manifest.get("schema_version")
+    if manifest.get("quality_status") != "PASS":
         raise DomesticBasisPipelineError("Domestic Basis Current contract is invalid")
+    if schema_version == "lutou-domestic-basis-current/2":
+        if observations.schema != CANONICAL_SCHEMA:
+            raise DomesticBasisPipelineError("Domestic Basis Current contract is invalid")
+    elif schema_version == "lutou-domestic-basis-current/3":
+        if observations.schema != FORMAL_CURRENT_SCHEMA:
+            raise DomesticBasisPipelineError("Formal Domestic Basis Current contract is invalid")
+    else:
+        raise DomesticBasisPipelineError("Domestic Basis Current schema version is unsupported")
     if identify_file(directory / "observations.parquet").sha256 != manifest.get("data_sha256"):
         raise DomesticBasisPipelineError("Domestic Basis Current data identity mismatch")
     if _business_sha(observations) != manifest.get("business_content_sha256"):
         raise DomesticBasisPipelineError("Domestic Basis Current business identity mismatch")
-    _validate_canonical(observations, None)
+    if observations.schema == CANONICAL_SCHEMA:
+        _validate_canonical(observations, None)
+    else:
+        _validate_formal_current(observations, None, require_live=True)
+        seed = load_historical_basis_seed(root)
+        parity = manifest.get("formal_contract_parity")
+        live = _extract_live_canonical(
+            DomesticBasisCurrent(str(pointer["release_id"]), directory, manifest, observations)
+        )
+        if (
+            seed is None
+            or manifest.get("historical_seed_manifest_sha256")
+            != identify_file(seed.directory / "manifest.json").sha256
+            or manifest.get("historical_seed_data_sha256") != seed.manifest.get("data_sha256")
+            or manifest.get("historical_seed_business_sha256")
+            != seed.manifest.get("business_content_sha256")
+            or manifest.get("live_business_content_sha256") != _business_sha(live)
+            or manifest.get("historical_row_count") != 16_331
+            or manifest.get("live_row_count") != live.num_rows
+            or not isinstance(parity, Mapping)
+            or parity.get("quality_status") != "PASS"
+            or parity.get("baseline_sha256") != FORMAL_BASELINE_SHA256
+            or parity.get("baseline_only_rows") != 0
+            or parity.get("public_only_nonextension_rows") != 0
+            or not isinstance(parity.get("field_differences"), Mapping)
+            or any(parity["field_differences"].values())
+        ):
+            raise DomesticBasisPipelineError("Formal Domestic Basis manifest, seed or parity identity mismatch")
     return DomesticBasisCurrent(str(pointer["release_id"]), directory, manifest, observations)
 
 
@@ -555,10 +1175,10 @@ def _nullable_number_equal(left: object, right: object) -> bool:
     return normalized(left) == normalized(right)
 
 
-def _merge_current(current: DomesticBasisCurrent | None, window: pa.Table, start: date) -> pa.Table:
+def _merge_current(current: pa.Table | None, window: pa.Table, start: date) -> pa.Table:
     if current is None:
         return window
-    history = [x for x in current.observations.to_pylist() if x["business_date"] < start]
+    history = [x for x in current.to_pylist() if x["business_date"] < start]
     merged = pa.Table.from_pylist(history + window.to_pylist(), schema=CANONICAL_SCHEMA)
     return merged.sort_by([(x, "ascending") for x in CANONICAL_STABLE_KEY])
 
@@ -692,8 +1312,12 @@ def _read_json(path: Path) -> dict[str, object]:
 
 
 __all__ = [
-    "LOOKBACK_DAYS", "CANONICAL_SCHEMA", "CANONICAL_STABLE_KEY", "STANDARD_SCHEMA", "STANDARD_STABLE_KEY",
-    "DomesticBasisCurrent", "DomesticBasisOfflineResult", "DomesticBasisPipelineError", "DomesticBasisRunResult",
+    "LOOKBACK_DAYS", "FORMAL_CUTOVER_DATE", "FORMAL_CURRENT_SCHEMA", "FORMAL_STABLE_KEY",
+    "CANONICAL_SCHEMA", "CANONICAL_STABLE_KEY", "STANDARD_SCHEMA", "STANDARD_STABLE_KEY",
+    "DomesticBasisAlignmentResult", "DomesticBasisCurrent", "DomesticBasisHistoricalSeed",
+    "DomesticBasisOfflineResult", "DomesticBasisPipelineError", "DomesticBasisRunResult",
+    "align_formal_domestic_basis_current", "build_historical_seed_table", "compare_formal_basis_parity",
+    "compose_formal_basis_current", "load_historical_basis_seed", "seal_historical_basis_seed",
     "build_canonical_table", "build_standard_table", "load_domestic_basis_current", "promote_domestic_basis",
     "compare_legacy_parity", "run_domestic_basis_live", "run_domestic_basis_offline_fixture",
     "simulate_canonical_policy", "validate_candidate",

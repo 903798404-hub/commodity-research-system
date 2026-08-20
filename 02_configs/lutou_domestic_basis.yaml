@@ -35,6 +35,28 @@ canonical_policy:
   cash_futures_policy: preserve_in_standard_legacy_compatible_null_in_canonical
   date_fill_policy: none
   promotion_requires: LIVE_CONFIRMED
+formal_current:
+  contract_version: public-domestic-basis-current/3
+  cutover_date: 2026-06-01
+  composition: sealed_historical_seed_plus_live_lutou_canonical
+  historical_seed:
+    seed_id: basis-history-before-20260601-81fb31ed3865-v1
+    source_sha256: 81fb31ed386528cf1ab703a9a5772e563356c3f1b3c649f7308f9dc56fd35dbb
+    upstream_excel_sha256: 3478e175b4a8de6f10bccce0d9a70412c6e7e186587d4d9ec88583f8f3c5715a
+    row_count: 16331
+    min_date: 2022-03-17
+    max_date: 2026-05-29
+    sealed: true
+  recovered_formal_baseline:
+    sha256: 0e3e8eadb848b3c804ce6c458ec8cc331f3b67831e70a3e619d6dfc65ac13411
+    row_count: 17042
+    max_date: 2026-08-14
+  live_segment:
+    start_date: 2026-06-01
+    cash_futures_policy: null
+    refresh_policy: existing_live_history_plus_31_day_lookback
+  daily_refresh_reads: [sealed_historical_seed, live_lutou_recent_window]
+  daily_refresh_forbidden_reads: [historical_excel, legacy_basis_sql, formal_basis_quotes_parquet]
 series:
   - {series_id: market.basis.domestic.china.palm_oil_24.east_china.spot, source_product: 棕榈油, consumer_product: 24度, product: palm_oil_24, region: 华东, region_id: east_china, underlying_exchange: DCE, underlying_product: P, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}
   - {series_id: market.basis.domestic.china.palm_oil_24.north_china.spot, source_product: 棕榈油, consumer_product: 24度, product: palm_oil_24, region: 华北, region_id: north_china, underlying_exchange: DCE, underlying_product: P, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}

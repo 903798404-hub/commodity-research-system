@@ -103,12 +103,23 @@ def test_live_provider_reports_independent_no_change(monkeypatch, runtime: Runti
         def date_bounds(self): return __import__("datetime").date(2022, 6, 15), __import__("datetime").date(2026, 8, 19)
 
     monkeypatch.setattr(providers, "load_domestic_basis_catalog", lambda path: SimpleNamespace(live_verified=True, series=tuple(range(21))))
+    monkeypatch.setattr(
+        providers,
+        "load_domestic_basis_current",
+        lambda root: SimpleNamespace(
+            release_id="formal-current",
+            manifest={"schema_version": "lutou-domestic-basis-current/3", "source_max_date": "2026-08-19"},
+        ),
+    )
+    monkeypatch.setattr(providers, "_pointer", lambda root: {"manifest_sha256": "a" * 64})
+    monkeypatch.setattr(providers, "load_historical_basis_seed", lambda root: SimpleNamespace(seed_id="sealed"))
     monkeypatch.setattr(providers, "LutouClient", Client)
     monkeypatch.setattr(providers, "LutouDomesticBasisLiveAdapter", Live)
-    monkeypatch.setattr(
-        providers, "run_domestic_basis_live",
-        lambda **kwargs: SimpleNamespace(promoted=False, query_end_date=__import__("datetime").date(2026, 8, 19)),
-    )
+    calls = []
+    def run(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(promoted=False, query_end_date=__import__("datetime").date(2026, 8, 19))
+    monkeypatch.setattr(providers, "run_domestic_basis_live", run)
     adapter = DomesticBasisRefreshAdapter(
         LutouConnectionSettings("safe-host", 3306, "readonly", "process-only"),
         runtime, "unified", Path("mapping.yaml"), connector=lambda *args: True,
@@ -119,3 +130,33 @@ def test_live_provider_reports_independent_no_change(monkeypatch, runtime: Runti
     assert outcome.status is ProviderStatus.NO_CHANGE
     assert outcome.domains == {"domestic_basis": "NO_CHANGE"}
     assert outcome.source_max_dates == {"domestic_basis": "2026-08-19"}
+    assert calls[0]["require_formal_current"] is True
+
+
+def test_live_provider_fails_before_network_when_formal_alignment_is_missing(
+    monkeypatch, runtime: RuntimeContext,
+) -> None:
+    import agri_research_agent.pipelines.public_data_providers as providers
+
+    monkeypatch.setattr(
+        providers,
+        "load_domestic_basis_catalog",
+        lambda path: SimpleNamespace(live_verified=True, series=tuple(range(21))),
+    )
+    network_calls = []
+    adapter = DomesticBasisRefreshAdapter(
+        LutouConnectionSettings("safe-host", 3306, "readonly", "process-only"),
+        runtime,
+        "unified",
+        Path("mapping.yaml"),
+        connector=lambda *args: network_calls.append(args) or True,
+    )
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="provider-formal-missing",
+        adapters=[adapter],
+    )
+    outcome = result.providers[0]
+    assert outcome.preflight_status is ProviderStatus.SOURCE_SCHEMA_FAILURE
+    assert outcome.status is ProviderStatus.SOURCE_SCHEMA_FAILURE
+    assert network_calls == []
