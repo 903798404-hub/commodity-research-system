@@ -214,6 +214,7 @@ def sync_to_local_server_store(
     pre_switch_validator: Callable[[Path], None] | None = None,
     post_switch_validator: Callable[[Path], None] | None = None,
     switch_hook: Callable[[], None] | None = None,
+    initial_seed: bool = False,
 ) -> ServerSyncResult:
     """Stage, validate and atomically switch one package-store Current pointer."""
 
@@ -229,6 +230,8 @@ def sync_to_local_server_store(
     _reject_symlink(incoming, "server incoming root")
     _reject_symlink(releases, "server releases root")
     pointer_path = root / "current.json"
+    if initial_seed and (pointer_path.exists() or pointer_path.is_symlink()):
+        raise DeliveryError("server store is already initialized")
     old_pointer = _strict_json(pointer_path) if pointer_path.is_file() else None
     if old_pointer and old_pointer.get("package_id") == package.package_id:
         current = resolve_server_current(root)
@@ -293,6 +296,7 @@ def activate_incoming_server_package(
     pre_switch_validator: Callable[[Path], None] | None = None,
     post_switch_validator: Callable[[Path], None] | None = None,
     switch_hook: Callable[[], None] | None = None,
+    initial_seed: bool = False,
 ) -> ServerSyncResult:
     """Validate one uploaded directory and atomically activate it in-place.
 
@@ -323,6 +327,8 @@ def activate_incoming_server_package(
         pre_switch_validator(package.directory / "data")
 
     pointer_path = root / "current.json"
+    if initial_seed and (pointer_path.exists() or pointer_path.is_symlink()):
+        raise DeliveryError("server store is already initialized")
     old_pointer = _strict_json(pointer_path) if pointer_path.is_file() else None
     if old_pointer and old_pointer.get("package_id") == package.package_id:
         current = resolve_server_current(root)

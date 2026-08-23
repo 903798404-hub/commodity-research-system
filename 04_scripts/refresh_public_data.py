@@ -84,6 +84,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Read-only source/current preflight; do not build Candidate or change Current",
     )
     parser.add_argument(
+        "--initial-seed",
+        action="store_true",
+        help="Explicitly initialize an empty server store from validated unchanged data",
+    )
+    parser.add_argument(
         "--tankan-secret-file",
         type=Path,
         default=Path.home() / ".market-data-secrets" / "tankan.env",
@@ -96,6 +101,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         )
     if all(remote) and args.sync_target_root is not None:
         parser.error("remote transport and --sync-target-root are mutually exclusive")
+    if args.initial_seed and args.dry_run:
+        parser.error("--initial-seed and --dry-run are mutually exclusive")
+    if args.initial_seed and not (all(remote) or args.sync_target_root is not None):
+        parser.error("--initial-seed requires a remote transport or --sync-target-root")
+    if args.initial_seed and set(args.sources or ("tankan", "lutou")) != {"tankan", "lutou"}:
+        parser.error("--initial-seed requires the complete tankan and lutou source set")
     return args
 
 
@@ -194,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         delivery_artifact_runner=(
             _refresh_domestic_spread_artifact if "tankan" in sources else None
         ),
+        initial_seed=args.initial_seed,
     )
     print(f"run_id={result.run_id}")
     print(f"overall_status={result.business_status.value}")
@@ -312,6 +324,7 @@ def _build_remote_syncer(*, ssh_target: str, activation_image_id: str):
         store_root: str | Path,
         pre_switch_validator=None,
         post_switch_validator=None,
+        initial_seed: bool = False,
     ) -> ServerSyncResult:
         del pre_switch_validator, post_switch_validator
         command = [
@@ -322,6 +335,8 @@ def _build_remote_syncer(*, ssh_target: str, activation_image_id: str):
             "--remote-store-root", str(store_root),
             "--activation-image-id", activation_image_id,
         ]
+        if initial_seed:
+            command.append("--initial-seed")
         completed = subprocess.run(
             command, cwd=ROOT, text=True, capture_output=True, check=False
         )

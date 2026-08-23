@@ -274,6 +274,39 @@ def test_uploaded_package_activates_in_place_and_is_idempotent(tmp_path: Path) -
     assert not second_upload.exists()
 
 
+def test_initial_seed_refuses_initialized_local_store(tmp_path: Path) -> None:
+    public = tmp_path / "public-market-data"
+    _current(public, "tankan", "r1", "one")
+    package = build_production_package(
+        public_current_root=public, packages_root=tmp_path / "packages", source_max_dates={}
+    )
+    store = tmp_path / "server"
+    sync_to_local_server_store(package.directory, store_root=store)
+    before = (store / "current.json").read_bytes()
+    with pytest.raises(DeliveryError, match="already initialized"):
+        sync_to_local_server_store(
+            package.directory, store_root=store, initial_seed=True
+        )
+    assert (store / "current.json").read_bytes() == before
+
+
+def test_initial_seed_activation_refuses_initialized_store_without_consuming_upload(
+    tmp_path: Path,
+) -> None:
+    public = tmp_path / "public-market-data"
+    _current(public, "tankan", "r1", "one")
+    package = build_production_package(
+        public_current_root=public, packages_root=tmp_path / "packages", source_max_dates={}
+    )
+    store = tmp_path / "server"
+    sync_to_local_server_store(package.directory, store_root=store)
+    upload = store / "incoming" / f"{package.package_id}.upload-seed"
+    shutil.copytree(package.directory, upload)
+    with pytest.raises(DeliveryError, match="already initialized"):
+        activate_incoming_server_package(upload, store_root=store, initial_seed=True)
+    assert upload.is_dir()
+
+
 def test_configured_consumers_resolve_one_activated_package(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

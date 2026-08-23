@@ -10,6 +10,7 @@ import refresh_public_data
 
 from agri_research_agent.pipelines.public_data_daily import (
     DailyBusinessStatus,
+    DeliveryAction,
     run_daily_update,
 )
 from agri_research_agent.pipelines.public_data_delivery import (
@@ -104,6 +105,157 @@ def test_no_change_short_circuits_package_sync_and_prewarm(runtime: RuntimeConte
     assert calls == []
 
 
+def test_initial_seed_requires_explicit_sync_target(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        refresh_public_data.parse_args([
+            "--runtime-root", str(tmp_path), "--initial-seed",
+        ])
+    with pytest.raises(SystemExit):
+        refresh_public_data.parse_args([
+            "--runtime-root", str(tmp_path), "--initial-seed", "--source", "tankan",
+            "--sync-target-root", str(tmp_path / "store"),
+        ])
+    with pytest.raises(SystemExit):
+        refresh_public_data.parse_args([
+            "--runtime-root", str(tmp_path), "--initial-seed", "--dry-run",
+            "--sync-target-root", str(tmp_path / "store"),
+        ])
+
+
+def test_no_change_explicit_initial_seed_builds_without_faking_updated(
+    runtime: RuntimeContext,
+) -> None:
+    artifact = runtime.runtime_root / "historical_spread_database.parquet"
+    artifact.write_bytes(b"fixture")
+    package_dir = runtime.runtime_root / "fixture-seed-package"
+    package_dir.mkdir()
+    identity = "d" * 64
+    package = ProductionPackage(
+        "public-current-seed", package_dir,
+        {"delivery_identity_sha256": identity}, True,
+    )
+    calls: list[str] = []
+
+    def sync(_directory: Path, **kwargs) -> ServerSyncResult:
+        assert kwargs["initial_seed"] is True
+        calls.append("sync")
+        return ServerSyncResult(
+            "SYNCED", package.package_id, "PASS", "PASS", "PASS", "PASS", package_dir
+        )
+
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-initial-seed",
+        refresh_runner=lambda: _refresh(
+            runtime.runtime_root, _outcome(ProviderStatus.NO_CHANGE)
+        ),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
+        delivery_artifact_runner=lambda: {"domestic-spread": artifact},
+        consumer_freshness_validator=lambda: ConsumerFreshnessReport(()),
+        package_builder=lambda **_kwargs: package,
+        syncer=sync,
+        initial_seed=True,
+    )
+
+    assert result.business_status is DailyBusinessStatus.NO_CHANGE
+    assert result.succeeded is True
+    assert result.manifest["delivery_action"] == DeliveryAction.INITIAL_SEED.value
+    assert result.manifest["delivery_identity"] == identity
+    assert result.manifest["production_data_package"]["status"] == "GENERATED"
+    assert result.manifest["server_sync"] == "SYNCED"
+    assert calls == ["sync"]
+
+
+def test_normal_daily_after_initial_seed_is_no_change_and_never_syncs(
+    runtime: RuntimeContext,
+) -> None:
+    artifact = runtime.runtime_root / "historical_spread_database.parquet"
+    artifact.write_bytes(b"fixture")
+    package_dir = runtime.runtime_root / "packages" / "public-current-seeded"
+    package_dir.mkdir(parents=True)
+    package = ProductionPackage(
+        "public-current-seeded", package_dir,
+        {"delivery_identity_sha256": "d" * 64}, False,
+    )
+    calls: list[str] = []
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-after-initial-seed",
+        refresh_runner=lambda: _refresh(
+            runtime.runtime_root, _outcome(ProviderStatus.NO_CHANGE)
+        ),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
+        delivery_artifact_runner=lambda: {"domestic-spread": artifact},
+        consumer_freshness_validator=lambda: ConsumerFreshnessReport(()),
+        package_builder=lambda **_kwargs: package,
+        syncer=lambda *_args, **_kwargs: calls.append("sync"),
+    )
+    assert result.business_status is DailyBusinessStatus.NO_CHANGE
+    assert result.succeeded is True
+    assert result.manifest["delivery_action"] == DeliveryAction.SKIPPED.value
+    assert result.manifest["delivery_identity"] == "d" * 64
+    assert result.manifest["production_data_package"]["status"] == "SKIPPED"
+    assert result.manifest["server_sync"] == "SKIPPED"
+    assert calls == []
+
+
+def test_source_unavailable_cannot_initial_seed(runtime: RuntimeContext) -> None:
+    calls: list[str] = []
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-initial-seed-unavailable",
+        refresh_runner=lambda: _refresh(
+            runtime.runtime_root,
+            _outcome(ProviderStatus.SOURCE_UNAVAILABLE, provider="lutou"),
+        ),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
+        delivery_artifact_runner=lambda: calls.append("artifact"),
+        package_builder=lambda **_kwargs: calls.append("package"),
+        syncer=lambda *_args, **_kwargs: calls.append("sync"),
+        initial_seed=True,
+    )
+    assert result.business_status is DailyBusinessStatus.SOURCE_UNAVAILABLE
+    assert result.manifest["delivery_action"] == DeliveryAction.SKIPPED.value
+    assert result.manifest["server_sync"] == "SKIPPED"
+    assert calls == []
+
+
+def test_stale_freshness_cannot_initial_seed(runtime: RuntimeContext) -> None:
+    artifact = runtime.runtime_root / "historical_spread_database.parquet"
+    artifact.write_bytes(b"fixture")
+    freshness = ConsumerFreshnessReport((ConsumerFreshness(
+        "Domestic Spread", date(2026, 8, 14), date(2026, 8, 21),
+        FreshnessStatus.STALE, FreshnessGate.HARD, "fixture",
+    ),))
+    calls: list[str] = []
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-initial-seed-stale",
+        refresh_runner=lambda: _refresh(
+            runtime.runtime_root, _outcome(ProviderStatus.NO_CHANGE)
+        ),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
+        delivery_artifact_runner=lambda: {"domestic-spread": artifact},
+        consumer_freshness_validator=lambda: freshness,
+        package_builder=lambda **_kwargs: calls.append("package"),
+        syncer=lambda *_args, **_kwargs: calls.append("sync"),
+        initial_seed=True,
+    )
+    assert result.business_status is DailyBusinessStatus.NO_CHANGE
+    assert result.succeeded is False
+    assert result.manifest["consumer_freshness_validation"]["status"] == "STALE"
+    assert result.manifest["production_data_package"]["status"] == "SKIPPED"
+    assert calls == []
+
+
 def test_remote_transport_arguments_are_all_required(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         refresh_public_data.parse_args([
@@ -149,6 +301,33 @@ def test_remote_syncer_maps_sealed_activation_result(
     assert "--ssh-target" in calls[0]
 
 
+def test_remote_syncer_propagates_initial_seed_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = {
+        "schema_version": "public-data-transport/1", "status": "SYNCED",
+        "package_id": "public-current-abc", "remote_activation": {
+            "status": "SYNCED", "package_id": "public-current-abc",
+            "manifest": "PASS", "sha": "PASS", "atomic_switch": "PASS",
+            "formal_read_validation": "PASS",
+        },
+    }
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        refresh_public_data.subprocess, "run",
+        lambda command, **_kwargs: (
+            calls.append(command) or subprocess.CompletedProcess(
+                command, 0, json.dumps(payload), ""
+            )
+        ),
+    )
+    sync = refresh_public_data._build_remote_syncer(
+        ssh_target="trusted-host", activation_image_id=f"sha256:{'a' * 64}"
+    )
+    sync(tmp_path / "package", store_root="/safe/store", initial_seed=True)
+    assert calls[0][-1] == "--initial-seed"
+
+
 def test_domestic_spread_change_delivers_when_public_currents_are_unchanged(
     runtime: RuntimeContext,
 ) -> None:
@@ -158,6 +337,7 @@ def test_domestic_spread_change_delivers_when_public_currents_are_unchanged(
     package_dir.mkdir()
     package = ProductionPackage("delivery-2", package_dir, {}, True)
     seen_artifacts: dict[str, object] = {}
+    (runtime.runtime_root / "packages" / "public-current-prior").mkdir(parents=True)
 
     def build(**kwargs) -> ProductionPackage:
         seen_artifacts.update(kwargs["delivery_artifacts"])
@@ -184,6 +364,7 @@ def test_domestic_spread_change_delivers_when_public_currents_are_unchanged(
     assert result.manifest["delivery_artifact_producer"] == "PASS"
     assert result.manifest["production_data_package"]["status"] == "GENERATED"
     assert result.manifest["server_sync"] == "SYNCED"
+    assert result.manifest["delivery_action"] == DeliveryAction.STANDARD.value
     assert seen_artifacts == {"domestic-spread": artifact}
 
 
@@ -217,7 +398,7 @@ def test_unchanged_currents_and_unchanged_domestic_spread_are_no_change(
     )
 
     assert result.business_status is DailyBusinessStatus.NO_CHANGE
-    assert result.manifest["production_data_package"]["status"] == "NO_CHANGE"
+    assert result.manifest["production_data_package"]["status"] == "SKIPPED"
     assert result.manifest["server_sync"] == "SKIPPED"
     assert sync_called is False
 
@@ -282,13 +463,16 @@ def test_qc_failure_blocks_publication_and_reports_failed_stage(runtime: Runtime
         refresh_runner=lambda: _refresh(runtime.runtime_root, _outcome(ProviderStatus.QC_FAILURE)),
         public_current_root=runtime.runtime_root / "public-market-data",
         packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
         package_builder=lambda **_kwargs: pytest.fail("package must be skipped"),
+        initial_seed=True,
     )
     assert result.business_status is DailyBusinessStatus.FAILED
     assert result.manifest["candidate"] == "PASS"
     assert result.manifest["qc"] == "FAIL"
     assert result.manifest["canonical"] == "N/A"
     assert result.manifest["server_sync"] == "SKIPPED"
+    assert result.manifest["delivery_action"] == DeliveryAction.SKIPPED.value
 
 
 def test_updated_alone_packages_syncs_then_prewarms(runtime: RuntimeContext) -> None:

@@ -33,6 +33,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--incoming-package", type=Path, required=True)
     parser.add_argument("--store-root", type=Path, required=True)
+    parser.add_argument("--initial-seed", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         store_root=args.store_root,
         pre_switch_validator=validate_activated_public_currents,
         post_switch_validator=post_switch_validate,
+        initial_seed=args.initial_seed,
     )
     payload = {
         "schema_version": "public-data-remote-activation/1",

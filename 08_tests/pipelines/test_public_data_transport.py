@@ -90,6 +90,57 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
     assert "StrictHostKeyChecking" not in " ".join(" ".join(item) for item in calls)
 
 
+def test_initial_seed_refuses_existing_remote_current_before_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = SimpleNamespace(
+        package_id="public-current-abc", directory=tmp_path,
+        manifest={"current_identity_sha256": "a" * 64,
+                  "delivery_identity_sha256": "b" * 64,
+                  "bundle_sha256": "c" * 64},
+    )
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(transport, "_run", lambda command: (
+        calls.append(command) or _completed(command, stdout=json.dumps({
+            "schema_version": "public-current-server-pointer/2",
+            "package_id": "another-package", **package.manifest,
+        }))
+    ))
+    code = transport.main([
+        "--package", str(tmp_path), "--ssh-target", "trusted-host",
+        "--remote-store-root", "/safe/store",
+        "--activation-image-id", f"sha256:{'a' * 64}", "--initial-seed",
+    ])
+    assert code == 2
+    assert len(calls) == 1 and calls[0][0] == "ssh"
+    assert json.loads(capsys.readouterr().out)["status"] == "ALREADY_INITIALIZED"
+
+
+def test_initial_seed_propagates_to_remote_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = SimpleNamespace(package_id="public-current-abc", directory=tmp_path, manifest={})
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+    def run(command: list[str]):
+        calls.append(command)
+        if len(calls) == 1:
+            return _completed(command, stdout="__MISSING__")
+        if len(calls) in {2, 3}:
+            return _completed(command)
+        return _completed(command, stdout=json.dumps({
+            "status": "SYNCED", "package_id": package.package_id,
+        }))
+    monkeypatch.setattr(transport, "_run", run)
+    assert transport.main([
+        "--package", str(tmp_path), "--ssh-target", "trusted-host",
+        "--remote-store-root", "/safe/store",
+        "--activation-image-id", f"sha256:{'a' * 64}", "--initial-seed",
+    ]) == 0
+    assert "--initial-seed" in calls[-1][-1]
+
+
 @pytest.mark.parametrize(
     ("target", "store", "image"),
     [

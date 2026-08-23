@@ -40,6 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ssh-target", required=True)
     parser.add_argument("--remote-store-root", required=True)
     parser.add_argument("--activation-image-id", required=True)
+    parser.add_argument("--initial-seed", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -91,6 +92,15 @@ def main(argv: list[str] | None = None) -> int:
             or pointer["schema_version"] != "public-current-server-pointer/2"
         ):
             raise RuntimeError("remote Current pointer schema is invalid")
+        if args.initial_seed:
+            print(json.dumps({
+                "schema_version": "public-data-transport/1",
+                "status": "ALREADY_INITIALIZED",
+                "package_id": package.package_id,
+                "transport": "SKIPPED",
+                "remote_activation": "SKIPPED",
+            }, sort_keys=True))
+            return 2
         if pointer.get("package_id") == package.package_id:
             expected = package.manifest
             if any(
@@ -120,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("SCP package transport failed")
 
     container_store = "/runtime/public-data-server-store"
-    activation = _ssh(target, [
+    activation_arguments = [
         "docker", "run", "--rm", "--pull", "never", "--network", "none",
         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
@@ -129,7 +139,10 @@ def main(argv: list[str] | None = None) -> int:
         image, "python", "/app/04_scripts/activate_public_data_package.py",
         "--incoming-package", f"{container_store}/incoming/{upload_name}",
         "--store-root", container_store,
-    ])
+    ]
+    if args.initial_seed:
+        activation_arguments.append("--initial-seed")
+    activation = _ssh(target, activation_arguments)
     if activation.returncode != 0:
         raise RuntimeError("remote validation or activation failed")
     try:

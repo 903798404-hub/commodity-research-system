@@ -41,6 +41,12 @@ class DailyBusinessStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class DeliveryAction(StrEnum):
+    SKIPPED = "SKIPPED"
+    STANDARD = "STANDARD"
+    INITIAL_SEED = "INITIAL_SEED"
+
+
 @dataclass(frozen=True, slots=True)
 class DailyUpdateResult:
     run_id: str
@@ -76,6 +82,7 @@ def run_daily_update(
     post_switch_validator: Callable[[Path], None] | None = None,
     consumer_freshness_validator: FreshnessValidator | None = None,
     delivery_artifact_runner: DeliveryArtifactRunner | None = None,
+    initial_seed: bool = False,
     package_builder: PackageBuilder = build_production_package,
     syncer: Syncer = sync_to_local_server_store,
     prewarmer: Prewarmer = run_prewarm,
@@ -97,6 +104,9 @@ def run_daily_update(
     freshness_payload: dict[str, Any] = {"status": "SKIPPED", "results": []}
     delivery_artifacts: Mapping[str, str | Path] | None = None
     delivery_artifact_status = "SKIPPED"
+    delivery_action = DeliveryAction.SKIPPED
+    delivery_identity: str | None = None
+    aggregate_unchanged = False
 
     if refresh_status in {DailyBusinessStatus.UPDATED, DailyBusinessStatus.NO_CHANGE}:
         if delivery_artifact_runner is not None:
@@ -110,16 +120,23 @@ def run_daily_update(
                 delivery_artifact_status = "FAIL"
                 safe_reason = f"delivery artifact producer failed: {type(exc).__name__}"
 
+    has_delivery_baseline = _has_delivery_package(packages_root)
     should_package = (
         status is DailyBusinessStatus.UPDATED
         or (
             status is DailyBusinessStatus.NO_CHANGE
             and delivery_artifact_runner is not None
             and delivery_artifact_status == "PASS"
+            and (initial_seed or has_delivery_baseline)
         )
     )
     if should_package:
-        if consumer_freshness_validator is not None:
+        if initial_seed and status is DailyBusinessStatus.NO_CHANGE:
+            delivery_action = DeliveryAction.INITIAL_SEED
+        if initial_seed and consumer_freshness_validator is None:
+            freshness_payload = {"status": "STALE", "results": []}
+            safe_reason = "consumer freshness validation is required for initial seed"
+        elif consumer_freshness_validator is not None:
             try:
                 freshness = consumer_freshness_validator()
                 freshness_payload = freshness.as_dict()
@@ -142,6 +159,13 @@ def run_daily_update(
                     if refresh_status is DailyBusinessStatus.UPDATED or package.created
                     else "NO_CHANGE"
                 )
+                delivery_identity = package.manifest.get("delivery_identity_sha256")
+                if refresh_status is DailyBusinessStatus.UPDATED:
+                    delivery_action = DeliveryAction.STANDARD
+                elif initial_seed:
+                    package_status = "GENERATED" if package.created else "REUSED"
+                elif package.created:
+                    delivery_action = DeliveryAction.STANDARD
             except Exception as exc:
                 package_status = "FAILED"
                 safe_reason = f"production package failed: {type(exc).__name__}"
@@ -149,18 +173,23 @@ def run_daily_update(
             package is not None
             and refresh_status is DailyBusinessStatus.NO_CHANGE
             and not package.created
+            and not initial_seed
         )
         if aggregate_unchanged:
             # A content-addressed delivery aggregate already exists locally;
             # NO_CHANGE must not contact or mutate the production server.
             server_status = "SKIPPED"
+            package_status = "SKIPPED"
+            package = None
         elif package is not None and server_store_root is not None:
             try:
+                seed_action = delivery_action is DeliveryAction.INITIAL_SEED
                 sync = syncer(
                     package.directory,
                     store_root=server_store_root,
                     pre_switch_validator=pre_switch_validator,
                     post_switch_validator=post_switch_validator,
+                    initial_seed=seed_action,
                 )
                 server_status = sync.status
                 manifest_status = sync.manifest
@@ -168,7 +197,8 @@ def run_daily_update(
                 switch_status = sync.atomic_switch
                 read_status = sync.formal_read_validation
                 if sync.status == "SYNCED":
-                    status = DailyBusinessStatus.UPDATED
+                    if not seed_action:
+                        status = DailyBusinessStatus.UPDATED
                     targets = prewarm_targets
                     if prewarm_target_factory is not None and sync.current_directory is not None:
                         targets = prewarm_target_factory(sync.current_directory / "data")
@@ -185,18 +215,20 @@ def run_daily_update(
 
     if (
         refresh_status is DailyBusinessStatus.NO_CHANGE
-        and package is not None
-        and not package.created
-        and (sync is None or sync.status == "NO_CHANGE")
+        and status is not DailyBusinessStatus.FAILED
+        and delivery_action is not DeliveryAction.STANDARD
     ):
         status = DailyBusinessStatus.NO_CHANGE
 
+    seed_action = delivery_action is DeliveryAction.INITIAL_SEED
     succeeded = status not in {DailyBusinessStatus.FAILED} and (
         not should_package
+        or aggregate_unchanged
         or (
             freshness_payload["status"] != "STALE"
-            and package_status in {"GENERATED", "NO_CHANGE"}
+            and package_status in {"GENERATED", "NO_CHANGE", "REUSED"}
             and server_status != "FAILED"
+            and (not seed_action or server_status == "SYNCED")
         )
     )
     now = datetime.now(timezone.utc).isoformat()
@@ -216,9 +248,8 @@ def run_daily_update(
         "public_current_identity": current_identity,
         "public_current_vector": current_vector,
         "current_changed": refresh_status is DailyBusinessStatus.UPDATED,
-        "delivery_identity": (
-            package.manifest.get("delivery_identity_sha256") if package else None
-        ),
+        "delivery_identity": delivery_identity,
+        "delivery_action": delivery_action.value,
         "delivery_changed": bool(
             package
             and (
@@ -265,6 +296,7 @@ def render_final_line(manifest: Mapping[str, Any]) -> str:
     if status == DailyBusinessStatus.NO_CHANGE.value:
         return (
             "NO_CHANGE | Delivery aggregate unchanged | "
+            f"Delivery action={manifest.get('delivery_action', 'SKIPPED')} | "
             f"Production package={manifest['production_data_package']['status']} | "
             f"Server={manifest['server_sync']}"
         )
@@ -297,6 +329,7 @@ def render_final_line(manifest: Mapping[str, Any]) -> str:
     return (
         f"{prefix}{freshness_text} | Current={manifest['public_current_identity']} | "
         f"Delivery={manifest['delivery_identity']} | "
+        f"Delivery action={manifest.get('delivery_action', 'SKIPPED')} | "
         f"Server={manifest['server_sync']} | Manifest={manifest['manifest']} | "
         f"Pre-warm={manifest['prewarm']['status']}"
     )
@@ -310,6 +343,7 @@ def render_daily_report(manifest: Mapping[str, Any]) -> str:
         f"Public Current identity: {manifest['public_current_identity']}",
         f"Current changed: {manifest['current_changed']}",
         f"Delivery identity: {manifest['delivery_identity']}",
+        f"Delivery action: {manifest.get('delivery_action', 'SKIPPED')}",
         f"Delivery changed: {manifest['delivery_changed']}",
         f"Delivery artifact producer: {manifest['delivery_artifact_producer']}",
         f"Consumer Freshness Validation: {manifest['consumer_freshness_validation']['status']}",
@@ -351,6 +385,14 @@ def _business_status(outcomes: Sequence[ProviderOutcome]) -> DailyBusinessStatus
     if ProviderStatus.UPDATED in statuses:
         return DailyBusinessStatus.UPDATED
     return DailyBusinessStatus.NO_CHANGE
+
+
+def _has_delivery_package(packages_root: str | Path) -> bool:
+    root = Path(packages_root)
+    return root.is_dir() and any(
+        path.is_dir() and path.name.startswith("public-current-")
+        for path in root.iterdir()
+    )
 
 
 def _source_payload(outcome: ProviderOutcome) -> dict[str, Any]:
@@ -428,6 +470,6 @@ def _json_sha256(value: object) -> str:
 
 
 __all__ = [
-    "DailyBusinessStatus", "DailyUpdateResult", "render_daily_report",
+    "DailyBusinessStatus", "DailyUpdateResult", "DeliveryAction", "render_daily_report",
     "render_final_line", "run_daily_update",
 ]
