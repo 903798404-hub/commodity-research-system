@@ -270,6 +270,64 @@ def fetch_spot(candidates: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd
     return pd.DataFrame(success_rows), pd.DataFrame(failures), raw_spot
 
 
+def fetch_daily_history(
+    candidates: pd.DataFrame, *, start_date: dt.date
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Fetch exchange-dated closes for every configured contract.
+
+    The spot endpoint does not expose a quote business date.  Stamping its last
+    price with the server date can therefore invent weekend or holiday rows and
+    cannot repair a missed run.  The daily endpoint supplies the exchange date
+    and lets one run backfill every real trading day after ``start_date``.
+    """
+
+    observations: list[pd.DataFrame] = []
+    raw_frames: list[pd.DataFrame] = []
+    failures: list[dict[str, Any]] = []
+    first_date = pd.Timestamp(start_date)
+    for row in candidates.itertuples(index=False):
+        symbol = str(row.symbol)
+        try:
+            raw = ak.futures_zh_daily_sina(symbol=symbol)
+            if not isinstance(raw, pd.DataFrame) or raw.empty:
+                raise ValueError("empty futures_zh_daily_sina response")
+            normalized = raw.copy()
+            normalized.columns = [str(column).strip().lower() for column in normalized.columns]
+            if not {"date", "close"}.issubset(normalized.columns):
+                raise ValueError("daily response is missing date or close")
+            normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+            normalized["close"] = pd.to_numeric(normalized["close"], errors="coerce")
+            normalized["requested_symbol"] = symbol
+            raw_frames.append(normalized)
+            selected = normalized[
+                normalized["date"].ge(first_date)
+                & normalized["date"].notna()
+                & normalized["close"].gt(0)
+            ].copy()
+            if selected.empty:
+                continue
+            selected["instrument"] = str(row.instrument)
+            selected["delivery_month"] = int(row.delivery_month)
+            selected["symbol"] = symbol
+            selected["season"] = str(row.season)
+            selected["price"] = selected["close"]
+            selected["price_field"] = "close"
+            selected["source"] = "akshare_futures_zh_daily_sina"
+            observations.append(
+                selected[
+                    [
+                        "date", "instrument", "delivery_month", "symbol", "season",
+                        "price", "price_field", "source",
+                    ]
+                ]
+            )
+        except Exception as exc:  # noqa: BLE001
+            failures.append({"symbol": symbol, "error": f"{type(exc).__name__}: {exc}"})
+    success = pd.concat(observations, ignore_index=True) if observations else pd.DataFrame()
+    raw_history = pd.concat(raw_frames, ignore_index=True) if raw_frames else pd.DataFrame()
+    return success, pd.DataFrame(failures), raw_history
+
+
 def build_price_long_rows(success: pd.DataFrame, existing_columns: list[str]) -> pd.DataFrame:
     now_text = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     rows: list[dict[str, object]] = []
@@ -323,7 +381,7 @@ def write_report(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Append today's AkShare futures prices to historical_price_long.xlsx.")
+    parser = argparse.ArgumentParser(description="Backfill missing exchange-dated AkShare futures closes.")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and report only; do not write historical_price_long.xlsx.")
     parser.add_argument(
         "--min-success-ratio",
@@ -354,7 +412,7 @@ def main() -> int:
     result_payload: dict[str, object] = {
         "status": "failed",
         "server_date": dt.date.today().isoformat(),
-        "source": "akshare_futures_zh_spot",
+        "source": "akshare_futures_zh_daily_sina",
         "required_contracts": 0,
         "success_contracts": 0,
         "failure_contracts": 0,
@@ -379,17 +437,25 @@ def main() -> int:
         existing = pd.read_excel(price_file, sheet_name=PRICE_LONG_SHEET)
         existing["date"] = pd.to_datetime(existing["date"], errors="coerce")
         candidates = build_candidates(config_file, database_file)
-        success, failures, raw_spot = fetch_spot(candidates)
+        latest_existing = existing["date"].max()
+        start_date = (
+            dt.date.today()
+            if pd.isna(latest_existing)
+            else (pd.Timestamp(latest_existing) + pd.Timedelta(days=1)).date()
+        )
+        success, failures, raw_spot = fetch_daily_history(
+            candidates, start_date=start_date
+        )
         required_contracts = int(len(candidates))
-        success_contracts = int(len(success))
+        failed_symbols = set(failures["symbol"].astype(str)) if not failures.empty else set()
+        success_contracts = required_contracts - len(failed_symbols)
         failed_contracts = failures["symbol"].astype(str).tolist() if not failures.empty else []
         failure_contracts = int(len(failed_contracts))
         success_ratio = success_contracts / required_contracts if required_contracts else 0.0
         to_append = build_price_long_rows(success, list(existing.columns)) if not success.empty else pd.DataFrame(columns=existing.columns)
-        today = pd.Timestamp(dt.date.today())
         unique_cols = ["date", "instrument", "delivery_month"]
         existing_today_rows = existing[
-            (existing["date"] == today)
+            existing["date"].isin(to_append["date"] if not to_append.empty else [])
             & existing["instrument"].isin(to_append["instrument"] if not to_append.empty else [])
             & existing["delivery_month"].isin(to_append["delivery_month"] if not to_append.empty else [])
         ].copy()
@@ -437,7 +503,11 @@ def main() -> int:
                 combined.to_excel(writer, sheet_name=PRICE_LONG_SHEET, index=False)
             os.replace(tmp_price_file, price_file)
 
-        latest_date = "" if to_append.empty else pd.to_datetime(to_append["date"]).max().strftime("%Y-%m-%d")
+        resulting_latest = pd.concat(
+            [existing["date"], to_append["date"] if not to_append.empty else pd.Series(dtype="datetime64[ns]")],
+            ignore_index=True,
+        ).max()
+        latest_date = "" if pd.isna(resulting_latest) else pd.Timestamp(resulting_latest).strftime("%Y-%m-%d")
         result_payload.update(
             {
                 "status": "success",
@@ -458,8 +528,7 @@ def main() -> int:
         logger.info("success_contracts=%s", success_contracts)
         logger.info("failure_contracts=%s", failure_contracts)
         logger.info("failed_contracts=%s", failed_contracts)
-        if not success.empty:
-            logger.info("akshare_times=%s", success[["symbol", "akshare_time"]].to_dict("records"))
+        logger.info("backfill_start_date=%s", start_date.isoformat())
         logger.info("to_append_rows=%s", len(to_append))
         logger.info("overwritten_rows=%s", overwritten_rows)
         logger.info("price_long_written=%s", result_payload["price_long_written"])

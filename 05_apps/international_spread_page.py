@@ -51,7 +51,7 @@ def _cached_page_payload(
 ) -> InternationalSpreadPayload:
     catalog = load_three_oil_v1()
     current = load_international_spread_public_current(
-        catalog, public_current_root
+        catalog, public_current_root, oil
     )
     if (
         current.identity.release_id != release_id

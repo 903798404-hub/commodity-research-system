@@ -120,6 +120,32 @@ def test_reader_returns_exact_series_and_current_traceability(
     assert record["current_manifest_sha256"] == "b" * 64
 
 
+def test_reader_filters_required_series_in_arrow_before_python_materialization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    irrelevant = [
+        _row(
+            series_id=f"market.irrelevant.{index}",
+            business_date=date(2026, 1, 1),
+        )
+        for index in range(1000)
+    ]
+    _install_current(monkeypatch, tmp_path, [*irrelevant, _row()])
+    original = reader._select_required_series
+    selected_rows: list[int] = []
+
+    def select(table: pa.Table, series_ids: tuple[str, ...]) -> pa.Table:
+        selected = original(table, series_ids)
+        selected_rows.append(selected.num_rows)
+        return selected
+
+    monkeypatch.setattr(reader, "_select_required_series", select)
+    result = load_three_oil_public_current(tmp_path, [_requirement()])
+
+    assert selected_rows == [1]
+    assert set(result.records_by_series_id) == {SERIES_ID}
+
+
 @pytest.mark.parametrize(
     ("changes", "requirement", "code"),
     [

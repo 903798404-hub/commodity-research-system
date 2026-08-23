@@ -43,6 +43,23 @@ def _synthetic_records():
     }
 
 
+def test_oil_page_dependency_projection_uses_only_required_source_series() -> None:
+    catalog = load_three_oil_v1()
+
+    selected = {
+        oil: application._required_source_series_ids(catalog, oil)
+        for oil in ("palm", "soy", "rape")
+    }
+
+    assert {oil: len(series_ids) for oil, series_ids in selected.items()} == {
+        "palm": 8,
+        "soy": 16,
+        "rape": 11,
+    }
+    all_series = {item.series_id for item in catalog.series}
+    assert all(series_ids < all_series for series_ids in selected.values())
+
+
 def _metrics(payload):
     return [
         metric

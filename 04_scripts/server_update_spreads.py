@@ -72,7 +72,7 @@ def initial_status(run_mode: str) -> dict[str, object]:
         "parquet_latest_date": "",
         "error_message": "",
         "run_mode": run_mode,
-        "source": "akshare_futures_zh_spot" if run_mode == "update_from_akshare" else "existing_local_data",
+        "source": "akshare_futures_zh_daily_sina" if run_mode == "update_from_akshare" else "existing_local_data",
     }
 
 
@@ -165,7 +165,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--update-from-akshare",
         action="store_true",
-        help="Fetch today's futures prices with AkShare, update historical_price_long.xlsx, then recalculate spreads.",
+        help="Backfill missing exchange-dated futures closes with AkShare, then recalculate spreads.",
     )
     parser.add_argument(
         "--recalculate-from-existing-price-long",

@@ -90,6 +90,31 @@ def test_mixed_noop_and_update_is_success(runtime: RuntimeContext) -> None:
     assert result.providers[1].current_before != result.providers[1].current_after
 
 
+def test_reported_update_requires_formal_current_identity_change(runtime: RuntimeContext) -> None:
+    class FalsePromotion(FakeAdapter):
+        def refresh(self) -> RefreshResult:
+            return RefreshResult(True, {"data": "2026-08-19"})
+
+    result = run_unified_refresh(
+        runtime=runtime, run_id="false-promotion", adapters=[FalsePromotion("tankan")]
+    )
+    assert result.providers[0].status is ProviderStatus.NO_CHANGE
+    assert result.providers[0].current_before == result.providers[0].current_after
+
+
+def test_no_change_with_identity_mutation_fails_closed(runtime: RuntimeContext) -> None:
+    class HiddenMutation(FakeAdapter):
+        def refresh(self) -> RefreshResult:
+            self.revision += 1
+            return RefreshResult(False, {"data": "2026-08-19"})
+
+    result = run_unified_refresh(
+        runtime=runtime, run_id="hidden-mutation", adapters=[HiddenMutation("tankan")]
+    )
+    assert result.providers[0].status is ProviderStatus.PROMOTION_FAILURE
+    assert result.overall_status is OverallStatus.FAILED
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -131,6 +156,75 @@ def test_unavailable_provider_does_not_block_other_provider(runtime: RuntimeCont
     )
     assert result.overall_status is OverallStatus.SUCCESS_WITH_UNAVAILABLE_SOURCE
     assert result.providers[1].status is ProviderStatus.UPDATED
+
+
+def test_required_source_mode_preflights_all_and_preserves_every_current(
+    runtime: RuntimeContext,
+) -> None:
+    tankan = FakeAdapter("tankan", RefreshResult(True, {"data": "2026-08-19"}))
+    lutou = FakeAdapter(
+        "lutou",
+        preflight_failure=ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "safe"),
+    )
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="all-required",
+        adapters=[tankan, lutou],
+        require_all_sources=True,
+    )
+    assert [item.status for item in result.providers] == [
+        ProviderStatus.NO_CHANGE,
+        ProviderStatus.SOURCE_UNAVAILABLE,
+    ]
+    assert all(item.current_before == item.current_after for item in result.providers)
+    assert tankan.revision == 1
+
+
+def test_required_source_mode_rolls_back_prior_update_when_later_qc_fails(
+    runtime: RuntimeContext,
+) -> None:
+    @dataclass
+    class PointerAdapter:
+        name: str
+        fail_qc: bool = False
+
+        @property
+        def pointer(self) -> Path:
+            return runtime.runtime_root / "public-market-data" / self.name / "current.json"
+
+        def current_identity(self) -> CurrentIdentity:
+            value = json.loads(self.pointer.read_text(encoding="utf-8"))
+            return CurrentIdentity(value["release_id"], value["manifest_sha256"], {})
+
+        def preflight(self):
+            return {"read_only": True}
+
+        def refresh(self) -> RefreshResult:
+            if self.fail_qc:
+                raise ProviderFailure(ProviderStatus.QC_FAILURE, "safe")
+            self.pointer.write_text(
+                json.dumps({"release_id": "r2", "manifest_sha256": "b" * 64}),
+                encoding="utf-8",
+            )
+            return RefreshResult(True, {})
+
+    adapters = [PointerAdapter("tankan"), PointerAdapter("lutou", fail_qc=True)]
+    for adapter in adapters:
+        adapter.pointer.parent.mkdir(parents=True)
+        adapter.pointer.write_text(
+            json.dumps({"release_id": "r1", "manifest_sha256": "a" * 64}),
+            encoding="utf-8",
+        )
+    before = {adapter.name: adapter.pointer.read_bytes() for adapter in adapters}
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="rollback-after-qc",
+        adapters=adapters,
+        require_all_sources=True,
+    )
+    assert result.providers[1].status is ProviderStatus.QC_FAILURE
+    assert all(item.current_before == item.current_after for item in result.providers)
+    assert {adapter.name: adapter.pointer.read_bytes() for adapter in adapters} == before
 
 
 def test_failed_provider_does_not_block_other_provider(runtime: RuntimeContext) -> None:

@@ -10,6 +10,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
+import pyarrow as pa
+import pyarrow.compute as pc
+
 from agri_research_agent.pipelines.lutou_goal_b import (
     GoalBCurrent,
     LutouGoalBError,
@@ -81,7 +84,7 @@ def load_three_oil_public_current(
     if len(by_id) != len(requirements):
         raise ValueError("Public Series requirements contain duplicate series_id values")
     identity, current = _resolve_current(public_current_root)
-    table = current.observations
+    table = _select_required_series(current.observations, tuple(by_id))
 
     output: dict[str, list[Mapping[str, object]]] = {
         series_id: [] for series_id in by_id
@@ -161,6 +164,27 @@ def load_three_oil_public_current(
         }
     )
     return PublicCurrentSnapshot(identity, records)
+
+
+def _select_required_series(
+    table: pa.Table, series_ids: Sequence[str]
+) -> pa.Table:
+    """Filter validated Current rows in Arrow before Python materialization."""
+
+    if "series_id" not in table.column_names:
+        raise PublicCurrentError(
+            PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST,
+            "Public Current series_id column is missing",
+        )
+    series_type = table.schema.field("series_id").type
+    try:
+        requested = pa.array(series_ids, type=series_type)
+        return table.filter(pc.is_in(table["series_id"], value_set=requested))
+    except (pa.ArrowException, TypeError, ValueError):
+        raise PublicCurrentError(
+            PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST,
+            "Public Current series_id filtering failed",
+        ) from None
 
 
 def _resolve_current(

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
 
 from agri_research_agent.shared.immutable_candidate import seal_immutable_candidate, validate_candidate_id
+from agri_research_agent.shared.atomic_storage import atomic_write_bytes
 from agri_research_agent.shared.runtime_context import RuntimeContext, assert_runtime_write
 
 
@@ -98,6 +99,7 @@ def run_unified_refresh(
     run_id: str,
     adapters: Sequence[ProviderAdapter],
     report_builder: Callable[[Mapping[str, object]], str] | None = None,
+    require_all_sources: bool = False,
 ) -> UnifiedRunResult:
     """Run providers independently and seal one immutable orchestration report."""
 
@@ -108,7 +110,19 @@ def run_unified_refresh(
     if len(names) != len(set(names)):
         raise ValueError("provider names must be unique")
     started = datetime.now(timezone.utc)
-    outcomes = tuple(_run_provider(adapter) for adapter in adapters)
+    pointer_snapshot = _snapshot_current_pointers(runtime) if require_all_sources else None
+    outcomes = (
+        _run_all_required(adapters)
+        if require_all_sources
+        else tuple(_run_provider(adapter) for adapter in adapters)
+    )
+    if require_all_sources and pointer_snapshot is not None and any(
+        item.status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
+        for item in outcomes
+    ):
+        outcomes = _restore_current_pointers(
+            runtime, adapters, outcomes, pointer_snapshot
+        )
     completed = datetime.now(timezone.utc)
     overall = _overall(outcomes)
     manifest: dict[str, object] = {
@@ -205,6 +219,7 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
         domains = {}
         source_max = preflight_source_max
     after = _safe_current_identity(adapter, before)
+    status, reason = _reconcile_status_with_identity(status, reason, before, after)
     if (
         status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
         and after != before
@@ -216,6 +231,168 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
         adapter.name, preflight_status, status, before, after,
         source_max or after.source_max_dates, domains, reason,
     )
+
+
+def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutcome, ...]:
+    """Preflight every source before allowing any Current-producing refresh."""
+
+    prepared: dict[str, tuple[ProviderAdapter, CurrentIdentity, Mapping[str, str]]] = {}
+    blocked: dict[str, ProviderOutcome] = {}
+    for adapter in adapters:
+        try:
+            before = adapter.current_identity()
+        except Exception as exc:
+            missing = CurrentIdentity(None, None, {})
+            blocked[adapter.name] = ProviderOutcome(
+                adapter.name, ProviderStatus.PROMOTION_FAILURE,
+                ProviderStatus.PROMOTION_FAILURE, missing, missing, {}, {},
+                f"Current identity check failed: {type(exc).__name__}",
+            )
+            continue
+        try:
+            preflight = adapter.preflight()
+            source_max = {
+                str(key): str(value)
+                for key, value in dict(preflight.get("source_max_dates", {})).items()
+            }
+            prepared[adapter.name] = (adapter, before, source_max)
+        except ProviderFailure as exc:
+            after = _safe_current_identity(adapter, before)
+            blocked[adapter.name] = ProviderOutcome(
+                adapter.name, exc.status, exc.status, before, after,
+                after.source_max_dates, {}, exc.safe_reason,
+            )
+        except Exception as exc:
+            after = _safe_current_identity(adapter, before)
+            blocked[adapter.name] = ProviderOutcome(
+                adapter.name, ProviderStatus.SOURCE_UNAVAILABLE,
+                ProviderStatus.SOURCE_UNAVAILABLE, before, after,
+                after.source_max_dates, {},
+                f"provider preflight failed: {type(exc).__name__}",
+            )
+    if blocked:
+        outcomes: list[ProviderOutcome] = []
+        for adapter in adapters:
+            if adapter.name in blocked:
+                outcomes.append(blocked[adapter.name])
+            else:
+                _, before, source_max = prepared[adapter.name]
+                outcomes.append(
+                    ProviderOutcome(
+                        adapter.name, ProviderStatus.READY, ProviderStatus.NO_CHANGE,
+                        before, before, source_max or before.source_max_dates, {},
+                        "refresh skipped because another required source is unavailable",
+                    )
+                )
+            _close_adapter(adapter)
+        return tuple(outcomes)
+    return tuple(
+        _refresh_preflighted(adapter, before, source_max)
+        for adapter, before, source_max in prepared.values()
+    )
+
+
+def _refresh_preflighted(
+    adapter: ProviderAdapter,
+    before: CurrentIdentity,
+    preflight_source_max: Mapping[str, str],
+) -> ProviderOutcome:
+    try:
+        refreshed = adapter.refresh()
+        status = refreshed.status or (
+            ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
+        )
+        reason = refreshed.safe_reason
+        domains = refreshed.domains
+        source_max = refreshed.source_max_dates
+    except ProviderFailure as exc:
+        status, reason, domains = exc.status, exc.safe_reason, {}
+        source_max = preflight_source_max
+    except Exception as exc:
+        status = ProviderStatus.INGESTION_FAILURE
+        reason = f"provider refresh failed: {type(exc).__name__}"
+        domains, source_max = {}, preflight_source_max
+    after = _safe_current_identity(adapter, before)
+    status, reason = _reconcile_status_with_identity(status, reason, before, after)
+    if status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE} and after != before and not domains:
+        status = ProviderStatus.PROMOTION_FAILURE
+        reason = "failed provider changed Current identity"
+    return ProviderOutcome(
+        adapter.name, ProviderStatus.READY, status, before, after,
+        source_max or after.source_max_dates, domains, reason,
+    )
+
+
+def _reconcile_status_with_identity(
+    status: ProviderStatus,
+    reason: str | None,
+    before: CurrentIdentity,
+    after: CurrentIdentity,
+) -> tuple[ProviderStatus, str | None]:
+    if status is ProviderStatus.UPDATED and after == before:
+        return ProviderStatus.NO_CHANGE, "provider reported promotion but Current identity is unchanged"
+    if status is ProviderStatus.NO_CHANGE and after != before:
+        return ProviderStatus.PROMOTION_FAILURE, "provider changed Current while reporting NO_CHANGE"
+    return status, reason
+
+
+def _close_adapter(adapter: ProviderAdapter) -> None:
+    close = getattr(adapter, "close", None)
+    if callable(close):
+        close()
+
+
+def _snapshot_current_pointers(runtime: RuntimeContext) -> dict[Path, bytes]:
+    public_root = runtime.runtime_root / "public-market-data"
+    if not public_root.is_dir():
+        return {}
+    return {
+        path.relative_to(runtime.runtime_root): path.read_bytes()
+        for path in public_root.glob("*/current.json")
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+def _restore_current_pointers(
+    runtime: RuntimeContext,
+    adapters: Sequence[ProviderAdapter],
+    outcomes: tuple[ProviderOutcome, ...],
+    snapshot: Mapping[Path, bytes],
+) -> tuple[ProviderOutcome, ...]:
+    public_root = runtime.runtime_root / "public-market-data"
+    current_paths = {
+        path.relative_to(runtime.runtime_root): path
+        for path in public_root.glob("*/current.json")
+        if path.is_file() and not path.is_symlink()
+    } if public_root.is_dir() else {}
+    try:
+        for relative, payload in snapshot.items():
+            target = assert_runtime_write(runtime, runtime.runtime_root / relative)
+            atomic_write_bytes(target, payload)
+        for relative, target in current_paths.items():
+            if relative not in snapshot:
+                assert_runtime_write(runtime, target).unlink(missing_ok=True)
+    except Exception as exc:
+        return tuple(
+            replace(
+                item,
+                status=ProviderStatus.PROMOTION_FAILURE,
+                safe_reason=f"Public Current rollback failed: {type(exc).__name__}",
+            )
+            for item in outcomes
+        )
+    refreshed: list[ProviderOutcome] = []
+    for adapter, outcome in zip(adapters, outcomes, strict=True):
+        after = _safe_current_identity(adapter, outcome.current_before)
+        status = outcome.status
+        reason = outcome.safe_reason
+        if status is ProviderStatus.UPDATED and after == outcome.current_before:
+            status = ProviderStatus.NO_CHANGE
+            reason = "Current update rolled back because another required source failed"
+        refreshed.append(
+            replace(outcome, status=status, current_after=after, safe_reason=reason)
+        )
+    return tuple(refreshed)
 
 
 def _safe_current_identity(

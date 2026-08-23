@@ -121,7 +121,7 @@ def test_page_rejects_current_identity_change_during_payload_load(
     monkeypatch.setattr(
         page,
         "load_international_spread_public_current",
-        lambda _catalog, _root: PublicCurrentSnapshot(
+        lambda _catalog, _root, _oil: PublicCurrentSnapshot(
             loaded_identity, MappingProxyType({})
         ),
     )

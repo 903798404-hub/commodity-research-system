@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import subprocess
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -22,7 +24,19 @@ from agri_research_agent.pipelines.public_data_providers import (
     LutouRefreshAdapter,
     TankanRefreshAdapter,
 )
-from agri_research_agent.pipelines.public_data_refresh import run_unified_refresh
+from agri_research_agent.pipelines.public_data_daily import run_daily_update
+from agri_research_agent.pipelines.public_data_freshness import (
+    build_consumer_freshness_validator,
+)
+from agri_research_agent.pipelines.public_data_prewarm import (
+    build_consumer_prewarm_targets,
+    validate_activated_public_currents,
+)
+from agri_research_agent.pipelines.public_data_refresh import (
+    ProviderFailure,
+    ProviderStatus,
+    run_unified_refresh,
+)
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
 
 
@@ -33,6 +47,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--weather-baseline-root", type=Path)
     parser.add_argument("--end-date", type=date.fromisoformat, default=date.today())
     parser.add_argument("--run-id")
+    parser.add_argument(
+        "--packages-root",
+        type=Path,
+        help="Immutable production data package root (defaults inside runtime root)",
+    )
+    parser.add_argument(
+        "--sync-target-root",
+        type=Path,
+        help="Local filesystem server-store backend used for Goal E validation",
+    )
+    parser.add_argument(
+        "--prewarm",
+        action="store_true",
+        help="Run the four consumer loader warmers after a successful local switch",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Read-only source/current preflight; do not build Candidate or change Current",
+    )
     parser.add_argument(
         "--tankan-secret-file",
         type=Path,
@@ -89,18 +123,111 @@ def main(argv: list[str] | None = None) -> int:
                 ROOT / "02_configs" / "lutou_domestic_basis.yaml",
             )
         )
-    result = run_unified_refresh(
+    if args.dry_run:
+        return _dry_run(adapters)
+    packages_root = args.packages_root or runtime.runtime_root / "public-data-packages"
+    required_datasets = []
+    if "tankan" in sources:
+        required_datasets.append("tankan")
+    if "lutou" in sources:
+        required_datasets.extend(
+            ("lutou-three-oil", "lutou-soil-moisture", "lutou-weather", "lutou-domestic-basis")
+        )
+    result = run_daily_update(
         runtime=runtime,
         run_id=run_id,
-        adapters=adapters,
+        refresh_runner=lambda: run_unified_refresh(
+            runtime=runtime,
+            run_id=f"{run_id}-refresh",
+            adapters=adapters,
+            require_all_sources=True,
+        ),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=packages_root,
+        server_store_root=args.sync_target_root,
+        required_datasets=required_datasets,
+        prewarm_target_factory=(
+            lambda activated_runtime: build_consumer_prewarm_targets(
+                project_root=ROOT, runtime_root=activated_runtime
+            )
+        ) if args.prewarm else None,
+        pre_switch_validator=validate_activated_public_currents,
+        post_switch_validator=validate_activated_public_currents,
+        consumer_freshness_validator=build_consumer_freshness_validator(
+            project_root=ROOT, runtime_root=runtime.runtime_root
+        ),
+        delivery_artifact_runner=(
+            _refresh_domestic_spread_artifact if "tankan" in sources else None
+        ),
     )
     print(f"run_id={result.run_id}")
-    print(f"overall_status={result.overall_status.value}")
-    for provider in result.providers:
+    print(f"overall_status={result.business_status.value}")
+    for provider in result.refresh.providers:
         print(f"provider={provider.provider} status={provider.status.value}")
-    return 0 if result.overall_status.value in {
-        "SUCCESS", "SUCCESS_WITH_UNAVAILABLE_SOURCE", "NO_CHANGE"
-    } else 1
+    print(result.manifest["summary"])
+    return 0 if result.succeeded else 1
+
+
+def _dry_run(adapters: list[object]) -> int:
+    sources: list[dict[str, object]] = []
+    failed = False
+    for adapter in adapters:
+        name = str(getattr(adapter, "name", type(adapter).__name__))
+        identity = None
+        try:
+            identity = adapter.current_identity()
+            preflight = adapter.preflight()
+            status = ProviderStatus.READY
+            reason = None
+            source_max = dict(preflight.get("source_max_dates", {}))
+        except ProviderFailure as exc:
+            try:
+                identity = getattr(adapter, "current_identity")()
+            except Exception:
+                identity = None
+            status = exc.status
+            reason = exc.safe_reason
+            source_max = {} if identity is None else dict(identity.source_max_dates)
+            failed = failed or status not in {
+                ProviderStatus.SOURCE_UNAVAILABLE,
+                ProviderStatus.NETWORK_UNAVAILABLE,
+                ProviderStatus.LIVE_VERIFICATION_PENDING,
+            }
+        except Exception as exc:
+            status = ProviderStatus.INGESTION_FAILURE
+            reason = f"dry-run preflight failed: {type(exc).__name__}"
+            source_max = {}
+            failed = True
+        finally:
+            close = getattr(adapter, "close", None)
+            if callable(close):
+                close()
+        sources.append(
+            {
+                "source": name,
+                "status": status.value,
+                "source_max_dates": source_max,
+                "current_identity": None if identity is None else {
+                    "release_id": identity.release_id,
+                    "manifest_sha256": identity.manifest_sha256,
+                },
+                "safe_reason": reason,
+            }
+        )
+    payload = {
+        "schema_version": "unified-public-data-dry-run/1",
+        "dry_run": True,
+        "sources": sources,
+        "candidate": "SKIPPED",
+        "qc": "SKIPPED",
+        "canonical": "SKIPPED",
+        "current_changed": False,
+        "production_data_package": "SKIPPED",
+        "server_sync": "SKIPPED",
+        "prewarm": "SKIPPED",
+    }
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return 1 if failed else 0
 
 
 def _lutou_settings() -> LutouConnectionSettings:
@@ -118,6 +245,27 @@ def _lutou_settings() -> LutouConnectionSettings:
     finally:
         for name in values:
             values[name] = ""
+
+
+def _refresh_domestic_spread_artifact() -> dict[str, Path]:
+    """Run the formal Domestic Spread producer and return its sealed input."""
+
+    command = [
+        sys.executable,
+        str(ROOT / "04_scripts" / "server_update_spreads.py"),
+        "--update-from-akshare",
+    ]
+    completed = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().splitlines()
+        suffix = f": {detail[-1]}" if detail else ""
+        raise RuntimeError(f"Domestic Spread producer failed{suffix}")
+    artifact = ROOT / "01_data" / "historical_spread_database.parquet"
+    if not artifact.is_file():
+        raise FileNotFoundError("Domestic Spread producer did not create Parquet")
+    return {"domestic-spread": artifact}
 
 
 if __name__ == "__main__":

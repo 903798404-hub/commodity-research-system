@@ -177,9 +177,15 @@ def build_international_spread_payload(
 def load_international_spread_public_current(
     catalog: ThreeOilV1Catalog,
     public_current_root: str | Path,
+    oil: str | None = None,
 ) -> PublicCurrentSnapshot:
-    """Resolve every approved source Series by stable Public Market identity."""
+    """Resolve the selected page's source Series by stable Public identity."""
 
+    required_ids = (
+        {item.series_id for item in catalog.series}
+        if oil is None
+        else _required_source_series_ids(catalog, oil)
+    )
     requirements = tuple(
         PublicSeriesRequirement(
             item.series_id,
@@ -188,8 +194,37 @@ def load_international_spread_public_current(
             item.price_type,
         )
         for item in catalog.series
+        if item.series_id in required_ids
     )
     return load_three_oil_public_current(public_current_root, requirements)
+
+
+def _required_source_series_ids(
+    catalog: ThreeOilV1Catalog, oil: str
+) -> set[str]:
+    try:
+        pages = tuple(catalog.page_by_id(page_id) for page_id in OIL_PAGE_IDS[oil])
+    except KeyError:
+        raise ValueError(f"unsupported international-spread oil: {oil}") from None
+    source_ids = {item.series_id for item in catalog.series}
+    required: set[str] = set()
+
+    def add_series(series_id: str) -> None:
+        if series_id in source_ids:
+            required.add(series_id)
+            return
+        for term in catalog.derived_series_by_id(series_id).terms:
+            add_series(term.series_id)
+
+    for page in pages:
+        for row in page.rows:
+            for metric in row.metrics:
+                if metric.metric_type == "spread":
+                    for term in catalog.spread_by_id(metric.contract_id).terms:
+                        add_series(term.series_id)
+                else:
+                    add_series(metric.contract_id)
+    return required
 
 
 def resolve_international_spread_snapshot(
