@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -35,7 +36,7 @@ DOMESTIC_SPREAD_FILENAME = "historical_spread_database.parquet"
 DOMESTIC_SPREAD_REQUIRED_COLUMNS = frozenset({
     "date", "spread_group", "spread_name", "leg1_instrument", "leg1_month",
     "leg1_price", "leg2_instrument", "leg2_month", "leg2_price",
-    "spread_value", "status", "updated_at",
+    "spread_value", "season", "calendar_offset", "status", "updated_at",
 })
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 
@@ -217,7 +218,10 @@ def sync_to_local_server_store(
     """Stage, validate and atomically switch one package-store Current pointer."""
 
     package = validate_production_package(package_directory)
-    root = Path(store_root).resolve()
+    configured_root = Path(store_root)
+    if configured_root.is_symlink():
+        raise DeliveryError("server store root must not be a symbolic link")
+    root = configured_root.resolve()
     incoming = root / "incoming"
     releases = root / "releases"
     incoming.mkdir(parents=True, exist_ok=True)
@@ -247,6 +251,94 @@ def sync_to_local_server_store(
         _safe_remove_tree(staged, incoming)
     else:
         os.replace(staged, formal)
+    new_pointer = {
+        "schema_version": SERVER_POINTER_SCHEMA,
+        "package_id": package.package_id,
+        "current_identity_sha256": package.manifest["current_identity_sha256"],
+        "delivery_identity_sha256": package.manifest["delivery_identity_sha256"],
+        "bundle_sha256": package.manifest["bundle_sha256"],
+    }
+    try:
+        if switch_hook is not None:
+            switch_hook()
+        atomic_write_json(pointer_path, new_pointer)
+    except Exception as exc:
+        return ServerSyncResult(
+            "FAILED", package.package_id, "PASS", "PASS", "FAIL", "N/A", None,
+            f"atomic Current switch failed: {type(exc).__name__}",
+        )
+    try:
+        current = resolve_server_current(root)
+        if post_switch_validator is not None:
+            post_switch_validator(current / "data")
+    except Exception as exc:
+        if old_pointer is None:
+            pointer_path.unlink(missing_ok=True)
+        else:
+            atomic_write_json(pointer_path, old_pointer)
+        return ServerSyncResult(
+            "FAILED", package.package_id, "PASS", "PASS", "PASS", "FAIL",
+            resolve_server_current(root) if old_pointer is not None else None,
+            f"formal read validation failed: {type(exc).__name__}",
+        )
+    return ServerSyncResult(
+        "SYNCED", package.package_id, "PASS", "PASS", "PASS", "PASS", current
+    )
+
+
+def activate_incoming_server_package(
+    incoming_directory: str | Path,
+    *,
+    store_root: str | Path,
+    pre_switch_validator: Callable[[Path], None] | None = None,
+    post_switch_validator: Callable[[Path], None] | None = None,
+    switch_hook: Callable[[], None] | None = None,
+) -> ServerSyncResult:
+    """Validate one uploaded directory and atomically activate it in-place.
+
+    Unlike the local simulation helper, this entrypoint never copies a package:
+    transport owns ``incoming/`` and activation renames the validated directory
+    into the immutable ``releases/`` store on the same filesystem.
+    """
+
+    configured_root = Path(store_root)
+    if configured_root.is_symlink():
+        raise DeliveryError("server store root must not be a symbolic link")
+    root = configured_root.resolve()
+    incoming_root = root / "incoming"
+    releases = root / "releases"
+    incoming_root.mkdir(parents=True, exist_ok=True)
+    releases.mkdir(parents=True, exist_ok=True)
+    _reject_symlink(incoming_root, "server incoming root")
+    _reject_symlink(releases, "server releases root")
+    upload_path = Path(incoming_directory)
+    if upload_path.is_symlink():
+        raise DeliveryError("uploaded package is outside server incoming root")
+    uploaded = upload_path.resolve(strict=True)
+    if uploaded.parent != incoming_root.resolve():
+        raise DeliveryError("uploaded package is outside server incoming root")
+    _safe_id(uploaded.name, "uploaded package directory")
+    package = validate_production_package(uploaded, require_directory_name=False)
+    if pre_switch_validator is not None:
+        pre_switch_validator(package.directory / "data")
+
+    pointer_path = root / "current.json"
+    old_pointer = _strict_json(pointer_path) if pointer_path.is_file() else None
+    if old_pointer and old_pointer.get("package_id") == package.package_id:
+        current = resolve_server_current(root)
+        _safe_remove_tree(uploaded, incoming_root)
+        return ServerSyncResult(
+            "NO_CHANGE", package.package_id, "PASS", "PASS", "N/A", "PASS", current
+        )
+
+    formal = releases / package.package_id
+    if formal.exists():
+        existing = validate_production_package(formal)
+        if existing.manifest["bundle_sha256"] != package.manifest["bundle_sha256"]:
+            raise DeliveryError("server release id collision")
+        _safe_remove_tree(uploaded, incoming_root)
+    else:
+        os.replace(uploaded, formal)
     new_pointer = {
         "schema_version": SERVER_POINTER_SCHEMA,
         "package_id": package.package_id,
@@ -491,6 +583,20 @@ def _domestic_spread_identity(path: Path) -> dict[str, Any]:
     successful = table.filter(pc.equal(table["status"], "success"))
     if successful.num_rows == 0:
         raise DeliveryError("Domestic Spread Parquet contains no successful rows")
+    for leg1, leg2, spread in zip(
+        successful["leg1_price"].to_pylist(),
+        successful["leg2_price"].to_pylist(),
+        successful["spread_value"].to_pylist(),
+        strict=True,
+    ):
+        try:
+            values = (float(leg1), float(leg2), float(spread))
+        except (TypeError, ValueError) as exc:
+            raise DeliveryError("Domestic Spread formula validation failed") from exc
+        if not all(math.isfinite(value) for value in values) or not math.isclose(
+            values[0] - values[1], values[2], rel_tol=1e-9, abs_tol=1e-8
+        ):
+            raise DeliveryError("Domestic Spread formula validation failed")
     latest = pc.max(successful["date"]).as_py()
     latest_text = (
         latest.date().isoformat() if isinstance(latest, datetime) else latest.isoformat()
@@ -612,6 +718,6 @@ def _safe_remove_tree(path: Path, expected_parent: Path, *, ignore_errors: bool 
 __all__ = [
     "DeliveryError", "PrewarmResult", "PrewarmStatus", "PrewarmTarget",
     "ProductionPackage", "ServerSyncResult", "build_production_package",
-    "resolve_server_current", "run_prewarm", "sync_to_local_server_store",
-    "validate_production_package",
+    "activate_incoming_server_package", "resolve_server_current", "run_prewarm",
+    "sync_to_local_server_store", "validate_production_package",
 ]

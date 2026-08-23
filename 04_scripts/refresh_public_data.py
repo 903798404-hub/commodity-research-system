@@ -32,6 +32,10 @@ from agri_research_agent.pipelines.public_data_prewarm import (
     build_consumer_prewarm_targets,
     validate_activated_public_currents,
 )
+from agri_research_agent.pipelines.public_data_delivery import (
+    ServerSyncResult,
+    sync_to_local_server_store,
+)
 from agri_research_agent.pipelines.public_data_refresh import (
     ProviderFailure,
     ProviderStatus,
@@ -58,6 +62,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Local filesystem server-store backend used for Goal E validation",
     )
     parser.add_argument(
+        "--ssh-target",
+        help="Trusted OpenSSH config alias for the production data host",
+    )
+    parser.add_argument(
+        "--remote-store-root",
+        help="Absolute Ubuntu public-data server-store root",
+    )
+    parser.add_argument(
+        "--activation-image-id",
+        help="Immutable sha256 Image ID containing the remote activation code",
+    )
+    parser.add_argument(
         "--prewarm",
         action="store_true",
         help="Run the four consumer loader warmers after a successful local switch",
@@ -72,7 +88,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path.home() / ".market-data-secrets" / "tankan.env",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    remote = (args.ssh_target, args.remote_store_root, args.activation_image_id)
+    if any(remote) and not all(remote):
+        parser.error(
+            "--ssh-target, --remote-store-root and --activation-image-id are required together"
+        )
+    if all(remote) and args.sync_target_root is not None:
+        parser.error("remote transport and --sync-target-root are mutually exclusive")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         required_datasets.extend(
             ("lutou-three-oil", "lutou-soil-moisture", "lutou-weather", "lutou-domestic-basis")
         )
+    remote_transport = bool(args.ssh_target)
     result = run_daily_update(
         runtime=runtime,
         run_id=run_id,
@@ -144,7 +169,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
         public_current_root=runtime.runtime_root / "public-market-data",
         packages_root=packages_root,
-        server_store_root=args.sync_target_root,
+        server_store_root=(
+            args.remote_store_root if remote_transport else args.sync_target_root
+        ),
+        syncer=(
+            _build_remote_syncer(
+                ssh_target=args.ssh_target,
+                activation_image_id=args.activation_image_id,
+            )
+            if remote_transport
+            else sync_to_local_server_store
+        ),
         required_datasets=required_datasets,
         prewarm_target_factory=(
             lambda activated_runtime: build_consumer_prewarm_targets(
@@ -266,6 +301,70 @@ def _refresh_domestic_spread_artifact() -> dict[str, Path]:
     if not artifact.is_file():
         raise FileNotFoundError("Domestic Spread producer did not create Parquet")
     return {"domestic-spread": artifact}
+
+
+def _build_remote_syncer(*, ssh_target: str, activation_image_id: str):
+    """Adapt the OpenSSH transport result to the daily orchestration contract."""
+
+    def sync(
+        package_directory: str | Path,
+        *,
+        store_root: str | Path,
+        pre_switch_validator=None,
+        post_switch_validator=None,
+    ) -> ServerSyncResult:
+        del pre_switch_validator, post_switch_validator
+        command = [
+            sys.executable,
+            str(ROOT / "04_scripts" / "transfer_public_data_package.py"),
+            "--package", str(package_directory),
+            "--ssh-target", ssh_target,
+            "--remote-store-root", str(store_root),
+            "--activation-image-id", activation_image_id,
+        ]
+        completed = subprocess.run(
+            command, cwd=ROOT, text=True, capture_output=True, check=False
+        )
+        if completed.returncode != 0:
+            raise RuntimeError("production package transport or activation failed")
+        try:
+            payload = json.loads(completed.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError) as exc:
+            raise RuntimeError("production package transport result is invalid") from exc
+        status = str(payload.get("status"))
+        package_id = str(payload.get("package_id"))
+        if payload.get("schema_version") != "public-data-transport/1":
+            raise RuntimeError("production package transport schema is invalid")
+        if status == "NO_CHANGE":
+            return ServerSyncResult(
+                status, package_id, "PASS", "PASS", "N/A", "PASS", None
+            )
+        activation = payload.get("remote_activation")
+        if (
+            status != "SYNCED"
+            or not isinstance(activation, dict)
+            or activation.get("status") != "SYNCED"
+            or activation.get("package_id") != package_id
+            or any(
+                activation.get(key) != "PASS"
+                for key in (
+                    "manifest", "sha", "atomic_switch", "formal_read_validation"
+                )
+            )
+        ):
+            raise RuntimeError("production package activation did not succeed")
+        return ServerSyncResult(
+            status,
+            package_id,
+            str(activation.get("manifest")),
+            str(activation.get("sha")),
+            str(activation.get("atomic_switch")),
+            str(activation.get("formal_read_validation")),
+            None,
+            activation.get("safe_reason"),
+        )
+
+    return sync
 
 
 if __name__ == "__main__":

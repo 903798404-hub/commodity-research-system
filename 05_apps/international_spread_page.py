@@ -23,6 +23,7 @@ from agri_research_agent.market_data.public_current import (
     PublicCurrentErrorCode,
     resolve_three_oil_current_identity,
 )
+from agri_research_agent.market_data.activated_runtime import resolve_public_data_root
 from agri_research_agent.research_data.canonical_spreads import CanonicalSpreadError
 from agri_research_agent.research_data.three_oil_v1 import load_three_oil_v1
 
@@ -39,7 +40,7 @@ GRID_COLUMN_COUNT = 3
 def _public_current_root(project_root: Path) -> Path:
     configured = os.getenv(PUBLIC_RUNTIME_ROOT_ENV, "").strip()
     runtime_root = Path(configured) if configured else project_root
-    return runtime_root / "public-market-data" / "lutou-three-oil"
+    return resolve_public_data_root(runtime_root) / "public-market-data" / "lutou-three-oil"
 
 
 @st.cache_data(show_spinner=False)

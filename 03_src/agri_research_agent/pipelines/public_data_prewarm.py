@@ -28,23 +28,22 @@ def build_consumer_prewarm_targets(
     from agri_research_agent.summary_engine.weather_cache import (
         load_weather_current_summary_cached,
     )
+    from agri_research_agent.application.domestic_spreads import (
+        load_domestic_spread_database,
+    )
     from basis_page import load_basis_page_data
     from international_spread_page import load_international_spread_payload
-    from research_overview_page import (
-        load_basis_overview_summary,
-        load_weather_overview_summaries,
-    )
 
     public = runtime / "public-market-data"
     weather_root = public / "lutou-weather"
     basis_root = public / "lutou-domestic-basis"
 
-    def overview() -> object:
-        basis = load_basis_overview_summary()
-        weather, warnings = load_weather_overview_summaries()
-        if warnings:
-            raise RuntimeError(f"Research Overview pre-warm returned {len(warnings)} warnings")
-        return basis, weather
+    domestic_spread = (
+        runtime
+        / "consumer-artifacts"
+        / "domestic-spread"
+        / "historical_spread_database.parquet"
+    )
 
     return (
         PrewarmTarget(
@@ -58,7 +57,10 @@ def build_consumer_prewarm_targets(
             ),
         ),
         PrewarmTarget("domestic_basis", lambda: load_basis_page_data(basis_root)),
-        PrewarmTarget("research_overview", overview),
+        PrewarmTarget(
+            "domestic_spread",
+            lambda: load_domestic_spread_database(domestic_spread),
+        ),
     )
 
 

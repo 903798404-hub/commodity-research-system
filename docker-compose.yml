@@ -19,6 +19,7 @@ services:
       OIL_WORLD_DASHBOARD_URL: ${OIL_WORLD_DASHBOARD_URL:?OIL_WORLD_DASHBOARD_URL must be explicitly set}
       WEATHER_DATA_DIR: ${WEATHER_DATA_DIR:?WEATHER_DATA_DIR must be explicitly set}
       PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data
+      PUBLIC_DATA_SERVER_STORE_ROOT: /app/01_data/public-data-server-store
     volumes:
       - ./01_data:/app/01_data:ro
       - ./06_outputs:/app/06_outputs

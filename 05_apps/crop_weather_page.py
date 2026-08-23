@@ -26,6 +26,7 @@ from agri_research_agent.market_data.public_weather_current import (  # noqa: E4
     load_public_weather_current,
     resolve_weather_current_identity,
 )
+from agri_research_agent.market_data.activated_runtime import resolve_public_data_root  # noqa: E402
 from agri_research_agent.weather.crop_weather import (  # noqa: E402
     add_season_columns,
     latest_observation_date,
@@ -52,7 +53,7 @@ PAGE_TITLE = "美国大豆天气研究"
 def _public_weather_current_root(project_root: Path = PROJECT_ROOT) -> Path:
     runtime_value = os.environ.get(PUBLIC_RUNTIME_ROOT_ENV, "").strip()
     runtime_root = Path(runtime_value) if runtime_value else project_root.parents[1] / "market-data-worktree-runtime" / "international-spread"
-    return runtime_root / "public-market-data" / "lutou-weather"
+    return resolve_public_data_root(runtime_root) / "public-market-data" / "lutou-weather"
 
 WEATHER_COUNTRY_FILES = {
     "USA": {"config": CONFIG_FILE, "fixture_enabled": True},

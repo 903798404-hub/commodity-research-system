@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from datetime import date
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from agri_research_agent.pipelines.public_data_delivery import (
+    activate_incoming_server_package,
     DeliveryError,
     PrewarmStatus,
     PrewarmTarget,
@@ -19,6 +21,10 @@ from agri_research_agent.pipelines.public_data_delivery import (
     run_prewarm,
     sync_to_local_server_store,
     validate_production_package,
+)
+from agri_research_agent.market_data.activated_runtime import (
+    resolve_domestic_spread_path,
+    resolve_public_data_root,
 )
 
 
@@ -65,6 +71,8 @@ def _domestic_spread(path: Path, *, value: float, updated_at: str) -> Path:
                 "leg2_month": 1,
                 "leg2_price": 3000.0 - value,
                 "spread_value": value,
+                "season": "2026/27",
+                "calendar_offset": 0,
                 "status": "success",
                 "updated_at": updated_at,
             }
@@ -241,6 +249,80 @@ def test_server_sync_stages_validates_and_switches_one_pointer(tmp_path: Path) -
     assert result.formal_read_validation == "PASS"
     assert resolve_server_current(tmp_path / "server") == result.current_directory
     assert seen == ["pre:data", "post:data"]
+
+
+def test_uploaded_package_activates_in_place_and_is_idempotent(tmp_path: Path) -> None:
+    public = tmp_path / "public-market-data"
+    _current(public, "tankan", "r1", "one")
+    package = build_production_package(
+        public_current_root=public, packages_root=tmp_path / "packages", source_max_dates={}
+    )
+    store = tmp_path / "server"
+    upload = store / "incoming" / f"{package.package_id}.upload-one"
+    upload.parent.mkdir(parents=True)
+    shutil.copytree(package.directory, upload)
+
+    result = activate_incoming_server_package(upload, store_root=store)
+
+    assert result.status == "SYNCED"
+    assert not upload.exists()
+    assert resolve_server_current(store).name == package.package_id
+    second_upload = store / "incoming" / f"{package.package_id}.upload-two"
+    shutil.copytree(package.directory, second_upload)
+    repeated = activate_incoming_server_package(second_upload, store_root=store)
+    assert repeated.status == "NO_CHANGE"
+    assert not second_upload.exists()
+
+
+def test_configured_consumers_resolve_one_activated_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    public = tmp_path / "public-market-data"
+    _current(public, "tankan", "r1", "one")
+    artifact = _domestic_spread(
+        tmp_path / "source" / "historical_spread_database.parquet",
+        value=-38.0,
+        updated_at="2026-08-23 08:00:00",
+    )
+    package = build_production_package(
+        public_current_root=public,
+        packages_root=tmp_path / "packages",
+        source_max_dates={},
+        delivery_artifacts={"domestic-spread": artifact},
+    )
+    store = tmp_path / "server"
+    sync_to_local_server_store(package.directory, store_root=store)
+    monkeypatch.setenv("PUBLIC_DATA_SERVER_STORE_ROOT", str(store))
+
+    data = resolve_public_data_root(tmp_path / "legacy")
+    spread = resolve_domestic_spread_path(tmp_path / "legacy")
+
+    assert data == store / "releases" / package.package_id / "data"
+    assert spread == data / "consumer-artifacts/domestic-spread/historical_spread_database.parquet"
+
+
+def test_domestic_spread_formula_mismatch_is_rejected(tmp_path: Path) -> None:
+    public = tmp_path / "public-market-data"
+    _current(public, "tankan", "r1", "one")
+    artifact = _domestic_spread(
+        tmp_path / "source" / "historical_spread_database.parquet",
+        value=-38.0,
+        updated_at="2026-08-23 08:00:00",
+    )
+    table = pq.read_table(artifact).set_column(
+        pq.read_table(artifact).schema.get_field_index("spread_value"),
+        "spread_value",
+        pa.array([999.0]),
+    )
+    pq.write_table(table, artifact)
+
+    with pytest.raises(DeliveryError, match="formula validation"):
+        build_production_package(
+            public_current_root=public,
+            packages_root=tmp_path / "packages",
+            source_max_dates={},
+            delivery_artifacts={"domestic-spread": artifact},
+        )
 
 
 def test_switch_failure_keeps_old_server_current(tmp_path: Path) -> None:

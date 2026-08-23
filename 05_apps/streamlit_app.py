@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from agri_research_agent.domains.spreads.calculation import add_plot_value
+from agri_research_agent.application.domestic_spreads import load_domestic_spread_database
 from agri_research_agent.domains.spreads.history import (
     FIVE_YEAR_MEAN_LABEL,
     FIVE_YEAR_MEAN_SMOOTH_WINDOW,
@@ -28,6 +29,10 @@ from agri_research_agent.domains.spreads.parsing import (
     display_spread_name,
     parse_spread_name,
     spread_sort_key,
+)
+from agri_research_agent.market_data.activated_runtime import (
+    resolve_domestic_spread_path,
+    resolve_public_data_root,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -75,9 +80,6 @@ PUBLIC_RUNTIME_ROOT = (
     / "market-data-worktree-runtime"
     / "international-spread"
 )
-PUBLIC_BASIS_CURRENT_ROOT = (
-    PUBLIC_RUNTIME_ROOT / "public-market-data" / "lutou-domestic-basis"
-)
 IMPORT_PROFIT_PAGE_TITLE = "日度进口大豆盘面净榨利"
 WEATHER_PAGE_ROUTES = {
     SOYBEAN_WEATHER_PAGE_TITLE: "soybean_weather",
@@ -90,25 +92,21 @@ SIDEBAR_NAVIGATION = NAVIGATION_GROUPS
 FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
 def get_database_path() -> Path:
-    return DATABASE_PARQUET_FILE if DATABASE_PARQUET_FILE.exists() else DATABASE_XLSX_FILE
+    return resolve_domestic_spread_path(DATA_DIR)
+
+
+def get_public_basis_current_root() -> Path:
+    return (
+        resolve_public_data_root(PUBLIC_RUNTIME_ROOT)
+        / "public-market-data"
+        / "lutou-domestic-basis"
+    )
 
 
 @st.cache_data(show_spinner=False)
 def load_database(database_path: Path, mtime: float) -> pd.DataFrame:
     del mtime
-    if database_path.suffix.lower() == ".parquet":
-        data = pd.read_parquet(database_path)
-    else:
-        data = pd.read_excel(database_path, sheet_name="spread_long")
-    data["date"] = pd.to_datetime(data["date"], errors="coerce")
-    data["calendar_offset"] = pd.to_numeric(data["calendar_offset"], errors="coerce")
-    data["spread_value"] = pd.to_numeric(data["spread_value"], errors="coerce")
-    data["leg1_price"] = pd.to_numeric(data["leg1_price"], errors="coerce")
-    data["leg2_price"] = pd.to_numeric(data["leg2_price"], errors="coerce")
-    data = data.dropna(subset=["date", "calendar_offset", "season"])
-    data["season"] = data["season"].astype(str)
-    data["spread_name"] = data["spread_name"].astype(str)
-    return data
+    return load_domestic_spread_database(database_path)
 
 
 @st.cache_data(show_spinner=False)
@@ -409,7 +407,7 @@ def render_selected_workspace_page(selected_page: str) -> None:
     elif selected_page == RESEARCH_OVERVIEW_PAGE_TITLE:
         render_research_overview()
     elif selected_page == "基差/一口价":
-        render_basis_page(PUBLIC_BASIS_CURRENT_ROOT)
+        render_basis_page(get_public_basis_current_root())
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
         render_soybean_weekly_page()
     elif selected_page in WEATHER_PAGE_ROUTES:

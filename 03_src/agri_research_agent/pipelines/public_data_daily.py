@@ -145,7 +145,16 @@ def run_daily_update(
             except Exception as exc:
                 package_status = "FAILED"
                 safe_reason = f"production package failed: {type(exc).__name__}"
-        if package is not None and server_store_root is not None:
+        aggregate_unchanged = (
+            package is not None
+            and refresh_status is DailyBusinessStatus.NO_CHANGE
+            and not package.created
+        )
+        if aggregate_unchanged:
+            # A content-addressed delivery aggregate already exists locally;
+            # NO_CHANGE must not contact or mutate the production server.
+            server_status = "SKIPPED"
+        elif package is not None and server_store_root is not None:
             try:
                 sync = syncer(
                     package.directory,

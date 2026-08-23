@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -103,6 +104,51 @@ def test_no_change_short_circuits_package_sync_and_prewarm(runtime: RuntimeConte
     assert calls == []
 
 
+def test_remote_transport_arguments_are_all_required(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        refresh_public_data.parse_args([
+            "--runtime-root", str(tmp_path), "--ssh-target", "trusted-host",
+        ])
+
+
+def test_remote_syncer_maps_sealed_activation_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = {
+        "schema_version": "public-data-transport/1",
+        "status": "SYNCED",
+        "package_id": "public-current-abc",
+        "transport": "PASS",
+        "remote_activation": {
+            "status": "SYNCED",
+            "package_id": "public-current-abc",
+            "manifest": "PASS",
+            "sha": "PASS",
+            "atomic_switch": "PASS",
+            "formal_read_validation": "PASS",
+            "safe_reason": None,
+        },
+    }
+    calls: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(refresh_public_data.subprocess, "run", run)
+    sync = refresh_public_data._build_remote_syncer(
+        ssh_target="trusted-host", activation_image_id=f"sha256:{'a' * 64}"
+    )
+    result = sync(
+        tmp_path / "package",
+        store_root="/home/ubuntu/market-data/01_data/public-data-server-store",
+    )
+
+    assert result.status == "SYNCED"
+    assert result.formal_read_validation == "PASS"
+    assert "--ssh-target" in calls[0]
+
+
 def test_domestic_spread_change_delivers_when_public_currents_are_unchanged(
     runtime: RuntimeContext,
 ) -> None:
@@ -149,6 +195,12 @@ def test_unchanged_currents_and_unchanged_domestic_spread_are_no_change(
     package_dir = runtime.runtime_root / "fixture-unchanged-delivery"
     package_dir.mkdir()
     package = ProductionPackage("delivery-1", package_dir, {}, False)
+    sync_called = False
+
+    def forbidden_sync(*_args, **_kwargs):
+        nonlocal sync_called
+        sync_called = True
+        raise AssertionError("NO_CHANGE must not contact the server")
 
     result = run_daily_update(
         runtime=runtime,
@@ -161,14 +213,13 @@ def test_unchanged_currents_and_unchanged_domestic_spread_are_no_change(
         server_store_root=runtime.runtime_root / "server",
         delivery_artifact_runner=lambda: {"domestic-spread": artifact},
         package_builder=lambda **_kwargs: package,
-        syncer=lambda *_args, **_kwargs: ServerSyncResult(
-            "NO_CHANGE", "delivery-1", "PASS", "PASS", "N/A", "PASS", package_dir
-        ),
+        syncer=forbidden_sync,
     )
 
     assert result.business_status is DailyBusinessStatus.NO_CHANGE
     assert result.manifest["production_data_package"]["status"] == "NO_CHANGE"
-    assert result.manifest["server_sync"] == "NO_CHANGE"
+    assert result.manifest["server_sync"] == "SKIPPED"
+    assert sync_called is False
 
 
 def test_domestic_spread_producer_failure_blocks_package_and_switch(

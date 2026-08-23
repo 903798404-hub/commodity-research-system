@@ -110,8 +110,8 @@ def build_consumer_freshness_validator(
 
     ``proposed_root`` is accepted by the returned callable so orchestration can
     validate either the freshly promoted local Current or a staged package.
-    Domestic Spread remains a legacy file consumer; its expected date is derived
-    independently from the dates common to each configured source-leg pair.
+    Domestic Spread uses the proposed package artifact when present; its expected
+    date is derived independently from configured source-leg common dates.
     """
 
     project = Path(project_root).resolve()
@@ -141,7 +141,17 @@ def build_consumer_freshness_validator(
             return payload.as_of_date, expected, "palm payload vs metric inputs"
 
         def domestic_spread() -> tuple[date | None, date | None, str]:
-            spread_path = project / "01_data" / "historical_spread_database.parquet"
+            packaged_spread = (
+                data_root
+                / "consumer-artifacts"
+                / "domestic-spread"
+                / "historical_spread_database.parquet"
+            )
+            spread_path = (
+                packaged_spread
+                if packaged_spread.is_file()
+                else project / "01_data" / "historical_spread_database.parquet"
+            )
             price_path = project / "01_data" / "historical_price_long.xlsx"
             config_path = project / "02_configs" / "historical_spread_config.xlsx"
             spread = pd.read_parquet(spread_path)

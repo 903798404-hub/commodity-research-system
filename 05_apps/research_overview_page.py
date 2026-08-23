@@ -16,6 +16,7 @@ from agri_research_agent.market_data.public_basis_current import (
     resolve_public_basis_current_identity,
 )
 from agri_research_agent.market_data.public_weather_current import PublicWeatherCurrentError
+from agri_research_agent.market_data.activated_runtime import resolve_public_data_root
 from agri_research_agent.summary_engine.weather_cache import load_weather_current_summary_cached
 from agri_research_agent.soybean_exports.research import (
     format_soybean_export_weekly_observation,
@@ -52,13 +53,13 @@ WEATHER_OVERVIEW_SOURCES = (
 def _public_weather_current_root(project_root: Path = PROJECT_ROOT) -> Path:
     runtime_value = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
     runtime_root = Path(runtime_value) if runtime_value else project_root.parents[1] / "market-data-worktree-runtime" / "international-spread"
-    return runtime_root / "public-market-data" / "lutou-weather"
+    return resolve_public_data_root(runtime_root) / "public-market-data" / "lutou-weather"
 
 
 def _public_basis_current_root(project_root: Path = PROJECT_ROOT) -> Path:
     runtime_value = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
     runtime_root = Path(runtime_value) if runtime_value else project_root.parents[1] / "market-data-worktree-runtime" / "international-spread"
-    return runtime_root / "public-market-data" / "lutou-domestic-basis"
+    return resolve_public_data_root(runtime_root) / "public-market-data" / "lutou-domestic-basis"
 
 
 def _summary_payload(summary: object | None) -> dict[str, Any]:
