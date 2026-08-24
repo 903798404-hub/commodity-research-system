@@ -33,6 +33,20 @@ from agri_research_agent.pipelines.public_data_prewarm import (  # noqa: E402
 _SSH_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}$")
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _REMOTE_PATH = re.compile(r"^/[A-Za-z0-9_./-]+$")
+_REMOTE_DETAIL_LIMIT = 512
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)\b(?:lutou_(?:host|port|user|password)|password|passwd|pwd|secret|"
+    r"token|api[_-]?key|authorization|user\s*(?:name|id)?|host|server|"
+    r"data\s+source|"
+    r"private[_-]?key)\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+)
+_CONNECTION_URI = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s]+")
+_SSH_AUTHORITY = re.compile(r"\b[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\b")
+_COMMAND_LINE = re.compile(r"(?i)(?:^|\s)(?:docker|ssh|scp)\s+\S+.*--\S+")
+_PRIVATE_KEY_PATH = re.compile(
+    r"(?i)(?:[A-Za-z]:\\|/)[^\s\"'<>]*(?:id_(?:rsa|dsa|ecdsa|ed25519)|"
+    r"[^/\\\s]+\.(?:pem|key))\b"
+)
 
 _PREPARE_PERMISSION_SCRIPT = (
     'set -eu; install -d --mode=0750 -- "$1" "$2" "$3"; '
@@ -131,6 +145,22 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 def _ssh(target: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return _run(["ssh", "-T", target, shlex.join(arguments)])
+
+
+def _bounded_remote_detail(result: subprocess.CompletedProcess[str]) -> str:
+    detail = result.stderr.strip() or result.stdout.strip()
+    detail = "\n".join(
+        "<redacted-command>" if _COMMAND_LINE.search(line) else line
+        for line in detail.splitlines()
+    )
+    detail = _CONNECTION_URI.sub("<redacted-connection-string>", detail)
+    detail = _SSH_AUTHORITY.sub("<redacted-ssh-authority>", detail)
+    detail = _SENSITIVE_ASSIGNMENT.sub("<redacted-credential>", detail)
+    detail = _PRIVATE_KEY_PATH.sub("<redacted-private-key-path>", detail)
+    detail = " ".join(detail.split()) or "<no diagnostic output>"
+    if len(detail) > _REMOTE_DETAIL_LIMIT:
+        detail = f"{detail[:_REMOTE_DETAIL_LIMIT - 3]}..."
+    return detail
 
 
 def _remote_integer(target: str, arguments: list[str], label: str) -> int:
@@ -341,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
         "--user", f"{transport_uid}:{transport_gid}",
-        "--mount", f"type=bind,src={store},dst={container_store},rw",
+        "--mount", f"type=bind,src={store},dst={container_store}",
         "--env", f"PUBLIC_DATA_SERVER_STORE_ROOT={container_store}",
         image, "python", "/app/04_scripts/activate_public_data_package.py",
         "--incoming-package", f"{container_store}/incoming/{upload_name}",
@@ -351,7 +381,10 @@ def main(argv: list[str] | None = None) -> int:
         activation_arguments.append("--initial-seed")
     activation = _ssh(target, activation_arguments)
     if activation.returncode != 0:
-        raise RuntimeError("remote validation or activation failed")
+        detail = _bounded_remote_detail(activation)
+        raise RuntimeError(
+            f"remote activation failed; exit_code={activation.returncode}; detail={detail}"
+        )
     try:
         result = json.loads(activation.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError) as exc:

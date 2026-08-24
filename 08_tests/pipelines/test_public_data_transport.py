@@ -29,8 +29,10 @@ def _formal_consumer_validation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _completed(command: list[str], *, code: int = 0, stdout: str = ""):
-    return subprocess.CompletedProcess(command, code, stdout, "")
+def _completed(
+    command: list[str], *, code: int = 0, stdout: str = "", stderr: str = ""
+):
+    return subprocess.CompletedProcess(command, code, stdout, stderr)
 
 
 def _successful_delivery_run(calls: list[list[str]], command: list[str]):
@@ -186,9 +188,93 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
     assert "--cap-drop ALL" in validation and ",readonly" in validation
     assert "--user 1000:1000" not in validation
     assert "--cap-drop ALL" in activation and "--user 1000:1000" in activation
-    assert ",rw" in activation
+    assert "type=bind,src=/home/ubuntu/market-data/01_data/public-data-server-store,dst=/runtime/public-data-server-store" in activation
+    assert ",rw" not in activation
+    assert ",readonly" not in activation
     assert "CAP_DAC_OVERRIDE" not in " ".join(joined_calls)
     assert "StrictHostKeyChecking" not in " ".join(" ".join(item) for item in calls)
+
+
+def test_activation_failure_retains_bounded_sanitized_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = SimpleNamespace(package_id="public-current-abc", directory=tmp_path, manifest={})
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+
+    def run(command: list[str]):
+        result = _successful_delivery_run(calls, command)
+        joined = " ".join(command)
+        if "activate_public_data_package.py" in joined and "--validate-only" not in joined:
+            secret_tail = "x" * 800
+            return _completed(
+                command,
+                code=125,
+                stdout="stdout must not override stderr",
+                stderr=(
+                    "invalid field 'rw'; LUTOU_PASSWORD=hunter2; "
+                    "LUTOU_USER=alice; postgresql://bob:secret@db.example/data; "
+                    "/home/alice/.ssh/id_rsa\n"
+                    "docker run --env LUTOU_PASSWORD=hunter2 image command\n"
+                    f"ops-user@private-host {secret_tail}"
+                ),
+            )
+        return result
+
+    monkeypatch.setattr(transport, "_run", run)
+    with pytest.raises(RuntimeError) as caught:
+        transport.main([
+            "--package", str(tmp_path), "--ssh-target", "trusted-host",
+            "--remote-store-root", "/safe/store",
+            "--activation-image-id", f"sha256:{'a' * 64}",
+        ])
+
+    message = str(caught.value)
+    assert "remote activation failed; exit_code=125" in message
+    assert "invalid field 'rw'" in message
+    assert "<redacted-credential>" in message
+    assert "<redacted-connection-string>" in message
+    assert "<redacted-private-key-path>" in message
+    assert "<redacted-command>" in message
+    assert "<redacted-ssh-authority>" in message
+    assert "hunter2" not in message
+    assert "alice" not in message
+    assert "bob" not in message
+    assert "secret" not in message
+    assert "private-host" not in message
+    assert "docker run" not in message
+    assert "stdout must not override stderr" not in message
+    assert len(message.partition("detail=")[2]) <= transport._REMOTE_DETAIL_LIMIT
+
+
+def test_activation_failure_uses_bounded_stdout_when_stderr_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = SimpleNamespace(package_id="public-current-abc", directory=tmp_path, manifest={})
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+
+    def run(command: list[str]):
+        result = _successful_delivery_run(calls, command)
+        joined = " ".join(command)
+        if "activate_public_data_package.py" in joined and "--validate-only" not in joined:
+            return _completed(
+                command, code=9, stdout="fallback diagnostic token=do-not-leak"
+            )
+        return result
+
+    monkeypatch.setattr(transport, "_run", run)
+    with pytest.raises(RuntimeError) as caught:
+        transport.main([
+            "--package", str(tmp_path), "--ssh-target", "trusted-host",
+            "--remote-store-root", "/safe/store",
+            "--activation-image-id", f"sha256:{'a' * 64}",
+        ])
+
+    message = str(caught.value)
+    assert "exit_code=9" in message
+    assert "fallback diagnostic" in message
+    assert "do-not-leak" not in message
 
 
 def test_initial_seed_refuses_existing_remote_current_before_upload(
