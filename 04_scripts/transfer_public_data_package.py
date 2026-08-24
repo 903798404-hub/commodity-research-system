@@ -34,6 +34,71 @@ _SSH_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}$")
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _REMOTE_PATH = re.compile(r"^/[A-Za-z0-9_./-]+$")
 
+_PREPARE_PERMISSION_SCRIPT = (
+    'set -eu; install -d --mode=0750 -- "$1" "$2" "$3"; '
+    'setfacl -m "u:$4:r-x,d:u:$4:r-x" -- "$1"; '
+    'setfacl -k -- "$2"; setfacl -m "u:$4:--x" -- "$2"; '
+    'if getfacl -cp -- "$2" | grep -q "^default:"; then exit 66; fi; '
+    'setfacl -m "u:$4:r-x" -- "$3"'
+)
+
+_CREATE_PRIVATE_UPLOAD_SCRIPT = (
+    'set -eu; test ! -e "$1"; test ! -L "$1"; '
+    'install -d --mode=0700 -- "$1"; setfacl -b -k -- "$1"; '
+    'chmod 0700 -- "$1"; '
+    'test "$(stat -c %u -- "$1")" = "$2"; '
+    'test "$(stat -c %g -- "$1")" = "$3"'
+)
+
+_VERIFY_COMPLETED_UPLOAD_SCRIPT = (
+    'set -eu; test -d "$1"; test ! -L "$1"; '
+    'test -f "$1/manifest.json"; test ! -L "$1/manifest.json"; '
+    'test -d "$1/data"; test ! -L "$1/data"; '
+    'test "$(find "$1" -mindepth 1 -maxdepth 1 -printf x | wc -c)" -eq 2'
+)
+
+_SEAL_FOR_RUNTIME_READ_SCRIPT = (
+    'set -eu; test -d "$1"; test ! -L "$1"; '
+    'test -z "$(find "$1" -mindepth 1 ! -type d ! -type f -print -quit)"; '
+    'find "$1" -type d -exec setfacl -b -k -- {} +; '
+    'find "$1" -type f -exec setfacl -b -- {} +; '
+    'find "$1" -type d -exec chmod 0700 -- {} +; '
+    'find "$1" -type f -exec chmod 0600 -- {} +; '
+    'find "$1" -type d -exec setfacl -m "u:$2:r-x" -- {} +; '
+    'find "$1" -type f -exec setfacl -m "u:$2:r--" -- {} +; '
+    'directory_count=$(find "$1" -type d -printf x | wc -c); '
+    'file_count=$(find "$1" -type f -printf x | wc -c); '
+    'test "$directory_count" -gt 0; test "$file_count" -gt 0; '
+    'directory_acls=$(find "$1" -type d -exec getfacl -cpn -- {} +); '
+    'file_acls=$(find "$1" -type f -exec getfacl -cpn -- {} +); '
+    'count=$(printf "%s\\n" "$directory_acls" | grep -c "^user::rwx$" || true); '
+    'test "$count" -eq "$directory_count"; '
+    'count=$(printf "%s\\n" "$directory_acls" | grep -c "^user:$2:r-x$" || true); '
+    'test "$count" -eq "$directory_count"; '
+    'count=$(printf "%s\\n" "$directory_acls" | grep -c "^group::---$" || true); '
+    'test "$count" -eq "$directory_count"; '
+    'count=$(printf "%s\\n" "$directory_acls" | grep -c "^mask::r-x$" || true); '
+    'test "$count" -eq "$directory_count"; '
+    'count=$(printf "%s\\n" "$directory_acls" | grep -c "^other::---$" || true); '
+    'test "$count" -eq "$directory_count"; '
+    'count=$(printf "%s\\n" "$directory_acls" | grep -c "^[^[:space:]]" || true); '
+    'test "$count" -eq "$((directory_count * 5))"; '
+    'if printf "%s\\n" "$directory_acls" | grep -q "^default:"; then exit 67; fi; '
+    'count=$(printf "%s\\n" "$file_acls" | grep -c "^user::rw-$" || true); '
+    'test "$count" -eq "$file_count"; '
+    'count=$(printf "%s\\n" "$file_acls" | grep -c "^user:$2:r--$" || true); '
+    'test "$count" -eq "$file_count"; '
+    'count=$(printf "%s\\n" "$file_acls" | grep -c "^group::---$" || true); '
+    'test "$count" -eq "$file_count"; '
+    'count=$(printf "%s\\n" "$file_acls" | grep -c "^mask::r--$" || true); '
+    'test "$count" -eq "$file_count"; '
+    'count=$(printf "%s\\n" "$file_acls" | grep -c "^other::---$" || true); '
+    'test "$count" -eq "$file_count"; '
+    'count=$(printf "%s\\n" "$file_acls" | grep -c "^[^[:space:]]" || true); '
+    'test "$count" -eq "$((file_count * 5))"; '
+    'test -z "$(find "$1" -mindepth 1 -perm /0007 -print -quit)"'
+)
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -204,33 +269,41 @@ def main(argv: list[str] | None = None) -> int:
 
     incoming_root = f"{store}/incoming"
     releases_root = f"{store}/releases"
-    prepare_script = (
-        'set -eu; install -d --mode=0750 -- "$1" "$2" "$3"; '
-        'setfacl -m "u:$4:r-x,d:u:$4:r-x" -- "$1"; '
-        'setfacl -m "u:$4:--x" -- "$2"; '
-        'setfacl -m "u:$4:r-x" -- "$3"'
-    )
     prepare = _ssh(target, [
-        "sh", "-c", prepare_script, "public-data-permission-setup",
+        "sh", "-c", _PREPARE_PERMISSION_SCRIPT, "public-data-permission-setup",
         store, incoming_root, releases_root, str(runtime_uid),
     ])
     if prepare.returncode != 0:
         raise RuntimeError("remote permission contract preparation failed")
     upload_name = f"{package.package_id}.upload-{uuid.uuid4().hex}"
     remote_upload = f"{incoming_root}/{upload_name}"
-    copied = _run(["scp", "-r", "--", str(package.directory), f"{target}:{remote_upload}"])
+    created = _ssh(target, [
+        "sh", "-c", _CREATE_PRIVATE_UPLOAD_SCRIPT, "create-private-upload",
+        remote_upload, str(transport_uid), str(transport_gid),
+    ])
+    if created.returncode != 0:
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("private staging creation failed")
+    copied = _run([
+        "scp", "-r", "--",
+        str(package.directory / "manifest.json"), str(package.directory / "data"),
+        f"{target}:{remote_upload}/",
+    ])
     if copied.returncode != 0:
         _quarantine_upload(target, store, remote_upload, upload_name)
         raise RuntimeError("SCP package transport failed")
 
+    completed = _ssh(target, [
+        "sh", "-c", _VERIFY_COMPLETED_UPLOAD_SCRIPT, "verify-completed-upload",
+        remote_upload,
+    ])
+    if completed.returncode != 0:
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("uploaded staging package is structurally incomplete")
+
     container_store = "/runtime/public-data-server-store"
-    seal_script = (
-        'set -eu; test -d "$1"; test ! -L "$1"; '
-        'find "$1" -type d -exec setfacl -m "u:$2:r-x" -- {} +; '
-        'find "$1" -type f -exec setfacl -m "u:$2:r--" -- {} +'
-    )
     sealed = _ssh(target, [
-        "sh", "-c", seal_script, "seal-for-runtime-read",
+        "sh", "-c", _SEAL_FOR_RUNTIME_READ_SCRIPT, "seal-for-runtime-read",
         remote_upload, str(runtime_uid),
     ])
     if sealed.returncode != 0:

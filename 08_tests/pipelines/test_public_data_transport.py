@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
+import stat
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -139,7 +142,17 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
     assert code == 0
     joined_calls = [" ".join(command) for command in calls]
     assert [command[0] for command in calls].count("scp") == 1
+    setup_index = next(
+        i for i, item in enumerate(joined_calls)
+        if "public-data-permission-setup" in item
+    )
+    create_index = next(
+        i for i, item in enumerate(joined_calls) if "create-private-upload" in item
+    )
     scp_index = next(i for i, command in enumerate(calls) if command[0] == "scp")
+    complete_index = next(
+        i for i, item in enumerate(joined_calls) if "verify-completed-upload" in item
+    )
     setup = next(item for item in joined_calls if "public-data-permission-setup" in item)
     seal_index = next(i for i, item in enumerate(joined_calls) if "seal-for-runtime-read" in item)
     validate_index = next(i for i, item in enumerate(joined_calls) if "--validate-only" in item)
@@ -147,11 +160,25 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
         i for i, item in enumerate(joined_calls)
         if "activate_public_data_package.py" in item
     )
-    assert scp_index < seal_index < validate_index < activate_index
+    assert setup_index < create_index < scp_index < complete_index < seal_index
+    assert seal_index < validate_index < activate_index
     assert 'd:u:$4:r-x' in setup and 'u:$4:--x' in setup
+    assert 'setfacl -k -- "$2"' in setup
+    assert '^default:' in setup
+    create = joined_calls[create_index]
+    assert "--mode=0700" in create
+    assert "setfacl -b -k" in create
+    assert "chmod 0700" in create
+    assert "u:$" not in create
+    scp = calls[scp_index]
+    assert str(tmp_path / "manifest.json") in scp
+    assert str(tmp_path / "data") in scp
     seal = joined_calls[seal_index]
     assert 'u:$2:r-x' in seal and 'u:$2:r--' in seal
-    assert "chmod" not in setup + seal
+    assert "setfacl -b -k" in seal and "setfacl -b" in seal
+    assert "chmod 0700" in seal and "chmod 0600" in seal
+    assert '^other::---$' in seal and '^group::---$' in seal
+    assert "-perm /0007" in seal
     validation = joined_calls[validate_index]
     activation = joined_calls[activate_index]
     assert image_id in activation
@@ -262,6 +289,135 @@ def test_seal_failure_quarantines_and_never_validates_or_activates(
     assert any("public-data-quarantine" in item for item in joined)
     assert not any("--validate-only" in item for item in joined)
     assert not any("--user 1000:1000" in item for item in joined)
+
+
+def test_incomplete_uploaded_structure_quarantines_before_seal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = SimpleNamespace(package_id="public-current-abc", directory=tmp_path, manifest={})
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+
+    def run(command: list[str]):
+        result = _successful_delivery_run(calls, command)
+        if "verify-completed-upload" in " ".join(command):
+            return _completed(command, code=1)
+        return result
+
+    monkeypatch.setattr(transport, "_run", run)
+    with pytest.raises(RuntimeError, match="structurally incomplete"):
+        transport.main([
+            "--package", str(tmp_path), "--ssh-target", "trusted-host",
+            "--remote-store-root", "/safe/store",
+            "--activation-image-id", f"sha256:{'a' * 64}",
+        ])
+    joined = [" ".join(command) for command in calls]
+    assert any("public-data-quarantine" in item for item in joined)
+    assert not any("seal-for-runtime-read" in item for item in joined)
+    assert not any("--validate-only" in item for item in joined)
+
+
+@pytest.mark.skipif(
+    os.name != "posix"
+    or shutil.which("sh") is None
+    or shutil.which("setfacl") is None
+    or shutil.which("getfacl") is None,
+    reason="requires a POSIX ACL runtime",
+)
+def test_real_scp_0664_modes_are_normalized_before_runtime_acl(tmp_path: Path) -> None:
+    staging = tmp_path / "public-current-abc.upload-scp"
+    nested = staging / "data" / "nested"
+    nested.mkdir(parents=True)
+    manifest = staging / "manifest.json"
+    payload = nested / "payload.txt"
+    manifest.write_text("ordinary manifest", encoding="utf-8")
+    payload.write_text("ordinary payload", encoding="utf-8")
+    for directory in (staging, staging / "data", nested):
+        directory.chmod(0o775)
+    for path in (manifest, payload):
+        path.chmod(0o664)
+        subprocess.run(
+            ["setfacl", "-m", "u:65533:rw-", "--", str(path)], check=True
+        )
+    subprocess.run(
+        ["setfacl", "-m", "d:u:65533:rwx", "--", str(staging / "data")],
+        check=True,
+    )
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o664
+    assert stat.S_IMODE(staging.stat().st_mode) == 0o775
+
+    runtime_uid = 65534
+    result = subprocess.run(
+        [
+            "sh", "-c", transport._SEAL_FOR_RUNTIME_READ_SCRIPT,
+            "seal-for-runtime-read", str(staging), str(runtime_uid),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    for directory in (staging, staging / "data", nested):
+        acl = subprocess.run(
+            ["getfacl", "-cpn", "--", str(directory)],
+            text=True, capture_output=True, check=True,
+        ).stdout.splitlines()
+        assert "user::rwx" in acl
+        assert f"user:{runtime_uid}:r-x" in acl
+        assert "group::---" in acl
+        assert "mask::r-x" in acl
+        assert "other::---" in acl
+        assert not any(line.startswith("default:") for line in acl)
+        assert not any(line.startswith("user:65533:") for line in acl)
+    for path in (manifest, payload):
+        acl = subprocess.run(
+            ["getfacl", "-cpn", "--", str(path)],
+            text=True, capture_output=True, check=True,
+        ).stdout.splitlines()
+        assert "user::rw-" in acl
+        assert f"user:{runtime_uid}:r--" in acl
+        assert "group::---" in acl
+        assert "mask::r--" in acl
+        assert "other::---" in acl
+        assert not any(line.startswith("user:65533:") for line in acl)
+        assert not any(
+            line.startswith(f"user:{runtime_uid}:") and "w" in line
+            for line in acl
+        )
+    manifest.write_text("transport still manages", encoding="utf-8")
+    created = staging / "transport-created.txt"
+    created.write_text("owner write", encoding="utf-8")
+    created.unlink()
+
+
+@pytest.mark.skipif(
+    os.name != "posix"
+    or shutil.which("sh") is None
+    or shutil.which("setfacl") is None
+    or shutil.which("getfacl") is None,
+    reason="requires a POSIX ACL runtime",
+)
+def test_permission_seal_rejects_symlink_before_recursive_changes(tmp_path: Path) -> None:
+    staging = tmp_path / "public-current-abc.upload-symlink"
+    staging.mkdir()
+    regular = staging / "manifest.json"
+    regular.write_text("unchanged", encoding="utf-8")
+    regular.chmod(0o664)
+    (staging / "escape").symlink_to(tmp_path / "outside")
+
+    result = subprocess.run(
+        [
+            "sh", "-c", transport._SEAL_FOR_RUNTIME_READ_SCRIPT,
+            "seal-for-runtime-read", str(staging), "65534",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert stat.S_IMODE(regular.stat().st_mode) == 0o664
 
 
 def test_validation_failure_quarantines_without_activation(
