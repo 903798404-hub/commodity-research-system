@@ -21,6 +21,7 @@ def atomic_write_with(
     *,
     schema_fingerprint: str | None = None,
     expected_identity: FileIdentity | None = None,
+    file_mode: int | None = None,
 ) -> FileIdentity:
     destination = Path(target)
     parent = destination.parent
@@ -37,6 +38,10 @@ def atomic_write_with(
         writer(temporary)
         if not temporary.is_file():
             raise RuntimeError("writer did not produce an ordinary file")
+        if file_mode is not None:
+            if file_mode < 0 or file_mode > 0o777:
+                raise ValueError("file_mode must contain only POSIX permission bits")
+            os.chmod(temporary, file_mode)
         with temporary.open("r+b") as handle:
             handle.flush()
             os.fsync(handle.fileno())
@@ -58,6 +63,7 @@ def atomic_write_bytes(
     payload: bytes,
     *,
     schema_fingerprint: str | None = None,
+    file_mode: int | None = None,
 ) -> FileIdentity:
     def write(temporary: Path) -> None:
         with temporary.open("wb") as handle:
@@ -65,7 +71,9 @@ def atomic_write_bytes(
             handle.flush()
             os.fsync(handle.fileno())
 
-    return atomic_write_with(target, write, schema_fingerprint=schema_fingerprint)
+    return atomic_write_with(
+        target, write, schema_fingerprint=schema_fingerprint, file_mode=file_mode
+    )
 
 
 def atomic_write_json(
@@ -73,6 +81,12 @@ def atomic_write_json(
     payload: Any,
     *,
     schema_fingerprint: str | None = None,
+    file_mode: int | None = None,
 ) -> FileIdentity:
-    encoded = (json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-    return atomic_write_bytes(target, encoded, schema_fingerprint=schema_fingerprint)
+    encoded = (
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("utf-8")
+    return atomic_write_bytes(
+        target, encoded, schema_fingerprint=schema_fingerprint, file_mode=file_mode
+    )

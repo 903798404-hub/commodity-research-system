@@ -65,6 +65,67 @@ def _ssh(target: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return _run(["ssh", "-T", target, shlex.join(arguments)])
 
 
+def _remote_integer(target: str, arguments: list[str], label: str) -> int:
+    result = _ssh(target, arguments)
+    try:
+        value = int(result.stdout.strip())
+    except ValueError as exc:
+        raise RuntimeError(f"remote {label} probe returned an invalid value") from exc
+    if result.returncode != 0 or value < 0:
+        raise RuntimeError(f"remote {label} probe failed")
+    return value
+
+
+def _candidate_runtime_identity(target: str, image: str) -> dict[str, object]:
+    code = (
+        "import json,os;"
+        "print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),"
+        "'groups':os.getgroups()},sort_keys=True))"
+    )
+    command = [
+        "docker", "run", "--rm", "--pull", "never", "--network", "none",
+        "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=16m",
+        image, "python", "-c", code,
+    ]
+    result = _ssh(target, command)
+    if result.returncode != 0:
+        raise RuntimeError("exact Candidate runtime identity probe failed")
+    try:
+        identity = json.loads(result.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError("exact Candidate runtime identity is invalid") from exc
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"uid", "gid", "groups"}
+        or not isinstance(identity["uid"], int)
+        or not isinstance(identity["gid"], int)
+        or not isinstance(identity["groups"], list)
+        or not all(isinstance(item, int) for item in identity["groups"])
+    ):
+        raise RuntimeError("exact Candidate runtime identity schema is invalid")
+    return identity
+
+
+def _quarantine_upload(
+    target: str, store: str, remote_upload: str, upload_name: str
+) -> str:
+    quarantine_name = f"{upload_name}.failed-{uuid.uuid4().hex}"
+    quarantine_root = f"{store}/quarantine"
+    quarantine_path = f"{quarantine_root}/{quarantine_name}"
+    script = (
+        'set -eu; install -d --mode=0700 -- "$1"; '
+        'if [ -e "$2" ] || [ -L "$2" ]; then mv -- "$2" "$3"; fi'
+    )
+    result = _ssh(target, [
+        "sh", "-c", script, "public-data-quarantine",
+        quarantine_root, remote_upload, quarantine_path,
+    ])
+    if result.returncode != 0:
+        raise RuntimeError("failed staging package could not be quarantined")
+    return quarantine_path
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     target, store, image = _checked_inputs(args)
@@ -119,22 +180,88 @@ def main(argv: list[str] | None = None) -> int:
                 "remote_activation": "SKIPPED",
             }, sort_keys=True))
             return 0
+    runtime_identity = _candidate_runtime_identity(target, image)
+    runtime_uid = int(runtime_identity["uid"])
+    transport_uid = _remote_integer(target, ["id", "-u"], "transport UID")
+    transport_gid = _remote_integer(target, ["id", "-g"], "transport GID")
+    if runtime_uid == transport_uid:
+        raise RuntimeError("runtime and transport owner identities must be distinct")
+
+    acl_probe = _ssh(target, [
+        "sh", "-c",
+        "command -v getfacl >/dev/null 2>&1 && command -v setfacl >/dev/null 2>&1",
+        "public-data-acl-probe",
+    ])
+    if acl_probe.returncode != 0:
+        raise RuntimeError("remote POSIX ACL tools are unavailable")
+
     incoming_root = f"{store}/incoming"
-    prepare = _ssh(target, ["install", "-d", "--mode=0750", "--", incoming_root])
+    releases_root = f"{store}/releases"
+    prepare_script = (
+        'set -eu; install -d --mode=0750 -- "$1" "$2" "$3"; '
+        'setfacl -m "u:$4:r-x,d:u:$4:r-x" -- "$1"; '
+        'setfacl -m "u:$4:--x" -- "$2"; '
+        'setfacl -m "u:$4:r-x" -- "$3"'
+    )
+    prepare = _ssh(target, [
+        "sh", "-c", prepare_script, "public-data-permission-setup",
+        store, incoming_root, releases_root, str(runtime_uid),
+    ])
     if prepare.returncode != 0:
-        raise RuntimeError("remote incoming preparation failed")
+        raise RuntimeError("remote permission contract preparation failed")
     upload_name = f"{package.package_id}.upload-{uuid.uuid4().hex}"
     remote_upload = f"{incoming_root}/{upload_name}"
     copied = _run(["scp", "-r", "--", str(package.directory), f"{target}:{remote_upload}"])
     if copied.returncode != 0:
+        _quarantine_upload(target, store, remote_upload, upload_name)
         raise RuntimeError("SCP package transport failed")
 
     container_store = "/runtime/public-data-server-store"
+    seal_script = (
+        'set -eu; test -d "$1"; test ! -L "$1"; '
+        'find "$1" -type d -exec setfacl -m "u:$2:r-x" -- {} +; '
+        'find "$1" -type f -exec setfacl -m "u:$2:r--" -- {} +'
+    )
+    sealed = _ssh(target, [
+        "sh", "-c", seal_script, "seal-for-runtime-read",
+        remote_upload, str(runtime_uid),
+    ])
+    if sealed.returncode != 0:
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("SEAL_FOR_RUNTIME_READ failed")
+
+    validation_arguments = [
+        "docker", "run", "--rm", "--pull", "never", "--network", "none",
+        "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
+        "--mount", f"type=bind,src={store},dst={container_store},readonly",
+        image, "python", "/app/04_scripts/activate_public_data_package.py",
+        "--incoming-package", f"{container_store}/incoming/{upload_name}",
+        "--store-root", container_store, "--validate-only",
+    ]
+    validation = _ssh(target, validation_arguments)
+    if validation.returncode != 0:
+        quarantine = _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError(f"remote sealed-package validation failed; quarantined={quarantine}")
+    try:
+        validation_result = json.loads(validation.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError) as exc:
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("remote sealed-package validation result is invalid") from exc
+    if (
+        not isinstance(validation_result, dict)
+        or validation_result.get("status") != "VALIDATED"
+        or validation_result.get("package_id") != package.package_id
+    ):
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("remote sealed-package validation identity mismatch")
+
     activation_arguments = [
         "docker", "run", "--rm", "--pull", "never", "--network", "none",
         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
-        "--mount", f"type=bind,src={store},dst={container_store}",
+        "--user", f"{transport_uid}:{transport_gid}",
+        "--mount", f"type=bind,src={store},dst={container_store},rw",
         "--env", f"PUBLIC_DATA_SERVER_STORE_ROOT={container_store}",
         image, "python", "/app/04_scripts/activate_public_data_package.py",
         "--incoming-package", f"{container_store}/incoming/{upload_name}",
@@ -149,11 +276,14 @@ def main(argv: list[str] | None = None) -> int:
         result = json.loads(activation.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError) as exc:
         raise RuntimeError("remote activation result is invalid") from exc
+    if result.get("package_id") != package.package_id:
+        raise RuntimeError("remote activation package identity mismatch")
     print(json.dumps({
         "schema_version": "public-data-transport/1",
         "status": result.get("status"),
         "package_id": package.package_id,
         "transport": "PASS",
+        "remote_validation": validation_result,
         "remote_activation": result,
     }, ensure_ascii=False, sort_keys=True))
     return 0 if result.get("status") in {"SYNCED", "NO_CHANGE"} else 1

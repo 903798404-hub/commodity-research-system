@@ -31,6 +31,7 @@ from agri_research_agent.shared.atomic_storage import atomic_write_json
 
 PACKAGE_SCHEMA = "public-current-production-package/2"
 SERVER_POINTER_SCHEMA = "public-current-server-pointer/2"
+SERVER_POINTER_MODE = 0o640
 DOMESTIC_SPREAD_ARTIFACT = "domestic-spread"
 DOMESTIC_SPREAD_FILENAME = "historical_spread_database.parquet"
 DOMESTIC_SPREAD_REQUIRED_COLUMNS = frozenset({
@@ -264,7 +265,7 @@ def sync_to_local_server_store(
     try:
         if switch_hook is not None:
             switch_hook()
-        atomic_write_json(pointer_path, new_pointer)
+        atomic_write_json(pointer_path, new_pointer, file_mode=SERVER_POINTER_MODE)
     except Exception as exc:
         return ServerSyncResult(
             "FAILED", package.package_id, "PASS", "PASS", "FAIL", "N/A", None,
@@ -278,7 +279,7 @@ def sync_to_local_server_store(
         if old_pointer is None:
             pointer_path.unlink(missing_ok=True)
         else:
-            atomic_write_json(pointer_path, old_pointer)
+            atomic_write_json(pointer_path, old_pointer, file_mode=SERVER_POINTER_MODE)
         return ServerSyncResult(
             "FAILED", package.package_id, "PASS", "PASS", "PASS", "FAIL",
             resolve_server_current(root) if old_pointer is not None else None,
@@ -355,7 +356,7 @@ def activate_incoming_server_package(
     try:
         if switch_hook is not None:
             switch_hook()
-        atomic_write_json(pointer_path, new_pointer)
+        atomic_write_json(pointer_path, new_pointer, file_mode=SERVER_POINTER_MODE)
     except Exception as exc:
         return ServerSyncResult(
             "FAILED", package.package_id, "PASS", "PASS", "FAIL", "N/A", None,
@@ -369,7 +370,7 @@ def activate_incoming_server_package(
         if old_pointer is None:
             pointer_path.unlink(missing_ok=True)
         else:
-            atomic_write_json(pointer_path, old_pointer)
+            atomic_write_json(pointer_path, old_pointer, file_mode=SERVER_POINTER_MODE)
         return ServerSyncResult(
             "FAILED", package.package_id, "PASS", "PASS", "PASS", "FAIL",
             resolve_server_current(root) if old_pointer is not None else None,

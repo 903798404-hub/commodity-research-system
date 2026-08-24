@@ -24,6 +24,7 @@ from agri_research_agent.pipelines.public_data_prewarm import (  # noqa: E402
 from agri_research_agent.pipelines.public_data_delivery import (  # noqa: E402
     PrewarmStatus,
     run_prewarm,
+    validate_production_package,
 )
 
 
@@ -34,11 +35,41 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--incoming-package", type=Path, required=True)
     parser.add_argument("--store-root", type=Path, required=True)
     parser.add_argument("--initial-seed", action="store_true")
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate a sealed staging package without writing server-store state",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if args.validate_only:
+        package = validate_production_package(
+            args.incoming_package, require_directory_name=False
+        )
+        data_root = package.directory / "data"
+        validate_activated_public_currents(data_root)
+        consumer_reads = run_prewarm(
+            build_consumer_prewarm_targets(project_root=ROOT, runtime_root=data_root)
+        )
+        if consumer_reads.status is not PrewarmStatus.PASS:
+            detail = ",".join(
+                f"{name}={status}" for name, status in sorted(consumer_reads.targets.items())
+            )
+            raise RuntimeError(f"sealed package consumer validation failed: {detail}")
+        print(json.dumps({
+            "schema_version": "public-data-remote-validation/1",
+            "status": "VALIDATED",
+            "package_id": package.package_id,
+            "manifest": "PASS",
+            "sha": "PASS",
+            "formal_read_validation": "PASS",
+            "consumer_reads": dict(consumer_reads.targets),
+        }, ensure_ascii=False, sort_keys=True))
+        return 0
 
     def post_switch_validate(data_root: Path) -> None:
         validate_activated_public_currents(data_root)

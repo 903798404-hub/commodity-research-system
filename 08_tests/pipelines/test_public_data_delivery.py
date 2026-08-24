@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from datetime import date
 from pathlib import Path
 
@@ -266,6 +267,8 @@ def test_uploaded_package_activates_in_place_and_is_idempotent(tmp_path: Path) -
 
     assert result.status == "SYNCED"
     assert not upload.exists()
+    if os.name == "posix":
+        assert stat.S_IMODE((store / "current.json").stat().st_mode) == 0o640
     assert resolve_server_current(store).name == package.package_id
     second_upload = store / "incoming" / f"{package.package_id}.upload-two"
     shutil.copytree(package.directory, second_upload)

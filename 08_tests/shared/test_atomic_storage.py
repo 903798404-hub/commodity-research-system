@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -44,3 +46,15 @@ def test_identity_mismatch_preserves_existing_target(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="expected_identity"):
         atomic_write_with(target, write_other, expected_identity=identify_file(expected_source))
     assert target.read_bytes() == b"old"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="exact POSIX mode contract")
+def test_atomic_mode_is_applied_before_final_identity(tmp_path: Path) -> None:
+    target = tmp_path / "current.json"
+    atomic_write_json(target, {"version": 1}, file_mode=0o640)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
+def test_atomic_mode_rejects_non_permission_bits(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="POSIX permission bits"):
+        atomic_write_json(tmp_path / "current.json", {}, file_mode=0o1640)
