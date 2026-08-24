@@ -280,7 +280,18 @@ def run_goal_b(
     )
 
 
-def load_current(public_root: str | Path) -> GoalBCurrent | None:
+def load_current(
+    public_root: str | Path,
+    *,
+    columns: Sequence[str] | None = None,
+) -> GoalBCurrent | None:
+    """Load a validated Current, optionally projecting canonical columns.
+
+    The pointer, manifest, file identity, and full Parquet schema are always
+    validated before a projection is read.  The default remains the complete
+    producer-facing table used by existing callers.
+    """
+
     root = Path(public_root)
     pointer = root / "current.json"
     if not pointer.exists():
@@ -295,12 +306,47 @@ def load_current(public_root: str | Path) -> GoalBCurrent | None:
         raise LutouGoalBError("Goal B Current manifest identity differs from pointer")
     manifest = _read_json(manifest_path)
     _verify_release(directory, manifest)
-    observations = pq.read_table(directory / "observations.parquet")
-    if observations.schema == LEGACY_CANONICAL_SCHEMA:
-        observations = _upgrade_legacy_current(observations)
-    elif observations.schema != CANONICAL_SCHEMA:
+    observations_path = directory / "observations.parquet"
+    parquet_schema = pq.read_schema(observations_path)
+    if parquet_schema not in (CANONICAL_SCHEMA, LEGACY_CANONICAL_SCHEMA):
         raise LutouGoalBError("Goal B Current schema is invalid")
+    projected = None if columns is None else tuple(columns)
+    if projected is not None:
+        if len(set(projected)) != len(projected):
+            raise LutouGoalBError("Goal B Current projection contains duplicates")
+        unknown = set(projected) - set(CANONICAL_SCHEMA.names)
+        if unknown:
+            raise LutouGoalBError("Goal B Current projection is invalid")
+        _validate_full_parquet_readability(observations_path)
+    if parquet_schema == LEGACY_CANONICAL_SCHEMA:
+        observations = _upgrade_legacy_current(pq.read_table(observations_path))
+        if projected is not None:
+            observations = observations.select(projected)
+    else:
+        observations = pq.read_table(
+            observations_path,
+            columns=None if projected is None else list(projected),
+        )
+        expected_schema = (
+            CANONICAL_SCHEMA
+            if projected is None
+            else pa.schema(CANONICAL_SCHEMA.field(name) for name in projected)
+        )
+        if observations.schema != expected_schema:
+            raise LutouGoalBError("Goal B Current projected schema is invalid")
     return GoalBCurrent(release_id, directory, manifest, observations)
+
+
+def _validate_full_parquet_readability(observations_path: Path) -> None:
+    """Decode every physical column without creating Python row objects."""
+
+    try:
+        parquet_file = pq.ParquetFile(observations_path)
+        scanned_rows = parquet_file.scan_contents(columns=None)
+    except (OSError, pa.ArrowException, ValueError):
+        raise LutouGoalBError("Goal B Current Parquet readability is invalid") from None
+    if scanned_rows != parquet_file.metadata.num_rows:
+        raise LutouGoalBError("Goal B Current Parquet readability is invalid")
 
 
 def _upgrade_legacy_current(table: pa.Table) -> pa.Table:

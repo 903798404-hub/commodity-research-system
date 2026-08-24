@@ -173,6 +173,92 @@ def test_source_precision_beyond_ten_places_is_preserved(
     assert set(standard["raw_price"].to_pylist()) == {source_value}
 
 
+def test_current_loader_projects_columns_after_full_schema_validation(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "projected", full=True)
+
+    current = load_current(
+        result.current_directory.parent.parent,
+        columns=("series_id", "business_date", "value"),
+    )
+
+    assert current is not None
+    assert current.observations.column_names == [
+        "series_id", "business_date", "value"
+    ]
+    assert current.observations.num_rows == 20
+
+
+def test_current_loader_rejects_unknown_or_duplicate_projection(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "projection-error", full=True)
+    root = result.current_directory.parent.parent
+
+    with pytest.raises(LutouGoalBError, match="projection is invalid"):
+        load_current(root, columns=("not_a_column",))
+    with pytest.raises(LutouGoalBError, match="projection contains duplicates"):
+        load_current(root, columns=("series_id", "series_id"))
+
+
+def test_projected_current_loader_scans_all_physical_columns(
+    runtime: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = apply_run(runtime, "projected-readability", full=True)
+    original = pq.ParquetFile
+    scans: list[object] = []
+
+    class SpyParquetFile:
+        def __init__(self, path: Path) -> None:
+            self._inner = original(path)
+            self.metadata = self._inner.metadata
+
+        def scan_contents(self, *, columns=None):  # type: ignore[no-untyped-def]
+            scans.append(columns)
+            return self._inner.scan_contents(columns=columns)
+
+    monkeypatch.setattr(
+        "agri_research_agent.pipelines.lutou_goal_b.pq.ParquetFile",
+        SpyParquetFile,
+    )
+
+    current = load_current(
+        result.current_directory.parent.parent,
+        columns=("series_id", "business_date", "value"),
+    )
+
+    assert current is not None
+    assert scans == [None]
+
+
+def test_projected_current_loader_fails_closed_on_nonprojected_readability(
+    runtime: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = apply_run(runtime, "projected-unreadable", full=True)
+
+    class UnreadableParquetFile:
+        def __init__(self, _path: Path) -> None:
+            self.metadata = object()
+
+        def scan_contents(self, *, columns=None):  # type: ignore[no-untyped-def]
+            assert columns is None
+            raise OSError("synthetic nonprojected column failure")
+
+    monkeypatch.setattr(
+        "agri_research_agent.pipelines.lutou_goal_b.pq.ParquetFile",
+        UnreadableParquetFile,
+    )
+
+    with pytest.raises(LutouGoalBError, match="readability is invalid"):
+        load_current(
+            result.current_directory.parent.parent,
+            columns=("series_id", "business_date", "value"),
+        )
+
+
 def test_legacy_current_provider_is_reconciled_without_changing_stable_keys(
     runtime: RuntimeContext,
 ) -> None:

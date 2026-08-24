@@ -15,8 +15,8 @@ from agri_research_agent.application.international_spreads import (
     InternationalSpreadPayload,
     MetricPayload,
     MetricStatus,
-    build_international_spread_payload,
-    load_international_spread_public_current,
+    build_international_spread_payload_from_current_table,
+    load_international_spread_public_current_table,
 )
 from agri_research_agent.market_data.public_current import (
     PublicCurrentError,
@@ -51,7 +51,7 @@ def _cached_page_payload(
     manifest_sha256: str,
 ) -> InternationalSpreadPayload:
     catalog = load_three_oil_v1()
-    current = load_international_spread_public_current(
+    current = load_international_spread_public_current_table(
         catalog, public_current_root, oil
     )
     if (
@@ -62,11 +62,10 @@ def _cached_page_payload(
             PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST,
             "Public Current changed while the page payload was loading",
         )
-    return build_international_spread_payload(
+    return build_international_spread_payload_from_current_table(
         catalog,
         oil,
-        current.records_by_series_id,
-        current_identity=current.identity,
+        current,
         acquisition_summary="Public Current",
     )
 

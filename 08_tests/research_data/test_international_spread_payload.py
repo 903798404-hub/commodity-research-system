@@ -6,13 +6,17 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import pyarrow as pa
+import pyarrow.compute as pc
 
 import agri_research_agent.application.international_spreads as application
 from agri_research_agent.application.international_spreads import (
     InternationalSpreadReferenceError,
     MetricStatus,
     build_international_spread_payload,
+    build_international_spread_payload_from_current_table,
     load_international_spread_public_current,
+    load_international_spread_public_current_table,
     load_international_spread_reference_records,
 )
 from agri_research_agent.data_sources.lutou.three_oil_snapshot import (
@@ -22,6 +26,10 @@ from agri_research_agent.research_data.canonical_spreads import CanonicalSpreadE
 from agri_research_agent.research_data.three_oil_v1 import (
     load_three_oil_v1,
     resolve_series_observations,
+)
+from agri_research_agent.market_data.public_current import (
+    PublicCurrentIdentity,
+    PublicCurrentTableSnapshot,
 )
 
 
@@ -58,6 +66,27 @@ def test_oil_page_dependency_projection_uses_only_required_source_series() -> No
     }
     all_series = {item.series_id for item in catalog.series}
     assert all(series_ids < all_series for series_ids in selected.values())
+
+
+def test_columnar_payload_rejects_missing_required_column() -> None:
+    catalog = load_three_oil_v1()
+    snapshot = PublicCurrentTableSnapshot(
+        PublicCurrentIdentity(
+            "release", "a" * 64, "lutou-goal-b-current/2", date(2026, 8, 18)
+        ),
+        pa.table(
+            {
+                "series_id": pa.array([], type=pa.string()),
+                "business_date": pa.array([], type=pa.date32()),
+            }
+        ),
+        0,
+    )
+
+    with pytest.raises(CanonicalSpreadError, match="schema is invalid"):
+        build_international_spread_payload_from_current_table(
+            catalog, "palm", snapshot
+        )
 
 
 def _metrics(payload):
@@ -159,6 +188,99 @@ def test_exact_date_missing_observation_remains_missing() -> None:
 
     assert 2023 not in soy_palm.available_years
     assert all(item.year != 2023 for item in soy_palm.observations)
+
+
+def test_columnar_path_preserves_missing_dates_and_sorts_unsorted_input() -> None:
+    catalog, source_records = _synthetic_records()
+    future_date = date(2026, 8, 24)
+    extra_historical_date = date(2020, 8, 10)
+    for values in source_records.values():
+        values.extend(
+            (
+                {
+                    **values[-1],
+                    "business_date": extra_historical_date,
+                    "price": "90",
+                },
+                {
+                    **values[-1],
+                    "business_date": future_date,
+                    "price": "120",
+                },
+            )
+        )
+    malaysia = "market.physical.palm_oil.malaysia.rbd_palm_oil.fob.p1"
+    source_records[malaysia] = [
+        item
+        for item in source_records[malaysia]
+        if item["business_date"].year != 2023
+    ]
+    canonical_records: dict[str, list[dict[str, object]]] = {}
+    table_rows: list[dict[str, object]] = []
+    for definition in catalog.series:
+        observations = resolve_series_observations(
+            catalog, definition.series_id, source_records
+        )
+        canonical_records[definition.series_id] = [
+            {
+                "provider_series_id": definition.provider_series_id,
+                "business_date": item.business_date,
+                "price": item.value,
+                "value_semantics": "canonical",
+            }
+            for item in observations
+        ]
+        table_rows.extend(
+            {
+                "series_id": definition.series_id,
+                "business_date": item.business_date,
+                "value": item.value,
+            }
+            for item in observations
+        )
+    table_rows.reverse()
+    snapshot = PublicCurrentTableSnapshot(
+        PublicCurrentIdentity(
+            "future-release", "c" * 64, "lutou-goal-b-current/2", future_date
+        ),
+        pa.Table.from_pylist(
+            table_rows,
+            schema=pa.schema(
+                (
+                    pa.field("series_id", pa.string(), nullable=False),
+                    pa.field("business_date", pa.date32(), nullable=False),
+                    pa.field("value", pa.decimal256(40, 20), nullable=False),
+                )
+            ),
+        ),
+        len(table_rows),
+    )
+
+    before = build_international_spread_payload(
+        catalog,
+        "palm",
+        canonical_records,
+        current_identity=snapshot.identity,
+        acquisition_summary="Public Current",
+    )
+    after = build_international_spread_payload_from_current_table(
+        catalog,
+        "palm",
+        snapshot,
+        acquisition_summary="Public Current",
+    )
+
+    assert after == before
+    assert after.current_identity == snapshot.identity
+    assert after.as_of_date == future_date
+    soy_palm = _metrics(after)[0]
+    assert 2023 not in soy_palm.available_years
+    assert extra_historical_date not in {
+        item.business_date for item in soy_palm.observations
+    }
+    assert list(soy_palm.observations) == sorted(
+        soy_palm.observations, key=lambda item: item.business_date
+    )
 
 
 def test_public_current_canonical_values_are_not_converted_twice() -> None:
@@ -319,6 +441,58 @@ def test_real_reference_payload_matches_all_sealed_latest_dates() -> None:
                 assert metric.status is MetricStatus.READY
                 assert metric.latest_observation_date == metric.expected_latest_date
                 assert metric.latest_value is not None
+
+
+def test_columnar_payload_exactly_matches_generic_public_current_payload() -> None:
+    runtime_root = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
+    if not runtime_root:
+        pytest.skip("PUBLIC_MARKET_DATA_RUNTIME_ROOT is required for integration")
+    current_root = Path(runtime_root) / "public-market-data" / "lutou-three-oil"
+    catalog = load_three_oil_v1()
+
+    for oil in ("palm", "soy", "rape"):
+        generic = load_international_spread_public_current(
+            catalog, current_root, oil
+        )
+        columnar = load_international_spread_public_current_table(
+            catalog, current_root, oil
+        )
+        before = build_international_spread_payload(
+            catalog,
+            oil,
+            generic.records_by_series_id,
+            current_identity=generic.identity,
+            acquisition_summary="Public Current",
+        )
+        after = build_international_spread_payload_from_current_table(
+            catalog,
+            oil,
+            columnar,
+            acquisition_summary="Public Current",
+        )
+
+        assert after == before
+        assert columnar.observations.column_names == [
+            "series_id", "business_date", "value"
+        ]
+        assert columnar.observations.num_rows < columnar.current_row_count
+        for series_id in application._required_source_series_ids(catalog, oil):
+            generic_values = {
+                item.business_date: item.value
+                for item in resolve_series_observations(
+                    catalog, series_id, generic.records_by_series_id
+                )
+            }
+            selected = columnar.observations.filter(
+                pc.equal(columnar.observations["series_id"], series_id)
+            )
+            assert dict(
+                zip(
+                    selected["business_date"].to_pylist(),
+                    selected["value"].to_pylist(),
+                    strict=True,
+                )
+            ) == generic_values
 
 
 def test_real_legacy_and_public_current_match_on_every_common_observation() -> None:

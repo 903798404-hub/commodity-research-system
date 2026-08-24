@@ -42,6 +42,7 @@ class PublicSeriesRequirement:
     currency: str
     unit: str
     price_type: str
+    provider_series_id: str | None = None
 
     def __post_init__(self) -> None:
         if not all(
@@ -49,6 +50,8 @@ class PublicSeriesRequirement:
             for value in (self.series_id, self.currency, self.unit, self.price_type)
         ):
             raise ValueError("Public Series requirement fields must be non-empty")
+        if self.provider_series_id is not None and not self.provider_series_id.strip():
+            raise ValueError("provider_series_id must be non-empty when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,11 +68,52 @@ class PublicCurrentSnapshot:
     records_by_series_id: Mapping[str, tuple[Mapping[str, object], ...]]
 
 
+@dataclass(frozen=True, slots=True)
+class PublicCurrentTableSnapshot:
+    """Validated, projected Current rows for columnar consumers."""
+
+    identity: PublicCurrentIdentity
+    observations: pa.Table
+    current_row_count: int
+
+
+_SELECTIVE_VALIDATION_COLUMNS = (
+    "series_id",
+    "provider_series_id",
+    "business_date",
+    "value",
+    "currency",
+    "unit",
+    "price_type",
+)
+_SELECTIVE_OUTPUT_COLUMNS = ("series_id", "business_date", "value")
+
+
 def resolve_three_oil_current_identity(
     public_current_root: str | Path,
 ) -> PublicCurrentIdentity:
-    identity, _ = _resolve_current(public_current_root)
+    identity, _ = _resolve_current(public_current_root, columns=())
     return identity
+
+
+def load_three_oil_public_current_table(
+    public_current_root: str | Path,
+    requirements: Sequence[PublicSeriesRequirement],
+) -> PublicCurrentTableSnapshot:
+    """Load required Current rows without materializing row dictionaries."""
+
+    by_id = _requirements_by_id(requirements)
+    identity, current = _resolve_current(
+        public_current_root,
+        columns=_SELECTIVE_VALIDATION_COLUMNS,
+    )
+    table = _select_required_series(current.observations, tuple(by_id))
+    _validate_selective_table(table, by_id)
+    return PublicCurrentTableSnapshot(
+        identity,
+        table.select(_SELECTIVE_OUTPUT_COLUMNS),
+        current.observations.num_rows,
+    )
 
 
 def load_three_oil_public_current(
@@ -78,11 +122,7 @@ def load_three_oil_public_current(
 ) -> PublicCurrentSnapshot:
     """Load exact required Series from one validated Three-Oil Current release."""
 
-    if not requirements:
-        raise ValueError("at least one Public Series requirement is required")
-    by_id = {item.series_id: item for item in requirements}
-    if len(by_id) != len(requirements):
-        raise ValueError("Public Series requirements contain duplicate series_id values")
+    by_id = _requirements_by_id(requirements)
     identity, current = _resolve_current(public_current_root)
     table = _select_required_series(current.observations, tuple(by_id))
 
@@ -166,6 +206,63 @@ def load_three_oil_public_current(
     return PublicCurrentSnapshot(identity, records)
 
 
+def _requirements_by_id(
+    requirements: Sequence[PublicSeriesRequirement],
+) -> dict[str, PublicSeriesRequirement]:
+    if not requirements:
+        raise ValueError("at least one Public Series requirement is required")
+    by_id = {item.series_id: item for item in requirements}
+    if len(by_id) != len(requirements):
+        raise ValueError("Public Series requirements contain duplicate series_id values")
+    return by_id
+
+
+def _validate_selective_table(
+    table: pa.Table,
+    requirements: Mapping[str, PublicSeriesRequirement],
+) -> None:
+    present = set(table["series_id"].unique().to_pylist())
+    missing = tuple(sorted(set(requirements) - present))
+    if missing:
+        raise PublicCurrentError(
+            PublicCurrentErrorCode.SERIES_NOT_FOUND,
+            f"required Public Series are absent: {', '.join(missing)}",
+        )
+    for series_id, requirement in requirements.items():
+        selected = table.filter(
+            pc.equal(table["series_id"], pa.scalar(series_id))
+        )
+        for column, expected, code in (
+            (
+                "provider_series_id",
+                requirement.provider_series_id,
+                PublicCurrentErrorCode.SERIES_METADATA_MISMATCH,
+            ),
+            ("currency", requirement.currency, PublicCurrentErrorCode.CURRENCY_MISMATCH),
+            ("unit", requirement.unit, PublicCurrentErrorCode.UNIT_MISMATCH),
+            (
+                "price_type",
+                requirement.price_type,
+                PublicCurrentErrorCode.SERIES_METADATA_MISMATCH,
+            ),
+        ):
+            if expected is None:
+                continue
+            if not pc.all(pc.equal(selected[column], pa.scalar(expected))).as_py():
+                raise PublicCurrentError(
+                    code,
+                    f"{column} differs for required Series {series_id}",
+                )
+    grouped = table.group_by(("series_id", "business_date")).aggregate(
+        (("value", "count"),)
+    )
+    if grouped.num_rows != table.num_rows:
+        raise PublicCurrentError(
+            PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST,
+            "duplicate Public Current stable key",
+        )
+
+
 def _select_required_series(
     table: pa.Table, series_ids: Sequence[str]
 ) -> pa.Table:
@@ -189,9 +286,11 @@ def _select_required_series(
 
 def _resolve_current(
     public_current_root: str | Path,
+    *,
+    columns: Sequence[str] | None = None,
 ) -> tuple[PublicCurrentIdentity, GoalBCurrent]:
     try:
-        current = load_current(public_current_root)
+        current = load_current(public_current_root, columns=columns)
     except (LutouGoalBError, OSError, ValueError) as exc:
         raise PublicCurrentError(
             PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST,
@@ -233,6 +332,7 @@ def _resolve_current(
 
 __all__ = [
     "PublicCurrentError", "PublicCurrentErrorCode", "PublicCurrentIdentity",
-    "PublicCurrentSnapshot", "PublicSeriesRequirement",
-    "load_three_oil_public_current", "resolve_three_oil_current_identity",
+    "PublicCurrentSnapshot", "PublicCurrentTableSnapshot",
+    "PublicSeriesRequirement", "load_three_oil_public_current",
+    "load_three_oil_public_current_table", "resolve_three_oil_current_identity",
 ]

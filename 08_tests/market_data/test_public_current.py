@@ -15,6 +15,7 @@ from agri_research_agent.market_data.public_current import (
     PublicCurrentIdentity,
     PublicSeriesRequirement,
     load_three_oil_public_current,
+    load_three_oil_public_current_table,
 )
 from agri_research_agent.pipelines.lutou_goal_b import (
     CANONICAL_SCHEMA,
@@ -89,7 +90,7 @@ def _install_current(
     monkeypatch.setattr(
         reader,
         "_resolve_current",
-        lambda _root: (identity, _current(tmp_path, rows)),
+        lambda _root, **_kwargs: (identity, _current(tmp_path, rows)),
     )
 
 
@@ -102,6 +103,84 @@ def _requirement(**changes: str) -> PublicSeriesRequirement:
     }
     value.update(changes)
     return PublicSeriesRequirement(**value)
+
+
+def test_selective_reader_returns_only_columnar_payload_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_current(monkeypatch, tmp_path, [_row()])
+
+    result = load_three_oil_public_current_table(tmp_path, [_requirement()])
+
+    assert result.identity.release_id == "release-test"
+    assert result.current_row_count == 1
+    assert result.observations.column_names == [
+        "series_id", "business_date", "value"
+    ]
+    assert result.observations.to_pylist() == [
+        {"series_id": SERIES_ID, "business_date": DAY, "value": Decimal("1000")}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("row_changes", "requirement_changes", "code"),
+    [
+        ({"currency": "INR"}, {}, PublicCurrentErrorCode.CURRENCY_MISMATCH),
+        ({"unit": "US_cents_per_lb"}, {}, PublicCurrentErrorCode.UNIT_MISMATCH),
+        ({"price_type": "basis"}, {}, PublicCurrentErrorCode.SERIES_METADATA_MISMATCH),
+        (
+            {"provider_series_id": "provider:wrong"},
+            {"provider_series_id": "provider:expected"},
+            PublicCurrentErrorCode.SERIES_METADATA_MISMATCH,
+        ),
+    ],
+)
+def test_selective_reader_rejects_metadata_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row_changes: dict[str, object],
+    requirement_changes: dict[str, str],
+    code: PublicCurrentErrorCode,
+) -> None:
+    _install_current(monkeypatch, tmp_path, [_row(**row_changes)])
+
+    with pytest.raises(PublicCurrentError) as raised:
+        load_three_oil_public_current_table(
+            tmp_path, [_requirement(**requirement_changes)]
+        )
+
+    assert raised.value.code is code
+
+
+def test_selective_reader_rejects_duplicate_stable_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_current(monkeypatch, tmp_path, [_row(), _row()])
+
+    with pytest.raises(PublicCurrentError) as raised:
+        load_three_oil_public_current_table(tmp_path, [_requirement()])
+
+    assert raised.value.code is PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST
+
+
+def test_selective_reader_rejects_empty_requirements() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        load_three_oil_public_current_table("unused", ())
+
+
+def test_selective_reader_rejects_missing_required_series(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_current(
+        monkeypatch,
+        tmp_path,
+        [_row(series_id="market.unrelated")],
+    )
+
+    with pytest.raises(PublicCurrentError) as raised:
+        load_three_oil_public_current_table(tmp_path, [_requirement()])
+
+    assert raised.value.code is PublicCurrentErrorCode.SERIES_NOT_FOUND
 
 
 def test_reader_returns_exact_series_and_current_traceability(

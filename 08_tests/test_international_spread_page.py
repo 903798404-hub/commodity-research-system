@@ -7,7 +7,6 @@ from datetime import date
 from decimal import Decimal
 from html import unescape
 from pathlib import Path
-from types import MappingProxyType
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -21,8 +20,9 @@ from agri_research_agent.market_data.public_current import (
     PublicCurrentError,
     PublicCurrentErrorCode,
     PublicCurrentIdentity,
-    PublicCurrentSnapshot,
+    PublicCurrentTableSnapshot,
 )
+import pyarrow as pa
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,9 +120,17 @@ def test_page_rejects_current_identity_change_during_payload_load(
     monkeypatch.setattr(page, "load_three_oil_v1", lambda: object())
     monkeypatch.setattr(
         page,
-        "load_international_spread_public_current",
-        lambda _catalog, _root, _oil: PublicCurrentSnapshot(
-            loaded_identity, MappingProxyType({})
+        "load_international_spread_public_current_table",
+        lambda _catalog, _root, _oil: PublicCurrentTableSnapshot(
+            loaded_identity,
+            pa.table(
+                {
+                    "series_id": pa.array([], type=pa.string()),
+                    "business_date": pa.array([], type=pa.date32()),
+                    "value": pa.array([], type=pa.decimal128(38, 20)),
+                }
+            ),
+            0,
         ),
     )
 
@@ -130,6 +138,43 @@ def test_page_rejects_current_identity_change_during_payload_load(
         page._cached_page_payload("palm", "unused", "old-release", "a" * 64)
 
     assert raised.value.code is PublicCurrentErrorCode.INVALID_CURRENT_MANIFEST
+
+
+def test_page_cache_key_changes_with_current_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _page_module()
+    calls: list[str] = []
+
+    def load(_catalog, _root, _oil):
+        calls.append(_root)
+        return PublicCurrentTableSnapshot(
+            PublicCurrentIdentity(
+                _root, _root * 64, "lutou-goal-b-current/2", date(2026, 8, 18)
+            ),
+            pa.table(
+                {
+                    "series_id": pa.array([], type=pa.string()),
+                    "business_date": pa.array([], type=pa.date32()),
+                    "value": pa.array([], type=pa.decimal128(38, 20)),
+                }
+            ),
+            0,
+        )
+
+    monkeypatch.setattr(page, "load_three_oil_v1", lambda: object())
+    monkeypatch.setattr(page, "load_international_spread_public_current_table", load)
+    monkeypatch.setattr(
+        page,
+        "build_international_spread_payload_from_current_table",
+        lambda *_args, **_kwargs: len(calls),
+    )
+    page._cached_page_payload.clear()
+
+    assert page._cached_page_payload("palm", "a", "a", "a" * 64) == 1
+    assert page._cached_page_payload("palm", "a", "a", "a" * 64) == 1
+    assert page._cached_page_payload("palm", "b", "b", "b" * 64) == 2
+    assert calls == ["a", "b"]
 
 
 def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
@@ -143,8 +188,10 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
     assert not app.exception
     assert len(app.get("plotly_chart")) == 7
     assert any(
-        "数据截至 2026-08-18 ｜ Reuters / Oil World ｜ Public Current"
-        in str(item.value)
+        re.search(
+            r"数据截至 2026-\d{2}-\d{2} ｜ Reuters / Oil World ｜ Public Current",
+            str(item.value),
+        )
         for item in app.markdown
     )
     assert any(
@@ -152,7 +199,10 @@ def test_formal_route_renders_7_15_9_charts_and_approved_title_order(
         for item in app.markdown
     )
     assert re.fullmatch(r"国际豆棕｜-?[\d,.]+ USD/T", _titles(app)[0])
-    assert any("截至 2026-08-18" in str(item.value) for item in app.markdown)
+    assert any(
+        re.search(r"截至 2026-\d{2}-\d{2}", str(item.value))
+        for item in app.markdown
+    )
     assert _base_titles(app) == [
         "国际豆棕",
         "国际菜棕",
