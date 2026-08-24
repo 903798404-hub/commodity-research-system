@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -10,7 +9,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from agri_research_agent.domains.spreads.calculation import add_plot_value
-from agri_research_agent.application.domestic_spreads import load_domestic_spread_database
+from agri_research_agent.application.domestic_spreads import (
+    load_domestic_spread_database,
+    load_domestic_spread_status,
+)
 from agri_research_agent.domains.spreads.history import (
     FIVE_YEAR_MEAN_LABEL,
     FIVE_YEAR_MEAN_SMOOTH_WINDOW,
@@ -70,7 +72,6 @@ CONFIG_DIR = PROJECT_ROOT / "02_configs"
 DATABASE_XLSX_FILE = DATA_DIR / "historical_spread_database.xlsx"
 DATABASE_PARQUET_FILE = DATA_DIR / "historical_spread_database.parquet"
 SPREAD_CONFIG_FILE = CONFIG_DIR / "historical_spread_config.xlsx"
-UPDATE_STATUS_FILE = DATA_DIR / "update_status.json"
 REPORT_CATALOG_FILE = CONFIG_DIR / "report_catalog.yaml"
 _PUBLIC_RUNTIME_VALUE = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
 PUBLIC_RUNTIME_ROOT = (
@@ -120,34 +121,18 @@ def load_spread_config(config_path: Path, mtime: float) -> pd.DataFrame:
     return config
 
 
-@st.cache_data(show_spinner=False)
-def load_update_status(status_path: Path, mtime: float) -> dict[str, object]:
-    del mtime
-    return json.loads(status_path.read_text(encoding="utf-8"))
-
-
-def render_update_status() -> None:
-    if not UPDATE_STATUS_FILE.exists():
-        st.info("未找到更新状态文件。")
-        return
-    try:
-        status = load_update_status(UPDATE_STATUS_FILE, UPDATE_STATUS_FILE.stat().st_mtime)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        st.warning(f"更新状态文件读取失败：{exc}")
-        return
-
-    status_name = str(status.get("status", "unknown"))
+def render_update_status(data: pd.DataFrame) -> None:
+    status = load_domestic_spread_status(data)
     message = (
-        f"更新状态：{status_name} | "
-        f"开始：{status.get('started_at') or '-'} | "
-        f"结束：{status.get('finished_at') or '-'} | "
-        f"最新交易日：{status.get('latest_date') or '-'} | "
-        f"合约：{status.get('success_contracts', 0)}/{status.get('required_contracts', 0)} 成功，"
-        f"{status.get('failure_contracts', 0)} 失败"
+        f"更新状态：{status.status} | "
+        f"最新交易日：{status.latest_business_date or '-'} | "
+        f"合约：{status.success_contracts}/{status.required_contracts} 成功，"
+        f"{status.failure_contracts} 失败 | "
+        f"来源：{status.source}"
     )
-    if status_name == "success":
+    if status.status == "success":
         st.success(message)
-    elif status_name in {"failed", "skipped_locked"}:
+    elif status.status == "failed":
         st.warning(message)
     else:
         st.info(message)
@@ -326,7 +311,7 @@ def render_spread_dashboard() -> None:
             year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
 
     st.title(board)
-    render_update_status()
+    render_update_status(data)
     if board == "品种间套利":
         for subgroup in ["油脂之间套利", "粕之间套利", "其他"]:
             names = [name for name in board_spreads[board] if classify_board(name)[1] == subgroup]
@@ -339,13 +324,13 @@ def render_spread_dashboard() -> None:
 
 def render_status_page() -> None:
     st.title("日更运行状态")
-    render_update_status()
-    if UPDATE_STATUS_FILE.exists():
-        try:
-            status = load_update_status(UPDATE_STATUS_FILE, UPDATE_STATUS_FILE.stat().st_mtime)
-            st.json(status)
-        except (OSError, ValueError, json.JSONDecodeError):
-            pass
+    database_path = get_database_path()
+    if not database_path.exists():
+        st.warning("当前 Domestic Spread artifact 不可用。")
+        return
+    data = load_database(database_path, database_path.stat().st_mtime)
+    render_update_status(data)
+    st.json(load_domestic_spread_status(data).as_dict())
 
 
 def render_usda_page() -> None:

@@ -30,7 +30,6 @@ spec.loader.exec_module(page)
 page.DATABASE_PARQUET_FILE = reference_root / "01_data" / "historical_spread_database.parquet"
 page.DATABASE_XLSX_FILE = reference_root / "01_data" / "historical_spread_database.xlsx"
 page.SPREAD_CONFIG_FILE = reference_root / "02_configs" / "historical_spread_config.xlsx"
-page.UPDATE_STATUS_FILE = reference_root / "01_data" / "update_status.json"
 page.render_spread_dashboard()
 """
     app = AppTest.from_string(script, default_timeout=30).run()
