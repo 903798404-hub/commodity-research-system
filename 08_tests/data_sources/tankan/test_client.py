@@ -150,9 +150,10 @@ def test_latest_source_dates_are_lightweight_allowlisted_reads() -> None:
         assert client.latest_source_dates() == {
             "market": date(2026, 8, 18),
             "fx": date(2026, 8, 18),
+            "domestic_spread": date(2026, 8, 18),
         }
     probes = [statement for statement, _, _ in connection.statements if "ORDER BY trade_date DESC" in statement]
-    assert len(probes) == 2
+    assert len(probes) == 3
     assert all("LIMIT 1" in statement for statement in probes)
 
 

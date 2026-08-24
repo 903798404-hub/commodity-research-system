@@ -65,9 +65,28 @@ ORDER BY trade_date
 """,
 )
 
+DOMESTIC_SPREAD_WINDOW_QUERY = QuerySpec(
+    name="market.futures_spread.window",
+    version="1-goal-e2",
+    provider=_provider("tankan.market.futures_spread", "futures_spread"),
+    parameter_count=2,
+    max_window_days=93,
+    max_plan_rows=100_000,
+    max_total_cost=500_000.0,
+    sql="""
+SELECT trade_date, product_name, contract, close_price, updated_at
+FROM market.futures_spread
+WHERE trade_date >= %s AND trade_date <= %s
+  AND product_name IN ('豆粕', '菜籽粕', '豆油', '菜籽油', '棕榈油')
+  AND contract IN ('01', '05', '09')
+ORDER BY trade_date, product_name, contract
+""",
+)
+
 
 _APPROVED_BY_SHA = {
-    query.sha256: query for query in (MARKET_WINDOW_QUERY, FX_WINDOW_QUERY)
+    query.sha256: query
+    for query in (MARKET_WINDOW_QUERY, FX_WINDOW_QUERY, DOMESTIC_SPREAD_WINDOW_QUERY)
 }
 
 
@@ -80,4 +99,7 @@ def require_approved_query(query: QuerySpec) -> QuerySpec:
     return approved
 
 
-__all__ = ["FX_WINDOW_QUERY", "MARKET_WINDOW_QUERY", "require_approved_query"]
+__all__ = [
+    "DOMESTIC_SPREAD_WINDOW_QUERY", "FX_WINDOW_QUERY", "MARKET_WINDOW_QUERY",
+    "require_approved_query",
+]

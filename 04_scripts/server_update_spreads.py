@@ -53,6 +53,10 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
 
 
 def initial_status(run_mode: str) -> dict[str, object]:
+    source = {
+        "update_from_akshare": "akshare_futures_zh_daily_sina",
+        "update_from_tankan": "tankan.market.futures_spread",
+    }.get(run_mode, "existing_local_data")
     return {
         "status": "running",
         "started_at": now_text(),
@@ -72,7 +76,7 @@ def initial_status(run_mode: str) -> dict[str, object]:
         "parquet_latest_date": "",
         "error_message": "",
         "run_mode": run_mode,
-        "source": "akshare_futures_zh_daily_sina" if run_mode == "update_from_akshare" else "existing_local_data",
+        "source": source,
     }
 
 
@@ -168,18 +172,46 @@ def parse_args() -> argparse.Namespace:
         help="Backfill missing exchange-dated futures closes with AkShare, then recalculate spreads.",
     )
     parser.add_argument(
+        "--update-from-tankan",
+        action="store_true",
+        help="Append validated closes from the approved Tankan reader, then recalculate spreads.",
+    )
+    parser.add_argument(
         "--recalculate-from-existing-price-long",
         action="store_true",
         help="Recalculate spread outputs from the existing historical_price_long.xlsx.",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Preview AkShare updates without writing or recalculating.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the selected source update without writing or recalculating.",
+    )
+    parser.add_argument("--end-date", type=dt.date.fromisoformat, default=dt.date.today())
+    parser.add_argument(
+        "--tankan-secret-file",
+        type=Path,
+        default=Path.home() / ".market-data-secrets" / "tankan.env",
+    )
     parser.add_argument("--lock-timeout", type=int, default=LOCK_TIMEOUT_SECONDS)
-    return parser.parse_args()
+    args = parser.parse_args()
+    selected = sum(
+        bool(value)
+        for value in (
+            args.update_from_akshare,
+            args.update_from_tankan,
+            args.recalculate_from_existing_price_long,
+        )
+    )
+    if selected > 1:
+        parser.error("update and recalculation modes are mutually exclusive")
+    return args
 
 
 def run_mode_for_args(args: argparse.Namespace) -> str:
     if args.update_from_akshare:
         return "update_from_akshare"
+    if args.update_from_tankan:
+        return "update_from_tankan"
     if args.recalculate_from_existing_price_long:
         return "recalculate_existing_price_long"
     return "safety_check"
@@ -200,7 +232,7 @@ def main() -> int:
     run_mode = run_mode_for_args(args)
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = logs_dir / f"server_update_spreads_{dt.date.today().strftime('%Y%m%d')}.log"
-    result_file = data_dir / f".akshare_update_result_{timestamp}.json"
+    result_file = data_dir / f".domestic_spread_update_result_{timestamp}.json"
     logs_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logger(log_file)
@@ -258,16 +290,27 @@ def main() -> int:
             logger.info("spread_database_backup=%s", excel_backup)
             logger.info("parquet_backup=%s", parquet_backup)
 
-        if args.update_from_akshare:
-            akshare_args = [
-                "update_price_long_from_akshare.py",
+        if args.update_from_akshare or args.update_from_tankan:
+            if args.update_from_tankan:
+                update_args = [
+                    "update_price_long_from_tankan.py",
+                    "--tankan-secret-file",
+                    str(args.tankan_secret_file),
+                    "--end-date",
+                    args.end_date.isoformat(),
+                ]
+                source_label = "Tankan"
+            else:
+                update_args = ["update_price_long_from_akshare.py"]
+                source_label = "AkShare"
+            update_args.extend([
                 "--result-json",
                 str(result_file),
                 "--skip-backup",
-            ]
+            ])
             if args.dry_run:
-                akshare_args.append("--dry-run")
-            result = run_script_args(akshare_args, root, logger)
+                update_args.append("--dry-run")
+            result = run_script_args(update_args, root, logger)
             if result_file.exists():
                 update_result = read_json(result_file)
                 for field in [
@@ -288,7 +331,7 @@ def main() -> int:
                 logger.info("price_long_written=%s", update_result.get("price_long_written"))
             if result.returncode != 0:
                 error_detail = update_result.get("error_message", "") if "update_result" in locals() else ""
-                raise RuntimeError(f"AkShare price update failed with code {result.returncode}: {error_detail}")
+                raise RuntimeError(f"{source_label} price update failed with code {result.returncode}: {error_detail}")
             if status["required_contracts"] != status["success_contracts"] or int(status["failure_contracts"]) != 0:
                 raise RuntimeError("contract completeness gate rejected the update")
             if args.dry_run:

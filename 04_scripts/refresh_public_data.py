@@ -203,7 +203,14 @@ def main(argv: list[str] | None = None) -> int:
             project_root=ROOT, runtime_root=runtime.runtime_root
         ),
         delivery_artifact_runner=(
-            _refresh_domestic_spread_artifact if "tankan" in sources else None
+            (
+                lambda: _refresh_domestic_spread_artifact(
+                    tankan_secret_file=args.tankan_secret_file,
+                    end_date=args.end_date,
+                )
+            )
+            if "tankan" in sources
+            else None
         ),
         initial_seed=args.initial_seed,
     )
@@ -294,13 +301,21 @@ def _lutou_settings() -> LutouConnectionSettings:
             values[name] = ""
 
 
-def _refresh_domestic_spread_artifact() -> dict[str, Path]:
+def _refresh_domestic_spread_artifact(
+    *,
+    tankan_secret_file: Path,
+    end_date: date,
+) -> dict[str, Path]:
     """Run the formal Domestic Spread producer and return its sealed input."""
 
     command = [
         sys.executable,
         str(ROOT / "04_scripts" / "server_update_spreads.py"),
-        "--update-from-akshare",
+        "--update-from-tankan",
+        "--tankan-secret-file",
+        str(tankan_secret_file),
+        "--end-date",
+        end_date.isoformat(),
     ]
     completed = subprocess.run(
         command, cwd=ROOT, text=True, capture_output=True, check=False

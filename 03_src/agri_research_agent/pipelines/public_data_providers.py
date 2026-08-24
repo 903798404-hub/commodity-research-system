@@ -149,8 +149,10 @@ class TankanRefreshAdapter:
             self._client.__enter__()
             market = self._client.inspect_relation("market", "foreign_futures_price_raw")
             fx = self._client.inspect_relation("market", "exchange_rate")
+            domestic_spread = self._client.inspect_relation("market", "futures_spread")
             market_names = {column.column_name for column in market}
             fx_names = {column.column_name for column in fx}
+            domestic_spread_names = {column.column_name for column in domestic_spread}
             required_market = {
                 "trade_date", "exchange", "product_name", "contract",
                 "close_price", "updated_at",
@@ -159,14 +161,21 @@ class TankanRefreshAdapter:
                 "trade_date", "spot", "updated_at",
                 *(f"fx_{month}m" for month in range(1, 13)),
             }
-            if not required_market <= market_names or not required_fx <= fx_names:
+            required_domestic_spread = {
+                "trade_date", "product_name", "contract", "close_price", "updated_at",
+            }
+            if (
+                not required_market <= market_names
+                or not required_fx <= fx_names
+                or not required_domestic_spread <= domestic_spread_names
+            ):
                 raise TankanSchemaError("approved Tankan relation is unavailable")
             source_max = {
                 key: value.isoformat()
                 for key, value in self._client.latest_source_dates().items()
             }
             self._preflight_source_max = source_max
-            return {"read_only": True, "relations": 2, "source_max_dates": source_max}
+            return {"read_only": True, "relations": 3, "source_max_dates": source_max}
         except TankanSourceUnavailableError:
             self.close()
             raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Tankan approved source is empty") from None
@@ -197,6 +206,10 @@ class TankanRefreshAdapter:
                 "market": str(result.candidate_manifest["market"]["source_max_date"]),
                 "fx": str(result.candidate_manifest["fx"]["source_max_date"]),
             }
+            if "domestic_spread" in self._preflight_source_max:
+                source_max["domestic_spread"] = self._preflight_source_max[
+                    "domestic_spread"
+                ]
             return RefreshResult(result.promoted, source_max)
         except TankanGoalAError as exc:
             raise _pipeline_failure(exc, "Tankan") from None

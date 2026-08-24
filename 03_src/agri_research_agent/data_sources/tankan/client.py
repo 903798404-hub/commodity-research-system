@@ -234,6 +234,10 @@ ORDER BY ordinal_position
                 "SELECT trade_date FROM market.exchange_rate "
                 "ORDER BY trade_date DESC LIMIT 1"
             ),
+            "domestic_spread": (
+                "SELECT trade_date FROM market.futures_spread "
+                "ORDER BY trade_date DESC LIMIT 1"
+            ),
         }
         output: dict[str, date] = {}
         try:
