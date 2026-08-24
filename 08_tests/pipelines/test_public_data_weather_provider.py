@@ -4,14 +4,29 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from agri_research_agent.data_sources.lutou.live import LutouConnectionSettings
+import pytest
+
+from agri_research_agent.data_sources.lutou.live import (
+    LutouConnectionSettings,
+    LutouQuery,
+    LutouSchemaError,
+)
 from agri_research_agent.pipelines import public_data_providers
 from agri_research_agent.pipelines.public_data_providers import LutouRefreshAdapter
-from agri_research_agent.pipelines.public_data_refresh import ProviderStatus
+from agri_research_agent.pipelines.public_data_refresh import (
+    ProviderFailure,
+    ProviderStatus,
+)
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
 
 
 class Client:
+    def __init__(self) -> None:
+        self.ensure_count = 0
+
+    def ensure_connected(self) -> None:
+        self.ensure_count += 1
+
     def close(self) -> None:
         pass
 
@@ -74,7 +89,8 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
         Path("weather.yaml"),
         Path("weather-baselines"),
     )
-    adapter._client = Client()  # type: ignore[assignment]
+    client = Client()
+    adapter._client = client  # type: ignore[assignment]
     adapter._weather_catalog = object()  # type: ignore[assignment]
 
     result = adapter.refresh()
@@ -91,3 +107,100 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
     }
     assert result.source_max_dates["weather_observation"] == "2026-08-18"
     assert result.source_max_dates["weather_forecast_valid"] == "2026-09-02"
+    assert client.ensure_count == 1
+
+
+def test_lutou_preflight_probes_every_required_domain_query(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    queries = {
+        "oil": LutouQuery("油脂油料价格", "oil", "Date", ("price",)),
+        "soil": LutouQuery("天气2.0", "soil", "日期", ("value",)),
+        "observation": LutouQuery("天气2.0", "weather_obs", "日期", ("value",)),
+        "forecast": LutouQuery("天气2.0", "weather_fc", "日期", ("value",)),
+    }
+    calls = []
+
+    class PreflightClient:
+        proof = SimpleNamespace(transaction_read_only=True, write_privileges=())
+        def __init__(self, settings): pass
+        def __enter__(self): return self
+        def probe_query(self, query):
+            calls.append(query.table)
+            return {"latest_date": "2026-08-23"}
+        def close(self): pass
+
+    monkeypatch.setattr(public_data_providers, "LutouClient", PreflightClient)
+    monkeypatch.setattr(
+        public_data_providers,
+        "load_three_oil_v1",
+        lambda path: SimpleNamespace(
+            series=(SimpleNamespace(source_native_table="oil", source_native_series="price"),)
+        ),
+    )
+    monkeypatch.setattr(
+        public_data_providers,
+        "load_soil_moisture_series",
+        lambda path: (
+            SimpleNamespace(source_table="soil", date_column="日期", source_column="value"),
+        ),
+    )
+    monkeypatch.setattr(public_data_providers, "validate_weather_normal_baselines", lambda *args: {})
+    monkeypatch.setattr(
+        public_data_providers,
+        "load_weather_source_catalog",
+        lambda *args: SimpleNamespace(
+            tables=(
+                SimpleNamespace(data_family="observation", query=queries["observation"]),
+                SimpleNamespace(data_family="forecast", query=queries["forecast"]),
+            )
+        ),
+    )
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture"),
+        _runtime(tmp_path), "preflight", public_data_providers.date(2026, 8, 24),
+        Path("soil.json"), Path("oil.json"), Path("weather.yaml"), Path("baselines"),
+        connector=lambda *args: True, network_check=lambda: True,
+    )
+    proof = adapter.preflight()
+    assert calls == ["oil", "soil", "weather_obs", "weather_fc"]
+    assert proof["readiness"] == {
+        "connectivity": "READY",
+        "required_query": "READY",
+        "required_schema": "READY",
+        "query_counts": {
+            "soil_moisture": 1,
+            "three_oil": 1,
+            "weather_forecast_valid": 1,
+            "weather_observation": 1,
+        },
+    }
+
+
+def test_lutou_preflight_schema_failure_never_reaches_refresh(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    class BrokenClient:
+        def __init__(self, settings): pass
+        def __enter__(self): return self
+        def probe_query(self, query): raise LutouSchemaError("fixture mismatch")
+        def close(self): pass
+
+    monkeypatch.setattr(public_data_providers, "LutouClient", BrokenClient)
+    monkeypatch.setattr(
+        public_data_providers,
+        "load_three_oil_v1",
+        lambda path: SimpleNamespace(
+            series=(SimpleNamespace(source_native_table="oil", source_native_series="price"),)
+        ),
+    )
+    monkeypatch.setattr(public_data_providers, "load_soil_moisture_series", lambda path: ())
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture"),
+        _runtime(tmp_path), "broken", public_data_providers.date(2026, 8, 24),
+        Path("soil.json"), Path("oil.json"), connector=lambda *args: True,
+        network_check=lambda: True,
+    )
+    with pytest.raises(ProviderFailure) as captured:
+        adapter.preflight()
+    assert captured.value.status is ProviderStatus.SOURCE_SCHEMA_FAILURE

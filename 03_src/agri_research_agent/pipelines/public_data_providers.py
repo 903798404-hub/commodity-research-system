@@ -14,6 +14,7 @@ from pathlib import Path
 
 from agri_research_agent.data_sources.lutou.live import (
     LutouClient,
+    LutouClientError,
     LutouConnectionError,
     LutouConnectionSettings,
     LutouQuery,
@@ -283,11 +284,8 @@ class LutouRefreshAdapter:
             self._client = LutouClient(self.settings)
             self._client.__enter__()
             maxima: dict[str, str] = {}
-            for domain, query in self._approved_queries():
-                latest = self._client.latest_date(query).isoformat()
-                previous = maxima.get(domain)
-                if previous is None or latest > previous:
-                    maxima[domain] = latest
+            readiness: dict[str, int] = defaultdict(int)
+            queries = list(self._approved_queries())
             if self.weather_policy_path is not None:
                 if self.weather_baseline_root is None:
                     raise LutouSchemaError("Weather normal baseline root is missing")
@@ -297,20 +295,33 @@ class LutouRefreshAdapter:
                 self._weather_catalog = load_weather_source_catalog(
                     self._client, self.weather_policy_path
                 )
-                observations = [
-                    item.max_date
+                queries.extend(
+                    (
+                        "weather_observation"
+                        if item.data_family == "observation"
+                        else "weather_forecast_valid",
+                        item.query,
+                    )
                     for item in self._weather_catalog.tables
-                    if item.data_family == "observation"
-                ]
-                forecasts = [
-                    item.max_date
-                    for item in self._weather_catalog.tables
-                    if item.data_family == "forecast"
-                ]
-                maxima["weather_observation"] = max(observations).isoformat()
-                maxima["weather_forecast_valid"] = max(forecasts).isoformat()
+                )
+            for domain, query in queries:
+                proof = self._client.probe_query(query)
+                latest = str(proof["latest_date"])
+                previous = maxima.get(domain)
+                if previous is None or latest > previous:
+                    maxima[domain] = latest
+                readiness[domain] += 1
             self._preflight_source_max = maxima
-            return {"read_only": True, "source_max_dates": maxima}
+            return {
+                "read_only": True,
+                "source_max_dates": maxima,
+                "readiness": {
+                    "connectivity": "READY",
+                    "required_query": "READY",
+                    "required_schema": "READY",
+                    "query_counts": dict(sorted(readiness.items())),
+                },
+            }
         except LutouSourceUnavailableError:
             self.close()
             raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Lutou approved source is empty") from None
@@ -323,10 +334,21 @@ class LutouRefreshAdapter:
         except LutouConnectionError:
             self.close()
             raise ProviderFailure(ProviderStatus.AUTH_FAILURE, "Lutou authentication failed") from None
+        except LutouClientError:
+            self.close()
+            raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Lutou required query readiness failed") from None
 
     def refresh(self) -> RefreshResult:
         if self._client is None:
             raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Lutou preflight client is unavailable")
+        try:
+            self._client.ensure_connected()
+        except LutouClientError:
+            self.close()
+            raise ProviderFailure(
+                ProviderStatus.SOURCE_UNAVAILABLE,
+                "Lutou preflight connection could not be refreshed",
+            ) from None
         domains: dict[str, str] = {}
         maxima: dict[str, str] = {}
         promoted = False
@@ -544,12 +566,20 @@ class DomesticBasisRefreshAdapter:
             self._adapter = LutouDomesticBasisLiveAdapter(self._client)
             schema_proof = self._adapter.verify_schema()
             _, self._source_max = self._adapter.date_bounds()
+            query_proof = self._client.probe_query(self._adapter.query)
             return {
                 "read_only": self._client.proof.transaction_read_only,
                 "write_privileges": list(self._client.proof.write_privileges),
                 "relations": 1,
                 "series": len(catalog.series),
                 "schema": schema_proof,
+                "readiness": {
+                    "connectivity": "READY",
+                    "required_query": "READY",
+                    "required_schema": "READY",
+                    "query_counts": {"domestic_basis": 1},
+                    "latest_query_date": query_proof["latest_date"],
+                },
                 "source_max_dates": {"domestic_basis": self._source_max.isoformat()},
             }
         except LutouReadOnlyError:
@@ -564,10 +594,21 @@ class DomesticBasisRefreshAdapter:
         except LutouConnectionError:
             self.close()
             raise ProviderFailure(ProviderStatus.AUTH_FAILURE, "Lutou authentication failed") from None
+        except LutouClientError:
+            self.close()
+            raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Domestic Basis required query readiness failed") from None
 
     def refresh(self) -> RefreshResult:
-        if self._adapter is None:
+        if self._adapter is None or self._client is None:
             raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Domestic Basis preflight client is unavailable")
+        try:
+            self._client.ensure_connected()
+        except LutouClientError:
+            self.close()
+            raise ProviderFailure(
+                ProviderStatus.SOURCE_UNAVAILABLE,
+                "Domestic Basis preflight connection could not be refreshed",
+            ) from None
         try:
             result = run_domestic_basis_live(
                 runtime=self.runtime,

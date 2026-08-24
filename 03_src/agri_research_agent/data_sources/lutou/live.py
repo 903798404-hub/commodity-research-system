@@ -241,6 +241,21 @@ class LutouClient:
             except Exception:
                 pass
 
+    def ensure_connected(self) -> LutouConnectionProof:
+        """Reconnect an idle preflight connection and re-prove read-only state."""
+        connection = self._require_connection()
+        try:
+            connection.ping(reconnect=True)
+            connection.rollback()
+            self._proof = self._verify_read_only()
+            return self._proof
+        except LutouClientError:
+            raise
+        except Exception as exc:
+            raise LutouConnectionError(
+                f"Lutou connection readiness failed: {type(exc).__name__}"
+            ) from None
+
     def inspect_query(self, query: LutouQuery) -> tuple[dict[str, object], ...]:
         connection = self._require_connection()
         placeholders = ", ".join(["%s"] * (len(query.value_columns) + 1))
@@ -399,6 +414,32 @@ class LutouClient:
             raise LutouSchemaError(
                 f"Lutou latest source-date probe failed: {type(exc).__name__}"
             ) from None
+
+    def probe_query(self, query: LutouQuery) -> dict[str, object]:
+        """Execute one newest-date window to prove schema and ingestion readiness."""
+        columns = self.inspect_query(query)
+        latest = self.latest_date(query)
+        plan, batches = self.plan_stream(query, latest, latest, batch_size=1_000)
+        expected = {query.date_column, *query.value_columns}
+        row_count = 0
+        for batch in batches:
+            for row in batch.rows:
+                if set(row) != expected:
+                    raise LutouSchemaError(
+                        "Lutou required query result shape differs from the approved contract"
+                    )
+                row_count += 1
+        if row_count == 0:
+            raise LutouSourceUnavailableError(
+                "approved Lutou required query returned no newest-date rows"
+            )
+        return {
+            "latest_date": latest.isoformat(),
+            "row_count": row_count,
+            "column_count": len(columns),
+            "plan_estimated_rows": plan.estimated_rows,
+            "query_sha256": query.sha256,
+        }
 
     def plan(self, query: LutouQuery, start: date, end: date) -> LutouPlanProof:
         parameters = _window(query, start, end)

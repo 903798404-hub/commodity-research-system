@@ -13,6 +13,7 @@ from agri_research_agent.data_sources.lutou.live import (
     LutouPlanRejectedError,
     LutouQuery,
     LutouReadOnlyError,
+    LutouSchemaError,
 )
 
 
@@ -111,12 +112,17 @@ class FakeConnection:
         self.source_rows = source_rows
         self.statements: list[tuple[str, tuple[object, ...]]] = []
         self.closed = False
+        self.ping_count = 0
 
     def cursor(self, *_args, **_kwargs) -> FakeCursor:
         return FakeCursor(self)
 
     def rollback(self) -> None:
         pass
+
+    def ping(self, reconnect: bool = True) -> None:
+        assert reconnect is True
+        self.ping_count += 1
 
     def close(self) -> None:
         self.closed = True
@@ -195,6 +201,43 @@ def test_latest_date_inspects_approved_columns_and_reads_one_row() -> None:
     assert latest == [
         "SELECT `Date` FROM `油脂油料价格`.`oil_world_prices` ORDER BY `Date` DESC LIMIT 1"
     ]
+
+
+def test_required_query_probe_executes_newest_window_and_validates_shape() -> None:
+    day = date(2026, 8, 18)
+    connection = FakeConnection(
+        source_rows=({"Date": day, "Soybean oil,Dutch, fob ex-mill": 1000},)
+    )
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        proof = client.probe_query(query())
+    assert proof["latest_date"] == day.isoformat()
+    assert proof["row_count"] == 1
+    assert proof["column_count"] == 2
+
+
+def test_required_query_probe_rejects_result_shape_mismatch() -> None:
+    day = date(2026, 8, 18)
+    connection = FakeConnection(source_rows=({"Date": day, "unexpected": 1000},))
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        with pytest.raises(LutouSchemaError, match="result shape"):
+            client.probe_query(query())
+
+
+def test_idle_preflight_connection_is_pinged_and_read_only_state_is_reproved() -> None:
+    connection = FakeConnection()
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        initial_proof_count = sum(
+            statement.startswith("START TRANSACTION READ ONLY")
+            for statement, _ in connection.statements
+        )
+        proof = client.ensure_connected()
+        final_proof_count = sum(
+            statement.startswith("START TRANSACTION READ ONLY")
+            for statement, _ in connection.statements
+        )
+    assert connection.ping_count == 1
+    assert proof.transaction_read_only is True
+    assert final_proof_count == initial_proof_count + 1
 
 
 def test_metadata_inventory_and_date_bounds_are_read_only() -> None:

@@ -8,7 +8,10 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agri_research_agent.data_sources.lutou.live import LutouConnectionSettings
+from agri_research_agent.data_sources.lutou.live import (
+    LutouClientError,
+    LutouConnectionSettings,
+)
 from agri_research_agent.pipelines.public_data_providers import (
     DomesticBasisPendingAdapter,
     DomesticBasisRefreshAdapter,
@@ -95,10 +98,12 @@ def test_live_provider_reports_independent_no_change(monkeypatch, runtime: Runti
         proof = SimpleNamespace(transaction_read_only=True, write_privileges=())
         def __init__(self, settings): pass
         def __enter__(self): return self
+        def probe_query(self, query): return {"latest_date": "2026-08-19"}
+        def ensure_connected(self): pass
         def close(self): pass
 
     class Live:
-        def __init__(self, client): pass
+        def __init__(self, client): self.query = object()
         def verify_schema(self): return {"column_count": 19, "date_indexed": True}
         def date_bounds(self): return __import__("datetime").date(2022, 6, 15), __import__("datetime").date(2026, 8, 19)
 
@@ -160,3 +165,45 @@ def test_live_provider_fails_before_network_when_formal_alignment_is_missing(
     assert outcome.preflight_status is ProviderStatus.SOURCE_SCHEMA_FAILURE
     assert outcome.status is ProviderStatus.SOURCE_SCHEMA_FAILURE
     assert network_calls == []
+
+
+def test_live_provider_required_query_failure_is_not_ready(
+    monkeypatch, runtime: RuntimeContext,
+) -> None:
+    import agri_research_agent.pipelines.public_data_providers as providers
+
+    class Client:
+        proof = SimpleNamespace(transaction_read_only=True, write_privileges=())
+        def __init__(self, settings): pass
+        def __enter__(self): return self
+        def probe_query(self, query): raise LutouClientError("fixture query failure")
+        def close(self): pass
+
+    class Live:
+        def __init__(self, client): self.query = object()
+        def verify_schema(self): return {"column_count": 19, "date_indexed": True}
+        def date_bounds(self):
+            return __import__("datetime").date(2022, 6, 15), __import__("datetime").date(2026, 8, 19)
+
+    monkeypatch.setattr(providers, "load_domestic_basis_catalog", lambda path: SimpleNamespace(live_verified=True, series=tuple(range(21))))
+    monkeypatch.setattr(
+        providers,
+        "load_domestic_basis_current",
+        lambda root: SimpleNamespace(
+            release_id="formal-current",
+            manifest={"schema_version": "lutou-domestic-basis-current/3", "source_max_date": "2026-08-19"},
+        ),
+    )
+    monkeypatch.setattr(providers, "_pointer", lambda root: {"manifest_sha256": "a" * 64})
+    monkeypatch.setattr(providers, "load_historical_basis_seed", lambda root: SimpleNamespace(seed_id="sealed"))
+    monkeypatch.setattr(providers, "LutouClient", Client)
+    monkeypatch.setattr(providers, "LutouDomesticBasisLiveAdapter", Live)
+    adapter = DomesticBasisRefreshAdapter(
+        LutouConnectionSettings("safe-host", 3306, "readonly", "process-only"),
+        runtime, "unified", Path("mapping.yaml"), connector=lambda *args: True,
+    )
+    result = run_unified_refresh(runtime=runtime, run_id="provider-query-not-ready", adapters=[adapter])
+    outcome = result.providers[0]
+    assert outcome.preflight_status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert outcome.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert outcome.current_before == outcome.current_after
