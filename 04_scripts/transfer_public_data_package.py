@@ -25,6 +25,9 @@ if str(SRC) not in sys.path:
 from agri_research_agent.pipelines.public_data_delivery import (  # noqa: E402
     validate_production_package,
 )
+from agri_research_agent.pipelines.public_data_prewarm import (  # noqa: E402
+    validate_formal_consumer_reads,
+)
 
 
 _SSH_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}$")
@@ -130,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     target, store, image = _checked_inputs(args)
     package = validate_production_package(args.package)
+    validate_formal_consumer_reads(
+        project_root=ROOT,
+        runtime_root=package.directory / "data",
+    )
     pointer_path = f"{store}/current.json"
     pointer_probe = (
         'if [ ! -e "$1" ]; then printf "__MISSING__"; '

@@ -18,12 +18,10 @@ from agri_research_agent.pipelines.public_data_delivery import (  # noqa: E402
     activate_incoming_server_package,
 )
 from agri_research_agent.pipelines.public_data_prewarm import (  # noqa: E402
-    build_consumer_prewarm_targets,
     validate_activated_public_currents,
+    validate_formal_consumer_reads,
 )
 from agri_research_agent.pipelines.public_data_delivery import (  # noqa: E402
-    PrewarmStatus,
-    run_prewarm,
     validate_production_package,
 )
 
@@ -51,15 +49,10 @@ def main(argv: list[str] | None = None) -> int:
             args.incoming_package, require_directory_name=False
         )
         data_root = package.directory / "data"
-        validate_activated_public_currents(data_root)
-        consumer_reads = run_prewarm(
-            build_consumer_prewarm_targets(project_root=ROOT, runtime_root=data_root)
+        consumer_reads = validate_formal_consumer_reads(
+            project_root=ROOT,
+            runtime_root=data_root,
         )
-        if consumer_reads.status is not PrewarmStatus.PASS:
-            detail = ",".join(
-                f"{name}={status}" for name, status in sorted(consumer_reads.targets.items())
-            )
-            raise RuntimeError(f"sealed package consumer validation failed: {detail}")
         print(json.dumps({
             "schema_version": "public-data-remote-validation/1",
             "status": "VALIDATED",
@@ -72,12 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     def post_switch_validate(data_root: Path) -> None:
-        validate_activated_public_currents(data_root)
-        consumer_reads = run_prewarm(
-            build_consumer_prewarm_targets(project_root=ROOT, runtime_root=data_root)
-        )
-        if consumer_reads.status is not PrewarmStatus.PASS:
-            raise RuntimeError("formal consumer read validation failed")
+        validate_formal_consumer_reads(project_root=ROOT, runtime_root=data_root)
 
     result = activate_incoming_server_package(
         args.incoming_package,

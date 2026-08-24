@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from agri_research_agent.market_data import public_weather_current as reader
@@ -93,6 +94,53 @@ def test_reader_uses_parquet_predicates_and_preserves_ec_gfs_identity(
     ]
 
 
+def test_reader_selects_latest_source_content_run_without_fabricating_issue_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = _weather_rows()
+    old = rows.loc[rows["data_family"].eq("forecast")].copy()
+    old["forecast_run_id"] = old["forecast_run_id"].map(lambda value: f"old-{value}")
+    old["value"] = old["value"] + 100
+    old["extracted_at"] = pd.Timestamp("2026-08-18", tz="UTC")
+    rows = pd.concat([old, rows], ignore_index=True)
+    monkeypatch.setattr(reader, "_resolve_current_versioned", lambda *_args: _resolved(tmp_path))
+    monkeypatch.setattr(
+        reader.pq, "read_table",
+        lambda *_args, **_kwargs: pa.Table.from_pandas(rows, preserve_index=False),
+    )
+
+    result = reader._read_metric_versioned.__wrapped__(
+        str(tmp_path), "weather-release", "a" * 64, "soybean", "USA",
+        "precipitation", ("illinois",), None, None,
+    )
+
+    forecast = result[result["data_type"].eq("forecast")]
+    assert set(forecast["forecast_run_id"]) == {"ec-run", "gfs-run"}
+    assert set(forecast["value"]) == {8.0, 9.0}
+    assert forecast["forecast_run_at"].isna().all()
+
+
+def test_reader_rejects_ambiguous_latest_forecast_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rows = _weather_rows()
+    duplicate = rows.loc[rows["forecast_run_id"].eq("ec-run")].copy()
+    duplicate["forecast_run_id"] = "another-ec-run"
+    rows = pd.concat([rows, duplicate], ignore_index=True)
+    monkeypatch.setattr(reader, "_resolve_current_versioned", lambda *_args: _resolved(tmp_path))
+    monkeypatch.setattr(
+        reader.pq, "read_table",
+        lambda *_args, **_kwargs: pa.Table.from_pandas(rows, preserve_index=False),
+    )
+
+    with pytest.raises(reader.PublicWeatherCurrentError) as exc:
+        reader._read_metric_versioned.__wrapped__(
+            str(tmp_path), "weather-release", "a" * 64, "soybean", "USA",
+            "precipitation", ("illinois",), None, None,
+        )
+    assert exc.value.code == reader.PublicWeatherCurrentErrorCode.SERIES_METADATA_MISMATCH
+
+
 @pytest.mark.parametrize(
     ("rows", "code"),
     [
@@ -159,7 +207,7 @@ def _manifest(tmp_path: Path, *, complete_series_count: int = 842) -> tuple[Path
         "row_count": 10, "series_count": 686, "soil_row_count": 10,
         "soil_series_count": 94, "normal_row_count": 10, "normal_series_count": 62,
         "stable_key_duplicate_count": 0, "normal_stable_key_duplicate_count": 0,
-        "forecast_run_count": 60, "source_max_dates": {
+        "forecast_run_count": 2, "source_max_dates": {
             "observation": "2026-08-18", "forecast_valid": "2026-09-02",
         }, "content_sha256": "b" * 64,
     }
@@ -168,6 +216,13 @@ def _manifest(tmp_path: Path, *, complete_series_count: int = 842) -> tuple[Path
     (directory / "soil_bindings.json").write_text(
         json.dumps({"binding_count": 102, "bindings": [{} for _ in range(102)]}),
         encoding="utf-8",
+    )
+    pq.write_table(
+        pa.table({
+            "data_family": ["forecast", "forecast", "observation"],
+            "forecast_run_id": ["ec-run", "gfs-run", "NOT_APPLICABLE"],
+        }),
+        directory / "observations.parquet",
     )
     return directory, manifest
 
@@ -216,6 +271,30 @@ def test_sealed_series_identity_contract_sha_is_enforced(
     assert exc.value.code == reader.PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST
 
 
+@pytest.mark.parametrize("invalid_value", [None, "2", 0, 1, 3])
+def test_forecast_run_count_is_required_and_matches_parquet_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, invalid_value: object
+) -> None:
+    directory, manifest = _manifest(tmp_path)
+    if invalid_value is None:
+        del manifest["forecast_run_count"]
+    else:
+        manifest["forecast_run_count"] = invalid_value
+    (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    fake = SimpleNamespace(
+        release_id="weather-release", directory=directory, manifest=manifest,
+        observations_path=directory / "observations.parquet",
+        soil_observations_path=directory / "soil_observations.parquet",
+        normals_path=directory / "normals.parquet",
+    )
+    monkeypatch.setattr(reader, "load_weather_current", lambda _root: fake)
+    sha = identify_file(directory / "manifest.json").sha256
+    reader._resolve_current_versioned.cache_clear()
+    with pytest.raises(reader.PublicWeatherCurrentError) as exc:
+        reader._resolve_current_versioned(str(tmp_path), "weather-release", sha)
+    assert exc.value.code == reader.PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST
+
+
 def test_missing_or_invalid_current_pointer_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(reader.PublicWeatherCurrentError) as missing:
         reader.resolve_weather_current_identity(tmp_path)
@@ -224,3 +303,40 @@ def test_missing_or_invalid_current_pointer_fails_closed(tmp_path: Path) -> None
     with pytest.raises(reader.PublicWeatherCurrentError) as invalid:
         reader.resolve_weather_current_identity(tmp_path)
     assert invalid.value.code == reader.PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST
+
+
+def test_pointer_manifest_sha_mismatch_fails_closed(tmp_path: Path) -> None:
+    directory, _manifest_value = _manifest(tmp_path)
+    (tmp_path / "current.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "release_id": directory.name,
+            "manifest_sha256": "a" * 64,
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(reader.PublicWeatherCurrentError) as exc:
+        reader.resolve_weather_current_identity(tmp_path)
+    assert exc.value.code == reader.PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST
+
+
+def test_release_identity_mismatch_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    directory, manifest = _manifest(tmp_path)
+    manifest["release_id"] = "another-weather-release"
+    (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    fake = SimpleNamespace(
+        release_id="weather-release", directory=directory, manifest=manifest,
+        observations_path=directory / "observations.parquet",
+        soil_observations_path=directory / "soil_observations.parquet",
+        normals_path=directory / "normals.parquet",
+    )
+    monkeypatch.setattr(reader, "load_weather_current", lambda _root: fake)
+    sha = identify_file(directory / "manifest.json").sha256
+    reader._resolve_current_versioned.cache_clear()
+
+    with pytest.raises(reader.PublicWeatherCurrentError) as exc:
+        reader._resolve_current_versioned(str(tmp_path), "weather-release", sha)
+    assert exc.value.code == reader.PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST

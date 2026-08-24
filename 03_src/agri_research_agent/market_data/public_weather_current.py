@@ -238,6 +238,10 @@ def _resolve_current_versioned(
         content_sha256 = str(manifest["content_sha256"])
         if _SHA256.fullmatch(content_sha256) is None:
             raise ValueError("content identity is invalid")
+        forecast_run_count = manifest["forecast_run_count"]
+        if type(forecast_run_count) is not int or forecast_run_count <= 0:
+            raise ValueError("forecast run count is invalid")
+        actual_forecast_run_count = _count_forecast_runs(current.observations_path)
     except (OSError, KeyError, TypeError, ValueError):
         raise PublicWeatherCurrentError(
             PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST,
@@ -257,7 +261,7 @@ def _resolve_current_versioned(
         or manifest.get("normal_series_count") != 62
         or manifest.get("stable_key_duplicate_count") != 0
         or manifest.get("normal_stable_key_duplicate_count") != 0
-        or manifest.get("forecast_run_count") != 60
+        or forecast_run_count != actual_forecast_run_count
     ):
         raise PublicWeatherCurrentError(
             PublicWeatherCurrentErrorCode.INVALID_CURRENT_MANIFEST,
@@ -303,6 +307,18 @@ def _resolve_current_versioned(
         content_sha256,
     )
     return _ResolvedWeatherCurrent(current, identity, bindings)
+
+
+def _count_forecast_runs(observations_path: Path) -> int:
+    table = pq.read_table(
+        observations_path,
+        columns=["forecast_run_id"],
+        filters=[("data_family", "=", "forecast")],
+    )
+    values = table.column("forecast_run_id").to_pylist()
+    if not values or any(not isinstance(value, str) or not value for value in values):
+        raise ValueError("forecast run identity is invalid")
+    return len(set(values))
 
 
 @lru_cache(maxsize=256)
@@ -400,6 +416,7 @@ def _read_metric_versioned(
             PublicWeatherCurrentErrorCode.SERIES_METADATA_MISMATCH,
             "Weather forecast issue-date semantics are invalid",
         )
+    rows = _select_active_forecast_runs(rows)
     _require_regions(rows, regions, crop, country, metric)
     _require_unique(rows, ["series_id", "valid_date", "forecast_run_id"])
     rows = rows.rename(
@@ -419,6 +436,35 @@ def _read_metric_versioned(
     return rows.sort_values(
         ["date", "region", "data_type", "model", "series_id"]
     ).reset_index(drop=True)
+
+
+def _select_active_forecast_runs(rows: pd.DataFrame) -> pd.DataFrame:
+    forecast = rows[rows["data_family"].eq("forecast")].copy()
+    if forecast.empty:
+        return rows
+    run_metadata = forecast[
+        ["series_id", "forecast_run_id", "extracted_at"]
+    ].drop_duplicates()
+    if run_metadata.duplicated(["series_id", "forecast_run_id"]).any():
+        raise PublicWeatherCurrentError(
+            PublicWeatherCurrentErrorCode.SERIES_METADATA_MISMATCH,
+            "Weather forecast run has inconsistent extraction identity",
+        )
+    latest = run_metadata.groupby("series_id")["extracted_at"].transform("max")
+    active = run_metadata[run_metadata["extracted_at"].eq(latest)]
+    if active.duplicated("series_id", keep=False).any():
+        raise PublicWeatherCurrentError(
+            PublicWeatherCurrentErrorCode.SERIES_METADATA_MISMATCH,
+            "Weather forecast active run identity is ambiguous",
+        )
+    selected = forecast.merge(
+        active[["series_id", "forecast_run_id"]],
+        on=["series_id", "forecast_run_id"],
+        how="inner",
+        validate="many_to_one",
+    )
+    observed = rows[rows["data_family"].eq("observation")]
+    return pd.concat([observed, selected], ignore_index=True)
 
 
 def _read_soil_metric(

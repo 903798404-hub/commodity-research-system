@@ -17,6 +17,15 @@ transport = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(transport)
 
 
+@pytest.fixture(autouse=True)
+def _formal_consumer_validation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        transport,
+        "validate_formal_consumer_reads",
+        lambda **_kwargs: SimpleNamespace(targets={"weather": "PASS"}),
+    )
+
+
 def _completed(command: list[str], *, code: int = 0, stdout: str = ""):
     return subprocess.CompletedProcess(command, code, stdout, "")
 
@@ -78,6 +87,34 @@ def test_same_remote_identity_skips_scp_and_activation(
     assert code == 0
     assert len(calls) == 1 and calls[0][0] == "ssh"
     assert json.loads(capsys.readouterr().out)["transport"] == "SKIPPED"
+
+
+def test_formal_consumer_failure_stops_before_any_server_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = SimpleNamespace(
+        package_id="public-current-abc", directory=tmp_path, manifest={}
+    )
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    monkeypatch.setattr(
+        transport,
+        "validate_formal_consumer_reads",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("formal consumer validation failed: weather=FAIL")
+        ),
+    )
+    monkeypatch.setattr(
+        transport,
+        "_run",
+        lambda _command: pytest.fail("formal validation must precede SSH and SCP"),
+    )
+
+    with pytest.raises(RuntimeError, match="weather=FAIL"):
+        transport.main([
+            "--package", str(tmp_path), "--ssh-target", "trusted-host",
+            "--remote-store-root", "/safe/store",
+            "--activation-image-id", f"sha256:{'a' * 64}",
+        ])
 
 
 def test_updated_package_uses_scp_then_immutable_image_activation(

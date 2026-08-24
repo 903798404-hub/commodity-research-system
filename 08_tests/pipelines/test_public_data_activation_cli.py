@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from agri_research_agent.pipelines.public_data_delivery import PrewarmStatus
-
+from agri_research_agent.pipelines import public_data_prewarm
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "04_scripts" / "activate_public_data_package.py"
@@ -16,6 +16,23 @@ SPEC = importlib.util.spec_from_file_location("public_data_activation_test", SCR
 assert SPEC and SPEC.loader
 activation = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(activation)
+
+
+def test_runtime_root_is_scoped_to_each_formal_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
+    monkeypatch.setenv(name, "existing-runtime")
+    observed: list[str | None] = []
+    loader = public_data_prewarm._runtime_scoped_loader(
+        tmp_path,
+        lambda: observed.append(os.environ.get(name)),
+    )
+
+    loader()
+
+    assert observed == [str(tmp_path.resolve())]
+    assert os.environ[name] == "existing-runtime"
 
 
 def test_validate_only_reads_sealed_package_without_activation(
@@ -36,19 +53,10 @@ def test_validate_only_reads_sealed_package_without_activation(
     )
     monkeypatch.setattr(
         activation,
-        "validate_activated_public_currents",
-        lambda path: calls.append(f"current:{Path(path).name}"),
-    )
-    monkeypatch.setattr(
-        activation,
-        "build_consumer_prewarm_targets",
-        lambda **kwargs: (SimpleNamespace(name="consumer"),),
-    )
-    monkeypatch.setattr(
-        activation,
-        "run_prewarm",
-        lambda targets: SimpleNamespace(
-            status=PrewarmStatus.PASS, targets={"consumer": "PASS"}
+        "validate_formal_consumer_reads",
+        lambda **kwargs: (
+            calls.append(f"formal:{Path(kwargs['runtime_root']).name}")
+            or SimpleNamespace(targets={"consumer": "PASS"})
         ),
     )
     monkeypatch.setattr(
@@ -65,7 +73,7 @@ def test_validate_only_reads_sealed_package_without_activation(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "VALIDATED"
     assert payload["consumer_reads"] == {"consumer": "PASS"}
-    assert calls == ["package:public-current-abc.upload-one:False", "current:data"]
+    assert calls == ["package:public-current-abc.upload-one:False", "formal:data"]
 
 
 def test_validate_only_fails_closed_on_consumer_failure(
@@ -75,17 +83,15 @@ def test_validate_only_fails_closed_on_consumer_failure(
     monkeypatch.setattr(
         activation, "validate_production_package", lambda *args, **kwargs: package
     )
-    monkeypatch.setattr(activation, "validate_activated_public_currents", lambda _path: None)
-    monkeypatch.setattr(activation, "build_consumer_prewarm_targets", lambda **kwargs: ())
     monkeypatch.setattr(
         activation,
-        "run_prewarm",
-        lambda _targets: SimpleNamespace(
-            status=PrewarmStatus.FAIL, targets={"consumer": "FAIL:ValueError"}
+        "validate_formal_consumer_reads",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("formal consumer validation failed: consumer=FAIL:ValueError")
         ),
     )
 
-    with pytest.raises(RuntimeError, match="consumer validation failed"):
+    with pytest.raises(RuntimeError, match="formal consumer validation failed"):
         activation.main([
             "--incoming-package", str(tmp_path),
             "--store-root", str(tmp_path / "store"),
