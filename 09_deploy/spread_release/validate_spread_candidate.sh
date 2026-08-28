@@ -17,6 +17,7 @@ manifest="${release_directory}/release.json"
 environment_file="${release_directory}/release.env"
 verifier="${script_dir}/verify_release_contract.py"
 readiness_waiter="${script_dir}/wait_for_service_ready.py"
+server_store_result="$(dirname -- "${readiness_result}")/candidate_server_store_contract.json"
 
 readarray -t identity < <(
     python3 - "${manifest}" <<'PY'
@@ -44,6 +45,23 @@ python3 "${verifier}" \
     --repository "${repository}" \
     --manifest "${manifest}" \
     --env-file "${environment_file}"
+
+# Runtime data provenance is a precondition for readiness: a healthy Streamlit
+# process must never validate while silently consuming loose /app/01_data files.
+python3 - "${script_dir}" "${candidate_container}" "${server_store_result}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from release_contract import validate_candidate_server_store_runtime
+
+evidence = validate_candidate_server_store_runtime(sys.argv[2])
+target = Path(sys.argv[3])
+with target.open("x", encoding="utf-8", newline="\n") as handle:
+    json.dump(evidence, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
 
 python3 "${readiness_waiter}" \
     --container "${candidate_container}" \

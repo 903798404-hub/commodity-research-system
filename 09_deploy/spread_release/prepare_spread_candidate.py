@@ -27,6 +27,8 @@ from release_contract import (
     IMPORT_PROFIT_RUNTIME_CONTAINER_PATH,
     IMPORT_PROFIT_RUNTIME_ENV_KEY,
     IMPORT_PROFIT_RUNTIME_MOUNT_ID,
+    PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT,
+    PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY,
     PUBLIC_MARKET_DATA_CONTAINER_ROOT,
     PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY,
     PRODUCTION_CONTAINER,
@@ -58,6 +60,7 @@ from release_contract import (
     validate_image_id,
     validate_rollback_image_ref,
     validate_source,
+    validate_server_store_contract_evidence,
     validate_weather_runtime_dir,
     validate_git_state,
     validate_formal_container_snapshot,
@@ -488,6 +491,9 @@ def build_candidate_compose(
     candidate_environment[PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY] = (
         PUBLIC_MARKET_DATA_CONTAINER_ROOT
     )
+    candidate_environment[PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY] = (
+        PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT
+    )
     if import_profit_runtime_host is not None:
         candidate_environment[IMPORT_PROFIT_RUNTIME_ENV_KEY] = import_profit_runtime_container
     # WEATHER_RUNTIME_CURRENT_DIR is an interpolation input, never an application
@@ -676,6 +682,15 @@ def validate_candidate_compose(
         != PUBLIC_MARKET_DATA_CONTAINER_ROOT
     ):
         raise ContractError("candidate Public Market Data runtime root is invalid")
+    if (
+        environment.get(PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY)
+        != PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT
+    ):
+        raise ContractError("candidate Public Data Server Store root is invalid")
+    server_store_root = PurePosixPath(PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT)
+    public_data_root = PurePosixPath(CANDIDATE_DATA_CONTAINER_PATH)
+    if public_data_root not in server_store_root.parents:
+        raise ContractError("candidate Server Store root must be under /app/01_data")
     expected_runtime_environment = (
         expected_import_profit_runtime_container
         if expected_import_profit_runtime_host is not None
@@ -1149,6 +1164,7 @@ def _candidate_check_evidence(
     formal_spread_after: Mapping[str, Any],
     data_baseline_before: Mapping[str, Any],
     data_baseline_after: Mapping[str, Any],
+    server_store_contract: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build candidate-result checks from live evidence, never operator defaults."""
     last_http = readiness.get("last_http_result") or {}
@@ -1168,12 +1184,16 @@ def _candidate_check_evidence(
         raise ContractError("formal spread-dashboard identity changed during candidate validation")
     if data_baseline_before.get("datasets") != data_baseline_after.get("datasets"):
         raise ContractError("formal data baseline changed during candidate validation")
+    validated_server_store = validate_server_store_contract_evidence(
+        server_store_contract
+    )
     return {
         "http": {"health": 200, "host_config": host_config_status, "root": root_status},
         # The Streamlit entry point and its host configuration were fetched from
         # the running candidate.  Detailed visual acceptance remains a separate
         # human gate; this is the contract's machine-readable page entry check.
         "pages": {"status": "passed"},
+        "server_store_contract": validated_server_store,
         "formal_git_unchanged": True,
         "data_files_unchanged": True,
         "production_switch_performed": False,
@@ -1211,6 +1231,10 @@ def _default_candidate_result_sealer(
         options.candidate_container_name,
         runtime,
     )
+    server_store_contract = _load_json_object(
+        output_directory / "candidate_server_store_contract.json",
+        "candidate Server Store runtime evidence",
+    )
     checks = _candidate_check_evidence(
         candidate_health_url,
         readiness,
@@ -1218,6 +1242,7 @@ def _default_candidate_result_sealer(
         formal_spread_after=formal_spread_after,
         data_baseline_before=manifest["data_baseline"],
         data_baseline_after=data_baseline_after,
+        server_store_contract=server_store_contract,
     )
     checks_path = output_directory / "candidate_checks.json"
     _write_json_exclusive(checks_path, checks)

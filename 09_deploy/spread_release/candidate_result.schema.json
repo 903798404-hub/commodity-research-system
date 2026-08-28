@@ -187,6 +187,9 @@
             }
           }
         },
+        "server_store_contract": {
+          "$ref": "#/$defs/serverStoreContract"
+        },
         "formal_containers_unchanged": {
           "const": true
         },
@@ -209,7 +212,12 @@
         "required": ["schema_version"]
       },
       "then": {
-        "required": ["blocking_gates", "completed_gates", "runtime_mounts", "candidate_runtime_access"]
+        "required": ["blocking_gates", "completed_gates", "runtime_mounts", "candidate_runtime_access"],
+        "properties": {
+          "checks": {
+            "required": ["server_store_contract"]
+          }
+        }
       },
       "else": {
         "properties": { "status": { "const": "candidate-validated" } }
@@ -233,6 +241,68 @@
     }
   ],
   "$defs": {
+    "serverStoreConsumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "resolved_path"],
+      "properties": {
+        "status": { "const": "passed" },
+        "resolved_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "serverStoreContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_status",
+        "environment_variable",
+        "container_root",
+        "mount_status",
+        "mount_target",
+        "mount_read_only",
+        "current_status",
+        "package_id",
+        "manifest_status",
+        "identity_status",
+        "resolved_data_root",
+        "required_consumers"
+      ],
+      "properties": {
+        "environment_status": { "const": "passed" },
+        "environment_variable": { "const": "PUBLIC_DATA_SERVER_STORE_ROOT" },
+        "container_root": { "const": "/app/01_data/public-data-server-store" },
+        "mount_status": { "const": "passed" },
+        "mount_target": { "const": "/app/01_data" },
+        "mount_read_only": { "const": true },
+        "current_status": { "const": "passed" },
+        "package_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"
+        },
+        "manifest_status": { "const": "passed" },
+        "identity_status": { "const": "passed" },
+        "resolved_data_root": {
+          "type": "string",
+          "pattern": "^/app/01_data/public-data-server-store/releases/[A-Za-z0-9][A-Za-z0-9._-]{0,199}/data$"
+        },
+        "required_consumers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "domestic_spread",
+            "international_spread",
+            "weather",
+            "domestic_basis"
+          ],
+          "properties": {
+            "domestic_spread": { "$ref": "#/$defs/serverStoreConsumer" },
+            "international_spread": { "$ref": "#/$defs/serverStoreConsumer" },
+            "weather": { "$ref": "#/$defs/serverStoreConsumer" },
+            "domestic_basis": { "$ref": "#/$defs/serverStoreConsumer" }
+          }
+        }
+      }
+    },
     "pendingGate": {
       "type": "object",
       "additionalProperties": false,

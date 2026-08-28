@@ -18,6 +18,7 @@ from release_contract import (
     hash_file,
     load_manifest_bundle,
     load_candidate_result,
+    validate_candidate_server_store_runtime,
     validate_git_state,
     write_candidate_result,
 )
@@ -143,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         checks = load_json_object(
             args.checks_file.resolve(),
             "candidate checks",
+        )
+        # Never trust operator-authored page provenance. Re-prove the live
+        # Candidate Server Store contract and replace any supplied value.
+        checks["server_store_contract"] = validate_candidate_server_store_runtime(
+            str(manifest["candidate_container_name"])
         )
         checks["formal_containers_before"] = load_json_object(
             args.formal_containers_before.resolve(),

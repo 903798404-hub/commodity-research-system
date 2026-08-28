@@ -60,6 +60,8 @@ from release_contract import (  # noqa: E402
     validate_formal_container_snapshot,
     validate_manifest,
     validate_candidate_result,
+    validate_candidate_server_store_runtime,
+    validate_server_store_contract_evidence,
     validate_artifact_manifest,
     validate_production_env,
     validate_release_image_ref,
@@ -672,6 +674,48 @@ def create_production_env(
     return path, environment
 
 
+def _server_store_evidence(
+    package_id: str = "public-current-test-package",
+) -> dict[str, object]:
+    data_root = (
+        f"/app/01_data/public-data-server-store/releases/{package_id}/data"
+    )
+    return {
+        "environment_status": "passed",
+        "environment_variable": "PUBLIC_DATA_SERVER_STORE_ROOT",
+        "container_root": "/app/01_data/public-data-server-store",
+        "mount_status": "passed",
+        "mount_target": "/app/01_data",
+        "mount_read_only": True,
+        "current_status": "passed",
+        "package_id": package_id,
+        "manifest_status": "passed",
+        "identity_status": "passed",
+        "resolved_data_root": data_root,
+        "required_consumers": {
+            "domestic_spread": {
+                "status": "passed",
+                "resolved_path": (
+                    f"{data_root}/consumer-artifacts/domestic-spread/"
+                    "historical_spread_database.parquet"
+                ),
+            },
+            "international_spread": {
+                "status": "passed",
+                "resolved_path": f"{data_root}/public-market-data/lutou-three-oil",
+            },
+            "weather": {
+                "status": "passed",
+                "resolved_path": f"{data_root}/public-market-data/lutou-weather",
+            },
+            "domestic_basis": {
+                "status": "passed",
+                "resolved_path": f"{data_root}/public-market-data/lutou-domestic-basis",
+            },
+        },
+    }
+
+
 def build_candidate_result_fixture(
     manifest: dict[str, object],
     runtime: FakeReleaseRuntime,
@@ -681,7 +725,24 @@ def build_candidate_result_fixture(
     completed_gates: tuple[dict[str, object], ...] = (),
     runtime_mounts: tuple[dict[str, object], ...] = (),
     candidate_runtime_access: dict[str, object] | None = None,
+    include_server_store: bool = True,
 ) -> dict[str, object]:
+    checks = {
+        "http": {
+            "health": 200,
+            "host_config": 200,
+            "root": 200,
+        },
+        "pages": {"status": page_status},
+        "formal_containers_before": capture_formal_container_snapshot(
+            runtime, captured_at=BUILD_TIME
+        ),
+        "formal_git_unchanged": True,
+        "data_files_unchanged": True,
+        "production_switch_performed": False,
+    }
+    if include_server_store:
+        checks["server_store_contract"] = _server_store_evidence()
     return create_candidate_result(
         manifest=manifest,
         runtime=runtime,
@@ -696,26 +757,143 @@ def build_candidate_result_fixture(
                 collected_at_utc=BUILD_TIME,
             ),
         },
-        checks={
-            "http": {
-                "health": 200,
-                "host_config": 200,
-                "root": 200,
-            },
-            "pages": {"status": page_status},
-            "formal_containers_before": capture_formal_container_snapshot(
-                runtime, captured_at=BUILD_TIME
-            ),
-            "formal_git_unchanged": True,
-            "data_files_unchanged": True,
-            "production_switch_performed": False,
-        },
+        checks=checks,
         generated_at=BUILD_TIME,
         blocking_gates=blocking_gates,
         completed_gates=completed_gates,
         runtime_mounts=runtime_mounts,
         candidate_runtime_access=candidate_runtime_access,
     )
+
+
+class ServerStoreRuntimeRunner:
+    def __init__(
+        self,
+        *,
+        environment: str | None = "/app/01_data/public-data-server-store",
+        mount_read_only: bool = True,
+        runtime_error: str | None = None,
+    ) -> None:
+        self.environment = environment
+        self.mount_read_only = mount_read_only
+        self.runtime_error = runtime_error
+
+    def run(self, command, *, cwd=None, env=None):
+        del cwd, env
+        command = list(command)
+        if command[:2] == ["docker", "inspect"]:
+            runtime_environment = ["MARKET_DATA_GIT_HEAD=" + GIT_COMMIT]
+            if self.environment is not None:
+                runtime_environment.append(
+                    "PUBLIC_DATA_SERVER_STORE_ROOT=" + self.environment
+                )
+            return json.dumps(
+                [
+                    {
+                        "Config": {"Env": runtime_environment},
+                        "Mounts": [
+                            {
+                                "Type": "bind",
+                                "Source": "/formal/01_data",
+                                "Destination": "/app/01_data",
+                                "RW": not self.mount_read_only,
+                            }
+                        ],
+                    }
+                ]
+            )
+        if command[:2] == ["docker", "exec"]:
+            if self.runtime_error:
+                raise ContractError(self.runtime_error)
+            evidence = _server_store_evidence()
+            return json.dumps(
+                {
+                    key: evidence[key]
+                    for key in (
+                        "current_status",
+                        "package_id",
+                        "manifest_status",
+                        "identity_status",
+                        "resolved_data_root",
+                        "required_consumers",
+                    )
+                }
+            )
+        raise AssertionError(command)
+
+
+def test_live_candidate_server_store_runtime_contract_passes() -> None:
+    evidence = validate_candidate_server_store_runtime(
+        "spread-dashboard-candidate-test",
+        ServerStoreRuntimeRunner(),  # type: ignore[arg-type]
+    )
+
+    assert evidence == _server_store_evidence()
+
+
+@pytest.mark.parametrize(
+    "environment",
+    (None, "/app/01_data/wrong-server-store"),
+)
+def test_live_candidate_server_store_runtime_rejects_missing_or_wrong_env(
+    environment: str | None,
+) -> None:
+    with pytest.raises(
+        ContractError, match="PUBLIC_DATA_SERVER_STORE_ROOT is missing or invalid"
+    ):
+        validate_candidate_server_store_runtime(
+            "spread-dashboard-candidate-test",
+            ServerStoreRuntimeRunner(environment=environment),  # type: ignore[arg-type]
+        )
+
+
+def test_live_candidate_server_store_runtime_rejects_writable_data_mount() -> None:
+    with pytest.raises(ContractError, match="must be a read-only bind"):
+        validate_candidate_server_store_runtime(
+            "spread-dashboard-candidate-test",
+            ServerStoreRuntimeRunner(mount_read_only=False),  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "runtime_error",
+    (
+        "Candidate Server Current is missing or unsafe",
+        "Candidate package manifest is missing",
+        "server Current package identity mismatch",
+    ),
+)
+def test_live_candidate_server_store_runtime_fails_closed_on_package_errors(
+    runtime_error: str,
+) -> None:
+    with pytest.raises(ContractError, match=re.escape(runtime_error)):
+        validate_candidate_server_store_runtime(
+            "spread-dashboard-candidate-test",
+            ServerStoreRuntimeRunner(runtime_error=runtime_error),  # type: ignore[arg-type]
+        )
+
+
+def test_server_store_evidence_rejects_loose_domestic_spread_path() -> None:
+    evidence = _server_store_evidence()
+    evidence["required_consumers"]["domestic_spread"]["resolved_path"] = (
+        "/app/01_data/historical_spread_database.parquet"
+    )
+
+    with pytest.raises(ContractError, match="domestic_spread"):
+        validate_server_store_contract_evidence(evidence)
+
+
+def test_candidate_result_cannot_pass_without_server_store_evidence(
+    tmp_path: Path,
+) -> None:
+    manifest, runtime, _ = build_manifest(tmp_path)
+
+    with pytest.raises(ContractError, match="Server Store runtime evidence"):
+        build_candidate_result_fixture(
+            manifest,
+            runtime,
+            include_server_store=False,
+        )
 
 
 def test_validate_build_time_accepts_docker_nanosecond_timestamps() -> None:
@@ -2570,6 +2748,10 @@ def test_candidate_environment_inherits_validated_public_urls(tmp_path: Path) ->
     assert candidate_environment["OIL_WORLD_DASHBOARD_URL"] == PRODUCTION_OIL_WORLD_URL
     assert "127.0.0.1:5175" not in candidate_environment.values()
     assert candidate_environment["MARKET_DATA_GIT_HEAD"] == GIT_COMMIT
+    assert candidate_environment["PUBLIC_MARKET_DATA_RUNTIME_ROOT"] == "/app/01_data"
+    assert candidate_environment["PUBLIC_DATA_SERVER_STORE_ROOT"] == (
+        "/app/01_data/public-data-server-store"
+    )
     assert candidate_environment["WEATHER_RUNTIME_CURRENT_DIR"] == (
         CANDIDATE_WEATHER_RUNTIME_DIR
     )
@@ -4215,6 +4397,9 @@ def test_candidate_deploy_and_rollback_share_one_readiness_tool() -> None:
     assert scripts["validate_spread_candidate.sh"].index("--phase candidate") < scripts[
         "validate_spread_candidate.sh"
     ].index('"${readiness_waiter}"')
+    assert scripts["validate_spread_candidate.sh"].index(
+        "validate_candidate_server_store_runtime"
+    ) < scripts["validate_spread_candidate.sh"].index('"${readiness_waiter}"')
     assert scripts["rollback_spread_release.sh"].index("--phase post-rollback") < scripts[
         "rollback_spread_release.sh"
     ].index('"${readiness_waiter}"')

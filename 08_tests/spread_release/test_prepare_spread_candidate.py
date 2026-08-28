@@ -642,6 +642,9 @@ def test_dry_run_generates_isolated_candidate_without_build_or_start(tmp_path: P
     assert service["environment"]["PUBLIC_MARKET_DATA_RUNTIME_ROOT"] == (
         "/app/01_data"
     )
+    assert service["environment"]["PUBLIC_DATA_SERVER_STORE_ROOT"] == (
+        "/app/01_data/public-data-server-store"
+    )
     assert service["labels"]["market-data.deployment.role"] == "candidate"
     assert service["labels"]["market-data.deployment.git_sha"] == options.git_commit
     assert "market-data.release.type=candidate" not in result["build_command"]
@@ -683,6 +686,26 @@ def test_candidate_mounts_formal_data_read_only_and_isolates_all_writable_paths(
     assert result["candidate_data_mount"]["mode"] == "ro"
     assert len(result["candidate_writable_mounts"]) == 4
     assert hashlib.sha256(options.production_compose_file.read_bytes()).hexdigest() == formal_sha
+
+
+def test_candidate_forces_server_store_root_over_missing_or_wrong_formal_value(
+    tmp_path: Path,
+) -> None:
+    for index, formal_value in enumerate((None, "/tmp/wrong-server-store")):
+        compose = _formal_compose(tmp_path / f"data-{index}")
+        environment = compose["services"]["spread-dashboard"]["environment"]
+        if formal_value is not None:
+            environment["PUBLIC_DATA_SERVER_STORE_ROOT"] = formal_value
+        options, runner = _options(tmp_path / f"case-{index}", compose=compose)
+
+        result = prepare_candidate(options, runner=runner, port_probe=lambda _: True)
+        candidate = json.loads(
+            Path(result["candidate_compose_file"]).read_text(encoding="utf-8")
+        )
+
+        assert candidate["services"][CANDIDATE_SERVICE]["environment"][
+            "PUBLIC_DATA_SERVER_STORE_ROOT"
+        ] == "/app/01_data/public-data-server-store"
 
 
 def test_candidate_rejects_writable_formal_data_mount(tmp_path: Path) -> None:
@@ -1059,6 +1082,10 @@ def test_root_compose_declares_future_production_runtime_role() -> None:
     assert "./10_logs:/app/10_logs\n" in compose_text
     assert (
         "PUBLIC_MARKET_DATA_RUNTIME_ROOT: /app/01_data"
+        in compose_text
+    )
+    assert (
+        "PUBLIC_DATA_SERVER_STORE_ROOT: /app/01_data/public-data-server-store"
         in compose_text
     )
     assert (

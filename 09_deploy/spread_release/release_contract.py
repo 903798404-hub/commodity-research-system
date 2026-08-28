@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Protocol, Sequence
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -94,6 +94,18 @@ WEATHER_RUNTIME_ENV_KEY = "WEATHER_RUNTIME_CURRENT_DIR"
 WEATHER_DATA_DIR_ENV_KEY = "WEATHER_DATA_DIR"
 PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
 PUBLIC_MARKET_DATA_CONTAINER_ROOT = "/app/01_data"
+PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY = "PUBLIC_DATA_SERVER_STORE_ROOT"
+PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT = (
+    f"{PUBLIC_MARKET_DATA_CONTAINER_ROOT}/public-data-server-store"
+)
+SERVER_STORE_REQUIRED_CONSUMERS = {
+    "domestic_spread": (
+        "consumer-artifacts/domestic-spread/historical_spread_database.parquet"
+    ),
+    "international_spread": "public-market-data/lutou-three-oil",
+    "weather": "public-market-data/lutou-weather",
+    "domestic_basis": "public-market-data/lutou-domestic-basis",
+}
 WEATHER_CONTAINER_PATH = "/app/runtime/weather"
 WEATHER_CONTAINER_CURRENT_PATH = f"{WEATHER_CONTAINER_PATH}/current"
 WEATHER_CONTAINER_NEXT_PATH = f"{WEATHER_CONTAINER_PATH}/next"
@@ -192,6 +204,10 @@ def candidate_compose_environment(
         "MARKET_DATA_GIT_HEAD": validate_full_git_commit(git_commit),
         WEATHER_RUNTIME_ENV_KEY: candidate_weather_dir,
         WEATHER_DATA_DIR_ENV_KEY: weather_candidate_data_dir(weather_candidate_mode),
+        PUBLIC_MARKET_DATA_RUNTIME_ENV_KEY: PUBLIC_MARKET_DATA_CONTAINER_ROOT,
+        PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY: (
+            PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT
+        ),
     }
 
 
@@ -840,6 +856,199 @@ def _load_docker_array(raw: str, description: str) -> dict[str, Any]:
     return payload[0]
 
 
+def validate_server_store_contract_evidence(evidence: Any) -> dict[str, Any]:
+    """Validate the safe, machine-generated Candidate Server Store evidence."""
+
+    if not isinstance(evidence, dict):
+        raise ContractError("candidate Server Store runtime evidence is missing")
+    expected_scalars = {
+        "environment_status": "passed",
+        "environment_variable": PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY,
+        "container_root": PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT,
+        "mount_status": "passed",
+        "mount_target": PUBLIC_MARKET_DATA_CONTAINER_ROOT,
+        "mount_read_only": True,
+        "current_status": "passed",
+        "manifest_status": "passed",
+        "identity_status": "passed",
+    }
+    for key, expected in expected_scalars.items():
+        if evidence.get(key) != expected:
+            raise ContractError(
+                f"candidate Server Store runtime evidence {key} mismatch"
+            )
+    package_id = evidence.get("package_id")
+    if not isinstance(package_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", package_id
+    ):
+        raise ContractError("candidate Server Store package ID is invalid")
+    expected_data_root = (
+        PurePosixPath(PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT)
+        / "releases"
+        / package_id
+        / "data"
+    )
+    if evidence.get("resolved_data_root") != str(expected_data_root):
+        raise ContractError("candidate Server Store resolved data root is invalid")
+    consumers = evidence.get("required_consumers")
+    if not isinstance(consumers, dict) or set(consumers) != set(
+        SERVER_STORE_REQUIRED_CONSUMERS
+    ):
+        raise ContractError("candidate Server Store consumer evidence is incomplete")
+    validated_consumers: dict[str, dict[str, str]] = {}
+    for name, relative in SERVER_STORE_REQUIRED_CONSUMERS.items():
+        item = consumers.get(name)
+        expected_path = str(expected_data_root / relative)
+        if not isinstance(item, dict) or item != {
+            "status": "passed",
+            "resolved_path": expected_path,
+        }:
+            raise ContractError(
+                f"candidate Server Store consumer evidence is invalid for {name}"
+            )
+        validated_consumers[name] = dict(item)
+    return {
+        **expected_scalars,
+        "package_id": package_id,
+        "resolved_data_root": str(expected_data_root),
+        "required_consumers": validated_consumers,
+    }
+
+
+def validate_candidate_server_store_runtime(
+    container_name: str,
+    runner: CommandRunner | None = None,
+) -> dict[str, Any]:
+    """Fail closed on the live Candidate env, read-only mount and Current package."""
+
+    command_runner = runner or CommandRunner()
+    inspected = _load_docker_array(
+        command_runner.run(["docker", "inspect", container_name]),
+        f"candidate container {container_name}",
+    )
+    config = inspected.get("Config")
+    raw_environment = config.get("Env") if isinstance(config, dict) else None
+    if not isinstance(raw_environment, list):
+        raise ContractError("candidate Server Store runtime environment is missing")
+    values = []
+    for entry in raw_environment:
+        if not isinstance(entry, str):
+            continue
+        key, separator, value = entry.partition("=")
+        if separator and key == PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY:
+            values.append(value)
+    if values != [PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT]:
+        raise ContractError(
+            "candidate PUBLIC_DATA_SERVER_STORE_ROOT is missing or invalid"
+        )
+    raw_mounts = inspected.get("Mounts")
+    if not isinstance(raw_mounts, list):
+        raise ContractError("candidate Server Store mount evidence is missing")
+    data_mounts = [
+        mount
+        for mount in raw_mounts
+        if isinstance(mount, dict)
+        and mount.get("Destination") == PUBLIC_MARKET_DATA_CONTAINER_ROOT
+    ]
+    if len(data_mounts) != 1:
+        raise ContractError("candidate /app/01_data mount is missing or ambiguous")
+    data_mount = data_mounts[0]
+    if data_mount.get("Type") != "bind" or data_mount.get("RW") is not False:
+        raise ContractError("candidate /app/01_data mount must be a read-only bind")
+    store_path = PurePosixPath(PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT)
+    data_path = PurePosixPath(PUBLIC_MARKET_DATA_CONTAINER_ROOT)
+    if data_path not in store_path.parents:
+        raise ContractError("candidate Server Store root is outside /app/01_data")
+
+    program = r'''
+import json
+import os
+from pathlib import Path
+
+from agri_research_agent.market_data.activated_runtime import (
+    resolve_domestic_spread_path,
+    resolve_public_data_root,
+    resolve_server_current_data_root,
+)
+
+ENVIRONMENT = "PUBLIC_DATA_SERVER_STORE_ROOT"
+EXPECTED_ROOT = Path("/app/01_data/public-data-server-store")
+value = os.environ.get(ENVIRONMENT)
+if value != str(EXPECTED_ROOT):
+    raise RuntimeError("Candidate Server Store environment is invalid")
+if not EXPECTED_ROOT.is_dir() or EXPECTED_ROOT.is_symlink():
+    raise RuntimeError("Candidate Server Store root is missing or unsafe")
+current_path = EXPECTED_ROOT / "current.json"
+if not current_path.is_file() or current_path.is_symlink():
+    raise RuntimeError("Candidate Server Current is missing or unsafe")
+resolved_data = resolve_server_current_data_root(EXPECTED_ROOT)
+pointer = json.loads(current_path.read_text(encoding="utf-8"))
+package_id = pointer["package_id"]
+expected_data = (
+    EXPECTED_ROOT / "releases" / package_id / "data"
+).resolve(strict=True)
+if resolved_data != expected_data:
+    raise RuntimeError("Candidate Server Current resolved an unexpected data root")
+if resolve_public_data_root(Path("/app/01_data")) != resolved_data:
+    raise RuntimeError("Candidate public consumer root did not use Server Current")
+consumers = {
+    "domestic_spread": resolve_domestic_spread_path(Path("/app/01_data")),
+    "international_spread": resolved_data / "public-market-data/lutou-three-oil",
+    "weather": resolved_data / "public-market-data/lutou-weather",
+    "domestic_basis": resolved_data / "public-market-data/lutou-domestic-basis",
+}
+for name, path in consumers.items():
+    resolved = path.resolve(strict=True)
+    if not resolved.is_relative_to(resolved_data):
+        raise RuntimeError(f"Candidate consumer escaped immutable package: {name}")
+    if name == "domestic_spread" and not resolved.is_file():
+        raise RuntimeError("Candidate Domestic Spread artifact is missing")
+    if name != "domestic_spread" and not resolved.is_dir():
+        raise RuntimeError(f"Candidate public consumer root is missing: {name}")
+    consumers[name] = resolved
+print(json.dumps({
+    "current_status": "passed",
+    "package_id": package_id,
+    "manifest_status": "passed",
+    "identity_status": "passed",
+    "resolved_data_root": str(resolved_data),
+    "required_consumers": {
+        name: {"status": "passed", "resolved_path": str(path)}
+        for name, path in consumers.items()
+    },
+}, sort_keys=True))
+'''
+    raw_runtime = command_runner.run(
+        [
+            "docker",
+            "exec",
+            "-e",
+            "PYTHONDONTWRITEBYTECODE=1",
+            container_name,
+            "python",
+            "-c",
+            program,
+        ]
+    )
+    try:
+        runtime = json.loads(raw_runtime)
+    except json.JSONDecodeError as exc:
+        raise ContractError(
+            "candidate Server Store runtime probe returned invalid JSON"
+        ) from exc
+    return validate_server_store_contract_evidence(
+        {
+            "environment_status": "passed",
+            "environment_variable": PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY,
+            "container_root": PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT,
+            "mount_status": "passed",
+            "mount_target": PUBLIC_MARKET_DATA_CONTAINER_ROOT,
+            "mount_read_only": True,
+            **runtime,
+        }
+    )
+
+
 def _runtime_git_commit_from_inspect(
     payload: Mapping[str, Any],
     description: str,
@@ -1479,6 +1688,14 @@ def validate_repository_static(repository: Path) -> None:
     if public_market_data_marker not in compose_text:
         raise ContractError(
             "spread Compose must declare the fixed Public Market Data runtime root"
+        )
+    server_store_marker = (
+        f"{PUBLIC_DATA_SERVER_STORE_ROOT_ENV_KEY}: "
+        f"{PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT}"
+    )
+    if server_store_marker not in compose_text:
+        raise ContractError(
+            "spread Compose must declare the fixed Public Data Server Store root"
         )
     weather_mount_marker = (
         f"${{{WEATHER_RUNTIME_ENV_KEY}:?{WEATHER_RUNTIME_ENV_KEY} must be explicitly set}}:"
@@ -3148,6 +3365,10 @@ def validate_candidate_result(
     pages = checks.get("pages")
     if not isinstance(pages, dict) or pages.get("status") != "passed":
         raise ContractError("candidate result page validation did not pass")
+    if result.get("schema_version") != LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION:
+        validate_server_store_contract_evidence(
+            checks.get("server_store_contract")
+        )
     for key, expected_value in (
         ("formal_git_unchanged", True),
         ("data_files_unchanged", True),
@@ -3266,6 +3487,9 @@ def create_candidate_result(
             "readiness": copy.deepcopy(dict(readiness)),
             "http": copy.deepcopy(dict(checks.get("http") or {})),
             "pages": copy.deepcopy(dict(checks.get("pages") or {})),
+            "server_store_contract": validate_server_store_contract_evidence(
+                checks.get("server_store_contract")
+            ),
             "formal_containers_unchanged": formal_containers[
                 "formal_containers_unchanged"
             ],
