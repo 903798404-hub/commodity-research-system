@@ -17,7 +17,10 @@ SRC = ROOT / "03_src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from agri_research_agent.data_sources.lutou.live import LutouConnectionSettings
+from agri_research_agent.data_sources.lutou.live import (
+    LutouClient,
+    LutouConnectionSettings,
+)
 from agri_research_agent.data_sources.tankan.client import TankanConnectionSettings
 from agri_research_agent.pipelines.public_data_providers import (
     DomesticBasisRefreshAdapter,
@@ -153,6 +156,9 @@ def main(argv: list[str] | None = None) -> int:
                 ROOT / "02_configs" / "international_three_oil_v1.sealed.json",
                 ROOT / "02_configs" / "lutou_weather_current.yaml",
                 weather_baseline_root,
+                recovery_client_factory=lambda: LutouClient(
+                    _lutou_settings(args.lutou_secret_file)
+                ),
             )
         )
         adapters.append(
@@ -161,6 +167,9 @@ def main(argv: list[str] | None = None) -> int:
                 runtime,
                 run_id,
                 ROOT / "02_configs" / "lutou_domestic_basis.yaml",
+                recovery_client_factory=lambda: LutouClient(
+                    _lutou_settings(args.lutou_secret_file)
+                ),
             )
         )
     if args.dry_run:

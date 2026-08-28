@@ -276,6 +276,25 @@ def test_idle_preflight_connection_is_pinged_and_read_only_state_is_reproved() -
     assert final_proof_count == initial_proof_count + 1
 
 
+def test_stale_session_fails_validation_before_any_business_query() -> None:
+    class StaleConnection(FakeConnection):
+        def ping(self, reconnect: bool = True) -> None:
+            assert reconnect is True
+            self.ping_count += 1
+            raise OSError("fixture socket is closed")
+
+    connection = StaleConnection()
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        before = len(connection.statements)
+        with pytest.raises(LutouConnectionError) as captured:
+            client.ensure_connected()
+        after = len(connection.statements)
+    assert connection.ping_count == 1
+    assert before == after
+    assert "fixture.invalid" not in str(captured.value)
+    assert "fixture-password" not in str(captured.value)
+
+
 def test_metadata_inventory_and_date_bounds_are_read_only() -> None:
     connection = FakeConnection()
     with LutouClient(settings(), connector=lambda **_: connection) as client:

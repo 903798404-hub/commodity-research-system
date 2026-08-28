@@ -85,6 +85,7 @@ from agri_research_agent.shared.runtime_context import RuntimeContext
 
 Connector = Callable[[str, int, float], bool]
 NetworkCheck = Callable[[], bool]
+LutouRecoveryClientFactory = Callable[[], LutouClient]
 
 
 def tcp_reachable(host: str, port: int, timeout: float = 5.0) -> bool:
@@ -235,6 +236,9 @@ class LutouRefreshAdapter:
     weather_baseline_root: Path | None = None
     connector: Connector = tcp_reachable
     network_check: NetworkCheck = tailscale_ready
+    recovery_client_factory: LutouRecoveryClientFactory | None = field(
+        default=None, repr=False
+    )
     name: str = "lutou"
     _client: LutouClient | None = field(default=None, init=False, repr=False)
     _preflight_source_max: Mapping[str, str] = field(default_factory=dict, init=False, repr=False)
@@ -341,20 +345,13 @@ class LutouRefreshAdapter:
     def refresh(self) -> RefreshResult:
         if self._client is None:
             raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Lutou preflight client is unavailable")
-        try:
-            self._client.ensure_connected()
-        except LutouClientError:
-            self.close()
-            raise ProviderFailure(
-                ProviderStatus.SOURCE_UNAVAILABLE,
-                "Lutou preflight connection could not be refreshed",
-            ) from None
         domains: dict[str, str] = {}
         maxima: dict[str, str] = {}
         promoted = False
         failures: list[ProviderFailure] = []
         try:
             try:
+                self._ensure_domain_connection("three-oil")
                 oil = run_goal_b(
                     self._client,
                     runtime=self.runtime,
@@ -366,11 +363,15 @@ class LutouRefreshAdapter:
                 domains["three_oil"] = (ProviderStatus.UPDATED if oil.promoted else ProviderStatus.NO_CHANGE).value
                 maxima["three_oil"] = str(oil.candidate_manifest["source_max_date"])
                 promoted = promoted or oil.promoted
+            except ProviderFailure as failure:
+                domains["three_oil"] = failure.status.value
+                failures.append(failure)
             except LutouGoalBError as exc:
                 failure = _pipeline_failure(exc, "Lutou three-oil")
                 domains["three_oil"] = failure.status.value
                 failures.append(failure)
             try:
+                self._ensure_domain_connection("soil-moisture")
                 soil = run_goal_b_soil(
                     self._client,
                     runtime=self.runtime,
@@ -382,12 +383,16 @@ class LutouRefreshAdapter:
                 domains["soil_moisture"] = (ProviderStatus.UPDATED if soil.promoted else ProviderStatus.NO_CHANGE).value
                 maxima["soil_moisture"] = str(soil.candidate_manifest["source_max_date"])
                 promoted = promoted or soil.promoted
+            except ProviderFailure as failure:
+                domains["soil_moisture"] = failure.status.value
+                failures.append(failure)
             except LutouGoalBSoilError as exc:
                 failure = _pipeline_failure(exc, "Lutou soil-moisture")
                 domains["soil_moisture"] = failure.status.value
                 failures.append(failure)
             if self.weather_policy_path is not None:
                 try:
+                    self._ensure_domain_connection("weather")
                     weather = run_lutou_weather(
                         self._client,
                         runtime=self.runtime,
@@ -410,6 +415,17 @@ class LutouRefreshAdapter:
                         weather.candidate_manifest["source_max_dates"]["forecast_valid"]
                     )
                     promoted = promoted or weather.promoted
+                except ProviderFailure as failure:
+                    domains["weather"] = failure.status.value
+                    failures.append(failure)
+                except LutouClientError:
+                    failure = ProviderFailure(
+                        ProviderStatus.SOURCE_UNAVAILABLE,
+                        "Lutou weather extraction failed: LutouClientError; "
+                        "root_cause=SOURCE_CONNECTION_FAILURE; query_retried=false",
+                    )
+                    domains["weather"] = failure.status.value
+                    failures.append(failure)
                 except LutouWeatherError as exc:
                     failure = _pipeline_failure(exc, "Lutou Weather")
                     domains["weather"] = failure.status.value
@@ -418,11 +434,33 @@ class LutouRefreshAdapter:
                 status = failures[0].status
                 return RefreshResult(
                     promoted, maxima, domains, status,
-                    "one or more Lutou domains failed",
+                    failures[0].safe_reason,
                 )
             return RefreshResult(promoted, maxima, domains)
         finally:
             self.close()
+
+    def _ensure_domain_connection(self, domain: str) -> None:
+        """Validate once at a domain boundary and rebuild one fresh client if stale."""
+
+        if self._client is not None:
+            try:
+                self._client.ensure_connected()
+                return
+            except LutouClientError:
+                self._client.close()
+                self._client = None
+        if self.recovery_client_factory is None:
+            raise _lutou_connection_validation_failure(domain) from None
+        replacement: LutouClient | None = None
+        try:
+            replacement = self.recovery_client_factory()
+            replacement.__enter__()
+        except Exception:
+            if replacement is not None:
+                replacement.close()
+            raise _lutou_connection_validation_failure(domain) from None
+        self._client = replacement
 
     def close(self) -> None:
         if self._client is not None:
@@ -519,6 +557,9 @@ class DomesticBasisRefreshAdapter:
     run_id: str
     mapping_path: Path
     connector: Connector = tcp_reachable
+    recovery_client_factory: LutouRecoveryClientFactory | None = field(
+        default=None, repr=False
+    )
     name: str = "lutou_domestic_basis"
     _client: LutouClient | None = field(default=None, init=False, repr=False)
     _adapter: LutouDomesticBasisLiveAdapter | None = field(default=None, init=False, repr=False)
@@ -604,11 +645,27 @@ class DomesticBasisRefreshAdapter:
         try:
             self._client.ensure_connected()
         except LutouClientError:
-            self.close()
-            raise ProviderFailure(
-                ProviderStatus.SOURCE_UNAVAILABLE,
-                "Domestic Basis preflight connection could not be refreshed",
-            ) from None
+            stale = self._client
+            self._client = None
+            self._adapter = None
+            stale.close()
+            replacement: LutouClient | None = None
+            try:
+                if self.recovery_client_factory is None:
+                    raise LutouConnectionError("fresh client factory is unavailable")
+                replacement = self.recovery_client_factory()
+                replacement.__enter__()
+            except Exception:
+                if replacement is not None:
+                    replacement.close()
+                raise ProviderFailure(
+                    ProviderStatus.SOURCE_UNAVAILABLE,
+                    "Domestic Basis connection-validation failed after one fresh-client "
+                    "recovery attempt: LutouClientError; "
+                    "root_cause=SOURCE_CONNECTION_FAILURE",
+                ) from None
+            self._client = replacement
+            self._adapter = LutouDomesticBasisLiveAdapter(replacement)
         try:
             result = run_domestic_basis_live(
                 runtime=self.runtime,
@@ -645,6 +702,15 @@ def _pipeline_failure(exc: Exception, provider: str) -> ProviderFailure:
     else:
         status = ProviderStatus.INGESTION_FAILURE
     return ProviderFailure(status, f"{provider} pipeline failed: {type(exc).__name__}")
+
+
+def _lutou_connection_validation_failure(domain: str) -> ProviderFailure:
+    safe_domain = domain.replace("_", "-")
+    return ProviderFailure(
+        ProviderStatus.SOURCE_UNAVAILABLE,
+        f"Lutou {safe_domain} connection-validation failed after one fresh-client "
+        "recovery attempt: LutouClientError; root_cause=SOURCE_CONNECTION_FAILURE",
+    )
 
 
 def _pointer(root: Path) -> Mapping[str, object]:

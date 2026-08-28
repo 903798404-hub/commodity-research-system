@@ -19,6 +19,7 @@ from agri_research_agent.pipelines.public_data_providers import (
 from agri_research_agent.pipelines.public_data_refresh import (
     CurrentIdentity,
     OverallStatus,
+    ProviderFailure,
     ProviderStatus,
     RefreshResult,
     run_unified_refresh,
@@ -207,3 +208,117 @@ def test_live_provider_required_query_failure_is_not_ready(
     assert outcome.preflight_status is ProviderStatus.SOURCE_UNAVAILABLE
     assert outcome.status is ProviderStatus.SOURCE_UNAVAILABLE
     assert outcome.current_before == outcome.current_after
+
+
+def test_domestic_basis_rebuilds_stale_preflight_client_before_extraction(
+    monkeypatch, runtime: RuntimeContext,
+) -> None:  # type: ignore[no-untyped-def]
+    import agri_research_agent.pipelines.public_data_providers as providers
+
+    class StaleClient:
+        close_count = 0
+        def ensure_connected(self):
+            raise LutouClientError("fixture stale session")
+        def close(self):
+            self.close_count += 1
+
+    class FreshClient:
+        def __init__(self):
+            self.enter_count = 0
+            self.close_count = 0
+            self.read_only_proved = False
+        def __enter__(self):
+            self.enter_count += 1
+            self.read_only_proved = True
+            return self
+        def close(self):
+            self.close_count += 1
+
+    class Live:
+        def __init__(self, client):
+            self.client = client
+            self.query = object()
+
+    stale = StaleClient()
+    fresh = FreshClient()
+    recovery_calls = []
+    extraction_clients = []
+
+    def run(**kwargs):  # type: ignore[no-untyped-def]
+        extraction_clients.append(kwargs["adapter"].client)
+        assert kwargs["adapter"].client.read_only_proved is True
+        return SimpleNamespace(
+            promoted=False,
+            query_end_date=__import__("datetime").date(2026, 8, 19),
+        )
+
+    monkeypatch.setattr(providers, "LutouDomesticBasisLiveAdapter", Live)
+    monkeypatch.setattr(providers, "run_domestic_basis_live", run)
+    adapter = DomesticBasisRefreshAdapter(
+        LutouConnectionSettings("safe-host", 3306, "readonly", "process-only"),
+        runtime, "stale-basis", Path("mapping.yaml"),
+        recovery_client_factory=lambda: recovery_calls.append("fresh") or fresh,
+    )
+    adapter._client = stale  # type: ignore[assignment]
+    adapter._adapter = Live(stale)  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert result.status is None
+    assert extraction_clients == [fresh]
+    assert recovery_calls == ["fresh"]
+    assert fresh.enter_count == 1
+    assert stale.close_count == 1
+
+
+def test_domestic_basis_fresh_reconnect_failure_fails_closed_once(
+    monkeypatch, runtime: RuntimeContext,
+) -> None:  # type: ignore[no-untyped-def]
+    import agri_research_agent.pipelines.public_data_providers as providers
+
+    class StaleClient:
+        def ensure_connected(self):
+            raise LutouClientError("fixture stale session")
+        def close(self):
+            pass
+
+    class BrokenFreshClient:
+        def __init__(self):
+            self.close_count = 0
+        def __enter__(self):
+            raise LutouClientError("fixture-secret at safe-host")
+        def close(self):
+            self.close_count += 1
+
+    class Live:
+        def __init__(self, client):
+            self.client = client
+
+    broken = BrokenFreshClient()
+    recovery_calls = []
+    extraction_calls = []
+    monkeypatch.setattr(providers, "LutouDomesticBasisLiveAdapter", Live)
+    monkeypatch.setattr(
+        providers, "run_domestic_basis_live",
+        lambda **kwargs: extraction_calls.append(kwargs),
+    )
+    adapter = DomesticBasisRefreshAdapter(
+        LutouConnectionSettings("safe-host", 3306, "readonly", "process-only"),
+        runtime, "basis-reconnect-fail", Path("mapping.yaml"),
+        recovery_client_factory=lambda: recovery_calls.append("fresh") or broken,
+    )
+    stale = StaleClient()
+    adapter._client = stale  # type: ignore[assignment]
+    adapter._adapter = Live(stale)  # type: ignore[assignment]
+
+    with pytest.raises(ProviderFailure) as captured:
+        adapter.refresh()
+
+    assert captured.value.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert recovery_calls == ["fresh"]
+    assert extraction_calls == []
+    assert broken.close_count == 1
+    assert "connection-validation" in captured.value.safe_reason
+    assert "SOURCE_CONNECTION_FAILURE" in captured.value.safe_reason
+    assert "fixture-secret" not in captured.value.safe_reason
+    assert "safe-host" not in captured.value.safe_reason

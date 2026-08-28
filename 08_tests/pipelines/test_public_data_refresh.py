@@ -227,6 +227,78 @@ def test_required_source_mode_rolls_back_prior_update_when_later_qc_fails(
     assert {adapter.name: adapter.pointer.read_bytes() for adapter in adapters} == before
 
 
+def test_required_source_mode_preserves_weather_root_cause_while_rolling_back(
+    runtime: RuntimeContext,
+) -> None:
+    @dataclass
+    class IncidentAdapter:
+        name: str
+        weather_failure: bool = False
+
+        @property
+        def pointer(self) -> Path:
+            return runtime.runtime_root / "public-market-data" / self.name / "current.json"
+
+        def current_identity(self) -> CurrentIdentity:
+            value = json.loads(self.pointer.read_text(encoding="utf-8"))
+            return CurrentIdentity(value["release_id"], value["manifest_sha256"], {})
+
+        def preflight(self):
+            return {"read_only": True}
+
+        def refresh(self) -> RefreshResult:
+            self.pointer.write_text(
+                json.dumps({"release_id": "r2", "manifest_sha256": "b" * 64}),
+                encoding="utf-8",
+            )
+            if self.weather_failure:
+                return RefreshResult(
+                    True,
+                    {
+                        "three_oil": "2026-08-25",
+                        "soil_moisture": "2026-08-22",
+                    },
+                    {
+                        "three_oil": ProviderStatus.UPDATED.value,
+                        "soil_moisture": ProviderStatus.UPDATED.value,
+                        "weather": ProviderStatus.SOURCE_UNAVAILABLE.value,
+                    },
+                    ProviderStatus.SOURCE_UNAVAILABLE,
+                    "Lutou weather extraction failed: LutouClientError; "
+                    "root_cause=SOURCE_CONNECTION_FAILURE; query_retried=false",
+                )
+            return RefreshResult(True, {"data": "2026-08-25"})
+
+    adapters = [IncidentAdapter("tankan"), IncidentAdapter("lutou", weather_failure=True)]
+    for adapter in adapters:
+        adapter.pointer.parent.mkdir(parents=True)
+        adapter.pointer.write_text(
+            json.dumps({"release_id": "r1", "manifest_sha256": "a" * 64}),
+            encoding="utf-8",
+        )
+    before = {adapter.name: adapter.pointer.read_bytes() for adapter in adapters}
+
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="rollback-after-weather-connection-failure",
+        adapters=adapters,
+        require_all_sources=True,
+    )
+
+    weather = result.providers[1]
+    assert weather.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert weather.domains == {
+        "three_oil": ProviderStatus.UPDATED.value,
+        "soil_moisture": ProviderStatus.UPDATED.value,
+        "weather": ProviderStatus.SOURCE_UNAVAILABLE.value,
+    }
+    assert "SOURCE_CONNECTION_FAILURE" in (weather.safe_reason or "")
+    assert all(item.current_before == item.current_after for item in result.providers)
+    assert {adapter.name: adapter.pointer.read_bytes() for adapter in adapters} == before
+    manifest = json.loads((result.run_directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["providers"][1]["safe_reason"] == weather.safe_reason
+
+
 def test_failed_provider_does_not_block_other_provider(runtime: RuntimeContext) -> None:
     result = run_unified_refresh(
         runtime=runtime,

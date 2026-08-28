@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from agri_research_agent.data_sources.lutou.live import (
+    LutouClientError,
+    LutouConnectionError,
     LutouConnectionSettings,
     LutouQuery,
     LutouSchemaError,
@@ -29,6 +31,33 @@ class Client:
 
     def close(self) -> None:
         pass
+
+
+class BoundaryClient:
+    def __init__(self, *, stale: bool = False, enter_fails: bool = False) -> None:
+        self.stale = stale
+        self.enter_fails = enter_fails
+        self.ensure_count = 0
+        self.enter_count = 0
+        self.close_count = 0
+        self.read_only_proved = False
+
+    def __enter__(self):  # type: ignore[no-untyped-def]
+        self.enter_count += 1
+        if self.enter_fails:
+            raise LutouConnectionError("fixture fresh session failed")
+        self.read_only_proved = True
+        self.stale = False
+        return self
+
+    def ensure_connected(self) -> None:
+        self.ensure_count += 1
+        if self.stale:
+            raise LutouClientError("fixture stale session")
+        self.read_only_proved = True
+
+    def close(self) -> None:
+        self.close_count += 1
 
 
 def _runtime(path: Path) -> RuntimeContext:
@@ -107,7 +136,227 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
     }
     assert result.source_max_dates["weather_observation"] == "2026-08-18"
     assert result.source_max_dates["weather_forecast_valid"] == "2026-09-02"
-    assert client.ensure_count == 1
+    assert client.ensure_count == 3
+
+
+def test_three_oil_rebuilds_stale_connection_before_extraction(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    old = BoundaryClient(stale=True)
+    fresh = BoundaryClient()
+    factory_calls = []
+    oil_clients = []
+
+    def oil(client, **kwargs):  # type: ignore[no-untyped-def]
+        oil_clients.append(client)
+        assert client.read_only_proved is True
+        return SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+        )
+
+    monkeypatch.setattr(public_data_providers, "run_goal_b", oil)
+    monkeypatch.setattr(
+        public_data_providers,
+        "run_goal_b_soil",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+        ),
+    )
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture"),
+        _runtime(tmp_path), "oil-stale", public_data_providers.date(2026, 8, 19),
+        Path("catalog.json"),
+        recovery_client_factory=lambda: factory_calls.append("fresh") or fresh,
+    )
+    adapter._client = old  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert result.status is None
+    assert oil_clients == [fresh]
+    assert factory_calls == ["fresh"]
+    assert fresh.enter_count == 1
+    assert old.close_count == 1
+
+
+def test_soil_revalidates_and_rebuilds_after_three_oil(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    old = BoundaryClient()
+    fresh = BoundaryClient()
+    soil_clients = []
+
+    def oil(*args, **kwargs):  # type: ignore[no-untyped-def]
+        old.stale = True
+        return SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+        )
+
+    def soil(client, **kwargs):  # type: ignore[no-untyped-def]
+        soil_clients.append(client)
+        assert client.read_only_proved is True
+        return SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+        )
+
+    monkeypatch.setattr(public_data_providers, "run_goal_b", oil)
+    monkeypatch.setattr(public_data_providers, "run_goal_b_soil", soil)
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture"),
+        _runtime(tmp_path), "soil-stale", public_data_providers.date(2026, 8, 19),
+        Path("catalog.json"), recovery_client_factory=lambda: fresh,
+    )
+    adapter._client = old  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert result.status is None
+    assert soil_clients == [fresh]
+    assert old.ensure_count == 2
+    assert fresh.enter_count == 1
+
+
+def test_weather_rebuilds_stale_connection_after_successful_oil_and_soil(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    old = BoundaryClient()
+    fresh = BoundaryClient()
+    weather_clients = []
+
+    monkeypatch.setattr(
+        public_data_providers,
+        "run_goal_b",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+        ),
+    )
+
+    def soil(*args, **kwargs):  # type: ignore[no-untyped-def]
+        old.stale = True
+        return SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+        )
+
+    def weather(client, **kwargs):  # type: ignore[no-untyped-def]
+        weather_clients.append(client)
+        assert client.read_only_proved is True
+        return SimpleNamespace(
+            promoted=False,
+            candidate_manifest={
+                "source_max_dates": {
+                    "observation": "2026-08-18",
+                    "forecast_valid": "2026-09-02",
+                }
+            },
+        )
+
+    monkeypatch.setattr(public_data_providers, "run_goal_b_soil", soil)
+    monkeypatch.setattr(public_data_providers, "run_lutou_weather", weather)
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture"),
+        _runtime(tmp_path), "weather-stale", public_data_providers.date(2026, 8, 19),
+        Path("catalog.json"), weather_policy_path=Path("weather.yaml"),
+        weather_baseline_root=Path("baselines"),
+        recovery_client_factory=lambda: fresh,
+    )
+    adapter._client = old  # type: ignore[assignment]
+    adapter._weather_catalog = object()  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert result.status is None
+    assert weather_clients == [fresh]
+    assert old.ensure_count == 3
+    assert fresh.enter_count == 1
+
+
+def test_weather_reconnect_failure_is_classified_and_query_is_not_started(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    old = BoundaryClient()
+    broken = BoundaryClient(enter_fails=True)
+    recovery_calls = []
+    weather_calls = []
+    monkeypatch.setattr(
+        public_data_providers, "run_goal_b",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+        ),
+    )
+
+    def soil(*args, **kwargs):  # type: ignore[no-untyped-def]
+        old.stale = True
+        return SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+        )
+
+    monkeypatch.setattr(public_data_providers, "run_goal_b_soil", soil)
+    monkeypatch.setattr(
+        public_data_providers, "run_lutou_weather",
+        lambda *args, **kwargs: weather_calls.append(args),
+    )
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture-secret"),
+        _runtime(tmp_path), "weather-reconnect-fail",
+        public_data_providers.date(2026, 8, 19), Path("catalog.json"),
+        weather_policy_path=Path("weather.yaml"),
+        weather_baseline_root=Path("baselines"),
+        recovery_client_factory=lambda: recovery_calls.append("fresh") or broken,
+    )
+    adapter._client = old  # type: ignore[assignment]
+    adapter._weather_catalog = object()  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert result.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert result.domains["weather"] == ProviderStatus.SOURCE_UNAVAILABLE.value
+    assert recovery_calls == ["fresh"]
+    assert weather_calls == []
+    assert "connection-validation" in (result.safe_reason or "")
+    assert "SOURCE_CONNECTION_FAILURE" in (result.safe_reason or "")
+    assert "fixture-secret" not in (result.safe_reason or "")
+
+
+def test_weather_midflight_client_failure_is_not_replayed(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    client = BoundaryClient()
+    weather_calls = []
+    monkeypatch.setattr(
+        public_data_providers, "run_goal_b",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+        ),
+    )
+    monkeypatch.setattr(
+        public_data_providers, "run_goal_b_soil",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+        ),
+    )
+
+    def weather(*args, **kwargs):  # type: ignore[no-untyped-def]
+        weather_calls.append("query")
+        raise LutouClientError("fixture-secret at fixture.invalid")
+
+    monkeypatch.setattr(public_data_providers, "run_lutou_weather", weather)
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture-secret"),
+        _runtime(tmp_path), "weather-midflight", public_data_providers.date(2026, 8, 19),
+        Path("catalog.json"), weather_policy_path=Path("weather.yaml"),
+        weather_baseline_root=Path("baselines"),
+    )
+    adapter._client = client  # type: ignore[assignment]
+    adapter._weather_catalog = object()  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert weather_calls == ["query"]
+    assert result.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert result.domains["weather"] == ProviderStatus.SOURCE_UNAVAILABLE.value
+    assert "query_retried=false" in (result.safe_reason or "")
+    assert "fixture-secret" not in (result.safe_reason or "")
+    assert "fixture.invalid" not in (result.safe_reason or "")
 
 
 def test_lutou_preflight_probes_every_required_domain_query(
