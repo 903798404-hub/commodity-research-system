@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
+from time import perf_counter
 from typing import Callable, Mapping, Protocol, Sequence
 
 from agri_research_agent.shared.immutable_candidate import seal_immutable_candidate, validate_candidate_id
@@ -50,6 +51,7 @@ class RefreshResult:
     domains: Mapping[str, str] = field(default_factory=dict)
     status: ProviderStatus | None = None
     safe_reason: str | None = None
+    performance: Mapping[str, object] = field(default_factory=dict)
 
 
 class ProviderAdapter(Protocol):
@@ -79,6 +81,7 @@ class ProviderOutcome:
     source_max_dates: Mapping[str, str]
     domains: Mapping[str, str]
     safe_reason: str | None = None
+    performance: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +179,7 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
             f"Current identity check failed: {type(exc).__name__}",
         )
     preflight_status = ProviderStatus.READY
+    preflight_started = perf_counter()
     try:
         preflight = adapter.preflight()
     except ProviderFailure as exc:
@@ -183,6 +187,7 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
         return ProviderOutcome(
             adapter.name, exc.status, exc.status, before, after,
             after.source_max_dates, {}, exc.safe_reason,
+            _provider_performance(perf_counter() - preflight_started),
         )
     except Exception as exc:
         after = _safe_current_identity(adapter, before)
@@ -195,13 +200,18 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
             after.source_max_dates,
             {},
             f"provider preflight failed: {type(exc).__name__}",
+            _provider_performance(perf_counter() - preflight_started),
         )
+    preflight_duration = perf_counter() - preflight_started
     preflight_source_max = {
         str(key): str(value)
         for key, value in dict(preflight.get("source_max_dates", {})).items()
     }
+    refresh_started = perf_counter()
+    details: Mapping[str, object] = {}
     try:
         refreshed = adapter.refresh()
+        details = refreshed.performance
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
         )
@@ -230,13 +240,18 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
     return ProviderOutcome(
         adapter.name, preflight_status, status, before, after,
         source_max or after.source_max_dates, domains, reason,
+        _provider_performance(
+            preflight_duration, perf_counter() - refresh_started, details
+        ),
     )
 
 
 def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutcome, ...]:
     """Preflight every source before allowing any Current-producing refresh."""
 
-    prepared: dict[str, tuple[ProviderAdapter, CurrentIdentity, Mapping[str, str]]] = {}
+    prepared: dict[
+        str, tuple[ProviderAdapter, CurrentIdentity, Mapping[str, str], float]
+    ] = {}
     blocked: dict[str, ProviderOutcome] = {}
     for adapter in adapters:
         try:
@@ -249,18 +264,23 @@ def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutc
                 f"Current identity check failed: {type(exc).__name__}",
             )
             continue
+        preflight_started = perf_counter()
         try:
             preflight = adapter.preflight()
+            preflight_duration = perf_counter() - preflight_started
             source_max = {
                 str(key): str(value)
                 for key, value in dict(preflight.get("source_max_dates", {})).items()
             }
-            prepared[adapter.name] = (adapter, before, source_max)
+            prepared[adapter.name] = (
+                adapter, before, source_max, preflight_duration
+            )
         except ProviderFailure as exc:
             after = _safe_current_identity(adapter, before)
             blocked[adapter.name] = ProviderOutcome(
                 adapter.name, exc.status, exc.status, before, after,
                 after.source_max_dates, {}, exc.safe_reason,
+                _provider_performance(perf_counter() - preflight_started),
             )
         except Exception as exc:
             after = _safe_current_identity(adapter, before)
@@ -269,6 +289,7 @@ def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutc
                 ProviderStatus.SOURCE_UNAVAILABLE, before, after,
                 after.source_max_dates, {},
                 f"provider preflight failed: {type(exc).__name__}",
+                _provider_performance(perf_counter() - preflight_started),
             )
     if blocked:
         outcomes: list[ProviderOutcome] = []
@@ -276,19 +297,20 @@ def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutc
             if adapter.name in blocked:
                 outcomes.append(blocked[adapter.name])
             else:
-                _, before, source_max = prepared[adapter.name]
+                _, before, source_max, preflight_duration = prepared[adapter.name]
                 outcomes.append(
                     ProviderOutcome(
                         adapter.name, ProviderStatus.READY, ProviderStatus.NO_CHANGE,
                         before, before, source_max or before.source_max_dates, {},
                         "refresh skipped because another required source is unavailable",
+                        _provider_performance(preflight_duration),
                     )
                 )
             _close_adapter(adapter)
         return tuple(outcomes)
     return tuple(
-        _refresh_preflighted(adapter, before, source_max)
-        for adapter, before, source_max in prepared.values()
+        _refresh_preflighted(adapter, before, source_max, preflight_duration)
+        for adapter, before, source_max, preflight_duration in prepared.values()
     )
 
 
@@ -296,9 +318,13 @@ def _refresh_preflighted(
     adapter: ProviderAdapter,
     before: CurrentIdentity,
     preflight_source_max: Mapping[str, str],
+    preflight_duration: float,
 ) -> ProviderOutcome:
+    refresh_started = perf_counter()
+    details: Mapping[str, object] = {}
     try:
         refreshed = adapter.refresh()
+        details = refreshed.performance
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
         )
@@ -320,7 +346,29 @@ def _refresh_preflighted(
     return ProviderOutcome(
         adapter.name, ProviderStatus.READY, status, before, after,
         source_max or after.source_max_dates, domains, reason,
+        _provider_performance(
+            preflight_duration, perf_counter() - refresh_started, details
+        ),
     )
+
+
+def _provider_performance(
+    preflight_duration: float,
+    refresh_duration: float | None = None,
+    details: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "provider-performance-telemetry/1",
+        "stages": {
+            "preflight": {"duration_seconds": round(preflight_duration, 6)},
+            "refresh": (
+                {"status": "SKIPPED"}
+                if refresh_duration is None
+                else {"duration_seconds": round(refresh_duration, 6)}
+            ),
+        },
+        "provider_details": dict(details or {}),
+    }
 
 
 def _reconcile_status_with_identity(
@@ -441,6 +489,7 @@ def _outcome_payload(value: ProviderOutcome) -> dict[str, object]:
         "current_after": _identity_payload(value.current_after),
         "domains": dict(value.domains),
         "safe_reason": value.safe_reason,
+        "performance": dict(value.performance),
     }
 
 

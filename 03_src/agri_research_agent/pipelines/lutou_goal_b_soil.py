@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from time import perf_counter
 from typing import Mapping
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from agri_research_agent.data_sources.lutou.soil_moisture_live import (
@@ -104,6 +106,7 @@ class SoilRunResult:
     canonical_manifest: Mapping[str, object]
     current_manifest: Mapping[str, object]
     promoted: bool
+    performance: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +127,14 @@ def run_goal_b_soil(
     catalog_path: str | Path,
     failure_hook: str | None = None,
 ) -> SoilRunResult:
+    total_started = perf_counter()
+    stages: dict[str, dict[str, object]] = {}
+
+    def observe(name: str, started: float, **details: object) -> float:
+        duration = round(perf_counter() - started, 6)
+        stages[name] = {"duration_seconds": duration, **details}
+        return duration
+
     safe_run_id = validate_candidate_id(run_id)
     _require_runtime(runtime)
     series = load_soil_moisture_series(catalog_path)
@@ -131,7 +142,13 @@ def run_goal_b_soil(
         runtime, runtime.runtime_root / "public-market-data" / "lutou-soil-moisture"
     )
     public_root.mkdir(parents=True, exist_ok=True)
+    stage_started = perf_counter()
     current = load_soil_current(public_root)
+    current_read_duration = observe(
+        "load_current",
+        stage_started,
+        rows=0 if current is None else current.observations.num_rows,
+    )
     if full_load and current is not None:
         raise LutouGoalBSoilError("soil full load refuses an existing Current")
     if not full_load and current is None:
@@ -143,6 +160,7 @@ def run_goal_b_soil(
         - timedelta(days=LOOKBACK_DAYS)
     )
     mode = "full" if current is None else "incremental-31-day-lookback"
+    stage_started = perf_counter()
     try:
         extraction = extract_soil_moisture_live(
             client, series, start=start, end=end_date  # type: ignore[arg-type]
@@ -151,12 +169,29 @@ def run_goal_b_soil(
         raise LutouGoalBSoilError(
             f"soil live extraction failed: {type(exc).__name__}: {exc}"
         ) from None
+    observe(
+        "extract",
+        stage_started,
+        query_count=len(extraction.queries),
+        source_rows=sum(extraction.table_row_counts.values()),
+        output_rows=len(extraction.records),
+    )
+    stage_started = perf_counter()
     standard = _standard_table(extraction)
+    observe(
+        "standardize",
+        stage_started,
+        input_rows=len(extraction.records),
+        output_rows=standard.num_rows,
+    )
+    stage_started = perf_counter()
     gate = _candidate_gate(standard, series)
+    observe("candidate_qc", stage_started, input_rows=standard.num_rows)
     if failure_hook == "candidate_qc":
         gate = {**gate, "quality_passed": False}
     if not gate["quality_passed"]:
         raise LutouGoalBSoilError("soil Candidate quality gate failed")
+    stage_started = perf_counter()
     candidate_directory, candidate_manifest = _seal_candidate(
         runtime,
         public_root,
@@ -169,15 +204,60 @@ def run_goal_b_soil(
         gate,
         client.proof.safe_manifest_fields(),  # type: ignore[attr-defined]
     )
+    candidate_write_duration = observe(
+        "candidate_build", stage_started, rows=standard.num_rows
+    )
+    stage_started = perf_counter()
     window, report = _canonicalize(standard, series)
+    observe(
+        "canonicalize",
+        stage_started,
+        input_rows=standard.num_rows,
+        output_rows=window.num_rows,
+    )
     if failure_hook == "canonical_collision":
         raise LutouGoalBSoilError("injected soil canonical collision")
+    stage_started = perf_counter()
     observations = window if current is None else _merge(current.observations, window, start)
+    observe(
+        "merge",
+        stage_started,
+        previous_rows=0 if current is None else current.observations.num_rows,
+        window_rows=window.num_rows,
+        output_rows=observations.num_rows,
+    )
+    stage_started = perf_counter()
     _validate_canonical(observations, series)
+    observe("canonical_qc", stage_started, input_rows=observations.num_rows)
+    stage_started = perf_counter()
     canonical_directory, canonical_manifest = _seal_canonical(
         runtime, public_root, safe_run_id, candidate_directory, observations, report
     )
+    canonical_write_duration = observe(
+        "canonical_build", stage_started, rows=observations.num_rows
+    )
+    io = {
+        "current_read": {
+            "rows": 0 if current is None else current.observations.num_rows,
+            "bytes": 0
+            if current is None
+            else (current.directory / "observations.parquet").stat().st_size,
+            "duration_seconds": current_read_duration,
+        },
+        "candidate_write": {
+            "rows": standard.num_rows,
+            "bytes": (candidate_directory / "standard.parquet").stat().st_size,
+            "duration_seconds": candidate_write_duration,
+        },
+        "canonical_write": {
+            "rows": observations.num_rows,
+            "bytes": (canonical_directory / "observations.parquet").stat().st_size,
+            "duration_seconds": canonical_write_duration,
+        },
+    }
     if current is not None and observations.equals(current.observations):
+        stages["promote"] = {"duration_seconds": 0.0, "status": "SKIPPED_NO_CHANGE"}
+        observe("total", total_started)
         return SoilRunResult(
             safe_run_id,
             mode,
@@ -188,7 +268,13 @@ def run_goal_b_soil(
             canonical_manifest,
             current.manifest,
             False,
+            {
+                "schema_version": "soil-performance-telemetry/1",
+                "stages": stages,
+                "io": io,
+            },
         )
+    stage_started = perf_counter()
     current_directory, current_manifest = _promote(
         runtime,
         public_root,
@@ -198,6 +284,13 @@ def run_goal_b_soil(
         candidate_manifest,
         failure_hook,
     )
+    promote_duration = observe("promote", stage_started, rows=observations.num_rows)
+    io["release_write"] = {
+        "rows": observations.num_rows,
+        "bytes": (current_directory / "observations.parquet").stat().st_size,
+        "duration_seconds": promote_duration,
+    }
+    observe("total", total_started)
     return SoilRunResult(
         safe_run_id,
         mode,
@@ -208,6 +301,11 @@ def run_goal_b_soil(
         canonical_manifest,
         current_manifest,
         True,
+        {
+            "schema_version": "soil-performance-telemetry/1",
+            "stages": stages,
+            "io": io,
+        },
     )
 
 
@@ -354,7 +452,9 @@ def _canonicalize(
     }
 
 
-def _merge(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
+def _merge_reference(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
+    """Reference row semantics retained for golden equivalence tests only."""
+
     old = [row for row in previous.to_pylist() if row["business_date"] < start]
     prior = {
         (str(row["series_id"]), row["business_date"]): row
@@ -374,6 +474,48 @@ def _merge(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
     return pa.Table.from_pylist([*old, *merged], schema=CANONICAL_SCHEMA).sort_by(
         [("series_id", "ascending"), ("business_date", "ascending")]
     )
+
+
+def _merge(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
+    """Columnar equivalent of the authoritative lookback-window upsert."""
+
+    if previous.schema != CANONICAL_SCHEMA or window.schema != CANONICAL_SCHEMA:
+        raise LutouGoalBSoilError("soil incremental merge schema is invalid")
+    _require_unique_stable_keys(previous, "previous")
+    _require_unique_stable_keys(window, "window")
+
+    before_window = previous.filter(
+        pc.less(previous["business_date"], pa.scalar(start, type=pa.date32()))
+    )
+    replaceable = previous.filter(
+        pc.greater_equal(previous["business_date"], pa.scalar(start, type=pa.date32()))
+    )
+    lookup = replaceable.select([*STABLE_KEY, "source_group_sha256"]).rename_columns(
+        [*STABLE_KEY, "__previous_group_sha256"]
+    )
+    lookup = lookup.append_column(
+        "__previous_index", pa.array(range(replaceable.num_rows), type=pa.int64())
+    )
+    joined = window.join(lookup, keys=list(STABLE_KEY), join_type="left outer")
+    unchanged = pc.fill_null(
+        pc.equal(joined["source_group_sha256"], joined["__previous_group_sha256"]),
+        False,
+    )
+    unchanged_previous = replaceable.take(
+        joined.filter(unchanged)["__previous_index"]
+    )
+    changed_window = joined.filter(pc.invert(unchanged)).select(window.column_names).cast(
+        CANONICAL_SCHEMA
+    )
+    return pa.concat_tables([before_window, unchanged_previous, changed_window]).sort_by(
+        [("series_id", "ascending"), ("business_date", "ascending")]
+    )
+
+
+def _require_unique_stable_keys(table: pa.Table, label: str) -> None:
+    distinct = table.select(STABLE_KEY).group_by(list(STABLE_KEY)).aggregate([])
+    if distinct.num_rows != table.num_rows:
+        raise LutouGoalBSoilError(f"soil {label} stable-key is duplicated")
 
 
 def _validate_canonical(table: pa.Table, series: tuple[SoilMoistureSeries, ...]) -> None:

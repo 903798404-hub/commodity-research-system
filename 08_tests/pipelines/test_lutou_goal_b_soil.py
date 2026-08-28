@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
+import agri_research_agent.pipelines.lutou_goal_b_soil as soil_pipeline
 from agri_research_agent.data_sources.lutou.live import (
     LutouBatch,
     LutouConnectionProof,
@@ -17,6 +21,10 @@ from agri_research_agent.data_sources.lutou.soil_moisture_live import (
     load_soil_moisture_series,
 )
 from agri_research_agent.pipelines.lutou_goal_b_soil import (
+    LutouGoalBSoilError,
+    _merge,
+    _merge_reference,
+    _validate_canonical,
     load_soil_current,
     run_goal_b_soil,
 )
@@ -187,3 +195,206 @@ def test_soil_non_numeric_sentinel_is_retained_as_qc_evidence(tmp_path: Path) ->
     assert invalid[0]["is_usable"] is False
     assert result.candidate_manifest["quality"]["non_numeric_row_count"] == 1
     assert result.canonical_manifest["row_count"] == 94
+
+
+def _replace_column(table: pa.Table, name: str, values: pa.Array) -> pa.Table:
+    return table.set_column(
+        table.schema.get_field_index(name), table.schema.field(name), values
+    )
+
+
+def _soil_current_fixture(tmp_path: Path) -> tuple[pa.Table, tuple[object, ...]]:
+    result = run_goal_b_soil(
+        FakeSoilClient(),
+        runtime=_runtime(tmp_path),
+        run_id="soil-merge-fixture",
+        end_date=DAY,
+        full_load=True,
+        catalog_path=_catalog(),
+    )
+    current = pq.read_table(result.current_directory / "observations.parquet")
+    return current, load_soil_moisture_series(_catalog())
+
+
+def test_arrow_native_merge_matches_reference_for_overlap_revision_null_and_dates(
+    tmp_path: Path,
+) -> None:
+    previous, series = _soil_current_fixture(tmp_path)
+    historical = _replace_column(
+        previous,
+        "business_date",
+        pa.array([date(2026, 6, 1)] * previous.num_rows, type=pa.date32()),
+    )
+    unchanged = previous.slice(0, 30)
+    revised = previous.slice(30, 30)
+    revised = _replace_column(
+        revised,
+        "value_percent",
+        pa.array(
+            [Decimal("42.0")] * revised.num_rows,
+            type=revised.schema.field("value_percent").type,
+        ),
+    )
+    revised = _replace_column(
+        revised,
+        "source_group_sha256",
+        pa.array(["f" * 64] * revised.num_rows),
+    )
+    nullable = previous.slice(60, 10)
+    nullable = _replace_column(
+        nullable,
+        "source_value",
+        pa.array(
+            [None] * nullable.num_rows,
+            type=nullable.schema.field("source_value").type,
+        ),
+    )
+    window = pa.concat_tables([unchanged, revised, nullable])
+    prior = pa.concat_tables([historical, previous])
+
+    expected = _merge_reference(prior, window, date(2026, 7, 9))
+    actual = _merge(prior, window, date(2026, 7, 9))
+
+    assert actual.schema == expected.schema
+    assert actual.column_names == expected.column_names
+    assert actual.num_rows == expected.num_rows
+    assert actual.equals(expected)
+    assert actual.equals(
+        actual.sort_by(
+            [("series_id", "ascending"), ("business_date", "ascending")]
+        )
+    )
+    _validate_canonical(actual, series)
+
+
+def test_arrow_native_merge_matches_reference_for_no_and_all_overlap(
+    tmp_path: Path,
+) -> None:
+    previous, _ = _soil_current_fixture(tmp_path)
+    historical = _replace_column(
+        previous,
+        "business_date",
+        pa.array([date(2026, 6, 1)] * previous.num_rows, type=pa.date32()),
+    )
+
+    no_overlap_expected = _merge_reference(historical, previous, date(2026, 7, 9))
+    no_overlap_actual = _merge(historical, previous, date(2026, 7, 9))
+    all_overlap_expected = _merge_reference(previous, previous, date(2026, 7, 9))
+    all_overlap_actual = _merge(previous, previous, date(2026, 7, 9))
+
+    assert no_overlap_actual.equals(no_overlap_expected)
+    assert all_overlap_actual.equals(all_overlap_expected)
+
+
+@pytest.mark.parametrize("duplicate_side", ["previous", "window"])
+def test_arrow_native_merge_rejects_duplicate_stable_keys(
+    tmp_path: Path, duplicate_side: str
+) -> None:
+    previous, _ = _soil_current_fixture(tmp_path)
+    window = previous.slice(0, 10)
+    if duplicate_side == "previous":
+        previous = pa.concat_tables([previous, previous.slice(0, 1)])
+    else:
+        window = pa.concat_tables([window, window.slice(0, 1)])
+
+    with pytest.raises(LutouGoalBSoilError, match="stable-key"):
+        _merge(previous, window, date(2026, 7, 9))
+
+
+def test_soil_merge_hot_path_forbids_whole_history_python_rows() -> None:
+    source = inspect.getsource(_merge)
+    assert ".to_pylist(" not in source
+    assert "from_pylist(" not in source
+
+
+def test_soil_performance_telemetry_is_observation_only(tmp_path: Path) -> None:
+    result = run_goal_b_soil(
+        FakeSoilClient(),
+        runtime=_runtime(tmp_path),
+        run_id="soil-telemetry",
+        end_date=DAY,
+        full_load=True,
+        catalog_path=_catalog(),
+    )
+
+    expected_stages = {
+        "load_current",
+        "extract",
+        "standardize",
+        "candidate_qc",
+        "candidate_build",
+        "canonicalize",
+        "merge",
+        "canonical_qc",
+        "canonical_build",
+        "promote",
+        "total",
+    }
+    assert expected_stages <= set(result.performance["stages"])
+    assert all(
+        details["duration_seconds"] >= 0
+        for details in result.performance["stages"].values()
+    )
+    assert result.performance["io"]["current_read"]["rows"] == 0
+    assert result.performance["io"]["candidate_write"]["rows"] == 94
+    assert result.performance["io"]["canonical_write"]["rows"] == 94
+    for manifest in (
+        result.candidate_manifest,
+        result.canonical_manifest,
+        result.current_manifest,
+    ):
+        assert "performance" not in manifest
+        assert "telemetry" not in manifest
+
+
+def test_telemetry_values_do_not_change_business_artifact_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def ticking(step: float):  # type: ignore[no-untyped-def]
+        value = 0.0
+
+        def tick() -> float:
+            nonlocal value
+            value += step
+            return value
+
+        return tick
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    monkeypatch.setattr(soil_pipeline, "perf_counter", ticking(1.0))
+    first = run_goal_b_soil(
+        FakeSoilClient(),
+        runtime=_runtime(first_root),
+        run_id="soil-identity",
+        end_date=DAY,
+        full_load=True,
+        catalog_path=_catalog(),
+    )
+    monkeypatch.setattr(soil_pipeline, "perf_counter", ticking(10.0))
+    second = run_goal_b_soil(
+        FakeSoilClient(),
+        runtime=_runtime(second_root),
+        run_id="soil-identity",
+        end_date=DAY,
+        full_load=True,
+        catalog_path=_catalog(),
+    )
+
+    assert first.performance != second.performance
+    assert first.candidate_manifest == second.candidate_manifest
+    assert first.canonical_manifest == second.canonical_manifest
+    assert first.current_manifest == second.current_manifest
+    for filename in ("standard.parquet", "manifest.json"):
+        assert identify_file(first.candidate_directory / filename) == identify_file(
+            second.candidate_directory / filename
+        )
+    for filename in ("observations.parquet", "manifest.json"):
+        assert identify_file(first.canonical_directory / filename) == identify_file(
+            second.canonical_directory / filename
+        )
+        assert identify_file(first.current_directory / filename) == identify_file(
+            second.current_directory / filename
+        )

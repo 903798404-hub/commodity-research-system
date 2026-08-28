@@ -347,6 +347,7 @@ class LutouRefreshAdapter:
             raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Lutou preflight client is unavailable")
         domains: dict[str, str] = {}
         maxima: dict[str, str] = {}
+        performance_domains: dict[str, object] = {}
         promoted = False
         failures: list[ProviderFailure] = []
         try:
@@ -382,6 +383,9 @@ class LutouRefreshAdapter:
                 )
                 domains["soil_moisture"] = (ProviderStatus.UPDATED if soil.promoted else ProviderStatus.NO_CHANGE).value
                 maxima["soil_moisture"] = str(soil.candidate_manifest["source_max_date"])
+                performance_domains["soil_moisture"] = dict(
+                    getattr(soil, "performance", {})
+                )
                 promoted = promoted or soil.promoted
             except ProviderFailure as failure:
                 domains["soil_moisture"] = failure.status.value
@@ -435,8 +439,14 @@ class LutouRefreshAdapter:
                 return RefreshResult(
                     promoted, maxima, domains, status,
                     failures[0].safe_reason,
+                    {"domains": performance_domains},
                 )
-            return RefreshResult(promoted, maxima, domains)
+            return RefreshResult(
+                promoted,
+                maxima,
+                domains,
+                performance={"domains": performance_domains},
+            )
         finally:
             self.close()
 

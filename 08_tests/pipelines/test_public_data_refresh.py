@@ -75,6 +75,44 @@ def test_all_noop_seals_machine_manifest_and_human_report(runtime: RuntimeContex
     assert [item.status for item in result.providers] == [ProviderStatus.NO_CHANGE] * 2
     assert (result.run_directory / "manifest.json").is_file()
     assert "Overall status: NO_CHANGE" in (result.run_directory / "report.txt").read_text()
+    for provider in result.manifest["providers"]:
+        performance = provider["performance"]
+        assert performance["schema_version"] == "provider-performance-telemetry/1"
+        assert performance["stages"]["preflight"]["duration_seconds"] >= 0
+        assert performance["stages"]["refresh"]["duration_seconds"] >= 0
+
+
+def test_provider_detail_performance_is_preserved_in_unified_manifest(
+    runtime: RuntimeContext,
+) -> None:
+    soil_performance = {
+        "domains": {
+            "soil_moisture": {
+                "schema_version": "soil-performance-telemetry/1",
+                "stages": {"merge": {"duration_seconds": 0.25, "output_rows": 42}},
+            }
+        }
+    }
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="provider-detail-performance",
+        adapters=[
+            FakeAdapter(
+                "lutou",
+                RefreshResult(
+                    False,
+                    {"data": "2026-08-18"},
+                    performance=soil_performance,
+                ),
+            )
+        ],
+    )
+
+    performance = result.manifest["providers"][0]["performance"]
+    assert performance["provider_details"] == soil_performance
+    assert performance["provider_details"]["domains"]["soil_moisture"]["stages"][
+        "merge"
+    ]["output_rows"] == 42
 
 
 def test_mixed_noop_and_update_is_success(runtime: RuntimeContext) -> None:
