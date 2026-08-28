@@ -3,6 +3,7 @@ from __future__ import annotations
 import reprlib
 import math
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -102,6 +103,24 @@ class FakeConnection:
 
 def settings(password: str = "super-secret") -> TankanConnectionSettings:
     return TankanConnectionSettings("db.example", 5432, "quanyong", "reader", password)
+
+
+def test_existing_tankan_machine_local_secret_loader_contract(tmp_path: Path) -> None:
+    secret = tmp_path / "tankan.env"
+    secret.write_text(
+        "TANKAN_HOST=db.example\n"
+        "TANKAN_PORT=5432\n"
+        "TANKAN_DATABASE=quanyong\n"
+        "TANKAN_USER=reader\n"
+        "TANKAN_PASSWORD=super-secret\n",
+        encoding="utf-8",
+    )
+    loaded = TankanConnectionSettings.from_secret_file(secret)
+    assert (loaded.host, loaded.port, loaded.database, loaded.user) == (
+        "db.example", 5432, "quanyong", "reader"
+    )
+    assert loaded.password == "super-secret"
+    assert "super-secret" not in reprlib.repr(loaded)
 
 
 def test_import_and_construction_do_not_connect() -> None:

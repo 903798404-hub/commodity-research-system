@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import reprlib
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -130,6 +131,41 @@ class FakeConnection:
 
 def settings(password: str = "fixture-password") -> LutouConnectionSettings:
     return LutouConnectionSettings("fixture.invalid", 3306, "reader", password)
+
+
+def test_settings_load_machine_local_env_style_secret(tmp_path: Path) -> None:
+    secret = tmp_path / "lutou.env"
+    secret.write_text(
+        "LUTOU_HOST=fixture.invalid\n"
+        "LUTOU_PORT=3306\n"
+        "LUTOU_USER=reader\n"
+        "LUTOU_PASSWORD=fixture-password\n",
+        encoding="utf-8",
+    )
+    loaded = LutouConnectionSettings.from_secret_file(secret)
+    assert (loaded.host, loaded.port, loaded.user, loaded.password) == (
+        "fixture.invalid", 3306, "reader", "fixture-password"
+    )
+    assert "fixture-password" not in reprlib.repr(loaded)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "LUTOU_HOST=fixture.invalid\nLUTOU_PORT=3306\nLUTOU_USER=reader\n",
+        "LUTOU_HOST=fixture.invalid\nLUTOU_PORT=invalid\nLUTOU_USER=reader\nLUTOU_PASSWORD=x\n",
+        "LUTOU_HOST=fixture.invalid\nLUTOU_PORT=70000\nLUTOU_USER=reader\nLUTOU_PASSWORD=x\n",
+    ],
+)
+def test_settings_secret_file_fails_closed_without_leaking(
+    tmp_path: Path, content: str
+) -> None:
+    secret = tmp_path / "lutou.env"
+    secret.write_text(content, encoding="utf-8")
+    with pytest.raises(LutouConnectionError) as captured:
+        LutouConnectionSettings.from_secret_file(secret)
+    assert "fixture.invalid" not in str(captured.value)
+    assert "LUTOU_PASSWORD=x" not in str(captured.value)
 
 
 def query(**overrides: object) -> LutouQuery:
@@ -279,4 +315,24 @@ def test_connection_error_does_not_expose_settings() -> None:
     assert "fixture-password" not in str(captured.value)
     assert "fixture.invalid" not in str(captured.value)
     assert "fixture-password" not in reprlib.repr(values)
+    assert values.password == ""
+
+
+def test_missing_auth_runtime_dependency_has_clear_secret_safe_error() -> None:
+    values = settings()
+
+    def fail(**_: object) -> object:
+        raise RuntimeError(
+            "'cryptography' package is required for caching_sha2_password auth method; "
+            "fixture-password at fixture.invalid"
+        )
+
+    with pytest.raises(LutouConnectionError) as captured:
+        with LutouClient(values, connector=fail):
+            pass
+    assert str(captured.value) == (
+        "Lutou authentication runtime dependency is unavailable"
+    )
+    assert "fixture-password" not in str(captured.value)
+    assert "fixture.invalid" not in str(captured.value)
     assert values.password == ""

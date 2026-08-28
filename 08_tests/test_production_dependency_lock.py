@@ -42,6 +42,14 @@ def test_tankan_postgres_runtime_dependencies_are_pinned_and_hashed() -> None:
         assert "--hash=sha256:" in block
 
 
+def test_lutou_authentication_runtime_dependency_is_pinned_and_hashed() -> None:
+    runtime_input = (ROOT / "requirements.in").read_text(encoding="utf-8")
+    assert "cryptography==50.0.0" in runtime_input
+    block = _entry((ROOT / "requirements.txt").read_text(encoding="utf-8"), "cryptography")
+    assert block.startswith("cryptography==50.0.0")
+    assert "--hash=sha256:" in block
+
+
 def test_shared_lock_has_pinned_hashed_mutually_exclusive_platform_entries() -> None:
     lock = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     expected = {

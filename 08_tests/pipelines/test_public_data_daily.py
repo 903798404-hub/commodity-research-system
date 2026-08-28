@@ -73,6 +73,64 @@ def _outcome(status: ProviderStatus, *, provider: str = "tankan") -> ProviderOut
     )
 
 
+def _clear_lutou_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("LUTOU_HOST", "LUTOU_PORT", "LUTOU_USER", "LUTOU_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_lutou_settings_falls_back_to_persistent_secret_without_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_lutou_environment(monkeypatch)
+    secret = tmp_path / "lutou.env"
+    secret.write_text(
+        "LUTOU_HOST=file.invalid\nLUTOU_PORT=3306\n"
+        "LUTOU_USER=file-reader\nLUTOU_PASSWORD=file-password\n",
+        encoding="utf-8",
+    )
+    loaded = refresh_public_data._lutou_settings(secret)
+    assert (loaded.host, loaded.port, loaded.user, loaded.password) == (
+        "file.invalid", 3306, "file-reader", "file-password"
+    )
+
+
+def test_lutou_complete_process_environment_overrides_secret_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = tmp_path / "lutou.env"
+    secret.write_text(
+        "LUTOU_HOST=file.invalid\nLUTOU_PORT=3307\n"
+        "LUTOU_USER=file-reader\nLUTOU_PASSWORD=file-password\n",
+        encoding="utf-8",
+    )
+    override = {
+        "LUTOU_HOST": "environment.invalid",
+        "LUTOU_PORT": "3306",
+        "LUTOU_USER": "environment-reader",
+        "LUTOU_PASSWORD": "environment-password",
+    }
+    for name, value in override.items():
+        monkeypatch.setenv(name, value)
+    loaded = refresh_public_data._lutou_settings(secret)
+    assert (loaded.host, loaded.port, loaded.user, loaded.password) == (
+        "environment.invalid", 3306, "environment-reader", "environment-password"
+    )
+
+
+def test_lutou_partial_or_invalid_process_environment_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_lutou_environment(monkeypatch)
+    monkeypatch.setenv("LUTOU_HOST", "partial.invalid")
+    with pytest.raises(SystemExit, match="incomplete"):
+        refresh_public_data._lutou_settings(tmp_path / "unused.env")
+    monkeypatch.setenv("LUTOU_PORT", "invalid")
+    monkeypatch.setenv("LUTOU_USER", "reader")
+    monkeypatch.setenv("LUTOU_PASSWORD", "password")
+    with pytest.raises(SystemExit, match="invalid"):
+        refresh_public_data._lutou_settings(tmp_path / "unused.env")
+
+
 def _refresh(tmp_path: Path, *outcomes: ProviderOutcome) -> UnifiedRunResult:
     return UnifiedRunResult(
         "refresh", "start", "end", tuple(item.provider for item in outcomes),

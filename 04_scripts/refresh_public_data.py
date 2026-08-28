@@ -93,6 +93,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path.home() / ".market-data-secrets" / "tankan.env",
     )
+    parser.add_argument(
+        "--lutou-secret-file",
+        type=Path,
+        default=Path.home() / ".market-data-secrets" / "lutou.env",
+    )
     args = parser.parse_args(argv)
     remote = (args.ssh_target, args.remote_store_root, args.activation_image_id)
     if any(remote) and not all(remote):
@@ -140,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     if "lutou" in sources:
         adapters.append(
             LutouRefreshAdapter(
-                _lutou_settings(),
+                _lutou_settings(args.lutou_secret_file),
                 runtime,
                 run_id,
                 args.end_date,
@@ -152,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         adapters.append(
             DomesticBasisRefreshAdapter(
-                _lutou_settings(),
+                _lutou_settings(args.lutou_secret_file),
                 runtime,
                 run_id,
                 ROOT / "02_configs" / "lutou_domestic_basis.yaml",
@@ -284,18 +289,26 @@ def _dry_run(adapters: list[object]) -> int:
     return 1 if failed else 0
 
 
-def _lutou_settings() -> LutouConnectionSettings:
+def _lutou_settings(secret_file: str | Path) -> LutouConnectionSettings:
+    """Prefer a complete process override, then the persistent local secret."""
+
     required = ("LUTOU_HOST", "LUTOU_PORT", "LUTOU_USER", "LUTOU_PASSWORD")
     values = {name: os.environ.get(name, "") for name in required}
-    if any(not values[name] for name in required):
-        raise SystemExit("Lutou process-local connection settings are incomplete")
     try:
-        return LutouConnectionSettings(
-            host=values["LUTOU_HOST"],
-            port=int(values["LUTOU_PORT"]),
-            user=values["LUTOU_USER"],
-            password=values["LUTOU_PASSWORD"],
-        )
+        present = tuple(name for name in required if values[name])
+        if present:
+            if len(present) != len(required):
+                raise SystemExit("Lutou process-local connection settings are incomplete")
+            try:
+                return LutouConnectionSettings(
+                    host=values["LUTOU_HOST"],
+                    port=int(values["LUTOU_PORT"]),
+                    user=values["LUTOU_USER"],
+                    password=values["LUTOU_PASSWORD"],
+                )
+            except (TypeError, ValueError):
+                raise SystemExit("Lutou process-local connection settings are invalid") from None
+        return LutouConnectionSettings.from_secret_file(secret_file)
     finally:
         for name in values:
             values[name] = ""

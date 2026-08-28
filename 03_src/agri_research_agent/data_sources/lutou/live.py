@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Callable, Iterator, Mapping, Sequence
 
 import pymysql
@@ -15,6 +16,13 @@ from pymysql.cursors import DictCursor
 
 _IDENTIFIER = re.compile(r"^[^`\x00-\x1f\x7f]+$")
 _READ_ONLY_PRIVILEGES = frozenset({"SELECT", "SHOW VIEW", "USAGE"})
+_AUTH_RUNTIME_DEPENDENCY_MARKERS = (
+    "cryptography",
+    "sha256_password",
+    "caching_sha2_password",
+    "pynacl",
+    "ed25519_password",
+)
 
 
 class LutouClientError(RuntimeError):
@@ -49,6 +57,39 @@ class LutouConnectionSettings:
     password: str = field(repr=False)
     connect_timeout_seconds: int = 15
     read_timeout_seconds: int = 120
+
+    @classmethod
+    def from_secret_file(cls, path: str | Path) -> "LutouConnectionSettings":
+        """Load the machine-local env-style credential without exposing values."""
+
+        values: dict[str, str] = {}
+        try:
+            lines = Path(path).read_text(encoding="utf-8-sig").splitlines()
+        except (OSError, UnicodeError) as exc:
+            raise LutouConnectionError(
+                f"Lutou secret file cannot be read: {type(exc).__name__}"
+            ) from None
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+        required = {"LUTOU_HOST", "LUTOU_PORT", "LUTOU_USER", "LUTOU_PASSWORD"}
+        if required - values.keys():
+            raise LutouConnectionError("secret file is missing required Lutou fields")
+        try:
+            return cls(
+                host=values["LUTOU_HOST"],
+                port=int(values["LUTOU_PORT"]),
+                user=values["LUTOU_USER"],
+                password=values["LUTOU_PASSWORD"],
+            )
+        except (TypeError, ValueError):
+            raise LutouConnectionError("invalid Lutou settings") from None
+        finally:
+            for name in values:
+                values[name] = ""
 
     def __post_init__(self) -> None:
         if not self.host or not self.user or not self.password:
@@ -220,9 +261,7 @@ class LutouClient:
         except Exception as exc:
             self._settings.clear_password()
             self.close()
-            raise LutouConnectionError(
-                f"Lutou connection failed: {type(exc).__name__}"
-            ) from None
+            raise LutouConnectionError(_safe_connection_failure(exc)) from None
 
     def __exit__(self, exc_type, exc, traceback) -> None:  # type: ignore[no-untyped-def]
         self.close()
@@ -252,9 +291,7 @@ class LutouClient:
         except LutouClientError:
             raise
         except Exception as exc:
-            raise LutouConnectionError(
-                f"Lutou connection readiness failed: {type(exc).__name__}"
-            ) from None
+            raise LutouConnectionError(_safe_connection_failure(exc)) from None
 
     def inspect_query(self, query: LutouQuery) -> tuple[dict[str, object], ...]:
         connection = self._require_connection()
@@ -562,6 +599,15 @@ def _quote(value: str) -> str:
     if _IDENTIFIER.fullmatch(value) is None:
         raise ValueError("Lutou identifier is invalid")
     return f"`{value}`"
+
+
+def _safe_connection_failure(exc: Exception) -> str:
+    detail = str(exc).lower()
+    if isinstance(exc, RuntimeError) and any(
+        marker in detail for marker in _AUTH_RUNTIME_DEPENDENCY_MARKERS
+    ):
+        return "Lutou authentication runtime dependency is unavailable"
+    return f"Lutou connection failed: {type(exc).__name__}"
 
 
 def _window(query: LutouQuery, start: date, end: date) -> tuple[date, date]:
