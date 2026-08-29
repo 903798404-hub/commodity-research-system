@@ -212,7 +212,13 @@ class TankanRefreshAdapter:
                 source_max["domestic_spread"] = self._preflight_source_max[
                     "domestic_spread"
                 ]
-            return RefreshResult(result.promoted, source_max)
+            return RefreshResult(
+                result.promoted,
+                source_max,
+                performance={
+                    "domains": {"tankan": dict(getattr(result, "performance", {}))}
+                },
+            )
         except TankanGoalAError as exc:
             raise _pipeline_failure(exc, "Tankan") from None
         finally:
@@ -363,6 +369,9 @@ class LutouRefreshAdapter:
                 )
                 domains["three_oil"] = (ProviderStatus.UPDATED if oil.promoted else ProviderStatus.NO_CHANGE).value
                 maxima["three_oil"] = str(oil.candidate_manifest["source_max_date"])
+                performance_domains["three_oil"] = dict(
+                    getattr(oil, "performance", {})
+                )
                 promoted = promoted or oil.promoted
             except ProviderFailure as failure:
                 domains["three_oil"] = failure.status.value

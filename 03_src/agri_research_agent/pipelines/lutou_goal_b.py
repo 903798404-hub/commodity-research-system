@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from time import perf_counter
 from typing import Mapping, Sequence
 
 import pyarrow as pa
@@ -25,6 +26,10 @@ from agri_research_agent.research_data.three_oil_v1 import (
     load_three_oil_v1,
 )
 from agri_research_agent.shared.atomic_storage import atomic_write_json
+from agri_research_agent.shared.arrow_window_upsert import (
+    ArrowWindowUpsertError,
+    merge_authoritative_window,
+)
 from agri_research_agent.shared.file_identity import identify_file
 from agri_research_agent.shared.immutable_candidate import (
     seal_immutable_candidate,
@@ -146,6 +151,7 @@ class GoalBRunResult:
     canonical_manifest: Mapping[str, object]
     current_manifest: Mapping[str, object]
     promoted: bool
+    performance: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +172,14 @@ def run_goal_b(
     catalog_path: str | Path | None = None,
     failure_hook: str | None = None,
 ) -> GoalBRunResult:
+    total_started = perf_counter()
+    stages: dict[str, dict[str, object]] = {}
+
+    def observe(name: str, started: float, **details: object) -> float:
+        duration = round(perf_counter() - started, 6)
+        stages[name] = {"duration_seconds": duration, **details}
+        return duration
+
     safe_run_id = validate_candidate_id(run_id)
     _require_runtime(runtime)
     if type(end_date) is not date:
@@ -175,7 +189,13 @@ def run_goal_b(
         runtime, runtime.runtime_root / "public-market-data" / "lutou-three-oil"
     )
     public_root.mkdir(parents=True, exist_ok=True)
+    stage_started = perf_counter()
     current = load_current(public_root)
+    current_read_duration = observe(
+        "load_current",
+        stage_started,
+        rows=0 if current is None else current.observations.num_rows,
+    )
     if full_load and current is not None:
         raise LutouGoalBError("Goal B full load refuses to replace an existing Current")
     if not full_load and current is None:
@@ -188,6 +208,7 @@ def run_goal_b(
         - timedelta(days=LOOKBACK_DAYS)
     )
     mode = "full" if full_load else "incremental-31-day-lookback"
+    stage_started = perf_counter()
     try:
         extraction = extract_three_oil_live(
             client, catalog, start=start, end=end_date  # type: ignore[arg-type]
@@ -196,17 +217,34 @@ def run_goal_b(
         raise LutouGoalBError(
             f"Goal B live extraction failed: {type(exc).__name__}"
         ) from None
+    observe(
+        "extract",
+        stage_started,
+        query_count=len(extraction.queries),
+        source_rows=sum(extraction.table_row_counts.values()),
+        output_rows=len(extraction.records),
+    )
     if failure_hook == "connection":
         raise LutouGoalBError("injected Goal B connection failure")
 
+    stage_started = perf_counter()
     raw = _raw_table(extraction)
     standard = _standard_table(extraction)
+    observe(
+        "standardize",
+        stage_started,
+        input_rows=len(extraction.records),
+        output_rows=standard.num_rows,
+    )
+    stage_started = perf_counter()
     candidate_gate = _candidate_gate(standard, catalog)
+    observe("candidate_qc", stage_started, input_rows=standard.num_rows)
     if failure_hook == "candidate_qc":
         candidate_gate = {**candidate_gate, "quality_passed": False, "quality_status": "FAIL"}
     if not candidate_gate["quality_passed"]:
         raise LutouGoalBError("Goal B Candidate quality gate failed")
 
+    stage_started = perf_counter()
     candidate_directory, candidate_manifest = _seal_candidate(
         runtime,
         public_root,
@@ -221,16 +259,37 @@ def run_goal_b(
         client.proof.safe_manifest_fields(),  # type: ignore[attr-defined]
         failure_hook,
     )
+    candidate_write_duration = observe(
+        "candidate_build", stage_started, rows=standard.num_rows
+    )
 
+    stage_started = perf_counter()
     window_canonical, report = _canonicalize(standard, catalog)
+    observe(
+        "canonicalize",
+        stage_started,
+        input_rows=standard.num_rows,
+        output_rows=window_canonical.num_rows,
+    )
     if failure_hook == "canonical_collision":
         raise LutouGoalBError("injected Goal B canonical collision")
+    stage_started = perf_counter()
     observations = (
         window_canonical
         if current is None
         else _merge_current(current.observations, window_canonical, start)
     )
+    observe(
+        "merge",
+        stage_started,
+        previous_rows=0 if current is None else current.observations.num_rows,
+        window_rows=window_canonical.num_rows,
+        output_rows=observations.num_rows,
+    )
+    stage_started = perf_counter()
     _validate_canonical(observations, catalog)
+    observe("canonical_qc", stage_started, input_rows=observations.num_rows)
+    stage_started = perf_counter()
     canonical_directory, canonical_manifest = _seal_canonical(
         runtime,
         public_root,
@@ -239,6 +298,31 @@ def run_goal_b(
         observations,
         report,
     )
+    canonical_write_duration = observe(
+        "canonical_build", stage_started, rows=observations.num_rows
+    )
+    io = {
+        "current_read": {
+            "rows": 0 if current is None else current.observations.num_rows,
+            "bytes": 0
+            if current is None
+            else (current.directory / "observations.parquet").stat().st_size,
+            "duration_seconds": current_read_duration,
+        },
+        "candidate_write": {
+            "rows": standard.num_rows,
+            "bytes": sum(
+                int(value["size_bytes"])
+                for value in candidate_manifest["files"].values()
+            ),
+            "duration_seconds": candidate_write_duration,
+        },
+        "canonical_write": {
+            "rows": observations.num_rows,
+            "bytes": (canonical_directory / "observations.parquet").stat().st_size,
+            "duration_seconds": canonical_write_duration,
+        },
+    }
 
     if (
         current is not None
@@ -247,6 +331,8 @@ def run_goal_b(
         == candidate_manifest.get("metadata_provenance")
         and observations.equals(current.observations)
     ):
+        stages["promote"] = {"duration_seconds": 0.0, "status": "SKIPPED_NO_CHANGE"}
+        observe("total", total_started)
         return GoalBRunResult(
             safe_run_id,
             mode,
@@ -257,7 +343,13 @@ def run_goal_b(
             canonical_manifest,
             current.manifest,
             False,
+            {
+                "schema_version": "three-oil-performance-telemetry/1",
+                "stages": stages,
+                "io": io,
+            },
         )
+    stage_started = perf_counter()
     current_directory, current_manifest = _promote(
         runtime,
         public_root,
@@ -267,6 +359,13 @@ def run_goal_b(
         candidate_manifest,
         failure_hook,
     )
+    promote_duration = observe("promote", stage_started, rows=observations.num_rows)
+    io["release_write"] = {
+        "rows": observations.num_rows,
+        "bytes": (current_directory / "observations.parquet").stat().st_size,
+        "duration_seconds": promote_duration,
+    }
+    observe("total", total_started)
     return GoalBRunResult(
         safe_run_id,
         mode,
@@ -277,6 +376,11 @@ def run_goal_b(
         canonical_manifest,
         current_manifest,
         True,
+        {
+            "schema_version": "three-oil-performance-telemetry/1",
+            "stages": stages,
+            "io": io,
+        },
     )
 
 
@@ -551,7 +655,9 @@ def _group_hash(rows: Sequence[Mapping[str, object]]) -> str:
     return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
-def _merge_current(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
+def _merge_current_reference(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
+    """Reference row semantics retained for golden equivalence tests only."""
+
     if previous.schema != CANONICAL_SCHEMA or window.schema != CANONICAL_SCHEMA:
         raise LutouGoalBError("Goal B incremental schemas differ")
     old_rows = [item for item in previous.to_pylist() if item["business_date"] < start]
@@ -575,6 +681,22 @@ def _merge_current(previous: pa.Table, window: pa.Table, start: date) -> pa.Tabl
     if _duplicate_count(result, STABLE_KEY):
         raise LutouGoalBError("Goal B incremental merge produced duplicate keys")
     return result
+
+
+def _merge_current(previous: pa.Table, window: pa.Table, start: date) -> pa.Table:
+    if previous.schema != CANONICAL_SCHEMA or window.schema != CANONICAL_SCHEMA:
+        raise LutouGoalBError("Goal B incremental schemas differ")
+    try:
+        return merge_authoritative_window(
+            previous,
+            window,
+            keys=STABLE_KEY,
+            date_column="business_date",
+            lower=start,
+            hash_column="source_group_sha256",
+        )
+    except ArrowWindowUpsertError as exc:
+        raise LutouGoalBError(f"Goal B incremental merge failed: {exc}") from None
 
 
 def _validate_canonical(table: pa.Table, catalog: ThreeOilV1Catalog) -> None:

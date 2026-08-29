@@ -1,21 +1,29 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-import pyarrow.parquet as pq
+import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import pytest
 
+import agri_research_agent.pipelines.tankan_goal_a as tankan_pipeline
+import agri_research_agent.shared.arrow_window_upsert as arrow_upsert
 from agri_research_agent.data_sources.tankan.models import (
     ConnectionProof,
     QueryPlanProof,
     SourceBatch,
 )
 from agri_research_agent.pipelines.tankan_goal_a import (
+    FX_STABLE_KEY,
+    MARKET_STABLE_KEY,
     MARKET_PRODUCTS,
     TankanGoalAError,
+    _merge_current,
+    _merge_current_reference,
     load_current,
     run_goal_a,
 )
@@ -197,3 +205,203 @@ def test_source_identity_and_fx_direction_reach_current(runtime: RuntimeContext)
     assert set(fx["base_currency"].to_pylist()) == {"USD"}
     assert set(fx["quote_currency"].to_pylist()) == {"CNH"}
     assert set(fx["rate_unit"].to_pylist()) == {"CNH_per_USD"}
+
+
+def _replace_column(table: pa.Table, name: str, values: pa.Array) -> pa.Table:
+    return table.set_column(
+        table.schema.get_field_index(name), table.schema.field(name), values
+    )
+
+
+def test_arrow_native_merge_matches_reference_for_both_tankan_domains(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "arrow-golden", full=True)
+    market = pq.read_table(result.current_directory / "market.parquet")
+    fx = pq.read_table(result.current_directory / "fx.parquet")
+    historical_market = _replace_column(
+        market,
+        "business_date",
+        pa.array([date(2026, 6, 1)] * market.num_rows, type=pa.date32()),
+    )
+    historical_fx = _replace_column(
+        fx,
+        "quote_date",
+        pa.array([date(2026, 6, 1)] * fx.num_rows, type=pa.date32()),
+    )
+    market_window = _replace_column(
+        market,
+        "instrument_id",
+        pa.array([None, *market["instrument_id"].to_pylist()[1:]], type=pa.string()),
+    )
+    market_window = _replace_column(
+        market_window,
+        "source_row_sha256",
+        pa.array(["f" * 64, *market["source_row_sha256"].to_pylist()[1:]]),
+    )
+    fx_window = _replace_column(
+        fx,
+        "value_date",
+        pa.array([None] * fx.num_rows, type=pa.date32()),
+    )
+    fx_window = _replace_column(
+        fx_window,
+        "source_row_sha256",
+        pa.array(["e" * 64] * fx.num_rows),
+    )
+
+    for previous, window, keys, date_column in (
+        (
+            pa.concat_tables([historical_market, market]),
+            market_window,
+            MARKET_STABLE_KEY,
+            "business_date",
+        ),
+        (
+            pa.concat_tables([historical_fx, fx]),
+            fx_window,
+            FX_STABLE_KEY,
+            "quote_date",
+        ),
+    ):
+        expected = _merge_current_reference(previous, window, keys, date_column)
+        actual = _merge_current(previous, window, keys, date_column)
+        assert actual.schema == expected.schema
+        assert actual.column_names == expected.column_names
+        assert actual.num_rows == expected.num_rows
+        assert actual.equals(expected)
+        assert actual.equals(actual.sort_by([(key, "ascending") for key in keys]))
+
+
+def test_tankan_merge_handles_no_overlap_full_overlap_and_empty_previous(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "arrow-boundaries", full=True)
+    market = pq.read_table(result.current_directory / "market.parquet")
+    historical = _replace_column(
+        market,
+        "business_date",
+        pa.array([date(2026, 6, 1)] * market.num_rows, type=pa.date32()),
+    )
+    empty = market.slice(0, 0)
+
+    assert _merge_current(
+        historical, market, MARKET_STABLE_KEY, "business_date"
+    ).equals(
+        _merge_current_reference(
+            historical, market, MARKET_STABLE_KEY, "business_date"
+        )
+    )
+    assert _merge_current(
+        market, market, MARKET_STABLE_KEY, "business_date"
+    ).equals(market)
+    assert _merge_current(
+        empty, market, MARKET_STABLE_KEY, "business_date"
+    ).equals(market)
+    with pytest.raises(TankanGoalAError, match="window"):
+        _merge_current(market, empty, MARKET_STABLE_KEY, "business_date")
+
+
+@pytest.mark.parametrize("duplicate_side", ["previous", "window"])
+def test_tankan_merge_rejects_duplicate_stable_keys(
+    runtime: RuntimeContext, duplicate_side: str
+) -> None:
+    result = apply_run(runtime, f"arrow-duplicate-{duplicate_side}", full=True)
+    market = pq.read_table(result.current_directory / "market.parquet")
+    previous = market
+    window = market
+    if duplicate_side == "previous":
+        previous = pa.concat_tables([previous, previous.slice(0, 1)])
+    else:
+        window = pa.concat_tables([window, window.slice(0, 1)])
+
+    with pytest.raises(TankanGoalAError, match="stable key"):
+        _merge_current(previous, window, MARKET_STABLE_KEY, "business_date")
+
+
+def test_tankan_merge_hot_path_forbids_whole_history_python_rows() -> None:
+    for callable_ in (_merge_current, arrow_upsert.merge_authoritative_window):
+        source = inspect.getsource(callable_)
+        assert ".to_pylist(" not in source
+        assert "from_pylist(" not in source
+
+
+def test_tankan_performance_telemetry_is_observation_only(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "tankan-telemetry", full=True)
+    expected_stages = {
+        "load_current",
+        "extract",
+        "standardize",
+        "candidate_qc",
+        "candidate_build",
+        "canonicalize",
+        "merge",
+        "canonical_qc",
+        "canonical_build",
+        "promote",
+        "total",
+    }
+    assert expected_stages <= set(result.performance["stages"])
+    assert result.performance["io"]["candidate_write"]["rows"] == 5
+    for manifest in (
+        result.candidate_manifest,
+        result.canonical_manifest,
+        result.current_manifest,
+    ):
+        assert "performance" not in manifest
+        assert "telemetry" not in manifest
+
+
+def test_tankan_timing_values_do_not_change_artifact_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def ticking(step: float):  # type: ignore[no-untyped-def]
+        value = 0.0
+
+        def tick() -> float:
+            nonlocal value
+            value += step
+            return value
+
+        return tick
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return cls(2026, 8, 19, tzinfo=tz)
+
+    roots = (tmp_path / "first", tmp_path / "second")
+    for root in roots:
+        root.mkdir()
+        (root / ".market-data-runtime.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "runtime_id": f"tankan-identity-{root.name}",
+                    "classification": "isolated-dev",
+                    "module_id": "international-spread",
+                    "created_at": "2026-08-19T00:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+    runtimes = tuple(
+        RuntimeContext(RuntimeMode.ISOLATED_DEV, "international-spread", root)
+        for root in roots
+    )
+    monkeypatch.setattr(tankan_pipeline, "datetime", FixedDateTime)
+    monkeypatch.setattr(tankan_pipeline, "perf_counter", ticking(1.0))
+    first = apply_run(runtimes[0], "tankan-identity", full=True)
+    monkeypatch.setattr(tankan_pipeline, "perf_counter", ticking(10.0))
+    second = apply_run(runtimes[1], "tankan-identity", full=True)
+
+    assert first.performance != second.performance
+    assert first.candidate_manifest == second.candidate_manifest
+    assert first.canonical_manifest == second.canonical_manifest
+    assert first.current_manifest == second.current_manifest
+    for filename in ("market.parquet", "fx.parquet", "manifest.json"):
+        assert identify_file(first.current_directory / filename) == identify_file(
+            second.current_directory / filename
+        )

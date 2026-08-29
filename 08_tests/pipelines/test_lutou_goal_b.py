@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+import agri_research_agent.pipelines.lutou_goal_b as three_oil_pipeline
+import agri_research_agent.shared.arrow_window_upsert as arrow_upsert
 from agri_research_agent.data_sources.lutou.live import (
     LutouBatch,
     LutouConnectionProof,
@@ -15,7 +19,10 @@ from agri_research_agent.data_sources.lutou.live import (
 )
 from agri_research_agent.pipelines.lutou_goal_b import (
     CANONICAL_SCHEMA,
+    STABLE_KEY,
     LutouGoalBError,
+    _merge_current,
+    _merge_current_reference,
     _upgrade_legacy_current,
     load_current,
     run_goal_b,
@@ -354,3 +361,170 @@ def test_manifests_exclude_credentials_and_absolute_paths(runtime: RuntimeContex
         str(runtime.runtime_root).lower(),
     ):
         assert forbidden not in encoded
+
+
+def _replace_column(table: pa.Table, name: str, values: pa.Array) -> pa.Table:
+    return table.set_column(
+        table.schema.get_field_index(name), table.schema.field(name), values
+    )
+
+
+def test_three_oil_arrow_merge_matches_reference_for_revision_and_boundaries(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "three-oil-arrow-golden", full=True)
+    current = pq.read_table(result.current_directory / "observations.parquet")
+    historical = _replace_column(
+        current,
+        "business_date",
+        pa.array([date(2026, 6, 1)] * current.num_rows, type=pa.date32()),
+    )
+    revised = _replace_column(
+        current,
+        "source_group_sha256",
+        pa.array(["f" * 64, *current["source_group_sha256"].to_pylist()[1:]]),
+    )
+    previous = pa.concat_tables([historical, current])
+    start = date(2026, 7, 18)
+
+    expected = _merge_current_reference(previous, revised, start)
+    actual = _merge_current(previous, revised, start)
+
+    assert actual.schema == expected.schema
+    assert actual.column_names == expected.column_names
+    assert actual.num_rows == expected.num_rows
+    assert actual.equals(expected)
+    assert actual.equals(
+        actual.sort_by(
+            [("series_id", "ascending"), ("business_date", "ascending")]
+        )
+    )
+    assert all(column.null_count == 0 for column in actual.columns)
+
+
+def test_three_oil_merge_handles_no_overlap_full_overlap_and_empty_tables(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "three-oil-arrow-boundaries", full=True)
+    current = pq.read_table(result.current_directory / "observations.parquet")
+    historical = _replace_column(
+        current,
+        "business_date",
+        pa.array([date(2026, 6, 1)] * current.num_rows, type=pa.date32()),
+    )
+    empty = current.slice(0, 0)
+    start = date(2026, 7, 18)
+
+    assert _merge_current(historical, current, start).equals(
+        _merge_current_reference(historical, current, start)
+    )
+    assert _merge_current(current, current, start).equals(current)
+    assert _merge_current(empty, current, start).equals(current)
+    assert _merge_current(current, empty, start).equals(
+        _merge_current_reference(current, empty, start)
+    )
+
+
+@pytest.mark.parametrize("duplicate_side", ["previous", "window"])
+def test_three_oil_merge_rejects_duplicate_stable_keys(
+    runtime: RuntimeContext, duplicate_side: str
+) -> None:
+    result = apply_run(runtime, f"three-oil-duplicate-{duplicate_side}", full=True)
+    current = pq.read_table(result.current_directory / "observations.parquet")
+    previous = current
+    window = current
+    if duplicate_side == "previous":
+        previous = pa.concat_tables([previous, previous.slice(0, 1)])
+    else:
+        window = pa.concat_tables([window, window.slice(0, 1)])
+
+    with pytest.raises(LutouGoalBError, match="stable key"):
+        _merge_current(previous, window, date(2026, 7, 18))
+
+
+def test_three_oil_merge_hot_path_forbids_whole_history_python_rows() -> None:
+    for callable_ in (_merge_current, arrow_upsert.merge_authoritative_window):
+        source = inspect.getsource(callable_)
+        assert ".to_pylist(" not in source
+        assert "from_pylist(" not in source
+
+
+def test_three_oil_performance_telemetry_is_observation_only(
+    runtime: RuntimeContext,
+) -> None:
+    result = apply_run(runtime, "three-oil-telemetry", full=True)
+    expected_stages = {
+        "load_current",
+        "extract",
+        "standardize",
+        "candidate_qc",
+        "candidate_build",
+        "canonicalize",
+        "merge",
+        "canonical_qc",
+        "canonical_build",
+        "promote",
+        "total",
+    }
+    assert expected_stages <= set(result.performance["stages"])
+    assert result.performance["io"]["candidate_write"]["rows"] == 20
+    for manifest in (
+        result.candidate_manifest,
+        result.canonical_manifest,
+        result.current_manifest,
+    ):
+        assert "performance" not in manifest
+        assert "telemetry" not in manifest
+
+
+def test_three_oil_timing_values_do_not_change_artifact_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def ticking(step: float):  # type: ignore[no-untyped-def]
+        value = 0.0
+
+        def tick() -> float:
+            nonlocal value
+            value += step
+            return value
+
+        return tick
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return cls(2026, 8, 19, tzinfo=tz)
+
+    roots = (tmp_path / "first", tmp_path / "second")
+    for root in roots:
+        root.mkdir()
+        (root / ".market-data-runtime.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "runtime_id": f"three-oil-identity-{root.name}",
+                    "classification": "isolated-dev",
+                    "module_id": "international-spread",
+                    "created_at": "2026-08-19T00:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+    runtimes = tuple(
+        RuntimeContext(RuntimeMode.ISOLATED_DEV, "international-spread", root)
+        for root in roots
+    )
+    monkeypatch.setattr(three_oil_pipeline, "datetime", FixedDateTime)
+    monkeypatch.setattr(three_oil_pipeline, "perf_counter", ticking(1.0))
+    first = apply_run(runtimes[0], "three-oil-identity", full=True)
+    monkeypatch.setattr(three_oil_pipeline, "perf_counter", ticking(10.0))
+    second = apply_run(runtimes[1], "three-oil-identity", full=True)
+
+    assert first.performance != second.performance
+    assert first.candidate_manifest == second.candidate_manifest
+    assert first.canonical_manifest == second.canonical_manifest
+    assert first.current_manifest == second.current_manifest
+    for filename in ("observations.parquet", "manifest.json"):
+        assert identify_file(first.current_directory / filename) == identify_file(
+            second.current_directory / filename
+        )

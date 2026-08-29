@@ -83,14 +83,18 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
         public_data_providers,
         "run_goal_b",
         lambda *args, **kwargs: SimpleNamespace(
-            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+            promoted=False,
+            candidate_manifest={"source_max_date": "2026-08-18"},
+            performance={"schema_version": "three-oil-performance-telemetry/1"},
         ),
     )
     monkeypatch.setattr(
         public_data_providers,
         "run_goal_b_soil",
         lambda *args, **kwargs: SimpleNamespace(
-            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+            promoted=False,
+            candidate_manifest={"source_max_date": "2026-08-15"},
+            performance={"schema_version": "soil-performance-telemetry/1"},
         ),
     )
     calls = []
@@ -136,6 +140,12 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
     }
     assert result.source_max_dates["weather_observation"] == "2026-08-18"
     assert result.source_max_dates["weather_forecast_valid"] == "2026-09-02"
+    assert result.performance["domains"]["three_oil"]["schema_version"] == (
+        "three-oil-performance-telemetry/1"
+    )
+    assert result.performance["domains"]["soil_moisture"]["schema_version"] == (
+        "soil-performance-telemetry/1"
+    )
     assert client.ensure_count == 3
 
 
@@ -151,7 +161,9 @@ def test_three_oil_rebuilds_stale_connection_before_extraction(
         oil_clients.append(client)
         assert client.read_only_proved is True
         return SimpleNamespace(
-            promoted=False, candidate_manifest={"source_max_date": "2026-08-18"}
+            promoted=False,
+            candidate_manifest={"source_max_date": "2026-08-18"},
+            performance={"schema_version": "three-oil-performance-telemetry/1"},
         )
 
     monkeypatch.setattr(public_data_providers, "run_goal_b", oil)
@@ -159,7 +171,9 @@ def test_three_oil_rebuilds_stale_connection_before_extraction(
         public_data_providers,
         "run_goal_b_soil",
         lambda *args, **kwargs: SimpleNamespace(
-            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+            promoted=False,
+            candidate_manifest={"source_max_date": "2026-08-15"},
+            performance={"schema_version": "soil-performance-telemetry/1"},
         ),
     )
     adapter = LutouRefreshAdapter(

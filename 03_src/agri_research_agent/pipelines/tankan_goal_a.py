@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator, Sequence
+from time import perf_counter
+from typing import Iterator, Mapping, Sequence
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -33,6 +34,10 @@ from agri_research_agent.data_sources.tankan.market_price_adapter import (
 from agri_research_agent.data_sources.tankan.models import QueryPlanProof, QuerySpec
 from agri_research_agent.data_sources.tankan.queries import FX_WINDOW_QUERY, MARKET_WINDOW_QUERY
 from agri_research_agent.shared.atomic_storage import atomic_write_json
+from agri_research_agent.shared.arrow_window_upsert import (
+    ArrowWindowUpsertError,
+    merge_authoritative_window,
+)
 from agri_research_agent.shared.file_identity import FileIdentity, identify_file
 from agri_research_agent.shared.immutable_candidate import seal_immutable_candidate, validate_candidate_id
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode, assert_runtime_write
@@ -96,6 +101,7 @@ class RunResult:
     candidate_manifest: dict[str, object]
     canonical_manifest: dict[str, object]
     promoted: bool
+    performance: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,13 +128,28 @@ def run_goal_a(
 ) -> RunResult:
     """Build Candidate, Canonical and optionally atomically promote Current."""
 
+    total_started = perf_counter()
+    stages: dict[str, dict[str, object]] = {}
+
+    def observe(name: str, started: float, **details: object) -> float:
+        duration = round(perf_counter() - started, 6)
+        stages[name] = {"duration_seconds": duration, **details}
+        return duration
+
     safe_run_id = validate_candidate_id(run_id)
     _require_runtime(runtime)
     if type(end_date) is not date:
         raise TankanGoalAError("end_date must be an exact date")
     public_root = assert_runtime_write(runtime, runtime.runtime_root / "public-market-data" / "tankan")
     public_root.mkdir(parents=True, exist_ok=True)
+    stage_started = perf_counter()
     current = load_current(public_root)
+    current_read_duration = observe(
+        "load_current",
+        stage_started,
+        market_rows=0 if current is None else current.market.num_rows,
+        fx_rows=0 if current is None else current.fx.num_rows,
+    )
     if full_load and current is not None:
         raise TankanGoalAError("full load refuses to overwrite an existing Current")
     if not full_load and current is None:
@@ -139,8 +160,16 @@ def run_goal_a(
     fx_start = fx_full_start if current is None else _date_field(current.manifest, "fx", "source_max_date") - timedelta(days=LOOKBACK_DAYS)
     captured_at = datetime.now(timezone.utc)
 
+    stage_started = perf_counter()
     raw_market, market_plans = _extract(client, MARKET_WINDOW_QUERY, MARKET_RAW_SCHEMA, market_start, end_date)
     raw_fx, fx_plans = _extract(client, FX_WINDOW_QUERY, FX_RAW_SCHEMA, fx_start, end_date)
+    observe(
+        "extract",
+        stage_started,
+        query_count=len(market_plans) + len(fx_plans),
+        market_rows=raw_market.num_rows,
+        fx_rows=raw_fx.num_rows,
+    )
     if raw_market.num_rows == 0 or raw_fx.num_rows == 0:
         raise TankanGoalAError("empty source window is blocked")
     if failure_hook == "connection":
@@ -152,6 +181,7 @@ def run_goal_a(
     previous_fx_date = None if current is None else _date_field(current.manifest, "fx", "source_max_date")
 
     candidate_root = assert_runtime_write(runtime, public_root / "candidates")
+    stage_started = perf_counter()
     candidate_directory, candidate_manifest = _seal_candidate(
         candidate_root,
         safe_run_id,
@@ -169,7 +199,9 @@ def run_goal_a(
         previous_fx_date=previous_fx_date,
         mode=mode,
         failure_hook=failure_hook,
+        performance_stages=stages,
     )
+    candidate_build_duration = observe("candidate_build", stage_started)
 
     canonical_root = assert_runtime_write(runtime, public_root / "canonical-candidates")
     canonical_directory, canonical_manifest = _seal_canonical(
@@ -179,11 +211,42 @@ def run_goal_a(
         candidate_manifest=candidate_manifest,
         current=current,
         failure_hook=failure_hook,
+        performance_stages=stages,
     )
     market = pq.read_table(canonical_directory / "market.parquet")
     fx = pq.read_table(canonical_directory / "fx.parquet")
+    io = {
+        "current_read": {
+            "rows": 0 if current is None else current.market.num_rows + current.fx.num_rows,
+            "bytes": 0
+            if current is None
+            else sum(
+                (current.directory / name).stat().st_size
+                for name in ("market.parquet", "fx.parquet")
+            ),
+            "duration_seconds": current_read_duration,
+        },
+        "candidate_write": {
+            "rows": raw_market.num_rows + raw_fx.num_rows,
+            "bytes": sum(
+                int(value["size_bytes"])
+                for value in candidate_manifest["files"].values()
+            ),
+            "duration_seconds": candidate_build_duration,
+        },
+        "canonical_write": {
+            "rows": market.num_rows + fx.num_rows,
+            "bytes": sum(
+                int(value["size_bytes"])
+                for value in canonical_manifest["files"].values()
+            ),
+            "duration_seconds": stages["canonical_build"]["duration_seconds"],
+        },
+    }
 
     if current is not None and market.equals(current.market) and fx.equals(current.fx):
+        stages["promote"] = {"duration_seconds": 0.0, "status": "SKIPPED_NO_CHANGE"}
+        observe("total", total_started)
         return RunResult(
             run_id=safe_run_id,
             mode=mode,
@@ -194,8 +257,14 @@ def run_goal_a(
             candidate_manifest=candidate_manifest,
             canonical_manifest=canonical_manifest,
             promoted=False,
+            performance={
+                "schema_version": "tankan-performance-telemetry/1",
+                "stages": stages,
+                "io": io,
+            },
         )
 
+    stage_started = perf_counter()
     current_directory, current_manifest = _promote(
         runtime,
         public_root,
@@ -204,6 +273,18 @@ def run_goal_a(
         canonical_manifest,
         failure_hook=failure_hook,
     )
+    promote_duration = observe(
+        "promote", stage_started, rows=market.num_rows + fx.num_rows
+    )
+    io["release_write"] = {
+        "rows": market.num_rows + fx.num_rows,
+        "bytes": sum(
+            (current_directory / name).stat().st_size
+            for name in ("market.parquet", "fx.parquet")
+        ),
+        "duration_seconds": promote_duration,
+    }
+    observe("total", total_started)
     return RunResult(
         run_id=safe_run_id,
         mode=mode,
@@ -214,6 +295,11 @@ def run_goal_a(
         candidate_manifest=candidate_manifest,
         canonical_manifest=canonical_manifest,
         promoted=True,
+        performance={
+            "schema_version": "tankan-performance-telemetry/1",
+            "stages": stages,
+            "io": io,
+        },
     )
 
 
@@ -374,6 +460,7 @@ def _seal_candidate(
     previous_fx_date: date | None,
     mode: str,
     failure_hook: str | None,
+    performance_stages: dict[str, dict[str, object]],
 ) -> tuple[Path, dict[str, object]]:
     manifest_result: dict[str, object] = {}
 
@@ -384,6 +471,7 @@ def _seal_candidate(
         pq.write_table(raw_fx, raw_fx_file, compression="zstd")
         raw_market_id = identify_file(raw_market_file)
         raw_fx_id = identify_file(raw_fx_file)
+        stage_started = perf_counter()
         market_result = adapt_market_price(
             raw_market,
             load_market_config(market_config_path),
@@ -398,8 +486,18 @@ def _seal_candidate(
             captured_at=captured_at,
             previous_latest_date=previous_fx_date,
         )
+        performance_stages["standardize"] = {
+            "duration_seconds": round(perf_counter() - stage_started, 6),
+            "input_rows": raw_market.num_rows + raw_fx.num_rows,
+            "output_rows": market_result.table.num_rows + fx_result.table.num_rows,
+        }
+        stage_started = perf_counter()
         market_gate = _candidate_market_gate(market_result.table, market_result.collision_report)
         fx_gate = _candidate_fx_gate(fx_result.table)
+        performance_stages["candidate_qc"] = {
+            "duration_seconds": round(perf_counter() - stage_started, 6),
+            "input_rows": market_result.table.num_rows + fx_result.table.num_rows,
+        }
         if failure_hook == "candidate_qc":
             market_gate["quality_passed"] = False
         if not market_gate["quality_passed"] or not fx_gate["quality_passed"]:
@@ -455,18 +553,37 @@ def _seal_canonical(
     candidate_manifest: dict[str, object],
     current: CurrentRelease | None,
     failure_hook: str | None,
+    performance_stages: dict[str, dict[str, object]],
 ) -> tuple[Path, dict[str, object]]:
     _verify_candidate_manifest(candidate_directory, candidate_manifest)
     source_market = pq.read_table(candidate_directory / "market_standard.parquet")
     source_fx = pq.read_table(candidate_directory / "fx_standard.parquet")
+    stage_started = perf_counter()
     market_window, market_report = canonicalize_market(source_market)
     fx_window, fx_report = canonicalize_fx(source_fx)
+    performance_stages["canonicalize"] = {
+        "duration_seconds": round(perf_counter() - stage_started, 6),
+        "input_rows": source_market.num_rows + source_fx.num_rows,
+        "output_rows": market_window.num_rows + fx_window.num_rows,
+    }
     if failure_hook == "canonical_collision":
         raise TankanGoalAError("injected canonical collision")
+    stage_started = perf_counter()
     market = market_window if current is None else _merge_current(current.market, market_window, MARKET_STABLE_KEY, "business_date")
     fx = fx_window if current is None else _merge_current(current.fx, fx_window, FX_STABLE_KEY, "quote_date")
+    performance_stages["merge"] = {
+        "duration_seconds": round(perf_counter() - stage_started, 6),
+        "previous_rows": 0 if current is None else current.market.num_rows + current.fx.num_rows,
+        "window_rows": market_window.num_rows + fx_window.num_rows,
+        "output_rows": market.num_rows + fx.num_rows,
+    }
+    stage_started = perf_counter()
     market_report = {**market_report, "row_count": market.num_rows, "stable_key_duplicates": _duplicate_count(market, MARKET_STABLE_KEY)}
     fx_report = {**fx_report, "row_count": fx.num_rows, "stable_key_duplicates": _duplicate_count(fx, FX_STABLE_KEY)}
+    performance_stages["canonical_qc"] = {
+        "duration_seconds": round(perf_counter() - stage_started, 6),
+        "input_rows": market.num_rows + fx.num_rows,
+    }
     if market_report["stable_key_duplicates"] or fx_report["stable_key_duplicates"]:
         raise TankanGoalAError("Canonical stable key validation failed")
     result: dict[str, object] = {}
@@ -497,7 +614,12 @@ def _seal_canonical(
         _write_json(directory / "manifest.json", manifest)
         result.update(manifest)
 
+    stage_started = perf_counter()
     directory, _ = seal_immutable_candidate(root, run_id, build)
+    performance_stages["canonical_build"] = {
+        "duration_seconds": round(perf_counter() - stage_started, 6),
+        "rows": market.num_rows + fx.num_rows,
+    }
     return directory, result
 
 
@@ -557,7 +679,9 @@ def _promote(
     return directory, result
 
 
-def _merge_current(previous: pa.Table, window: pa.Table, keys: Sequence[str], date_column: str) -> pa.Table:
+def _merge_current_reference(previous: pa.Table, window: pa.Table, keys: Sequence[str], date_column: str) -> pa.Table:
+    """Reference row semantics retained for golden equivalence tests only."""
+
     if previous.schema != window.schema or window.num_rows == 0:
         raise TankanGoalAError("incremental merge schema/window is invalid")
     lower = pc.min(window[date_column]).as_py()
@@ -579,6 +703,24 @@ def _merge_current(previous: pa.Table, window: pa.Table, keys: Sequence[str], da
     if _duplicate_count(table, keys):
         raise TankanGoalAError("incremental merge produced duplicate stable keys")
     return table
+
+
+def _merge_current(previous: pa.Table, window: pa.Table, keys: Sequence[str], date_column: str) -> pa.Table:
+    if previous.schema != window.schema or window.num_rows == 0:
+        raise TankanGoalAError("incremental merge schema/window is invalid")
+    lower = pc.min(window[date_column]).as_py()
+    try:
+        return merge_authoritative_window(
+            previous,
+            window,
+            keys=keys,
+            date_column=date_column,
+            lower=lower,
+            hash_column="source_row_sha256",
+            require_non_empty_window=True,
+        )
+    except ArrowWindowUpsertError as exc:
+        raise TankanGoalAError(f"incremental merge failed: {exc}") from None
 
 
 def _candidate_market_gate(table: pa.Table, collision: dict[str, object]) -> dict[str, object]:
