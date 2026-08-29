@@ -11,12 +11,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from time import perf_counter
 
 from agri_research_agent.data_sources.lutou.live import (
     LutouClient,
     LutouClientError,
     LutouConnectionError,
     LutouConnectionSettings,
+    LutouPreflightProofContext,
     LutouQuery,
     LutouReadOnlyError,
     LutouSchemaError,
@@ -248,6 +250,9 @@ class LutouRefreshAdapter:
     name: str = "lutou"
     _client: LutouClient | None = field(default=None, init=False, repr=False)
     _preflight_source_max: Mapping[str, str] = field(default_factory=dict, init=False, repr=False)
+    _preflight_performance: Mapping[str, object] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _weather_catalog: WeatherSourceCatalog | None = field(default=None, init=False, repr=False)
 
     def current_identity(self) -> CurrentIdentity:
@@ -286,6 +291,8 @@ class LutouRefreshAdapter:
         return CurrentIdentity("|".join(releases) or None, digest, maxima)
 
     def preflight(self) -> Mapping[str, object]:
+        preflight_started = perf_counter()
+        self._preflight_performance = {}
         if not self.network_check():
             raise ProviderFailure(ProviderStatus.NETWORK_UNAVAILABLE, "Tailscale network is unavailable")
         if not self.connector(self.settings.host, self.settings.port, 5.0):
@@ -293,6 +300,7 @@ class LutouRefreshAdapter:
         try:
             self._client = LutouClient(self.settings)
             self._client.__enter__()
+            proof_context = LutouPreflightProofContext()
             maxima: dict[str, str] = {}
             readiness: dict[str, int] = defaultdict(int)
             queries = list(self._approved_queries())
@@ -315,13 +323,19 @@ class LutouRefreshAdapter:
                     for item in self._weather_catalog.tables
                 )
             for domain, query in queries:
-                proof = self._client.probe_query(query)
+                proof = self._client.probe_query(
+                    query, proof_context=proof_context
+                )
                 latest = str(proof["latest_date"])
                 previous = maxima.get(domain)
                 if previous is None or latest > previous:
                     maxima[domain] = latest
                 readiness[domain] += 1
             self._preflight_source_max = maxima
+            self._preflight_performance = proof_context.safe_telemetry(
+                self._client,
+                elapsed_seconds=perf_counter() - preflight_started,
+            )
             return {
                 "read_only": True,
                 "source_max_dates": maxima,
@@ -331,6 +345,7 @@ class LutouRefreshAdapter:
                     "required_schema": "READY",
                     "query_counts": dict(sorted(readiness.items())),
                 },
+                "performance": dict(self._preflight_performance),
             }
         except LutouSourceUnavailableError:
             self.close()
@@ -448,13 +463,19 @@ class LutouRefreshAdapter:
                 return RefreshResult(
                     promoted, maxima, domains, status,
                     failures[0].safe_reason,
-                    {"domains": performance_domains},
+                    {
+                        "preflight": dict(self._preflight_performance),
+                        "domains": performance_domains,
+                    },
                 )
             return RefreshResult(
                 promoted,
                 maxima,
                 domains,
-                performance={"domains": performance_domains},
+                performance={
+                    "preflight": dict(self._preflight_performance),
+                    "domains": performance_domains,
+                },
             )
         finally:
             self.close()

@@ -12,9 +12,11 @@ from agri_research_agent.data_sources.lutou.live import (
     LutouConnectionError,
     LutouConnectionSettings,
     LutouPlanRejectedError,
+    LutouPreflightProofContext,
     LutouQuery,
     LutouReadOnlyError,
     LutouSchemaError,
+    LutouSourceUnavailableError,
 )
 
 
@@ -83,8 +85,8 @@ class FakeCursor:
         elif statement.startswith("SELECT `Date`"):
             self._rows = list(self.connection.source_rows)
 
-    def fetchone(self) -> dict[str, object]:
-        return self._rows[0]
+    def fetchone(self) -> dict[str, object] | None:
+        return self._rows[0] if self._rows else None
 
     def fetchall(self) -> list[dict[str, object]]:
         return list(self._rows)
@@ -257,6 +259,122 @@ def test_required_query_probe_rejects_result_shape_mismatch() -> None:
     with LutouClient(settings(), connector=lambda **_: connection) as client:
         with pytest.raises(LutouSchemaError, match="result shape"):
             client.probe_query(query())
+
+
+def test_preflight_context_deduplicates_relation_proofs_per_invocation() -> None:
+    day = date(2026, 8, 18)
+    approved = query(value_columns=("value",))
+    connection = FakeConnection(source_rows=({"Date": day, "value": 1000},))
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        context = LutouPreflightProofContext()
+        first = client.probe_query(approved, proof_context=context)
+        second = client.probe_query(approved, proof_context=context)
+        telemetry = context.safe_telemetry(client, elapsed_seconds=1.25)
+
+        next_start = client.database_round_trips
+        independent = LutouPreflightProofContext(next_start)
+        client.probe_query(approved, proof_context=independent)
+        independent_telemetry = independent.safe_telemetry(
+            client, elapsed_seconds=0.5
+        )
+
+    assert first == second
+    assert telemetry == {
+        "schema_version": "lutou-preflight-performance-telemetry/1",
+        "elapsed_seconds": 1.25,
+        "database_round_trips": 11,
+        "schema_inspections": 1,
+        "latest_date_queries": 1,
+        "explain_queries": 2,
+        "probe_select_queries": 2,
+        "relations_proved": 1,
+        "query_contracts_proved": 2,
+    }
+    assert independent_telemetry["database_round_trips"] == 4
+    assert independent_telemetry["schema_inspections"] == 1
+    assert independent_telemetry["latest_date_queries"] == 1
+    statements = [statement for statement, _ in connection.statements]
+    assert sum("INFORMATION_SCHEMA.COLUMNS" in item for item in statements) == 2
+    assert sum("DESC LIMIT 1" in item for item in statements) == 2
+    assert sum(item.startswith("EXPLAIN FORMAT=JSON") for item in statements) == 3
+
+
+def test_preflight_context_preserves_fail_closed_source_proofs() -> None:
+    day = date(2026, 8, 18)
+    missing_column = query(value_columns=("missing",))
+    with LutouClient(
+        settings(),
+        connector=lambda **_: FakeConnection(
+            source_rows=({"Date": day, "value": 1000},)
+        ),
+    ) as client:
+        with pytest.raises(LutouSchemaError, match="columns are missing"):
+            client.probe_query(
+                missing_column, proof_context=LutouPreflightProofContext()
+            )
+
+    no_latest = query(value_columns=("value",))
+    with LutouClient(
+        settings(), connector=lambda **_: FakeConnection(source_rows=())
+    ) as client:
+        with pytest.raises(LutouSourceUnavailableError, match="no latest date"):
+            client.probe_query(
+                no_latest, proof_context=LutouPreflightProofContext()
+            )
+
+    bounded = query(value_columns=("value",), max_plan_rows=5)
+    with LutouClient(
+        settings(),
+        connector=lambda **_: FakeConnection(
+            plan_rows=6, source_rows=({"Date": day, "value": 1000},)
+        ),
+    ) as client:
+        with pytest.raises(LutouPlanRejectedError):
+            client.probe_query(
+                bounded, proof_context=LutouPreflightProofContext()
+            )
+
+    class MissingRelationCursor(FakeCursor):
+        def execute(self, statement: str, parameters=()) -> None:  # type: ignore[no-untyped-def]
+            super().execute(statement, parameters)
+            if "INFORMATION_SCHEMA.COLUMNS" in statement:
+                self._rows = []
+
+    class MissingRelationConnection(FakeConnection):
+        def cursor(self, *_args, **_kwargs) -> MissingRelationCursor:
+            return MissingRelationCursor(self)
+
+    with LutouClient(
+        settings(), connector=lambda **_: MissingRelationConnection()
+    ) as client:
+        with pytest.raises(LutouSchemaError, match="relation is missing"):
+            client.probe_query(
+                no_latest, proof_context=LutouPreflightProofContext()
+            )
+
+    class LatestOnlyCursor(FakeCursor):
+        def execute(self, statement: str, parameters=()) -> None:  # type: ignore[no-untyped-def]
+            super().execute(statement, parameters)
+            if statement.startswith("SELECT `Date`"):
+                self._rows = (
+                    [{"Date": day}]
+                    if "DESC LIMIT 1" in statement
+                    else []
+                )
+
+    class LatestOnlyConnection(FakeConnection):
+        def cursor(self, *_args, **_kwargs) -> LatestOnlyCursor:
+            return LatestOnlyCursor(self)
+
+    with LutouClient(
+        settings(), connector=lambda **_: LatestOnlyConnection()
+    ) as client:
+        with pytest.raises(
+            LutouSourceUnavailableError, match="returned no newest-date rows"
+        ):
+            client.probe_query(
+                no_latest, proof_context=LutouPreflightProofContext()
+            )
 
 
 def test_idle_preflight_connection_is_pinged_and_read_only_state_is_reproved() -> None:

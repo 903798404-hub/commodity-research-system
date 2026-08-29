@@ -218,6 +218,63 @@ class LutouBatch:
             raise ValueError("Lutou batch query and plan identities differ")
 
 
+@dataclass(slots=True)
+class LutouPreflightProofContext:
+    """Invocation-scoped relation proof reuse for one aggregate preflight."""
+
+    starting_database_round_trips: int = 0
+    _relation_schemas: dict[
+        tuple[str, str], tuple[dict[str, object], ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+    _latest_dates: dict[tuple[str, str, str], date] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _schema_inspections: int = field(default=0, init=False, repr=False)
+    _latest_date_queries: int = field(default=0, init=False, repr=False)
+    _explain_queries: int = field(default=0, init=False, repr=False)
+    _probe_select_queries: int = field(default=0, init=False, repr=False)
+    _query_contracts_proved: int = field(default=0, init=False, repr=False)
+
+    def prove(self, client: "LutouClient", query: LutouQuery) -> dict[str, object]:
+        relation_key = (query.schema, query.table)
+        relation_schema = self._relation_schemas.get(relation_key)
+        if relation_schema is None:
+            relation_schema = client.inspect_relation(query.schema, query.table)
+            self._relation_schemas[relation_key] = relation_schema
+            self._schema_inspections += 1
+        columns = _validated_query_columns(query, relation_schema)
+
+        latest_key = (query.schema, query.table, query.date_column)
+        latest = self._latest_dates.get(latest_key)
+        if latest is None:
+            latest = client.latest_date(query, inspect=False)
+            self._latest_dates[latest_key] = latest
+            self._latest_date_queries += 1
+
+        self._explain_queries += 1
+        self._probe_select_queries += 1
+        proof = client._probe_with_evidence(query, columns, latest)
+        self._query_contracts_proved += 1
+        return proof
+
+    def safe_telemetry(
+        self, client: "LutouClient", *, elapsed_seconds: float
+    ) -> dict[str, object]:
+        return {
+            "schema_version": "lutou-preflight-performance-telemetry/1",
+            "elapsed_seconds": round(elapsed_seconds, 6),
+            "database_round_trips": (
+                client.database_round_trips - self.starting_database_round_trips
+            ),
+            "schema_inspections": self._schema_inspections,
+            "latest_date_queries": self._latest_date_queries,
+            "explain_queries": self._explain_queries,
+            "probe_select_queries": self._probe_select_queries,
+            "relations_proved": len(self._relation_schemas),
+            "query_contracts_proved": self._query_contracts_proved,
+        }
+
+
 class LutouClient:
     """Read approved, date-bounded tables inside one explicit read-only transaction."""
 
@@ -231,12 +288,19 @@ class LutouClient:
         self._connector = connector
         self._connection = None
         self._proof: LutouConnectionProof | None = None
+        self._database_round_trips = 0
 
     @property
     def proof(self) -> LutouConnectionProof:
         if self._proof is None:
             raise LutouConnectionError("Lutou client is not connected")
         return self._proof
+
+    @property
+    def database_round_trips(self) -> int:
+        """Return explicit SQL executions observed by this client instance."""
+
+        return self._database_round_trips
 
     def __enter__(self) -> "LutouClient":
         try:
@@ -298,7 +362,8 @@ class LutouClient:
         placeholders = ", ".join(["%s"] * (len(query.value_columns) + 1))
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
+                self._execute(
+                    cursor,
                     "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, ORDINAL_POSITION "
                     "FROM INFORMATION_SCHEMA.COLUMNS "
                     "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
@@ -315,11 +380,7 @@ class LutouClient:
             raise LutouSchemaError(
                 f"Lutou schema inspection failed: {type(exc).__name__}"
             ) from None
-        names = {str(item["COLUMN_NAME"]) for item in rows}
-        expected = {query.date_column, *query.value_columns}
-        if names != expected:
-            raise LutouSchemaError("Lutou approved source columns are missing")
-        return rows
+        return _validated_query_columns(query, rows)
 
     def inspect_relation(
         self, schema: str, table: str
@@ -331,7 +392,8 @@ class LutouClient:
         connection = self._require_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
+                self._execute(
+                    cursor,
                     "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, ORDINAL_POSITION, "
                     "COLUMN_COMMENT FROM INFORMATION_SCHEMA.COLUMNS "
                     "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
@@ -356,7 +418,8 @@ class LutouClient:
         connection = self._require_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
+                self._execute(
+                    cursor,
                     "SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT, UPDATE_TIME "
                     "FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = %s "
                     "ORDER BY TABLE_NAME",
@@ -378,7 +441,8 @@ class LutouClient:
         connection = self._require_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
+                self._execute(
+                    cursor,
                     "SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE "
                     "FROM INFORMATION_SCHEMA.STATISTICS "
                     "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
@@ -406,7 +470,7 @@ class LutouClient:
         )
         try:
             with connection.cursor() as cursor:
-                cursor.execute(statement)
+                self._execute(cursor, statement)
                 row = cursor.fetchone()
             minimum = row.get("min_date") if row else None
             maximum = row.get("max_date") if row else None
@@ -426,16 +490,17 @@ class LutouClient:
                 f"Lutou source-date bounds probe failed: {type(exc).__name__}"
             ) from None
 
-    def latest_date(self, query: LutouQuery) -> date:
+    def latest_date(self, query: LutouQuery, *, inspect: bool = True) -> date:
         """Read one newest date from a validated approved-query relation."""
-        self.inspect_query(query)
+        if inspect:
+            self.inspect_query(query)
         connection = self._require_connection()
         relation = f"{_quote(query.schema)}.{_quote(query.table)}"
         column = _quote(query.date_column)
         statement = f"SELECT {column} FROM {relation} ORDER BY {column} DESC LIMIT 1"
         try:
             with connection.cursor() as cursor:
-                cursor.execute(statement)
+                self._execute(cursor, statement)
                 row = cursor.fetchone()
             value = None if row is None else row.get(query.date_column)
             if isinstance(value, datetime):
@@ -452,10 +517,25 @@ class LutouClient:
                 f"Lutou latest source-date probe failed: {type(exc).__name__}"
             ) from None
 
-    def probe_query(self, query: LutouQuery) -> dict[str, object]:
+    def probe_query(
+        self,
+        query: LutouQuery,
+        *,
+        proof_context: LutouPreflightProofContext | None = None,
+    ) -> dict[str, object]:
         """Execute one newest-date window to prove schema and ingestion readiness."""
+        if proof_context is not None:
+            return proof_context.prove(self, query)
         columns = self.inspect_query(query)
         latest = self.latest_date(query)
+        return self._probe_with_evidence(query, columns, latest)
+
+    def _probe_with_evidence(
+        self,
+        query: LutouQuery,
+        columns: Sequence[Mapping[str, object]],
+        latest: date,
+    ) -> dict[str, object]:
         plan, batches = self.plan_stream(query, latest, latest, batch_size=1_000)
         expected = {query.date_column, *query.value_columns}
         row_count = 0
@@ -483,7 +563,9 @@ class LutouClient:
         connection = self._require_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(f"EXPLAIN FORMAT=JSON {query.sql}", parameters)
+                self._execute(
+                    cursor, f"EXPLAIN FORMAT=JSON {query.sql}", parameters
+                )
                 payload = cursor.fetchone()
             raw = next(iter(payload.values()))
             plan = json.loads(str(raw))
@@ -531,7 +613,7 @@ class LutouClient:
         extracted_at = datetime.now(timezone.utc)
         try:
             with connection.cursor() as cursor:
-                cursor.execute(query.sql, parameters)
+                self._execute(cursor, query.sql, parameters)
                 while rows := cursor.fetchmany(batch_size):
                     yield LutouBatch(
                         query=query,
@@ -548,7 +630,7 @@ class LutouClient:
         connection = self._require_connection()
         try:
             with connection.cursor() as cursor:
-                cursor.execute("SHOW GRANTS FOR CURRENT_USER")
+                self._execute(cursor, "SHOW GRANTS FOR CURRENT_USER")
                 grant_rows = cursor.fetchall()
                 grants = tuple(str(next(iter(item.values()))) for item in grant_rows)
                 write_privileges = _write_privileges(grants)
@@ -556,18 +638,19 @@ class LutouClient:
                     raise LutouReadOnlyError(
                         "Lutou account has write-capable privileges"
                     )
-                cursor.execute("SET SESSION TRANSACTION READ ONLY")
-                cursor.execute("START TRANSACTION READ ONLY")
-                cursor.execute(
+                self._execute(cursor, "SET SESSION TRANSACTION READ ONLY")
+                self._execute(cursor, "START TRANSACTION READ ONLY")
+                self._execute(
+                    cursor,
                     "SELECT VERSION() AS engine_version, "
                     "@@version_comment AS engine_comment, "
                     "@@global.time_zone AS global_timezone, "
                     "@@session.time_zone AS session_timezone, "
                     "@@global.read_only AS global_read_only, "
-                    "@@session.transaction_read_only AS transaction_read_only"
+                    "@@session.transaction_read_only AS transaction_read_only",
                 )
                 row = cursor.fetchone()
-                cursor.execute("SELECT 1 AS read_probe")
+                self._execute(cursor, "SELECT 1 AS read_probe")
                 if cursor.fetchone()["read_probe"] != 1:
                     raise LutouReadOnlyError("Lutou read probe failed")
             if int(row["transaction_read_only"]) != 1:
@@ -594,11 +677,30 @@ class LutouClient:
             raise LutouConnectionError("Lutou client is not connected")
         return self._connection
 
+    def _execute(
+        self, cursor: object, statement: str, parameters: object = ()
+    ) -> object:
+        self._database_round_trips += 1
+        return cursor.execute(statement, parameters)  # type: ignore[attr-defined]
+
 
 def _quote(value: str) -> str:
     if _IDENTIFIER.fullmatch(value) is None:
         raise ValueError("Lutou identifier is invalid")
     return f"`{value}`"
+
+
+def _validated_query_columns(
+    query: LutouQuery, rows: Sequence[Mapping[str, object]]
+) -> tuple[dict[str, object], ...]:
+    expected = {query.date_column, *query.value_columns}
+    selected = tuple(
+        dict(item) for item in rows if str(item.get("COLUMN_NAME")) in expected
+    )
+    names = {str(item["COLUMN_NAME"]) for item in selected}
+    if names != expected:
+        raise LutouSchemaError("Lutou approved source columns are missing")
+    return selected
 
 
 def _safe_connection_failure(exc: Exception) -> str:

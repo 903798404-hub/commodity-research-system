@@ -386,9 +386,10 @@ def test_lutou_preflight_probes_every_required_domain_query(
 
     class PreflightClient:
         proof = SimpleNamespace(transaction_read_only=True, write_privileges=())
+        database_round_trips = 0
         def __init__(self, settings): pass
         def __enter__(self): return self
-        def probe_query(self, query):
+        def probe_query(self, query, *, proof_context=None):
             calls.append(query.table)
             return {"latest_date": "2026-08-23"}
         def close(self): pass
@@ -438,15 +439,19 @@ def test_lutou_preflight_probes_every_required_domain_query(
             "weather_observation": 1,
         },
     }
+    assert proof["performance"]["elapsed_seconds"] >= 0
+    assert proof["performance"]["database_round_trips"] == 0
 
 
 def test_lutou_preflight_schema_failure_never_reaches_refresh(
     tmp_path: Path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
     class BrokenClient:
+        database_round_trips = 0
         def __init__(self, settings): pass
         def __enter__(self): return self
-        def probe_query(self, query): raise LutouSchemaError("fixture mismatch")
+        def probe_query(self, query, *, proof_context=None):
+            raise LutouSchemaError("fixture mismatch")
         def close(self): pass
 
     monkeypatch.setattr(public_data_providers, "LutouClient", BrokenClient)
