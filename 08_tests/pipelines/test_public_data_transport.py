@@ -192,7 +192,53 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
     assert ",rw" not in activation
     assert ",readonly" not in activation
     assert "CAP_DAC_OVERRIDE" not in " ".join(joined_calls)
-    assert "StrictHostKeyChecking" not in " ".join(" ".join(item) for item in calls)
+    all_commands = " ".join(" ".join(item) for item in calls)
+    assert "BatchMode=yes" in all_commands
+    assert "StrictHostKeyChecking=yes" in all_commands
+    assert "ConnectTimeout=15" in all_commands
+    assert "ServerAliveInterval=30" in all_commands
+    assert "ServerAliveCountMax=3" in all_commands
+
+
+def test_transport_subprocess_timeout_is_explicit_and_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport._transport_deadline = transport.time.monotonic() + 60
+    seen: dict[str, object] = {}
+
+    def expire(_command, **kwargs):
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(_command, kwargs.get("timeout"))
+
+    monkeypatch.setattr(transport.subprocess, "run", expire)
+    with pytest.raises(transport.TransportTimeoutError, match="total timeout"):
+        transport._run(["ssh", "trusted-host"])
+    assert isinstance(seen.get("timeout"), float)
+
+
+def test_scp_timeout_never_reaches_validation_or_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = SimpleNamespace(package_id="public-current-abc", directory=tmp_path, manifest={})
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+
+    def run(command: list[str]):
+        if command[0] == "scp":
+            calls.append(command)
+            raise transport.TransportTimeoutError("SSH/SCP transport total timeout exhausted")
+        return _successful_delivery_run(calls, command)
+
+    monkeypatch.setattr(transport, "_run", run)
+    with pytest.raises(transport.TransportTimeoutError):
+        transport.main([
+            "--package", str(tmp_path), "--ssh-target", "trusted-host",
+            "--remote-store-root", "/safe/store",
+            "--activation-image-id", f"sha256:{'a' * 64}",
+        ])
+    joined = [" ".join(command) for command in calls]
+    assert not any("--validate-only" in item for item in joined)
+    assert not any("--user 1000:1000" in item for item in joined)
 
 
 def test_activation_failure_retains_bounded_sanitized_stderr(

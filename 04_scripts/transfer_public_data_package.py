@@ -13,6 +13,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path, PurePosixPath
 
@@ -47,6 +48,19 @@ _PRIVATE_KEY_PATH = re.compile(
     r"(?i)(?:[A-Za-z]:\\|/)[^\s\"'<>]*(?:id_(?:rsa|dsa|ecdsa|ed25519)|"
     r"[^/\\\s]+\.(?:pem|key))\b"
 )
+_SSH_OPTIONS = (
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=yes",
+    "-o", "ConnectTimeout=15",
+    "-o", "ServerAliveInterval=30",
+    "-o", "ServerAliveCountMax=3",
+)
+_DEFAULT_TRANSPORT_TIMEOUT_SECONDS = 3600.0
+_transport_deadline: float | None = None
+
+
+class TransportTimeoutError(TimeoutError):
+    """The bounded SSH/SCP transport budget was exhausted."""
 
 _PREPARE_PERMISSION_SCRIPT = (
     'set -eu; install -d --mode=0750 -- "$1" "$2" "$3"; '
@@ -123,6 +137,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--remote-store-root", required=True)
     parser.add_argument("--activation-image-id", required=True)
     parser.add_argument("--initial-seed", action="store_true")
+    parser.add_argument(
+        "--transport-timeout-seconds",
+        type=float,
+        default=_DEFAULT_TRANSPORT_TIMEOUT_SECONDS,
+        help="Total wall-clock budget shared by all SSH and SCP subprocesses",
+    )
     return parser.parse_args(argv)
 
 
@@ -140,11 +160,21 @@ def _checked_inputs(args: argparse.Namespace) -> tuple[str, str, str]:
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, capture_output=True, check=False)
+    timeout = None
+    if _transport_deadline is not None:
+        timeout = _transport_deadline - time.monotonic()
+        if timeout <= 0:
+            raise TransportTimeoutError("SSH/SCP transport total timeout exhausted")
+    try:
+        return subprocess.run(
+            command, text=True, capture_output=True, check=False, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TransportTimeoutError("SSH/SCP transport total timeout exhausted") from exc
 
 
 def _ssh(target: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
-    return _run(["ssh", "-T", target, shlex.join(arguments)])
+    return _run(["ssh", *_SSH_OPTIONS, "-T", target, shlex.join(arguments)])
 
 
 def _bounded_remote_detail(result: subprocess.CompletedProcess[str]) -> str:
@@ -225,7 +255,11 @@ def _quarantine_upload(
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _transport_deadline
     args = parse_args(argv)
+    if args.transport_timeout_seconds <= 0:
+        raise ValueError("transport timeout must be positive")
+    _transport_deadline = time.monotonic() + args.transport_timeout_seconds
     target, store, image = _checked_inputs(args)
     package = validate_production_package(args.package)
     validate_formal_consumer_reads(
@@ -315,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         _quarantine_upload(target, store, remote_upload, upload_name)
         raise RuntimeError("private staging creation failed")
     copied = _run([
-        "scp", "-r", "--",
+        "scp", *_SSH_OPTIONS, "-r", "--",
         str(package.directory / "manifest.json"), str(package.directory / "data"),
         f"{target}:{remote_upload}/",
     ])
@@ -403,4 +437,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except TransportTimeoutError:
+        print("SSH/SCP transport total timeout exhausted", file=sys.stderr)
+        raise SystemExit(124) from None

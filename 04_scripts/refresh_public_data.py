@@ -47,6 +47,14 @@ from agri_research_agent.pipelines.public_data_refresh import (
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
 
 
+class ServerTransportTimeout(TimeoutError):
+    """The bounded transport subprocess exhausted its total deadline."""
+
+
+class ServerActivationFailure(RuntimeError):
+    """Transport reached the remote activation stage, which then failed."""
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh isolated public data Currents")
     parser.add_argument("--source", action="append", choices=("tankan", "lutou"), dest="sources")
@@ -378,6 +386,10 @@ def _build_remote_syncer(*, ssh_target: str, activation_image_id: str):
             command, cwd=ROOT, text=True, capture_output=True, check=False
         )
         if completed.returncode != 0:
+            if completed.returncode == 124:
+                raise ServerTransportTimeout("production package transport timed out")
+            if "remote activation failed" in completed.stderr:
+                raise ServerActivationFailure("production package remote activation failed")
             raise RuntimeError("production package transport or activation failed")
         try:
             payload = json.loads(completed.stdout.strip().splitlines()[-1])
