@@ -251,6 +251,28 @@ def test_trusted_tool_repo_is_exact_head_tree_and_clean(tmp_path: Path) -> None:
     assert subprocess.check_output(["git", "-C", str(destination), "status", "--porcelain"], text=True) == ""
 
 
+def test_trusted_tool_repo_enables_windows_long_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def complete(command: list[str], **_kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    identities = iter(("head", "tree", ""))
+    monkeypatch.setattr(wrapper.subprocess, "run", complete)
+    monkeypatch.setattr(wrapper, "_git", lambda *_args: next(identities))
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: f"{name}.exe")
+
+    wrapper.create_trusted_tool_repo(
+        tmp_path / "source", tmp_path / "tool-repo", "head", "tree"
+    )
+
+    clone = calls[0]
+    assert clone[:5] == ["git.exe", "clone", "-c", "core.longpaths=true", "--local"]
+
+
 def test_run_id_is_sortable_unique_and_allows_same_day_multiple_runs() -> None:
     now = datetime(2026, 8, 31, 1, 2, 3, 456789, tzinfo=timezone.utc)
     first, second = wrapper.new_run_id(now), wrapper.new_run_id(now)

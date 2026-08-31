@@ -156,7 +156,10 @@ def repository_identity(repository: Path) -> tuple[str, str, str]:
 
 def create_trusted_tool_repo(source: Path, destination: Path, head: str, tree: str) -> None:
     result = subprocess.run(
-        [tool_path("git"), "clone", "--local", "--no-hardlinks", "--no-checkout", str(source), str(destination)],
+        [
+            tool_path("git"), "clone", "-c", "core.longpaths=true",
+            "--local", "--no-hardlinks", "--no-checkout", str(source), str(destination),
+        ],
         text=True, encoding="utf-8", capture_output=True, check=False, timeout=300,
     )
     if result.returncode:
