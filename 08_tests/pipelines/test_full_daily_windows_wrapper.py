@@ -40,6 +40,32 @@ def _write(path: Path, value: object) -> Path:
     return path
 
 
+def _git(repository: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repository), *args], check=True, capture_output=True,
+        text=True, encoding="utf-8",
+    )
+    return result.stdout.strip()
+
+
+def _commit(repository: Path, filename: str, content: str, message: str) -> str:
+    (repository / filename).write_text(content, encoding="utf-8")
+    _git(repository, "add", filename)
+    _git(repository, "commit", "-m", message)
+    return _git(repository, "rev-parse", "HEAD")
+
+
+def _formal_repository(tmp_path: Path) -> tuple[Path, str, str]:
+    repository = tmp_path / "formal"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-b", "main", str(repository)], check=True, capture_output=True)
+    _git(repository, "config", "user.email", "test@example.invalid")
+    _git(repository, "config", "user.name", "Test")
+    production = _commit(repository, "production.txt", "approved\n", "production")
+    _git(repository, "update-ref", "refs/remotes/origin/main", production)
+    return repository, production, _git(repository, "rev-parse", f"{production}^{{tree}}")
+
+
 @pytest.mark.parametrize("business", ["UPDATED", "NO_CHANGE"])
 def test_valid_updated_and_no_change_are_success(tmp_path: Path, business: str) -> None:
     run_id = "full-daily-20260831T010203.000001Z-abcdef12"
@@ -47,10 +73,17 @@ def test_valid_updated_and_no_change_are_success(tmp_path: Path, business: str) 
     result = wrapper.validate_daily_manifest(path, run_id, 0)
     assert result["manifest"]["business_status"] == business
     assert result["warnings"] == []
-    invocation = wrapper.Invocation(run_id, "manual", "2026-08-31T01:02:03Z", "a" * 40, "b" * 40, "main", "python.exe")
+    invocation = wrapper.Invocation(
+        run_id, "manual", "2026-08-31T01:02:03Z",
+        "a" * 40, "b" * 40, "c" * 40, "d" * 40, "main", "python.exe",
+    )
     final = wrapper.make_final_status(invocation, status="SUCCESS", completed_at="2026-08-31T01:03:03Z", failed_stage=None, safe_reason="PASS", process_exit_code=0, manifest_path=path, manifest=result["manifest"])
     assert final["status"] == "SUCCESS"
     assert final["daily_manifest_sha256"] == wrapper.sha256_file(path)
+    assert final["repository_main_head"] == "a" * 40
+    assert final["repository_main_tree"] == "b" * 40
+    assert final["production_commit"] == "c" * 40
+    assert final["production_tree"] == "d" * 40
 
 
 def test_source_unavailable_with_zero_exit_is_failed(tmp_path: Path) -> None:
@@ -232,6 +265,87 @@ def test_manual_and_scheduled_have_identical_business_command() -> None:
     scheduled = wrapper.business_command(*arguments)
     assert manual == scheduled
     assert manual[1].endswith(str(Path("04_scripts") / "refresh_public_data.py"))
+
+
+def test_current_main_equal_to_production_commit_is_allowed(tmp_path: Path) -> None:
+    repository, production, production_tree = _formal_repository(tmp_path)
+    identity = wrapper.repository_identity(repository, production)
+    assert identity.repository_main_head == production
+    assert identity.repository_main_tree == production_tree
+    assert identity.production_commit == production
+    assert identity.production_tree == production_tree
+
+
+@pytest.mark.parametrize("trigger", ["manual", "scheduled"])
+def test_main_can_advance_while_both_triggers_keep_approved_production(
+    tmp_path: Path, trigger: str,
+) -> None:
+    repository, production, production_tree = _formal_repository(tmp_path)
+    main_head = _commit(repository, "frontend-only-change.txt", "UI only\n", "frontend only")
+    _git(repository, "update-ref", "refs/remotes/origin/main", main_head)
+
+    identity = wrapper.repository_identity(repository, production)
+    invocation = wrapper.Invocation(
+        "run", trigger, "2026-08-31T01:02:03Z",
+        identity.repository_main_head, identity.repository_main_tree,
+        identity.production_commit, identity.production_tree,
+        identity.repository_branch, "python.exe",
+    )
+    evidence = {**invocation.__dict__, "schema_version": wrapper.SCHEMA_VERSION}
+    assert evidence["repository_main_head"] == main_head
+    assert evidence["production_commit"] == production
+
+    tool_repo = tmp_path / f"tool-{trigger}"
+    wrapper.create_trusted_tool_repo(repository, tool_repo, production, production_tree)
+    assert _git(tool_repo, "rev-parse", "HEAD") == production
+    assert _git(tool_repo, "rev-parse", "HEAD^{tree}") == production_tree
+    assert _git(tool_repo, "branch", "--show-current") == ""
+    assert _git(tool_repo, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    assert not (tool_repo / "frontend-only-change.txt").exists()
+
+
+@pytest.mark.parametrize("production", ["", "abc123", "A" * 40])
+def test_production_commit_must_be_full_lowercase_sha(tmp_path: Path, production: str) -> None:
+    repository, _, _ = _formal_repository(tmp_path)
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.repository_identity(repository, production)
+    assert caught.value.stage == "REPOSITORY"
+
+
+def test_nonexistent_production_commit_is_rejected(tmp_path: Path) -> None:
+    repository, _, _ = _formal_repository(tmp_path)
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.repository_identity(repository, "f" * 40)
+    assert caught.value.stage == "REPOSITORY"
+    assert "known local commit" in caught.value.safe_reason
+
+
+def test_feature_only_and_unpushed_local_commit_are_rejected(tmp_path: Path) -> None:
+    repository, production, _ = _formal_repository(tmp_path)
+    _git(repository, "checkout", "-b", "feature")
+    feature = _commit(repository, "feature.txt", "not approved\n", "feature only")
+    _git(repository, "checkout", "main")
+    assert _git(repository, "rev-parse", "origin/main") == production
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.repository_identity(repository, feature)
+    assert caught.value.stage == "REPOSITORY"
+    assert "not an ancestor" in caught.value.safe_reason
+
+
+def test_dirty_workspace_is_still_rejected(tmp_path: Path) -> None:
+    repository, production, _ = _formal_repository(tmp_path)
+    (repository / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.repository_identity(repository, production)
+    assert caught.value.stage == "REPOSITORY"
+
+
+def test_local_main_divergence_from_origin_main_is_still_rejected(tmp_path: Path) -> None:
+    repository, production, _ = _formal_repository(tmp_path)
+    _commit(repository, "local-only.txt", "unpushed\n", "local only")
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.repository_identity(repository, production)
+    assert caught.value.stage == "REPOSITORY"
 
 
 def test_trusted_tool_repo_is_exact_head_tree_and_clean(tmp_path: Path) -> None:

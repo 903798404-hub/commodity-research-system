@@ -27,7 +27,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 from filelock import FileLock, Timeout as FileLockTimeout
 
 
-SCHEMA_VERSION = "windows-full-daily-wrapper/1"
+SCHEMA_VERSION = "windows-full-daily-wrapper/2"
 DAILY_SCHEMA = "unified-public-data-daily-update/1"
 TRIGGERS = {"manual", "scheduled"}
 REQUIRED_PROVIDERS = {
@@ -56,6 +56,7 @@ DEFAULT_PYTHON = DEFAULT_REPOSITORY / ".venv-py312" / "Scripts" / "python.exe"
 _SSH_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}$")
 _REMOTE_PATH = re.compile(r"^/[A-Za-z0-9_./-]+$")
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _WINDOWS_TOOLS = {
     "git": (Path(r"C:\Program Files\Git\cmd\git.exe"),),
     "ssh": (Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "OpenSSH" / "ssh.exe",),
@@ -77,10 +78,21 @@ class Invocation:
     run_id: str
     trigger_source: str
     started_at: str
-    repository_head: str
-    repository_tree: str
+    repository_main_head: str
+    repository_main_tree: str
+    production_commit: str
+    production_tree: str
     repository_branch: str
     python_executable: str
+
+
+@dataclass(frozen=True)
+class RepositoryIdentity:
+    repository_main_head: str
+    repository_main_tree: str
+    production_commit: str
+    production_tree: str
+    repository_branch: str
 
 
 def utc_now() -> str:
@@ -141,7 +153,7 @@ def _git(repository: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def repository_identity(repository: Path) -> tuple[str, str, str]:
+def repository_identity(repository: Path, production_commit: str) -> RepositoryIdentity:
     if not (repository / ".git").exists():
         raise WrapperFailure("REPOSITORY", "formal repository is not a Git worktree")
     branch = _git(repository, "branch", "--show-current")
@@ -151,7 +163,24 @@ def repository_identity(repository: Path) -> tuple[str, str, str]:
     upstream = _git(repository, "rev-parse", "origin/main")
     if branch != "main" or head != upstream or status:
         raise WrapperFailure("REPOSITORY", "repository must be clean main at local origin/main")
-    return head, tree, branch
+    if not _COMMIT_SHA.fullmatch(production_commit):
+        raise WrapperFailure("REPOSITORY", "approved production commit must be a full lowercase Git SHA")
+    object_probe = subprocess.run(
+        [tool_path("git"), "-C", str(repository), "cat-file", "-t", production_commit],
+        text=True, encoding="utf-8", capture_output=True, check=False, timeout=30,
+    )
+    if object_probe.returncode or object_probe.stdout.strip() != "commit":
+        raise WrapperFailure("REPOSITORY", "approved production commit is not a known local commit")
+    ancestor_probe = subprocess.run(
+        [tool_path("git"), "-C", str(repository), "merge-base", "--is-ancestor", production_commit, "origin/main"],
+        text=True, encoding="utf-8", capture_output=True, check=False, timeout=30,
+    )
+    if ancestor_probe.returncode == 1:
+        raise WrapperFailure("REPOSITORY", "approved production commit is not an ancestor of origin/main")
+    if ancestor_probe.returncode:
+        raise WrapperFailure("REPOSITORY", "production ancestry probe failed")
+    production_tree = _git(repository, "rev-parse", f"{production_commit}^{{tree}}")
+    return RepositoryIdentity(head, tree, production_commit, production_tree, branch)
 
 
 def create_trusted_tool_repo(source: Path, destination: Path, head: str, tree: str) -> None:
@@ -409,8 +438,10 @@ def make_final_status(
         "server_sync": manifest.get("server_sync") if manifest else None,
         "production_package_id": package.get("package_id") if isinstance(package, dict) else None,
         "prewarm_status": prewarm_status, "warnings": list(warnings),
-        "repository_head": invocation.repository_head,
-        "repository_tree": invocation.repository_tree,
+        "repository_main_head": invocation.repository_main_head,
+        "repository_main_tree": invocation.repository_main_tree,
+        "production_commit": invocation.production_commit,
+        "production_tree": invocation.production_tree,
         "started_at": invocation.started_at, "completed_at": completed_at,
         "duration_seconds": round((completed - started).total_seconds(), 3),
     }
@@ -505,15 +536,23 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
     run_dir = automation_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     lock_path, active_path = automation_root / "full-daily.lock", automation_root / "active-run.json"
-    invocation = Invocation(run_id, trigger_source, started, "UNKNOWN", "UNKNOWN", "UNKNOWN", str(python))
+    invocation = Invocation(
+        run_id, trigger_source, started, "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", str(python)
+    )
     process_exit_code: int | None = None
     daily_manifest_path: Path | None = None
     daily_manifest: Mapping[str, Any] | None = None
     atomic_write_json(run_dir / "invocation.json", {**invocation.__dict__, "schema_version": SCHEMA_VERSION})
     try:
         with lifecycle_lock(lock_path, active_path, run_id):
-            head, tree, branch = repository_identity(repository)
-            invocation = Invocation(run_id, trigger_source, started, head, tree, branch, str(python))
+            production_commit = os.environ.get("MARKET_DATA_FULL_DAILY_PRODUCTION_COMMIT", "").strip()
+            identity = repository_identity(repository, production_commit)
+            invocation = Invocation(
+                run_id, trigger_source, started,
+                identity.repository_main_head, identity.repository_main_tree,
+                identity.production_commit, identity.production_tree,
+                identity.repository_branch, str(python),
+            )
             atomic_write_json(run_dir / "invocation.json", {**invocation.__dict__, "schema_version": SCHEMA_VERSION})
             gates: list[dict[str, Any]] = []
             def record_gate(name: str, action: Callable[[], str | Mapping[str, Any] | None]) -> None:
@@ -530,7 +569,10 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
                     raise WrapperFailure("WINDOWS_ENV", "wrapper requires Windows")
                 return {name: tool_path(name) for name in ("git", "ssh", "scp", "tailscale")}
             record_gate("WINDOWS_ENV", windows_gate)
-            record_gate("REPOSITORY", lambda: "clean main identity pinned")
+            record_gate("REPOSITORY", lambda: {
+                "repository_main_head": identity.repository_main_head,
+                "production_commit": identity.production_commit,
+            })
             def python_gate() -> str:
                 if python.resolve() != DEFAULT_PYTHON.resolve() or not python.is_file():
                     raise WrapperFailure("PYTHON_RUNTIME", "exact project Python executable is unavailable")
@@ -614,7 +656,9 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
                 raise WrapperFailure("LOCAL_DISK", "less than 10 GiB local disk space remains")
             record_gate("LOCAL_DISK", lambda: f"free_bytes={usage.free}")
             tool_repo, runtime = run_dir / "tool-repo", run_dir / "runtime"
-            create_trusted_tool_repo(repository, tool_repo, head, tree)
+            create_trusted_tool_repo(
+                repository, tool_repo, identity.production_commit, identity.production_tree
+            )
             write_runtime_marker(runtime, run_id)
             baseline = run_dir / "runtime-baseline" / str(remote_pointer["package_id"])
             download_runtime_baseline(ssh_target, remote_store, str(remote_pointer["package_id"]), baseline)
@@ -681,7 +725,7 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
 
 
 __all__ = [
-    "Invocation", "WrapperFailure", "atomic_write_json", "business_command",
+    "Invocation", "RepositoryIdentity", "WrapperFailure", "atomic_write_json", "business_command",
     "create_trusted_tool_repo", "download_runtime_baseline", "lifecycle_lock", "make_final_status", "new_run_id", "require_baseline_matches",
-    "run_logged", "run_provider_preflight", "run_wrapper", "ssh_command", "validate_daily_manifest",
+    "repository_identity", "run_logged", "run_provider_preflight", "run_wrapper", "ssh_command", "validate_daily_manifest",
 ]
