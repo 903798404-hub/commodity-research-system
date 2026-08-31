@@ -232,6 +232,56 @@ def test_provider_preflight_hard_failure_is_explicit(tmp_path: Path, monkeypatch
     assert caught.value.stage == "PROVIDER_PREFLIGHT"
 
 
+def test_manifest_failure_prefers_structured_weather_root_over_legacy_reason() -> None:
+    manifest = {
+        "root_failure": {
+            "provider": "lutou", "domain": "weather", "stage": "SOIL_EVIDENCE",
+            "exception_type": "WeatherError", "underlying_exception_type": "ValueError",
+            "safe_message": "safe",
+        },
+        "transaction": {"rollback": "PASS"},
+        "safe_reason": "provider preflight failed",
+        "sources": [{"source": "lutou", "read": "READY", "status": "INGESTION_FAILURE"}],
+    }
+    assert wrapper.classify_manifest_failure(manifest) == "WEATHER"
+
+
+def test_manifest_failure_reports_rollback_after_unmapped_root() -> None:
+    manifest = {
+        "root_failure": {
+            "provider": "lutou", "domain": None, "stage": "UNKNOWN",
+            "exception_type": "RuntimeError", "underlying_exception_type": None,
+            "safe_message": "safe",
+        },
+        "transaction": {"rollback": "FAIL"},
+    }
+    assert wrapper.classify_manifest_failure(manifest) == "ROLLBACK"
+
+
+def test_manifest_failure_only_uses_provider_preflight_for_readiness_failure() -> None:
+    readiness = {
+        "sources": [
+            {"source": "lutou", "read": "SOURCE_UNAVAILABLE", "status": "SOURCE_UNAVAILABLE"}
+        ]
+    }
+    post_read = {
+        "sources": [
+            {"source": "lutou", "read": "READY", "status": "INGESTION_FAILURE", "safe_reason": "unknown"}
+        ]
+    }
+    assert wrapper.classify_manifest_failure(readiness) == "PROVIDER_PREFLIGHT"
+    assert wrapper.classify_manifest_failure(post_read) == "ENTRYPOINT_EXCEPTION"
+
+
+def test_legacy_manifest_weather_keyword_remains_compatible() -> None:
+    manifest = {
+        "sources": [
+            {"source": "lutou", "read": "READY", "status": "INGESTION_FAILURE", "safe_reason": "Lutou Weather failed"}
+        ]
+    }
+    assert wrapper.classify_manifest_failure(manifest) == "WEATHER"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows crash-release contract")
 def test_os_releases_lock_when_owner_process_crashes(tmp_path: Path) -> None:
     lock_path = tmp_path / "crash.lock"

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import agri_research_agent.pipelines.public_data_refresh as refresh_module
 
 from agri_research_agent.pipelines.public_data_refresh import (
     CurrentIdentity,
@@ -12,6 +13,7 @@ from agri_research_agent.pipelines.public_data_refresh import (
     ProviderFailure,
     ProviderStatus,
     RefreshResult,
+    RootFailure,
     run_unified_refresh,
 )
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
@@ -151,6 +153,7 @@ def test_no_change_with_identity_mutation_fails_closed(runtime: RuntimeContext) 
     )
     assert result.providers[0].status is ProviderStatus.PROMOTION_FAILURE
     assert result.overall_status is OverallStatus.FAILED
+    assert result.manifest["root_failure"]["stage"] == "PROMOTION"
 
 
 @pytest.mark.parametrize(
@@ -299,11 +302,15 @@ def test_required_source_mode_preserves_weather_root_cause_while_rolling_back(
                     {
                         "three_oil": ProviderStatus.UPDATED.value,
                         "soil_moisture": ProviderStatus.UPDATED.value,
-                        "weather": ProviderStatus.SOURCE_UNAVAILABLE.value,
+                        "weather": ProviderStatus.INGESTION_FAILURE.value,
                     },
-                    ProviderStatus.SOURCE_UNAVAILABLE,
-                    "Lutou weather extraction failed: LutouClientError; "
-                    "root_cause=SOURCE_CONNECTION_FAILURE; query_retried=false",
+                    ProviderStatus.INGESTION_FAILURE,
+                    "Lutou Weather pipeline failed: LutouWeatherStageError",
+                    root_failure=RootFailure(
+                        "lutou", "weather", "SOIL_EVIDENCE",
+                        "LutouWeatherStageError", "LutouGoalBError",
+                        "Weather SOIL_EVIDENCE failed: LutouGoalBError",
+                    ),
                 )
             return RefreshResult(True, {"data": "2026-08-25"})
 
@@ -318,23 +325,69 @@ def test_required_source_mode_preserves_weather_root_cause_while_rolling_back(
 
     result = run_unified_refresh(
         runtime=runtime,
-        run_id="rollback-after-weather-connection-failure",
+        run_id="rollback-after-weather-soil-evidence-failure",
         adapters=adapters,
         require_all_sources=True,
     )
 
     weather = result.providers[1]
-    assert weather.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert weather.status is ProviderStatus.INGESTION_FAILURE
     assert weather.domains == {
         "three_oil": ProviderStatus.UPDATED.value,
         "soil_moisture": ProviderStatus.UPDATED.value,
-        "weather": ProviderStatus.SOURCE_UNAVAILABLE.value,
+        "weather": ProviderStatus.INGESTION_FAILURE.value,
     }
-    assert "SOURCE_CONNECTION_FAILURE" in (weather.safe_reason or "")
+    assert "LutouWeatherStageError" in (weather.safe_reason or "")
     assert all(item.current_before == item.current_after for item in result.providers)
     assert {adapter.name: adapter.pointer.read_bytes() for adapter in adapters} == before
     manifest = json.loads((result.run_directory / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["providers"][1]["safe_reason"] == weather.safe_reason
+    assert manifest["root_failure"] == {
+        "provider": "lutou",
+        "domain": "weather",
+        "stage": "SOIL_EVIDENCE",
+        "exception_type": "LutouWeatherStageError",
+        "underlying_exception_type": "LutouGoalBError",
+        "safe_message": "Weather SOIL_EVIDENCE failed: LutouGoalBError",
+    }
+    assert manifest["transaction"] == {
+        "current_changed_before_rollback": True,
+        "rollback": "PASS",
+        "rollback_failure": None,
+    }
+    assert manifest["aggregate_status"] == "FAILED"
+    assert weather.status is ProviderStatus.INGESTION_FAILURE
+
+
+def test_rollback_failure_is_separate_from_original_root_failure(
+    runtime: RuntimeContext, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = RootFailure(
+        "lutou", "weather", "SOIL_EVIDENCE", "WeatherError", "ValueError", "safe"
+    )
+    adapter = FakeAdapter(
+        "lutou",
+        refresh_failure=ProviderFailure(
+            ProviderStatus.INGESTION_FAILURE, "weather failed", root_failure=root
+        ),
+    )
+    public = runtime.runtime_root / "public-market-data/lutou/current.json"
+    public.parent.mkdir(parents=True)
+    public.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        refresh_module, "atomic_write_bytes",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("rollback blocked")),
+    )
+
+    result = run_unified_refresh(
+        runtime=runtime, run_id="rollback-failure", adapters=[adapter],
+        require_all_sources=True,
+    )
+
+    assert result.manifest["root_failure"] == root.as_dict()
+    assert result.manifest["transaction"]["rollback"] == "FAIL"
+    assert result.manifest["transaction"]["rollback_failure"]["stage"] == "ROLLBACK"
+    assert result.providers[0].status is ProviderStatus.INGESTION_FAILURE
 
 
 def test_failed_provider_does_not_block_other_provider(runtime: RuntimeContext) -> None:

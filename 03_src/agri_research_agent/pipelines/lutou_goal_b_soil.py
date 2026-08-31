@@ -645,6 +645,15 @@ def _promote(
             "min_date": canonical_manifest["min_date"],
             "max_date": canonical_manifest["max_date"],
             "quality_status": "PASS",
+            "weather_evidence": {
+                "schema_version": "lutou-soil-weather-evidence/1",
+                "source_tables": sorted(candidate_manifest["table_row_counts"]),
+                "retained_exception_count": (
+                    int(candidate_manifest["quality"]["non_numeric_row_count"])
+                    + int(candidate_manifest["quality"]["out_of_range_row_count"])
+                ),
+                "retained_exception_count_status": "RECORDED",
+            },
             "files": _file_identities(directory, ("observations.parquet",)),
         }
         _write_json(directory / "manifest.json", manifest)

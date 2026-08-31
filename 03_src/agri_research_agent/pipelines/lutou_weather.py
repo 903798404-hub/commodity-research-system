@@ -139,6 +139,12 @@ class LutouWeatherError(RuntimeError):
     pass
 
 
+class LutouWeatherStageError(LutouWeatherError):
+    def __init__(self, stage: str, exc: Exception) -> None:
+        super().__init__(f"Weather {stage} failed: {type(exc).__name__}: {exc}")
+        self.stage = stage
+
+
 @dataclass(frozen=True, slots=True)
 class WeatherCurrent:
     release_id: str
@@ -233,7 +239,12 @@ def run_lutou_weather(
         if current is None
         else "incremental-31-day-observation-plus-full-forecast"
     )
-    soil = _soil_evidence(runtime, policy_path)
+    try:
+        soil = _soil_evidence(runtime, policy_path)
+    except Exception as exc:
+        if isinstance(exc, LutouWeatherStageError):
+            raise
+        raise LutouWeatherStageError("SOIL_EVIDENCE", exc) from exc
     baseline = _baseline_evidence(policy_path, baseline_root)
 
     candidate_directory, candidate_manifest = _seal_candidate(
@@ -1511,25 +1522,34 @@ def _soil_evidence(
     if current is None:
         raise LutouWeatherError("Weather requires the approved Soil Current")
     pointer = _read_json(root / "current.json")
-    candidate = root / "candidates" / current.release_id
-    candidate_manifest_path = candidate / "manifest.json"
-    candidate_manifest = _read_json(candidate_manifest_path)
-    _verify_files(candidate, candidate_manifest["files"])
     soil_series = load_soil_moisture_series(
         Path(policy_path).parent / "public_research_data_catalog.candidate.json"
     )
     bindings = build_soil_consumer_bindings(policy_path, soil_series)
+    release_evidence = current.manifest.get("weather_evidence")
+    if isinstance(release_evidence, Mapping):
+        source_tables = sorted(str(item) for item in release_evidence["source_tables"])
+        retained_exception_count = int(release_evidence["retained_exception_count"])
+        retained_exception_count_status = str(
+            release_evidence["retained_exception_count_status"]
+        )
+    else:
+        # Releases sealed before lutou-soil-weather-evidence/1 remain usable from
+        # their formal observations.  Their discarded candidate-row count cannot
+        # be reconstructed, so that absence is represented explicitly.
+        source_tables = sorted(
+            {str(item) for item in current.observations["source_table"].to_pylist()}
+        )
+        retained_exception_count = None
+        retained_exception_count_status = "NOT_RECORDED_LEGACY_RELEASE"
     return {
         "release_id": current.release_id,
         "manifest_sha256": str(pointer["manifest_sha256"]),
-        "candidate_manifest_sha256": identify_file(candidate_manifest_path).sha256,
         "row_count": current.observations.num_rows,
         "series_count": int(current.manifest["series_count"]),
         "source_max_date": str(current.manifest["source_max_date"]),
-        "retained_exception_count": int(
-            candidate_manifest["quality"]["non_numeric_row_count"]
-        )
-        + int(candidate_manifest["quality"]["out_of_range_row_count"]),
+        "retained_exception_count": retained_exception_count,
+        "retained_exception_count_status": retained_exception_count_status,
         "semantics": {
             "metric": "soil_moisture",
             "soil_depth": "0-100cm",
@@ -1537,7 +1557,7 @@ def _soil_evidence(
             "unit": "%",
             "transformation": "source_value * 100",
         },
-        "source_tables": sorted(candidate_manifest["table_row_counts"]),
+        "source_tables": source_tables,
         "bindings": list(bindings),
         "observations_path": str(current.directory / "observations.parquet"),
     }

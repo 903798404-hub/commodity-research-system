@@ -42,6 +42,7 @@ FAILED_STAGES = {
     "LUTOU_AUTH", "SSH", "RUNTIME_BASELINE", "LOCAL_DISK", "REMOTE_IDENTITY",
     "REMOTE_DISK", "PROVIDER_PREFLIGHT", "TANKAN_REFRESH", "THREE_OIL",
     "SOIL_MOISTURE", "WEATHER", "DOMESTIC_BASIS", "DOMESTIC_SPREAD",
+    "PROMOTION", "ROLLBACK",
     "CONSUMER_FRESHNESS", "PRODUCTION_PACKAGE", "SERVER_TRANSPORT",
     "SERVER_ACTIVATION", "FORMAL_READ", "PREWARM", "ENTRYPOINT_EXCEPTION",
     "TIMEOUT", "MANIFEST_VALIDATION", "STATUS_SEAL",
@@ -378,6 +379,14 @@ def validate_daily_manifest(path: Path, run_id: str, process_exit_code: int) -> 
 
 
 def classify_manifest_failure(manifest: Mapping[str, Any]) -> str:
+    root_failure = manifest.get("root_failure")
+    if isinstance(root_failure, Mapping):
+        structured = _structured_failure_stage(root_failure)
+        if structured is not None:
+            return structured
+    transaction = manifest.get("transaction")
+    if isinstance(transaction, Mapping) and transaction.get("rollback") == "FAIL":
+        return "ROLLBACK"
     safe_reason = str(manifest.get("safe_reason", ""))
     if "ServerTransportTimeout" in safe_reason:
         return "TIMEOUT"
@@ -400,6 +409,14 @@ def classify_manifest_failure(manifest: Mapping[str, Any]) -> str:
     sources = manifest.get("sources")
     if isinstance(sources, list):
         failed = [item for item in sources if isinstance(item, Mapping) and item.get("status") not in SUCCESS_BUSINESS]
+        for item in failed:
+            source_root = item.get("root_failure")
+            if isinstance(source_root, Mapping):
+                structured = _structured_failure_stage(source_root)
+                if structured is not None:
+                    return structured
+        if any(str(item.get("read")) != "READY" for item in failed):
+            return "PROVIDER_PREFLIGHT"
         names = {str(item.get("source")) for item in failed}
         if "tankan" in names:
             return "TANKAN_REFRESH"
@@ -413,8 +430,30 @@ def classify_manifest_failure(manifest: Mapping[str, Any]) -> str:
                 return "SOIL_MOISTURE"
             if "weather" in reasons:
                 return "WEATHER"
-            return "PROVIDER_PREFLIGHT"
+            return "ENTRYPOINT_EXCEPTION"
     return "ENTRYPOINT_EXCEPTION"
+
+
+def _structured_failure_stage(root_failure: Mapping[str, Any]) -> str | None:
+    stage = str(root_failure.get("stage", "")).upper()
+    domain = str(root_failure.get("domain", "")).lower()
+    if stage in {"PROVIDER_PREFLIGHT", "READINESS", "PREFLIGHT"}:
+        return "PROVIDER_PREFLIGHT"
+    if stage == "PROMOTION":
+        return "PROMOTION"
+    if stage == "ROLLBACK":
+        return "ROLLBACK"
+    if stage == "TIMEOUT":
+        return "TIMEOUT"
+    if domain == "three_oil" or stage == "THREE_OIL":
+        return "THREE_OIL"
+    if domain == "soil_moisture" or stage == "SOIL_MOISTURE":
+        return "SOIL_MOISTURE"
+    if domain == "weather" or stage in {"WEATHER", "SOIL_EVIDENCE"}:
+        return "WEATHER"
+    if domain == "domestic_basis" or stage == "DOMESTIC_BASIS":
+        return "DOMESTIC_BASIS"
+    return None
 
 
 def make_final_status(

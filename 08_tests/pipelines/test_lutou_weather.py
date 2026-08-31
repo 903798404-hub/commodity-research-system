@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -366,6 +367,83 @@ def test_complete_weather_current_preserves_identity_and_is_idempotent(
     assert current.manifest["complete_row_count"] == 22_728
     assert current.manifest["stable_key_duplicate_count"] == 0
     assert current.manifest["normal_stable_key_duplicate_count"] == 0
+
+
+def test_weather_uses_self_contained_soil_release_without_candidate_history(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path / "runtime")
+    _seed_soil(runtime)
+    soil_root = runtime.runtime_root / "public-market-data/lutou-soil-moisture"
+    shutil.rmtree(soil_root / "candidates" / "soil-current")
+
+    result = _run(runtime, "weather-without-soil-candidate", full=True)
+
+    assert result.promoted is True
+    assert result.current_manifest["soil_current"]["release_id"] == "soil-current"
+    assert not (soil_root / "candidates" / "soil-current").exists()
+
+
+def test_weather_accepts_legacy_soil_release_after_no_change_without_candidate(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path / "runtime")
+    _seed_soil(runtime)
+    unchanged = run_goal_b_soil(
+        FakeSoilClient(), runtime=runtime, run_id="soil-no-change",
+        end_date=date(2026, 8, 9), full_load=False,
+        catalog_path=Path("02_configs/public_research_data_catalog.candidate.json"),
+    )
+    assert unchanged.promoted is False
+    soil_root = runtime.runtime_root / "public-market-data/lutou-soil-moisture"
+    release_manifest = soil_root / "releases/soil-current/manifest.json"
+    legacy = json.loads(release_manifest.read_text(encoding="utf-8"))
+    legacy.pop("weather_evidence")
+    release_manifest.write_text(
+        json.dumps(legacy, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    pointer_path = soil_root / "current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer["manifest_sha256"] = identify_file(release_manifest).sha256
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+    shutil.rmtree(soil_root / "candidates" / "soil-current")
+
+    weather = _run(runtime, "weather-from-legacy-soil", full=True)
+
+    evidence = weather.current_manifest["soil_current"]
+    assert weather.promoted is True
+    assert evidence["retained_exception_count"] is None
+    assert evidence["retained_exception_count_status"] == "NOT_RECORDED_LEGACY_RELEASE"
+
+
+def test_weather_uses_updated_soil_release_without_candidate_history(
+    tmp_path: Path,
+) -> None:
+    class UpdatedSoilClient(FakeSoilClient):
+        def plan_stream(self, query, start, end):  # type: ignore[no-untyped-def]
+            plan, batches = super().plan_stream(query, start, end)
+            batch = next(batches)
+            row = dict(batch.rows[0])
+            for column in query.value_columns:
+                row[column] = Decimal("0.500")
+            return plan, iter((LutouBatch(query, plan, (row,), batch.extracted_at),))
+
+    runtime = _runtime(tmp_path / "runtime")
+    _seed_soil(runtime)
+    updated = run_goal_b_soil(
+        UpdatedSoilClient(), runtime=runtime, run_id="soil-updated",
+        end_date=date(2026, 8, 9), full_load=False,
+        catalog_path=Path("02_configs/public_research_data_catalog.candidate.json"),
+    )
+    assert updated.promoted is True
+    soil_root = runtime.runtime_root / "public-market-data/lutou-soil-moisture"
+    shutil.rmtree(soil_root / "candidates" / "soil-updated")
+
+    weather = _run(runtime, "weather-from-updated-soil", full=True)
+
+    assert weather.promoted is True
+    assert weather.current_manifest["soil_current"]["release_id"] == "soil-updated"
 
 
 def test_approved_normal_revision_promotes_without_changing_series_count(

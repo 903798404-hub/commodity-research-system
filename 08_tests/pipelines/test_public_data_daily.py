@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from agri_research_agent.pipelines.public_data_refresh import (
     OverallStatus,
     ProviderOutcome,
     ProviderStatus,
+    RootFailure,
     UnifiedRunResult,
 )
 from agri_research_agent.pipelines.public_data_freshness import (
@@ -161,6 +163,48 @@ def test_no_change_short_circuits_package_sync_and_prewarm(runtime: RuntimeConte
     assert result.manifest["server_sync"] == "SKIPPED"
     assert result.prewarm.status is PrewarmStatus.SKIPPED
     assert calls == []
+
+
+def test_daily_manifest_preserves_refresh_root_and_transaction(
+    runtime: RuntimeContext,
+) -> None:
+    root = RootFailure(
+        "lutou", "weather", "SOIL_EVIDENCE", "WeatherError", "ValueError", "safe"
+    )
+    outcome = replace(
+        _outcome(ProviderStatus.INGESTION_FAILURE, provider="lutou"),
+        root_failure=root,
+    )
+    transaction = {
+        "current_changed_before_rollback": True,
+        "rollback": "PASS",
+        "rollback_failure": None,
+    }
+    refresh = UnifiedRunResult(
+        "refresh", "start", "end", ("lutou",), (outcome,),
+        OverallStatus.FAILED, runtime.runtime_root / "refresh",
+        {
+            "aggregate_status": "FAILED",
+            "root_failure": root.as_dict(),
+            "transaction": transaction,
+        },
+        root,
+        transaction,
+    )
+
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-root-evidence",
+        refresh_runner=lambda: refresh,
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
+    )
+
+    assert result.manifest["root_failure"] == root.as_dict()
+    assert result.manifest["transaction"] == transaction
+    assert result.manifest["aggregate_status"] == "FAILED"
+    assert result.manifest["sources"][0]["root_failure"] == root.as_dict()
 
 
 def test_initial_seed_requires_explicit_sync_target(tmp_path: Path) -> None:

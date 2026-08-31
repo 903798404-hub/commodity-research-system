@@ -65,6 +65,7 @@ from agri_research_agent.pipelines.lutou_domestic_basis import (
 )
 from agri_research_agent.pipelines.lutou_weather import (
     LutouWeatherError,
+    LutouWeatherStageError,
     load_weather_current,
     run_lutou_weather,
     validate_weather_normal_baselines,
@@ -74,6 +75,7 @@ from agri_research_agent.pipelines.public_data_refresh import (
     ProviderFailure,
     ProviderStatus,
     RefreshResult,
+    root_failure_from_exception,
 )
 from agri_research_agent.pipelines.tankan_goal_a import (
     TankanGoalAError,
@@ -446,16 +448,42 @@ class LutouRefreshAdapter:
                 except ProviderFailure as failure:
                     domains["weather"] = failure.status.value
                     failures.append(failure)
-                except LutouClientError:
+                except LutouClientError as exc:
                     failure = ProviderFailure(
                         ProviderStatus.SOURCE_UNAVAILABLE,
                         "Lutou weather extraction failed: LutouClientError; "
                         "root_cause=SOURCE_CONNECTION_FAILURE; query_retried=false",
+                        root_failure=root_failure_from_exception(
+                            "lutou", "weather", "EXTRACTION", exc
+                        ),
+                    )
+                    domains["weather"] = failure.status.value
+                    failures.append(failure)
+                except LutouWeatherStageError as exc:
+                    failure = ProviderFailure(
+                        ProviderStatus.INGESTION_FAILURE,
+                        f"Lutou Weather pipeline failed: {type(exc).__name__}",
+                        root_failure=root_failure_from_exception(
+                            "lutou", "weather", exc.stage, exc
+                        ),
                     )
                     domains["weather"] = failure.status.value
                     failures.append(failure)
                 except LutouWeatherError as exc:
-                    failure = _pipeline_failure(exc, "Lutou Weather")
+                    failure = _pipeline_failure(
+                        exc, "Lutou Weather", provider_id="lutou",
+                        domain="weather", stage="WEATHER",
+                    )
+                    domains["weather"] = failure.status.value
+                    failures.append(failure)
+                except Exception as exc:
+                    failure = ProviderFailure(
+                        ProviderStatus.INGESTION_FAILURE,
+                        f"Lutou Weather pipeline failed: {type(exc).__name__}",
+                        root_failure=root_failure_from_exception(
+                            "lutou", "weather", "WEATHER", exc
+                        ),
+                    )
                     domains["weather"] = failure.status.value
                     failures.append(failure)
             if failures:
@@ -467,6 +495,7 @@ class LutouRefreshAdapter:
                         "preflight": dict(self._preflight_performance),
                         "domains": performance_domains,
                     },
+                    failures[0].root_failure,
                 )
             return RefreshResult(
                 promoted,
@@ -731,7 +760,14 @@ class DomesticBasisRefreshAdapter:
         self._adapter = None
 
 
-def _pipeline_failure(exc: Exception, provider: str) -> ProviderFailure:
+def _pipeline_failure(
+    exc: Exception,
+    provider: str,
+    *,
+    provider_id: str | None = None,
+    domain: str | None = None,
+    stage: str | None = None,
+) -> ProviderFailure:
     message = str(exc).lower()
     if "quality" in message or "collision" in message or "duplicate" in message:
         status = ProviderStatus.QC_FAILURE
@@ -741,7 +777,19 @@ def _pipeline_failure(exc: Exception, provider: str) -> ProviderFailure:
         status = ProviderStatus.SOURCE_SCHEMA_FAILURE
     else:
         status = ProviderStatus.INGESTION_FAILURE
-    return ProviderFailure(status, f"{provider} pipeline failed: {type(exc).__name__}")
+    root_stage = stage or (
+        "PROMOTION" if status is ProviderStatus.PROMOTION_FAILURE else "REFRESH"
+    )
+    return ProviderFailure(
+        status,
+        f"{provider} pipeline failed: {type(exc).__name__}",
+        root_failure=root_failure_from_exception(
+            provider_id or provider.lower().replace(" ", "_"),
+            domain,
+            root_stage,
+            exc,
+        ),
+    )
 
 
 def _lutou_connection_validation_failure(domain: str) -> ProviderFailure:

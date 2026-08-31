@@ -239,6 +239,26 @@ def run_daily_update(
         "run_id": safe_run_id,
         "completed_at": now,
         "business_status": status.value,
+        "aggregate_status": refresh.manifest.get(
+            "aggregate_status", refresh.overall_status.value
+        ),
+        "root_failure": (
+            refresh.manifest.get("root_failure")
+            if "root_failure" in refresh.manifest
+            else (
+                None
+                if refresh.root_failure is None
+                else refresh.root_failure.as_dict()
+            )
+        ),
+        "transaction": refresh.manifest.get(
+            "transaction",
+            refresh.transaction or {
+                "current_changed_before_rollback": False,
+                "rollback": "NOT_REQUIRED",
+                "rollback_failure": None,
+            },
+        ),
         "succeeded": succeeded,
         "sources": [_source_payload(item) for item in refresh.providers],
         "source_max_dates": _source_max_dates(refresh.providers),
@@ -410,6 +430,9 @@ def _source_payload(outcome: ProviderOutcome) -> dict[str, Any]:
         "current_changed": outcome.current_before != outcome.current_after,
         "domains": dict(outcome.domains),
         "safe_reason": outcome.safe_reason,
+        "root_failure": (
+            None if outcome.root_failure is None else outcome.root_failure.as_dict()
+        ),
     }
 
 

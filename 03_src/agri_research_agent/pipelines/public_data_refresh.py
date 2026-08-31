@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -45,6 +46,26 @@ class CurrentIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class RootFailure:
+    provider: str
+    domain: str | None
+    stage: str
+    exception_type: str
+    underlying_exception_type: str | None
+    safe_message: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "domain": self.domain,
+            "stage": self.stage,
+            "exception_type": self.exception_type,
+            "underlying_exception_type": self.underlying_exception_type,
+            "safe_message": self.safe_message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RefreshResult:
     promoted: bool
     source_max_dates: Mapping[str, str]
@@ -52,6 +73,7 @@ class RefreshResult:
     status: ProviderStatus | None = None
     safe_reason: str | None = None
     performance: Mapping[str, object] = field(default_factory=dict)
+    root_failure: RootFailure | None = None
 
 
 class ProviderAdapter(Protocol):
@@ -63,12 +85,19 @@ class ProviderAdapter(Protocol):
 
 
 class ProviderFailure(RuntimeError):
-    def __init__(self, status: ProviderStatus, safe_reason: str) -> None:
+    def __init__(
+        self,
+        status: ProviderStatus,
+        safe_reason: str,
+        *,
+        root_failure: RootFailure | None = None,
+    ) -> None:
         if status in {ProviderStatus.READY, ProviderStatus.NO_CHANGE, ProviderStatus.UPDATED}:
             raise ValueError("ProviderFailure requires a failure status")
         super().__init__(safe_reason)
         self.status = status
         self.safe_reason = safe_reason
+        self.root_failure = root_failure
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +111,7 @@ class ProviderOutcome:
     domains: Mapping[str, str]
     safe_reason: str | None = None
     performance: Mapping[str, object] = field(default_factory=dict)
+    root_failure: RootFailure | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +124,8 @@ class UnifiedRunResult:
     overall_status: OverallStatus
     run_directory: Path
     manifest: Mapping[str, object]
+    root_failure: RootFailure | None = None
+    transaction: Mapping[str, object] = field(default_factory=dict)
 
 
 def run_unified_refresh(
@@ -119,15 +151,38 @@ def run_unified_refresh(
         if require_all_sources
         else tuple(_run_provider(adapter) for adapter in adapters)
     )
+    root_failure = next(
+        (item.root_failure for item in outcomes if item.root_failure is not None), None
+    )
+    transaction: dict[str, object] = {
+        "current_changed_before_rollback": any(
+            item.current_before != item.current_after for item in outcomes
+        ),
+        "rollback": "NOT_REQUIRED",
+        "rollback_failure": None,
+    }
     if require_all_sources and pointer_snapshot is not None and any(
         item.status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
         for item in outcomes
     ):
-        outcomes = _restore_current_pointers(
+        outcomes, rollback_failure = _restore_current_pointers(
             runtime, adapters, outcomes, pointer_snapshot
+        )
+        transaction["rollback"] = "FAIL" if rollback_failure else "PASS"
+        transaction["rollback_failure"] = (
+            None if rollback_failure is None else rollback_failure.as_dict()
         )
     completed = datetime.now(timezone.utc)
     overall = _overall(outcomes)
+    aggregate = (
+        OverallStatus.FAILED
+        if require_all_sources
+        and any(
+            item.status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
+            for item in outcomes
+        )
+        else overall
+    )
     manifest: dict[str, object] = {
         "schema_version": "unified-public-data-refresh/1",
         "run_id": safe_run_id,
@@ -136,6 +191,9 @@ def run_unified_refresh(
         "requested_providers": list(names),
         "providers": [_outcome_payload(item) for item in outcomes],
         "overall_status": overall.value,
+        "aggregate_status": aggregate.value,
+        "root_failure": None if root_failure is None else root_failure.as_dict(),
+        "transaction": transaction,
     }
     _reject_sensitive_metadata(manifest)
     root = assert_runtime_write(
@@ -160,6 +218,8 @@ def run_unified_refresh(
         overall,
         run_directory,
         manifest,
+        root_failure,
+        transaction,
     )
 
 
@@ -169,16 +229,13 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
     except Exception as exc:
         missing = CurrentIdentity(None, None, {})
         return ProviderOutcome(
-            adapter.name,
-            ProviderStatus.PROMOTION_FAILURE,
-            ProviderStatus.PROMOTION_FAILURE,
-            missing,
-            missing,
-            {},
-            {},
+            adapter.name, ProviderStatus.PROMOTION_FAILURE,
+            ProviderStatus.PROMOTION_FAILURE, missing, missing, {}, {},
             f"Current identity check failed: {type(exc).__name__}",
+            root_failure=root_failure_from_exception(
+                adapter.name, None, "PROMOTION", exc
+            ),
         )
-    preflight_status = ProviderStatus.READY
     preflight_started = perf_counter()
     try:
         preflight = adapter.preflight()
@@ -188,19 +245,21 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
             adapter.name, exc.status, exc.status, before, after,
             after.source_max_dates, {}, exc.safe_reason,
             _provider_performance(perf_counter() - preflight_started),
+            exc.root_failure or root_failure_from_exception(
+                adapter.name, None, "PROVIDER_PREFLIGHT", exc
+            ),
         )
     except Exception as exc:
         after = _safe_current_identity(adapter, before)
         return ProviderOutcome(
-            adapter.name,
-            ProviderStatus.SOURCE_UNAVAILABLE,
-            ProviderStatus.SOURCE_UNAVAILABLE,
-            before,
-            after,
-            after.source_max_dates,
-            {},
+            adapter.name, ProviderStatus.SOURCE_UNAVAILABLE,
+            ProviderStatus.SOURCE_UNAVAILABLE, before, after,
+            after.source_max_dates, {},
             f"provider preflight failed: {type(exc).__name__}",
             _provider_performance(perf_counter() - preflight_started),
+            root_failure_from_exception(
+                adapter.name, None, "PROVIDER_PREFLIGHT", exc
+            ),
         )
     preflight_duration = perf_counter() - preflight_started
     preflight_source_max = {
@@ -209,40 +268,42 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
     }
     refresh_started = perf_counter()
     details: Mapping[str, object] = {}
+    root_failure: RootFailure | None = None
     try:
         refreshed = adapter.refresh()
         details = refreshed.performance
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
         )
-        reason = refreshed.safe_reason
-        domains = refreshed.domains
-        source_max = refreshed.source_max_dates
+        reason, domains = refreshed.safe_reason, refreshed.domains
+        source_max, root_failure = refreshed.source_max_dates, refreshed.root_failure
     except ProviderFailure as exc:
-        status = exc.status
-        reason = exc.safe_reason
-        domains = {}
+        status, reason, domains = exc.status, exc.safe_reason, {}
         source_max = preflight_source_max
+        root_failure = exc.root_failure or root_failure_from_exception(
+            adapter.name, None, "REFRESH", exc
+        )
     except Exception as exc:
         status = ProviderStatus.INGESTION_FAILURE
         reason = f"provider refresh failed: {type(exc).__name__}"
-        domains = {}
-        source_max = preflight_source_max
+        domains, source_max = {}, preflight_source_max
+        root_failure = root_failure_from_exception(
+            adapter.name, None, "REFRESH", exc
+        )
     after = _safe_current_identity(adapter, before)
     status, reason = _reconcile_status_with_identity(status, reason, before, after)
-    if (
-        status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
-        and after != before
-        and not domains
-    ):
-        status = ProviderStatus.PROMOTION_FAILURE
-        reason = "failed provider changed Current identity"
+    if status is ProviderStatus.PROMOTION_FAILURE and root_failure is None:
+        root_failure = RootFailure(
+            adapter.name, None, "PROMOTION", "PromotionContractFailure", None,
+            reason or "provider promotion contract failed",
+        )
     return ProviderOutcome(
-        adapter.name, preflight_status, status, before, after,
+        adapter.name, ProviderStatus.READY, status, before, after,
         source_max or after.source_max_dates, domains, reason,
         _provider_performance(
             preflight_duration, perf_counter() - refresh_started, details
         ),
+        root_failure,
     )
 
 
@@ -262,6 +323,9 @@ def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutc
                 adapter.name, ProviderStatus.PROMOTION_FAILURE,
                 ProviderStatus.PROMOTION_FAILURE, missing, missing, {}, {},
                 f"Current identity check failed: {type(exc).__name__}",
+                root_failure=root_failure_from_exception(
+                    adapter.name, None, "PROMOTION", exc
+                ),
             )
             continue
         preflight_started = perf_counter()
@@ -281,6 +345,9 @@ def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutc
                 adapter.name, exc.status, exc.status, before, after,
                 after.source_max_dates, {}, exc.safe_reason,
                 _provider_performance(perf_counter() - preflight_started),
+                exc.root_failure or root_failure_from_exception(
+                    adapter.name, None, "PROVIDER_PREFLIGHT", exc
+                ),
             )
         except Exception as exc:
             after = _safe_current_identity(adapter, before)
@@ -290,6 +357,9 @@ def _run_all_required(adapters: Sequence[ProviderAdapter]) -> tuple[ProviderOutc
                 after.source_max_dates, {},
                 f"provider preflight failed: {type(exc).__name__}",
                 _provider_performance(perf_counter() - preflight_started),
+                root_failure_from_exception(
+                    adapter.name, None, "PROVIDER_PREFLIGHT", exc
+                ),
             )
     if blocked:
         outcomes: list[ProviderOutcome] = []
@@ -322,6 +392,7 @@ def _refresh_preflighted(
 ) -> ProviderOutcome:
     refresh_started = perf_counter()
     details: Mapping[str, object] = {}
+    root_failure: RootFailure | None = None
     try:
         refreshed = adapter.refresh()
         details = refreshed.performance
@@ -331,24 +402,34 @@ def _refresh_preflighted(
         reason = refreshed.safe_reason
         domains = refreshed.domains
         source_max = refreshed.source_max_dates
+        root_failure = refreshed.root_failure
     except ProviderFailure as exc:
         status, reason, domains = exc.status, exc.safe_reason, {}
         source_max = preflight_source_max
+        root_failure = exc.root_failure or root_failure_from_exception(
+            adapter.name, None, "REFRESH", exc
+        )
     except Exception as exc:
         status = ProviderStatus.INGESTION_FAILURE
         reason = f"provider refresh failed: {type(exc).__name__}"
         domains, source_max = {}, preflight_source_max
+        root_failure = root_failure_from_exception(
+            adapter.name, None, "REFRESH", exc
+        )
     after = _safe_current_identity(adapter, before)
     status, reason = _reconcile_status_with_identity(status, reason, before, after)
-    if status not in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE} and after != before and not domains:
-        status = ProviderStatus.PROMOTION_FAILURE
-        reason = "failed provider changed Current identity"
+    if status is ProviderStatus.PROMOTION_FAILURE and root_failure is None:
+        root_failure = RootFailure(
+            adapter.name, None, "PROMOTION", "PromotionContractFailure", None,
+            reason or "provider promotion contract failed",
+        )
     return ProviderOutcome(
         adapter.name, ProviderStatus.READY, status, before, after,
         source_max or after.source_max_dates, domains, reason,
         _provider_performance(
             preflight_duration, perf_counter() - refresh_started, details
         ),
+        root_failure,
     )
 
 
@@ -406,7 +487,7 @@ def _restore_current_pointers(
     adapters: Sequence[ProviderAdapter],
     outcomes: tuple[ProviderOutcome, ...],
     snapshot: Mapping[Path, bytes],
-) -> tuple[ProviderOutcome, ...]:
+) -> tuple[tuple[ProviderOutcome, ...], RootFailure | None]:
     public_root = runtime.runtime_root / "public-market-data"
     current_paths = {
         path.relative_to(runtime.runtime_root): path
@@ -421,13 +502,8 @@ def _restore_current_pointers(
             if relative not in snapshot:
                 assert_runtime_write(runtime, target).unlink(missing_ok=True)
     except Exception as exc:
-        return tuple(
-            replace(
-                item,
-                status=ProviderStatus.PROMOTION_FAILURE,
-                safe_reason=f"Public Current rollback failed: {type(exc).__name__}",
-            )
-            for item in outcomes
+        return outcomes, root_failure_from_exception(
+            "transaction", None, "ROLLBACK", exc
         )
     refreshed: list[ProviderOutcome] = []
     for adapter, outcome in zip(adapters, outcomes, strict=True):
@@ -440,7 +516,7 @@ def _restore_current_pointers(
         refreshed.append(
             replace(outcome, status=status, current_after=after, safe_reason=reason)
         )
-    return tuple(refreshed)
+    return tuple(refreshed), None
 
 
 def _safe_current_identity(
@@ -490,7 +566,42 @@ def _outcome_payload(value: ProviderOutcome) -> dict[str, object]:
         "domains": dict(value.domains),
         "safe_reason": value.safe_reason,
         "performance": dict(value.performance),
+        "root_failure": (
+            None if value.root_failure is None else value.root_failure.as_dict()
+        ),
     }
+
+
+_WINDOWS_ABSOLUTE_PATH = re.compile(r"(?i)(?:[a-z]:\\[^\s;]+)")
+_UNIX_ABSOLUTE_PATH = re.compile(r"(?<!\w)/(?:[^\s;]+/)*[^\s;]+")
+_URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.IGNORECASE)
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(password|passwd|token|secret|credential|private_key|dsn)\s*[:=]\s*\S+"
+)
+
+
+def root_failure_from_exception(
+    provider: str,
+    domain: str | None,
+    stage: str,
+    exc: Exception,
+) -> RootFailure:
+    underlying = exc.__cause__ or exc.__context__
+    message = " ".join(str(exc).split()) or type(exc).__name__
+    message = _URL.sub("<redacted-url>", message)
+    message = _WINDOWS_ABSOLUTE_PATH.sub("<redacted-path>", message)
+    message = _UNIX_ABSOLUTE_PATH.sub("<redacted-path>", message)
+    message = _SECRET_ASSIGNMENT.sub(r"\1=<redacted>", message)[:500]
+    return RootFailure(
+        provider=provider,
+        domain=domain,
+        stage=stage,
+        exception_type=type(exc).__name__,
+        underlying_exception_type=(
+            None if underlying is None else type(underlying).__name__
+        ),
+        safe_message=message,
+    )
 
 
 def render_report(manifest: Mapping[str, object]) -> str:
@@ -545,6 +656,7 @@ def _reject_sensitive_metadata(payload: object) -> None:
 
 __all__ = [
     "CurrentIdentity", "OverallStatus", "ProviderAdapter", "ProviderFailure",
-    "ProviderOutcome", "ProviderStatus", "RefreshResult", "UnifiedRunResult",
+    "ProviderOutcome", "ProviderStatus", "RefreshResult", "RootFailure",
+    "UnifiedRunResult", "root_failure_from_exception",
     "render_report", "run_unified_refresh",
 ]

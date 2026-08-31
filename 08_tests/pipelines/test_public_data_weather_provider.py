@@ -15,6 +15,7 @@ from agri_research_agent.data_sources.lutou.live import (
 )
 from agri_research_agent.pipelines import public_data_providers
 from agri_research_agent.pipelines.public_data_providers import LutouRefreshAdapter
+from agri_research_agent.pipelines.lutou_weather import LutouWeatherStageError
 from agri_research_agent.pipelines.public_data_refresh import (
     ProviderFailure,
     ProviderStatus,
@@ -147,6 +148,52 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
         "soil-performance-telemetry/1"
     )
     assert client.ensure_count == 3
+
+
+def test_weather_soil_evidence_exception_preserves_structured_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_data_providers, "run_goal_b",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=True, candidate_manifest={"source_max_date": "2026-08-18"}
+        ),
+    )
+    monkeypatch.setattr(
+        public_data_providers, "run_goal_b_soil",
+        lambda *args, **kwargs: SimpleNamespace(
+            promoted=False, candidate_manifest={"source_max_date": "2026-08-15"}
+        ),
+    )
+
+    def fail_weather(*args, **kwargs):  # type: ignore[no-untyped-def]
+        try:
+            raise ValueError("formal soil evidence is invalid")
+        except ValueError as exc:
+            raise LutouWeatherStageError("SOIL_EVIDENCE", exc) from exc
+
+    monkeypatch.setattr(public_data_providers, "run_lutou_weather", fail_weather)
+    adapter = LutouRefreshAdapter(
+        LutouConnectionSettings("fixture.invalid", 3306, "reader", "fixture"),
+        _runtime(tmp_path), "weather-root", public_data_providers.date(2026, 8, 19),
+        Path("catalog.json"), weather_policy_path=Path("weather.yaml"),
+        weather_baseline_root=Path("baselines"),
+    )
+    adapter._client = Client()  # type: ignore[assignment]
+    adapter._weather_catalog = object()  # type: ignore[assignment]
+
+    result = adapter.refresh()
+
+    assert result.status is ProviderStatus.INGESTION_FAILURE
+    assert result.domains["three_oil"] == ProviderStatus.UPDATED.value
+    assert result.domains["weather"] == ProviderStatus.INGESTION_FAILURE.value
+    assert result.root_failure is not None
+    assert result.root_failure.provider == "lutou"
+    assert result.root_failure.domain == "weather"
+    assert result.root_failure.stage == "SOIL_EVIDENCE"
+    assert result.root_failure.exception_type == "LutouWeatherStageError"
+    assert result.root_failure.underlying_exception_type == "ValueError"
+    assert "formal soil evidence is invalid" in result.root_failure.safe_message
 
 
 def test_three_oil_rebuilds_stale_connection_before_extraction(
