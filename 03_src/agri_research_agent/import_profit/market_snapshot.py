@@ -14,7 +14,11 @@ from typing import Iterable, Mapping, TypeVar
 from .business_days import require_business_weekday
 from .cnf_store import CnfQuoteRecord, business_key_tuple
 from .config import SoybeanImportProfitConfig
-from .contract_mapping import map_soybean_contracts
+from .contract_override import (
+    ContractSelectionMode,
+    SoybeanContractSelection,
+    select_soybean_contracts,
+)
 from .fx import calculate_tenor_months, select_fx
 from .models import (
     BusinessKey,
@@ -26,6 +30,7 @@ from .models import (
     MappedContracts,
     MissingReason,
 )
+from .parameter_snapshot import build_parameter_snapshot
 from .soybean import SoybeanCalculationInput
 
 
@@ -38,8 +43,29 @@ MARKET_MISSING_REASON_ORDER = (
     MissingReason.MISSING_FX,
     MissingReason.MISSING_SOYMEAL,
     MissingReason.MISSING_SOYOIL,
+    MissingReason.MISSING_OVERRIDE_CBOT,
+    MissingReason.MISSING_OVERRIDE_SOYMEAL,
+    MissingReason.MISSING_OVERRIDE_SOYOIL,
 )
 _DCE_CONTRACT_CODE = re.compile(r"^[MY][0-9]{4}$")
+SOURCE_CONFIRMED_EXACT = "source_confirmed_exact"
+CONTINUOUS_INFERRED = "continuous_inferred"
+LEGACY_UNKNOWN = "legacy_unknown"
+CONTRACT_IDENTITY_STATUSES = frozenset(
+    {SOURCE_CONFIRMED_EXACT, CONTINUOUS_INFERRED, LEGACY_UNKNOWN}
+)
+QUOTE_DATE_SOURCE_CONFIRMED = "source_confirmed"
+QUOTE_DATE_TIME_ONLY_UNCONFIRMED = "time_only_unconfirmed"
+QUOTE_DATE_MISMATCH = "date_mismatch"
+QUOTE_DATE_LEGACY_UNKNOWN = "legacy_unknown"
+QUOTE_DATE_EVIDENCE_STATUSES = frozenset(
+    {
+        QUOTE_DATE_SOURCE_CONFIRMED,
+        QUOTE_DATE_TIME_ONLY_UNCONFIRMED,
+        QUOTE_DATE_MISMATCH,
+        QUOTE_DATE_LEGACY_UNKNOWN,
+    }
+)
 
 CbotKey = tuple[date, int, int]
 FxKey = tuple[date, int]
@@ -222,9 +248,13 @@ class DcePricePoint:
     source: str
     source_function: str
     is_usable: bool
+    quote_date_evidence_status: str
     source_quote_date: date | None = None
     source_quote_time: time | None = None
     source_snapshot_sha256: str | None = None
+    contract_identity_status: str = LEGACY_UNKNOWN
+    source_contract_code: str | None = None
+    source_delivery_month: int | None = None
 
     def __post_init__(self) -> None:
         _require_real_date(self.business_date, "business_date")
@@ -248,6 +278,10 @@ class DcePricePoint:
         _require_non_empty(self.source, "source")
         _require_non_empty(self.source_function, "source_function")
         _require_bool(self.is_usable, "is_usable")
+        if self.quote_date_evidence_status not in QUOTE_DATE_EVIDENCE_STATUSES:
+            raise MarketSnapshotValidationError(
+                "quote_date_evidence_status is unsupported"
+            )
         if self.source_quote_date is not None:
             _require_real_date(self.source_quote_date, "source_quote_date")
         if self.source_quote_time is not None and type(self.source_quote_time) is not time:
@@ -258,6 +292,78 @@ class DcePricePoint:
             _require_non_empty(
                 self.source_snapshot_sha256,
                 "source_snapshot_sha256",
+            )
+        if self.quote_date_evidence_status == QUOTE_DATE_SOURCE_CONFIRMED:
+            if self.source_quote_date is None:
+                raise MarketSnapshotValidationError(
+                    "source-confirmed quote date must be explicit"
+                )
+            if (
+                self.price_type == "night_session_close"
+                and self.source_quote_date >= self.business_date
+            ):
+                raise MarketSnapshotValidationError(
+                    "night-session quote date must precede its trading business_date"
+                )
+            if (
+                self.price_type != "night_session_close"
+                and self.source_quote_date != self.business_date
+            ):
+                raise MarketSnapshotValidationError(
+                    "source-confirmed quote date must match business_date"
+                )
+        elif self.quote_date_evidence_status == QUOTE_DATE_TIME_ONLY_UNCONFIRMED:
+            if self.source_quote_date is not None or self.is_usable:
+                raise MarketSnapshotValidationError(
+                    "time-only quote date evidence must be unusable and have no date"
+                )
+        elif self.quote_date_evidence_status == QUOTE_DATE_MISMATCH:
+            if self.source_quote_date is None or self.is_usable:
+                raise MarketSnapshotValidationError(
+                    "mismatched quote date evidence must be explicit and unusable"
+                )
+        if self.contract_identity_status not in CONTRACT_IDENTITY_STATUSES:
+            raise MarketSnapshotValidationError(
+                "contract_identity_status is unsupported"
+            )
+        if self.source_contract_code is not None and (
+            not isinstance(self.source_contract_code, str)
+            or _DCE_CONTRACT_CODE.fullmatch(self.source_contract_code) is None
+        ):
+            raise MarketSnapshotValidationError(
+                "source_contract_code must be a complete uppercase M/Y code or None"
+            )
+        if self.source_delivery_month is not None and (
+            isinstance(self.source_delivery_month, bool)
+            or not isinstance(self.source_delivery_month, int)
+            or not 1 <= self.source_delivery_month <= 12
+        ):
+            raise MarketSnapshotValidationError(
+                "source_delivery_month must be 1..12 or None"
+            )
+        resolved_month = int(self.contract_code[3:5])
+        if self.contract_identity_status == SOURCE_CONFIRMED_EXACT:
+            if (
+                self.source_contract_code != self.contract_code
+                or self.source_delivery_month != resolved_month
+            ):
+                raise MarketSnapshotValidationError(
+                    "source-confirmed identity must match the resolved contract"
+                )
+        elif self.contract_identity_status == CONTINUOUS_INFERRED:
+            if (
+                self.source_contract_code is not None
+                or self.source_delivery_month != resolved_month
+            ):
+                raise MarketSnapshotValidationError(
+                    "continuous identity requires only the matching source delivery month"
+                )
+        elif (
+            self.source_contract_code is not None
+            or self.source_delivery_month is not None
+        ):
+            raise MarketSnapshotValidationError(
+                "legacy identity cannot claim source contract evidence"
             )
 
     @property
@@ -278,7 +384,9 @@ class FxPointProvenance:
 class SoybeanMarketSnapshot:
     business_key: BusinessKey
     mapped_contracts: MappedContracts
+    contract_selection: SoybeanContractSelection
     parameter_version: str
+    parameter_hash: str
     cnf_cents_per_bushel: float | None
     cnf_source: str | None
     cbot_price_cents_per_bushel: float | None
@@ -300,10 +408,22 @@ class SoybeanMarketSnapshot:
     soymeal_price_type: str | None
     soymeal_source: str | None
     soymeal_source_function: str | None
+    soymeal_contract_identity_status: str | None
+    soymeal_source_contract_code: str | None
+    soymeal_source_delivery_month: int | None
+    soymeal_quote_date_evidence_status: str | None
+    soymeal_source_quote_date: date | None
+    soymeal_source_quote_time: time | None
     soyoil_price_cny_per_tonne: float | None
     soyoil_price_type: str | None
     soyoil_source: str | None
     soyoil_source_function: str | None
+    soyoil_contract_identity_status: str | None
+    soyoil_source_contract_code: str | None
+    soyoil_source_delivery_month: int | None
+    soyoil_quote_date_evidence_status: str | None
+    soyoil_source_quote_date: date | None
+    soyoil_source_quote_time: time | None
     snapshot_status: SnapshotStatus
     missing_reasons: tuple[MissingReason, ...]
 
@@ -312,20 +432,32 @@ class SoybeanMarketSnapshot:
         return self.mapped_contracts.mapping_identity
 
     @property
+    def mapping_hash(self) -> str:
+        return self.mapped_contracts.mapping_hash
+
+    @property
+    def contract_override_hash(self) -> str:
+        return self.contract_selection.contract_override_hash
+
+    @property
     def cbot_contract_year(self) -> int:
-        return self.mapped_contracts.cbot.contract_year
+        return self.contract_selection.cbot.effective_contract.contract_year
 
     @property
     def cbot_contract_month(self) -> int:
-        return self.mapped_contracts.cbot.contract_month
+        return self.contract_selection.cbot.effective_contract.contract_month
 
     @property
     def soymeal_contract_code(self) -> str:
-        return self.mapped_contracts.soymeal.code
+        contract = self.contract_selection.soymeal.effective_contract
+        assert hasattr(contract, "code")
+        return contract.code
 
     @property
     def soyoil_contract_code(self) -> str:
-        return self.mapped_contracts.soyoil.code
+        contract = self.contract_selection.soyoil.effective_contract
+        assert hasattr(contract, "code")
+        return contract.code
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,11 +539,10 @@ def build_soybean_market_snapshot_from_index(
             "market_index must be a validated MarketDataIndex"
         )
 
-    mapped = map_soybean_contracts(
-        config,
-        business_key.shipment_year,
-        business_key.shipment_month,
-    )
+    selection = select_soybean_contracts(config, business_key)
+    mapped = selection.automatic
+    provenance = build_parameter_snapshot(config)
+    assert provenance.parameter_hash is not None
     cnf_record = market_index.cnf_by_key.get(business_key_tuple(business_key))
     cnf_value = (
         None if cnf_record is None else cnf_record.cnf_cents_per_bushel
@@ -420,8 +551,8 @@ def build_soybean_market_snapshot_from_index(
     cbot_record = market_index.cbot_by_key.get(
         (
             business_key.business_date,
-            mapped.cbot.contract_year,
-            mapped.cbot.contract_month,
+            selection.cbot.effective_contract.contract_year,
+            selection.cbot.effective_contract.contract_month,
         )
     )
     selected_cbot = (
@@ -458,19 +589,31 @@ def build_soybean_market_snapshot_from_index(
     fx_identity = _shared_value(fx_provenance, "source_snapshot_sha256")
 
     soymeal_record = market_index.dce_by_key.get(
-        (business_key.business_date, mapped.soymeal.code)
+        (
+            business_key.business_date,
+            selection.soymeal.effective_contract.code,
+        )
     )
     selected_soymeal = (
         soymeal_record
-        if soymeal_record is not None and soymeal_record.is_usable
+        if soymeal_record is not None
+        and soymeal_record.is_usable
+        and soymeal_record.quote_date_evidence_status
+        == QUOTE_DATE_SOURCE_CONFIRMED
         else None
     )
     soyoil_record = market_index.dce_by_key.get(
-        (business_key.business_date, mapped.soyoil.code)
+        (
+            business_key.business_date,
+            selection.soyoil.effective_contract.code,
+        )
     )
     selected_soyoil = (
         soyoil_record
-        if soyoil_record is not None and soyoil_record.is_usable
+        if soyoil_record is not None
+        and soyoil_record.is_usable
+        and soyoil_record.quote_date_evidence_status
+        == QUOTE_DATE_SOURCE_CONFIRMED
         else None
     )
 
@@ -480,20 +623,35 @@ def build_soybean_market_snapshot_from_index(
             (cnf_value, MissingReason.MISSING_CNF),
             (
                 None if selected_cbot is None else selected_cbot.price_cents_per_bushel,
-                MissingReason.MISSING_CBOT,
+                (
+                    MissingReason.MISSING_OVERRIDE_CBOT
+                    if selection.cbot.selection_mode
+                    is ContractSelectionMode.MANUAL_OVERRIDE
+                    else MissingReason.MISSING_CBOT
+                ),
             ),
             (fx_selection.fx_value, MissingReason.MISSING_FX),
             (
                 None
                 if selected_soymeal is None
                 else selected_soymeal.price_cny_per_tonne,
-                MissingReason.MISSING_SOYMEAL,
+                (
+                    MissingReason.MISSING_OVERRIDE_SOYMEAL
+                    if selection.soymeal.selection_mode
+                    is ContractSelectionMode.MANUAL_OVERRIDE
+                    else MissingReason.MISSING_SOYMEAL
+                ),
             ),
             (
                 None
                 if selected_soyoil is None
                 else selected_soyoil.price_cny_per_tonne,
-                MissingReason.MISSING_SOYOIL,
+                (
+                    MissingReason.MISSING_OVERRIDE_SOYOIL
+                    if selection.soyoil.selection_mode
+                    is ContractSelectionMode.MANUAL_OVERRIDE
+                    else MissingReason.MISSING_SOYOIL
+                ),
             ),
         )
         if value is None
@@ -506,7 +664,9 @@ def build_soybean_market_snapshot_from_index(
     return SoybeanMarketSnapshot(
         business_key=business_key,
         mapped_contracts=mapped,
+        contract_selection=selection,
         parameter_version=str(config.schema_version),
+        parameter_hash=provenance.parameter_hash,
         cnf_cents_per_bushel=cnf_value,
         cnf_source=None if cnf_record is None else cnf_record.source,
         cbot_price_cents_per_bushel=(
@@ -556,6 +716,32 @@ def build_soybean_market_snapshot_from_index(
             if selected_soymeal is None
             else selected_soymeal.source_function
         ),
+        soymeal_contract_identity_status=(
+            None
+            if soymeal_record is None
+            else soymeal_record.contract_identity_status
+        ),
+        soymeal_source_contract_code=(
+            None
+            if soymeal_record is None
+            else soymeal_record.source_contract_code
+        ),
+        soymeal_source_delivery_month=(
+            None
+            if soymeal_record is None
+            else soymeal_record.source_delivery_month
+        ),
+        soymeal_quote_date_evidence_status=(
+            None
+            if soymeal_record is None
+            else soymeal_record.quote_date_evidence_status
+        ),
+        soymeal_source_quote_date=(
+            None if soymeal_record is None else soymeal_record.source_quote_date
+        ),
+        soymeal_source_quote_time=(
+            None if soymeal_record is None else soymeal_record.source_quote_time
+        ),
         soyoil_price_cny_per_tonne=(
             None
             if selected_soyoil is None
@@ -571,6 +757,32 @@ def build_soybean_market_snapshot_from_index(
             None
             if selected_soyoil is None
             else selected_soyoil.source_function
+        ),
+        soyoil_contract_identity_status=(
+            None
+            if soyoil_record is None
+            else soyoil_record.contract_identity_status
+        ),
+        soyoil_source_contract_code=(
+            None
+            if soyoil_record is None
+            else soyoil_record.source_contract_code
+        ),
+        soyoil_source_delivery_month=(
+            None
+            if soyoil_record is None
+            else soyoil_record.source_delivery_month
+        ),
+        soyoil_quote_date_evidence_status=(
+            None
+            if soyoil_record is None
+            else soyoil_record.quote_date_evidence_status
+        ),
+        soyoil_source_quote_date=(
+            None if soyoil_record is None else soyoil_record.source_quote_date
+        ),
+        soyoil_source_quote_time=(
+            None if soyoil_record is None else soyoil_record.source_quote_time
         ),
         snapshot_status=status,
         missing_reasons=missing_reasons,
@@ -594,7 +806,10 @@ def snapshot_to_calculation_input(
         )
     if (
         snapshot.parameter_version != str(config.schema_version)
+        or snapshot.parameter_hash
+        != build_parameter_snapshot(config).parameter_hash
         or snapshot.mapping_identity != config.contract_mapping_identity
+        or snapshot.contract_override_hash != config.contract_override_hash
     ):
         raise MarketSnapshotValidationError(
             "snapshot configuration identity does not match config"
@@ -602,15 +817,17 @@ def snapshot_to_calculation_input(
     return SoybeanCalculationInput(
         business_key=snapshot.business_key,
         cnf_cents_per_bushel=snapshot.cnf_cents_per_bushel,
-        cbot_contract=snapshot.mapped_contracts.cbot,
+        cbot_contract=snapshot.contract_selection.cbot.effective_contract,
         cbot_daily_price_cents_per_bushel=snapshot.cbot_price_cents_per_bushel,
         fx_value=snapshot.fx_value,
-        soymeal_contract=snapshot.mapped_contracts.soymeal,
+        soymeal_contract=snapshot.contract_selection.soymeal.effective_contract,
         soymeal_price_cny_per_tonne=snapshot.soymeal_price_cny_per_tonne,
-        soyoil_contract=snapshot.mapped_contracts.soyoil,
+        soyoil_contract=snapshot.contract_selection.soyoil.effective_contract,
         soyoil_price_cny_per_tonne=snapshot.soyoil_price_cny_per_tonne,
         resolved_parameters=config.resolve_parameters(snapshot.business_key.origin),
         mapping_identity=snapshot.mapping_identity,
+        mapping_hash=snapshot.mapping_hash,
+        contract_override_hash=snapshot.contract_override_hash,
     )
 
 

@@ -30,6 +30,7 @@ from agri_research_agent.pipelines.import_profit_runtime import (
 )
 from test_import_profit_daily_increment import (
     CONFIG_PATH,
+    PREVIOUS_TRADING_DATE,
     TARGET,
     calendar_frame,
     clock_at,
@@ -59,7 +60,12 @@ def prepare_external(tmp_path, *, candidate_id="external-001"):
 
 
 def prepare_dce(
-    tmp_path, *, failed=False, partial=False, candidate_id="dce-001"
+    tmp_path,
+    *,
+    failed=False,
+    partial=False,
+    time_only=False,
+    candidate_id="dce-001",
 ):
     return capture_and_store_dce_night_session_close(
         tmp_path / "dce",
@@ -68,7 +74,10 @@ def prepare_dce(
         candidate_id=candidate_id,
         snapshot_batch_id=f"snapshot-{candidate_id}",
         fetcher=lambda request: frame_for(
-            request, omit_last=partial, omit_all=failed
+            request,
+            omit_last=partial,
+            omit_all=failed,
+            quote_date=None if time_only else PREVIOUS_TRADING_DATE,
         ),
         trade_calendar_fetcher=calendar_frame,
         clock=clock_at(8, 30, 1),
@@ -119,6 +128,17 @@ def test_both_input_arrival_orders_use_one_idempotent_materializer(tmp_path, fir
     assert result.incomplete_count_delta == 48
     assert loaded.dataset.business_key_count == 50
     assert loaded.resolved.previous_release_id == before.release_id
+    assert loaded.resolved.mapping_provenance == before.mapping_provenance
+    assert (
+        loaded.resolved.contract_override_provenance
+        == before.contract_override_provenance
+    )
+    assert {
+        record.mapping_hash for record in loaded.dataset.records
+    } == {before.mapping_provenance.mapping_hash}
+    assert {
+        record.contract_override_hash for record in loaded.dataset.records
+    } == {before.contract_override_provenance.contract_override_hash}
     assert loaded.resolved.manual_cnf_exists is False
     assert sum(
         record.business_date == TARGET for record in loaded.dataset.records
@@ -127,6 +147,14 @@ def test_both_input_arrival_orders_use_one_idempotent_materializer(tmp_path, fir
         record.cnf_cents_per_bushel is None
         and record.cnf_source == "manual_ui"
         and "missing_cnf" in record.missing_reasons
+        for record in loaded.dataset.records
+        if record.business_date == TARGET
+    )
+    assert all(
+        record.soymeal_contract_identity_status == "source_confirmed_exact"
+        and record.soymeal_source_contract_code == record.soymeal_contract
+        and record.soyoil_contract_identity_status == "source_confirmed_exact"
+        and record.soyoil_source_contract_code == record.soyoil_contract
         for record in loaded.dataset.records
         if record.business_date == TARGET
     )
@@ -153,6 +181,32 @@ def test_legal_failed_dce_still_materializes_all_keys_with_missing_dce(tmp_path)
         and "missing_soyoil" in record.missing_reasons
         for record in records
     )
+
+
+def test_time_only_dce_is_diagnostic_only_and_release_is_incomplete(tmp_path):
+    runtime_root, _, _ = bootstrap_fixture(tmp_path)
+    prepare_external(tmp_path)
+    prepare_dce(tmp_path, time_only=True)
+
+    result = materialize(runtime_root, tmp_path)
+    loaded = load_runtime_release_dataset(runtime_root)
+    target_records = [
+        record
+        for record in loaded.dataset.records
+        if record.business_date == TARGET
+    ]
+
+    assert result.status == "materialized"
+    assert target_records
+    assert all(record.calculation_status == "incomplete" for record in target_records)
+    assert all(record.soymeal_price_cny_per_tonne is None for record in target_records)
+    assert all(record.soyoil_price_cny_per_tonne is None for record in target_records)
+    assert {
+        record.soymeal_quote_date_evidence_status for record in target_records
+    } == {"time_only_unconfirmed"}
+    assert {
+        record.soyoil_quote_date_evidence_status for record in target_records
+    } == {"time_only_unconfirmed"}
     assert (
         load_runtime_release_dataset(runtime_root)
         .resolved.manifest["night_session_close_start_date"]

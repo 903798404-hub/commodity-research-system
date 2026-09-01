@@ -34,4 +34,5 @@ def map_soybean_contracts(
         soymeal=DceContract.soymeal(dce_year, rule.dce.contract_month),
         soyoil=DceContract.soyoil(dce_year, rule.dce.contract_month),
         mapping_identity=config.contract_mapping_identity,
+        mapping_hash=config.contract_mapping_hash,
     )

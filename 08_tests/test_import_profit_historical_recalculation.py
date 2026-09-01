@@ -248,7 +248,7 @@ def test_strict_parquet_loaders_reject_unsorted_and_wrong_schema(tmp_path):
 
 def test_dce_exact_resolution_deduplicates_and_preserves_provenance():
     result = run()
-    assert len(result.resolved_dce_points) == 8
+    assert len(result.resolved_dce_points) == 6
     assert {point.business_date for point in result.resolved_dce_points} == {DAY}
     assert {point.source for point in result.resolved_dce_points} == {"reuters_sql"}
     assert {point.price_type for point in result.resolved_dce_points} == {

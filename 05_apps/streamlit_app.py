@@ -46,6 +46,9 @@ from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import get_external_app_url, render_home
 from import_profit_runtime_page import render_import_profit_runtime_page
+from import_profit_intraday_runtime_page import (
+    render_import_profit_intraday_runtime_page,
+)
 from international_spread_page import render_international_spread_page
 from navigation import (
     IMPORT_PROFIT_ROUTE_ID,
@@ -351,15 +354,51 @@ def render_import_profit_route() -> None:
     configured_path = os.getenv(
         "IMPORT_PROFIT_CONFIG_PATH", ""
     ).strip()
+    intraday_result_root = os.getenv(
+        "IMPORT_PROFIT_INTRADAY_RESULT_ROOT", ""
+    ).strip()
+    intraday_snapshot_root = os.getenv(
+        "IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT", ""
+    ).strip()
+    intraday_page_mode = os.getenv(
+        "IMPORT_PROFIT_INTRADAY_PAGE_MODE", "STRICT_RUNTIME"
+    ).strip()
+    intraday_environment = os.getenv(
+        "IMPORT_PROFIT_INTRADAY_ENVIRONMENT", "FORMAL"
+    ).strip()
+    preview_historical_cnf_path = os.getenv(
+        "IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH", ""
+    ).strip()
+    intraday_cnf_store_path = os.getenv(
+        "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH", ""
+    ).strip()
+    allow_intraday_cnf_save = os.getenv(
+        "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE", "0"
+    ).strip() == "1"
     config_path = (
         Path(configured_path)
         if configured_path
         else CONFIG_DIR / "import_profit_soybean.yaml"
     )
-    render_import_profit_runtime_page(
-        runtime_root or None,
-        config_path=config_path,
-    )
+    if intraday_result_root:
+        render_import_profit_intraday_runtime_page(
+            runtime_root or None,
+            result_root=intraday_result_root,
+            snapshot_root=intraday_snapshot_root or None,
+            config_path=config_path,
+            page_mode=intraday_page_mode,
+            environment=intraday_environment,
+            preview_historical_cnf_path=(
+                preview_historical_cnf_path or None
+            ),
+            intraday_cnf_store_path=(intraday_cnf_store_path or None),
+            allow_cnf_save=allow_intraday_cnf_save,
+        )
+    else:
+        render_import_profit_runtime_page(
+            runtime_root or None,
+            config_path=config_path,
+        )
 
 
 def apply_workspace_navigation_request() -> None:

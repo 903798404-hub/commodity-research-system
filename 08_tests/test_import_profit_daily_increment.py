@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 import json
 from pathlib import Path
@@ -7,7 +8,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from agri_research_agent.import_profit.config import load_soybean_config
+from agri_research_agent.import_profit.config import (
+    ContractOverrideConfig,
+    ContractOverrideRule,
+    load_soybean_config,
+)
+from agri_research_agent.import_profit.models import DceContract
 from agri_research_agent.import_profit.daily_increment import (
     DailyIncrementError,
     capture_and_store_dce_night_session_close,
@@ -23,10 +29,15 @@ from agri_research_agent.import_profit.dce_daily import (
 
 CONFIG_PATH = Path("02_configs/import_profit_soybean.yaml")
 TARGET = date(2026, 8, 5)
+PREVIOUS_TRADING_DATE = date(2026, 8, 4)
 
 
 def frame_for(
-    request: str, *, omit_last: bool = False, omit_all: bool = False
+    request: str,
+    *,
+    omit_last: bool = False,
+    omit_all: bool = False,
+    quote_date: date | None = PREVIOUS_TRADING_DATE,
 ) -> pd.DataFrame:
     contracts = [normalize_full_contract_code(code) for code in request.split(",")]
     if omit_last:
@@ -43,6 +54,7 @@ def frame_for(
                 else 8000.0 + index * 10
                 for index, item in enumerate(contracts)
             ],
+            "date": [quote_date] * len(contracts),
         }
     )
 
@@ -59,7 +71,7 @@ def clock_at(hour: int, minute: int, second: int):
 
 def calendar_frame() -> pd.DataFrame:
     return pd.DataFrame(
-        {"trade_date": [date(2026, 8, 4), TARGET]}
+        {"trade_date": [PREVIOUS_TRADING_DATE, TARGET]}
     )
 
 
@@ -80,6 +92,35 @@ def test_fixed_daily_keys_and_unique_dce_contracts():
         for origin in config.origin_codes
     )
     assert len(contracts) == len(set(contracts))
+
+
+def test_required_dce_contracts_include_effective_override_without_dropping_automatic():
+    config = load_soybean_config(CONFIG_PATH)
+    overridden = replace(
+        config,
+        contract_override=ContractOverrideConfig(
+            True,
+            (
+                ContractOverrideRule(
+                    origin="brazil",
+                    shipment_year=2026,
+                    shipment_month=12,
+                    effective_from_business_date=TARGET,
+                    effective_to_business_date=None,
+                    cbot_contract=None,
+                    soymeal_contract=DceContract.soymeal(2028, 9),
+                    soyoil_contract=None,
+                    reason="source contract anomaly",
+                ),
+            ),
+        ),
+    )
+
+    contracts = required_dce_contracts(TARGET, overridden)
+
+    assert "M2809" in contracts
+    assert "M2701" in contracts
+    assert "Y2701" in contracts
 
 
 @pytest.mark.parametrize("minute,second", [(30, 0), (32, 59)])
@@ -145,6 +186,32 @@ def test_all_contracts_failed_records_failed_without_parquet(tmp_path):
     assert not (
         result.outcome.candidate_dir / "dce_night_session_close_prices.parquet"
     ).exists()
+
+
+def test_time_only_candidate_retains_diagnostics_but_is_not_usable(tmp_path):
+    root = tmp_path / "dce"
+    result = capture_and_store_dce_night_session_close(
+        root,
+        business_date=TARGET,
+        config=load_soybean_config(CONFIG_PATH),
+        candidate_id="dce-time-only",
+        snapshot_batch_id="snapshot-time-only",
+        fetcher=lambda request: frame_for(request, quote_date=None),
+        trade_calendar_fetcher=calendar_frame,
+        clock=clock_at(8, 30, 1),
+    )
+
+    assert result.outcome.attempt_status == "failed"
+    assert result.outcome.available_contracts == ()
+    assert "quote_date_unconfirmed" in result.outcome.failure_reasons
+    parquet = result.outcome.candidate_dir / "dce_night_session_close_prices.parquet"
+    assert parquet.is_file()
+    rows = pd.read_parquet(parquet).to_dict("records")
+    assert rows
+    assert {row["quote_date_evidence_status"] for row in rows} == {
+        "time_only_unconfirmed"
+    }
+    assert {row["is_usable"] for row in rows} == {False}
 
 
 def test_outside_window_fails_without_candidate_or_index(tmp_path):

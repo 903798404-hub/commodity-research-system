@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from enum import StrEnum
 import hashlib
 from pathlib import Path
@@ -16,7 +16,18 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from .historical_cnf_adapter import shipment_year_for
-from .result_store import RESULT_SCHEMA, SNAPSHOT_SCHEMA
+from .result_store import (
+    LEGACY_CONTRACT_IDENTITY_SNAPSHOT_SCHEMA,
+    LEGACY_QUOTE_DATE_SNAPSHOT_SCHEMA,
+    LEGACY_RESULT_SCHEMA,
+    LEGACY_SNAPSHOT_SCHEMA,
+    LEGACY_MAPPING_PROVENANCE_RESULT_SCHEMA,
+    LEGACY_MAPPING_PROVENANCE_SNAPSHOT_SCHEMA,
+    LEGACY_OVERRIDE_PROVENANCE_RESULT_SCHEMA,
+    LEGACY_OVERRIDE_PROVENANCE_SNAPSHOT_SCHEMA,
+    RESULT_SCHEMA,
+    SNAPSHOT_SCHEMA,
+)
 
 
 KEY_FIELDS = (
@@ -123,6 +134,39 @@ class SoybeanQueryRecord:
     soyoil_price_type: str | None
     parameter_version: str
     mapping_identity: str
+    parameter_hash: str | None = None
+    mapping_hash: str | None = None
+    contract_override_hash: str | None = None
+    soymeal_contract_identity_status: str | None = None
+    soymeal_source_contract_code: str | None = None
+    soymeal_source_delivery_month: int | None = None
+    soyoil_contract_identity_status: str | None = None
+    soyoil_source_contract_code: str | None = None
+    soyoil_source_delivery_month: int | None = None
+    soymeal_quote_date_evidence_status: str | None = None
+    soymeal_source_quote_date: date | None = None
+    soymeal_source_quote_time: time | None = None
+    soyoil_quote_date_evidence_status: str | None = None
+    soyoil_source_quote_date: date | None = None
+    soyoil_source_quote_time: time | None = None
+    cbot_automatic_contract: str | None = None
+    cbot_override_contract: str | None = None
+    cbot_selection_mode: str = "legacy_unknown"
+    cbot_override_reason: str | None = None
+    cbot_override_effective_from: date | None = None
+    cbot_override_effective_to: date | None = None
+    soymeal_automatic_contract: str | None = None
+    soymeal_override_contract: str | None = None
+    soymeal_selection_mode: str = "legacy_unknown"
+    soymeal_override_reason: str | None = None
+    soymeal_override_effective_from: date | None = None
+    soymeal_override_effective_to: date | None = None
+    soyoil_automatic_contract: str | None = None
+    soyoil_override_contract: str | None = None
+    soyoil_selection_mode: str = "legacy_unknown"
+    soyoil_override_reason: str | None = None
+    soyoil_override_effective_from: date | None = None
+    soyoil_override_effective_to: date | None = None
 
     @property
     def key(self) -> CanonicalKey:
@@ -265,10 +309,26 @@ def load_soybean_query_dataset(
         business_keys_path, HISTORICAL_BUSINESS_KEY_SCHEMA, "business keys"
     )
     snapshot_table, snapshot_identity = _read_exact(
-        snapshots_path, SNAPSHOT_SCHEMA, "snapshots"
+        snapshots_path,
+        SNAPSHOT_SCHEMA,
+        "snapshots",
+        compatible_schemas=(
+            LEGACY_OVERRIDE_PROVENANCE_SNAPSHOT_SCHEMA,
+            LEGACY_MAPPING_PROVENANCE_SNAPSHOT_SCHEMA,
+            LEGACY_QUOTE_DATE_SNAPSHOT_SCHEMA,
+            LEGACY_CONTRACT_IDENTITY_SNAPSHOT_SCHEMA,
+            LEGACY_SNAPSHOT_SCHEMA,
+        ),
     )
     result_table, result_identity = _read_exact(
-        results_path, RESULT_SCHEMA, "results"
+        results_path,
+        RESULT_SCHEMA,
+        "results",
+        compatible_schemas=(
+            LEGACY_OVERRIDE_PROVENANCE_RESULT_SCHEMA,
+            LEGACY_MAPPING_PROVENANCE_RESULT_SCHEMA,
+            LEGACY_RESULT_SCHEMA,
+        ),
     )
     load_seconds = perf_counter() - started
 
@@ -337,7 +397,104 @@ def load_soybean_query_dataset(
             soymeal_price_type=snapshot["soymeal_price_type"],
             soyoil_price_type=snapshot["soyoil_price_type"],
             parameter_version=snapshot["parameter_version"],
+            parameter_hash=snapshot.get("parameter_hash"),
             mapping_identity=snapshot["mapping_identity"],
+            mapping_hash=snapshot.get("mapping_hash"),
+            contract_override_hash=snapshot.get("contract_override_hash"),
+            soymeal_contract_identity_status=snapshot.get(
+                "soymeal_contract_identity_status", "legacy_unknown"
+            ),
+            soymeal_source_contract_code=snapshot.get(
+                "soymeal_source_contract_code"
+            ),
+            soymeal_source_delivery_month=snapshot.get(
+                "soymeal_source_delivery_month"
+            ),
+            soyoil_contract_identity_status=snapshot.get(
+                "soyoil_contract_identity_status", "legacy_unknown"
+            ),
+            soyoil_source_contract_code=snapshot.get(
+                "soyoil_source_contract_code"
+            ),
+            soyoil_source_delivery_month=snapshot.get(
+                "soyoil_source_delivery_month"
+            ),
+            soymeal_quote_date_evidence_status=snapshot.get(
+                "soymeal_quote_date_evidence_status", "legacy_unknown"
+            ),
+            soymeal_source_quote_date=snapshot.get(
+                "soymeal_source_quote_date"
+            ),
+            soymeal_source_quote_time=snapshot.get(
+                "soymeal_source_quote_time"
+            ),
+            soyoil_quote_date_evidence_status=snapshot.get(
+                "soyoil_quote_date_evidence_status", "legacy_unknown"
+            ),
+            soyoil_source_quote_date=snapshot.get(
+                "soyoil_source_quote_date"
+            ),
+            soyoil_source_quote_time=snapshot.get(
+                "soyoil_source_quote_time"
+            ),
+            cbot_automatic_contract=(
+                None
+                if snapshot.get("cbot_automatic_contract_year") is None
+                else (
+                    f"{snapshot['cbot_automatic_contract_year']:04d}-"
+                    f"{snapshot['cbot_automatic_contract_month']:02d}"
+                )
+            ),
+            cbot_override_contract=(
+                None
+                if snapshot.get("cbot_override_contract_year") is None
+                else (
+                    f"{snapshot['cbot_override_contract_year']:04d}-"
+                    f"{snapshot['cbot_override_contract_month']:02d}"
+                )
+            ),
+            cbot_selection_mode=snapshot.get(
+                "cbot_selection_mode", "legacy_unknown"
+            ),
+            cbot_override_reason=snapshot.get("cbot_override_reason"),
+            cbot_override_effective_from=snapshot.get(
+                "cbot_override_effective_from"
+            ),
+            cbot_override_effective_to=snapshot.get(
+                "cbot_override_effective_to"
+            ),
+            soymeal_automatic_contract=snapshot.get(
+                "soymeal_automatic_contract_code"
+            ),
+            soymeal_override_contract=snapshot.get(
+                "soymeal_override_contract_code"
+            ),
+            soymeal_selection_mode=snapshot.get(
+                "soymeal_selection_mode", "legacy_unknown"
+            ),
+            soymeal_override_reason=snapshot.get("soymeal_override_reason"),
+            soymeal_override_effective_from=snapshot.get(
+                "soymeal_override_effective_from"
+            ),
+            soymeal_override_effective_to=snapshot.get(
+                "soymeal_override_effective_to"
+            ),
+            soyoil_automatic_contract=snapshot.get(
+                "soyoil_automatic_contract_code"
+            ),
+            soyoil_override_contract=snapshot.get(
+                "soyoil_override_contract_code"
+            ),
+            soyoil_selection_mode=snapshot.get(
+                "soyoil_selection_mode", "legacy_unknown"
+            ),
+            soyoil_override_reason=snapshot.get("soyoil_override_reason"),
+            soyoil_override_effective_from=snapshot.get(
+                "soyoil_override_effective_from"
+            ),
+            soyoil_override_effective_to=snapshot.get(
+                "soyoil_override_effective_to"
+            ),
         )
         by_key[record.key] = record
         month_key = (
@@ -480,7 +637,11 @@ def _metric(metric: QueryMetric | str) -> QueryMetric:
 
 
 def _read_exact(
-    path: str | Path, schema: pa.Schema, label: str
+    path: str | Path,
+    schema: pa.Schema,
+    label: str,
+    *,
+    compatible_schemas: tuple[pa.Schema, ...] = (),
 ) -> tuple[pa.Table, SafeFileIdentity]:
     source = Path(path)
     if not source.is_file():
@@ -490,13 +651,14 @@ def _read_exact(
         metadata_count = pq.ParquetFile(source).metadata.num_rows
     except Exception as exc:
         raise QuerySchemaError(f"failed to read {label} Parquet") from exc
-    if table.schema != schema:
+    allowed_schemas = (schema, *compatible_schemas)
+    if table.schema not in allowed_schemas:
         raise QuerySchemaError(f"{label} Schema or field order does not match")
     if metadata_count != table.num_rows:
         raise QuerySchemaError(f"{label} metadata row count does not match")
     digest = hashlib.sha256(source.read_bytes()).hexdigest().upper()
     fingerprint = hashlib.sha256(
-        schema.serialize().to_pybytes()
+        table.schema.serialize().to_pybytes()
     ).hexdigest().upper()
     return table, SafeFileIdentity(
         filename=source.name,
@@ -584,23 +746,59 @@ def _validate_joined_rows(
         raise QueryDataIntegrityError("missing reasons are inconsistent")
     if snapshot["parameter_version"] != result["parameter_version"]:
         raise QueryDataIntegrityError("parameter versions are inconsistent")
+    if snapshot.get("parameter_hash") != result.get("parameter_hash"):
+        raise QueryDataIntegrityError("parameter hashes are inconsistent")
     if snapshot["mapping_identity"] != result["mapping_identity"]:
         raise QueryDataIntegrityError("mapping identities are inconsistent")
+    if snapshot.get("mapping_hash") != result.get("mapping_hash"):
+        raise QueryDataIntegrityError("mapping hashes are inconsistent")
+    if snapshot.get("contract_override_hash") != result.get(
+        "contract_override_hash"
+    ):
+        raise QueryDataIntegrityError(
+            "contract override hashes are inconsistent"
+        )
+    _validate_contract_selection(snapshot)
+    _validate_contract_identity(snapshot, "soymeal")
+    _validate_contract_identity(snapshot, "soyoil")
+    _validate_quote_date_evidence(snapshot, "soymeal")
+    _validate_quote_date_evidence(snapshot, "soyoil")
     if key_row["cnf_source"] != snapshot["cnf_source"]:
         raise QueryDataIntegrityError("CNF sources are inconsistent")
     cnf_value = snapshot["cnf_cents_per_bushel"]
     if key_row["cnf_is_null"] != (cnf_value is None):
         raise QueryDataIntegrityError("business-key CNF null marker is inconsistent")
-    for value, reason in (
+    for value, reasons in (
         (cnf_value, "missing_cnf"),
-        (snapshot["cbot_price_cents_per_bushel"], "missing_cbot"),
+        (
+            snapshot["cbot_price_cents_per_bushel"],
+            (
+                "override_cbot_contract_price_missing"
+                if snapshot.get("cbot_selection_mode") == "manual_override"
+                else "missing_cbot"
+            ),
+        ),
         (snapshot["fx_value"], "missing_fx"),
-        (snapshot["soymeal_price_cny_per_tonne"], "missing_soymeal"),
-        (snapshot["soyoil_price_cny_per_tonne"], "missing_soyoil"),
+        (
+            snapshot["soymeal_price_cny_per_tonne"],
+            (
+                "override_soymeal_contract_price_missing"
+                if snapshot.get("soymeal_selection_mode") == "manual_override"
+                else "missing_soymeal"
+            ),
+        ),
+        (
+            snapshot["soyoil_price_cny_per_tonne"],
+            (
+                "override_soyoil_contract_price_missing"
+                if snapshot.get("soyoil_selection_mode") == "manual_override"
+                else "missing_soyoil"
+            ),
+        ),
     ):
-        if (value is None) != (reason in snapshot["missing_reasons"]):
+        if (value is None) != (reasons in snapshot["missing_reasons"]):
             raise QueryDataIntegrityError(
-                f"{reason} value and missing reason are inconsistent"
+                f"{reasons} value and missing reason are inconsistent"
             )
     if (snapshot["snapshot_status"] == "complete") != (
         len(snapshot["missing_reasons"]) == 0
@@ -608,3 +806,126 @@ def _validate_joined_rows(
         raise QueryDataIntegrityError(
             "snapshot status and missing reasons are inconsistent"
         )
+
+
+def _validate_contract_identity(snapshot: dict, leg: str) -> None:
+    status_field = f"{leg}_contract_identity_status"
+    if status_field not in snapshot:
+        return
+    status = snapshot[status_field]
+    source_code = snapshot[f"{leg}_source_contract_code"]
+    source_month = snapshot[f"{leg}_source_delivery_month"]
+    resolved_code = snapshot[f"{leg}_contract_code"]
+    if status is None:
+        if source_code is not None or source_month is not None:
+            raise QueryDataIntegrityError(
+                f"{leg} absent contract identity has source evidence"
+            )
+        return
+    resolved_month = int(resolved_code[3:5])
+    if status == "source_confirmed_exact":
+        valid = source_code == resolved_code and source_month == resolved_month
+    elif status == "continuous_inferred":
+        valid = source_code is None and source_month == resolved_month
+    elif status == "legacy_unknown":
+        valid = source_code is None and source_month is None
+    else:
+        valid = False
+    if not valid:
+        raise QueryDataIntegrityError(
+            f"{leg} contract identity provenance is inconsistent"
+        )
+
+
+def _validate_quote_date_evidence(snapshot: dict, leg: str) -> None:
+    status_field = f"{leg}_quote_date_evidence_status"
+    if status_field not in snapshot:
+        return
+    status = snapshot[status_field]
+    source_date = snapshot[f"{leg}_source_quote_date"]
+    source_time = snapshot[f"{leg}_source_quote_time"]
+    price = snapshot[f"{leg}_price_cny_per_tonne"]
+    price_type = snapshot[f"{leg}_price_type"]
+    if status is None:
+        if source_date is not None or source_time is not None:
+            raise QueryDataIntegrityError(
+                f"{leg} absent quote-date status has source evidence"
+            )
+        return
+    if status == "source_confirmed":
+        valid = source_date is not None and price is not None
+        if valid and price_type == "night_session_close":
+            valid = source_date < snapshot["business_date"]
+        elif valid:
+            valid = source_date == snapshot["business_date"]
+    elif status == "time_only_unconfirmed":
+        valid = source_date is None and source_time is not None and price is None
+    elif status == "date_mismatch":
+        valid = (
+            source_date is not None
+            and source_time is not None
+            and price is None
+        )
+    elif status == "legacy_unknown":
+        valid = source_date is None and source_time is None
+    else:
+        valid = False
+    if not valid:
+        raise QueryDataIntegrityError(
+            f"{leg} quote-date evidence is inconsistent"
+        )
+
+
+def _validate_contract_selection(snapshot: dict) -> None:
+    if "contract_override_hash" not in snapshot:
+        return
+    for leg in ("cbot", "soymeal", "soyoil"):
+        mode = snapshot[f"{leg}_selection_mode"]
+        if leg == "cbot":
+            automatic = (
+                snapshot["cbot_automatic_contract_year"],
+                snapshot["cbot_automatic_contract_month"],
+            )
+            override = (
+                None
+                if snapshot["cbot_override_contract_year"] is None
+                else (
+                    snapshot["cbot_override_contract_year"],
+                    snapshot["cbot_override_contract_month"],
+                )
+            )
+            effective = (
+                snapshot["cbot_contract_year"],
+                snapshot["cbot_contract_month"],
+            )
+        else:
+            automatic = snapshot[f"{leg}_automatic_contract_code"]
+            override = snapshot[f"{leg}_override_contract_code"]
+            effective = snapshot[f"{leg}_contract_code"]
+        reason = snapshot[f"{leg}_override_reason"]
+        start = snapshot[f"{leg}_override_effective_from"]
+        end = snapshot[f"{leg}_override_effective_to"]
+        if mode == "automatic":
+            valid = (
+                override is None
+                and effective == automatic
+                and reason is None
+                and start is None
+                and end is None
+            )
+        elif mode == "manual_override":
+            valid = (
+                override is not None
+                and effective == override
+                and isinstance(reason, str)
+                and bool(reason)
+                and start is not None
+                and start <= snapshot["business_date"]
+                and (end is None or snapshot["business_date"] <= end)
+            )
+        else:
+            valid = False
+        if not valid:
+            raise QueryDataIntegrityError(
+                f"{leg} contract selection provenance is inconsistent"
+            )

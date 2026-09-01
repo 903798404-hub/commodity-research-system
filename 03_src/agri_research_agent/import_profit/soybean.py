@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import SoybeanImportProfitConfig, SoybeanParameters
-from .contract_mapping import map_soybean_contracts
+from .contract_override import ContractSelectionMode, select_soybean_contracts
 from .models import (
     BusinessKey,
     BusinessKeyError,
@@ -17,6 +17,7 @@ from .models import (
     MissingReason,
     require_finite_number,
 )
+from .parameter_snapshot import build_parameter_snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,8 @@ class SoybeanCalculationInput:
     soyoil_price_cny_per_tonne: float | None
     resolved_parameters: SoybeanParameters
     mapping_identity: str
+    mapping_hash: str
+    contract_override_hash: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.business_key, BusinessKey):
@@ -78,6 +81,16 @@ class SoybeanCalculationInput:
         )
         if not isinstance(self.mapping_identity, str) or not self.mapping_identity:
             raise InvalidParameterError("mapping_identity must be non-empty", MissingReason.INVALID_PARAMETER)
+        if not isinstance(self.mapping_hash, str) or len(self.mapping_hash) != 64:
+            raise InvalidParameterError("mapping_hash must be SHA-256", MissingReason.INVALID_PARAMETER)
+        if self.contract_override_hash is not None and (
+            not isinstance(self.contract_override_hash, str)
+            or len(self.contract_override_hash) != 64
+        ):
+            raise InvalidParameterError(
+                "contract_override_hash must be SHA-256",
+                MissingReason.INVALID_PARAMETER,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +102,10 @@ class SoybeanCalculationOutput:
     calculation_status: CalculationStatus
     missing_reasons: tuple[MissingReason, ...]
     parameter_version: str
+    parameter_hash: str
     mapping_identity: str
+    mapping_hash: str
+    contract_override_hash: str
 
 
 def calculate_soybean_net_crush_margin(
@@ -97,20 +113,31 @@ def calculate_soybean_net_crush_margin(
     config: SoybeanImportProfitConfig,
 ) -> SoybeanCalculationOutput:
     key = calculation_input.business_key
+    provenance = build_parameter_snapshot(config)
+    assert provenance.parameter_hash is not None
     if key.commodity != config.commodity or key.origin not in config.origin_codes:
         raise ContractMappingError(
             "business key is inconsistent with configuration",
             MissingReason.INVALID_CONTRACT_MAPPING,
         )
-    expected = map_soybean_contracts(config, key.shipment_year, key.shipment_month)
+    selection = select_soybean_contracts(config, key)
+    expected = selection.automatic
     if (
-        calculation_input.cbot_contract != expected.cbot
-        or calculation_input.soymeal_contract != expected.soymeal
-        or calculation_input.soyoil_contract != expected.soyoil
+        calculation_input.cbot_contract != selection.cbot.effective_contract
+        or calculation_input.soymeal_contract
+        != selection.soymeal.effective_contract
+        or calculation_input.soyoil_contract
+        != selection.soyoil.effective_contract
         or calculation_input.mapping_identity != expected.mapping_identity
+        or calculation_input.mapping_hash != expected.mapping_hash
+        or (
+            calculation_input.contract_override_hash is not None
+            and calculation_input.contract_override_hash
+            != selection.contract_override_hash
+        )
     ):
         raise ContractMappingError(
-            "input contracts or mapping identity do not match configured mapping",
+            "input contracts or provenance do not match configured selection",
             MissingReason.INVALID_CONTRACT_MAPPING,
         )
 
@@ -125,10 +152,28 @@ def calculate_soybean_net_crush_margin(
         reason
         for value, reason in (
             (calculation_input.cnf_cents_per_bushel, MissingReason.MISSING_CNF),
-            (calculation_input.cbot_daily_price_cents_per_bushel, MissingReason.MISSING_CBOT),
+            (
+                calculation_input.cbot_daily_price_cents_per_bushel,
+                MissingReason.MISSING_OVERRIDE_CBOT
+                if selection.cbot.selection_mode
+                is ContractSelectionMode.MANUAL_OVERRIDE
+                else MissingReason.MISSING_CBOT,
+            ),
             (calculation_input.fx_value, MissingReason.MISSING_FX),
-            (calculation_input.soymeal_price_cny_per_tonne, MissingReason.MISSING_SOYMEAL),
-            (calculation_input.soyoil_price_cny_per_tonne, MissingReason.MISSING_SOYOIL),
+            (
+                calculation_input.soymeal_price_cny_per_tonne,
+                MissingReason.MISSING_OVERRIDE_SOYMEAL
+                if selection.soymeal.selection_mode
+                is ContractSelectionMode.MANUAL_OVERRIDE
+                else MissingReason.MISSING_SOYMEAL,
+            ),
+            (
+                calculation_input.soyoil_price_cny_per_tonne,
+                MissingReason.MISSING_OVERRIDE_SOYOIL
+                if selection.soyoil.selection_mode
+                is ContractSelectionMode.MANUAL_OVERRIDE
+                else MissingReason.MISSING_SOYOIL,
+            ),
         )
         if value is None
     )
@@ -141,7 +186,10 @@ def calculate_soybean_net_crush_margin(
             calculation_status=CalculationStatus.INCOMPLETE,
             missing_reasons=missing_reasons,
             parameter_version=str(config.schema_version),
+            parameter_hash=provenance.parameter_hash,
             mapping_identity=expected.mapping_identity,
+            mapping_hash=expected.mapping_hash,
+            contract_override_hash=selection.contract_override_hash,
         )
 
     params = calculation_input.resolved_parameters
@@ -170,7 +218,10 @@ def calculate_soybean_net_crush_margin(
         calculation_status=CalculationStatus.SUCCESS,
         missing_reasons=(),
         parameter_version=str(config.schema_version),
+        parameter_hash=provenance.parameter_hash,
         mapping_identity=expected.mapping_identity,
+        mapping_hash=expected.mapping_hash,
+        contract_override_hash=selection.contract_override_hash,
     )
 
 

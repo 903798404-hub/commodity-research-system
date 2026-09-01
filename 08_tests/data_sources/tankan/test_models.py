@@ -8,8 +8,10 @@ import pytest
 
 from agri_research_agent.data_sources.tankan.models import QueryPlanProof, SourceBatch
 from agri_research_agent.data_sources.tankan.queries import (
+    CBOT_SOYBEAN_LIVE_QUERY,
     FX_WINDOW_QUERY,
     MARKET_WINDOW_QUERY,
+    require_approved_live_query,
     require_approved_query,
 )
 from agri_research_agent.research_data import DataAssetCatalog
@@ -79,6 +81,17 @@ def test_runtime_query_variants_are_not_implicitly_approved() -> None:
     assert require_approved_query(MARKET_WINDOW_QUERY) is MARKET_WINDOW_QUERY
     with pytest.raises(ValueError, match="approved Tankan registry"):
         require_approved_query(replace(MARKET_WINDOW_QUERY, max_plan_rows=1))
+
+
+def test_live_query_is_exact_contract_bounded_and_allowlisted() -> None:
+    query = CBOT_SOYBEAN_LIVE_QUERY
+    assert query.parameter_count == 1
+    assert query.max_contracts == 32
+    assert "contract = ANY(%s)" in query.sql
+    assert "foreign_futures_live" in query.sql
+    assert require_approved_live_query(query) is query
+    with pytest.raises(ValueError, match="approved Tankan live registry"):
+        require_approved_live_query(replace(query, max_contracts=31))
 
 
 def test_source_batch_requires_matching_plan_identity() -> None:

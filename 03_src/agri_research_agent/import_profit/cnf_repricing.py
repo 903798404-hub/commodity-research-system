@@ -10,8 +10,9 @@ from typing import Mapping
 import pyarrow as pa
 
 from .config import SoybeanImportProfitConfig
-from .contract_mapping import map_soybean_contracts
+from .contract_override import select_soybean_contracts
 from .models import BusinessKey
+from .parameter_snapshot import build_parameter_snapshot
 from .query import (
     HISTORICAL_BUSINESS_KEY_SCHEMA,
     CanonicalKey,
@@ -70,19 +71,7 @@ def reprice_query_record_with_manual_cnf(
     _validate_row_key(current_business_key_row, record.key, "business key")
     _validate_row_key(current_snapshot_row, record.key, "market snapshot")
 
-    mapped = map_soybean_contracts(
-        config, record.shipment_year, record.shipment_month
-    )
-    if (
-        record.cbot_contract != mapped.cbot.label
-        or record.soymeal_contract != mapped.soymeal.code
-        or record.soyoil_contract != mapped.soyoil.code
-        or record.mapping_identity != mapped.mapping_identity
-        or record.parameter_version != str(config.schema_version)
-    ):
-        raise CnfRepricingError(
-            "persisted contracts or identities do not match configuration"
-        )
+    provenance = build_parameter_snapshot(config)
     key = BusinessKey(
         record.business_date,
         record.commodity,
@@ -93,25 +82,42 @@ def reprice_query_record_with_manual_cnf(
         config.commodity,
         record.shipment_period,
     )
+    selection = select_soybean_contracts(config, key)
+    mapped = selection.automatic
+    if (
+        record.cbot_contract != selection.cbot.effective_contract.label
+        or record.soymeal_contract != selection.soymeal.effective_contract.code
+        or record.soyoil_contract != selection.soyoil.effective_contract.code
+        or record.mapping_identity != mapped.mapping_identity
+        or record.mapping_hash != mapped.mapping_hash
+        or record.contract_override_hash != selection.contract_override_hash
+        or record.parameter_version != str(config.schema_version)
+        or record.parameter_hash != provenance.parameter_hash
+    ):
+        raise CnfRepricingError(
+            "persisted contracts or identities do not match configuration"
+        )
     calculation = calculate_soybean_net_crush_margin(
         SoybeanCalculationInput(
             business_key=key,
             cnf_cents_per_bushel=cnf_cents_per_bushel,
-            cbot_contract=mapped.cbot,
+            cbot_contract=selection.cbot.effective_contract,
             cbot_daily_price_cents_per_bushel=(
                 record.cbot_price_cents_per_bushel
             ),
             fx_value=record.fx_value,
-            soymeal_contract=mapped.soymeal,
+            soymeal_contract=selection.soymeal.effective_contract,
             soymeal_price_cny_per_tonne=(
                 record.soymeal_price_cny_per_tonne
             ),
-            soyoil_contract=mapped.soyoil,
+            soyoil_contract=selection.soyoil.effective_contract,
             soyoil_price_cny_per_tonne=(
                 record.soyoil_price_cny_per_tonne
             ),
             resolved_parameters=config.resolve_parameters(record.origin),
             mapping_identity=record.mapping_identity,
+            mapping_hash=record.mapping_hash,
+            contract_override_hash=record.contract_override_hash,
         ),
         config,
     )
@@ -148,7 +154,10 @@ def reprice_query_record_with_manual_cnf(
         "missing_reasons": list(reasons),
         "parameter_version": calculation.parameter_version,
         "mapping_identity": calculation.mapping_identity,
+        "mapping_hash": calculation.mapping_hash,
         "calculated_at": calculated_at,
+        "parameter_hash": calculation.parameter_hash,
+        "contract_override_hash": calculation.contract_override_hash,
     }
     _validate_arrow_row(key_row, HISTORICAL_BUSINESS_KEY_SCHEMA)
     _validate_arrow_row(snapshot_row, SNAPSHOT_SCHEMA)

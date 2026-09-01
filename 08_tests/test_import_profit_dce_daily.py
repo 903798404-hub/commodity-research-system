@@ -10,6 +10,7 @@ from agri_research_agent.import_profit import dce_daily
 
 
 TARGET = date(2026, 7, 28)
+PREVIOUS_TRADING_DATE = date(2026, 7, 27)
 CAPTURED = datetime(2026, 7, 28, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE)
 
 
@@ -19,7 +20,7 @@ def stable_trade_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
         dce_daily,
         "default_trade_calendar_fetcher",
         lambda: pd.DataFrame(
-            {"trade_date": [date(2026, 7, 24), TARGET]}
+            {"trade_date": [PREVIOUS_TRADING_DATE, TARGET]}
         ),
     )
 
@@ -33,11 +34,13 @@ def spot_frame(
     symbols = symbols or ["豆粕2701", "豆油2701"]
     prices = prices or [3010.0, 8010.0]
     times = times or ["23:00:00", 230000]
+    dates = extra.pop("date", [PREVIOUS_TRADING_DATE] * len(symbols))
     return pd.DataFrame(
         {
             "symbol": symbols,
             "time": times,
             "current_price": prices,
+            "date": dates,
             **extra,
         }
     )
@@ -119,11 +122,12 @@ def test_multi_contract_snapshot_produces_strict_records() -> None:
     assert record.price_type == "night_session_close"
     assert record.source_function == "futures_zh_spot"
     assert record.capture_timezone == "Asia/Shanghai"
-    assert record.source_quote_date is None
+    assert record.source_quote_date == PREVIOUS_TRADING_DATE
     assert record.source_quote_time == time(23, 0)
-    assert record.quality_status == "valid_time_only"
+    assert record.quality_status == "valid"
+    assert record.quote_date_evidence_status == "source_confirmed"
     assert result.attempt_status == "success"
-    assert result.previous_trading_date == date(2026, 7, 24)
+    assert result.previous_trading_date == PREVIOUS_TRADING_DATE
 
 
 def test_return_order_changes_and_extra_contracts_do_not_change_matching() -> None:
@@ -247,12 +251,13 @@ def test_matching_quote_date_is_preserved() -> None:
             symbols=["M2701"],
             prices=[3010.0],
             times=["23:00:00"],
-            date=["2026-07-28"],
+            date=[PREVIOUS_TRADING_DATE],
         ),
         captured_at=CAPTURED,
     )
     assert result.is_usable
-    assert result.records[0].source_quote_date == TARGET
+    assert result.records[0].source_quote_date == PREVIOUS_TRADING_DATE
+    assert result.records[0].quote_date_evidence_status == "source_confirmed"
 
 
 def test_stale_quote_date_is_rejected() -> None:
@@ -263,21 +268,34 @@ def test_stale_quote_date_is_rejected() -> None:
             symbols=["M2701"],
             prices=[3010.0],
             times=["23:00:00"],
-            date=["2026-07-27"],
+            date=[TARGET],
         ),
         captured_at=CAPTURED,
     )
     assert result.contract_results[0].quality_status == "stale_quote_date"
+    assert result.contract_results[0].quote_date_evidence_status == "date_mismatch"
+    assert result.contract_results[0].record is not None
+    assert not result.contract_results[0].record.is_usable
 
 
-def test_no_quote_date_is_allowed_only_with_explicit_current_context() -> None:
+def test_time_only_quote_is_retained_but_not_formally_usable() -> None:
     result = dce_daily.fetch_dce_morning_open_snapshot(
         ["M2701"], TARGET, fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[3010.0], times=["23:00:00"]
+            symbols=["M2701"], prices=[3010.0], times=["23:00:00"], date=[None]
         ), captured_at=CAPTURED
     )
-    assert result.is_usable
+    assert not result.is_usable
+    assert result.attempt_status == "failed"
     assert result.records[0].source_quote_date is None
+    assert result.records[0].source_quote_time == time(23, 0)
+    assert result.records[0].price_cny_per_tonne == 3010.0
+    assert result.records[0].contract_identity_status == "source_confirmed_exact"
+    assert result.records[0].quote_date_evidence_status == (
+        "time_only_unconfirmed"
+    )
+    assert result.contract_results[0].quality_status == (
+        "quote_date_unconfirmed"
+    )
 
 
 @pytest.mark.parametrize(
@@ -405,7 +423,10 @@ def test_monday_uses_calendar_previous_trading_date_without_sunday_guess() -> No
         ["M2701"],
         monday,
         fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[3010.0], times=["23:00:00"]
+            symbols=["M2701"],
+            prices=[3010.0],
+            times=["23:00:00"],
+            date=[date(2026, 7, 31)],
         ),
         trade_calendar_fetcher=lambda: pd.DataFrame(
             {"trade_date": [date(2026, 7, 31), monday]}
@@ -416,6 +437,56 @@ def test_monday_uses_calendar_previous_trading_date_without_sunday_guess() -> No
     )
     assert result.attempt_status == "success"
     assert result.previous_trading_date == date(2026, 7, 31)
+    assert result.records[0].business_date == monday
+    assert result.records[0].source_quote_date == date(2026, 7, 31)
+
+
+def test_post_holiday_first_trading_day_uses_calendar_previous_trading_date() -> None:
+    post_holiday = date(2026, 10, 9)
+    previous_trading_date = date(2026, 9, 30)
+    result = dce_daily.fetch_dce_night_session_close_snapshot(
+        ["M2701"],
+        post_holiday,
+        fetcher=lambda symbol: spot_frame(
+            symbols=["M2701"],
+            prices=[3010.0],
+            times=["23:00:00"],
+            date=[previous_trading_date],
+        ),
+        trade_calendar_fetcher=lambda: pd.DataFrame(
+            {"trade_date": [previous_trading_date, post_holiday]}
+        ),
+        captured_at=datetime(
+            2026, 10, 9, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE
+        ),
+    )
+    assert result.attempt_status == "success"
+    assert result.previous_trading_date == previous_trading_date
+    assert result.records[0].business_date == post_holiday
+    assert result.records[0].source_quote_date == previous_trading_date
+
+
+def test_post_holiday_calendar_previous_day_is_not_night_session_date() -> None:
+    post_holiday = date(2026, 10, 9)
+    result = dce_daily.fetch_dce_night_session_close_snapshot(
+        ["M2701"],
+        post_holiday,
+        fetcher=lambda symbol: spot_frame(
+            symbols=["M2701"],
+            prices=[3010.0],
+            times=["23:00:00"],
+            date=[date(2026, 10, 8)],
+        ),
+        trade_calendar_fetcher=lambda: pd.DataFrame(
+            {"trade_date": [date(2026, 9, 30), post_holiday]}
+        ),
+        captured_at=datetime(
+            2026, 10, 9, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE
+        ),
+    )
+    assert result.attempt_status == "failed"
+    assert result.contract_results[0].quality_status == "stale_quote_date"
+    assert result.contract_results[0].quote_date_evidence_status == "date_mismatch"
 
 
 def test_post_holiday_without_valid_night_quote_fails_closed() -> None:
@@ -424,7 +495,10 @@ def test_post_holiday_without_valid_night_quote_fails_closed() -> None:
         ["M2701"],
         post_holiday,
         fetcher=lambda symbol: spot_frame(
-            symbols=["M2701"], prices=[3010.0], times=["14:59:59"]
+            symbols=["M2701"],
+            prices=[3010.0],
+            times=["14:59:59"],
+            date=[date(2026, 9, 30)],
         ),
         trade_calendar_fetcher=lambda: pd.DataFrame(
             {"trade_date": [date(2026, 9, 30), post_holiday]}
@@ -451,6 +525,22 @@ def test_partial_contract_set_is_passed_with_incomplete() -> None:
     )
     assert result.attempt_status == "passed_with_incomplete"
     assert [record.contract_code for record in result.records] == ["M2701"]
+
+
+def test_source_native_full_symbol_is_confirmed_exact_identity() -> None:
+    result = dce_daily.fetch_dce_night_session_close_snapshot(
+        ["M2701"],
+        TARGET,
+        fetcher=lambda symbol: spot_frame(
+            symbols=["豆粕2701"], prices=[3010.0], times=["23:00:00"]
+        ),
+        captured_at=CAPTURED,
+    )
+
+    record = result.records[0]
+    assert record.contract_identity_status == "source_confirmed_exact"
+    assert record.source_contract_code == "M2701"
+    assert record.source_delivery_month == 1
 
 
 def test_fetcher_exception_is_structured_and_proxy_identity_is_redacted(

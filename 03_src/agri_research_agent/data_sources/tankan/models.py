@@ -83,6 +83,67 @@ class QuerySpec:
 
 
 @dataclass(frozen=True, slots=True)
+class LiveQuerySpec:
+    """A code-reviewed live-table SELECT bounded by exact contract codes."""
+
+    name: str
+    version: str
+    sql: str
+    provider: ProviderIdentity
+    parameter_count: int
+    max_contracts: int
+    max_plan_rows: int
+    max_total_cost: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _nonempty(self.name, "name"))
+        object.__setattr__(self, "version", _nonempty(self.version, "version"))
+        object.__setattr__(self, "sql", _nonempty(self.sql, "sql"))
+        if not isinstance(self.provider, ProviderIdentity):
+            raise TypeError("provider must be ProviderIdentity")
+        if not self.sql.lstrip().upper().startswith("SELECT "):
+            raise ValueError("LiveQuerySpec must contain a read-only SELECT query")
+        if (
+            ";" in self.sql
+            or "--" in self.sql
+            or "/*" in self.sql
+            or "*/" in self.sql
+            or _FORBIDDEN_SQL.search(self.sql)
+        ):
+            raise ValueError("LiveQuerySpec contains a forbidden SQL token")
+        if type(self.parameter_count) is not int or self.parameter_count not in {0, 1}:
+            raise ValueError("live parameter_count must be zero or one")
+        if self.sql.count("%s") != self.parameter_count:
+            raise ValueError("parameter_count does not match SQL placeholders")
+        if type(self.max_contracts) is not int or self.max_contracts < 0:
+            raise ValueError("max_contracts must be non-negative")
+        if self.parameter_count == 0 and self.max_contracts != 0:
+            raise ValueError("zero-parameter live queries cannot accept contracts")
+        if self.parameter_count == 1 and self.max_contracts <= 0:
+            raise ValueError("contract live queries require a positive bound")
+        if type(self.max_plan_rows) is not int or self.max_plan_rows <= 0:
+            raise ValueError("max_plan_rows must be positive")
+        if not isinstance(self.max_total_cost, (int, float)) or self.max_total_cost <= 0:
+            raise ValueError("max_total_cost must be positive")
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.sql.encode("utf-8")).hexdigest()
+
+    def identity(self) -> dict[str, str]:
+        return {
+            "query_name": self.name,
+            "query_version": self.version,
+            "query_sha256": self.sha256,
+            "dataset_id": str(self.provider.dataset.dataset_id),
+            "provider_dataset_id": str(self.provider.provider_dataset_id),
+            "origin_system": str(self.provider.dataset.origin_system),
+            "acquisition_channel": self.provider.acquisition_channel.value,
+            "source_locator": str(self.provider.source_locator),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class QueryPlanProof:
     query_sha256: str
     estimated_rows: int
@@ -153,7 +214,7 @@ class ConnectionProof:
 
 @dataclass(frozen=True, slots=True)
 class SourceBatch:
-    query: QuerySpec
+    query: QuerySpec | LiveQuerySpec
     plan: QueryPlanProof
     rows: tuple[Mapping[str, object], ...]
     extracted_at: datetime

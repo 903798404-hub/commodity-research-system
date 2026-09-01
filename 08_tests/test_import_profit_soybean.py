@@ -57,6 +57,7 @@ def complete_input(config=CONFIG, *, key: BusinessKey | None = None, **overrides
         "soyoil_price_cny_per_tonne": 8000.0,
         "resolved_parameters": config.resolve_parameters(key.origin),
         "mapping_identity": mapped.mapping_identity,
+        "mapping_hash": mapped.mapping_hash,
     }
     values.update(overrides)
     return SoybeanCalculationInput(**values)
@@ -68,13 +69,42 @@ def test_fixed_complete_input_reconciles_to_independent_manual_formula() -> None
 
     expected_usd_cost = (1200.0 + 150.0) * 0.367437
     expected_duty_paid = expected_usd_cost * 7.2 * (1 + 0.03) * (1 + 0.09)
-    expected_net_margin = 3200.0 * 0.785 + 8000.0 * 0.185 - expected_duty_paid - 100.0 - 150.0
+    expected_product_value = 3200.0 * 0.795 + 8000.0 * 0.19
+    expected_net_margin = expected_product_value - expected_duty_paid - 50.0 - 150.0
     assert result.usd_cost_per_tonne == pytest.approx(expected_usd_cost)
     assert result.duty_paid_cost_cny_per_tonne == pytest.approx(expected_duty_paid)
     assert result.net_crush_margin_cny_per_tonne == pytest.approx(expected_net_margin)
     assert result.calculation_status is CalculationStatus.SUCCESS
     assert result.missing_reasons == ()
     assert result.usd_cost_per_tonne != round(result.usd_cost_per_tonne, 2)
+
+
+def test_formal_parameter_baseline_and_old_baseline_produce_different_results() -> None:
+    params = CONFIG.default_parameters
+    assert (
+        params.tariff_rate,
+        params.vat_rate,
+        params.port_charge_cny_per_tonne,
+        params.processing_fee_cny_per_tonne,
+        params.meal_yield,
+        params.oil_yield,
+        params.cents_per_bushel_to_usd_per_tonne,
+    ) == (0.03, 0.09, 50.0, 150.0, 0.795, 0.19, 0.367437)
+
+    old_params = replace(
+        params,
+        port_charge_cny_per_tonne=100.0,
+        meal_yield=0.785,
+        oil_yield=0.185,
+    )
+    old_config = replace(CONFIG, default_parameters=old_params)
+    new_result = calculate_soybean_net_crush_margin(complete_input(), CONFIG)
+    old_result = calculate_soybean_net_crush_margin(
+        complete_input(old_config), old_config
+    )
+    assert new_result.net_crush_margin_cny_per_tonne != pytest.approx(
+        old_result.net_crush_margin_cny_per_tonne
+    )
 
 
 def test_zero_cnf_is_a_valid_quote() -> None:
@@ -181,7 +211,7 @@ def test_origin_override_changes_only_the_configured_calculation_term(tmp_path: 
         override_config,
     )
     assert overridden.net_crush_margin_cny_per_tonne == pytest.approx(
-        baseline.net_crush_margin_cny_per_tonne - 25  # type: ignore[operator]
+        baseline.net_crush_margin_cny_per_tonne - 75  # type: ignore[operator]
     )
 
 

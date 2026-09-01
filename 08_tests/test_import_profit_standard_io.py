@@ -10,6 +10,10 @@ from agri_research_agent.import_profit.standard_io import (
     CBOT_SCHEMA,
     DCE_HISTORICAL_SCHEMA,
     DCE_INCREMENTAL_SCHEMA,
+    LEGACY_DCE_HISTORICAL_SCHEMA,
+    LEGACY_DCE_INCREMENTAL_SCHEMA,
+    LEGACY_QUOTE_DATE_DCE_HISTORICAL_SCHEMA,
+    LEGACY_QUOTE_DATE_DCE_INCREMENTAL_SCHEMA,
     FX_SCHEMA,
     StandardDataError,
     StandardDuplicateKeyError,
@@ -80,6 +84,10 @@ def dce_row(code="M2701", **overrides):
         "capture_timezone": "Asia/Shanghai",
         "quality_status": "valid",
         "is_usable": True,
+        "contract_identity_status": "source_confirmed_exact",
+        "source_contract_code": code,
+        "source_delivery_month": int(code[3:5]),
+        "quote_date_evidence_status": "source_confirmed",
     }
     row.update(overrides)
     return row
@@ -208,6 +216,8 @@ def test_dce_incremental_preserves_unusable_and_rejects_duplicate(tmp_path) -> N
     loaded = load_dce_parquet(good)
     assert loaded.records[0].is_usable is False
     assert loaded.records[1].contract_code == "Y2701"
+    assert loaded.records[1].contract_identity_status == "source_confirmed_exact"
+    assert loaded.records[1].source_contract_code == "Y2701"
 
     duplicate = tmp_path / "duplicate-dce.parquet"
     write(duplicate, DCE_INCREMENTAL_SCHEMA, [dce_row(), dce_row()])
@@ -250,7 +260,7 @@ def test_explicit_historical_dce_schema_requires_full_contract(tmp_path) -> None
         rows.append(row)
     write(path, DCE_HISTORICAL_SCHEMA, rows)
     loaded = load_dce_parquet(path)
-    assert loaded.identity.schema_version == "dce-explicit-history-v1"
+    assert loaded.identity.schema_version == "dce-explicit-history-v3"
     assert loaded.records[0].price_type == "historical_daily_close"
 
     month_only = tmp_path / "month-only.parquet"
@@ -268,6 +278,40 @@ def test_explicit_historical_dce_schema_requires_full_contract(tmp_path) -> None
     )
     with pytest.raises(StandardSchemaError):
         load_dce_parquet(month_only)
+
+
+@pytest.mark.parametrize(
+    ("schema", "historical", "identity_unknown"),
+    [
+        (LEGACY_DCE_INCREMENTAL_SCHEMA, False, True),
+        (LEGACY_DCE_HISTORICAL_SCHEMA, True, True),
+        (LEGACY_QUOTE_DATE_DCE_INCREMENTAL_SCHEMA, False, False),
+        (LEGACY_QUOTE_DATE_DCE_HISTORICAL_SCHEMA, True, False),
+    ],
+)
+def test_legacy_dce_standard_input_is_explicitly_unknown(
+    tmp_path, schema, historical, identity_unknown
+) -> None:
+    row = dce_row()
+    if historical:
+        row.pop("captured_at")
+        row.pop("capture_timezone")
+        row["source_snapshot_sha256"] = "HISTORY-SHA"
+    legacy_row = {name: row[name] for name in schema.names}
+    path = tmp_path / ("historical.parquet" if historical else "daily.parquet")
+    write(path, schema, [legacy_row])
+
+    record = load_dce_parquet(path).records[0]
+    assert record.contract_identity_status == (
+        "legacy_unknown" if identity_unknown else "source_confirmed_exact"
+    )
+    assert record.source_contract_code == (
+        None if identity_unknown else "M2701"
+    )
+    assert record.source_delivery_month == (None if identity_unknown else 1)
+    assert record.quote_date_evidence_status == "legacy_unknown"
+    assert record.source_quote_date is None
+    assert record.source_quote_time is None
 
 
 def test_missing_directory_and_corrupt_parquet_fail_explicitly(tmp_path) -> None:

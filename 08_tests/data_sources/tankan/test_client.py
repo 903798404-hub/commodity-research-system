@@ -14,7 +14,11 @@ from agri_research_agent.data_sources.tankan.client import (
     TankanPlanRejectedError,
     TankanReadOnlyError,
 )
-from agri_research_agent.data_sources.tankan.queries import MARKET_WINDOW_QUERY
+from agri_research_agent.data_sources.tankan.queries import (
+    CBOT_SOYBEAN_LIVE_QUERY,
+    MARKET_WINDOW_QUERY,
+    USD_CNH_SPOT_LIVE_QUERY,
+)
 
 
 class FakeCursor:
@@ -161,6 +165,38 @@ def test_stream_explains_without_analyze_before_bounded_select() -> None:
     assert batches[0].rows == tuple(rows)
     assert batches[0].plan.estimated_rows == 50
     assert batches[0].query.provider.dataset.origin_system.value == "tankan"
+
+
+def test_stream_live_binds_only_exact_unique_contracts() -> None:
+    rows = [{"contract": "2701", "last": 1200.0}]
+    connection = FakeConnection(batches=(rows,))
+    with TankanClient(settings(), connector=lambda **_: connection) as client:
+        batches = list(
+            client.stream_live(CBOT_SOYBEAN_LIVE_QUERY, ("2701",), batch_size=1)
+        )
+    operational = [
+        item for item in connection.statements if item[0].startswith(("EXPLAIN", "SELECT exchange"))
+    ]
+    assert operational[0][1] == (["2701"],)
+    assert operational[1][2] is True
+    assert batches[0].rows == tuple(rows)
+
+
+@pytest.mark.parametrize("contracts", [(), ("M2701",), ("270",), ("2701", "2701")])
+def test_stream_live_rejects_unbounded_or_non_yymm_contracts(contracts) -> None:
+    connection = FakeConnection()
+    with TankanClient(settings(), connector=lambda **_: connection) as client:
+        with pytest.raises(ValueError):
+            list(client.stream_live(CBOT_SOYBEAN_LIVE_QUERY, contracts))
+    assert not any(statement.startswith("EXPLAIN") for statement, _, _ in connection.statements)
+
+
+def test_zero_parameter_live_spot_query_rejects_contracts() -> None:
+    connection = FakeConnection()
+    with TankanClient(settings(), connector=lambda **_: connection) as client:
+        with pytest.raises(ValueError):
+            list(client.stream_live(USD_CNH_SPOT_LIVE_QUERY, ("2701",)))
+    assert not any(statement.startswith("EXPLAIN") for statement, _, _ in connection.statements)
 
 
 def test_latest_source_dates_are_lightweight_allowlisted_reads() -> None:

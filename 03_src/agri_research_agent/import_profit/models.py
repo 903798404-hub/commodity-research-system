@@ -21,6 +21,9 @@ class MissingReason(StrEnum):
     MISSING_FX = "missing_fx"
     MISSING_SOYMEAL = "missing_soymeal"
     MISSING_SOYOIL = "missing_soyoil"
+    MISSING_OVERRIDE_CBOT = "override_cbot_contract_price_missing"
+    MISSING_OVERRIDE_SOYMEAL = "override_soymeal_contract_price_missing"
+    MISSING_OVERRIDE_SOYOIL = "override_soyoil_contract_price_missing"
     INVALID_BUSINESS_KEY = "invalid_business_key"
     INVALID_CONTRACT_MAPPING = "invalid_contract_mapping"
     INVALID_PARAMETER = "invalid_parameter"
@@ -207,6 +210,7 @@ class MappedContracts:
     soymeal: DceContract
     soyoil: DceContract
     mapping_identity: str
+    mapping_hash: str
 
 
 @dataclass(frozen=True, slots=True)

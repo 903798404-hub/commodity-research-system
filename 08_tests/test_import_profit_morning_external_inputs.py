@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timezone
 import hashlib
 import json
@@ -9,9 +10,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from agri_research_agent.import_profit.config import load_soybean_config
+from agri_research_agent.import_profit.config import (
+    ContractOverrideConfig,
+    ContractOverrideRule,
+    load_soybean_config,
+)
 from agri_research_agent.import_profit.contract_mapping import map_soybean_contracts
 from agri_research_agent.import_profit.historical_cnf_adapter import shipment_year_for
+from agri_research_agent.import_profit.models import CbotContract
 from agri_research_agent.import_profit.morning_external_inputs import (
     CBOT_SOURCE_FILENAME,
     FX_SOURCE_FILENAME,
@@ -37,6 +43,7 @@ def reuters_candidate(
     business_date: date = date(2026, 8, 5),
     missing_cbot: bool = False,
     fx_tenors=range(13),
+    extra_cbot=(),
 ) -> Path:
     config = load_soybean_config(CONFIG_PATH)
     root.mkdir()
@@ -54,6 +61,7 @@ def reuters_candidate(
             )
         }
     )
+    contracts = sorted(set(contracts) | set(extra_cbot))
     if missing_cbot:
         contracts.pop()
     cbot_rows = [
@@ -147,6 +155,47 @@ def test_build_accepts_actual_upload_time_and_exact_same_day_inputs(
     )
     assert manifest["direct_fx_count"] == 12
     assert str(tmp_path) not in json.dumps(manifest)
+
+
+def test_morning_inputs_include_effective_cbot_override_contract(tmp_path):
+    business_date = date(2026, 8, 5)
+    source = reuters_candidate(
+        tmp_path / "reuters",
+        business_date=business_date,
+        extra_cbot=((2028, 3),),
+    )
+    config = load_soybean_config(CONFIG_PATH)
+    overridden = replace(
+        config,
+        contract_override=ContractOverrideConfig(
+            True,
+            (
+                ContractOverrideRule(
+                    origin="brazil",
+                    shipment_year=2026,
+                    shipment_month=12,
+                    effective_from_business_date=business_date,
+                    effective_to_business_date=None,
+                    cbot_contract=CbotContract(2028, 3),
+                    soymeal_contract=None,
+                    soyoil_contract=None,
+                    reason="source contract anomaly",
+                ),
+            ),
+        ),
+    )
+
+    result = build_morning_external_inputs_candidate(
+        reuters_candidate_dir=source,
+        business_date=business_date,
+        config=overridden,
+        output_dir=tmp_path / "candidate",
+        source_file_uploaded_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+        prepared_at=datetime(2026, 8, 5, 1, tzinfo=timezone.utc),
+    )
+
+    assert "2028-03" in result.required_cbot_contracts
+    assert "2027-01" in result.required_cbot_contracts
 
 
 def test_missing_target_or_fx_is_incomplete_and_never_cross_fills_date(tmp_path):

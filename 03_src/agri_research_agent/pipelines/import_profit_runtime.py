@@ -32,6 +32,21 @@ from agri_research_agent.import_profit.config import (
     SoybeanImportProfitConfig,
 )
 from agri_research_agent.import_profit.models import BusinessKey
+from agri_research_agent.import_profit.parameter_snapshot import (
+    ParameterSnapshotError,
+    build_parameter_snapshot,
+    read_parameter_provenance,
+)
+from agri_research_agent.import_profit.mapping_snapshot import (
+    MappingSnapshotError,
+    build_mapping_snapshot,
+    read_mapping_provenance,
+)
+from agri_research_agent.import_profit.override_snapshot import (
+    ContractOverrideSnapshotError,
+    build_contract_override_snapshot,
+    read_contract_override_provenance,
+)
 from agri_research_agent.import_profit.query import (
     HISTORICAL_BUSINESS_KEY_SCHEMA,
     CanonicalKey,
@@ -40,6 +55,7 @@ from agri_research_agent.import_profit.query import (
 from agri_research_agent.import_profit.result_store import (
     RESULT_SCHEMA,
     SNAPSHOT_SCHEMA,
+    with_legacy_contract_identity,
 )
 from agri_research_agent.import_profit.runtime_store import (
     BUSINESS_KEYS_FILENAME,
@@ -72,6 +88,13 @@ from agri_research_agent.import_profit.runtime_store import (
     write_json_exclusive,
     write_parquet,
     write_release_index_atomically,
+)
+from agri_research_agent.shared.runtime_context import (
+    MARKER_FILENAME,
+    RuntimeAuthorizationError,
+    RuntimeContext,
+    RuntimeMode,
+    assert_runtime_write,
 )
 
 
@@ -151,17 +174,74 @@ def bootstrap_import_profit_runtime(
     root = Path(runtime_root)
     _reject_repository_path(root)
     existed = root.exists()
-    if existed and (not root.is_dir() or any(root.iterdir())):
-        raise RuntimePipelineError(
-            "runtime_root must not exist or must be an empty directory"
-        )
     candidate = Path(historical_candidate_dir)
+    _validate_bootstrap_runtime_root(root, candidate)
     candidate_files = _validate_historical_candidate(candidate)
+    parameter_provenance = build_parameter_snapshot(config)
+    assert parameter_provenance.parameter_hash is not None
+    mapping_provenance = build_mapping_snapshot(config)
+    assert mapping_provenance.mapping_hash is not None
+    override_provenance = build_contract_override_snapshot(config)
+    assert override_provenance.contract_override_hash is not None
+    candidate_manifest = read_json(
+        candidate / MANIFEST_FILENAME, "historical Manifest"
+    )
+    candidate_provenance = read_parameter_provenance(candidate_manifest)
+    candidate_mapping = read_mapping_provenance(candidate_manifest)
+    candidate_override = read_contract_override_provenance(candidate_manifest)
+    if not candidate_provenance.available:
+        raise RuntimePipelineError(
+            "legacy historical candidate parameter snapshot is unavailable; "
+            "rebuild the candidate before bootstrap"
+        )
+    if candidate_provenance.parameter_hash != parameter_provenance.parameter_hash:
+        raise RuntimePipelineError(
+            "historical candidate parameter identity does not match config"
+        )
+    if not candidate_mapping.available:
+        raise RuntimePipelineError(
+            "legacy historical candidate mapping snapshot is unavailable; "
+            "rebuild the candidate before bootstrap"
+        )
+    if candidate_mapping.mapping_hash != mapping_provenance.mapping_hash:
+        raise RuntimePipelineError(
+            "historical candidate mapping identity does not match config"
+        )
+    if not candidate_override.available:
+        raise RuntimePipelineError(
+            "legacy historical candidate contract override snapshot is "
+            "unavailable; rebuild the candidate before bootstrap"
+        )
+    if (
+        candidate_override.contract_override_hash
+        != override_provenance.contract_override_hash
+    ):
+        raise RuntimePipelineError(
+            "historical candidate contract override identity does not match config"
+        )
     dataset = load_soybean_query_dataset(
         candidate / HISTORICAL_KEYS_FILENAME,
         candidate / HISTORICAL_SNAPSHOTS_FILENAME,
         candidate / HISTORICAL_RESULTS_FILENAME,
     )
+    if {
+        record.parameter_hash for record in dataset.records
+    } != {candidate_provenance.parameter_hash}:
+        raise RuntimePipelineError(
+            "historical candidate rows do not match parameter identity"
+        )
+    if {record.mapping_hash for record in dataset.records} != {
+        candidate_mapping.mapping_hash
+    }:
+        raise RuntimePipelineError(
+            "historical candidate rows do not match mapping identity"
+        )
+    if {record.contract_override_hash for record in dataset.records} != {
+        candidate_override.contract_override_hash
+    }:
+        raise RuntimePipelineError(
+            "historical candidate rows do not match contract override identity"
+        )
     paths = ImportProfitRuntimePaths(root)
     building: Path | None = None
     final: Path | None = None
@@ -170,12 +250,41 @@ def bootstrap_import_profit_runtime(
         paths.releases_dir.mkdir()
         building = paths.releases_dir / f".building-{uuid.uuid4().hex}"
         building.mkdir()
-        for source_name, target_name in (
-            (HISTORICAL_KEYS_FILENAME, BUSINESS_KEYS_FILENAME),
-            (HISTORICAL_SNAPSHOTS_FILENAME, SNAPSHOTS_FILENAME),
-            (HISTORICAL_RESULTS_FILENAME, RESULTS_FILENAME),
-        ):
-            shutil.copy2(candidate / source_name, building / target_name)
+        shutil.copy2(
+            candidate / HISTORICAL_KEYS_FILENAME,
+            building / BUSINESS_KEYS_FILENAME,
+        )
+        snapshot_rows = [
+            with_legacy_contract_identity(row)
+            for row in pq.read_table(
+                candidate / HISTORICAL_SNAPSHOTS_FILENAME
+            ).to_pylist()
+        ]
+        result_rows = pq.read_table(
+            candidate / HISTORICAL_RESULTS_FILENAME
+        ).to_pylist()
+        for row in snapshot_rows:
+            row["parameter_hash"] = parameter_provenance.parameter_hash
+            row["mapping_hash"] = mapping_provenance.mapping_hash
+            row["contract_override_hash"] = (
+                override_provenance.contract_override_hash
+            )
+        for row in result_rows:
+            row["parameter_hash"] = parameter_provenance.parameter_hash
+            row["mapping_hash"] = mapping_provenance.mapping_hash
+            row["contract_override_hash"] = (
+                override_provenance.contract_override_hash
+            )
+        write_parquet(
+            building / SNAPSHOTS_FILENAME,
+            SNAPSHOT_SCHEMA,
+            snapshot_rows,
+        )
+        write_parquet(
+            building / RESULTS_FILENAME,
+            RESULT_SCHEMA,
+            result_rows,
+        )
         identities = {
             BUSINESS_KEYS_FILENAME: parquet_identity(
                 building / BUSINESS_KEYS_FILENAME,
@@ -194,15 +303,22 @@ def bootstrap_import_profit_runtime(
             ),
         }
         quality = _bootstrap_quality_payload(
-            release_id, dataset, candidate_files
+            release_id,
+            dataset,
+            candidate_files,
+            parameter_hash=parameter_provenance.parameter_hash,
+            mapping_hash=mapping_provenance.mapping_hash,
+            contract_override_hash=(
+                override_provenance.contract_override_hash
+            ),
         )
         write_json_exclusive(building / QUALITY_FILENAME, quality)
         identities[QUALITY_FILENAME] = json_identity(
             building / QUALITY_FILENAME, QUALITY_FILENAME
         )
-        calculated_at = read_json(
-            candidate / MANIFEST_FILENAME, "historical Manifest"
-        ).get("calculated_at", generated_at_text)
+        calculated_at = candidate_manifest.get(
+            "calculated_at", generated_at_text
+        )
         manifest = _bootstrap_manifest(
             release_id=release_id,
             generated_at=generated_at_text,
@@ -212,6 +328,14 @@ def bootstrap_import_profit_runtime(
             candidate_files=candidate_files,
             dataset=dataset,
             identities=identities,
+            parameter_snapshot=parameter_provenance.snapshot,
+            parameter_hash=parameter_provenance.parameter_hash,
+            mapping_snapshot=mapping_provenance.snapshot,
+            mapping_hash=mapping_provenance.mapping_hash,
+            contract_override_snapshot=override_provenance.snapshot,
+            contract_override_hash=(
+                override_provenance.contract_override_hash
+            ),
         )
         write_json_exclusive(building / MANIFEST_FILENAME, manifest)
         manifest_sha = file_sha256(building / MANIFEST_FILENAME)
@@ -310,6 +434,40 @@ def update_runtime_cnf_quotes(
             expected_index_sha256=expected_index_sha256,
         )
         current = loaded.resolved
+        config_provenance = build_parameter_snapshot(config)
+        config_mapping = build_mapping_snapshot(config)
+        config_override = build_contract_override_snapshot(config)
+        if not current.parameter_provenance.available:
+            raise RuntimePipelineError(
+                "legacy Release parameter snapshot is unavailable; CNF update refused"
+            )
+        if (
+            config_provenance.parameter_hash
+            != current.parameter_provenance.parameter_hash
+        ):
+            raise RuntimePipelineError(
+                "Current Release parameters do not match the supplied config"
+            )
+        if not current.mapping_provenance.available:
+            raise RuntimePipelineError(
+                "legacy Release mapping snapshot is unavailable; CNF update refused"
+            )
+        if config_mapping.mapping_hash != current.mapping_provenance.mapping_hash:
+            raise RuntimePipelineError(
+                "Current Release mapping does not match the supplied config"
+            )
+        if not current.contract_override_provenance.available:
+            raise RuntimePipelineError(
+                "legacy Release contract override snapshot is unavailable; "
+                "CNF update refused"
+            )
+        if (
+            config_override.contract_override_hash
+            != current.contract_override_provenance.contract_override_hash
+        ):
+            raise RuntimePipelineError(
+                "Current Release contract override does not match the supplied config"
+            )
         if (
             current.identity.manual_cnf_sha256
             != expected_manual_cnf_sha256
@@ -456,7 +614,10 @@ def _publish_cnf_update(
         snapshot_table = pq.read_table(current.snapshots_path)
         result_table = pq.read_table(current.results_path)
         key_rows = key_table.to_pylist()
-        snapshot_rows = snapshot_table.to_pylist()
+        snapshot_rows = [
+            with_legacy_contract_identity(row)
+            for row in snapshot_table.to_pylist()
+        ]
         result_rows = result_table.to_pylist()
         row_positions = {
             _row_key(row): index for index, row in enumerate(key_rows)
@@ -658,6 +819,45 @@ def _validate_historical_candidate(
     return identities
 
 
+def _validate_bootstrap_runtime_root(root: Path, candidate: Path) -> None:
+    if not root.exists():
+        return
+    if not root.is_dir():
+        raise RuntimePipelineError(
+            "runtime_root must not exist or must be an empty directory"
+        )
+    entries = {path.name for path in root.iterdir()}
+    if not entries:
+        return
+    marker_path = root / MARKER_FILENAME
+    if not marker_path.is_file():
+        raise RuntimePipelineError(
+            "runtime_root must not exist or must be an empty directory"
+        )
+    unexpected = entries - {MARKER_FILENAME, "candidate", "tmp"}
+    if unexpected:
+        raise RuntimePipelineError(
+            "marked isolated runtime_root contains unexpected entries"
+        )
+    try:
+        context = RuntimeContext(
+            mode=RuntimeMode.ISOLATED_DEV,
+            module_id="soybean-import-crush",
+            runtime_root=root,
+            candidate_root=candidate,
+        )
+        for target in (
+            root / RELEASES_DIRNAME,
+            root / INDEX_FILENAME,
+            root / ".runtime.lock",
+        ):
+            assert_runtime_write(context, target)
+    except RuntimeAuthorizationError as exc:
+        raise RuntimePipelineError(
+            "marked runtime_root is not an authorized soybean isolated-dev runtime"
+        ) from exc
+
+
 def _bootstrap_manifest(
     *,
     release_id: str,
@@ -668,6 +868,12 @@ def _bootstrap_manifest(
     candidate_files: dict[str, dict[str, object]],
     dataset,
     identities,
+    parameter_snapshot,
+    parameter_hash: str,
+    mapping_snapshot,
+    mapping_hash: str,
+    contract_override_snapshot,
+    contract_override_hash: str,
 ) -> dict[str, object]:
     return {
         "schema_version": RUNTIME_SCHEMA_VERSION,
@@ -679,6 +885,12 @@ def _bootstrap_manifest(
         "created_at": generated_at,
         "calculated_at": str(calculated_at),
         "config": _safe_file_payload(config_path),
+        "parameter_snapshot": parameter_snapshot,
+        "parameter_hash": parameter_hash,
+        "mapping_snapshot": mapping_snapshot,
+        "mapping_hash": mapping_hash,
+        "contract_override_snapshot": contract_override_snapshot,
+        "contract_override_hash": contract_override_hash,
         "source_candidate": {
             "directory_name": candidate_dir.name,
             "manifest": candidate_files[MANIFEST_FILENAME],
@@ -758,6 +970,16 @@ def _update_manifest(
         "manual_cnf_record_count": cnf_result.new_record_count,
         "manual_cnf_sha256": cnf_result.new_sha256,
         "config": _safe_file_payload(config_path),
+        "parameter_snapshot": current.parameter_provenance.snapshot,
+        "parameter_hash": current.parameter_provenance.parameter_hash,
+        "mapping_snapshot": current.mapping_provenance.snapshot,
+        "mapping_hash": current.mapping_provenance.mapping_hash,
+        "contract_override_snapshot": (
+            current.contract_override_provenance.snapshot
+        ),
+        "contract_override_hash": (
+            current.contract_override_provenance.contract_override_hash
+        ),
         "output_files": {
             name: identity.as_dict()
             for name, identity in identities.items()
@@ -772,13 +994,38 @@ def _update_manifest(
 
 
 def _bootstrap_quality_payload(
-    release_id: str, dataset, candidate_files
+    release_id: str,
+    dataset,
+    candidate_files,
+    *,
+    parameter_hash: str,
+    mapping_hash: str,
+    contract_override_hash: str,
 ) -> dict[str, object]:
     return {
         "transaction": "bootstrap_history",
         "release_id": release_id,
         "record_count_consistent": True,
         "key_sets_consistent": True,
+        "parameter_snapshot_present": True,
+        "parameter_hash_valid": True,
+        "result_parameter_identity_consistent": all(
+            record.parameter_hash == parameter_hash
+            for record in dataset.records
+            if record.parameter_hash is not None
+        ),
+        "mapping_snapshot_present": True,
+        "mapping_hash_valid": True,
+        "result_mapping_identity_consistent": all(
+            record.mapping_hash == mapping_hash
+            for record in dataset.records
+        ),
+        "contract_override_snapshot_present": True,
+        "contract_override_hash_valid": True,
+        "result_contract_override_identity_consistent": all(
+            record.contract_override_hash == contract_override_hash
+            for record in dataset.records
+        ),
         "source_candidate_files": sorted(candidate_files),
         "fatal": [],
         "warning": (
@@ -838,6 +1085,15 @@ def _update_quality_payload(
         "key_sets_consistent": True,
         "unchanged_record_check": "full_row_equality",
         "manifest_and_output_identity_check": "passed",
+        "parameter_snapshot_present": True,
+        "parameter_hash_valid": True,
+        "result_parameter_identity_consistent": True,
+        "mapping_snapshot_present": True,
+        "mapping_hash_valid": True,
+        "result_mapping_identity_consistent": True,
+        "contract_override_snapshot_present": True,
+        "contract_override_hash_valid": True,
+        "result_contract_override_identity_consistent": True,
         "fatal": [],
         "warning": (
             []
@@ -863,7 +1119,45 @@ def _validate_materialized_release(
     if dataset.business_key_count != expected_count:
         raise RuntimeWriteError("materialized Release row count mismatch")
     read_json(release_dir / QUALITY_FILENAME, "quality report")
-    read_json(release_dir / MANIFEST_FILENAME, "Release Manifest")
+    manifest = read_json(
+        release_dir / MANIFEST_FILENAME, "Release Manifest"
+    )
+    try:
+        provenance = read_parameter_provenance(manifest)
+    except ParameterSnapshotError as exc:
+        raise RuntimeWriteError(
+            "materialized Release parameter provenance is invalid"
+        ) from exc
+    try:
+        mapping_provenance = read_mapping_provenance(manifest)
+    except MappingSnapshotError as exc:
+        raise RuntimeWriteError(
+            "materialized Release mapping provenance is invalid"
+        ) from exc
+    try:
+        override_provenance = read_contract_override_provenance(manifest)
+    except ContractOverrideSnapshotError as exc:
+        raise RuntimeWriteError(
+            "materialized Release contract override provenance is invalid"
+        ) from exc
+    if not provenance.available or {
+        record.parameter_hash for record in dataset.records
+    } != {provenance.parameter_hash}:
+        raise RuntimeWriteError(
+            "materialized Release parameter identities are inconsistent"
+        )
+    if not mapping_provenance.available or {
+        record.mapping_hash for record in dataset.records
+    } != {mapping_provenance.mapping_hash}:
+        raise RuntimeWriteError(
+            "materialized Release mapping identities are inconsistent"
+        )
+    if not override_provenance.available or {
+        record.contract_override_hash for record in dataset.records
+    } != {override_provenance.contract_override_hash}:
+        raise RuntimeWriteError(
+            "materialized Release contract override identities are inconsistent"
+        )
 
 
 def _validate_runtime_updates(

@@ -41,9 +41,19 @@ from agri_research_agent.import_profit.historical_recalculation import (  # noqa
     recalculate_historical_soybean,
 )
 from agri_research_agent.import_profit.models import CalculationStatus  # noqa: E402
+from agri_research_agent.import_profit.parameter_snapshot import (  # noqa: E402
+    build_parameter_snapshot,
+)
+from agri_research_agent.import_profit.mapping_snapshot import (  # noqa: E402
+    build_mapping_snapshot,
+)
+from agri_research_agent.import_profit.override_snapshot import (  # noqa: E402
+    build_contract_override_snapshot,
+)
 from agri_research_agent.import_profit.result_store import (  # noqa: E402
     RESULT_SCHEMA,
     SNAPSHOT_SCHEMA,
+    contract_selection_row,
 )
 from agri_research_agent.import_profit.standard_io import (  # noqa: E402
     CBOT_SCHEMA,
@@ -58,7 +68,7 @@ SNAPSHOTS_FILENAME = "historical_soybean_market_snapshots.parquet"
 RESULTS_FILENAME = "historical_soybean_net_crush_results.parquet"
 MANIFEST_FILENAME = "manifest.json"
 QUALITY_FILENAME = "quality_report.json"
-SCHEMA_VERSION = "historical-soybean-results-v1"
+SCHEMA_VERSION = "historical-soybean-results-v4"
 AS_OF_POLICY = "explicit_latest_real_cnf_date"
 DEFAULT_BATCH_SIZE = 1000
 MAX_SAMPLE_COUNT = 5
@@ -151,6 +161,9 @@ def build_historical_soybean_results_candidate(
         _validate_prior_candidate_file(fx_path, FX_SCHEMA, "FX"),
     )
     config = load_soybean_config(config_source)
+    parameter_provenance = build_parameter_snapshot(config)
+    mapping_provenance = build_mapping_snapshot(config)
+    override_provenance = build_contract_override_snapshot(config)
     historical_cnf = load_historical_cnf_parquet(cnf_path)
     historical_dce = load_historical_dce_continuous_parquet(dce_path)
     cbot = load_cbot_parquet(cbot_path)
@@ -286,6 +299,14 @@ def build_historical_soybean_results_candidate(
             timings=timings,
             cbot_record_count=len(cbot.records),
             fx_record_count=len(fx.records),
+            parameter_snapshot=parameter_provenance.snapshot,
+            parameter_hash=parameter_provenance.parameter_hash,
+            mapping_snapshot=mapping_provenance.snapshot,
+            mapping_hash=mapping_provenance.mapping_hash,
+            contract_override_snapshot=override_provenance.snapshot,
+            contract_override_hash=(
+                override_provenance.contract_override_hash
+            ),
         )
         _assert_safe_json(manifest)
         _assert_safe_json(quality)
@@ -454,12 +475,44 @@ def _snapshot_rows(run: HistoricalRecalculationRun) -> list[dict[str, Any]]:
                 "soymeal_price_cny_per_tonne": snapshot.soymeal_price_cny_per_tonne,
                 "soymeal_price_type": snapshot.soymeal_price_type,
                 "soymeal_source": snapshot.soymeal_source,
+                "soymeal_contract_identity_status": (
+                    snapshot.soymeal_contract_identity_status
+                ),
+                "soymeal_source_contract_code": (
+                    snapshot.soymeal_source_contract_code
+                ),
+                "soymeal_source_delivery_month": (
+                    snapshot.soymeal_source_delivery_month
+                ),
+                "soymeal_quote_date_evidence_status": (
+                    snapshot.soymeal_quote_date_evidence_status
+                ),
+                "soymeal_source_quote_date": snapshot.soymeal_source_quote_date,
+                "soymeal_source_quote_time": snapshot.soymeal_source_quote_time,
                 "soyoil_contract_code": snapshot.soyoil_contract_code,
                 "soyoil_price_cny_per_tonne": snapshot.soyoil_price_cny_per_tonne,
                 "soyoil_price_type": snapshot.soyoil_price_type,
                 "soyoil_source": snapshot.soyoil_source,
+                "soyoil_contract_identity_status": (
+                    snapshot.soyoil_contract_identity_status
+                ),
+                "soyoil_source_contract_code": (
+                    snapshot.soyoil_source_contract_code
+                ),
+                "soyoil_source_delivery_month": (
+                    snapshot.soyoil_source_delivery_month
+                ),
+                "soyoil_quote_date_evidence_status": (
+                    snapshot.soyoil_quote_date_evidence_status
+                ),
+                "soyoil_source_quote_date": snapshot.soyoil_source_quote_date,
+                "soyoil_source_quote_time": snapshot.soyoil_source_quote_time,
                 "snapshot_status": snapshot.snapshot_status.value,
                 "missing_reasons": [reason.value for reason in snapshot.missing_reasons],
+                "parameter_hash": snapshot.parameter_hash,
+                "mapping_hash": snapshot.mapping_hash,
+                **contract_selection_row(snapshot),
+                "contract_override_hash": snapshot.contract_override_hash,
             }
         )
     return rows
@@ -489,6 +542,9 @@ def _result_rows(
                 "parameter_version": result.parameter_version,
                 "mapping_identity": result.mapping_identity,
                 "calculated_at": calculated_at,
+                "parameter_hash": result.parameter_hash,
+                "mapping_hash": result.mapping_hash,
+                "contract_override_hash": result.contract_override_hash,
             }
         )
     return rows
@@ -641,6 +697,12 @@ def _manifest(
     timings: dict[str, float],
     cbot_record_count: int,
     fx_record_count: int,
+    parameter_snapshot,
+    parameter_hash: str,
+    mapping_snapshot,
+    mapping_hash: str,
+    contract_override_snapshot,
+    contract_override_hash: str,
 ) -> dict[str, Any]:
     snapshots = run.recalculation_batch.items
     source_counts = {
@@ -695,6 +757,12 @@ def _manifest(
         "schema_version": SCHEMA_VERSION,
         "pipeline_version": PIPELINE_VERSION,
         "candidate_status": quality["candidate_status"],
+        "parameter_snapshot": parameter_snapshot,
+        "parameter_hash": parameter_hash,
+        "mapping_snapshot": mapping_snapshot,
+        "mapping_hash": mapping_hash,
+        "contract_override_snapshot": contract_override_snapshot,
+        "contract_override_hash": contract_override_hash,
         "historical_input": True,
         "as_of_date": as_of_date.isoformat(),
         "as_of_policy": AS_OF_POLICY,

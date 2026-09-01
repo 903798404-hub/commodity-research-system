@@ -1,0 +1,23 @@
+schema_version: 1
+timezone: Asia/Shanghai
+calendar_policy: soybean-weekday-business-calendar-v1
+job:
+  command: 04_scripts/capture_public_intraday.py
+  source: tankan_only
+  unified_refresh: false
+  trigger: manual_after_public_update
+  retries:
+    interval_seconds: 30
+    max_attempts: 21
+sessions:
+  AM:
+    window_start: "08:00:00"
+    window_end_exclusive: "12:00:00"
+    command_args: ["--session", "AM"]
+  PM:
+    window_start: "15:00:00"
+    window_end_exclusive: "21:00:00"
+    command_args: ["--session", "PM"]
+non_trading_day_status: NOT_SCHEDULED
+failure_policy: fail_closed
+fallback_sources: []

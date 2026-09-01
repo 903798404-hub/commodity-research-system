@@ -94,6 +94,24 @@ class DeterministicBusinessDayPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class WeekdayBusinessDayPolicy:
+    """The repository's current soybean Monday-Friday business-date contract."""
+
+    policy_name: str = "soybean-weekday-business-calendar-v1"
+    source_identity: str = "02_configs/import_profit_soybean.yaml:business_calendar_policy"
+
+    def decide(self, business_date: date) -> BusinessDayDecision:
+        if type(business_date) is not date:
+            raise TypeError("business_date must be an exact date")
+        return BusinessDayDecision(
+            business_date=business_date,
+            is_business_day=business_date.weekday() < 5,
+            policy_name=self.policy_name,
+            source_identity=self.source_identity,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class StrictNightSessionTradeDatePolicy:
     policy_name: str = "strict-night-trade-date-v1"
     source_identity: str = "contract"

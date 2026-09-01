@@ -534,6 +534,12 @@ def _resolved_as_dicts(
                 "source_snapshot_sha256": record.source_snapshot_sha256,
                 "quality_status": "valid",
                 "is_usable": record.is_usable,
+                "contract_identity_status": record.contract_identity_status,
+                "source_contract_code": record.source_contract_code,
+                "source_delivery_month": record.source_delivery_month,
+                "quote_date_evidence_status": (
+                    record.quote_date_evidence_status
+                ),
             }
         )
     return result

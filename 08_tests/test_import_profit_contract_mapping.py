@@ -16,11 +16,11 @@ EXPECTED = [
     (1, "2026-01", "M2605", "Y2605"),
     (2, "2026-03", "M2605", "Y2605"),
     (3, "2026-03", "M2605", "Y2605"),
-    (4, "2026-05", "M2609", "Y2609"),
-    (5, "2026-05", "M2609", "Y2609"),
-    (6, "2026-07", "M2609", "Y2609"),
-    (7, "2026-07", "M2609", "Y2609"),
-    (8, "2026-09", "M2701", "Y2701"),
+    (4, "2026-05", "M2605", "Y2605"),
+    (5, "2026-05", "M2605", "Y2605"),
+    (6, "2026-07", "M2605", "Y2605"),
+    (7, "2026-07", "M2605", "Y2605"),
+    (8, "2026-09", "M2605", "Y2605"),
     (9, "2026-09", "M2701", "Y2701"),
     (10, "2026-11", "M2701", "Y2701"),
     (11, "2026-11", "M2701", "Y2701"),
@@ -63,8 +63,14 @@ def test_december_and_following_january_have_distinct_cross_year_mapping() -> No
     assert december.mapping_identity == january.mapping_identity == CONFIG.contract_mapping_identity
 
 
-@pytest.mark.parametrize("shipment_month", [8, 9, 10, 11])
-def test_august_through_november_use_next_year_dce_contracts(shipment_month: int) -> None:
+def test_august_keeps_current_business_dce_contract() -> None:
+    result = map_soybean_contracts(CONFIG, 2026, 8)
+    assert result.soymeal.code == "M2605"
+    assert result.soyoil.code == "Y2605"
+
+
+@pytest.mark.parametrize("shipment_month", [9, 10, 11])
+def test_september_through_november_use_next_year_dce_contracts(shipment_month: int) -> None:
     result = map_soybean_contracts(CONFIG, 2026, shipment_month)
     assert result.soymeal.contract_year == 2027
     assert result.soyoil.contract_year == 2027

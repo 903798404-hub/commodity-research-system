@@ -135,15 +135,19 @@ def test_spread_formula_is_unchanged_for_tankan_prices() -> None:
     assert result.iloc[0]["leg1_price"] - result.iloc[0]["leg2_price"] == result.iloc[0]["spread_value"] == 500.0
 
 
-def test_unified_producer_invokes_tankan_not_akshare(monkeypatch) -> None:
+def test_unified_producer_invokes_tankan_not_akshare(monkeypatch, tmp_path: Path) -> None:
     refresh = load_script("04_scripts/refresh_public_data.py", "refresh_public_data_e2")
     seen: list[str] = []
+    artifact = tmp_path / "01_data" / "historical_spread_database.parquet"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"isolated-test-artifact")
 
     def run(command, **_):
         seen.extend(str(value) for value in command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(refresh.subprocess, "run", run)
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
     result = refresh._refresh_domestic_spread_artifact(
         tankan_secret_file=Path("safe-secret-file"), end_date=date(2026, 8, 24)
     )

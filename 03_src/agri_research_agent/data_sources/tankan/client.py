@@ -11,8 +11,8 @@ from typing import Callable, Iterator, Sequence
 import psycopg
 from psycopg.rows import dict_row
 
-from .models import ConnectionProof, PostgresColumn, QueryPlanProof, QuerySpec, SourceBatch
-from .queries import require_approved_query
+from .models import ConnectionProof, LiveQuerySpec, PostgresColumn, QueryPlanProof, QuerySpec, SourceBatch
+from .queries import require_approved_live_query, require_approved_query
 
 
 class TankanClientError(RuntimeError):
@@ -323,9 +323,58 @@ ORDER BY ordinal_position
             batch_size=batch_size,
         )
 
+    def stream_live(
+        self,
+        query: LiveQuerySpec,
+        contracts: Sequence[str] = (),
+        *,
+        batch_size: int = 128,
+    ) -> Iterator[SourceBatch]:
+        """Execute one allowlisted live query bounded to exact YYMM contracts."""
+
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        approved = require_approved_live_query(query)
+        parameters = self._validate_live_parameters(approved, contracts)
+        plan = self._explain_live(approved, parameters)
+        yield from self._stream_after_plan(
+            approved,
+            parameters,
+            plan,
+            batch_size=batch_size,
+        )
+
+    def _explain_live(
+        self,
+        query: LiveQuerySpec,
+        parameters: tuple[object, ...],
+    ) -> QueryPlanProof:
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"EXPLAIN (FORMAT JSON) {query.sql}", parameters)
+                payload = cursor.fetchone()
+            plan = self._extract_plan(payload)
+            estimated_rows, total_cost = self._plan_bounds(plan)
+            return QueryPlanProof(
+                query_sha256=query.sha256,
+                estimated_rows=estimated_rows,
+                total_cost=total_cost,
+                max_plan_rows=query.max_plan_rows,
+                max_total_cost=query.max_total_cost,
+            )
+        except (TypeError, ValueError, KeyError, IndexError) as exc:
+            raise TankanPlanRejectedError(
+                f"live query plan was rejected: {type(exc).__name__}"
+            ) from None
+        except Exception as exc:
+            raise TankanClientError(
+                f"live query planning failed: {type(exc).__name__}"
+            ) from None
+
     def _stream_after_plan(
         self,
-        query: QuerySpec,
+        query: QuerySpec | LiveQuerySpec,
         bound_parameters: tuple[object, ...],
         plan: QueryPlanProof,
         *,
@@ -364,6 +413,30 @@ ORDER BY ordinal_position
         if (end - start).days > query.max_window_days:
             raise ValueError("query window exceeds QuerySpec maximum")
         return values
+
+    @staticmethod
+    def _validate_live_parameters(
+        query: LiveQuerySpec,
+        contracts: Sequence[str],
+    ) -> tuple[object, ...]:
+        values = tuple(contracts)
+        if query.parameter_count == 0:
+            if values:
+                raise ValueError("zero-parameter live query does not accept contracts")
+            return ()
+        if not values or len(values) > query.max_contracts:
+            raise ValueError("live contract selection is empty or exceeds its bound")
+        if any(
+            not isinstance(value, str)
+            or len(value) != 4
+            or not value.isascii()
+            or not value.isdigit()
+            for value in values
+        ):
+            raise ValueError("live contracts must be exact YYMM codes")
+        if len(values) != len(set(values)):
+            raise ValueError("live contracts must be unique")
+        return (list(values),)
 
     @staticmethod
     def _extract_plan(payload: object) -> dict[str, object]:

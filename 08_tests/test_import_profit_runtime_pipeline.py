@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from dataclasses import replace
 import math
 from pathlib import Path
 
 from filelock import FileLock
 import pytest
 
-from agri_research_agent.import_profit import BusinessKey
+from agri_research_agent.import_profit import (
+    BusinessKey,
+    ContractOverrideConfig,
+    ContractOverrideRule,
+    DceContract,
+)
 from agri_research_agent.import_profit.cnf_store import load_cnf_store
 from agri_research_agent.import_profit.runtime_store import (
     MANIFEST_FILENAME,
@@ -126,8 +132,31 @@ def test_first_manual_cnf_update_promotes_complete_immutable_release(tmp_path):
     runtime_root, _, bootstrap = bootstrap_fixture(tmp_path)
     old = resolve_current_runtime_release(runtime_root)
     old_shas = release_file_shas(old.release_dir)
+    old_parameter_hash = old.parameter_provenance.parameter_hash
+    old_parameter_snapshot = old.parameter_provenance.snapshot
+    old_mapping_hash = old.mapping_provenance.mapping_hash
+    old_mapping_snapshot = old.mapping_provenance.snapshot
+    old_override = old.contract_override_provenance
 
     result = apply_update(runtime_root, [update(key(), 100.0)])
+    current = resolve_current_runtime_release(runtime_root)
+    assert current.parameter_provenance.parameter_hash == old_parameter_hash
+    assert current.parameter_provenance.snapshot == old_parameter_snapshot
+    assert current.mapping_provenance.mapping_hash == old_mapping_hash
+    assert current.mapping_provenance.snapshot == old_mapping_snapshot
+    assert current.contract_override_provenance == old_override
+    assert {
+        record.parameter_hash
+        for record in load_runtime_release_dataset(runtime_root).dataset.records
+    } == {old_parameter_hash}
+    assert {
+        record.mapping_hash
+        for record in load_runtime_release_dataset(runtime_root).dataset.records
+    } == {old_mapping_hash}
+    assert {
+        record.contract_override_hash
+        for record in load_runtime_release_dataset(runtime_root).dataset.records
+    } == {old_override.contract_override_hash}
     loaded = load_runtime_release_dataset(runtime_root)
     record = loaded.dataset.get(
         business_date=date(2026, 6, 10),
@@ -158,6 +187,120 @@ def test_first_manual_cnf_update_promotes_complete_immutable_release(tmp_path):
     assert loaded.dataset.business_key_count == 2
     assert loaded.dataset.success_count == 2
     assert loaded.dataset.incomplete_count == 0
+
+
+def test_cnf_update_rejects_rebinding_current_release_to_changed_parameters(
+    tmp_path,
+):
+    runtime_root, _, _ = bootstrap_fixture(tmp_path)
+    current = resolve_current_runtime_release(runtime_root)
+    changed = replace(
+        CONFIG,
+        default_parameters=replace(
+            CONFIG.default_parameters, tariff_rate=0.20
+        ),
+    )
+
+    with pytest.raises(RuntimePipelineError, match="parameters do not match"):
+        update_runtime_cnf_quotes(
+            runtime_root,
+            [update(key(), 100.0)],
+            config=changed,
+            config_path=CONFIG_PATH,
+            expected_release_id=current.release_id,
+            expected_index_sha256=current.identity.index_sha256,
+            expected_manual_cnf_sha256=current.identity.manual_cnf_sha256,
+            calculated_at=UPDATED_AT,
+            batch_id="batch-001",
+            release_id="manual-rebound",
+        )
+
+    after = resolve_current_runtime_release(runtime_root)
+    assert after.release_id == current.release_id
+    assert (
+        after.parameter_provenance.parameter_hash
+        == current.parameter_provenance.parameter_hash
+    )
+
+
+def test_cnf_update_rejects_rebinding_current_release_to_changed_mapping(
+    tmp_path,
+):
+    runtime_root, _, _ = bootstrap_fixture(tmp_path)
+    current = resolve_current_runtime_release(runtime_root)
+    first, *remaining = CONFIG.contract_mapping
+    changed = replace(
+        CONFIG,
+        contract_mapping=(
+            replace(first, cbot=replace(first.cbot, contract_month=3)),
+            *remaining,
+        ),
+    )
+
+    with pytest.raises(RuntimePipelineError, match="mapping does not match"):
+        update_runtime_cnf_quotes(
+            runtime_root,
+            [update(key(), 100.0)],
+            config=changed,
+            config_path=CONFIG_PATH,
+            expected_release_id=current.release_id,
+            expected_index_sha256=current.identity.index_sha256,
+            expected_manual_cnf_sha256=current.identity.manual_cnf_sha256,
+            calculated_at=UPDATED_AT,
+            batch_id="batch-001",
+            release_id="manual-mapping-rebound",
+        )
+
+    after = resolve_current_runtime_release(runtime_root)
+    assert after.release_id == current.release_id
+    assert after.mapping_provenance == current.mapping_provenance
+
+
+def test_cnf_update_rejects_rebinding_current_release_to_changed_override(
+    tmp_path,
+):
+    runtime_root, _, _ = bootstrap_fixture(tmp_path)
+    current = resolve_current_runtime_release(runtime_root)
+    changed = replace(
+        CONFIG,
+        contract_override=ContractOverrideConfig(
+            True,
+            (
+                ContractOverrideRule(
+                    origin="brazil",
+                    shipment_year=2026,
+                    shipment_month=12,
+                    effective_from_business_date=date(2026, 6, 10),
+                    effective_to_business_date=None,
+                    cbot_contract=None,
+                    soymeal_contract=DceContract.soymeal(2027, 9),
+                    soyoil_contract=None,
+                    reason="source contract anomaly",
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimePipelineError, match="contract override"):
+        update_runtime_cnf_quotes(
+            runtime_root,
+            [update(key(), 100.0)],
+            config=changed,
+            config_path=CONFIG_PATH,
+            expected_release_id=current.release_id,
+            expected_index_sha256=current.identity.index_sha256,
+            expected_manual_cnf_sha256=current.identity.manual_cnf_sha256,
+            calculated_at=UPDATED_AT,
+            batch_id="batch-001",
+            release_id="manual-override-rebound",
+        )
+
+    after = resolve_current_runtime_release(runtime_root)
+    assert after.release_id == current.release_id
+    assert (
+        after.contract_override_provenance
+        == current.contract_override_provenance
+    )
 
 
 def test_overwrite_clear_batch_and_partial_no_change(tmp_path):

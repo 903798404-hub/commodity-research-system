@@ -111,15 +111,17 @@ def seasonal_window(
 
 
 def build_shipment_month_seasonality(
-    dataset: SoybeanQueryDataset,
+    dataset: SoybeanQueryDataset | object,
     *,
     origin: str,
     as_of_date: date,
     metric: QueryMetric | str,
     shipment_month: int,
 ) -> SeasonalityDataset:
-    if not isinstance(dataset, SoybeanQueryDataset):
-        raise SeasonalityError("dataset must be a SoybeanQueryDataset")
+    if not callable(getattr(dataset, "require_origin", None)) or not callable(
+        getattr(dataset, "get", None)
+    ):
+        raise SeasonalityError("dataset must implement the seasonality provider contract")
     dataset.require_origin(origin)
     if type(as_of_date) is not date:
         raise SeasonalityError("as_of_date must be a real date")
@@ -177,7 +179,7 @@ def build_shipment_month_seasonality(
 
 
 def build_all_shipment_month_seasonality(
-    dataset: SoybeanQueryDataset,
+    dataset: SoybeanQueryDataset | object,
     *,
     origin: str,
     as_of_date: date,

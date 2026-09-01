@@ -57,8 +57,22 @@ def configured_rows(
             "parameter_version": str(CONFIG.schema_version),
             "cbot_contract_year": mapped.cbot.contract_year,
             "cbot_contract_month": mapped.cbot.contract_month,
+            "cbot_automatic_contract_year": mapped.cbot.contract_year,
+            "cbot_automatic_contract_month": mapped.cbot.contract_month,
             "soymeal_contract_code": mapped.soymeal.code,
+            "soymeal_automatic_contract_code": mapped.soymeal.code,
             "soyoil_contract_code": mapped.soyoil.code,
+            "soyoil_automatic_contract_code": mapped.soyoil.code,
+            "soymeal_source_delivery_month": (
+                mapped.soymeal.contract_month
+                if parts[1]["soymeal_price_cny_per_tonne"] is not None
+                else None
+            ),
+            "soyoil_source_delivery_month": (
+                mapped.soyoil.contract_month
+                if parts[1]["soyoil_price_cny_per_tonne"] is not None
+                else None
+            ),
         }
     )
     parts[2].update(
@@ -136,8 +150,8 @@ def test_origin_order_parameter_summary_and_official_table(tmp_path):
     )
     summary = components.parameter_summary(CONFIG, "brazil")
     assert summary == (
-        "出粕率78.5%｜出油率18.5%｜换算系数0.367437｜"
-        "关税3%｜增值税9%｜港杂费100元/吨｜加工费150元/吨"
+        "出粕率79.5%｜出油率19.0%｜换算系数0.367437｜"
+        "关税3%｜增值税9%｜港杂费50元/吨｜加工费150元/吨"
     )
     records = components.records_for_date(
         dataset, origin="brazil", business_date=date(2026, 6, 25)
@@ -180,12 +194,12 @@ def test_origin_order_parameter_summary_and_official_table(tmp_path):
     assert table.loc[6, "美元成本"] == "407.00"
     assert table.loc[6, "CBOT价格"] == "1107.00"
     assert table.loc[6, "汇率"] == "6.8700"
-    assert table.loc[6, "国内合约"] == "2609"
+    assert table.loc[6, "国内合约"] == "2605"
     assert table.loc[6, "豆粕盘面"] == "2907.00"
     assert table.loc[6, "豆油盘面"] == "8107.00"
-    total = 3007.0 + 100.0 + 150.0
-    assert table.loc[6, "粕成本"] == f"{(total - 8107.0 * 0.185) / 0.785:.2f}"
-    assert table.loc[6, "油成本"] == f"{(total - 2907.0 * 0.785) / 0.185:.2f}"
+    total = 3007.0 + 50.0 + 150.0
+    assert table.loc[6, "粕成本"] == f"{(total - 8107.0 * 0.19) / 0.795:.2f}"
+    assert table.loc[6, "油成本"] == f"{(total - 2907.0 * 0.795) / 0.19:.2f}"
     assert table.loc[2, "CBOT价格"] == "1103.00"
     assert table.loc[2, "汇率"] == "6.8300"
     assert table.loc[2, "豆粕盘面"] == "2903.00"
@@ -193,10 +207,25 @@ def test_origin_order_parameter_summary_and_official_table(tmp_path):
     assert table.loc[2, "完税成本"] == "—"
     assert table.loc[2, "盘面榨利"] == "—"
     assert table.loc[2, "粕成本"] == "—"
+    legacy_summary = components.parameter_summary(
+        CONFIG, "brazil", parameters_available=False
+    )
+    assert legacy_summary == "旧版Release未封存计算参数，参数快照不可用。"
+    legacy_table = components.formal_daily_table(
+        records,
+        business_date=date(2026, 6, 25),
+        origin="brazil",
+        config=CONFIG,
+        parameters_available=False,
+    )
+    assert set(legacy_table["关税%"] ) == {"—"}
+    assert set(legacy_table["增值税%"] ) == {"—"}
+    assert set(legacy_table["粕成本"] ) == {"—"}
+    assert set(legacy_table["油成本"] ) == {"—"}
     assert table.loc[2, "油成本"] == "—"
     assert components._domestic_contract_label(
         replace(records[6], soyoil_contract="Y2701")
-    ) == "M2609 / Y2701"
+    ) == "M2605 / Y2701"
     assert components.date_status_counts(records) == (8, 4)
 
 
