@@ -53,9 +53,10 @@ class RootFailure:
     exception_type: str
     underlying_exception_type: str | None
     safe_message: str
+    cleanup_failure: Mapping[str, object] | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "provider": self.provider,
             "domain": self.domain,
             "stage": self.stage,
@@ -63,6 +64,9 @@ class RootFailure:
             "underlying_exception_type": self.underlying_exception_type,
             "safe_message": self.safe_message,
         }
+        if self.cleanup_failure is not None:
+            value["cleanup_failure"] = dict(self.cleanup_failure)
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -592,6 +596,7 @@ def root_failure_from_exception(
     message = _WINDOWS_ABSOLUTE_PATH.sub("<redacted-path>", message)
     message = _UNIX_ABSOLUTE_PATH.sub("<redacted-path>", message)
     message = _SECRET_ASSIGNMENT.sub(r"\1=<redacted>", message)[:500]
+    cleanup_failure = getattr(exc, "cleanup_failure", None)
     return RootFailure(
         provider=provider,
         domain=domain,
@@ -601,6 +606,9 @@ def root_failure_from_exception(
             None if underlying is None else type(underlying).__name__
         ),
         safe_message=message,
+        cleanup_failure=(
+            dict(cleanup_failure) if isinstance(cleanup_failure, Mapping) else None
+        ),
     )
 
 

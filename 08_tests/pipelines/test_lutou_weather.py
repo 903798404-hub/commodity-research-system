@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 from datetime import UTC, date, datetime, timedelta
@@ -9,6 +10,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from agri_research_agent.pipelines import lutou_weather as weather_module
 from agri_research_agent.data_sources.lutou.live import (
     LutouBatch,
     LutouConnectionProof,
@@ -22,8 +24,13 @@ from agri_research_agent.data_sources.lutou.weather_live import (
     load_weather_config,
 )
 from agri_research_agent.pipelines.lutou_goal_b_soil import run_goal_b_soil
+from agri_research_agent.pipelines.public_data_refresh import (
+    root_failure_from_exception,
+)
 from agri_research_agent.pipelines.lutou_weather import (
     LutouWeatherError,
+    LutouWeatherStageError,
+    _cleanup_table_partitions,
     _table_query_windows,
     load_weather_current,
     run_lutou_weather,
@@ -367,6 +374,151 @@ def test_complete_weather_current_preserves_identity_and_is_idempotent(
     assert current.manifest["complete_row_count"] == 22_728
     assert current.manifest["stable_key_duplicate_count"] == 0
     assert current.manifest["normal_stable_key_duplicate_count"] == 0
+    weather_root = runtime.runtime_root / "public-market-data/lutou-weather"
+    assert not list(weather_root.glob("candidates/.building-*"))
+    assert not list(weather_root.glob("candidates/*/.table-partitions"))
+
+
+def _cleanup_fixture(tmp_path: Path, run_id: str = "cleanup-run") -> tuple[Path, Path, Path]:
+    outer = (
+        tmp_path
+        / "lutou-weather"
+        / "candidates"
+        / f".building-{run_id}-0123456789abcdef"
+    )
+    target = outer / ".table-partitions"
+    target.mkdir(parents=True)
+    (target / "table-one").mkdir()
+    (target / "table-one" / "manifest.json").write_text("{}", encoding="utf-8")
+    return (
+        outer,
+        target,
+        outer.parent.parent / "failure-evidence" / "cleanup.json",
+    )
+
+
+def test_table_partition_cleanup_succeeds_once(tmp_path: Path) -> None:
+    outer, target, evidence = _cleanup_fixture(tmp_path)
+    result = _cleanup_table_partitions(
+        outer_building=outer,
+        target=target,
+        candidate_run_id="cleanup-run",
+        evidence_path=evidence,
+    )
+    assert result["attempt_count"] == 1
+    assert result["retry_count"] == 0
+    assert not target.exists()
+    assert not evidence.exists()
+
+
+def test_table_partition_cleanup_retries_winerror_145_and_records_entries(
+    tmp_path: Path,
+) -> None:
+    outer, target, evidence = _cleanup_fixture(tmp_path)
+    calls = 0
+
+    def fail_once(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError(errno.ENOTEMPTY, "directory is not empty", str(path), 145)
+        shutil.rmtree(path)
+
+    result = _cleanup_table_partitions(
+        outer_building=outer,
+        target=target,
+        candidate_run_id="cleanup-run",
+        evidence_path=evidence,
+        rmtree=fail_once,
+        sleep=lambda _seconds: None,
+    )
+    persisted = json.loads(evidence.read_text(encoding="utf-8"))
+    assert result["retry_count"] == 1
+    assert persisted["status"] == "PASS"
+    assert persisted["attempts"][0]["attempt"] == 1
+    assert persisted["attempts"][0]["remaining_entries"] == [
+        {"entry_type": "directory", "relative_path": "table-one"},
+        {"entry_type": "file", "relative_path": "table-one/manifest.json"},
+    ]
+    assert not target.exists()
+
+
+def test_table_partition_cleanup_exhaustion_has_precise_stage_and_evidence(
+    tmp_path: Path,
+) -> None:
+    outer, target, evidence = _cleanup_fixture(tmp_path)
+
+    def always_nonempty(path: Path) -> None:
+        raise OSError(errno.ENOTEMPTY, "directory is not empty", str(path), 145)
+
+    with pytest.raises(LutouWeatherStageError) as caught:
+        _cleanup_table_partitions(
+            outer_building=outer,
+            target=target,
+            candidate_run_id="cleanup-run",
+            evidence_path=evidence,
+            rmtree=always_nonempty,
+            sleep=lambda _seconds: None,
+        )
+    persisted = json.loads(evidence.read_text(encoding="utf-8"))
+    assert caught.value.stage == "WEATHER_TABLE_PARTITION_CLEANUP"
+    assert caught.value.__cause__ is not None
+    root_failure = root_failure_from_exception(
+        "lutou", "weather", caught.value.stage, caught.value
+    )
+    assert root_failure.stage == "WEATHER_TABLE_PARTITION_CLEANUP"
+    assert root_failure.exception_type == "LutouWeatherStageError"
+    assert root_failure.underlying_exception_type == "OSError"
+    assert "operation=shutil.rmtree" in root_failure.safe_message
+    assert "retry_count=3" in root_failure.safe_message
+    assert str(tmp_path) not in root_failure.safe_message
+    assert persisted["status"] == "FAILED"
+    assert persisted["attempt_count"] == 4
+    assert persisted["retry_count"] == 3
+    assert len(persisted["attempts"]) == 4
+    assert target.exists()
+
+
+@pytest.mark.parametrize(
+    ("outer_name", "target_suffix", "candidate_run_id"),
+    [
+        ("cleanup-run", "../another-run", "cleanup-run"),
+        ("another-run", ".table-partitions", "cleanup-run"),
+        ("cleanup-run", "../../releases/release-a", "cleanup-run"),
+        ("cleanup-run", "../../current.json", "cleanup-run"),
+    ],
+)
+def test_table_partition_cleanup_rejects_unowned_targets(
+    tmp_path: Path,
+    outer_name: str,
+    target_suffix: str,
+    candidate_run_id: str,
+) -> None:
+    outer, owned, evidence = _cleanup_fixture(tmp_path, outer_name)
+    protected = outer / target_suffix
+    with pytest.raises(LutouWeatherStageError) as caught:
+        _cleanup_table_partitions(
+            outer_building=outer,
+            target=protected,
+            candidate_run_id=candidate_run_id,
+            evidence_path=evidence,
+        )
+    assert caught.value.stage == "WEATHER_TABLE_PARTITION_CLEANUP"
+    assert owned.exists()
+
+
+def test_table_partition_cleanup_supports_long_windows_path(tmp_path: Path) -> None:
+    long_root = tmp_path.joinpath(*(["long-component-0123456789"] * 8))
+    outer, target, evidence = _cleanup_fixture(long_root)
+    assert len(str(target)) > 200
+    result = _cleanup_table_partitions(
+        outer_building=outer,
+        target=target,
+        candidate_run_id="cleanup-run",
+        evidence_path=evidence,
+    )
+    assert result["status"] == "PASS"
+    assert not target.exists()
 
 
 def test_weather_uses_self_contained_soil_release_without_candidate_history(
@@ -670,6 +822,51 @@ def test_failures_preserve_previous_weather_current(tmp_path: Path, hook: str) -
         )
     assert identify_file(pointer) == before
     assert load_weather_current(pointer.parent).release_id == "weather-good"
+
+
+def test_primary_weather_failure_is_not_replaced_by_secondary_cleanup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _runtime(tmp_path / "runtime")
+    _seed_soil(runtime)
+    _run(runtime, "weather-good", full=True)
+    pointer = runtime.runtime_root / "public-market-data/lutou-weather/current.json"
+    before = identify_file(pointer)
+
+    def fail_cleanup(**_kwargs):  # type: ignore[no-untyped-def]
+        cause = OSError(
+            errno.ENOTEMPTY,
+            "directory is not empty",
+            ".table-partitions",
+            145,
+        )
+        failure = LutouWeatherStageError(
+            "WEATHER_TABLE_PARTITION_CLEANUP", cause
+        )
+        failure.cleanup_evidence = {
+            "stage": "WEATHER_TABLE_PARTITION_CLEANUP",
+            "exception_type": "OSError",
+            "winerror": 145,
+            "operation": "shutil.rmtree",
+            "owned_relative_path": ".table-partitions",
+            "retry_count": 3,
+            "evidence_file": "cleanup.json",
+        }
+        raise failure from cause
+
+    monkeypatch.setattr(weather_module, "_cleanup_table_partitions", fail_cleanup)
+    with pytest.raises(LutouWeatherError) as caught:
+        _run(
+            runtime,
+            "weather-primary-failure",
+            full=False,
+            failure_hook="rainfall_extraction",
+        )
+    assert "injected rainfall extraction failure" in str(caught.value)
+    assert caught.value.cleanup_failure["stage"] == (  # type: ignore[attr-defined]
+        "WEATHER_TABLE_PARTITION_CLEANUP"
+    )
+    assert identify_file(pointer) == before
 
 
 def _key(row):  # type: ignore[no-untyped-def]

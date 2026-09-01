@@ -37,19 +37,17 @@ UNAVAILABLE = {"SOURCE_UNAVAILABLE", "NETWORK_UNAVAILABLE", "LIVE_VERIFICATION_P
 SUCCESS_BUSINESS = {"UPDATED", "NO_CHANGE"}
 PREWARM_WARNINGS = {"SKIPPED", "PARTIAL", "FAIL"}
 FAILED_STAGES = {
-    "LOCK", "WINDOWS_ENV", "REPOSITORY", "PYTHON_RUNTIME", "CREDENTIALS",
+    "LOCK", "WINDOWS_ENV", "RUNTIME_FILESYSTEM", "REPOSITORY", "PYTHON_RUNTIME", "CREDENTIALS",
     "TAILSCALE", "NETWORK", "TANKAN_TCP", "TANKAN_AUTH", "LUTOU_TCP",
     "LUTOU_AUTH", "SSH", "RUNTIME_BASELINE", "LOCAL_DISK", "REMOTE_IDENTITY",
     "REMOTE_DISK", "PROVIDER_PREFLIGHT", "TANKAN_REFRESH", "THREE_OIL",
-    "SOIL_MOISTURE", "WEATHER", "DOMESTIC_BASIS", "DOMESTIC_SPREAD",
+    "SOIL_MOISTURE", "WEATHER", "WEATHER_TABLE_PARTITION_CLEANUP",
+    "DOMESTIC_BASIS", "DOMESTIC_SPREAD",
     "PROMOTION", "ROLLBACK",
     "CONSUMER_FRESHNESS", "PRODUCTION_PACKAGE", "SERVER_TRANSPORT",
     "SERVER_ACTIVATION", "FORMAL_READ", "PREWARM", "ENTRYPOINT_EXCEPTION",
     "TIMEOUT", "MANIFEST_VALIDATION", "STATUS_SEAL",
 }
-DEFAULT_RUNTIME_ROOT = Path(
-    r"C:\Users\xx202\Desktop\codex自动更新\codex-projects\market-data-worktree-runtime"
-) / "automation"
 DEFAULT_REPOSITORY = Path(
     r"C:\Users\xx202\Desktop\codex自动更新\codex-projects\market-data"
 )
@@ -58,6 +56,8 @@ _SSH_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}$")
 _REMOTE_PATH = re.compile(r"^/[A-Za-z0-9_./-]+$")
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+_CLOUD_REPARSE_BASE = 0x9000001A
+_CLOUD_REPARSE_MASK = 0xFFFF0FFF
 _WINDOWS_TOOLS = {
     "git": (Path(r"C:\Program Files\Git\cmd\git.exe"),),
     "ssh": (Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "OpenSSH" / "ssh.exe",),
@@ -72,6 +72,110 @@ class WrapperFailure(RuntimeError):
             raise ValueError(f"unknown failed_stage: {stage}")
         super().__init__(safe_reason)
         self.stage, self.safe_reason = stage, safe_reason
+
+
+def default_runtime_root(environ: Mapping[str, str] | None = None) -> Path:
+    values = os.environ if environ is None else environ
+    local_app_data = values.get("LOCALAPPDATA", "").strip()
+    if not local_app_data:
+        raise WrapperFailure(
+            "RUNTIME_FILESYSTEM", "LOCALAPPDATA is unavailable for production runtime",
+        )
+    root = Path(local_app_data)
+    if not root.is_absolute():
+        raise WrapperFailure(
+            "RUNTIME_FILESYSTEM", "LOCALAPPDATA is not an absolute Windows path",
+        )
+    return root / "market-data-runtime" / "automation"
+
+
+DEFAULT_RUNTIME_ROOT = default_runtime_root()
+
+
+def _reparse_tag(path: Path) -> int | None:
+    value = path.lstat()
+    tag = getattr(value, "st_reparse_tag", 0)
+    return int(tag) if tag else None
+
+
+def _is_cloud_reparse_tag(tag: int | None) -> bool:
+    return tag is not None and tag & _CLOUD_REPARSE_MASK == _CLOUD_REPARSE_BASE
+
+
+def validate_runtime_filesystem(
+    automation_root: Path,
+    repository: Path,
+    *,
+    expected_root: Path | None = None,
+) -> Mapping[str, object]:
+    """Create and validate an owned non-Cloud-Files automation root."""
+
+    requested = automation_root.absolute()
+    expected = expected_root.absolute() if expected_root is not None else None
+    if expected is not None and requested != expected:
+        raise WrapperFailure(
+            "RUNTIME_FILESYSTEM", "production runtime is not the expected LocalAppData root",
+        )
+    repository_resolved = repository.resolve(strict=False)
+    requested_resolved = requested.resolve(strict=False)
+    if requested_resolved == repository_resolved or requested_resolved.is_relative_to(
+        repository_resolved
+    ):
+        raise WrapperFailure(
+            "RUNTIME_FILESYSTEM", "production runtime must not be inside the repository",
+        )
+
+    known_sync_roots = {
+        Path(value).resolve(strict=False)
+        for name in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer")
+        if (value := os.environ.get(name, "").strip())
+    }
+    user_profile = os.environ.get("USERPROFILE", "").strip()
+    if user_profile:
+        profile = Path(user_profile)
+        known_sync_roots.update(
+            (profile / name).resolve(strict=False) for name in ("Desktop", "Documents")
+        )
+    if any(
+        requested_resolved == root or requested_resolved.is_relative_to(root)
+        for root in known_sync_roots
+    ):
+        raise WrapperFailure(
+            "RUNTIME_FILESYSTEM", "production runtime is located in a known synchronized user folder",
+        )
+
+    requested.mkdir(parents=True, exist_ok=True)
+    inspected: list[dict[str, object]] = []
+    current = requested
+    stop = Path(current.anchor)
+    while True:
+        if current.exists():
+            tag = _reparse_tag(current)
+            inspected.append(
+                {
+                    "relative_level": len(requested.parts) - len(current.parts),
+                    "reparse_tag": None if tag is None else f"0x{tag:08X}",
+                    "cloud_files": _is_cloud_reparse_tag(tag),
+                }
+            )
+            if _is_cloud_reparse_tag(tag):
+                raise WrapperFailure(
+                    "RUNTIME_FILESYSTEM",
+                    "production runtime is located on Cloud Files/reparse storage",
+                )
+        if current == stop:
+            break
+        current = current.parent
+    if requested.is_symlink() or not requested.is_dir():
+        raise WrapperFailure(
+            "RUNTIME_FILESYSTEM", "production runtime must be a real directory",
+        )
+    return {
+        "runtime_class": "LOCALAPPDATA_LOCAL_FILESYSTEM",
+        "cloud_files": False,
+        "inspected_path_count": len(inspected),
+        "reparse_points": [item for item in inspected if item["reparse_tag"] is not None],
+    }
 
 
 @dataclass(frozen=True)
@@ -445,6 +549,8 @@ def _structured_failure_stage(root_failure: Mapping[str, Any]) -> str | None:
         return "ROLLBACK"
     if stage == "TIMEOUT":
         return "TIMEOUT"
+    if stage == "WEATHER_TABLE_PARTITION_CLEANUP":
+        return "WEATHER_TABLE_PARTITION_CLEANUP"
     if domain == "three_oil" or stage == "THREE_OIL":
         return "THREE_OIL"
     if domain == "soil_moisture" or stage == "SOIL_MOISTURE":
@@ -568,10 +674,35 @@ def run_provider_preflight(
     return {"sources": [{"source": item.get("source"), "status": item.get("status")} for item in sources]}
 
 
-def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, automation_root: Path = DEFAULT_RUNTIME_ROOT, python: Path = DEFAULT_PYTHON, timeout_seconds: float = 14400) -> int:
+def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, automation_root: Path | None = None, python: Path = DEFAULT_PYTHON, timeout_seconds: float = 14400) -> int:
     if trigger_source not in TRIGGERS:
         raise ValueError("trigger_source must be manual or scheduled")
+    formal_runtime = automation_root is None
+    automation_root = default_runtime_root() if formal_runtime else automation_root
+    assert automation_root is not None
     run_id, started = new_run_id(), utc_now()
+    try:
+        filesystem_evidence = validate_runtime_filesystem(
+            automation_root,
+            repository,
+            expected_root=default_runtime_root() if formal_runtime else None,
+        )
+    except WrapperFailure as exc:
+        print(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "run_id": run_id,
+                    "status": "FAILED",
+                    "failed_stage": exc.stage,
+                    "safe_reason": exc.safe_reason,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 1
     run_dir = automation_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     lock_path, active_path = automation_root / "full-daily.lock", automation_root / "active-run.json"
@@ -602,6 +733,7 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
                     atomic_write_json(run_dir / "preflight.json", {"schema_version": SCHEMA_VERSION, "run_id": run_id, "gates": gates})
                     raise
                 atomic_write_json(run_dir / "preflight.json", {"schema_version": SCHEMA_VERSION, "run_id": run_id, "gates": gates})
+            record_gate("RUNTIME_FILESYSTEM", lambda: filesystem_evidence)
             record_gate("LOCK", lambda: "exclusive OS lock acquired")
             def windows_gate() -> Mapping[str, str]:
                 if platform.system() != "Windows":
@@ -766,5 +898,6 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
 __all__ = [
     "Invocation", "RepositoryIdentity", "WrapperFailure", "atomic_write_json", "business_command",
     "create_trusted_tool_repo", "download_runtime_baseline", "lifecycle_lock", "make_final_status", "new_run_id", "require_baseline_matches",
-    "repository_identity", "run_logged", "run_provider_preflight", "run_wrapper", "ssh_command", "validate_daily_manifest",
+    "default_runtime_root", "repository_identity", "run_logged", "run_provider_preflight", "run_wrapper", "ssh_command", "validate_daily_manifest",
+    "validate_runtime_filesystem",
 ]

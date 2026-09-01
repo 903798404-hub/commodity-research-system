@@ -66,6 +66,57 @@ def _formal_repository(tmp_path: Path) -> tuple[Path, str, str]:
     return repository, production, _git(repository, "rev-parse", f"{production}^{{tree}}")
 
 
+def test_default_automation_runtime_is_local_app_data() -> None:
+    root = wrapper.default_runtime_root(
+        {"LOCALAPPDATA": r"C:\Users\tester\AppData\Local"}
+    )
+    assert root == Path(
+        r"C:\Users\tester\AppData\Local\market-data-runtime\automation"
+    )
+    assert "Desktop" not in root.parts
+
+
+def test_local_runtime_filesystem_passes_and_is_created(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    runtime = tmp_path / "local-app-data" / "market-data-runtime" / "automation"
+    evidence = wrapper.validate_runtime_filesystem(runtime, repository)
+    assert runtime.is_dir()
+    assert evidence["cloud_files"] is False
+    assert evidence["runtime_class"] == "LOCALAPPDATA_LOCAL_FILESYSTEM"
+
+
+def test_cloud_files_reparse_runtime_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    runtime = tmp_path / "runtime"
+    monkeypatch.setattr(
+        wrapper,
+        "_reparse_tag",
+        lambda path: 0x9000601A if path == runtime.absolute() else None,
+    )
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.validate_runtime_filesystem(runtime, repository)
+    assert caught.value.stage == "RUNTIME_FILESYSTEM"
+    assert "Cloud Files" in caught.value.safe_reason
+
+
+def test_runtime_inside_repository_is_rejected_without_deleting_history(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    history = repository / "old-runtime" / "historical-run.json"
+    history.parent.mkdir()
+    history.write_text("evidence", encoding="utf-8")
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.validate_runtime_filesystem(repository / "runtime", repository)
+    assert caught.value.stage == "RUNTIME_FILESYSTEM"
+    assert history.read_text(encoding="utf-8") == "evidence"
+
+
 @pytest.mark.parametrize("business", ["UPDATED", "NO_CHANGE"])
 def test_valid_updated_and_no_change_are_success(tmp_path: Path, business: str) -> None:
     run_id = "full-daily-20260831T010203.000001Z-abcdef12"
@@ -244,6 +295,24 @@ def test_manifest_failure_prefers_structured_weather_root_over_legacy_reason() -
         "sources": [{"source": "lutou", "read": "READY", "status": "INGESTION_FAILURE"}],
     }
     assert wrapper.classify_manifest_failure(manifest) == "WEATHER"
+
+
+def test_manifest_failure_preserves_precise_weather_cleanup_stage() -> None:
+    manifest = {
+        "root_failure": {
+            "provider": "lutou",
+            "domain": "weather",
+            "stage": "WEATHER_TABLE_PARTITION_CLEANUP",
+            "exception_type": "LutouWeatherStageError",
+            "underlying_exception_type": "OSError",
+            "safe_message": "WinError 145; operation=shutil.rmtree",
+        },
+        "transaction": {"rollback": "PASS"},
+    }
+    assert (
+        wrapper.classify_manifest_failure(manifest)
+        == "WEATHER_TABLE_PARTITION_CLEANUP"
+    )
 
 
 def test_manifest_failure_reports_rollback_after_unmapped_root() -> None:

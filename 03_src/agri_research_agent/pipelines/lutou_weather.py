@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import re
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
+from types import TracebackType
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -52,6 +54,8 @@ STABLE_KEY = ("series_id", "valid_date", "forecast_run_id")
 NORMAL_STABLE_KEY = ("series_id", "month_day")
 SOURCE_POLICY_VERSION = "public-weather-current-consumer-scope/1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_CLEANUP_MAX_ATTEMPTS = 4
+_CLEANUP_BACKOFF_SECONDS = (0.05, 0.1, 0.2)
 
 STANDARD_SCHEMA = pa.schema(
     [
@@ -143,6 +147,8 @@ class LutouWeatherStageError(LutouWeatherError):
     def __init__(self, stage: str, exc: Exception) -> None:
         super().__init__(f"Weather {stage} failed: {type(exc).__name__}: {exc}")
         self.stage = stage
+        self.cleanup_failure = getattr(exc, "cleanup_failure", None)
+        self.cleanup_evidence: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,6 +396,13 @@ def _seal_candidate(
             directory / "standard.parquet",
             failure_hook,
             seed_partition_root=seed_partition_root,
+            cleanup_evidence_path=assert_runtime_write(
+                runtime,
+                public_root
+                / "failure-evidence"
+                / f"{run_id}-table-partition-cleanup.json",
+            ),
+            candidate_run_id=run_id,
         )
         if failure_hook == "candidate_qc":
             stats["quality_passed"] = False
@@ -461,6 +474,8 @@ def _extract_standard(
     failure_hook: str | None,
     *,
     seed_partition_root: Path | None,
+    cleanup_evidence_path: Path,
+    candidate_run_id: str,
 ) -> dict[str, object]:
     writer = pq.ParquetWriter(destination, STANDARD_SCHEMA, compression="zstd")
     row_count = usable_count = missing_count = non_numeric_count = 0
@@ -500,6 +515,7 @@ def _extract_standard(
             ),
         )
     ]
+    primary_error: tuple[BaseException, TracebackType | None] | None = None
     try:
         for table, start, end in query_partitions:
             partition_id = _table_partition_id(table, start, end)
@@ -617,15 +633,41 @@ def _extract_standard(
                     "reused": reused,
                 }
             )
-    finally:
+    except BaseException as exc:
+        primary_error = (exc, exc.__traceback__)
+    try:
         writer.close()
-        if seed_partition_root is None and local_partition_root.exists():
-            shutil.rmtree(local_partition_root)
+    except BaseException as exc:
+        if primary_error is None:
+            primary_error = (exc, exc.__traceback__)
+    cleanup_telemetry: Mapping[str, object] = {
+        "status": "NOT_REQUIRED", "attempt_count": 0, "retry_count": 0,
+    }
+    if seed_partition_root is None and local_partition_root.exists():
+        try:
+            cleanup_telemetry = _cleanup_table_partitions(
+                outer_building=destination.parent,
+                target=local_partition_root,
+                candidate_run_id=candidate_run_id,
+                evidence_path=cleanup_evidence_path,
+            )
+        except LutouWeatherStageError as cleanup_error:
+            if primary_error is None:
+                raise
+            primary_exception = primary_error[0]
+            if (
+                isinstance(primary_exception, Exception)
+                and cleanup_error.cleanup_evidence is not None
+            ):
+                primary_exception.cleanup_failure = cleanup_error.cleanup_evidence  # type: ignore[attr-defined]
+    if primary_error is not None:
+        raise primary_error[0].with_traceback(primary_error[1])
     expected = {item.series_id for item in catalog.series}
     quality_passed = series_seen == expected and duplicate_date_count == 0
     return {
         "quality_status": "PASS" if quality_passed else "FAIL",
         "quality_passed": quality_passed,
+        "table_partition_cleanup": dict(cleanup_telemetry),
         "standard_row_count": row_count,
         "usable_row_count": usable_count,
         "retained_exception_count": row_count - usable_count,
@@ -671,6 +713,161 @@ def _extract_standard(
         "forecast_valid_date_min": min(forecast_minima).isoformat(),
         "forecast_valid_date_max": max(forecast_maxima).isoformat(),
     }
+
+
+def _remaining_cleanup_entries(target: Path) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    try:
+        paths = sorted(
+            target.rglob("*"),
+            key=lambda item: item.relative_to(target).as_posix(),
+        )
+    except OSError as exc:
+        return [
+            {
+                "relative_path": "<enumeration-failed>",
+                "entry_type": type(exc).__name__,
+            }
+        ]
+    for path in paths[:200]:
+        try:
+            entry_type = (
+                "directory"
+                if path.is_dir()
+                else "file"
+                if path.is_file()
+                else "other"
+            )
+        except OSError:
+            entry_type = "unavailable"
+        entries.append(
+            {
+                "relative_path": path.relative_to(target).as_posix(),
+                "entry_type": entry_type,
+            }
+        )
+    if len(paths) > 200:
+        entries.append(
+            {"relative_path": "<truncated>", "entry_type": "metadata"}
+        )
+    return entries
+
+
+def _cleanup_table_partitions(
+    *,
+    outer_building: Path,
+    target: Path,
+    candidate_run_id: str,
+    evidence_path: Path,
+    max_attempts: int = _CLEANUP_MAX_ATTEMPTS,
+    backoff_seconds: tuple[float, ...] = _CLEANUP_BACKOFF_SECONDS,
+    rmtree: Callable[[Path], None] = shutil.rmtree,
+    sleep: Callable[[float], None] = sleep,
+) -> Mapping[str, object]:
+    safe_run_id = validate_candidate_id(candidate_run_id)
+    outer = outer_building.resolve(strict=False)
+    owned_target = target.resolve(strict=False)
+    expected_target = (outer / ".table-partitions").resolve(strict=False)
+    weather_root = outer.parent.parent
+    expected_evidence_parent = (weather_root / "failure-evidence").resolve(
+        strict=False
+    )
+    if (
+        outer.parent.name != "candidates"
+        or weather_root.name != "lutou-weather"
+        or not outer.name.startswith(f".building-{safe_run_id}-")
+        or owned_target != expected_target
+        or evidence_path.parent.resolve(strict=False) != expected_evidence_parent
+        or outer_building.is_symlink()
+        or target.is_symlink()
+    ):
+        raise LutouWeatherStageError(
+            "WEATHER_TABLE_PARTITION_CLEANUP",
+            ValueError(
+                "cleanup target is not the owned current-run table partition directory"
+            ),
+        )
+    if max_attempts < 1 or len(backoff_seconds) < max_attempts - 1:
+        raise ValueError("cleanup retry policy is invalid")
+
+    attempts: list[dict[str, object]] = []
+    for attempt in range(1, max_attempts + 1):
+        try:
+            rmtree(owned_target)
+            result: dict[str, object] = {
+                "status": "PASS",
+                "operation": "shutil.rmtree",
+                "owned_relative_path": ".table-partitions",
+                "attempt_count": attempt,
+                "retry_count": attempt - 1,
+            }
+            if attempts:
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(
+                    evidence_path,
+                    {
+                        "schema_version": "lutou-weather-cleanup-evidence/1",
+                        "stage": "WEATHER_TABLE_PARTITION_CLEANUP",
+                        **result,
+                        "attempts": attempts,
+                        "completed_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+                result["evidence_file"] = evidence_path.name
+            return result
+        except OSError as exc:
+            winerror = getattr(exc, "winerror", None)
+            transient = winerror == 145 or exc.errno == errno.ENOTEMPTY
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "operation": "shutil.rmtree",
+                    "owned_relative_path": ".table-partitions",
+                    "exception_type": type(exc).__name__,
+                    "winerror": winerror,
+                    "errno": exc.errno,
+                    "remaining_entries": _remaining_cleanup_entries(owned_target),
+                }
+            )
+            exhausted = attempt == max_attempts
+            if not transient or exhausted:
+                retry_count = attempt - 1
+                evidence = {
+                    "schema_version": "lutou-weather-cleanup-evidence/1",
+                    "stage": "WEATHER_TABLE_PARTITION_CLEANUP",
+                    "status": "FAILED",
+                    "operation": "shutil.rmtree",
+                    "owned_relative_path": ".table-partitions",
+                    "attempt_count": attempt,
+                    "retry_count": retry_count,
+                    "attempts": attempts,
+                    "completed_at": datetime.now(UTC).isoformat(),
+                }
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(evidence_path, evidence)
+                safe_error = OSError(
+                    exc.errno,
+                    f"{exc}; operation=shutil.rmtree; "
+                    f"owned_relative_path=.table-partitions; "
+                    f"retry_count={retry_count}",
+                    ".table-partitions",
+                    winerror,
+                )
+                stage_error = LutouWeatherStageError(
+                    "WEATHER_TABLE_PARTITION_CLEANUP", safe_error
+                )
+                stage_error.cleanup_evidence = {
+                    "stage": "WEATHER_TABLE_PARTITION_CLEANUP",
+                    "exception_type": type(exc).__name__,
+                    "winerror": winerror,
+                    "operation": "shutil.rmtree",
+                    "owned_relative_path": ".table-partitions",
+                    "retry_count": retry_count,
+                    "evidence_file": evidence_path.name,
+                }
+                raise stage_error from exc
+            sleep(backoff_seconds[attempt - 1])
+    raise AssertionError("cleanup retry loop terminated unexpectedly")
 
 
 def _table_query_windows(
