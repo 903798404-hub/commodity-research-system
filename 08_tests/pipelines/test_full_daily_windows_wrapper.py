@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import subprocess
 import sys
@@ -11,6 +12,18 @@ import pytest
 from filelock import FileLock
 
 from agri_research_agent.automation import full_daily_windows as wrapper
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_script(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _manifest(run_id: str, *, business: str = "UPDATED", succeeded: bool = True, prewarm: str = "PASS") -> dict[str, object]:
@@ -63,6 +76,19 @@ def _formal_repository(tmp_path: Path) -> tuple[Path, str, str]:
     _git(repository, "config", "user.name", "Test")
     production = _commit(repository, "production.txt", "approved\n", "production")
     _git(repository, "update-ref", "refs/remotes/origin/main", production)
+    return repository, production, _git(repository, "rev-parse", f"{production}^{{tree}}")
+
+
+def _repository_with_remote(tmp_path: Path) -> tuple[Path, str, str]:
+    remote = tmp_path / "origin.git"
+    repository = tmp_path / "canonical"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "clone", str(remote), str(repository)], check=True, capture_output=True)
+    _git(repository, "checkout", "-b", "main")
+    _git(repository, "config", "user.email", "test@example.invalid")
+    _git(repository, "config", "user.name", "Test")
+    production = _commit(repository, "production.txt", "approved\n", "production")
+    _git(repository, "push", "-u", "origin", "main")
     return repository, production, _git(repository, "rev-parse", f"{production}^{{tree}}")
 
 
@@ -372,8 +398,13 @@ def test_utf8_atomic_status_round_trip_under_chinese_path(tmp_path: Path) -> Non
 
 def test_child_environment_forces_utf8_and_never_uses_partial_lutou_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LUTOU_HOST", "partial-only")
+    monkeypatch.setenv("PYTHONPATH", "caller-code")
+    monkeypatch.setenv("PYTHONHOME", "caller-python")
     env = wrapper.runtime_environment()
     assert "LUTOU_HOST" not in env
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
+    assert env["PYTHONNOUSERSITE"] == "1"
     assert env["PYTHONUTF8"] == "1"
     assert env["PYTHONIOENCODING"] == "utf-8"
 
@@ -383,12 +414,13 @@ def test_manual_and_scheduled_have_identical_business_command() -> None:
     manual = wrapper.business_command(*arguments)
     scheduled = wrapper.business_command(*arguments)
     assert manual == scheduled
-    assert manual[1].endswith(str(Path("04_scripts") / "refresh_public_data.py"))
+    assert manual[1] == "-I"
+    assert manual[2].endswith(str(Path("04_scripts") / "refresh_public_data.py"))
 
 
 def test_current_main_equal_to_production_commit_is_allowed(tmp_path: Path) -> None:
     repository, production, production_tree = _formal_repository(tmp_path)
-    identity = wrapper.repository_identity(repository, production)
+    identity = wrapper.repository_identity(repository, production, remote_main=production)
     assert identity.repository_main_head == production
     assert identity.repository_main_tree == production_tree
     assert identity.production_commit == production
@@ -403,7 +435,7 @@ def test_main_can_advance_while_both_triggers_keep_approved_production(
     main_head = _commit(repository, "frontend-only-change.txt", "UI only\n", "frontend only")
     _git(repository, "update-ref", "refs/remotes/origin/main", main_head)
 
-    identity = wrapper.repository_identity(repository, production)
+    identity = wrapper.repository_identity(repository, production, remote_main=main_head)
     invocation = wrapper.Invocation(
         "run", trigger, "2026-08-31T01:02:03Z",
         identity.repository_main_head, identity.repository_main_tree,
@@ -434,7 +466,7 @@ def test_production_commit_must_be_full_lowercase_sha(tmp_path: Path, production
 def test_nonexistent_production_commit_is_rejected(tmp_path: Path) -> None:
     repository, _, _ = _formal_repository(tmp_path)
     with pytest.raises(wrapper.WrapperFailure) as caught:
-        wrapper.repository_identity(repository, "f" * 40)
+        wrapper.repository_identity(repository, "f" * 40, remote_main=_git(repository, "rev-parse", "origin/main"))
     assert caught.value.stage == "REPOSITORY"
     assert "known local commit" in caught.value.safe_reason
 
@@ -446,25 +478,177 @@ def test_feature_only_and_unpushed_local_commit_are_rejected(tmp_path: Path) -> 
     _git(repository, "checkout", "main")
     assert _git(repository, "rev-parse", "origin/main") == production
     with pytest.raises(wrapper.WrapperFailure) as caught:
-        wrapper.repository_identity(repository, feature)
+        wrapper.repository_identity(repository, feature, remote_main=production)
     assert caught.value.stage == "REPOSITORY"
     assert "not an ancestor" in caught.value.safe_reason
 
 
-def test_dirty_workspace_is_still_rejected(tmp_path: Path) -> None:
+def test_dirty_caller_workspace_does_not_change_approved_identity(tmp_path: Path) -> None:
     repository, production, _ = _formal_repository(tmp_path)
     (repository / "untracked.txt").write_text("dirty\n", encoding="utf-8")
-    with pytest.raises(wrapper.WrapperFailure) as caught:
-        wrapper.repository_identity(repository, production)
-    assert caught.value.stage == "REPOSITORY"
+    identity = wrapper.repository_identity(repository, production, remote_main=production)
+    assert identity.production_commit == production
+    assert identity.repository_branch == "NOT_APPLICABLE"
 
 
-def test_local_main_divergence_from_origin_main_is_still_rejected(tmp_path: Path) -> None:
+def test_local_main_divergence_does_not_change_approved_identity(tmp_path: Path) -> None:
     repository, production, _ = _formal_repository(tmp_path)
     _commit(repository, "local-only.txt", "unpushed\n", "local only")
-    with pytest.raises(wrapper.WrapperFailure) as caught:
+    identity = wrapper.repository_identity(repository, production, remote_main=production)
+    assert identity.repository_main_head == production
+    assert identity.production_commit == production
+
+
+@pytest.mark.parametrize("caller_state", ["feature", "integration", "detached"])
+def test_caller_checkout_identity_is_irrelevant(tmp_path: Path, caller_state: str) -> None:
+    repository, production, _ = _formal_repository(tmp_path)
+    if caller_state == "detached":
+        _git(repository, "checkout", "--detach", production)
+    else:
+        _git(repository, "checkout", "-b", caller_state)
+        _commit(repository, f"{caller_state}.txt", "caller only\n", caller_state)
+    identity = wrapper.repository_identity(repository, production, remote_main=production)
+    assert identity.production_commit == production
+    assert identity.repository_main_head == production
+
+
+@pytest.mark.parametrize("caller_state", ["main", "feature", "integration", "detached", "dirty"])
+def test_bootstrap_resolves_approved_remote_identity_independent_of_caller(
+    tmp_path: Path, caller_state: str,
+) -> None:
+    bootstrap = _load_script(
+        f"full_daily_bootstrap_{caller_state}",
+        ROOT / "04_scripts" / "automation" / "full_daily_windows_bootstrap.py",
+    )
+    repository, production, production_tree = _repository_with_remote(tmp_path)
+    if caller_state == "detached":
+        _git(repository, "checkout", "--detach", production)
+    elif caller_state in {"feature", "integration"}:
+        _git(repository, "checkout", "-b", caller_state)
+        _commit(repository, f"{caller_state}.txt", "caller only\n", caller_state)
+    elif caller_state == "dirty":
+        (repository / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+
+    identity = bootstrap.resolve_approved_identity(repository, production)
+    assert identity.commit == production
+    assert identity.tree == production_tree
+    assert identity.remote_main == production
+
+
+def test_bootstrap_rejects_unapproved_feature_commit(tmp_path: Path) -> None:
+    bootstrap = _load_script(
+        "full_daily_bootstrap_reject_feature",
+        ROOT / "04_scripts" / "automation" / "full_daily_windows_bootstrap.py",
+    )
+    repository, production, _ = _repository_with_remote(tmp_path)
+    _git(repository, "checkout", "-b", "feature")
+    feature = _commit(repository, "feature.txt", "unapproved\n", "feature")
+    assert feature != production
+    with pytest.raises(bootstrap.BootstrapFailure, match="not on trusted origin/main"):
+        bootstrap.resolve_approved_identity(repository, feature)
+
+
+def test_wrapper_uses_live_remote_identity_and_fails_closed_when_unavailable(tmp_path: Path) -> None:
+    repository, production, production_tree = _repository_with_remote(tmp_path)
+    identity = wrapper.repository_identity(repository, production)
+    assert identity.repository_main_head == production
+    assert identity.production_tree == production_tree
+    _git(repository, "remote", "set-url", "origin", str(tmp_path / "missing-origin.git"))
+    with pytest.raises(wrapper.WrapperFailure):
         wrapper.repository_identity(repository, production)
-    assert caught.value.stage == "REPOSITORY"
+
+
+def test_approved_control_plane_ignores_caller_cwd_and_pythonpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _load_script(
+        "full_daily_bootstrap_import_boundary",
+        ROOT / "04_scripts" / "automation" / "full_daily_windows_bootstrap.py",
+    )
+    control_plane = tmp_path / "approved"
+    caller = tmp_path / "dirty-caller"
+    runner = control_plane / "04_scripts" / "automation" / "run_full_daily_windows.py"
+    approved_src = control_plane / "03_src"
+    caller_src = caller / "03_src"
+    runner.parent.mkdir(parents=True)
+    approved_src.mkdir(parents=True)
+    caller_src.mkdir(parents=True)
+    (approved_src / "identity_marker.py").write_text("VALUE = 'approved'\n", encoding="utf-8")
+    (caller_src / "identity_marker.py").write_text("VALUE = 'caller'\n", encoding="utf-8")
+    runner.write_text(
+        "import argparse, os, pathlib, sys\n"
+        "p=argparse.ArgumentParser()\n"
+        "p.add_argument('--trigger-source'); p.add_argument('--timeout-seconds')\n"
+        "p.add_argument('--source-repository'); p.add_argument('--approved-control-plane-commit')\n"
+        "p.add_argument('--approved-control-plane-tree'); p.parse_args()\n"
+        "sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / '03_src'))\n"
+        "import identity_marker\n"
+        "pathlib.Path(os.environ['CONTROL_PLANE_RESULT']).write_text(identity_marker.VALUE)\n",
+        encoding="utf-8",
+    )
+    result_file = tmp_path / "result.txt"
+    monkeypatch.setenv("PYTHONPATH", str(caller_src))
+    monkeypatch.setenv("CONTROL_PLANE_RESULT", str(result_file))
+    monkeypatch.chdir(caller)
+    identity = bootstrap.ApprovedIdentity("a" * 40, "b" * 40, "c" * 40, "d" * 40)
+    result = bootstrap.run_approved_control_plane(
+        Path(sys.executable), caller, control_plane, identity, "manual", 30
+    )
+    assert result == 0
+    assert result_file.read_text(encoding="utf-8") == "approved"
+
+
+def test_bootstrap_control_plane_requires_exact_detached_clean_checkout(tmp_path: Path) -> None:
+    bootstrap = _load_script(
+        "full_daily_bootstrap_checkout_gate",
+        ROOT / "04_scripts" / "automation" / "full_daily_windows_bootstrap.py",
+    )
+    repository, production, production_tree = _repository_with_remote(tmp_path)
+    identity = bootstrap.resolve_approved_identity(repository, production)
+    checkout = tmp_path / "approved-control-plane"
+    bootstrap.create_detached_checkout(repository, checkout, identity)
+    bootstrap.validate_detached_checkout(checkout, identity)
+
+    wrong_head = bootstrap.ApprovedIdentity(
+        "f" * 40, production_tree, identity.remote_main, identity.remote_main_tree
+    )
+    with pytest.raises(bootstrap.BootstrapFailure, match="HEAD mismatch"):
+        bootstrap.validate_detached_checkout(checkout, wrong_head)
+    wrong_tree = bootstrap.ApprovedIdentity(
+        production, "f" * 40, identity.remote_main, identity.remote_main_tree
+    )
+    with pytest.raises(bootstrap.BootstrapFailure, match="tree mismatch"):
+        bootstrap.validate_detached_checkout(checkout, wrong_tree)
+    (checkout / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(bootstrap.BootstrapFailure, match="dirty"):
+        bootstrap.validate_detached_checkout(checkout, identity)
+
+
+def test_approved_entry_revalidates_head_tree_detached_and_clean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = _load_script(
+        "full_daily_approved_entry",
+        ROOT / "04_scripts" / "automation" / "run_full_daily_windows.py",
+    )
+    values = iter(("a" * 40, "b" * 40, "HEAD", ""))
+    monkeypatch.setattr(entry, "_git", lambda *_args: next(values))
+    entry.validate_control_plane_root("a" * 40, "b" * 40)
+
+    dirty = iter(("a" * 40, "b" * 40, "HEAD", "?? caller.py"))
+    monkeypatch.setattr(entry, "_git", lambda *_args: next(dirty))
+    with pytest.raises(RuntimeError, match="dirty"):
+        entry.validate_control_plane_root("a" * 40, "b" * 40)
+
+
+def test_powershell_launcher_materializes_bootstrap_from_approved_git_object() -> None:
+    launcher = (ROOT / "04_scripts" / "automation" / "run_full_daily_windows.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "$PSScriptRoot" not in launcher
+    assert "${ApprovedCommit}:04_scripts/automation/full_daily_windows_bootstrap.py" in launcher
+    assert "git -C $CanonicalRepository show $BootstrapObject" in launcher
+    assert "-I $Bootstrap" in launcher
 
 
 def test_trusted_tool_repo_is_exact_head_tree_and_clean(tmp_path: Path) -> None:
@@ -493,7 +677,7 @@ def test_trusted_tool_repo_enables_windows_long_paths(
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    identities = iter(("head", "tree", ""))
+    identities = iter(("head", "tree", "HEAD", ""))
     monkeypatch.setattr(wrapper.subprocess, "run", complete)
     monkeypatch.setattr(wrapper, "_git", lambda *_args: next(identities))
     monkeypatch.setattr(wrapper, "tool_path", lambda name: f"{name}.exe")

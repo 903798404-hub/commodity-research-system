@@ -240,9 +240,12 @@ def tool_path(name: str) -> str:
 
 def runtime_environment() -> dict[str, str]:
     env = dict(os.environ)
-    for name in ("LUTOU_HOST", "LUTOU_PORT", "LUTOU_USER", "LUTOU_PASSWORD"):
+    for name in (
+        "LUTOU_HOST", "LUTOU_PORT", "LUTOU_USER", "LUTOU_PASSWORD",
+        "PYTHONHOME", "PYTHONPATH",
+    ):
         env.pop(name, None)
-    env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+    env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PYTHONNOUSERSITE": "1"})
     tool_directories = [str(Path(tool_path(name)).parent) for name in ("git", "ssh", "scp", "tailscale")]
     env["PATH"] = os.pathsep.join(dict.fromkeys([*tool_directories, env.get("PATH", "")]))
     return env
@@ -258,18 +261,28 @@ def _git(repository: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def repository_identity(repository: Path, production_commit: str) -> RepositoryIdentity:
+def trusted_remote_main(repository: Path) -> str:
+    advertised = _git(repository, "ls-remote", "--exit-code", "origin", "refs/heads/main")
+    fields = advertised.split()
+    if len(fields) != 2 or fields[1] != "refs/heads/main" or not _COMMIT_SHA.fullmatch(fields[0]):
+        raise WrapperFailure("REPOSITORY", "origin did not advertise one valid main SHA")
+    remote_main = fields[0]
+    _git(repository, "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main")
+    if _git(repository, "rev-parse", "refs/remotes/origin/main") != remote_main:
+        raise WrapperFailure("REPOSITORY", "fetched origin/main differs from live remote advertisement")
+    return remote_main
+
+
+def repository_identity(
+    repository: Path, production_commit: str, *, remote_main: str | None = None,
+) -> RepositoryIdentity:
     if not (repository / ".git").exists():
         raise WrapperFailure("REPOSITORY", "formal repository is not a Git worktree")
-    branch = _git(repository, "branch", "--show-current")
-    head = _git(repository, "rev-parse", "HEAD")
-    tree = _git(repository, "rev-parse", "HEAD^{tree}")
-    status = _git(repository, "status", "--porcelain=v1", "--untracked-files=all")
-    upstream = _git(repository, "rev-parse", "origin/main")
-    if branch != "main" or head != upstream or status:
-        raise WrapperFailure("REPOSITORY", "repository must be clean main at local origin/main")
     if not _COMMIT_SHA.fullmatch(production_commit):
         raise WrapperFailure("REPOSITORY", "approved production commit must be a full lowercase Git SHA")
+    trusted_main = remote_main or trusted_remote_main(repository)
+    if not _COMMIT_SHA.fullmatch(trusted_main):
+        raise WrapperFailure("REPOSITORY", "trusted origin/main must be a full lowercase Git SHA")
     object_probe = subprocess.run(
         [tool_path("git"), "-C", str(repository), "cat-file", "-t", production_commit],
         text=True, encoding="utf-8", capture_output=True, check=False, timeout=30,
@@ -277,15 +290,29 @@ def repository_identity(repository: Path, production_commit: str) -> RepositoryI
     if object_probe.returncode or object_probe.stdout.strip() != "commit":
         raise WrapperFailure("REPOSITORY", "approved production commit is not a known local commit")
     ancestor_probe = subprocess.run(
-        [tool_path("git"), "-C", str(repository), "merge-base", "--is-ancestor", production_commit, "origin/main"],
+        [tool_path("git"), "-C", str(repository), "merge-base", "--is-ancestor", production_commit, trusted_main],
         text=True, encoding="utf-8", capture_output=True, check=False, timeout=30,
     )
     if ancestor_probe.returncode == 1:
-        raise WrapperFailure("REPOSITORY", "approved production commit is not an ancestor of origin/main")
+        raise WrapperFailure("REPOSITORY", "approved production commit is not an ancestor of trusted origin/main")
     if ancestor_probe.returncode:
         raise WrapperFailure("REPOSITORY", "production ancestry probe failed")
     production_tree = _git(repository, "rev-parse", f"{production_commit}^{{tree}}")
-    return RepositoryIdentity(head, tree, production_commit, production_tree, branch)
+    trusted_main_tree = _git(repository, "rev-parse", f"{trusted_main}^{{tree}}")
+    return RepositoryIdentity(
+        trusted_main, trusted_main_tree, production_commit, production_tree, "NOT_APPLICABLE"
+    )
+
+
+def validate_tool_repo_identity(destination: Path, head: str, tree: str) -> None:
+    if _git(destination, "rev-parse", "HEAD") != head:
+        raise WrapperFailure("REPOSITORY", "trusted workspace HEAD mismatch")
+    if _git(destination, "rev-parse", "HEAD^{tree}") != tree:
+        raise WrapperFailure("REPOSITORY", "trusted workspace tree mismatch")
+    if _git(destination, "rev-parse", "--abbrev-ref", "HEAD") != "HEAD":
+        raise WrapperFailure("REPOSITORY", "trusted workspace is not detached")
+    if _git(destination, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise WrapperFailure("REPOSITORY", "trusted workspace is not clean")
 
 
 def create_trusted_tool_repo(source: Path, destination: Path, head: str, tree: str) -> None:
@@ -304,10 +331,7 @@ def create_trusted_tool_repo(source: Path, destination: Path, head: str, tree: s
     )
     if checkout.returncode:
         raise WrapperFailure("REPOSITORY", "trusted workspace checkout failed")
-    if _git(destination, "rev-parse", "HEAD") != head or _git(destination, "rev-parse", "HEAD^{tree}") != tree:
-        raise WrapperFailure("REPOSITORY", "trusted workspace identity mismatch")
-    if _git(destination, "status", "--porcelain=v1", "--untracked-files=all"):
-        raise WrapperFailure("REPOSITORY", "trusted workspace is not clean")
+    validate_tool_repo_identity(destination, head, tree)
 
 
 def write_runtime_marker(runtime: Path, run_id: str) -> None:
@@ -634,7 +658,7 @@ def business_command(
     ssh_target: str, remote_store_root: str, activation_image_id: str,
 ) -> list[str]:
     return [
-        str(python), str(tool_repo / "04_scripts" / "refresh_public_data.py"),
+        str(python), "-I", str(tool_repo / "04_scripts" / "refresh_public_data.py"),
         "--runtime-root", str(runtime), "--weather-baseline-root",
         str(tool_repo / "01_data" / "processed" / "weather"),
         "--packages-root", str(runtime / "public-data-packages"), "--run-id", run_id,
@@ -648,7 +672,7 @@ def run_provider_preflight(
     tankan_secret: Path, lutou_secret: Path, *, timeout: float = 900,
 ) -> Mapping[str, Any]:
     command = [
-        str(python), str(tool_repo / "04_scripts" / "refresh_public_data.py"),
+        str(python), "-I", str(tool_repo / "04_scripts" / "refresh_public_data.py"),
         "--runtime-root", str(runtime), "--weather-baseline-root",
         str(tool_repo / "01_data" / "processed" / "weather"),
         "--run-id", f"{run_id}-preflight", "--tankan-secret-file", str(tankan_secret),
@@ -898,6 +922,6 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
 __all__ = [
     "Invocation", "RepositoryIdentity", "WrapperFailure", "atomic_write_json", "business_command",
     "create_trusted_tool_repo", "download_runtime_baseline", "lifecycle_lock", "make_final_status", "new_run_id", "require_baseline_matches",
-    "default_runtime_root", "repository_identity", "run_logged", "run_provider_preflight", "run_wrapper", "ssh_command", "validate_daily_manifest",
-    "validate_runtime_filesystem",
+    "default_runtime_root", "repository_identity", "run_logged", "run_provider_preflight", "run_wrapper", "ssh_command", "trusted_remote_main", "validate_daily_manifest",
+    "validate_runtime_filesystem", "validate_tool_repo_identity",
 ]
