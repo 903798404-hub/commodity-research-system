@@ -671,28 +671,53 @@ def run_provider_preflight(
     python: Path, tool_repo: Path, runtime: Path, run_id: str,
     tankan_secret: Path, lutou_secret: Path, *, timeout: float = 900,
 ) -> Mapping[str, Any]:
+    runtime.mkdir(parents=True, exist_ok=True)
+    evidence_path = runtime / "provider-preflight-evidence.json"
+    human_stdout_path = runtime / "provider-preflight.stdout.log"
+    human_stderr_path = runtime / "provider-preflight.stderr.log"
+    evidence_path.unlink(missing_ok=True)
+    preflight_run_id = f"{run_id}-preflight"
     command = [
         str(python), "-I", str(tool_repo / "04_scripts" / "refresh_public_data.py"),
         "--runtime-root", str(runtime), "--weather-baseline-root",
-        str(tool_repo / "01_data" / "processed" / "weather"),
-        "--run-id", f"{run_id}-preflight", "--tankan-secret-file", str(tankan_secret),
+        str(tool_repo / "01_data" / "processed" / "weather"), "--run-id",
+        preflight_run_id, "--tankan-secret-file", str(tankan_secret),
         "--lutou-secret-file", str(lutou_secret), "--dry-run",
+        "--evidence-output", str(evidence_path),
     ]
     env = runtime_environment()
     try:
-        result = subprocess.run(
-            command, cwd=tool_repo, env=env, text=True, encoding="utf-8",
-            capture_output=True, check=False, timeout=timeout,
-        )
+        with human_stdout_path.open("wb") as human_stdout, human_stderr_path.open("wb") as human_stderr:
+            result = subprocess.run(
+                command, cwd=tool_repo, env=env, stdout=human_stdout,
+                stderr=human_stderr, check=False, timeout=timeout,
+            )
     except subprocess.TimeoutExpired as exc:
         raise WrapperFailure("TIMEOUT", "provider preflight total timeout exhausted") from exc
     try:
-        payload = json.loads(result.stdout.strip().splitlines()[-1])
-    except (IndexError, ValueError) as exc:
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
         raise WrapperFailure("PROVIDER_PREFLIGHT", "provider preflight returned invalid evidence") from exc
-    sources = payload.get("sources") if isinstance(payload, dict) else None
-    if result.returncode or not isinstance(sources, list) or any(
-        not isinstance(item, dict) or item.get("status") != "READY" for item in sources
+    if not isinstance(payload, dict):
+        raise WrapperFailure("PROVIDER_PREFLIGHT", "provider preflight returned invalid evidence")
+    sources = payload.get("sources")
+    valid_sources = isinstance(sources, list) and all(
+        isinstance(item, dict)
+        and isinstance(item.get("source"), str)
+        and isinstance(item.get("status"), str)
+        for item in sources
+    )
+    source_names = [item["source"] for item in sources] if valid_sources else []
+    valid_identity = (
+        payload.get("schema_version") == "unified-public-data-dry-run/1"
+        and payload.get("dry_run") is True
+        and payload.get("run_id") == preflight_run_id
+        and valid_sources
+        and len(source_names) == len(set(source_names))
+        and set(source_names) == REQUIRED_PROVIDERS
+    )
+    if result.returncode or not valid_identity or any(
+        item.get("status") != "READY" for item in sources if isinstance(item, dict)
     ):
         raise WrapperFailure("PROVIDER_PREFLIGHT", "one or more formal providers did not pass read-only preflight")
     return {"sources": [{"source": item.get("source"), "status": item.get("status")} for item in sources]}

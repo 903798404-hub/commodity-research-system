@@ -754,7 +754,9 @@ def test_mixed_updated_and_unavailable_never_publishes_partial_snapshot(runtime:
     assert result.manifest["server_sync"] == "SKIPPED"
 
 
-def test_dry_run_is_read_only_and_reports_all_publication_steps_skipped(capsys) -> None:
+def test_dry_run_is_read_only_and_reports_all_publication_steps_skipped(
+    capsys, tmp_path: Path,
+) -> None:
     class Adapter:
         name = "tankan"
         refreshed = False
@@ -774,11 +776,18 @@ def test_dry_run_is_read_only_and_reports_all_publication_steps_skipped(capsys) 
             self.closed = True
 
     adapter = Adapter()
-    assert refresh_public_data._dry_run([adapter]) == 0
-    payload = json.loads(capsys.readouterr().out)
+    evidence = tmp_path / "machine-evidence.json"
+    assert refresh_public_data._dry_run(
+        [adapter], run_id="dry-run-test", evidence_output=evidence
+    ) == 0
+    assert capsys.readouterr().out.strip() == "provider preflight evidence written"
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload["run_id"] == "dry-run-test"
     assert payload["dry_run"] is True
     assert payload["candidate"] == payload["qc"] == payload["canonical"] == "SKIPPED"
     assert payload["current_changed"] is False
     assert payload["server_sync"] == "SKIPPED"
+    assert evidence.read_bytes().endswith(b"\n")
+    assert not list(evidence.parent.glob(".*.tmp"))
     assert adapter.refreshed is False
     assert adapter.closed is True

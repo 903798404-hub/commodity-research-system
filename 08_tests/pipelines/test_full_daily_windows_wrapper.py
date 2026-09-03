@@ -287,25 +287,203 @@ def test_runtime_baseline_identity_mismatch_stops_refresh() -> None:
     assert caught.value.stage == "RUNTIME_BASELINE"
 
 
-def test_provider_preflight_is_read_only_and_requires_every_source_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _preflight_payload(run_id: str = "run-preflight") -> dict[str, object]:
+    return {
+        "schema_version": "unified-public-data-dry-run/1",
+        "run_id": run_id,
+        "dry_run": True,
+        "sources": [
+            {"source": "tankan", "status": "READY"},
+            {"source": "lutou", "status": "READY"},
+            {"source": "lutou_domestic_basis", "status": "READY"},
+        ],
+    }
+
+
+def _complete_preflight(
+    command: list[str],
+    kwargs: dict[str, object],
+    payload: dict[str, object] | bytes | None,
+    *,
+    stdout: bytes = b"",
+    stderr: bytes = b"",
+    returncode: int = 0,
+) -> subprocess.CompletedProcess[bytes]:
+    kwargs["stdout"].write(stdout)
+    kwargs["stderr"].write(stderr)
+    if payload is not None:
+        evidence = Path(command[command.index("--evidence-output") + 1])
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_bytes(
+            payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
+        )
+    return subprocess.CompletedProcess(command, returncode)
+
+
+@pytest.mark.parametrize(
+    ("stdout_bytes", "stderr_bytes"),
+    [
+        (b"ASCII human log\r\n", b""),
+        ("中文 human log\n".encode("utf-8"), b""),
+        (b"path=codex\xd7\xd4\xb6\xaf\xb8\xfc\xd0\xc2\r\n", b""),
+        (b"", b"stderr=codex\xd7\xd4\xb6\xaf\xb8\xfc\xd0\xc2\r\n"),
+    ],
+    ids=("ascii", "utf8-chinese", "windows-legacy-stdout", "windows-legacy-stderr"),
+)
+def test_provider_preflight_is_read_only_and_requires_every_source_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stdout_bytes: bytes,
+    stderr_bytes: bytes,
+) -> None:
     seen: dict[str, object] = {}
-    payload = {"sources": [{"source": "tankan", "status": "READY"}, {"source": "lutou", "status": "READY"}, {"source": "lutou_domestic_basis", "status": "READY"}]}
+    payload = _preflight_payload()
     def complete(command, **kwargs):
         seen["command"] = command
         seen["env"] = kwargs["env"]
-        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+        return _complete_preflight(
+            command, kwargs, payload, stdout=stdout_bytes, stderr=stderr_bytes
+        )
     monkeypatch.setattr(wrapper.subprocess, "run", complete)
     result = wrapper.run_provider_preflight(Path("python.exe"), tmp_path, tmp_path / "runtime", "run", tmp_path / "t.env", tmp_path / "l.env")
     assert result["sources"] == payload["sources"]
     assert "--dry-run" in seen["command"]
+    assert "--evidence-output" in seen["command"]
     assert seen["env"]["PYTHONUTF8"] == "1"
+    assert (tmp_path / "runtime" / "provider-preflight.stdout.log").read_bytes() == stdout_bytes
+    assert (tmp_path / "runtime" / "provider-preflight.stderr.log").read_bytes() == stderr_bytes
+
+
+def test_real_0xd7_fixture_breaks_old_utf8_decode_but_not_machine_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_traceback = (
+        b'  File "C:\\Users\\xx202\\Desktop\\codex'
+        b'\xd7\xd4\xb6\xaf\xb8\xfc\xd0\xc2\\refresh_public_data.py"\r\n'
+    )
+    with pytest.raises(UnicodeDecodeError):
+        legacy_traceback.decode("utf-8")
+    monkeypatch.setattr(
+        wrapper.subprocess,
+        "run",
+        lambda command, **kwargs: _complete_preflight(
+            command, kwargs, _preflight_payload(), stderr=legacy_traceback
+        ),
+    )
+    result = wrapper.run_provider_preflight(
+        Path("python.exe"), tmp_path, tmp_path / "runtime", "run",
+        tmp_path / "t.env", tmp_path / "l.env",
+    )
+    assert {item["status"] for item in result["sources"]} == {"READY"}
+    assert (tmp_path / "runtime" / "provider-preflight.stderr.log").read_bytes() == legacy_traceback
+
+
+def test_real_child_process_keeps_cp936_logs_out_of_utf8_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool_repo = tmp_path / "tool-repo"
+    script = tool_repo / "04_scripts" / "refresh_public_data.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        """import argparse, json, os, sys, uuid
+from pathlib import Path
+parser = argparse.ArgumentParser()
+parser.add_argument('--run-id', required=True)
+parser.add_argument('--evidence-output', type=Path, required=True)
+args, _ = parser.parse_known_args()
+payload = {
+    'schema_version': 'unified-public-data-dry-run/1',
+    'run_id': args.run_id,
+    'dry_run': True,
+    'sources': [
+        {'source': 'tankan', 'status': 'READY'},
+        {'source': 'lutou', 'status': 'READY'},
+        {'source': 'lutou_domestic_basis', 'status': 'READY'},
+    ],
+}
+temporary = args.evidence_output.with_name('.evidence-' + uuid.uuid4().hex + '.tmp')
+temporary.write_bytes((json.dumps(payload) + '\\n').encode('utf-8'))
+os.replace(temporary, args.evidence_output)
+sys.stdout.buffer.write(b'stdout=codex\\xd7\\xd4\\xb6\\xaf\\xb8\\xfc\\xd0\\xc2\\r\\n')
+sys.stderr.buffer.write(b'stderr=codex\\xd7\\xd4\\xb6\\xaf\\xb8\\xfc\\xd0\\xc2\\r\\n')
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(wrapper, "runtime_environment", lambda: os.environ.copy())
+    result = wrapper.run_provider_preflight(
+        Path(sys.executable), tool_repo, tmp_path / "runtime", "run",
+        tmp_path / "t.env", tmp_path / "l.env",
+    )
+    assert {item["status"] for item in result["sources"]} == {"READY"}
+    assert b"\xd7\xd4\xb6\xaf\xb8\xfc\xd0\xc2" in (
+        tmp_path / "runtime" / "provider-preflight.stdout.log"
+    ).read_bytes()
+    assert b"\xd7\xd4\xb6\xaf\xb8\xfc\xd0\xc2" in (
+        tmp_path / "runtime" / "provider-preflight.stderr.log"
+    ).read_bytes()
+    json.loads(
+        (tmp_path / "runtime" / "provider-preflight-evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
 
 def test_provider_preflight_hard_failure_is_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = {"sources": [{"source": "tankan", "status": "SOURCE_UNAVAILABLE"}]}
-    monkeypatch.setattr(wrapper.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(payload), ""))
+    payload = _preflight_payload()
+    payload["sources"][0]["status"] = "SOURCE_UNAVAILABLE"
+    monkeypatch.setattr(
+        wrapper.subprocess, "run",
+        lambda command, **kwargs: _complete_preflight(command, kwargs, payload),
+    )
     with pytest.raises(wrapper.WrapperFailure) as caught:
         wrapper.run_provider_preflight(Path("python.exe"), tmp_path, tmp_path / "runtime", "run", tmp_path / "t.env", tmp_path / "l.env")
+    assert caught.value.stage == "PROVIDER_PREFLIGHT"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        b"\xff\xfe\x00\x7b",
+        b'{"schema_version":"unified-public-data-dry-run/1"',
+        {**_preflight_payload(), "schema_version": "wrong/1"},
+        {**_preflight_payload(), "run_id": "another-run"},
+        {**_preflight_payload(), "sources": [{"source": "tankan", "status": "READY"}]},
+    ],
+    ids=("missing", "non-utf8", "truncated", "wrong-schema", "wrong-run", "missing-providers"),
+)
+def test_provider_preflight_invalid_machine_evidence_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object] | bytes | None,
+) -> None:
+    monkeypatch.setattr(
+        wrapper.subprocess, "run",
+        lambda command, **kwargs: _complete_preflight(
+            command, kwargs, payload, stderr=b"human\xd7log"
+        ),
+    )
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.run_provider_preflight(
+            Path("python.exe"), tmp_path, tmp_path / "runtime", "run",
+            tmp_path / "t.env", tmp_path / "l.env",
+        )
+    assert caught.value.stage == "PROVIDER_PREFLIGHT"
+
+
+def test_provider_preflight_nonzero_child_fails_even_with_ready_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        wrapper.subprocess, "run",
+        lambda command, **kwargs: _complete_preflight(
+            command, kwargs, _preflight_payload(), returncode=9
+        ),
+    )
+    with pytest.raises(wrapper.WrapperFailure) as caught:
+        wrapper.run_provider_preflight(
+            Path("python.exe"), tmp_path, tmp_path / "runtime", "run",
+            tmp_path / "t.env", tmp_path / "l.env",
+        )
     assert caught.value.stage == "PROVIDER_PREFLIGHT"
 
 

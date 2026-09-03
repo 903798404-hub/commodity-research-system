@@ -44,6 +44,7 @@ from agri_research_agent.pipelines.public_data_refresh import (
     ProviderStatus,
     run_unified_refresh,
 )
+from agri_research_agent.shared.atomic_storage import atomic_write_json
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
 
 
@@ -95,6 +96,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Read-only source/current preflight; do not build Candidate or change Current",
     )
     parser.add_argument(
+        "--evidence-output",
+        type=Path,
+        help="Explicit UTF-8 machine evidence file for --dry-run",
+    )
+    parser.add_argument(
         "--initial-seed",
         action="store_true",
         help="Explicitly initialize an empty server store from validated unchanged data",
@@ -119,6 +125,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("remote transport and --sync-target-root are mutually exclusive")
     if args.initial_seed and args.dry_run:
         parser.error("--initial-seed and --dry-run are mutually exclusive")
+    if args.evidence_output is not None and not args.dry_run:
+        parser.error("--evidence-output requires --dry-run")
     if args.initial_seed and not (all(remote) or args.sync_target_root is not None):
         parser.error("--initial-seed requires a remote transport or --sync-target-root")
     if args.initial_seed and set(args.sources or ("tankan", "lutou")) != {"tankan", "lutou"}:
@@ -181,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     if args.dry_run:
-        return _dry_run(adapters)
+        return _dry_run(adapters, run_id=run_id, evidence_output=args.evidence_output)
     packages_root = args.packages_root or runtime.runtime_root / "public-data-packages"
     required_datasets = []
     if "tankan" in sources:
@@ -244,7 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if result.succeeded else 1
 
 
-def _dry_run(adapters: list[object]) -> int:
+def _dry_run(
+    adapters: list[object],
+    *,
+    run_id: str = "dry-run",
+    evidence_output: Path | None = None,
+) -> int:
     sources: list[dict[str, object]] = []
     failed = False
     for adapter in adapters:
@@ -292,6 +305,7 @@ def _dry_run(adapters: list[object]) -> int:
         )
     payload = {
         "schema_version": "unified-public-data-dry-run/1",
+        "run_id": run_id,
         "dry_run": True,
         "sources": sources,
         "candidate": "SKIPPED",
@@ -302,7 +316,13 @@ def _dry_run(adapters: list[object]) -> int:
         "server_sync": "SKIPPED",
         "prewarm": "SKIPPED",
     }
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    if evidence_output is not None:
+        atomic_write_json(evidence_output.resolve(), payload)
+        print("provider preflight evidence written")
+    else:
+        # Preserve the existing interactive dry-run contract when an explicit
+        # machine channel was not requested.
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 1 if failed else 0
 
 
