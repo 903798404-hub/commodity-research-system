@@ -42,7 +42,7 @@ def _stable_git(_: Path, *args: str) -> str:
         ("rev-parse", "--verify", "base^{commit}"): "base\n",
         ("rev-parse", "HEAD"): "head\n",
         ("status", "--porcelain=v1", "--untracked-files=all"): "",
-        ("diff", "--name-only", "base..HEAD"): "03_src/feature.py\n05_apps/unrelated.py\n",
+        ("diff", "--name-only", "base...HEAD"): "03_src/feature.py\n05_apps/unrelated.py\n",
         ("diff", "--name-only", "--cached"): "",
         ("diff", "--name-only"): "",
     }
@@ -55,6 +55,96 @@ def test_incremental_audit_reports_out_of_scope_changes(tmp_path: Path) -> None:
     assert report["out_of_scope_changes"] == ["05_apps/unrelated.py"]
     assert report["findings"][-1]["classification"] == "OUT_OF_SCOPE"
     assert report["allow_next_stage"] is False
+    assert report["PROJECT_SCOPE"] == "FAIL"
+    assert report["comparison"] == "base...HEAD"
+
+
+def test_business_feature_cannot_approve_its_own_shared_change(tmp_path: Path) -> None:
+    def shared_git(_: Path, *args: str) -> str:
+        if args == ("diff", "--name-only", "base...HEAD"):
+            return "04_scripts/refresh_public_data.py\n"
+        return _stable_git(tmp_path, *args).replace(
+            "03_src/feature.py\n05_apps/unrelated.py\n", "04_scripts/refresh_public_data.py\n"
+        )
+
+    report = audit_changed_scope.run_audit(
+        tmp_path,
+        "base",
+        ["04_scripts/refresh_public_data.py"],
+        git=shared_git,
+    )
+
+    assert report["out_of_scope_changes"] == []
+    assert report["PROJECT_SCOPE"] == "FAIL"
+    assert report["SHARED_CHANGE"] == "YES"
+    assert report["findings"][-1]["classification"] == "SHARED_CHANGE"
+
+
+def test_explicit_shared_change_can_pass_with_owned_paths(tmp_path: Path) -> None:
+    def shared_git(_: Path, *args: str) -> str:
+        if args == ("diff", "--name-only", "base...HEAD"):
+            return "04_scripts/refresh_public_data.py\n"
+        return _stable_git(tmp_path, *args).replace(
+            "03_src/feature.py\n05_apps/unrelated.py\n", "04_scripts/refresh_public_data.py\n"
+        )
+
+    report = audit_changed_scope.run_audit(
+        tmp_path,
+        "base",
+        ["04_scripts/refresh_public_data.py"],
+        change_class="shared",
+        git=shared_git,
+    )
+
+    assert report["PROJECT_SCOPE"] == "PASS"
+    assert report["SHARED_CHANGE"] == "YES"
+    assert report["allow_next_stage"] is True
+
+
+def test_owned_cli_alias_uses_origin_main_by_default() -> None:
+    args = audit_changed_scope.parse_args(["--owned", "03_src/feature.py"])
+
+    assert args.allowed == ["03_src/feature.py"]
+    assert args.baseline == "origin/main"
+    assert args.change_class == "business"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "03_src/agri_research_agent/automation/full_daily_windows.py",
+        "03_src/agri_research_agent/data_sources/tankan/client.py",
+        "03_src/agri_research_agent/pipelines/public_intraday.py",
+        "04_scripts/refresh_public_data.py",
+        "05_apps/streamlit_app.py",
+        "09_deploy/spread_release/release_contract.py",
+        "08_tests/data_sources/tankan/test_client.py",
+        "08_tests/pipelines/test_public_intraday.py",
+    ],
+)
+def test_repository_protected_boundaries_are_shared(path: str) -> None:
+    assert audit_changed_scope._is_shared(path, audit_changed_scope.SHARED_PATH_PATTERNS)
+
+
+def test_known_existing_cannot_hide_shared_change(tmp_path: Path) -> None:
+    def shared_git(_: Path, *args: str) -> str:
+        if args == ("diff", "--name-only", "base...HEAD"):
+            return "04_scripts/refresh_public_data.py\n"
+        return _stable_git(tmp_path, *args).replace(
+            "03_src/feature.py\n05_apps/unrelated.py\n", "04_scripts/refresh_public_data.py\n"
+        )
+
+    report = audit_changed_scope.run_audit(
+        tmp_path,
+        "base",
+        ["03_src/feature.py"],
+        known_existing=["04_scripts/refresh_public_data.py"],
+        git=shared_git,
+    )
+
+    assert report["preexisting_changes"] == ["04_scripts/refresh_public_data.py"]
+    assert report["PROJECT_SCOPE"] == "FAIL"
+    assert report["SHARED_CHANGE"] == "YES"
 
 
 def test_git_quoted_utf8_path_is_decoded_without_windows_locale() -> None:

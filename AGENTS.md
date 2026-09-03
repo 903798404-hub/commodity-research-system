@@ -10,7 +10,7 @@
 ## 代码基线
 
 - 整个 `market-data` 仓库是农产品研究系统唯一开发源、唯一 Git 根目录和唯一代码基线；服务器仅用于生产运行，不作为日常开发环境。
-- GitHub 仓库 `commodity-research-system` 的 `main` 是唯一远程可信主线；本地测试通过后显式提交，并以普通 fast-forward 推送 `origin/main`。所有可部署代码都必须有明确的完整 Git SHA。
+- GitHub 仓库 `commodity-research-system` 的 `main` 是唯一远程可信主线；本地 `main` checkout 必须保持为 clean `origin/main` 镜像，只用于只读审计和同步，不得作为 feature 开发、临时 merge、集成验收或 release 工作区。所有 feature、integration 和 release 工作都必须使用自己的 branch/worktree；验收通过后从获批 branch 以普通 fast-forward 更新 `origin/main`，再同步本地 `main`。所有可部署代码都必须有明确的完整 Git SHA。
 - USDA 子项目正式位置为 `11_独立应用/USDA平衡表/`，继续保持独立前端项目结构，但不得拥有嵌套 `.git`。
 - Oil World 子项目正式位置为 `11_独立应用/OilWorld平衡表/`，源码、配置和发布数据受主仓库管理，授权原始资料保存在 Git 仓库外。
 - 禁止重新创建与 `market-data` 同级的独立 USDA 开发目录；历史独立目录只能作为过渡备份保留，不得继续开发。
@@ -44,9 +44,10 @@
 
 ## 测试与部署
 
-标准流程：本地修改 → 定向测试 → 查看 Git diff → 显式 Git commit → 普通 fast-forward 推送 `origin/main` → 服务器独立只读浅克隆并核验精确提交 → 构建和验证候选镜像 → 密封候选结果和证据 → 删除候选容器并确认不存在 → 生成部署计划 → 使用同一 Image ID 正式切换且禁止 build → 密封部署结果与 Manifest。
+标准流程：独立 feature branch/worktree → 本地修改 → Direct Tests → Project Scope Gate → Impact/必要 Full Tests → 查看 Git diff → 显式 Git commit → 独立 integration/release 验收 → 从获批 branch 普通 fast-forward 更新 `origin/main` → 同步 clean local main 镜像 → 服务器独立只读浅克隆并核验精确提交 → 构建和验证候选镜像 → 密封候选结果和证据 → 删除候选容器并确认不存在 → 生成部署计划 → 使用同一 Image ID 正式切换且禁止 build → 密封部署结果与 Manifest。
 
 - 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
+- 普通业务 feature 必须声明 owned paths，并在进入 Impact/完整回归、commit 或 integration 前运行 `04_scripts/quality/audit_changed_scope.py`。默认禁止跨项目以及修改 Weather producer、shared Public refresh、统一 refresh、shared infrastructure 和部署基础设施；出现这些变化时，只有任务事先明确分类为 `shared` change 才可继续。
 - Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负责生产镜像构建，本地 Docker 构建不再是 commit、push 或部署的前置条件。
 - 不得再建议用户安装 Docker Desktop、Podman 或 WSL，也不得要求用户为本项目安装这些工具。Windows 本地只负责代码修改、Python 和前端测试、Streamlit 启动检查、Dockerfile 与 Compose 静态检查、构建上下文文件存在性检查，以及 Git 差异和工作区检查。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须在服务器隔离候选目录中重建对应镜像，不得在服务器正式仓库中直接构建。
