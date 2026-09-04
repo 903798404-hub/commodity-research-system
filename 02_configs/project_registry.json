@@ -26,7 +26,7 @@
     {
       "project_id": "soybean-pm",
       "change_class": "business",
-      "status": "frozen",
+      "status": "ready",
       "owned_paths": [
         "03_src/agri_research_agent/import_profit",
         "04_scripts/import_profit",
@@ -69,7 +69,25 @@
         "08_tests/test_import_profit_runtime_store.py",
         "08_tests/test_import_profit_seasonality.py",
         "08_tests/test_import_profit_soybean.py",
-        "08_tests/test_import_profit_standard_io.py"
+        "08_tests/test_import_profit_standard_io.py",
+        "03_src/agri_research_agent/pipelines/import_profit_daily.py",
+        "03_src/agri_research_agent/pipelines/import_profit_results.py",
+        "03_src/agri_research_agent/pipelines/import_profit_runtime.py",
+        "07_docs/projects/进口商品利润研究框架契约.md"
+      ],
+      "future_owned_paths": [
+        "03_src/agri_research_agent/pipelines/soybean_intraday.py",
+        "05_apps/import_profit_intraday_page.py",
+        "05_apps/import_profit_intraday_runtime_page.py",
+        "08_tests/test_import_profit_contract_override.py",
+        "08_tests/test_import_profit_historical_margin.py",
+        "08_tests/test_import_profit_intraday.py",
+        "08_tests/test_import_profit_intraday_history.py",
+        "08_tests/test_import_profit_intraday_page.py",
+        "08_tests/test_import_profit_mapping_snapshot.py",
+        "08_tests/test_import_profit_parameter_snapshot.py",
+        "08_tests/test_import_profit_public_market_input_adapter.py",
+        "08_tests/test_import_profit_scenario.py"
       ],
       "shared_dependencies": [
         "03_src/agri_research_agent/shared",
@@ -106,7 +124,39 @@
         "08_tests/test_import_profit_market_snapshot.py",
         "08_tests/test_import_profit_cnf_store.py",
         "08_tests/test_import_profit_result_store.py",
-        "08_tests/test_import_profit_runtime_page.py"
+        "08_tests/test_import_profit_runtime_page.py",
+        "08_tests/test_import_profit_cnf_repricing.py",
+        "08_tests/test_import_profit_components.py",
+        "08_tests/test_import_profit_config.py",
+        "08_tests/test_import_profit_contract.py",
+        "08_tests/test_import_profit_contract_mapping.py",
+        "08_tests/test_import_profit_daily_increment.py",
+        "08_tests/test_import_profit_daily_pipeline.py",
+        "08_tests/test_import_profit_dce_candidate.py",
+        "08_tests/test_import_profit_dce_daily.py",
+        "08_tests/test_import_profit_historical_candidate.py",
+        "08_tests/test_import_profit_historical_dce_adapter.py",
+        "08_tests/test_import_profit_historical_recalculation.py",
+        "08_tests/test_import_profit_historical_results_candidate.py",
+        "08_tests/test_import_profit_morning_external_inputs.py",
+        "08_tests/test_import_profit_page.py",
+        "08_tests/test_import_profit_query.py",
+        "08_tests/test_import_profit_recalculation.py",
+        "08_tests/test_import_profit_runtime_pipeline.py",
+        "08_tests/test_import_profit_runtime_store.py",
+        "08_tests/test_import_profit_soybean.py",
+        "08_tests/test_import_profit_standard_io.py"
+      ],
+      "future_required_tests": [
+        "08_tests/test_import_profit_contract_override.py",
+        "08_tests/test_import_profit_historical_margin.py",
+        "08_tests/test_import_profit_intraday.py",
+        "08_tests/test_import_profit_intraday_history.py",
+        "08_tests/test_import_profit_intraday_page.py",
+        "08_tests/test_import_profit_mapping_snapshot.py",
+        "08_tests/test_import_profit_parameter_snapshot.py",
+        "08_tests/test_import_profit_public_market_input_adapter.py",
+        "08_tests/test_import_profit_scenario.py"
       ],
       "capabilities": [
         "PM业务逻辑",
@@ -117,7 +167,7 @@
         "PM UI",
         "PM专项tests"
       ],
-      "boundary_notes": "依据现有 import_profit 专属目录及专项测试最小登记。PM冻结；登记不授权解冻。AM/PM公共producer或shared snapshot adapter不因PM消费而转归PM；冻结分支新增PM专属文件需解冻任务审查登记，不猜测路径。"
+      "boundary_notes": "用户明确批准解除PM Registry冻结；仅允许从最新authoritative main启动clean business candidate。已审计来源5e796f33a9e77135a7ebd382f55f7b34ff4a7f8f、merge-base acb8e9abeeee9fa52074df3323887464c670556a的77个PM_OWNED文件：61个已由原ownership覆盖，仅补充16个精确路径（4个existing、12个future），不新增目录或reserved namespace。旧PM worktree仅作只读恢复来源，禁止whole cherry-pick/merge/rebase/reset。Tankan Live、Shared Intraday、公共入口、Public refresh、FULL DAILY、Weather/Basis及其他shared实现不转归PM；复用main正式接口。required tests保留原4项并覆盖33个已审计PM测试（合计25个existing、9个future）。解冻不授权修改历史Snapshot/CNF/生产数据或部署。"
     },
     {
       "project_id": "weather-basis-push",

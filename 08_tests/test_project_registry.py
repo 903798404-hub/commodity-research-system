@@ -13,12 +13,112 @@ from quality import start_project
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Exact reviewed PM registration delta; no directory or shared ownership grant.
+PM_EXISTING_ADDITIONS = [
+    '03_src/agri_research_agent/pipelines/import_profit_daily.py',
+    '03_src/agri_research_agent/pipelines/import_profit_results.py',
+    '03_src/agri_research_agent/pipelines/import_profit_runtime.py',
+    '07_docs/projects/进口商品利润研究框架契约.md',
+]
+PM_FUTURE_TESTS = ['08_tests/test_import_profit_' + name + '.py' for name in (
+    'contract_override', 'historical_margin', 'intraday', 'intraday_history',
+    'intraday_page', 'mapping_snapshot', 'parameter_snapshot',
+    'public_market_input_adapter', 'scenario')]
+PM_FUTURE_PATHS = [
+    '03_src/agri_research_agent/pipelines/soybean_intraday.py',
+    '05_apps/import_profit_intraday_page.py',
+    '05_apps/import_profit_intraday_runtime_page.py',
+] + PM_FUTURE_TESTS
+PM_EXISTING_TEST_ADDITIONS = ['08_tests/test_import_profit_' + name + '.py' for name in (
+    'cnf_repricing', 'components', 'config', 'contract', 'contract_mapping',
+    'daily_increment', 'daily_pipeline', 'dce_candidate', 'dce_daily',
+    'historical_candidate', 'historical_dce_adapter', 'historical_recalculation',
+    'historical_results_candidate', 'morning_external_inputs', 'page', 'query',
+    'recalculation', 'runtime_pipeline', 'runtime_store', 'soybean', 'standard_io')]
+
+
+def registration_baseline():
+    """Permit only the approved PM delta before commit; keep other invariants."""
+    baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
+    old = next(p for p in baseline['projects'] if p['project_id'] == 'soybean-pm')
+    if old['status'] == 'frozen':
+        current = registry.select_project(ROOT, 'soybean-pm')[1]
+        expected = copy.deepcopy(old)
+        expected.update(status='ready',
+                        owned_paths=old['owned_paths'] + PM_EXISTING_ADDITIONS,
+                        future_owned_paths=PM_FUTURE_PATHS,
+                        required_tests=old['required_tests'] + PM_EXISTING_TEST_ADDITIONS,
+                        future_required_tests=PM_FUTURE_TESTS,
+                        boundary_notes=current['boundary_notes'])
+        assert current == expected
+        old.update(expected)
+    return baseline
+
 
 def minimal_registry():
     return {"schema_version":"project-registry/1", "protected_paths":["shared"], "projects":[{
         "project_id":"demo", "change_class":"business", "status":"ready",
         "owned_paths":["feature"], "shared_dependencies":["shared"], "forbidden_paths":["other"],
         "required_tests":["tests/test_feature.py"], "capabilities":["demo"], "boundary_notes":"fixture only"}]}
+
+
+def test_pm_unfreeze_exact_registration_contract():
+    data, project = registry.select_project(ROOT, 'soybean-pm')
+    baseline = registration_baseline()
+    assert data == baseline
+    assert project['status'] == 'ready' and project['change_class'] == 'business'
+    assert not project.get('reserved_paths')
+    assert project['owned_paths'][-4:] == PM_EXISTING_ADDITIONS
+    assert project['future_owned_paths'] == PM_FUTURE_PATHS
+    assert project['future_required_tests'] == PM_FUTURE_TESTS
+    original_tests = ['08_tests/test_import_profit_' + name + '.py' for name in (
+        'market_snapshot', 'cnf_store', 'result_store', 'runtime_page')]
+    assert project['required_tests'] == original_tests + PM_EXISTING_TEST_ADDITIONS
+    assert len(set(project['required_tests'] + project['future_required_tests'])) == 34
+    assert all(registry.owns(project, p) for p in PM_EXISTING_ADDITIONS + PM_FUTURE_PATHS)
+    assert all(not registry.owns(project, p + '/unapproved.py') for p in PM_FUTURE_PATHS)
+    assert all(not registry.owns(project, p) for p in project['shared_dependencies'] + project['forbidden_paths'])
+    assert '77个PM_OWNED' in project['boundary_notes']
+    assert '不新增目录或reserved namespace' in project['boundary_notes']
+
+
+@pytest.mark.parametrize('path', PM_EXISTING_ADDITIONS + PM_FUTURE_PATHS + [
+    '02_configs/public_intraday_schedule.yaml',
+    '03_src/agri_research_agent/data_sources/tankan/client.py',
+    '03_src/agri_research_agent/data_sources/tankan/models.py',
+    '03_src/agri_research_agent/data_sources/tankan/queries.py',
+    '03_src/agri_research_agent/market_data/calendars.py',
+    '03_src/agri_research_agent/market_data/intraday.py',
+    '03_src/agri_research_agent/pipelines/public_intraday.py',
+    '04_scripts/capture_public_intraday.py',
+    '05_apps/streamlit_app.py',
+    '08_tests/data_sources/tankan/test_client.py',
+    '08_tests/data_sources/tankan/test_domestic_spread.py',
+    '08_tests/data_sources/tankan/test_models.py',
+    '08_tests/market_data/test_intraday.py',
+    '08_tests/pipelines/test_public_intraday.py',
+    '08_tests/test_public_intraday_schedule.py',
+    '03_src/agri_research_agent/pipelines/public_data_refresh.py',
+    '03_src/agri_research_agent/pipelines/lutou_weather.py',
+    '03_src/agri_research_agent/pipelines/lutou_domestic_basis.py',
+    '03_src/agri_research_agent/pipelines/other_soybean.py',
+    '05_apps/import_profit_unapproved.py',
+    '08_tests/test_import_profit_unapproved.py',
+    '01_data/manual/cnf.parquet',
+])
+def test_pm_unfreeze_scope_positive_and_negative(path):
+    _, project = registry.select_project(ROOT, 'soybean-pm')
+    def synthetic_git(root, *args):
+        if args == ('diff', '--name-only', '--no-renames', 'base...HEAD'):
+            return path + '\n'
+        if args[:1] == ('rev-parse',):
+            return 'fixture-head'
+        return ''
+    report = scope.run_audit(ROOT, 'base', project['owned_paths'],
+                             exact_allowed=project['future_owned_paths'],
+                             change_class='business', git=synthetic_git)
+    expected = 'PASS' if path in PM_EXISTING_ADDITIONS + PM_FUTURE_PATHS else 'FAIL'
+    assert report['PROJECT_SCOPE'] == expected
 
 
 def write_registry(root, data):
@@ -52,7 +152,7 @@ def test_real_registry_schema_paths_and_minimum_projects():
     projects={p['project_id']:p for p in data['projects']}
     assert {'soybean-pm','weather-basis-push','international-spread','weather','domestic-basis',
             'usda','oil-world','palm','canola'} <= projects.keys()
-    assert projects['soybean-pm']['status']=='frozen'
+    assert projects['soybean-pm']['status']=='ready'
     assert not projects['weather-basis-push']['owned_paths']
     assert projects['canola']['status']=='needs-boundary-review'
     assert len(projects['soybean-pm']['capabilities'])==7
@@ -466,7 +566,7 @@ def test_registered_shared_intraday_exact_boundary():
         assert not registry.owns(project, path + '/unapproved.py')
     for path in project['forbidden_paths'] + project['shared_dependencies']:
         assert not registry.owns(project, path)
-    assert registry.select_project(ROOT, 'soybean-pm')[1]['status'] == 'frozen'
+    assert registry.select_project(ROOT, 'soybean-pm')[1]['status'] == 'ready'
 
 
 def test_tankan_live_registration_is_additive_and_narrow():
@@ -639,7 +739,7 @@ def test_reserved_link_rejected(repository,tmp_path):
 
 
 def test_real_records_compatibility_and_docs_partition():
-    baseline=json.loads(registry.git(ROOT,'show',f'HEAD:{registry.REGISTRY_PATH}'))
+    baseline=registration_baseline()
     current=registry.load_registry(ROOT)
     current_by_id = {p['project_id']: p for p in current['projects']}
     for old in baseline['projects']:
@@ -704,7 +804,7 @@ def test_reserved_ancestor_of_exact_future_file_conflicts(repository):
 
 
 def test_existing_project_scope_classification_unchanged():
-    before=json.loads(registry.git(ROOT,'show',f'HEAD:{registry.REGISTRY_PATH}'))
+    before=registration_baseline()
     after=registry.load_registry(ROOT)
     after_by_id = {p['project_id']: p for p in after['projects']}
     for old in before['projects']:
@@ -729,7 +829,7 @@ def test_existing_project_scope_classification_unchanged():
 
 def test_notification_registration_contract():
     data, project = registry.select_project(ROOT, 'notification-push')
-    baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
+    baseline = registration_baseline()
     current_by_id = {p['project_id']: p for p in data['projects']}
     assert all(current_by_id[p['project_id']] == p for p in baseline['projects'] if p['project_id'] != 'notification-push')
     assert data['schema_version'] == baseline['schema_version'] == 'project-registry/3'
@@ -798,7 +898,7 @@ def test_notification_registered_scope_in_temporary_git(tmp_path, monkeypatch, c
 
 def test_tankan_fixture_isolation_registration():
     data, project = registry.select_project(ROOT, 'tankan-fixture-isolation')
-    baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
+    baseline = registration_baseline()
     assert data['schema_version'] == baseline['schema_version']
     assert data['protected_paths'] == baseline['protected_paths']
     current = {p['project_id']: p for p in data['projects']}
