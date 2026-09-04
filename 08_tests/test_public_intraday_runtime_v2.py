@@ -82,6 +82,7 @@ def test_manifest_and_deployment_contract_are_isolated_and_non_root():
         "requirements.txt",
         "02_configs/runtime_manifest.schema.json",
         "02_configs/runtime_contracts/public-intraday-runtime.json",
+        "03_src/agri_research_agent/shared/runtime_manifest.py",
     }
     assert copied == expected_copied
 

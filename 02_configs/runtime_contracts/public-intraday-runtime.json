@@ -217,10 +217,6 @@
     {
       "path": "03_src/agri_research_agent/shared/runtime_context.py",
       "role": "runtime_configuration"
-    },
-    {
-      "path": "03_src/agri_research_agent/shared/runtime_manifest.py",
-      "role": "runtime_configuration"
     }
   ]
 }
