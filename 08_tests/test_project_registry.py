@@ -77,6 +77,18 @@ PRODUCTION_INFRA_REGISTRATION = {'project_id': 'shared-production-infrastructure
                    'Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring '
                    'worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。'}
 
+# Exact Goal C registration from the reviewed external record, embedded so
+# tests do not depend on a machine-local attachment.
+RUNTIME_MANIFEST_REGISTRATION = {
+ 'project_id':'shared-runtime-manifest','change_class':'shared','status':'ready','runtime_target':'library_only','owned_paths':[],
+ 'future_owned_paths':['03_src/agri_research_agent/shared/runtime_manifest.py','02_configs/runtime_manifest.schema.json','08_tests/shared/test_runtime_manifest.py','07_docs/projects/生产RuntimeManifest合同.md'],
+ 'shared_dependencies':['04_scripts/quality/target_runtime_gate.py','03_src/agri_research_agent/shared/production_identity.py','09_deploy/runtime_identity/host_authorization.py'],
+ 'forbidden_paths':['02_configs/project_registry.json','02_configs/production_runtime_trust.json','03_src/agri_research_agent/shared/runtime_context.py','03_src/agri_research_agent/shared/production_identity.py','03_src/agri_research_agent/automation','03_src/agri_research_agent/data_sources','03_src/agri_research_agent/market_data','03_src/agri_research_agent/pipelines','03_src/agri_research_agent/import_profit','03_src/agri_research_agent/summary_engine','03_src/agri_research_agent/alerts','04_scripts','05_apps','09_deploy','Dockerfile','.dockerignore','docker-compose.yml','requirements.txt','requirements.in','AGENTS.md','07_docs/00_文档索引与适用范围.md'],
+ 'required_tests':['08_tests/test_project_registry.py','08_tests/test_quality_controls.py','08_tests/test_documentation_contract.py'],'future_required_tests':['08_tests/shared/test_runtime_manifest.py'],
+ 'capabilities':['versioned machine-readable source runtime manifest schema and shared validator','explicit production entrypoint, initialization commands and controlled source inputs','runtime path roles, identity-root binding, environment/secret references and dependency requirements','production/preview policy and deployment-instance/source separation'],
+ 'boundary_notes':'PROD-RUNTIME-V2 Goal C独立授权。library_only表示通用schema/validator源码交付，不是独立业务容器；不宣称真实container deployability。仅新增四个精确文件，没有ownership转移或目录扩权。源码manifest不得存放host绝对路径、当前container/image identity或secret值；实例值由受保护deployment evidence提供。明确区分实际entrypoint与初始化验证命令，不把--help或单纯import作为完整部署证明。版本演进必须明确，旧合同不得被隐式重解释；quality gate与host identity消费者的适配由各自合法owner在后续独立阶段实施。当前只交付清单，不修改治理入口、身份库、Docker/Compose、信任公钥或任何业务模块。FULL DAILY/Wrapper只读不改，旧Wiring保持PARKED；不部署、不capture、不修改旧SEALED、不启用Notification或任何schedule、不提升Approved identity。'
+}
+
 # Exact reviewed PM registration delta; no directory or shared ownership grant.
 PM_EXISTING_ADDITIONS = [
     '03_src/agri_research_agent/pipelines/import_profit_daily.py',
@@ -123,6 +135,11 @@ def registration_baseline():
         expected['legacy_registry_commit'] = '0839be9b57674b3e4ad41a7accffe502d918ff33'
         next(p for p in expected['projects'] if p['project_id'] == 'dev-governance')['runtime_target'] = 'none'
         expected['projects'].append(PRODUCTION_INFRA_REGISTRATION)
+        assert current == expected
+        baseline = expected
+    if baseline['schema_version'] == 'project-registry/4' and 'shared-runtime-manifest' not in {p['project_id'] for p in baseline['projects']}:
+        expected = copy.deepcopy(baseline)
+        expected['projects'].append(RUNTIME_MANIFEST_REGISTRATION)
         assert current == expected
         baseline = expected
     return baseline
@@ -488,7 +505,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == PRODUCTION_INFRA_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -508,6 +525,23 @@ def test_production_infrastructure_registration_has_only_exact_new_ownership():
                  '09_deploy/spread_release/release_contract.py',
                  '09_deploy/runtime_identity/unapproved.py']:
         assert not registry.owns(project, path), path
+
+
+def test_runtime_manifest_registration_is_exact_and_non_overlapping():
+    current, project = registry.select_project(ROOT, 'shared-runtime-manifest')
+    assert project == RUNTIME_MANIFEST_REGISTRATION
+    assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
+    assert project['owned_paths'] == [] and not project.get('reserved_paths')
+    for path in project['future_owned_paths']:
+        assert registry.owns(project, path)
+        assert not registry.owns(project, path + '/sibling.py')
+        assert all(not registry.owns(other, path) for other in current['projects'] if other is not project)
+    for path in ['03_src/agri_research_agent/shared/runtime_manifest_extra.py',
+                 '02_configs/runtime_manifest.schema.json.bak',
+                 '07_docs/projects/其他合同.md',
+                 '09_deploy/runtime_identity/host_authorization.py',
+                 '04_scripts/quality/target_runtime_gate.py']:
+        assert not registry.owns(project, path)
 
 
 def test_pm_unfreeze_exact_registration_contract():
