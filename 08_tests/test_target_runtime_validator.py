@@ -70,6 +70,16 @@ def test_non_linux_or_nonroot_is_builder_unavailable_not_pass(monkeypatch):
     assert "probes" not in evidence and "image_id" not in evidence
 
 
+def test_caller_selected_docker_endpoint_is_never_a_builder(monkeypatch):
+    engine = load_engine()
+    monkeypatch.setattr(engine.sys, "platform", "linux")
+    monkeypatch.setattr(engine.os, "name", "posix")
+    monkeypatch.setattr(engine.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setenv("DOCKER_HOST", "tcp://caller.example:2375")
+    with pytest.raises(engine.BuilderUnavailable):
+        engine.require_builder()
+
+
 def test_evidence_output_is_new_strict_and_never_overwritten(tmp_path):
     engine = load_engine()
     output = tmp_path / "evidence.json"
@@ -137,6 +147,19 @@ def test_release_mismatch_is_a_failure(field, value):
         engine._release_identity(json.dumps(release).encode(), candidate)
 
 
+def test_release_application_and_oci_release_id_are_bound():
+    engine = load_engine()
+    candidate = binding()
+    release = {"application": "demo", "release_id": "demo-release",
+               "git_commit": candidate["commit"], "git_tree": candidate["tree"]}
+    assert engine._release_identity(json.dumps(release).encode(), candidate,
+                                    "demo", "demo-release") == release
+    for application, release_id in (("other", "demo-release"), ("demo", "other")):
+        with pytest.raises(engine.ValidationError, match="RELEASE"):
+            engine._release_identity(json.dumps(release).encode(), candidate,
+                                     application, release_id)
+
+
 def test_strict_json_rejects_duplicate_and_nonfinite_values():
     engine = load_engine()
     for raw in (b'{"a":1,"a":2}', b'{"a":NaN}', b'[]', b'\xff'):
@@ -152,4 +175,3 @@ def test_probe_evidence_cannot_be_complete_without_every_actual_result():
         "wrong_tree_rejected", "wrong_image_rejected", "wrong_service_rejected",
         "wrong_manifest_rejected", "preview_write_rejected", "release_mismatch_rejected",
     }
-

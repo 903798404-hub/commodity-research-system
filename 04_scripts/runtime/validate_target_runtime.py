@@ -195,6 +195,8 @@ def require_builder() -> str:
     if (sys.platform != "linux" or os.name != "posix" or not hasattr(os, "geteuid")
             or os.geteuid() != 0):
         raise BuilderUnavailable(BLOCKED_REASON)
+    if any(os.environ.get(name) for name in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")):
+        raise BuilderUnavailable(BLOCKED_REASON)
     for command in (("docker", "version", "--format", "{{.Server.Os}}"),
                     ("docker", "compose", "version", "--short")):
         try:
@@ -204,12 +206,19 @@ def require_builder() -> str:
         if command[1] == "version" and result.stdout.decode().strip() != "linux":
             raise BuilderUnavailable(BLOCKED_REASON)
     try:
+        if _run(("docker", "context", "show"), timeout=30).stdout.decode().strip() != "default":
+            raise BuilderUnavailable(BLOCKED_REASON)
+        server = _strict_json(_run(("docker", "info", "--format", "{{json .}}"),
+                                  timeout=30).stdout, "Docker server")
+        server_id = server.get("ID")
+        if not isinstance(server_id, str) or not server_id.strip():
+            raise BuilderUnavailable(BLOCKED_REASON)
         machine = Path("/etc/machine-id").read_bytes().strip()
     except OSError as exc:
         raise BuilderUnavailable(BLOCKED_REASON) from exc
     if not machine:
         raise BuilderUnavailable(BLOCKED_REASON)
-    return "linux-" + _sha(machine)[:16]
+    return "linux-" + _sha(machine + b"\0" + server_id.encode("utf-8"))[:16]
 
 
 def create_archive_context(root: Path, destination: Path) -> None:
@@ -222,7 +231,22 @@ def create_archive_context(root: Path, destination: Path) -> None:
             pure = PurePosixPath(member.name)
             if pure.is_absolute() or ".." in pure.parts or member.issym() or member.islnk():
                 raise ValidationError("Git archive contains an unsafe path")
-        bundle.extractall(destination, filter="data")
+        # Python 3.10 has no tarfile extraction filter. Extract regular files
+        # and directories explicitly after the path/link checks above.
+        for member in bundle.getmembers():
+            target = destination.joinpath(*PurePosixPath(member.name).parts)
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise ValidationError("Git archive file has no payload")
+                with source, target.open("xb") as stream:
+                    shutil.copyfileobj(source, stream)
+                os.chmod(target, member.mode & 0o777)
+            else:
+                raise ValidationError("Git archive contains a special file")
     archive_path.unlink()
     if any(path.name == ".git" for path in destination.rglob(".git")):
         raise ValidationError("Git metadata entered the build context")
@@ -268,6 +292,8 @@ def _labels(image: Mapping[str, Any], binding: Mapping[str, Any], service: str) 
                 "market-data.artifact.origin": "candidate"}
     if any(labels.get(key) != value for key, value in expected.items()):
         raise ValidationError("image OCI/source/service labels differ from candidate")
+    if labels.get("market-data.artifact.promotable") != "true" or not labels.get("market-data.release.id"):
+        raise ValidationError("image promotion/release labels are incomplete")
 
 
 def build_image(root: Path, context: Path, contract: Mapping[str, Any],
@@ -367,11 +393,28 @@ def _render_compose(work: Path, compose: Path, env_file: Path) -> tuple[dict[str
     return rendered, _sha(_canonical(rendered))
 
 
-def _release_identity(raw: bytes, binding: Mapping[str, Any]) -> dict[str, Any]:
+def _release_identity(raw: bytes, binding: Mapping[str, Any],
+                      expected_application: str | None = None,
+                      expected_release_id: str | None = None) -> dict[str, Any]:
     release = _strict_json(raw, "RELEASE")
     if release.get("git_commit") != binding["commit"] or release.get("git_tree") != binding["tree"]:
         raise ValidationError("embedded RELEASE differs from candidate")
+    if expected_application is not None and release.get("application") != expected_application:
+        raise ValidationError("embedded RELEASE application differs from runtime project")
+    if expected_release_id is not None and release.get("release_id") != expected_release_id:
+        raise ValidationError("embedded RELEASE ID differs from OCI image")
     return release
+
+
+def _manifest_identity(raw: bytes, contract: Mapping[str, Any], parser) -> dict[str, Any]:
+    try:
+        parsed = parser.parse_runtime_manifest(_strict_json(raw, "runtime manifest")).to_dict()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValidationError("runtime manifest violates v2 source contract") from exc
+    expected = {key: value for key, value in contract.items() if not key.startswith("_")}
+    if parsed != expected:
+        raise ValidationError("image runtime manifest differs from bound source contract")
+    return parsed
 
 
 def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: str,
@@ -436,9 +479,10 @@ def _expect_rejected(action, label: str) -> None:
     raise ValidationError(f"negative identity probe was accepted: {label}")
 
 
-def _negative_observation_probes(host, observed: Mapping[str, Any],
+def _negative_observation_probes(host, parser, observed: Mapping[str, Any],
                                  policy: Mapping[str, Any], manifest_raw: bytes,
-                                 release_raw: bytes) -> dict[str, str]:
+                                 release_raw: bytes, contract: Mapping[str, Any],
+                                 binding: Mapping[str, Any]) -> dict[str, str]:
     import copy
     probes: dict[str, str] = {}
     mutations = {
@@ -455,15 +499,15 @@ def _negative_observation_probes(host, observed: Mapping[str, Any],
         _expect_rejected(lambda c=candidate: host.validate_observation(
             observed, c, role="candidate_validation"), probe)
         probes[probe] = "PASS"
-    bad_manifest = bytearray(manifest_raw)
-    bad_manifest[-1:] = b" " if bad_manifest[-1:] != b" " else b"\n"
-    if _sha(bytes(bad_manifest)) == policy["runtime_manifest_sha256"]:
-        raise ValidationError("manifest mismatch probe did not change identity")
+    bad_manifest = _strict_json(manifest_raw, "runtime manifest")
+    bad_manifest["service_id"] = "wrong-service"
+    _expect_rejected(lambda: _manifest_identity(_canonical(bad_manifest), contract, parser),
+                     "wrong_manifest_rejected")
     probes["wrong_manifest_rejected"] = "PASS"
-    bad_release = bytearray(release_raw)
-    bad_release[-1:] = b" " if bad_release[-1:] != b" " else b"\n"
-    _expect_rejected(lambda: _release_identity(bytes(bad_release), {
-        "commit": "0" * 40, "tree": policy["approved_tree"]}),
+    bad_release = _strict_json(release_raw, "RELEASE")
+    bad_release["git_commit"] = "0" * 40
+    _expect_rejected(lambda: _release_identity(_canonical(bad_release), binding,
+                                               contract["project_id"]),
         "release_mismatch_rejected")
     probes["release_mismatch_rejected"] = "PASS"
     return probes
@@ -488,6 +532,8 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                    binding: Mapping[str, Any], builder_id: str) -> dict[str, Any]:
     host = _load(root / "09_deploy/runtime_identity/host_authorization.py",
                  "_host_authorization_engine")
+    parser = _load(root / "03_src/agri_research_agent/shared/runtime_manifest.py",
+                   "_runtime_manifest_engine")
     container_id = None
     with _protected_work() as work:
         context = work / "context"
@@ -539,8 +585,11 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             manifest_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/" + project["runtime_contract"])
             if _sha(manifest_raw) != binding["source_sha256"][project["runtime_contract"]]:
                 raise ValidationError("image runtime manifest differs from candidate")
+            _manifest_identity(manifest_raw, contract, parser)
             release_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/RELEASE.json")
-            _release_identity(release_raw, binding)
+            image_labels = image["Config"]["Labels"]
+            _release_identity(release_raw, binding, contract["project_id"],
+                              image_labels["market-data.release.id"])
             marker_raw = marker_path.read_bytes()
             policy = _policy(contract, binding, image_id, image, container, scope, compose,
                              env_file, rendered_hash, _sha(manifest_raw), _sha(marker_raw),
@@ -550,8 +599,8 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             os.chmod(policy_path, 0o600)
             observed = host.normalize_observation(container, image,
                                                   _strict_json(release_raw, "RELEASE"))
-            probes = _negative_observation_probes(host, observed, policy,
-                                                  manifest_raw, release_raw)
+            probes = _negative_observation_probes(host, parser, observed, policy,
+                                                  manifest_raw, release_raw, contract, binding)
             key_path = _KEY_ROOT / (policy["key_id"] + ".pem")
             host.issue_execution_grant(container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
@@ -581,6 +630,16 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 _exec(container_id, argv, expect_success=item["access"] == "rw")
             probes["runtime_paths"] = "PASS"
             probes["mount_permissions"] = "PASS"
+            # Preview/candidate execution has no production mount authority and
+            # cannot write immutable application source.
+            actual_mounts = host._mounts(started)
+            if any(item["source"] != str(grant_dir)
+                   and not item["source"].startswith(scope["candidate_host_root"] + "/")
+                   for item in actual_mounts):
+                raise ValidationError("candidate contains a non-candidate mount")
+            _exec(container_id, ["python", "-B", "-c",
+                  "from pathlib import Path; p=Path('/app/.preview-write-probe'); p.write_text('x')"],
+                  expect_success=False)
             probes["preview_write_rejected"] = "PASS"
             if set(probes) != REQUIRED_PROBES or any(value != "PASS" for value in probes.values()):
                 raise ValidationError("required probe set was not actually completed")
