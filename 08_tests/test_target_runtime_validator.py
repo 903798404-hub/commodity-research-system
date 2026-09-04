@@ -101,7 +101,9 @@ def test_git_archive_context_excludes_git_and_untracked_files(tmp_path):
                     "user.email=test@example.invalid", "commit", "-qm", "fixture"], check=True)
     (repo / "ignored.txt").write_text("ignored\n", encoding="utf-8")
     context = tmp_path / "context"
-    engine.create_archive_context(repo, context)
+    exact = {"commit": engine._git(repo, "rev-parse", "HEAD"),
+             "tree": engine._git(repo, "rev-parse", "HEAD^{tree}")}
+    engine.create_archive_context(repo, context, exact)
     assert (context / "tracked.txt").read_text() == "tracked\n"
     assert not (context / "ignored.txt").exists()
     assert not any(path.name == ".git" for path in context.rglob("*"))
@@ -132,6 +134,27 @@ def test_derived_compose_is_candidate_only_and_hardened(tmp_path):
     assert service["user"] == "1000:1000"
     assert all("production" not in item["source"] for item in service["volumes"])
     assert all("docker.sock" not in item["source"] for item in service["volumes"])
+
+
+def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tmp_path):
+    engine = load_engine()
+    contract = v2_contract()
+    contract.update(build={"compose_sources": ["compose.yml"],
+                           "dockerfile": "Dockerfile"}, secret_references=[])
+    rendered = {"services": {"demo": {
+        "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
+        "working_dir": "/app", "environment": {"DEMO_MODE": "${DEMO_MODE}"},
+        "volumes": [
+            {"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
+            {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+        ]}}}
+    from types import SimpleNamespace
+    monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(
+        stdout=json.dumps(rendered).encode()))
+    assert engine.validate_source_compose(tmp_path, contract) == rendered
+    rendered["services"]["demo"]["volumes"].pop()
+    with pytest.raises(engine.ValidationError, match="mounts"):
+        engine.validate_source_compose(tmp_path, contract)
 
 
 @pytest.mark.parametrize("field,value", [

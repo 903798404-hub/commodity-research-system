@@ -221,9 +221,15 @@ def require_builder() -> str:
     return "linux-" + _sha(machine + b"\0" + server_id.encode("utf-8"))[:16]
 
 
-def create_archive_context(root: Path, destination: Path) -> None:
+def create_archive_context(root: Path, destination: Path,
+                           binding: Mapping[str, Any] | None = None) -> None:
     destination.mkdir(mode=0o700)
-    archive = _git(root, "archive", "--format=tar", "HEAD", binary=True)
+    revision = "HEAD" if binding is None else binding["commit"]
+    if binding is not None:
+        if (_git(root, "rev-parse", revision) != binding["commit"]
+                or _git(root, "rev-parse", revision + "^{tree}") != binding["tree"]):
+            raise ValidationError("bound Git object no longer resolves to candidate")
+    archive = _git(root, "archive", "--format=tar", revision, binary=True)
     archive_path = destination.parent / "source.tar"
     archive_path.write_bytes(archive)
     with tarfile.open(archive_path, "r:") as bundle:
@@ -250,6 +256,9 @@ def create_archive_context(root: Path, destination: Path) -> None:
     archive_path.unlink()
     if any(path.name == ".git" for path in destination.rglob(".git")):
         raise ValidationError("Git metadata entered the build context")
+    if binding is not None and (_git(root, "rev-parse", revision) != binding["commit"]
+                                or _git(root, "rev-parse", revision + "^{tree}") != binding["tree"]):
+        raise ValidationError("bound Git object changed during archive")
 
 
 def _strict_json_value(raw: bytes, label: str) -> Any:
@@ -383,7 +392,49 @@ def _compose_document(contract: Mapping[str, Any], image_id: str,
                 "network_mode": "none", "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
                 "environment": environment, "volumes": volumes,
-                "restart": "no"}}}
+            "restart": "no"}}}
+
+
+def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the checked-in deployment shape without resolving host values."""
+    args = ["compose", "--project-directory", str(root)]
+    for relative in contract["build"]["compose_sources"]:
+        args.extend(("-f", str(root / relative)))
+    args.extend(("config", "--no-interpolate", "--format", "json"))
+    rendered = _strict_json(_docker(*args).stdout, "source Compose")
+    service = rendered.get("services", {}).get(contract["service_id"])
+    if not isinstance(service, dict):
+        raise ValidationError("source Compose omits the runtime service")
+    if service.get("entrypoint") != contract["entrypoint"]:
+        raise ValidationError("source Compose entrypoint differs from runtime manifest")
+    if service.get("working_dir") != contract["working_directory"]:
+        raise ValidationError("source Compose working directory differs from runtime manifest")
+    if not isinstance(service.get("image"), str) or not service["image"]:
+        raise ValidationError("source Compose image contract is missing")
+    build = service.get("build")
+    if build is not None:
+        if not isinstance(build, dict) or build.get("dockerfile") != contract["build"]["dockerfile"]:
+            raise ValidationError("source Compose Dockerfile differs from runtime manifest")
+    environment = service.get("environment") or {}
+    if not isinstance(environment, dict) or not set(contract["required_environment"]).issubset(environment):
+        raise ValidationError("source Compose required environment contract is incomplete")
+    secrets = service.get("secrets") or []
+    secret_names = {item if isinstance(item, str) else item.get("source")
+                    for item in secrets if isinstance(item, (str, dict))}
+    if not set(contract["secret_references"]).issubset(secret_names):
+        raise ValidationError("source Compose secret references are incomplete")
+    volumes = service.get("volumes") or []
+    if any(not isinstance(item, dict) or item.get("type") not in {"bind", "volume"}
+           for item in volumes):
+        raise ValidationError("source Compose mounts are not explicit contracts")
+    actual_mounts = {item.get("target"): bool(item.get("read_only", False)) for item in volumes}
+    expected_mounts = {item["container_path"]: item["read_only"]
+                       for item in contract["required_mounts"]}
+    if actual_mounts != expected_mounts:
+        raise ValidationError("source Compose mounts differ from runtime manifest")
+    if any("docker.sock" in str(item.get("source", "")) for item in volumes):
+        raise ValidationError("source Compose exposes a Docker control socket")
+    return rendered
 
 
 def _render_compose(work: Path, compose: Path, env_file: Path) -> tuple[dict[str, Any], str]:
@@ -459,14 +510,15 @@ def _exec(container_id: str, argv: Sequence[str], *, cwd: str | None = None,
         raise ValidationError("container probe returned an unexpected result")
 
 
-def _identity_probe_argv(contract: Mapping[str, Any], marker_hash: str, *, missing: bool = False) -> list[str]:
+def _identity_probe_argv(contract: Mapping[str, Any], marker_hash: str, *,
+                         missing: bool = False, role: str = "candidate_validation") -> list[str]:
     grant = _GRANT_ROOT + ("/missing.json" if missing else "/grant.json")
     root = next(item["container_path"] for item in contract["runtime_roots"] if item["role"] == contract["identity_root_role"])
     code = (
         "from pathlib import Path; from agri_research_agent.shared.production_identity import OCIExecutionRequest,verify_execution; "
         f"r=Path({root!r}); verify_execution(OCIExecutionRequest(Path({grant!r}),Path('/app/RELEASE.json'),"
         f"Path({('/app/' + contract['_runtime_contract'])!r}),r,r/'.market-data-runtime.json'),"
-        f"expected_role='candidate_validation',module_id={contract['module_id']!r},runtime_id='target-validation',"
+        f"expected_role={role!r},module_id={contract['module_id']!r},runtime_id='target-validation',"
         f"runtime_root=r,marker_sha256={marker_hash!r})")
     return ["python", "-B", "-c", code]
 
@@ -536,8 +588,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                    "_runtime_manifest_engine")
     container_id = None
     with _protected_work() as work:
+        validate_source_compose(root, contract)
         context = work / "context"
-        create_archive_context(root, context)
+        create_archive_context(root, context, binding)
         image_id = build_image(root, context, contract, binding)
         image = inspect_one("image", image_id)
         uid, gid = _numeric_user(image)
@@ -637,6 +690,8 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                    and not item["source"].startswith(scope["candidate_host_root"] + "/")
                    for item in actual_mounts):
                 raise ValidationError("candidate contains a non-candidate mount")
+            _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw), role="production"),
+                  expect_success=False)
             _exec(container_id, ["python", "-B", "-c",
                   "from pathlib import Path; p=Path('/app/.preview-write-probe'); p.write_text('x')"],
                   expect_success=False)
@@ -659,6 +714,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         finally:
             if container_id:
                 _docker("rm", "-f", container_id, check=False, timeout=120)
+            _docker("compose", "--project-name", "market-data-runtime-validation",
+                    "--project-directory", str(work), "--env-file", str(env_file),
+                    "-f", str(compose), "down", "--remove-orphans", check=False, timeout=120)
             shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
 
 
