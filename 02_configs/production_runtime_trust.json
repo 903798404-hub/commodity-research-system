@@ -1,6 +1,19 @@
 {
   "schema_version": "production-runtime-trust/1",
-  "keys": [],
+  "keys": [
+    {
+      "key_id": "production-runtime-v2-production-20260905",
+      "domain": "production",
+      "algorithm": "ed25519",
+      "public_key_base64": "fwZEePzsJM1tjUYmbZM1GXYiEAoWBhvySLmLr5eDEO8="
+    },
+    {
+      "key_id": "production-runtime-v2-candidate-20260905",
+      "domain": "candidate_validation",
+      "algorithm": "ed25519",
+      "public_key_base64": "mXOvHVu3h9jO3O4k/oEDWwTNHG5nBpFoGTnvCLT/U+c="
+    }
+  ],
   "revoked_key_ids": [],
   "revoked_grant_ids": []
 }

@@ -8,6 +8,7 @@ validators so a caller cannot turn a hand-crafted mapping into authorization.
 from __future__ import annotations
 
 import io
+import importlib.util
 import json
 import hashlib
 import os
@@ -17,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
@@ -30,6 +32,10 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 TRUST_CONFIG_PATH = Path(__file__).resolve().parents[2] / "02_configs" / "production_runtime_trust.json"
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+GRANT_CONTRACT_PATH = SOURCE_ROOT / "03_src" / "agri_research_agent" / "shared" / "production_grant.py"
+MANIFEST_CONTRACT_PATH = SOURCE_ROOT / "03_src" / "agri_research_agent" / "shared" / "runtime_manifest.py"
+CANDIDATE_SCOPE_PARENT = "/tmp/market-data-candidate-scopes"
 
 
 def _run_docker(args: Sequence[str], *, runner=None) -> bytes:
@@ -199,7 +205,7 @@ def normalize_observation(container: Mapping, image: Mapping, release: Mapping) 
     }
 
 
-_POLICY_FIELDS = {
+_POLICY_V1_FIELDS = {
     "schema_version", "role", "key_id", "project_id", "module_id", "service_id", "runtime_id",
     "approved_commit", "approved_tree", "image_id", "artifact_service", "release_application",
     "source_root", "runtime_root", "runtime_manifest_path", "runtime_manifest_sha256",
@@ -207,10 +213,34 @@ _POLICY_FIELDS = {
     "compose_sources", "compose_project_directory", "compose_environment_file", "rendered_compose_sha256",
     "grant_container_directory", "candidate_host_root",
 }
+_POLICY_V2_FIELDS = _POLICY_V1_FIELDS | {"candidate_scope"}
+
+
+def _contract_module(path: Path, name: str):
+    """Load a trusted source contract without importing the application package."""
+    try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise HostAuthorizationError("source contract cannot be loaded")
+        module = importlib.util.module_from_spec(spec)
+        previous = sys.modules.get(name)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+        return module
+    except (OSError, ImportError, AttributeError, TypeError, ValueError) as exc:
+        raise HostAuthorizationError("source contract cannot be loaded") from exc
 
 
 def validate_policy(policy: Mapping, role: str) -> None:
-    if set(policy) != _POLICY_FIELDS or policy.get("schema_version") != "host-runtime-policy/1" or policy.get("role") != role:
+    version = policy.get("schema_version")
+    expected_fields = _POLICY_V1_FIELDS if version == "host-runtime-policy/1" else _POLICY_V2_FIELDS if version == "host-runtime-policy/2" else set()
+    if set(policy) != expected_fields or policy.get("role") != role:
         raise HostAuthorizationError("protected policy schema or role mismatch")
     if role not in {"production", "candidate_validation"}:
         raise HostAuthorizationError("unknown authorization role")
@@ -231,6 +261,15 @@ def validate_policy(policy: Mapping, role: str) -> None:
         raise HostAuthorizationError("runtime manifest is outside source image")
     if not isinstance(policy["mounts"], list) or not isinstance(policy["compose_sources"], list) or not policy["compose_sources"]:
         raise HostAuthorizationError("deployment contract missing")
+    mount_targets = set()
+    for item in policy["mounts"]:
+        if not isinstance(item, dict) or set(item) != {"source", "target", "read_only"} or type(item["read_only"]) is not bool:
+            raise HostAuthorizationError("invalid mount policy")
+        _absolute(item["source"])
+        target = _absolute(item["target"])
+        if target in mount_targets:
+            raise HostAuthorizationError("duplicate mount target")
+        mount_targets.add(target)
     source_paths = []
     for item in policy["compose_sources"]:
         if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
@@ -240,14 +279,33 @@ def validate_policy(policy: Mapping, role: str) -> None:
             raise HostAuthorizationError("Compose source identity missing")
     if len(set(source_paths)) != len(source_paths):
         raise HostAuthorizationError("duplicate Compose source")
-    if role == "candidate_validation":
+    if role == "candidate_validation" and version == "host-runtime-policy/1":
         if not _within(policy["runtime_root"], "/tmp") or policy["runtime_root"] == "/tmp":
             raise HostAuthorizationError("candidate container root is not temporary")
         _absolute(policy["candidate_host_root"])
         if not _within(policy["candidate_host_root"], "/tmp") or policy["candidate_host_root"] == "/tmp":
             raise HostAuthorizationError("candidate host root is not temporary")
-    elif policy["candidate_host_root"] is not None:
+    elif role == "production" and policy["candidate_host_root"] is not None:
         raise HostAuthorizationError("production cannot use a candidate root")
+    if version == "host-runtime-policy/2":
+        scope = policy["candidate_scope"]
+        if role == "production":
+            if scope is not None:
+                raise HostAuthorizationError("production cannot use a candidate scope")
+        else:
+            if not isinstance(scope, dict) or set(scope) != {"descriptor_path", "descriptor_sha256", "scope_id"}:
+                raise HostAuthorizationError("candidate scope binding is incomplete")
+            _absolute(scope["descriptor_path"])
+            if not isinstance(scope["descriptor_sha256"], str) or not _HEX64.fullmatch(scope["descriptor_sha256"]):
+                raise HostAuthorizationError("candidate scope descriptor identity is invalid")
+            if not isinstance(scope["scope_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", scope["scope_id"]):
+                raise HostAuthorizationError("candidate scope identity is invalid")
+            _absolute(policy["candidate_host_root"])
+            parent = CANDIDATE_SCOPE_PARENT
+            descriptor_root = parent + "/.candidate-scope-descriptors"
+            if (not _within(policy["candidate_host_root"], parent) or policy["candidate_host_root"] == parent
+                    or not _within(scope["descriptor_path"], descriptor_root)):
+                raise HostAuthorizationError("candidate scope is outside the fixed temporary authority root")
 
 
 def validate_observation(observed: Mapping, expected: Mapping, *, role: str) -> dict:
@@ -327,6 +385,223 @@ def require_protected_key_and_grant_dirs(key_path: str | Path, grant_dir: str | 
         raise HostAuthorizationError("grant directory must be public-readable, root-controlled and contain no private key")
 
 
+def require_protected_authority_source() -> None:
+    """Require the root-run signer and source contracts to be immutable to non-root users."""
+    for path in (Path(__file__).resolve(strict=True), GRANT_CONTRACT_PATH, MANIFEST_CONTRACT_PATH, TRUST_CONFIG_PATH):
+        _protected_path(path)
+
+
+def _rfc3339(value: object, label: str) -> datetime:
+    if not isinstance(value, str) or not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})", value
+    ):
+        raise HostAuthorizationError(f"invalid {label}")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value[-1:] in {"Z", "z"} else value)
+    except ValueError as exc:
+        raise HostAuthorizationError(f"invalid {label}") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise HostAuthorizationError(f"invalid {label}")
+    return parsed.astimezone(timezone.utc)
+
+
+def _host_mount_points() -> tuple[str, ...]:
+    def unescape(value: str) -> str:
+        return re.sub(r"\\(040|011|012|134)", lambda match: {"040": " ", "011": "\t", "012": "\n", "134": "\\"}[match.group(1)], value)
+    try:
+        rows = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise HostAuthorizationError("host mount table is unavailable") from exc
+    result = []
+    for row in rows:
+        pieces = row.split()
+        if len(pieces) < 6 or "-" not in pieces:
+            raise HostAuthorizationError("host mount table is invalid")
+        result.append(_absolute(unescape(pieces[4])))
+    return tuple(result)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _safe_scope_tree(root: Path) -> None:
+    """Reject aliases, special files, hardlinks, and nested host mounts."""
+    resolved = root.resolve(strict=True)
+    if resolved != root or root.is_symlink() or not root.is_dir():
+        raise HostAuthorizationError("candidate scope root is missing or aliased")
+    state = root.stat()
+    if state.st_uid != 0 or stat.S_IMODE(state.st_mode) != 0o700:
+        raise HostAuthorizationError("candidate scope root must be root-owned mode 0700")
+    root_text = str(root)
+    if any(_within(point, root_text) for point in _host_mount_points()):
+        raise HostAuthorizationError("candidate scope contains a nested host mount")
+    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+        for name in [*names, *files]:
+            path = Path(directory) / name
+            item = path.lstat()
+            if stat.S_ISLNK(item.st_mode) or not (stat.S_ISDIR(item.st_mode) or stat.S_ISREG(item.st_mode)):
+                raise HostAuthorizationError("candidate scope contains an alias or special file")
+            if stat.S_ISREG(item.st_mode) and item.st_nlink != 1:
+                raise HostAuthorizationError("candidate scope contains a hard-linked file")
+
+
+def _candidate_descriptor(policy: Mapping, *, consume: bool) -> dict:
+    binding = policy.get("candidate_scope")
+    if policy.get("schema_version") != "host-runtime-policy/2" or policy.get("role") != "candidate_validation" or not isinstance(binding, dict):
+        raise HostAuthorizationError("candidate scope is unavailable")
+    descriptor_path = _protected_path(Path(binding["descriptor_path"]), private=True, temporary=True)
+    raw = descriptor_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != binding["descriptor_sha256"]:
+        raise HostAuthorizationError("candidate scope descriptor differs from policy")
+    descriptor = _json(raw)
+    expected = {"schema_version", "scope_id", "created_at", "expires_at", "root", "binds"}
+    if set(descriptor) != expected or descriptor.get("schema_version") != "candidate-scope/1" or descriptor.get("scope_id") != binding["scope_id"]:
+        raise HostAuthorizationError("candidate scope descriptor schema is invalid")
+    created, expires = _rfc3339(descriptor["created_at"], "candidate scope creation time"), _rfc3339(descriptor["expires_at"], "candidate scope expiry")
+    now = datetime.now(timezone.utc)
+    if created > now or expires <= now or expires - created > timedelta(hours=1):
+        raise HostAuthorizationError("candidate scope is expired or exceeds its lifetime")
+    root_record = descriptor.get("root")
+    if not isinstance(root_record, dict) or set(root_record) != {"path", "device", "inode"}:
+        raise HostAuthorizationError("candidate scope root identity is invalid")
+    root = Path(_absolute(root_record["path"]))
+    if str(root) != policy["candidate_host_root"]:
+        raise HostAuthorizationError("candidate scope root differs from policy")
+    _safe_scope_tree(root)
+    root_state = root.stat()
+    if type(root_record["device"]) is not int or type(root_record["inode"]) is not int or (root_record["device"], root_record["inode"]) != (root_state.st_dev, root_state.st_ino):
+        raise HostAuthorizationError("candidate scope root inode changed")
+    binds = descriptor.get("binds")
+    if not isinstance(binds, list) or not binds:
+        raise HostAuthorizationError("candidate scope bind identity is missing")
+    actual = []
+    targets = set()
+    for item in binds:
+        if not isinstance(item, dict) or set(item) != {"source", "device", "inode", "target", "read_only"} or type(item["read_only"]) is not bool:
+            raise HostAuthorizationError("candidate scope bind identity is invalid")
+        source = Path(_absolute(item["source"]))
+        target = _absolute(item["target"])
+        if target in targets or not _within(str(source), str(root)):
+            raise HostAuthorizationError("candidate scope bind is duplicate or outside its root")
+        targets.add(target)
+        if source.is_symlink() or source.resolve(strict=True) != source or not (source.is_dir() or source.is_file()):
+            raise HostAuthorizationError("candidate scope bind source is unsafe")
+        source_state = source.stat()
+        if type(item["device"]) is not int or type(item["inode"]) is not int or (item["device"], item["inode"]) != (source_state.st_dev, source_state.st_ino):
+            raise HostAuthorizationError("candidate scope bind inode changed")
+        if source.is_file() and source_state.st_nlink != 1:
+            raise HostAuthorizationError("candidate scope bind is hard-linked")
+        actual.append({"source": str(source), "target": target, "read_only": item["read_only"]})
+    expected_mounts = [m for m in policy["mounts"] if m["target"] != policy["grant_container_directory"]]
+    if sorted(actual, key=lambda item: item["target"]) != sorted(expected_mounts, key=lambda item: item["target"]):
+        raise HostAuthorizationError("candidate scope descriptor differs from mount policy")
+    if consume:
+        receipt = descriptor_path.with_name(descriptor_path.name + ".consumed")
+        try:
+            fd = os.open(receipt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(_canonical({"scope_id": binding["scope_id"], "consumed_at": now.isoformat()}))
+                stream.flush()
+                os.fsync(stream.fileno())
+            _fsync_directory(receipt.parent)
+        except FileExistsError as exc:
+            raise HostAuthorizationError("candidate scope was already consumed") from exc
+    return descriptor
+
+
+def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 3600) -> dict:
+    """Create the only supported candidate bind-source scope as Linux root.
+
+    ``bindings`` names directories to create below the fresh scope.  The
+    returned values are policy inputs; callers cannot nominate pre-existing
+    sources.  Mutable leaves may be owned by the numeric container user while
+    the enclosing scope remains root-owned mode 0700.
+    """
+    from pathlib import PurePosixPath
+    _require_linux_root()
+    try:
+        os.mkdir(CANDIDATE_SCOPE_PARENT, 0o700)
+    except FileExistsError:
+        pass
+    parent = _protected_path(Path(CANDIDATE_SCOPE_PARENT), directory=True, temporary=True)
+    if stat.S_IMODE(parent.stat().st_mode) != 0o700 or type(ttl_seconds) is not int or not 0 < ttl_seconds <= 3600:
+        raise HostAuthorizationError("candidate scope parent or lifetime is invalid")
+    if not isinstance(bindings, Sequence) or isinstance(bindings, (str, bytes)) or not bindings:
+        raise HostAuthorizationError("candidate scope bindings are missing")
+    scope_id = os.urandom(16).hex()
+    root = Path(tempfile.mkdtemp(prefix=f"candidate-{scope_id}-", dir=parent))
+    os.chmod(root, 0o700)
+    records = []
+    relative_names, targets = set(), set()
+    try:
+        for binding in bindings:
+            required = {"relative_path", "target", "read_only", "owner_uid", "owner_gid"}
+            if not isinstance(binding, Mapping) or set(binding) != required or type(binding["read_only"]) is not bool:
+                raise HostAuthorizationError("candidate scope binding is invalid")
+            relative = binding["relative_path"]
+            pure = PurePosixPath(relative) if isinstance(relative, str) else PurePosixPath("/")
+            if (not isinstance(relative, str) or not relative or pure.is_absolute() or str(pure) != relative
+                    or ".." in pure.parts or relative in relative_names):
+                raise HostAuthorizationError("candidate scope relative path is unsafe")
+            uid, gid = binding["owner_uid"], binding["owner_gid"]
+            if type(uid) is not int or type(gid) is not int or uid < 0 or gid < 0:
+                raise HostAuthorizationError("candidate scope owner is invalid")
+            target = _absolute(binding["target"])
+            if target in targets:
+                raise HostAuthorizationError("candidate scope target is duplicated")
+            relative_names.add(relative)
+            targets.add(target)
+            source = root if relative == "." else root.joinpath(*pure.parts)
+            if relative == ".":
+                if (uid, gid) != (0, 0):
+                    raise HostAuthorizationError("candidate scope root ownership cannot change")
+            else:
+                source.mkdir(parents=True, exist_ok=False)
+                os.chown(source, uid, gid)
+            state = source.stat()
+            records.append({"source": str(source), "device": state.st_dev, "inode": state.st_ino, "target": target, "read_only": binding["read_only"]})
+        descriptor_dir = parent / ".candidate-scope-descriptors"
+        try:
+            descriptor_dir.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        _protected_path(descriptor_dir, directory=True, temporary=True)
+        if stat.S_IMODE(descriptor_dir.stat().st_mode) != 0o700:
+            raise HostAuthorizationError("candidate scope descriptor directory is unprotected")
+        now = datetime.now(timezone.utc)
+        root_state = root.stat()
+        descriptor = {
+            "schema_version": "candidate-scope/1", "scope_id": scope_id,
+            "created_at": now.isoformat(), "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
+            "root": {"path": str(root), "device": root_state.st_dev, "inode": root_state.st_ino},
+            "binds": records,
+        }
+        raw = _canonical(descriptor)
+        descriptor_path = descriptor_dir / f"{scope_id}.json"
+        fd = os.open(descriptor_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        _fsync_directory(descriptor_path.parent)
+        return {
+            "candidate_host_root": str(root),
+            "candidate_scope": {"descriptor_path": str(descriptor_path), "descriptor_sha256": hashlib.sha256(raw).hexdigest(), "scope_id": scope_id},
+            "mounts": [{"source": item["source"], "target": item["target"], "read_only": item["read_only"]} for item in records],
+        }
+    except Exception:
+        # The parent is protected and freshly allocated, so recursive cleanup
+        # cannot escape it.  Failed creation never yields a usable descriptor.
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+
+
 def _load_policy(path: str | Path) -> dict:
     return _json(_protected_path(Path(path), private=True).read_bytes())
 
@@ -368,8 +643,12 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) 
         raise HostAuthorizationError("actual Compose source differs from protected deployment policy")
     command = ["compose", "--project-directory", policy["compose_project_directory"], "--env-file", policy["compose_environment_file"]]
     _protected_path(Path(policy["compose_environment_file"]), private=True)
+    if policy["schema_version"] == "host-runtime-policy/2":
+        _protected_path(Path(policy["compose_project_directory"]), directory=True)
     for path, expected_source in zip(paths, policy["compose_sources"]):
         file = Path(path)
+        if policy["schema_version"] == "host-runtime-policy/2":
+            _protected_path(file)
         if file.is_symlink() or file.resolve(strict=True) != file or hashlib.sha256(file.read_bytes()).hexdigest() != expected_source["sha256"]:
             raise HostAuthorizationError("actual Compose source content changed")
         command.extend(["-f", path])
@@ -454,6 +733,7 @@ def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapp
 def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900) -> dict:
     """Observe a fresh container, sign a bounded grant, and leave it unstarted."""
     _require_linux_root()
+    require_protected_authority_source()
     policy = _load_policy(expected_policy_path)
     validate_policy(policy, role)
     require_protected_key_and_grant_dirs(key_path, grant_dir)
@@ -462,6 +742,11 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     grant_dir, destination = Path(grant_dir), Path(grant_path)
     if not destination.is_absolute() or destination.parent != grant_dir or destination.exists() or destination.is_symlink():
         raise HostAuthorizationError("grant path must be new and inside its protected directory")
+    policy_version = policy["schema_version"]
+    if policy_version == "host-runtime-policy/2" and role == "candidate_validation":
+        # Consumption deliberately precedes every fallible Docker observation.
+        # A failed attempt is not replayable with a mutated scope.
+        _candidate_descriptor(policy, consume=True)
     observed = observe_and_validate(container_id, policy, role=role)
     _validate_mount_sources(observed, policy, grant_dir)
     if role == "candidate_validation":
@@ -472,14 +757,28 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     marker_path = policy["runtime_root"] + "/.market-data-runtime.json"
     manifest_raw = copy_container_bytes(container_id, policy["runtime_manifest_path"])
     marker_raw = copy_container_bytes(container_id, marker_path)
-    manifest, marker = _json(manifest_raw), _json(marker_raw)
+    marker = _json(marker_raw)
     if hashlib.sha256(manifest_raw).hexdigest() != policy["runtime_manifest_sha256"] or hashlib.sha256(marker_raw).hexdigest() != policy["runtime_marker_sha256"]:
         raise HostAuthorizationError("actual runtime manifest/marker differs from approval")
+    manifest = _json(manifest_raw)
+    if policy_version == "host-runtime-policy/2":
+        try:
+            manifest_contract = _contract_module(MANIFEST_CONTRACT_PATH, "_market_data_runtime_manifest_host_contract")
+            manifest_object = manifest_contract.parse_runtime_manifest(manifest)
+            manifest = manifest_object.to_dict()
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise HostAuthorizationError("runtime manifest violates its source contract") from exc
     for key in ("project_id", "module_id", "service_id"):
         if manifest.get(key) != policy[key]:
             raise HostAuthorizationError("runtime manifest identity mismatch")
-    if manifest.get("identity_kind") != "oci_container" or manifest.get("runtime_target") != "production_container" or manifest.get("schema_version") != "runtime-manifest/1":
+    expected_manifest_version = "runtime-manifest/1" if policy_version == "host-runtime-policy/1" else "runtime-manifest/2"
+    if manifest.get("identity_kind") != "oci_container" or manifest.get("runtime_target") != "production_container" or manifest.get("schema_version") != expected_manifest_version:
         raise HostAuthorizationError("runtime manifest identity contract is missing")
+    identity_root_role = manifest.get("identity_root_role")
+    if policy_version == "host-runtime-policy/2":
+        identity_roots = [item for item in manifest["runtime_roots"] if item["role"] == identity_root_role]
+        if len(identity_roots) != 1 or identity_roots[0]["access"] != "ro" or identity_roots[0]["container_path"] != policy["runtime_root"]:
+            raise HostAuthorizationError("policy runtime root differs from manifest identity root")
     classification = "formal" if role == "production" else "candidate-validation"
     if marker.get("classification") != classification or marker.get("module_id") != policy["module_id"] or marker.get("runtime_id") != policy["runtime_id"]:
         raise HostAuthorizationError("runtime marker cannot authorize this deployment role")
@@ -488,7 +787,10 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     writable = [m["target"] for m in mounts if not m["read_only"] and _within(m["target"], policy["runtime_root"])]
     if not writable or any(target == policy["runtime_root"] for target in writable):
         raise HostAuthorizationError("runtime marker root must remain read-only with explicit writable children")
-    protected = [policy["source_root"], policy["grant_container_directory"], marker_path]
+    protected = ([policy["source_root"], policy["grant_container_directory"], marker_path]
+                 if policy_version == "host-runtime-policy/1"
+                 else [policy["source_root"], policy["grant_container_directory"],
+                       *[item["container_path"] for item in manifest["runtime_roots"] if item["access"] == "ro"]])
     def writable_cover(path):
         matches = [m for m in mounts if _within(path, m["target"])]
         return bool(matches and not max(matches, key=lambda m: len(m["target"]))["read_only"])
@@ -507,15 +809,34 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     now = datetime.now(timezone.utc)
     payload = {key: policy[key] for key in ("project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "image_id", "runtime_root", "runtime_manifest_sha256", "runtime_marker_sha256")}
     payload.update(grant_id=os.urandom(16).hex(), issued_at=now.isoformat(), expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(), identity_kind="oci_container", authorization_mode=role, role=role, artifact_origin=observed["image_labels"]["market-data.artifact.origin"], release_commit=policy["approved_commit"], release_tree=policy["approved_tree"], release_sha256=observed["release_sha256"], rendered_compose_sha256=rendered_digest, mount_contract_sha256=_digest(mounts), actual_config_sha256=observed["actual_config_sha256"], container_id=container_id, hostname_nonce=observed["config"]["Hostname"], writable_roots=writable, protected_mounts=protected)
-    envelope = {"schema_version": "production-execution-grant/1", "algorithm": "ed25519", "key_id": policy["key_id"], "payload": payload, "signature": base64.b64encode(key.sign(_canonical(payload))).decode("ascii")}
-    from jsonschema import Draft202012Validator, FormatChecker
-    schema = _json(Path(__file__).with_name("production_authorization.schema.json").read_bytes())
+    grant_version = "production-execution-grant/1" if policy_version == "host-runtime-policy/1" else "production-execution-grant/2"
+    if grant_version == "production-execution-grant/2":
+        scope = policy["candidate_scope"]
+        payload.update(
+            runtime_manifest_schema_version="runtime-manifest/2",
+            identity_root_role=identity_root_role,
+            candidate_scope_id=scope["scope_id"] if scope is not None else None,
+            candidate_scope_sha256=scope["descriptor_sha256"] if scope is not None else None,
+        )
+    envelope = {"schema_version": grant_version, "algorithm": "ed25519", "key_id": policy["key_id"], "payload": payload, "signature": base64.b64encode(key.sign(_canonical(payload))).decode("ascii")}
     try:
-        Draft202012Validator(schema, format_checker=FormatChecker()).validate(envelope)
-    except Exception as exc:
+        grant_contract = _contract_module(GRANT_CONTRACT_PATH, "_market_data_production_grant_host_contract")
+        grant_contract.validate_execution_grant_envelope(envelope)
+    except (AttributeError, TypeError, ValueError) as exc:
         raise HostAuthorizationError("issued envelope violates the grant schema") from exc
     if observe_and_validate(container_id, policy, role=role) != observed:
         raise HostAuthorizationError("container changed before grant sealing")
+    _validate_mount_sources(observed, policy, grant_dir)
+    final_container = docker_inspect(container_id)
+    final_image = docker_image_inspect(policy["image_id"])
+    if _render_actual_compose(final_container, policy, final_image) != rendered_digest:
+        raise HostAuthorizationError("Compose deployment changed before grant sealing")
+    if (copy_container_bytes(container_id, policy["runtime_manifest_path"]) != manifest_raw
+            or copy_container_bytes(container_id, marker_path) != marker_raw
+            or copy_container_bytes(container_id, policy["source_root"] + "/02_configs/production_runtime_trust.json") != trust_raw):
+        raise HostAuthorizationError("identity material changed before grant sealing")
+    if policy_version == "host-runtime-policy/2" and role == "candidate_validation":
+        _candidate_descriptor(policy, consume=False)
     try:
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
         with os.fdopen(descriptor, "wb") as stream:
@@ -523,6 +844,7 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(destination, 0o444)
+        _fsync_directory(destination.parent)
     except FileExistsError as exc:
         raise HostAuthorizationError("grant already exists; refusing overwrite") from exc
     return envelope

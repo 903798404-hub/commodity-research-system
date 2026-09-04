@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 import re
@@ -20,6 +20,9 @@ from typing import Mapping
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .production_grant import GrantShapeError, parse_execution_grant_json
+from .runtime_manifest import ManifestValidationError, parse_runtime_manifest
 
 
 class ProductionIdentityError(RuntimeError):
@@ -214,24 +217,20 @@ def _signed_payload(path: Path, role: AuthorizationRole) -> dict:
     if path.is_symlink() or not path.is_file():
         raise ProductionIdentityError("execution grant is missing or unsafe")
     try:
-        envelope = _json_object(path.read_text(encoding="utf-8"), "execution grant")
-    except (OSError, UnicodeError, ProductionIdentityError) as exc:
+        raw = path.read_bytes()
+        payload = parse_execution_grant_json(raw)
+        envelope = _json_object(raw.decode("utf-8"), "execution grant")
+    except (OSError, UnicodeError, ProductionIdentityError, GrantShapeError) as exc:
         raise ProductionIdentityError("execution grant is invalid") from exc
-    expected = {"schema_version", "algorithm", "key_id", "payload", "signature"}
-    if not isinstance(envelope, dict) or set(envelope) != expected or envelope.get("schema_version") != "production-execution-grant/1" or envelope.get("algorithm") != "ed25519":
-        raise ProductionIdentityError("execution grant envelope is invalid")
     key_id = _require_id(envelope.get("key_id"), "grant key id")
     keys, revoked_keys, revoked_grants = _load_trust(role.value)
     if key_id in revoked_keys or key_id not in keys:
         raise ProductionIdentityError("grant signing key is untrusted or revoked")
-    if not isinstance(envelope["payload"], dict) or not isinstance(envelope["signature"], str):
-        raise ProductionIdentityError("execution grant payload is invalid")
     try:
         signature = base64.b64decode(envelope["signature"], validate=True)
-        keys[key_id].verify(signature, _canonical(envelope["payload"]))
+        keys[key_id].verify(signature, _canonical(payload))
     except (ValueError, InvalidSignature) as exc:
         raise ProductionIdentityError("execution grant signature is invalid") from exc
-    payload = envelope["payload"]
     if payload.get("grant_id") in revoked_grants:
         raise ProductionIdentityError("execution grant is revoked")
     return payload
@@ -247,7 +246,8 @@ def _mount_options() -> dict[str, set[str]]:
         pieces = row.split()
         if len(pieces) < 6 or "-" not in pieces:
             continue
-        mounts[pieces[4]] = set(pieces[5].split(","))
+        target = re.sub(r"\\(040|011|012|134)", lambda match: {"040": " ", "011": "\t", "012": "\n", "134": "\\"}[match.group(1)], pieces[4])
+        mounts[target] = set(pieces[5].split(","))
     return mounts
 
 
@@ -262,11 +262,13 @@ def _runtime_path(path: Path) -> str:
     return str(path.resolve(strict=True))
 
 
+def _within_mount(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
 def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id: str, runtime_id: str, marker_sha256: str) -> VerifiedExecutionIdentity:
     payload = _signed_payload(request.grant_path, role)
-    required = {"grant_id", "issued_at", "expires_at", "identity_kind", "authorization_mode", "artifact_origin", "role", "project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "release_commit", "release_tree", "image_id", "release_sha256", "runtime_manifest_sha256", "runtime_marker_sha256", "runtime_root", "writable_roots", "protected_mounts", "rendered_compose_sha256", "mount_contract_sha256", "actual_config_sha256", "container_id", "hostname_nonce"}
-    if set(payload) != required or payload.get("identity_kind") != IdentityKind.OCI_CONTAINER:
-        raise ProductionIdentityError("execution grant payload schema is invalid")
+    grant_v2 = "runtime_manifest_schema_version" in payload
     try:
         actual_role = AuthorizationRole(payload["role"])
     except (TypeError, ValueError) as exc:
@@ -294,13 +296,23 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
         raise ProductionIdentityError("release or runtime manifest identity mismatch")
     try:
         release = _json_object(request.release_path.read_text(encoding="utf-8"), "release")
-        manifest = _json_object(request.runtime_manifest_path.read_text(encoding="utf-8"), "runtime manifest")
+        manifest_raw = _json_object(request.runtime_manifest_path.read_text(encoding="utf-8"), "runtime manifest")
     except (UnicodeError, ProductionIdentityError) as exc:
         raise ProductionIdentityError("release or runtime manifest is invalid") from exc
     if not isinstance(release, dict) or release.get("git_commit") != payload["release_commit"] or release.get("git_tree") != payload["release_tree"]:
         raise ProductionIdentityError("embedded release identity mismatch")
-    if not isinstance(manifest, dict) or any(manifest.get(key) != payload[key] for key in ("project_id", "module_id", "service_id")):
+    if not isinstance(manifest_raw, dict) or any(manifest_raw.get(key) != payload[key] for key in ("project_id", "module_id", "service_id")):
         raise ProductionIdentityError("runtime manifest identity mismatch")
+    manifest = manifest_raw
+    if grant_v2:
+        try:
+            manifest_object = parse_runtime_manifest(manifest_raw)
+            manifest = manifest_object.to_dict()
+        except (ManifestValidationError, TypeError, ValueError) as exc:
+            raise ProductionIdentityError("runtime manifest violates its source contract") from exc
+        if (manifest["schema_version"] != payload["runtime_manifest_schema_version"]
+                or manifest["identity_root_role"] != payload["identity_root_role"]):
+            raise ProductionIdentityError("runtime manifest version or identity root mismatch")
     if request.runtime_marker_path.is_symlink():
         raise ProductionIdentityError("runtime marker must not be a symbolic link")
     marker_path = request.runtime_marker_path.resolve(strict=True)
@@ -321,13 +333,21 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
     writable, protected = set(payload["writable_roots"]), set(payload["protected_mounts"])
     if not writable or writable & protected or any(not isinstance(v, str) or not v.startswith("/") for v in writable | protected) or any(not v.startswith(root + "/") for v in writable):
         raise ProductionIdentityError("runtime mount contract is invalid")
+    if grant_v2:
+        identity_roots = [item for item in manifest["runtime_roots"] if item["role"] == manifest["identity_root_role"]]
+        expected_writable = {item["container_path"] for item in manifest["runtime_roots"] if item["access"] == "rw"}
+        expected_readonly = {item["container_path"] for item in manifest["runtime_roots"] if item["access"] == "ro"}
+        if (len(identity_roots) != 1 or identity_roots[0]["access"] != "ro"
+                or identity_roots[0]["container_path"] != root or writable != expected_writable
+                or not expected_readonly.issubset(protected)):
+            raise ProductionIdentityError("signed mount roots differ from runtime manifest")
     if not isinstance(payload.get("hostname_nonce"), str) or payload["hostname_nonce"] != socket.gethostname() or not re.fullmatch(r"[0-9a-f]{32}", payload["hostname_nonce"]):
         raise ProductionIdentityError("runtime instance hostname mismatch")
     if not isinstance(payload.get("grant_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", payload["grant_id"]):
         raise ProductionIdentityError("execution grant id is invalid")
     issued, expires = _parse_time(payload["issued_at"], "grant issue time"), _parse_time(payload["expires_at"], "grant expiry")
     now = datetime.now(timezone.utc)
-    if issued > now or expires <= now:
+    if issued > now or expires <= now or expires <= issued or expires - issued > timedelta(hours=1):
         raise ProductionIdentityError("execution grant is not currently valid")
     if not isinstance(payload.get("container_id"), str) or not re.fullmatch(r"[0-9a-f]{64}", payload["container_id"]):
         raise ProductionIdentityError("execution grant container identity is invalid")
@@ -344,7 +364,11 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
     if (any("ro" not in _mount_for(mounts, path) for path in protected_paths + required_protected)
             or any("rw" not in _mount_for(mounts, Path(value)) for value in writable)):
         raise ProductionIdentityError("OCI runtime mount permissions disagree with signed contract")
-    if role is AuthorizationRole.CANDIDATE_VALIDATION and (payload["artifact_origin"] != "candidate" or not root.startswith("/tmp/")):
+    if grant_v2:
+        declared_targets = {item["container_path"] for item in manifest["required_mounts"]}
+        if any(_within_mount(target, root) and target not in declared_targets for target in mounts):
+            raise ProductionIdentityError("OCI runtime contains an undeclared overlay mount")
+    if role is AuthorizationRole.CANDIDATE_VALIDATION and (payload["artifact_origin"] != "candidate" or (not grant_v2 and not root.startswith("/tmp/"))):
         raise ProductionIdentityError("candidate validation identity is not isolated")
     if role is AuthorizationRole.PRODUCTION and payload["artifact_origin"] not in {"candidate", "production"}:
         raise ProductionIdentityError("production grant artifact origin is invalid")

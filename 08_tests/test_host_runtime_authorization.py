@@ -46,6 +46,19 @@ def test_policy_rejects_non_temporary_candidate_and_unknown_fields():
     value=policy(); host.validate_policy(value,"candidate_validation")
     broken=copy.deepcopy(value); broken["runtime_root"]="/runtime"
     with pytest.raises(host.HostAuthorizationError): host.validate_policy(broken,"candidate_validation")
+
+
+def test_v2_policy_uses_explicit_candidate_scope_instead_of_container_path_heuristic():
+    value = policy()
+    value["schema_version"] = "host-runtime-policy/2"
+    value["runtime_root"] = "/runtime/candidate"
+    value["candidate_host_root"] = "/tmp/market-data-candidate-scopes/candidate-2"
+    value["candidate_scope"] = {"descriptor_path":"/tmp/market-data-candidate-scopes/.candidate-scope-descriptors/candidate.json","descriptor_sha256":"1"*64,"scope_id":"2"*32}
+    host.validate_policy(value, "candidate_validation")
+    broken = copy.deepcopy(value); broken["candidate_scope"] = None
+    with pytest.raises(host.HostAuthorizationError, match="scope"): host.validate_policy(broken, "candidate_validation")
+    production = policy("production"); production["schema_version"] = "host-runtime-policy/2"; production["candidate_scope"] = value["candidate_scope"]
+    with pytest.raises(host.HostAuthorizationError, match="scope"): host.validate_policy(production, "production")
     broken=copy.deepcopy(value); broken["extra"]=True
     with pytest.raises(host.HostAuthorizationError): host.validate_policy(broken,"candidate_validation")
 
@@ -68,13 +81,26 @@ def test_candidate_image_can_be_promoted_but_candidate_policy_cannot_be_producti
     with pytest.raises(host.HostAuthorizationError): host.validate_policy(candidate,"production")
 
 
-def signing_fixture(tmp_path, monkeypatch, role="candidate_validation"):
+def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=1):
     """Model Linux mounts/ownership and Docker transport, never the verifier or signer."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
     from agri_research_agent.shared import production_identity as identity
 
     expected = policy(role)
+    if version == 2:
+        expected["schema_version"] = "host-runtime-policy/2"
+        expected["candidate_scope"] = None if role == "production" else {"descriptor_path":"/tmp/protected/descriptors/scope.json","descriptor_sha256":"3"*64,"scope_id":"4"*32}
+        if role == "candidate_validation":
+            old_root = expected["candidate_host_root"]
+            expected["candidate_host_root"] = "/tmp/market-data-candidate-scopes/candidate-4"
+            for mount in expected["mounts"]:
+                if mount["source"] == old_root: mount["source"] = expected["candidate_host_root"]
+                elif mount["source"].startswith(old_root + "/"): mount["source"] = expected["candidate_host_root"] + mount["source"][len(old_root):]
+            expected["candidate_scope"]["descriptor_path"] = "/tmp/market-data-candidate-scopes/.candidate-scope-descriptors/scope.json"
+            expected["runtime_root"] = "/runtime/candidate"
+            expected["mounts"][1]["target"] = expected["runtime_root"]
+            expected["mounts"][2]["target"] = expected["runtime_root"] + "/data"
     image_root, runtime, grants = tmp_path / "image", tmp_path / "runtime", tmp_path / "grants"
     for folder in (image_root / "02_configs", image_root / "03_src", image_root / "04_scripts", image_root / "05_apps", runtime / "data", grants):
         folder.mkdir(parents=True)
@@ -84,6 +110,17 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation"):
     trust = image_root / "02_configs" / "production_runtime_trust.json"
     trust.write_text(json.dumps({"schema_version":"production-runtime-trust/1", "keys":[{"key_id":expected["key_id"], "domain":role, "algorithm":"ed25519", "public_key_base64":base64.b64encode(private.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw)).decode()}],"revoked_key_ids":[],"revoked_grant_ids":[]}),encoding="utf-8")
     manifest = {"schema_version":"runtime-manifest/1", "runtime_target":"production_container", "identity_kind":"oci_container", **{name:expected[name] for name in ("project_id","module_id","service_id")}, "runtime_roots":[{"role":"marker", "container_path":expected["runtime_root"], "access":"ro"},{"role":"data", "container_path":expected["runtime_root"]+"/data", "access":"rw"}],"required_mounts":[{"role":"marker","container_path":expected["runtime_root"],"read_only":True},{"role":"data","container_path":expected["runtime_root"]+"/data","read_only":False}]}
+    if version == 2:
+        manifest.update({
+            "schema_version":"runtime-manifest/2", "build":{"dockerfile":"Dockerfile","dockerignore":".dockerignore","dependency_contracts":["requirements.txt"],"compose_sources":["compose.yml"]},
+            "entrypoint":["python","app.py"], "working_directory":"/app", "required_environment":[], "secret_references":[],
+            "required_executables":["python"], "required_python_modules":[],
+            "production_policy":{"deployment_role":"production","write_grant_required":True},
+            "preview_policy":{"production_write":False,"production_rw_mounts":False},
+            "validation_probes":["entrypoint_initialization","runtime_identity","dependencies","runtime_paths","mount_permissions","missing_grant_rejected","wrong_commit_rejected","wrong_tree_rejected","wrong_image_rejected","wrong_service_rejected","wrong_manifest_rejected","preview_write_rejected","release_mismatch_rejected"],
+            "identity_root_role":"marker", "initialization_commands":[{"name":"initialize","argv":["python","init.py"]}],
+            "source_inputs":[{"path":"app.py","role":"entrypoint"},{"path":"init.py","role":"initialization"}],
+        })
     marker = {"schema_version":1,"runtime_id":"runtime","module_id":"shared-runtime","classification":"candidate-validation" if role=="candidate_validation" else "formal", "created_at":"2026-01-01T00:00:00Z"}
     release = {"git_commit":COMMIT,"git_tree":TREE,"application":"app","release_id":"release"}
     manifest_file, marker_file, release_file = image_root / "runtime.json", runtime / ".market-data-runtime.json", image_root / "RELEASE.json"
@@ -135,6 +172,8 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation"):
     monkeypatch.setattr(host,"_protected_path",lambda path,**kwargs:path)
     monkeypatch.setattr(host,"require_protected_key_and_grant_dirs",lambda *args:None)
     monkeypatch.setattr(host,"_validate_mount_sources",lambda *args:None)
+    monkeypatch.setattr(host,"_candidate_descriptor",lambda *args,**kwargs:{"scope_id":"4"*32})
+    monkeypatch.setattr(host,"_fsync_directory",lambda *args:None)
     monkeypatch.setattr(identity,"_ROOT",image_root)
     monkeypatch.setattr(identity,"TRUST_CONFIG_PATH",trust)
     mapping={image_root:"/app",runtime:expected["runtime_root"],grants:"/run/grants"}
@@ -167,6 +206,42 @@ def test_host_signature_roundtrip_is_accepted_only_for_its_role(tmp_path,monkeyp
         identity.verify_execution(request,expected_role="production" if role=="candidate_validation" else "candidate_validation",module_id="shared-runtime",runtime_id="runtime",runtime_root=marker.parent,marker_sha256=expected["runtime_marker_sha256"])
     with pytest.raises(host.HostAuthorizationError,match="new"):
         host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grant,grant_dir=grants,role=role)
+
+
+def test_v2_production_issuer_binds_manifest_identity_root_and_null_scope(tmp_path, monkeypatch):
+    expected,container,image,rendered,policy_file,key,grants,manifest,marker,release,identity = signing_fixture(tmp_path,monkeypatch,"production",2)
+    grant = grants / "grant-v2.json"
+    envelope = host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grant,grant_dir=grants,role="production")
+    assert envelope["schema_version"] == "production-execution-grant/2"
+    assert envelope["payload"]["runtime_manifest_schema_version"] == "runtime-manifest/2"
+    assert envelope["payload"]["identity_root_role"] == "marker"
+    assert envelope["payload"]["candidate_scope_id"] is None
+    request=identity.OCIExecutionRequest(grant,release,manifest,marker.parent,marker)
+    assert identity.verify_execution(request,expected_role="production",module_id="shared-runtime",runtime_id="runtime",
+                                     runtime_root=marker.parent,marker_sha256=expected["runtime_marker_sha256"]).image_id == IMAGE
+
+
+def test_v2_issuer_requires_protected_authority_source_before_docker_observation(tmp_path, monkeypatch):
+    expected,container,image,rendered,policy_file,key,grants,*_ = signing_fixture(tmp_path,monkeypatch,"production",2)
+    monkeypatch.setattr(host,"require_protected_authority_source",lambda:(_ for _ in ()).throw(host.HostAuthorizationError("unprotected authority")))
+    monkeypatch.setattr(host,"_run_docker",lambda *args,**kwargs:(_ for _ in ()).throw(AssertionError("Docker must not run")))
+    with pytest.raises(host.HostAuthorizationError, match="unprotected authority"):
+        host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grants/"grant.json",grant_dir=grants,role="production")
+
+
+def test_v2_candidate_issuer_uses_signed_host_scope_with_logical_container_root(tmp_path, monkeypatch):
+    expected,container,image,rendered,policy_file,key,grants,manifest,marker,release,identity = signing_fixture(tmp_path,monkeypatch,"candidate_validation",2)
+    calls = []
+    monkeypatch.setattr(host,"_candidate_descriptor",lambda policy,consume:calls.append(consume) or {"scope_id":"4"*32})
+    grant = grants / "candidate-v2.json"
+    envelope = host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grant,grant_dir=grants,role="candidate_validation")
+    assert calls == [True, False]
+    assert envelope["payload"]["runtime_root"] == "/runtime/candidate"
+    assert envelope["payload"]["candidate_scope_id"] == "4" * 32
+    assert envelope["payload"]["candidate_scope_sha256"] == "3" * 64
+    request=identity.OCIExecutionRequest(grant,release,manifest,marker.parent,marker)
+    assert identity.verify_execution(request,expected_role="candidate_validation",module_id="shared-runtime",runtime_id="runtime",
+                                     runtime_root=marker.parent,marker_sha256=expected["runtime_marker_sha256"]).role.value == "candidate_validation"
 
 
 @pytest.mark.parametrize("mutation",["image","tree","commit","service","manifest","marker","compose","environment","key-domain","container-layer"])

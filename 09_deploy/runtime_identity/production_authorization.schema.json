@@ -1,246 +1,52 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "algorithm",
-    "key_id",
-    "payload",
-    "signature"
-  ],
-  "properties": {
-    "schema_version": {
-      "const": "production-execution-grant/1"
+  "$id": "urn:market-data:production-execution-grant:1-2",
+  "description": "Structural grant schema only. Signature, trust, expiry, host observations and in-container mount validation are separate authorization checks.",
+  "oneOf": [{"$ref": "#/$defs/envelope-v1"}, {"$ref": "#/$defs/envelope-v2"}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "key-id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,127}$"},
+    "hex32": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "hex40": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "hex64": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "image": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "path": {"type": "string", "pattern": "^/", "minLength": 2, "allOf": [{"not": {"pattern": "\\\\"}}, {"not": {"pattern": "(?:^|/)\\.{1,2}(?:/|$)"}}]},
+    "paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+    "signature": {"type": "string", "pattern": "^[A-Za-z0-9+/]{86}==$"},
+    "role-rules": {
+      "allOf": [
+        {"if": {"properties": {"role": {"const": "production"}}, "required": ["role"]}, "then": {"properties": {"authorization_mode": {"const": "production"}, "artifact_origin": {"enum": ["candidate", "production"]}}}},
+        {"if": {"properties": {"role": {"const": "candidate_validation"}}, "required": ["role"]}, "then": {"properties": {"authorization_mode": {"const": "candidate_validation"}, "artifact_origin": {"const": "candidate"}}}}
+      ]
     },
-    "algorithm": {
-      "const": "ed25519"
-    },
-    "key_id": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{0,127}$"
-    },
-    "signature": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9+/]{86}==$"
-    },
-    "payload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "grant_id",
-        "issued_at",
-        "expires_at",
-        "identity_kind",
-        "authorization_mode",
-        "artifact_origin",
-        "role",
-        "project_id",
-        "module_id",
-        "service_id",
-        "runtime_id",
-        "approved_commit",
-        "approved_tree",
-        "release_commit",
-        "release_tree",
-        "image_id",
-        "release_sha256",
-        "runtime_manifest_sha256",
-        "runtime_marker_sha256",
-        "runtime_root",
-        "writable_roots",
-        "protected_mounts",
-        "rendered_compose_sha256",
-        "mount_contract_sha256",
-        "actual_config_sha256",
-        "container_id",
-        "hostname_nonce"
-      ],
+    "payload-v1": {
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "grant_id": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{32}$"
-        },
-        "issued_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "expires_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "identity_kind": {
-          "const": "oci_container"
-        },
-        "authorization_mode": {
-          "enum": [
-            "production",
-            "candidate_validation"
-          ]
-        },
-        "artifact_origin": {
-          "enum": [
-            "production",
-            "candidate"
-          ]
-        },
-        "role": {
-          "enum": [
-            "production",
-            "candidate_validation"
-          ]
-        },
-        "project_id": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$"
-        },
-        "module_id": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$"
-        },
-        "service_id": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$"
-        },
-        "runtime_id": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$"
-        },
-        "approved_commit": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{40}$"
-        },
-        "approved_tree": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{40}$"
-        },
-        "release_commit": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{40}$"
-        },
-        "release_tree": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{40}$"
-        },
-        "image_id": {
-          "type": "string",
-          "pattern": "^sha256:[a-f0-9]{64}$"
-        },
-        "release_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "runtime_manifest_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "runtime_marker_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "rendered_compose_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "mount_contract_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "actual_config_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "runtime_root": {
-          "type": "string",
-          "pattern": "^/[^\\\\]*$",
-          "minLength": 2
-        },
-        "writable_roots": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^/[^\\\\]*$"
-          }
-        },
-        "protected_mounts": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^/[^\\\\]*$"
-          }
-        },
-        "container_id": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "hostname_nonce": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{32}$"
-        }
-      }
-    }
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "payload": {
-            "properties": {
-              "role": {
-                "const": "production"
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "payload": {
-            "properties": {
-              "authorization_mode": {
-                "const": "production"
-              },
-              "artifact_origin": {
-                "enum": [
-                  "candidate",
-                  "production"
-                ]
-              }
-            }
-          }
-        }
-      }
+        "grant_id": {"$ref": "#/$defs/hex32"}, "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "identity_kind": {"const": "oci_container"}, "authorization_mode": {"enum": ["production", "candidate_validation"]}, "artifact_origin": {"enum": ["production", "candidate"]}, "role": {"enum": ["production", "candidate_validation"]}, "project_id": {"$ref": "#/$defs/id"}, "module_id": {"$ref": "#/$defs/id"}, "service_id": {"$ref": "#/$defs/id"}, "runtime_id": {"$ref": "#/$defs/id"}, "approved_commit": {"$ref": "#/$defs/hex40"}, "approved_tree": {"$ref": "#/$defs/hex40"}, "release_commit": {"$ref": "#/$defs/hex40"}, "release_tree": {"$ref": "#/$defs/hex40"}, "image_id": {"$ref": "#/$defs/image"}, "release_sha256": {"$ref": "#/$defs/hex64"}, "runtime_manifest_sha256": {"$ref": "#/$defs/hex64"}, "runtime_marker_sha256": {"$ref": "#/$defs/hex64"}, "runtime_root": {"$ref": "#/$defs/path"}, "writable_roots": {"$ref": "#/$defs/paths"}, "protected_mounts": {"$ref": "#/$defs/paths"}, "rendered_compose_sha256": {"$ref": "#/$defs/hex64"}, "mount_contract_sha256": {"$ref": "#/$defs/hex64"}, "actual_config_sha256": {"$ref": "#/$defs/hex64"}, "container_id": {"$ref": "#/$defs/hex64"}, "hostname_nonce": {"$ref": "#/$defs/hex32"}
+      }, "required": ["grant_id", "issued_at", "expires_at", "identity_kind", "authorization_mode", "artifact_origin", "role", "project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "release_commit", "release_tree", "image_id", "release_sha256", "runtime_manifest_sha256", "runtime_marker_sha256", "runtime_root", "writable_roots", "protected_mounts", "rendered_compose_sha256", "mount_contract_sha256", "actual_config_sha256", "container_id", "hostname_nonce"],
+      "allOf": [{"$ref": "#/$defs/role-rules"}]
     },
-    {
-      "if": {
-        "properties": {
-          "payload": {
-            "properties": {
-              "role": {
-                "const": "candidate_validation"
-              }
-            }
-          }
-        }
+    "payload-v2": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "grant_id": {"$ref": "#/$defs/hex32"}, "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "identity_kind": {"const": "oci_container"}, "authorization_mode": {"enum": ["production", "candidate_validation"]}, "artifact_origin": {"enum": ["production", "candidate"]}, "role": {"enum": ["production", "candidate_validation"]}, "project_id": {"$ref": "#/$defs/id"}, "module_id": {"$ref": "#/$defs/id"}, "service_id": {"$ref": "#/$defs/id"}, "runtime_id": {"$ref": "#/$defs/id"}, "approved_commit": {"$ref": "#/$defs/hex40"}, "approved_tree": {"$ref": "#/$defs/hex40"}, "release_commit": {"$ref": "#/$defs/hex40"}, "release_tree": {"$ref": "#/$defs/hex40"}, "image_id": {"$ref": "#/$defs/image"}, "release_sha256": {"$ref": "#/$defs/hex64"}, "runtime_manifest_sha256": {"$ref": "#/$defs/hex64"}, "runtime_marker_sha256": {"$ref": "#/$defs/hex64"}, "runtime_root": {"$ref": "#/$defs/path"}, "writable_roots": {"$ref": "#/$defs/paths"}, "protected_mounts": {"$ref": "#/$defs/paths"}, "rendered_compose_sha256": {"$ref": "#/$defs/hex64"}, "mount_contract_sha256": {"$ref": "#/$defs/hex64"}, "actual_config_sha256": {"$ref": "#/$defs/hex64"}, "container_id": {"$ref": "#/$defs/hex64"}, "hostname_nonce": {"$ref": "#/$defs/hex32"}, "runtime_manifest_schema_version": {"const": "runtime-manifest/2"}, "identity_root_role": {"$ref": "#/$defs/id"}, "candidate_scope_id": {"type": ["string", "null"], "pattern": "^[a-f0-9]{32}$"}, "candidate_scope_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
       },
-      "then": {
-        "properties": {
-          "payload": {
-            "properties": {
-              "authorization_mode": {
-                "const": "candidate_validation"
-              },
-              "artifact_origin": {
-                "const": "candidate"
-              }
-            }
-          }
-        }
-      }
+      "required": ["grant_id", "issued_at", "expires_at", "identity_kind", "authorization_mode", "artifact_origin", "role", "project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "release_commit", "release_tree", "image_id", "release_sha256", "runtime_manifest_sha256", "runtime_marker_sha256", "runtime_root", "writable_roots", "protected_mounts", "rendered_compose_sha256", "mount_contract_sha256", "actual_config_sha256", "container_id", "hostname_nonce", "runtime_manifest_schema_version", "identity_root_role", "candidate_scope_id", "candidate_scope_sha256"],
+      "allOf": [
+        {"$ref": "#/$defs/role-rules"},
+        {"if": {"properties": {"role": {"const": "production"}}, "required": ["role"]}, "then": {"properties": {"candidate_scope_id": {"const": null}, "candidate_scope_sha256": {"const": null}}}},
+        {"if": {"properties": {"role": {"const": "candidate_validation"}}, "required": ["role"]}, "then": {"properties": {"candidate_scope_id": {"$ref": "#/$defs/hex32"}, "candidate_scope_sha256": {"$ref": "#/$defs/hex64"}}}}
+      ]
+    },
+    "envelope-v1": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"schema_version": {"const": "production-execution-grant/1"}, "algorithm": {"const": "ed25519"}, "key_id": {"$ref": "#/$defs/key-id"}, "signature": {"$ref": "#/$defs/signature"}, "payload": {"$ref": "#/$defs/payload-v1"}},
+      "required": ["schema_version", "algorithm", "key_id", "payload", "signature"]
+    },
+    "envelope-v2": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"schema_version": {"const": "production-execution-grant/2"}, "algorithm": {"const": "ed25519"}, "key_id": {"$ref": "#/$defs/key-id"}, "signature": {"$ref": "#/$defs/signature"}, "payload": {"$ref": "#/$defs/payload-v2"}},
+      "required": ["schema_version", "algorithm", "key_id", "payload", "signature"]
     }
-  ]
+  }
 }
