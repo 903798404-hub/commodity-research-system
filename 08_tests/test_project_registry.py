@@ -469,6 +469,18 @@ def test_registered_shared_intraday_exact_boundary():
     assert registry.select_project(ROOT, 'soybean-pm')[1]['status'] == 'frozen'
 
 
+def test_tankan_live_registration_is_additive_and_narrow():
+    _, project = registry.select_project(ROOT, 'tankan-live-query')
+    assert project['status'] == 'ready' and project['change_class'] == 'shared'
+    assert project['owned_paths'] == [
+        '03_src/agri_research_agent/data_sources/tankan/client.py',
+        '03_src/agri_research_agent/data_sources/tankan/queries.py']
+    assert project['future_owned_paths'] == project['future_required_tests'] == [
+        '08_tests/data_sources/tankan/test_live_queries.py']
+    assert not registry.owns(project, '03_src/agri_research_agent/data_sources/tankan/models.py')
+    assert not registry.owns(project, '03_src/agri_research_agent/pipelines/public_data_daily.py')
+
+
 @pytest.mark.parametrize('path,expected', [
     ('03_src/agri_research_agent/market_data/intraday.py', 'PASS'),
     ('03_src/agri_research_agent/market_data/intraday_helper_random.py', 'FAIL'),

@@ -482,6 +482,53 @@
       "boundary_notes": "目前无法确认独立Canola专属代码路径，散落在多品种共享模块，禁止猜测授予整目录；登记身份，具体owned/tests另审。"
     },
     {
+      "project_id": "tankan-live-query",
+      "change_class": "shared",
+      "status": "ready",
+      "owned_paths": [
+        "03_src/agri_research_agent/data_sources/tankan/client.py",
+        "03_src/agri_research_agent/data_sources/tankan/queries.py"
+      ],
+      "future_owned_paths": [
+        "08_tests/data_sources/tankan/test_live_queries.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/data_sources/tankan/models.py",
+        "03_src/agri_research_agent/research_data/identities.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/data_sources/tankan/models.py",
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/pipelines",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/import_profit",
+        "04_scripts",
+        "05_apps",
+        "09_deploy",
+        "02_configs"
+      ],
+      "required_tests": [
+        "08_tests/test_project_registry.py",
+        "08_tests/test_quality_controls.py",
+        "08_tests/data_sources/tankan/test_client.py",
+        "08_tests/data_sources/tankan/test_models.py",
+        "08_tests/data_sources/tankan/test_market_price_adapter.py",
+        "08_tests/data_sources/tankan/test_fx_adapter.py",
+        "08_tests/data_sources/tankan/test_domestic_spread.py",
+        "08_tests/pipelines/test_full_daily_windows_wrapper.py"
+      ],
+      "future_required_tests": [
+        "08_tests/data_sources/tankan/test_live_queries.py"
+      ],
+      "capabilities": [
+        "additive approved exact-contract live query family",
+        "public live client validation; exact match or explicit unavailable",
+        "source timestamp preservation; existing daily behavior unchanged"
+      ],
+      "boundary_notes": "Unified Goal A明确授权；现有QuerySpec可表达带参数SELECT，live参数验证在client的独立公开入口中完成，不改变daily日期参数或三条daily SQL。models只读；若确需改model必须先独立治理扩展。不得实现Snapshot、AM/PM、业务映射、榨利或UI；不得修改FULL DAILY。"
+    },
+    {
       "project_id": "shared-intraday",
       "change_class": "shared",
       "status": "ready",
