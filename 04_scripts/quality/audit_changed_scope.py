@@ -322,10 +322,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if allowed and any(not project_registry.owns(project, path) for path in allowed):
                 raise ValueError("--owned may only narrow registry scope")
             if allowed:
-                exact_allowed = [p for p in allowed if not _is_allowed(p, project["owned_paths"])]
+                exact_allowed = [p for p in allowed if not _is_allowed(p, (project["owned_paths"] + project.get("reserved_paths", [])))]
                 allowed = [p for p in allowed if p not in exact_allowed]
             else:
-                allowed = project["owned_paths"]
+                allowed = (project["owned_paths"] + project.get("reserved_paths", []))
                 exact_allowed = project.get("future_owned_paths", [])
             protected += tuple(pattern for path in registry["protected_paths"] for pattern in (path, path + "/**"))
             project_registry.assert_main_mirror(PROJECT_ROOT)
@@ -352,6 +352,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             shared_patterns=protected,
         )
         if project:
+            for name in report['changed_files']:
+                if any(project_registry.under_path(name, p) for p in project.get('reserved_paths', [])):
+                    project_registry.future_file(PROJECT_ROOT, name, exact_file=False)
             forbidden = [p for p in report["changed_files"] if _is_allowed(p, project["forbidden_paths"])]
             if forbidden:
                 report["PROJECT_SCOPE"] = "FAIL"
@@ -360,7 +363,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             report.update(project_id=args.project, registry=project_registry.REGISTRY_PATH,
                           forbidden_changes=forbidden, required_tests=project["required_tests"],
                           future_required_tests=project.get("future_required_tests", []),
-                          shared_dependencies=project["shared_dependencies"])
+                          shared_dependencies=project["shared_dependencies"],
+                          reserved_paths=project.get("reserved_paths", []))
     except (RuntimeError, ValueError, WorktreeChangedError) as exc:
         print(f"审计失败: {exc}", file=sys.stderr)
         return 2

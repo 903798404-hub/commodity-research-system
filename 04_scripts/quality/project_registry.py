@@ -26,10 +26,10 @@ def under_path(value: str, parent: str) -> bool:
     return value == parent or value.startswith(parent + "/")
 
 
-def future_file(root: Path, value: str, *, test: bool = False) -> Path:
+def future_file(root: Path, value: str, *, test: bool = False, exact_file: bool = True) -> Path:
     """Exact file only, even after creation; never traverse links or junctions."""
     key = canonical_path(value)
-    if not PurePosixPath(key).suffix or key.startswith(".git/"):
+    if (exact_file and not PurePosixPath(key).suffix) or key.startswith(".git/"):
         raise ValueError(f"Future path must name an exact file: {value}")
     if test and not (key.startswith("08_tests/") and PurePosixPath(key).name.startswith("test_") and key.endswith(".py")):
         raise ValueError(f"Future test outside test area: {value}")
@@ -47,8 +47,43 @@ def future_file(root: Path, value: str, *, test: bool = False) -> Path:
     return current
 
 
+def reserved_directory(root: Path, value: str) -> Path:
+    """An explicit subtree: only its leaf may be absent; never create it."""
+    relative_path(value)
+    key = canonical_path(value)
+    parts = key.split('/')
+    if (len(parts) < 2 or any(p.startswith('.') for p in parts)
+            or key in ('03_src/agri_research_agent', '07_docs/projects')
+            or PurePosixPath(key).suffix):
+        raise ValueError(f"Overbroad or invalid reserved directory: {value}")
+    current = root.resolve()
+    for index, part in enumerate(value.split('/')):
+        matches = [p for p in current.iterdir() if p.name.casefold() == part.casefold()]
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous case aliases: {value}")
+        current = matches[0] if matches else current / part
+        if current.is_symlink() or current.is_junction():
+            raise ValueError(f"Reserved path traverses link: {value}")
+        if not current.exists():
+            if index != len(parts) - 1:
+                raise ValueError(f"Reserved parent namespace missing: {value}")
+        elif not current.is_dir():
+            raise ValueError(f"Reserved namespace is not a directory: {value}")
+    if root.resolve() not in current.resolve().parents:
+        raise ValueError(f"Reserved namespace outside repository: {value}")
+    return current
+
+
+def ownership_paths(project: dict) -> list[str]:
+    return project['owned_paths'] + project.get('future_owned_paths', []) + project.get('reserved_paths', [])
+
+
+def overlaps(left: str, right: str) -> bool:
+    return under_path(left, right) or under_path(right, left)
+
+
 def owns(project: dict, value: str) -> bool:
-    return (any(under_path(value, p) for p in project["owned_paths"])
+    return (any(under_path(value, p) for p in project["owned_paths"] + project.get("reserved_paths", []))
             or canonical_path(value) in {canonical_path(p) for p in project.get("future_owned_paths", [])})
 
 
@@ -61,7 +96,7 @@ def relative_path(value: str) -> str:
 
 
 def validate_registry(data: dict, root: Path) -> dict:
-    if not isinstance(data, dict) or data.get("schema_version") not in ("project-registry/1", "project-registry/2"):
+    if not isinstance(data, dict) or data.get("schema_version") not in ("project-registry/1", "project-registry/2", "project-registry/3"):
         raise ValueError("Invalid project registry schema")
     if set(data) != {"schema_version", "protected_paths", "projects"}:
         raise ValueError("Unexpected registry fields")
@@ -80,7 +115,9 @@ def validate_registry(data: dict, root: Path) -> dict:
     keys = {"project_id", "change_class", "status", "owned_paths", "shared_dependencies",
             "forbidden_paths", "required_tests", "capabilities", "boundary_notes"}
     for item in data["projects"]:
-        optional = {"future_owned_paths", "future_required_tests"} if data["schema_version"] == "project-registry/2" else set()
+        optional = {"future_owned_paths", "future_required_tests"} if data["schema_version"] != "project-registry/1" else set()
+        if data["schema_version"] == "project-registry/3":
+            optional.add("reserved_paths")
         if not isinstance(item, dict) or not keys <= set(item) or set(item) - keys - optional:
             raise ValueError("Invalid project fields")
         pid = item["project_id"]
@@ -100,8 +137,11 @@ def validate_registry(data: dict, root: Path) -> dict:
             if len({canonical_path(p) for p in values}) != len(values):
                 raise ValueError("Duplicate future path identity")
             for value in values:
-                future_file(root, value, test=key == "future_required_tests")
-        if item["status"] == "ready" and (not (item["owned_paths"] or item.get("future_owned_paths")) or not (item["required_tests"] or item.get("future_required_tests"))):
+                if key == "reserved_paths":
+                    reserved_directory(root, value)
+                else:
+                    future_file(root, value, test=key == "future_required_tests")
+        if item["status"] == "ready" and (not (item["owned_paths"] or item.get("future_owned_paths") or item.get("reserved_paths")) or not (item["required_tests"] or item.get("future_required_tests"))):
             raise ValueError("Ready project needs owned paths and tests")
         if not isinstance(item["capabilities"], list) or not all(isinstance(x,str) and x for x in item["capabilities"]):
             raise ValueError("Invalid capabilities")
@@ -130,6 +170,22 @@ def validate_registry(data: dict, root: Path) -> dict:
                 raise ValueError(f"Future test conflicts with read-only/forbidden scope: {value}")
             if any(other is not item and owns(other, value) for other in data["projects"]):
                 raise ValueError(f"Future test ownership collision: {value}")
+    # All ownership kinds participate, including ordinary ancestor/descendant paths.
+    for index, item in enumerate(data['projects']):
+        for other in data['projects'][index + 1:]:
+            for value in ownership_paths(item):
+                if any(overlaps(value, p) for p in ownership_paths(other)):
+                    raise ValueError(f"Ownership collision: {item['project_id']} / {other['project_id']}: {value}")
+        for value in item.get('reserved_paths', []):
+            if any(overlaps(value, p) for p in item['shared_dependencies'] + item['forbidden_paths']):
+                raise ValueError(f"Reservation conflicts with read-only/forbidden scope: {value}")
+            if item['change_class'] == 'business':
+                try:
+                    from .audit_changed_scope import SHARED_PATH_PATTERNS, _is_shared
+                except ImportError:
+                    from audit_changed_scope import SHARED_PATH_PATTERNS, _is_shared
+                if any(overlaps(value, p) for p in data['protected_paths']) or _is_shared(value, SHARED_PATH_PATTERNS) or _is_shared(value + '/probe.py', SHARED_PATH_PATTERNS):
+                    raise ValueError(f"Reserved business namespace is protected: {value}")
     return data
 
 

@@ -502,3 +502,222 @@ def test_registered_intraday_synthetic_scope(path, expected):
                              exact_allowed=project['future_owned_paths'],
                              change_class=project['change_class'], git=synthetic_git)
     assert report['PROJECT_SCOPE'] == expected
+
+# Namespace reservation acceptance uses only temporary repositories.
+def reservation_registry(root):
+    data = minimal_registry()
+    data['schema_version'] = 'project-registry/3'
+    for name in ('03_src/agri_research_agent/alerts', '04_scripts', '08_tests',
+                 '02_configs', '07_docs/projects'):
+        (root/name).mkdir(parents=True, exist_ok=True)
+    project = data['projects'][0]
+    project.update(project_id='notification-push-fixture', owned_paths=['03_src/agri_research_agent/alerts'],
+                   reserved_paths=['04_scripts/notifications', '08_tests/alerts',
+                                   '02_configs/notifications', '07_docs/projects/notification'],
+                   required_tests=[], future_required_tests=['08_tests/alerts/test_core.py'])
+    return data
+
+
+def test_reservation_bootstrap_real_git(tmp_path, monkeypatch, capsys):
+    main = tmp_path/'main'
+    main.mkdir()
+    for name in ('shared/code.py', 'other/code.py', 'tests/test_feature.py',
+                 '03_src/agri_research_agent/pipelines/lutou_weather.py',
+                 '03_src/agri_research_agent/pipelines/public_data_daily.py',
+                 '04_scripts/common.py', '08_tests/test_anchor.py', '07_docs/projects/canola/contract.md'):
+        path=main/name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('# fixture\n')
+    data=reservation_registry(main)
+    (main/'03_src/agri_research_agent/alerts/__init__.py').write_text('# fixture\n')
+    write_registry(main,data)
+    registry.validate_registry(data, main)
+    registry.git(main,'init','-b','main')
+    registry.git(main,'config','user.name','Scope Fixture')
+    registry.git(main,'config','user.email','fixture@example.invalid')
+    registry.git(main,'add','.')
+    registry.git(main,'-c','commit.gpgsign=false','commit','-m','synthetic approved reservation')
+    remote=tmp_path/'remote.git'
+    registry.git(main,'clone','--bare',str(main),str(remote))
+    registry.git(main,'remote','add','origin',str(remote))
+    feature=tmp_path/'feature'
+    result=start_project.prepare(main,'notification-push-fixture','feat/bootstrap',feature,create=True)
+    assert result['created'] and result['reserved_paths']==data['projects'][0]['reserved_paths']
+    assert all(not (feature/p).exists() for p in result['reserved_paths'])
+    monkeypatch.setattr(scope,'PROJECT_ROOT',feature)
+    for name in ('04_scripts/notifications/preview.py','04_scripts/notifications/README',
+                 '08_tests/alerts/test_core.py','02_configs/notifications/default.json',
+                 '07_docs/projects/notification/contract.md'):
+        path=feature/name
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('# fixture\n')
+    assert scope.main(['--project','notification-push-fixture'])==0
+    assert json.loads(capsys.readouterr().out)['PROJECT_SCOPE']=='PASS'
+    for name in ('03_src/agri_research_agent/pipelines/lutou_weather.py',
+                 '03_src/agri_research_agent/pipelines/public_data_daily.py',
+                 '04_scripts/common.py','07_docs/projects/canola/contract.md',
+                 '04_scripts/weather_producer/foo.py'):
+        path=feature/name
+        existed=path.exists()
+        original=path.read_bytes() if existed else None
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('# forbidden change\n')
+        assert scope.main(['--project','notification-push-fixture'])==1
+        assert json.loads(capsys.readouterr().out)['PROJECT_SCOPE']=='FAIL'
+        if existed: path.write_bytes(original)
+        else: path.unlink()
+    assert registry.git(main,'status','--porcelain')==''
+    assert (feature/registry.REGISTRY_PATH).read_bytes()==(main/registry.REGISTRY_PATH).read_bytes()
+
+
+@pytest.mark.parametrize('value',['/tmp/x','C:/tmp/x','../x','04_scripts/../x','.',
+    '04_scripts','07_docs/projects','03_src/agri_research_agent','**','04_scripts/**',
+    '04_scripts/./x','04_scripts//x','missing/leaf','04_scripts/missing/leaf',
+    '04_scripts/NUL','04_scripts/x.','04_scripts/x ','04_scripts/a.py'])
+def test_reserved_invalid_namespace(repository,value):
+    _,root=repository
+    data=reservation_registry(root)
+    data['projects'][0]['reserved_paths']=[value]
+    with pytest.raises(ValueError): registry.validate_registry(data,root)
+
+
+@pytest.mark.parametrize('existing, reserved',[
+    ('04_scripts','04_scripts/notifications'),
+    ('04_scripts/notifications','04_scripts/notifications'),
+    ('04_scripts/notifications/child','04_scripts/notifications'),
+    ('04_scripts/Notifications','04_scripts/notifications')])
+def test_reserved_conflicts_existing_owner(repository,existing,reserved):
+    _,root=repository
+    data=reservation_registry(root)
+    (root/existing).mkdir(parents=True,exist_ok=True)
+    other=copy.deepcopy(data['projects'][0])
+    other.update(project_id='other-owner',owned_paths=[existing],reserved_paths=[],
+                 future_required_tests=[],required_tests=['tests/test_feature.py'])
+    data['projects'].append(other)
+    with pytest.raises(ValueError,match='collision'): registry.validate_registry(data,root)
+
+
+def test_reserved_docs_siblings_and_case_collision(repository):
+    _,root=repository
+    data=reservation_registry(root)
+    other=copy.deepcopy(data['projects'][0])
+    other.update(project_id='canola-fixture',owned_paths=[],reserved_paths=['07_docs/projects/canola'],
+                 required_tests=['tests/test_feature.py'],future_required_tests=[])
+    data['projects'].append(other)
+    registry.validate_registry(data,root)
+    for value in ['07_docs/projects/notification','07_docs/projects/NOTIFICATION','07_docs/projects']:
+        other['reserved_paths']=[value]
+        with pytest.raises(ValueError): registry.validate_registry(data,root)
+
+
+def test_reserved_readonly_protected_and_normal_owned_missing(repository):
+    _,root=repository
+    data=reservation_registry(root)
+    for value in ['shared/new','03_src/agri_research_agent/market_data']:
+        data['projects'][0]['reserved_paths']=[value, '08_tests/alerts']
+        with pytest.raises(ValueError,match='read-only|protected'): registry.validate_registry(data,root)
+    data=reservation_registry(root)
+    data['projects'][0]['owned_paths']=['04_scripts/notifications']
+    with pytest.raises(ValueError,match='missing'): registry.validate_registry(data,root)
+
+
+def test_reserved_link_rejected(repository,tmp_path):
+    import os
+    _,root=repository
+    data=reservation_registry(root)
+    outside=tmp_path/'outside'
+    outside.mkdir()
+    link=root/'04_scripts/notifications'
+    if os.name=='nt':
+        subprocess.run(['cmd','/c','mklink','/J',str(link),str(outside)],check=True,capture_output=True)
+    else: link.symlink_to(outside,target_is_directory=True)
+    try:
+        with pytest.raises(ValueError,match='link'): registry.validate_registry(data,root)
+    finally:
+        if os.name=='nt': link.rmdir()
+        else: link.unlink()
+
+
+def test_real_records_compatibility_and_docs_partition():
+    baseline=json.loads(registry.git(ROOT,'show',f'HEAD:{registry.REGISTRY_PATH}'))
+    current=registry.load_registry(ROOT)
+    for old,new in zip(baseline['projects'],current['projects'],strict=True):
+        if old['project_id']!='dev-governance': assert old==new
+        else:
+            assert {k:v for k,v in old.items() if k!='owned_paths'}=={k:v for k,v in new.items() if k!='owned_paths'}
+            assert '07_docs' not in new['owned_paths']
+            expected=list((ROOT/'07_docs').glob('0[0-6]_*.md'))+list((ROOT/'07_docs/templates').glob('*.md'))
+            expected.append(ROOT/'07_docs/projects/生产只读检出实例登记.md')
+            assert all(registry.owns(new,p.relative_to(ROOT).as_posix()) for p in expected)
+            assert not registry.owns(new,'07_docs/projects/notification/contract.md')
+        for name in subprocess.check_output(['git','-C',str(ROOT),'ls-files','-z']).decode('utf-8').split('\0'):
+            if not name: continue
+            before=registry.owns(old,name)
+            after=registry.owns(new,name)
+            assert not after or before
+            if old['project_id']!='dev-governance': assert before==after
+
+
+def test_normal_ownership_collision_is_rejected(repository):
+    _,root=repository
+    data=minimal_registry()
+    other=copy.deepcopy(data['projects'][0]);other['project_id']='second'
+    data['projects'].append(other)
+    with pytest.raises(ValueError,match='collision'): registry.validate_registry(data,root)
+
+
+def test_reserved_only_ready_and_required_tests_still_mandatory(repository):
+    _,root=repository
+    data=reservation_registry(root)
+    p=data['projects'][0]
+    p['owned_paths']=[]
+    registry.validate_registry(data,root)
+    assert p['status']=='ready'
+    assert not (root/'08_tests/alerts').exists()
+    p['future_required_tests']=[]
+    with pytest.raises(ValueError,match='tests'): registry.validate_registry(data,root)
+
+
+def test_reservation_cannot_claim_governance_docs(repository):
+    _,root=repository
+    data=reservation_registry(root)
+    (root/'07_docs/templates').mkdir()
+    owner=copy.deepcopy(data['projects'][0])
+    owner.update(project_id='governance-fixture',change_class='shared',owned_paths=['07_docs/templates'],
+                 reserved_paths=[],future_required_tests=[],required_tests=['tests/test_feature.py'])
+    data['projects'].append(owner)
+    data['projects'][0]['reserved_paths'].append('07_docs/templates')
+    with pytest.raises(ValueError,match='collision|protected'): registry.validate_registry(data,root)
+
+
+def test_reserved_ancestor_of_exact_future_file_conflicts(repository):
+    _,root=repository
+    data=reservation_registry(root)
+    other=copy.deepcopy(data['projects'][0])
+    other.update(project_id='exact-owner',owned_paths=[],reserved_paths=[],
+                 future_owned_paths=['04_scripts/notifications/preview.py'],
+                 future_required_tests=[],required_tests=['tests/test_feature.py'])
+    data['projects'].append(other)
+    with pytest.raises(ValueError,match='collision'): registry.validate_registry(data,root)
+
+
+def test_existing_project_scope_classification_unchanged():
+    before=json.loads(registry.git(ROOT,'show',f'HEAD:{registry.REGISTRY_PATH}'))
+    after=registry.load_registry(ROOT)
+    for old,new in zip(before['projects'],after['projects'],strict=True):
+        probes=old['owned_paths']+old.get('future_owned_paths',[])
+        probes=probes+['04_scripts/not_owned.py','03_src/agri_research_agent/pipelines/public_data_daily.py']
+        for path in probes:
+            if old['project_id']=='dev-governance' and path=='07_docs': continue
+            def synthetic_git(root,*args):
+                if args==('diff','--name-only','--no-renames','base...HEAD'): return path+'\n'
+                if args[:1]==('rev-parse',): return 'fixture-head'
+                return ''
+            def outcome(project):
+                try:
+                    return scope.run_audit(ROOT,'base',project['owned_paths'],
+                        exact_allowed=project.get('future_owned_paths',[]),
+                        change_class=project['change_class'],git=synthetic_git)['PROJECT_SCOPE']
+                except ValueError as exc:
+                    return ('REJECTED', str(exc))
+            assert outcome(old)==outcome(new),(old['project_id'],path)

@@ -1,5 +1,5 @@
 {
-  "schema_version": "project-registry/2",
+  "schema_version": "project-registry/3",
   "protected_paths": [
     "AGENTS.md",
     "02_configs/project_registry.json",
@@ -627,14 +627,22 @@
         "02_configs/project_registry.json",
         "04_scripts/quality",
         "04_scripts/automation/说明.md",
-        "07_docs",
         "08_tests/test_quality_controls.py",
         "08_tests/test_documentation_contract.py",
         "08_tests/test_project_registry.py",
         "11_独立应用/USDA平衡表/AGENTS.md",
         "11_独立应用/USDA平衡表/docs",
         "09_deploy/README_TENCENT_LIGHTHOUSE.md",
-        "11_独立应用/OilWorld平衡表/deploy"
+        "11_独立应用/OilWorld平衡表/deploy",
+        "07_docs/00_文档索引与适用范围.md",
+        "07_docs/01_系统架构与项目边界.md",
+        "07_docs/02_数据与输出规范.md",
+        "07_docs/03_标准开发与生产发布规范.md",
+        "07_docs/04_开发与发布检查清单.md",
+        "07_docs/05_执行环境与跨环境传输规范.md",
+        "07_docs/06_日常运行与数据更新手册.md",
+        "07_docs/templates",
+        "07_docs/projects/生产只读检出实例登记.md"
       ],
       "shared_dependencies": [],
       "forbidden_paths": [
