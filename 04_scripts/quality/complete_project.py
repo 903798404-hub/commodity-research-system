@@ -12,10 +12,11 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 try:
-    from . import project_registry as registry, audit_changed_scope as scope
+    from . import project_registry as registry, audit_changed_scope as scope, target_runtime_gate
 except ImportError:
     import project_registry as registry
     import audit_changed_scope as scope
+    import target_runtime_gate
 
 
 def complete(root: Path, project_id: str) -> dict:
@@ -56,10 +57,12 @@ def complete(root: Path, project_id: str) -> dict:
             if not cases or any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
                 raise ValueError(f'Required test must run and PASS without skip/xfail: {name}')
             results.append({'path': name, 'passed': len(cases), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+    runtime_evidence = target_runtime_gate.validate_target(root, project)
     if before != identity():
         raise ValueError('Candidate changed during completion')
     return {'PROJECT_COMPLETION': 'PASS', 'project_id': project_id, 'head': before[0],
-            'candidate_content_sha256': before[1], 'executed_tests': results}
+            'candidate_content_sha256': before[1], 'executed_tests': results,
+            'target_runtime_evidence': runtime_evidence}
 
 
 def main(argv=None):
@@ -72,6 +75,9 @@ def main(argv=None):
             raise ValueError('Project Scope must PASS before completion')
         print(json.dumps(complete(scope.PROJECT_ROOT, args.project), ensure_ascii=False, indent=2))
         return 0
+    except target_runtime_gate.RuntimeValidationBlocked as exc:
+        print(json.dumps({'PROJECT_COMPLETION': 'BLOCKED', 'TARGET_RUNTIME_CONTAINER_VALIDATION': 'BLOCKED', 'reason': str(exc)}))
+        return 3
     except (ValueError, OSError, subprocess.SubprocessError, ET.ParseError) as exc:
         print(json.dumps({'PROJECT_COMPLETION': 'FAIL', 'reason': str(exc)}))
         return 1

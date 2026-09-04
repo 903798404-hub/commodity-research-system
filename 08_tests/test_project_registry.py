@@ -62,6 +62,356 @@ def minimal_registry():
         "required_tests":["tests/test_feature.py"], "capabilities":["demo"], "boundary_notes":"fixture only"}]}
 
 
+def runtime_v4_fixture(root, *, target="production_container"):
+    """Versioned fixture with only repository-contained build inputs."""
+    from quality import target_runtime_gate as gate
+    data = minimal_registry()
+    data['schema_version'] = 'project-registry/4'
+    project = data['projects'][0]
+    project['runtime_target'] = target
+    if target == 'production_container':
+        project['runtime_contract'] = 'feature/runtime.json'
+        contract = {'schema_version': 'runtime-manifest/1', 'project_id': 'demo',
+                    'runtime_target': target, 'identity_kind': 'oci_container',
+                    'module_id': 'demo', 'service_id': 'demo', 'entrypoint': ['python', 'feature/code.py'],
+                    'working_directory': '/app',
+                    'runtime_roots': [{'role': 'state', 'container_path': '/runtime/state', 'access': 'rw'}],
+                    'required_mounts': [{'role': 'state', 'container_path': '/runtime/state', 'read_only': False}],
+                    'required_environment': [], 'secret_references': [], 'required_executables': ['python'],
+                    'required_python_modules': [], 'validation_probes': sorted(gate.REQUIRED_PROBES),
+                    'production_policy': {'deployment_role': 'production', 'write_grant_required': True},
+                    'preview_policy': {'production_write': False, 'production_rw_mounts': False},
+                    'build': {'dockerfile': 'Dockerfile', 'dockerignore': '.dockerignore',
+                              'dependency_contracts': ['requirements.txt'],
+                              'compose_sources': ['compose.yml']}}
+        for name, content in {'Dockerfile': 'FROM scratch\n', '.dockerignore': '.git\n',
+                              'requirements.txt': '# fixture\n', 'compose.yml': 'services: {}\n',
+                              gate.ENGINE: '# engine transport fixture\n',
+                              'feature/runtime.json': json.dumps(contract)}.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding='utf-8')
+    return data
+
+
+def approved_runtime_fixture(root):
+    data = runtime_v4_fixture(root)
+    (root/'tests/test_feature.py').write_text('def test_required(): assert True\n', encoding='utf-8')
+    write_registry(root, data)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'runtime fixture')
+    registry.git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    return data['projects'][0]
+
+
+def runtime_pass_evidence(binding):
+    from quality import target_runtime_gate as gate
+    return {'schema_version': gate.EVIDENCE_SCHEMA, 'binding': copy.deepcopy(binding),
+            'TARGET_RUNTIME_STATIC_VALIDATION': 'PASS', 'TARGET_RUNTIME_CONTAINER_VALIDATION': 'PASS',
+            'image_id': 'sha256:' + 'a'*64, 'rendered_compose_sha256': 'b'*64,
+            'builder': {'builder_id': 'test-transport-fixture', 'os': 'linux', 'execution': 'isolated'},
+            'observed_identity': {'image_id': 'sha256:' + 'a'*64, 'oci_revision': binding['commit'],
+                                  'git_tree': binding['tree'], 'source_sha256': copy.deepcopy(binding['source_sha256']),
+                                  'rendered_compose_sha256': 'b'*64, 'authorization_role': 'candidate_validation',
+                                  'git_metadata_present': False, 'production_volumes_mounted': False},
+            'probes': {name: 'PASS' for name in gate.REQUIRED_PROBES}}
+
+
+@pytest.mark.parametrize('target', ['none', 'library_only', 'windows_git_worktree', 'production_container'])
+def test_v4_explicit_runtime_intents(repository, target):
+    _, root = repository
+    registry.validate_registry(runtime_v4_fixture(root, target=target), root)
+
+
+@pytest.mark.parametrize('target', [None, '', 'docker', 'unknown_production', 4])
+def test_v4_missing_or_unknown_runtime_intent_rejected(repository, target):
+    _, root = repository
+    data = runtime_v4_fixture(root)
+    if target is None:
+        del data['projects'][0]['runtime_target']
+    else:
+        data['projects'][0]['runtime_target'] = target
+    with pytest.raises(ValueError, match='runtime_target'):
+        registry.validate_registry(data, root)
+
+
+@pytest.mark.parametrize('path', [None, 'missing.json', '../outside.json', '/tmp/contract.json',
+                                'feature/*.json', 'feature', 'C:/contract.json', 'feature\\runtime.json'])
+def test_v4_invalid_or_missing_runtime_contract_rejected(repository, path):
+    _, root = repository
+    data = runtime_v4_fixture(root)
+    if path is None:
+        del data['projects'][0]['runtime_contract']
+    else:
+        data['projects'][0]['runtime_contract'] = path
+    with pytest.raises(ValueError):
+        registry.validate_registry(data, root)
+
+
+@pytest.mark.parametrize('field,value', [('schema_version', 'runtime-manifest/999'),
+                                      ('project_id', 'other'), ('identity_kind', 'git_worktree'),
+                                      ('runtime_target', 'none'), ('build', {})])
+def test_v4_runtime_contract_identity_rejected(repository, field, value):
+    _, root = repository
+    data = runtime_v4_fixture(root)
+    path = root/'feature/runtime.json'
+    contract = json.loads(path.read_text())
+    contract[field] = value
+    path.write_text(json.dumps(contract), encoding='utf-8')
+    with pytest.raises(ValueError):
+        registry.validate_registry(data, root)
+
+
+@pytest.mark.parametrize('version', ['project-registry/1', 'project-registry/2', 'project-registry/3'])
+def test_legacy_records_need_no_runtime_declaration(repository, version):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    data = minimal_registry()
+    data['schema_version'] = version
+    registry.validate_registry(data, root)
+    assert gate.validate_target(root, data['projects'][0]) == {'TARGET_RUNTIME_VALIDATION': 'NOT_REQUIRED'}
+    data['projects'][0]['runtime_target'] = 'production_container'
+    with pytest.raises(ValueError, match='fields'):
+        registry.validate_registry(data, root)
+
+
+@pytest.mark.parametrize('target', ['none', 'library_only', 'windows_git_worktree'])
+def test_noncontainer_completion_does_not_invoke_engine(repository, monkeypatch, target):
+    from quality import complete_project, target_runtime_gate as gate
+    _, root = repository
+    data = runtime_v4_fixture(root, target=target)
+    (root/'tests/test_feature.py').write_text('def test_required(): assert True\n')
+    write_registry(root, data)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'noncontainer')
+    registry.git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    def forbidden(*args):
+        raise AssertionError('Noncontainer projects must not require Docker')
+    monkeypatch.setattr(gate, 'execute_engine', forbidden)
+    assert complete_project.complete(root, 'demo')['PROJECT_COMPLETION'] == 'PASS'
+
+
+def test_container_completion_executes_validator_and_binds_evidence(repository, monkeypatch):
+    from quality import complete_project, target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_fixture(root)
+    calls = []
+    def engine(candidate, selected, output):
+        calls.append((candidate, selected['project_id']))
+        output.write_text(json.dumps(runtime_pass_evidence(gate.candidate_binding(candidate, selected))), encoding='utf-8')
+        return 0
+    monkeypatch.setattr(gate, 'execute_engine', engine)
+    result = complete_project.complete(root, 'demo')
+    assert calls == [(root, 'demo')]
+    assert result['target_runtime_evidence']['binding'] == gate.candidate_binding(root, project)
+
+
+@pytest.mark.parametrize('mutation', ['static_missing', 'container_missing', 'container_failed',
+                                    'commit', 'tree', 'manifest', 'validator', 'image', 'compose', 'exit'])
+def test_container_completion_rejects_invalid_evidence(repository, monkeypatch, mutation):
+    from quality import complete_project, target_runtime_gate as gate
+    _, root = repository
+    approved_runtime_fixture(root)
+    def engine(candidate, selected, output):
+        evidence = runtime_pass_evidence(gate.candidate_binding(candidate, selected))
+        if mutation == 'static_missing': del evidence['TARGET_RUNTIME_STATIC_VALIDATION']
+        elif mutation == 'container_missing': del evidence['TARGET_RUNTIME_CONTAINER_VALIDATION']
+        elif mutation == 'container_failed': evidence['TARGET_RUNTIME_CONTAINER_VALIDATION'] = 'FAIL'
+        elif mutation in ('commit', 'tree'): evidence['binding'][mutation] = '0'*40
+        elif mutation == 'manifest': evidence['binding']['source_sha256'][selected['runtime_contract']] = '0'*64
+        elif mutation == 'validator': evidence['binding']['validator_version'] = 'old'
+        elif mutation == 'image': evidence['image_id'] = 'latest'
+        elif mutation == 'compose': del evidence['rendered_compose_sha256']
+        output.write_text(json.dumps(evidence), encoding='utf-8')
+        return 1 if mutation == 'exit' else 0
+    monkeypatch.setattr(gate, 'execute_engine', engine)
+    with pytest.raises(ValueError):
+        complete_project.complete(root, 'demo')
+
+
+@pytest.mark.parametrize('name', ['feature/runtime.json', 'Dockerfile', '.dockerignore',
+                                'requirements.txt', 'compose.yml'])
+def test_committed_input_change_invalidates_runtime_evidence(repository, name):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_fixture(root)
+    old = runtime_pass_evidence(gate.candidate_binding(root, project))
+    with (root/name).open('a', encoding='utf-8') as stream: stream.write('\n')
+    with pytest.raises(ValueError, match='clean'):
+        gate.candidate_binding(root, project)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'changed runtime input')
+    with pytest.raises(ValueError, match='binding'):
+        gate.validate_evidence(old, gate.candidate_binding(root, project), 0)
+
+
+def test_container_missing_engine_is_blocked(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = runtime_v4_fixture(root)['projects'][0]
+    (root/gate.ENGINE).unlink()
+    with pytest.raises(gate.RuntimeValidationBlocked, match='engine unavailable'):
+        gate.validate_target(root, project)
+
+
+def test_container_builder_unavailable_is_blocked_not_pass(repository, monkeypatch):
+    from quality import complete_project, target_runtime_gate as gate
+    _, root = repository
+    approved_runtime_fixture(root)
+    def engine(candidate, project, output):
+        evidence = runtime_pass_evidence(gate.candidate_binding(candidate, project))
+        evidence.update(TARGET_RUNTIME_CONTAINER_VALIDATION='BLOCKED', blocked_reason='LINUX_BUILDER_UNAVAILABLE')
+        output.write_text(json.dumps(evidence), encoding='utf-8')
+        return 3
+    monkeypatch.setattr(gate, 'execute_engine', engine)
+    with pytest.raises(gate.RuntimeValidationBlocked, match='builder unavailable'):
+        complete_project.complete(root, 'demo')
+
+
+def test_container_no_output_or_mutation_cannot_complete(repository, monkeypatch):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_fixture(root)
+    monkeypatch.setattr(gate, 'execute_engine', lambda *args: 0)
+    with pytest.raises(ValueError, match='no machine evidence'):
+        gate.validate_target(root, project)
+    def engine(candidate, selected, output):
+        output.write_text(json.dumps(runtime_pass_evidence(gate.candidate_binding(candidate, selected))), encoding='utf-8')
+        (candidate/'Dockerfile').write_text('changed\n')
+        return 0
+    monkeypatch.setattr(gate, 'execute_engine', engine)
+    with pytest.raises(ValueError, match='clean|changed'):
+        gate.validate_target(root, project)
+
+
+@pytest.mark.parametrize('mutation', ['windows', 'builder_missing', 'wrong_observed_image',
+                                    'wrong_observed_commit', 'wrong_observed_compose', 'git_present',
+                                    'production_mount', 'production_role', 'missing_probe', 'failed_probe'])
+def test_runtime_observation_and_probe_contract_rejects_false_pass(mutation):
+    from quality import target_runtime_gate as gate
+    binding = {'commit': 'c'*40, 'tree': 'd'*40, 'source_sha256': {'manifest.json': 'e'*64}}
+    evidence = runtime_pass_evidence(binding)
+    if mutation == 'windows': evidence['builder']['os'] = 'windows'
+    elif mutation == 'builder_missing': del evidence['builder']
+    elif mutation == 'wrong_observed_image': evidence['observed_identity']['image_id'] = 'sha256:' + 'f'*64
+    elif mutation == 'wrong_observed_commit': evidence['observed_identity']['oci_revision'] = 'f'*40
+    elif mutation == 'wrong_observed_compose': evidence['observed_identity']['rendered_compose_sha256'] = 'f'*64
+    elif mutation == 'git_present': evidence['observed_identity']['git_metadata_present'] = True
+    elif mutation == 'production_mount': evidence['observed_identity']['production_volumes_mounted'] = True
+    elif mutation == 'production_role': evidence['observed_identity']['authorization_role'] = 'production'
+    elif mutation == 'missing_probe': del evidence['probes']['preview_write_rejected']
+    else: evidence['probes']['wrong_image_rejected'] = 'FAIL'
+    with pytest.raises(ValueError): gate.validate_evidence(evidence, binding, 0)
+
+
+@pytest.mark.parametrize('static,code,reason', [('PASS', 0, 'LINUX_BUILDER_UNAVAILABLE'),
+                                            ('FAIL', 3, 'LINUX_BUILDER_UNAVAILABLE'),
+                                            ('PASS', 3, 'anything_else')])
+def test_arbitrary_blocked_claim_is_failure(static, code, reason):
+    from quality import target_runtime_gate as gate
+    binding = {'commit': 'c'*40, 'tree': 'd'*40, 'source_sha256': {}}
+    evidence = runtime_pass_evidence(binding)
+    evidence.update(TARGET_RUNTIME_STATIC_VALIDATION=static, TARGET_RUNTIME_CONTAINER_VALIDATION='BLOCKED',
+                    blocked_reason=reason)
+    with pytest.raises(ValueError) as caught: gate.validate_evidence(evidence, binding, code)
+    assert not isinstance(caught.value, gate.RuntimeValidationBlocked)
+
+
+def test_completion_unknown_and_frozen_still_fail_closed(repository):
+    from quality import complete_project
+    _, root = repository
+    with pytest.raises(ValueError, match='Unknown'):
+        complete_project.complete(root, 'unknown')
+    data = runtime_v4_fixture(root, target='library_only')
+    data['projects'][0]['status'] = 'frozen'
+    write_registry(root, data)
+    with pytest.raises(ValueError, match='not ready'):
+        complete_project.complete(root, 'demo')
+
+
+def test_runtime_contract_unknown_fields_and_unsafe_policy_rejected(repository):
+    _, root = repository
+    data = runtime_v4_fixture(root)
+    path = root/'feature/runtime.json'
+    original = json.loads(path.read_text())
+    for patch in [{'host_path': '/home/ubuntu/production'}, {'production_policy': {}},
+                  {'preview_policy': {'production_write': True, 'production_rw_mounts': True}},
+                  {'working_directory': '/app/../production'}, {'runtime_roots': []},
+                  {'required_mounts': []}, {'validation_probes': ['static_only']}, {'entrypoint': []}]:
+        path.write_text(json.dumps({**original, **patch}), encoding='utf-8')
+        with pytest.raises(ValueError): registry.validate_registry(data, root)
+
+
+def test_v4_legacy_provenance_preserves_only_exact_current_records(repository):
+    _, root = repository
+    legacy = minimal_registry()
+    old_commit = registry.git(root, 'rev-parse', 'origin/main')
+    mixed = {**copy.deepcopy(legacy), 'schema_version': 'project-registry/4', 'legacy_registry_commit': old_commit}
+    registry.validate_registry(mixed, root)
+    changes = {'owned_paths': ['other'], 'required_tests': [], 'status': 'frozen',
+               'boundary_notes': 'changed', 'capabilities': ['changed'], 'forbidden_paths': [],
+               'project_id': 'new-project'}
+    for key, value in changes.items():
+        candidate = copy.deepcopy(mixed)
+        candidate['projects'][0][key] = value
+        with pytest.raises(ValueError, match='runtime_target'):
+            registry.validate_registry(candidate, root)
+    migrated = copy.deepcopy(mixed)
+    migrated['projects'][0].update(runtime_target='library_only', boundary_notes='explicit migration fixture')
+    registry.validate_registry(migrated, root)
+    write_registry(root, migrated)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'explicit runtime migration')
+    registry.git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    with pytest.raises(ValueError, match='runtime_target'):
+        registry.validate_registry(mixed, root)
+
+
+def test_v4_legacy_reference_rejects_untrusted_or_nonlegacy_objects(repository):
+    _, root = repository
+    mixed = {**minimal_registry(), 'schema_version': 'project-registry/4'}
+    for value in ['HEAD', 'HEAD^{commit}', 'a'*12, 'a'*40,
+                  registry.git(root, 'rev-parse', 'HEAD^{tree}')]:
+        mixed['legacy_registry_commit'] = value
+        with pytest.raises(ValueError): registry.validate_registry(mixed, root)
+    legacy_commit = registry.git(root, 'rev-parse', 'HEAD')
+    # An otherwise valid v4 source cannot recursively supply legacy authority.
+    data = runtime_v4_fixture(root, target='library_only')
+    write_registry(root, data)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'v4 source')
+    newer = registry.git(root, 'rev-parse', 'HEAD')
+    mixed['legacy_registry_commit'] = newer
+    with pytest.raises(ValueError): registry.validate_registry(mixed, root)  # not yet on main
+    registry.git(root, 'update-ref', 'refs/remotes/origin/main', newer)
+    with pytest.raises(ValueError, match='Registry/1-3'): registry.validate_registry(mixed, root)
+    data = minimal_registry()
+    data['legacy_registry_commit'] = legacy_commit
+    with pytest.raises(ValueError, match='Unexpected'): registry.validate_registry(data, root)
+
+
+def test_runtime_build_input_case_aliases_and_duplicate_roles_rejected(repository):
+    _, root = repository
+    data = runtime_v4_fixture(root)
+    path = root/'feature/runtime.json'
+    original = json.loads(path.read_text())
+    for duplicates in [['Dockerfile'], ['dockerfile'], ['requirements.txt', 'REQUIREMENTS.txt']]:
+        contract = copy.deepcopy(original)
+        contract['build']['dependency_contracts'] = duplicates
+        path.write_text(json.dumps(contract), encoding='utf-8')
+        with pytest.raises(ValueError, match='duplicate identities'):
+            registry.validate_registry(data, root)
+
+
+def test_goal_a_preserves_real_legacy_registry_and_scope():
+    # Capability rollout is not a migration of real business runtime intent.
+    current = registry.load_registry(ROOT)
+    trusted = json.loads(registry.git(ROOT, 'show', f'origin/main:{registry.REGISTRY_PATH}'))
+    assert current == trusted
+    assert current['schema_version'] == 'project-registry/3'
+    assert all('runtime_target' not in p for p in current['projects'])
+
+
 def test_pm_unfreeze_exact_registration_contract():
     data, project = registry.select_project(ROOT, 'soybean-pm')
     baseline = registration_baseline()

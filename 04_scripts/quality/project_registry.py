@@ -96,9 +96,11 @@ def relative_path(value: str) -> str:
 
 
 def validate_registry(data: dict, root: Path) -> dict:
-    if not isinstance(data, dict) or data.get("schema_version") not in ("project-registry/1", "project-registry/2", "project-registry/3"):
+    if not isinstance(data, dict) or data.get("schema_version") not in ("project-registry/1", "project-registry/2", "project-registry/3", "project-registry/4"):
         raise ValueError("Invalid project registry schema")
-    if set(data) != {"schema_version", "protected_paths", "projects"}:
+    required_root = {"schema_version", "protected_paths", "projects"}
+    optional_root = {"legacy_registry_commit"} if data["schema_version"] == "project-registry/4" else set()
+    if not required_root <= set(data) or set(data) - required_root - optional_root:
         raise ValueError("Unexpected registry fields")
     if not isinstance(data["projects"], list) or not data["projects"]:
         raise ValueError("Registry projects must be nonempty")
@@ -111,19 +113,50 @@ def validate_registry(data: dict, root: Path) -> dict:
             if root.resolve() not in resolved.parents or not resolved.exists():
                 raise ValueError(f"Registry path missing or outside repository: {value}")
     paths(data["protected_paths"])
+    legacy_records = {}
+    if "legacy_registry_commit" in data:
+        commit = data["legacy_registry_commit"]
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError("legacy_registry_commit must be an exact commit SHA")
+        if git(root, "cat-file", "-t", commit) != "commit":
+            raise ValueError("legacy_registry_commit is not a commit")
+        git(root, "merge-base", "--is-ancestor", commit, "origin/main")
+        legacy = json.loads(git(root, "show", f"{commit}:{REGISTRY_PATH}"))
+        if not isinstance(legacy, dict) or legacy.get("schema_version") not in {"project-registry/1", "project-registry/2", "project-registry/3"}:
+            raise ValueError("Legacy source must be Registry/1-3")
+        validate_registry(legacy, root)
+        trusted = json.loads(git(root, "show", f"origin/main:{REGISTRY_PATH}"))
+        current_records = {p['project_id']: p for p in trusted['projects']}
+        # A historical record cannot resurrect, unfreeze or downgrade a current record.
+        legacy_records = {p['project_id']: p for p in legacy['projects']
+                          if p == current_records.get(p['project_id']) and 'runtime_target' not in p}
     seen = set()
     keys = {"project_id", "change_class", "status", "owned_paths", "shared_dependencies",
             "forbidden_paths", "required_tests", "capabilities", "boundary_notes"}
     for item in data["projects"]:
         optional = {"future_owned_paths", "future_required_tests"} if data["schema_version"] != "project-registry/1" else set()
-        if data["schema_version"] == "project-registry/3":
+        if data["schema_version"] in ("project-registry/3", "project-registry/4"):
             optional.add("reserved_paths")
-        if not isinstance(item, dict) or not keys <= set(item) or set(item) - keys - optional:
+        runtime_keys = {"runtime_target", "runtime_contract"} if data["schema_version"] == "project-registry/4" else set()
+        if not isinstance(item, dict) or not keys <= set(item) or set(item) - keys - optional - runtime_keys:
             raise ValueError("Invalid project fields")
         pid = item["project_id"]
         if not isinstance(pid, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", pid) or pid in seen:
             raise ValueError("Invalid or duplicate project_id")
         seen.add(pid)
+        if data["schema_version"] == "project-registry/4":
+            unchanged_legacy = "runtime_target" not in item and item == legacy_records.get(pid)
+            target = item.get("runtime_target")
+            if not unchanged_legacy and (not isinstance(target, str) or target not in {"none", "library_only", "windows_git_worktree", "production_container"}):
+                raise ValueError("Missing or unknown runtime_target")
+            if target == "production_container":
+                try:
+                    from . import target_runtime_gate
+                except ImportError:
+                    import target_runtime_gate
+                target_runtime_gate.read_contract(root, item)
+            elif "runtime_contract" in item:
+                raise ValueError("runtime_contract requires production_container target")
         if item["change_class"] not in ("business", "shared"):
             raise ValueError("Invalid project change_class")
         if item["status"] not in ("ready", "frozen", "needs-boundary-review"):
