@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -192,6 +193,120 @@ def approved_runtime_fixture(root):
     registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'runtime fixture')
     registry.git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
     return data['projects'][0]
+
+
+def runtime_manifest_v2_fixture(root):
+    """A production target using the v2 manifest source-input contract."""
+    from quality import target_runtime_gate as gate
+    data = runtime_v4_fixture(root)
+    project = data['projects'][0]
+    project['runtime_contract'] = 'feature/runtime.json'
+    contract = json.loads((root / project['runtime_contract']).read_text(encoding='utf-8'))
+    contract['schema_version'] = 'runtime-manifest/2'
+    contract['identity_root_role'] = 'marker'
+    contract['runtime_roots'].insert(0, {'role': 'marker', 'container_path': '/runtime', 'access': 'ro'})
+    contract['required_mounts'].insert(0, {'role': 'marker', 'container_path': '/runtime', 'read_only': True})
+    contract['initialization_commands'] = [{'name': 'initialize', 'argv': ['python', 'init.py']}]
+    contract['source_inputs'] = [
+        {'path': 'app.py', 'role': 'entrypoint'},
+        {'path': 'init.py', 'role': 'initialization'},
+        {'path': 'config.json', 'role': 'runtime_configuration'},
+    ]
+    for name, content in {'app.py': 'print("fixture")\n', 'init.py': 'print("init")\n',
+                          'config.json': '{"mode":"fixture"}\n'}.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding='utf-8')
+    manifest_path = root / '03_src/agri_research_agent/shared/runtime_manifest.py'
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / '03_src/agri_research_agent/shared/runtime_manifest.py', manifest_path)
+    schema_path = root / '02_configs/runtime_manifest.schema.json'
+    schema_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / '02_configs/runtime_manifest.schema.json', schema_path)
+    (root / project['runtime_contract']).write_text(json.dumps(contract), encoding='utf-8')
+    return data, project
+
+
+def approved_runtime_manifest_v2_fixture(root):
+    data, project = runtime_manifest_v2_fixture(root)
+    (root / 'tests/test_feature.py').write_text('def test_required(): assert True\n', encoding='utf-8')
+    write_registry(root, data)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'runtime manifest v2 fixture')
+    registry.git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    return project
+
+
+def test_runtime_manifest_v2_bridge_accepts_source_inputs_and_binds_all_sources(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_manifest_v2_fixture(root)
+    contract = gate.read_contract(root, project)
+    assert contract['schema_version'] == 'runtime-manifest/2'
+    binding = gate.candidate_binding(root, project)
+    for path in ['app.py', 'init.py', 'config.json', '03_src/agri_research_agent/shared/runtime_manifest.py',
+                 '02_configs/runtime_manifest.schema.json']:
+        assert path in binding['source_sha256']
+
+
+@pytest.mark.parametrize('mutation', ['missing_source', 'ignored_source', 'logical_role', 'manifest_overlap'])
+def test_runtime_manifest_v2_bridge_rejects_invalid_source_contract(repository, mutation):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_manifest_v2_fixture(root)
+    path = root / project['runtime_contract']
+    contract = json.loads(path.read_text(encoding='utf-8'))
+    if mutation == 'missing_source':
+        (root / 'init.py').unlink()
+        registry.git(root, 'add', '-u')
+        registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'missing declared input')
+    elif mutation == 'ignored_source':
+        registry.git(root, 'rm', '--cached', 'init.py')
+        (root / '.gitignore').write_text('init.py\n', encoding='utf-8')
+        registry.git(root, 'add', '.gitignore')
+        registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'ignored-only declared input')
+        assert (root / 'init.py').is_file()
+    elif mutation == 'logical_role':
+        contract['identity_root_role'] = 'unknown'
+        path.write_text(json.dumps(contract), encoding='utf-8')
+    else:
+        contract['source_inputs'][0]['path'] = project['runtime_contract']
+        path.write_text(json.dumps(contract), encoding='utf-8')
+    if mutation in ('missing_source', 'ignored_source'):
+        assert registry.git(root, 'status', '--porcelain=v1') == ''
+    with pytest.raises((ValueError, OSError)):
+        gate.candidate_binding(root, project)
+
+
+def test_runtime_manifest_v2_source_change_invalidates_old_binding(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_manifest_v2_fixture(root)
+    old = gate.candidate_binding(root, project)
+    (root / 'init.py').write_text('changed\n', encoding='utf-8')
+    registry.git(root, 'add', 'init.py')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'changed manifest source input')
+    with pytest.raises(ValueError, match='binding'):
+        gate.validate_evidence(runtime_pass_evidence(old),
+                               gate.candidate_binding(root, project), 0)
+
+
+@pytest.mark.parametrize('version', ['runtime-manifest/1', 'runtime-manifest/2'])
+def test_runtime_manifest_v2_bridge_duplicate_json_key_never_downgrades(repository, version):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    data, project = runtime_manifest_v2_fixture(root)
+    project['runtime_contract'] = 'feature/runtime.json'
+    path = root / project['runtime_contract']
+    contract = json.loads(path.read_text(encoding='utf-8'))
+    contract['schema_version'] = version
+    if version == 'runtime-manifest/1':
+        for key in ('identity_root_role', 'initialization_commands', 'source_inputs'):
+            del contract[key]
+    other = 'runtime-manifest/2' if version == 'runtime-manifest/1' else 'runtime-manifest/1'
+    path.write_text('{"schema_version":' + json.dumps(other) + ',' + json.dumps(contract)[1:], encoding='utf-8')
+    with pytest.raises(ValueError, match='Invalid runtime contract JSON'):
+        gate.read_contract(root, project)
 
 
 def runtime_pass_evidence(binding):

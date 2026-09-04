@@ -7,6 +7,7 @@ The engine implementation belongs to the independent runtime infrastructure proj
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ except ImportError:
     import project_registry as registry
 
 ENGINE = "04_scripts/runtime/validate_target_runtime.py"
+MANIFEST_PARSER = "03_src/agri_research_agent/shared/runtime_manifest.py"
+MANIFEST_SCHEMA = "02_configs/runtime_manifest.schema.json"
 VALIDATOR_VERSION = "target-runtime-validator/1"
 EVIDENCE_SCHEMA = "target-runtime-evidence/1"
 REQUIRED_PROBES = frozenset({"entrypoint_initialization", "runtime_identity", "dependencies",
@@ -48,15 +51,60 @@ def exact_file(root: Path, value: str) -> Path:
     return path
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate runtime contract JSON key")
+        result[key] = value
+    return result
+
+
+def _read_v2(root: Path, project: dict, path: Path) -> dict:
+    # Resolve from this gate's checkout, never an installed package, PYTHONPATH,
+    # or a caller-provided module object. The candidate binds these files below.
+    source_root = Path(__file__).resolve().parents[2]
+    parser_path = exact_file(source_root, MANIFEST_PARSER)
+    name = "_market_data_runtime_manifest_contract"
+    spec = importlib.util.spec_from_file_location(name, parser_path)
+    if spec is None or spec.loader is None:
+        raise ValueError("Runtime manifest parser unavailable")
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        # Never execute ignored __pycache__ bytecode as validator authority.
+        exec(compile(parser_path.read_bytes(), str(parser_path), "exec"), module.__dict__)
+        contract = module.load_runtime_manifest(path).to_dict()
+    finally:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+    if contract['schema_version'] != 'runtime-manifest/2' or contract['project_id'] != project['project_id']:
+        raise ValueError("Runtime contract schema or project identity mismatch")
+    build = contract['build']
+    names = [project['runtime_contract'], build['dockerfile'], build['dockerignore'],
+             *build['dependency_contracts'], *build['compose_sources'],
+             *(item['path'] for item in contract['source_inputs'])]
+    if len({registry.canonical_path(name) for name in names}) != len(names):
+        raise ValueError("Runtime input paths contain duplicate identities or aliases")
+    for name in names:
+        exact_file(root, name)
+    return contract
+
+
 def read_contract(root: Path, project: dict) -> dict:
     value = project.get("runtime_contract")
     if not isinstance(value, str):
         raise ValueError("production_container requires runtime_contract")
     path = exact_file(root, value)
     try:
-        contract = json.loads(path.read_text(encoding="utf-8"))
+        contract = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
     except (ValueError, UnicodeError) as exc:
         raise ValueError("Invalid runtime contract JSON") from exc
+    if isinstance(contract, dict) and contract.get('schema_version') == 'runtime-manifest/2':
+        return _read_v2(root, project, path)
     if (not isinstance(contract, dict)
             or contract.get("schema_version") != "runtime-manifest/1"
             or contract.get("runtime_target") != "production_container"
@@ -138,6 +186,11 @@ def candidate_binding(root: Path, project: dict) -> dict:
     build = contract["build"]
     paths = [project["runtime_contract"], build["dockerfile"], build["dockerignore"],
              *build["dependency_contracts"], *build["compose_sources"], ENGINE]
+    if contract['schema_version'] == 'runtime-manifest/2':
+        paths.extend(item['path'] for item in contract['source_inputs'])
+        paths.extend([MANIFEST_PARSER, MANIFEST_SCHEMA])
+        if len({registry.canonical_path(name) for name in paths}) != len(paths):
+            raise ValueError("Runtime source and validator inputs overlap")
     hashes = {}
     for name in paths:
         path = exact_file(root, name)
