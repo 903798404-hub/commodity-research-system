@@ -811,7 +811,10 @@
         "08_tests/shared/test_production_identity.py",
         "08_tests/test_host_runtime_authorization.py",
         "03_src/agri_research_agent/shared/production_grant.py",
-        "08_tests/shared/test_production_grant.py"
+        "08_tests/shared/test_production_grant.py",
+        "04_scripts/runtime/validate_target_runtime.py",
+        "08_tests/test_target_runtime_validator.py",
+        "07_docs/projects/production-runtime-v2/目标RuntimeDeployabilityGate.md"
       ],
       "shared_dependencies": [
         "03_src/agri_research_agent/shared/file_identity.py",
@@ -825,13 +828,20 @@
       "forbidden_paths": [
         "02_configs/project_registry.json",
         "03_src/agri_research_agent/automation",
+        "04_scripts/automation",
+        "04_scripts/environment",
+        "04_scripts/import_profit",
+        "04_scripts/notifications",
+        "04_scripts/quality",
+        "04_scripts/soybean_crop_progress",
+        "04_scripts/soybean_exports",
+        "04_scripts/weather",
         "03_src/agri_research_agent/data_sources",
         "03_src/agri_research_agent/market_data",
         "03_src/agri_research_agent/pipelines",
         "03_src/agri_research_agent/import_profit",
         "03_src/agri_research_agent/summary_engine",
         "03_src/agri_research_agent/alerts",
-        "04_scripts",
         "05_apps",
         "09_deploy/spread_release",
         "Dockerfile",
@@ -851,15 +861,18 @@
       "future_required_tests": [
         "08_tests/shared/test_production_identity.py",
         "08_tests/test_host_runtime_authorization.py",
-        "08_tests/shared/test_production_grant.py"
+        "08_tests/shared/test_production_grant.py",
+        "08_tests/test_target_runtime_validator.py"
       ],
       "capabilities": [
         "versioned explicit git_worktree / oci_container execution identity and Approved Commit/Tree binding",
         "trusted host authorization verifier, signed evidence and protected read-only injection contract",
         "distinct artifact origin, deployment role and production write grant; candidate-validation isolation",
-        "additive RuntimeContext integration preserving runtime marker, readonly and path boundaries"
+        "additive RuntimeContext integration preserving runtime marker, readonly and path boundaries",
+        "candidate-bound static and actual target runtime validation with machine evidence",
+        "isolated Linux exact-image Compose and negative deployability probes"
       ],
-      "boundary_notes": "PROD-RUNTIME-V2 Goal B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container deployability必须由后续Goal D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。"
+      "boundary_notes": "PROD-RUNTIME-V2 Goal B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container deployability必须由后续Goal D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。 Goal D独立Deployability Engine仅分配三个精确未来文件，并为该精确测试增加Completion要求；移除04_scripts目录级forbidden仅为容纳已列明的单个engine文件，不授予任何其他脚本ownership。Engine必须从clean committed candidate重新建立source/image/Compose绑定，在真实隔离Linux Docker执行全部13项probe，验证.git缺失、不可变Image ID、OCI revision/tree、实际Compose/mount/env/dependency与candidate-only scope；禁止production volume/secret、业务Docker socket、caller evidence、mutable tag或dev worktree输入。BLOCKED只允许真实LINUX_BUILDER_UNAVAILABLE，任何检查缺失、错误镜像、错误Commit/Tree/service/manifest、Preview写入或release不一致均FAIL。该登记不创建业务runtime contract、不修改Docker/Compose/业务模块、不签发production grant、不部署或提升Approved identity。"
     },
     {
       "project_id": "shared-runtime-manifest",

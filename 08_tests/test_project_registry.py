@@ -103,6 +103,27 @@ GRANT_CONTRACT_REGISTRATION['shared_dependencies'] += [
 GRANT_CONTRACT_REGISTRATION['future_required_tests'] += ['08_tests/shared/test_production_grant.py']
 GRANT_CONTRACT_REGISTRATION['boundary_notes'] += ' 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。'
 
+# Goal D deployability-engine registration is an exact extension of the
+# reviewed B grant contract. Removing the broad scripts prohibition is only
+# necessary because ownership remains an exact future file, never a directory.
+DEPLOYABILITY_ENGINE_REGISTRATION = copy.deepcopy(GRANT_CONTRACT_REGISTRATION)
+DEPLOYABILITY_ENGINE_REGISTRATION['future_owned_paths'] += [
+    '04_scripts/runtime/validate_target_runtime.py',
+    '08_tests/test_target_runtime_validator.py',
+    '07_docs/projects/production-runtime-v2/目标RuntimeDeployabilityGate.md']
+DEPLOYABILITY_ENGINE_REGISTRATION['future_required_tests'] += [
+    '08_tests/test_target_runtime_validator.py']
+DEPLOYABILITY_ENGINE_REGISTRATION['forbidden_paths'].remove('04_scripts')
+marker = DEPLOYABILITY_ENGINE_REGISTRATION['forbidden_paths'].index('03_src/agri_research_agent/automation') + 1
+DEPLOYABILITY_ENGINE_REGISTRATION['forbidden_paths'][marker:marker] = [
+    '04_scripts/automation', '04_scripts/environment', '04_scripts/import_profit',
+    '04_scripts/notifications', '04_scripts/quality', '04_scripts/soybean_crop_progress',
+    '04_scripts/soybean_exports', '04_scripts/weather']
+DEPLOYABILITY_ENGINE_REGISTRATION['capabilities'] += [
+    'candidate-bound static and actual target runtime validation with machine evidence',
+    'isolated Linux exact-image Compose and negative deployability probes']
+DEPLOYABILITY_ENGINE_REGISTRATION['boundary_notes'] += ' Goal D独立Deployability Engine仅分配三个精确未来文件，并为该精确测试增加Completion要求；移除04_scripts目录级forbidden仅为容纳已列明的单个engine文件，不授予任何其他脚本ownership。Engine必须从clean committed candidate重新建立source/image/Compose绑定，在真实隔离Linux Docker执行全部13项probe，验证.git缺失、不可变Image ID、OCI revision/tree、实际Compose/mount/env/dependency与candidate-only scope；禁止production volume/secret、业务Docker socket、caller evidence、mutable tag或dev worktree输入。BLOCKED只允许真实LINUX_BUILDER_UNAVAILABLE，任何检查缺失、错误镜像、错误Commit/Tree/service/manifest、Preview写入或release不一致均FAIL。该登记不创建业务runtime contract、不修改Docker/Compose/业务模块、不签发production grant、不部署或提升Approved identity。'
+
 # Exact reviewed PM registration delta; no directory or shared ownership grant.
 PM_EXISTING_ADDITIONS = [
     '03_src/agri_research_agent/pipelines/import_profit_daily.py',
@@ -161,6 +182,12 @@ def registration_baseline():
         if baseline_by_id.get('shared-production-infrastructure') == PRODUCTION_INFRA_REGISTRATION:
             expected = copy.deepcopy(baseline)
             expected['projects'] = [GRANT_CONTRACT_REGISTRATION if p['project_id'] == 'shared-production-infrastructure' else p for p in expected['projects']]
+            assert current == expected
+            baseline = expected
+        baseline_by_id = {p['project_id']: p for p in baseline['projects']}
+        if baseline_by_id.get('shared-production-infrastructure') == GRANT_CONTRACT_REGISTRATION:
+            expected = copy.deepcopy(baseline)
+            expected['projects'] = [DEPLOYABILITY_ENGINE_REGISTRATION if p['project_id'] == 'shared-production-infrastructure' else p for p in expected['projects']]
             assert current == expected
             baseline = expected
     return baseline
@@ -639,13 +666,13 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         expected = copy.deepcopy(old)
         if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
         assert by_id[old['project_id']] == expected
-    assert by_id['shared-production-infrastructure'] == GRANT_CONTRACT_REGISTRATION
+    assert by_id['shared-production-infrastructure'] == DEPLOYABILITY_ENGINE_REGISTRATION
     assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == GRANT_CONTRACT_REGISTRATION
+    assert project == DEPLOYABILITY_ENGINE_REGISTRATION
     assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
     assert not project.get('reserved_paths')
     for path in project['owned_paths'] + project['future_owned_paths']:
@@ -664,20 +691,38 @@ def test_production_infrastructure_registration_has_only_exact_new_ownership():
 
 def test_production_grant_contract_registration_is_exact_and_readonly_dependencies():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == GRANT_CONTRACT_REGISTRATION
+    assert project == DEPLOYABILITY_ENGINE_REGISTRATION
     assert project['runtime_target'] == 'library_only'
-    assert project['future_owned_paths'][-2:] == [
+    assert project['future_owned_paths'][9:11] == [
         '03_src/agri_research_agent/shared/production_grant.py',
         '08_tests/shared/test_production_grant.py']
-    assert project['future_required_tests'][-1] == '08_tests/shared/test_production_grant.py'
+    assert '08_tests/shared/test_production_grant.py' in project['future_required_tests']
     assert project['shared_dependencies'][-2:] == [
         '03_src/agri_research_agent/shared/runtime_manifest.py',
         '02_configs/runtime_manifest.schema.json']
-    for path in project['future_owned_paths'][-2:]:
+    for path in ['03_src/agri_research_agent/shared/production_grant.py',
+                 '08_tests/shared/test_production_grant.py']:
         assert registry.owns(project, path)
         assert not registry.owns(project, path + '/sibling.py')
         assert all(not registry.owns(other, path) for other in current['projects'] if other is not project)
     for path in project['shared_dependencies'][-2:]:
+        assert not registry.owns(project, path)
+
+
+def test_deployability_engine_registration_is_exact_and_does_not_grant_scripts_directory():
+    current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
+    assert project == DEPLOYABILITY_ENGINE_REGISTRATION
+    assert project['future_owned_paths'][-3:] == [
+        '04_scripts/runtime/validate_target_runtime.py',
+        '08_tests/test_target_runtime_validator.py',
+        '07_docs/projects/production-runtime-v2/目标RuntimeDeployabilityGate.md']
+    assert project['future_required_tests'][-1] == '08_tests/test_target_runtime_validator.py'
+    for path in project['future_owned_paths'][-3:]:
+        assert registry.owns(project, path)
+        assert all(not registry.owns(other, path) for other in current['projects'] if other is not project)
+    for path in ['04_scripts/runtime/other.py', '04_scripts/quality/complete_project.py',
+                 '08_tests/test_target_runtime_validator_other.py',
+                 '07_docs/projects/production-runtime-v2/unregistered.md']:
         assert not registry.owns(project, path)
     for path in ['03_src/agri_research_agent/shared/production_grant_extra.py',
                  '08_tests/shared/test_production_grant_other.py',
