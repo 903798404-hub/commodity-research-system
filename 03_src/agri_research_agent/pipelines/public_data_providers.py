@@ -220,6 +220,7 @@ class TankanRefreshAdapter:
                 result.promoted,
                 source_max,
                 performance={
+                    "async_updates": dict(getattr(result, "async_reports", {})),
                     "domains": {"tankan": dict(getattr(result, "performance", {}))}
                 },
             )
@@ -371,6 +372,7 @@ class LutouRefreshAdapter:
         domains: dict[str, str] = {}
         maxima: dict[str, str] = {}
         performance_domains: dict[str, object] = {}
+        async_reports: dict[str, object] = {}
         promoted = False
         failures: list[ProviderFailure] = []
         try:
@@ -385,6 +387,7 @@ class LutouRefreshAdapter:
                     catalog_path=self.three_oil_catalog_path,
                 )
                 domains["three_oil"] = (ProviderStatus.UPDATED if oil.promoted else ProviderStatus.NO_CHANGE).value
+                async_reports.update(getattr(oil, "async_reports", {}))
                 maxima["three_oil"] = str(oil.candidate_manifest["source_max_date"])
                 performance_domains["three_oil"] = dict(
                     getattr(oil, "performance", {})
@@ -408,6 +411,7 @@ class LutouRefreshAdapter:
                     catalog_path=self.soil_catalog_path,
                 )
                 domains["soil_moisture"] = (ProviderStatus.UPDATED if soil.promoted else ProviderStatus.NO_CHANGE).value
+                async_reports.update(getattr(soil, "async_reports", {}))
                 maxima["soil_moisture"] = str(soil.candidate_manifest["source_max_date"])
                 performance_domains["soil_moisture"] = dict(
                     getattr(soil, "performance", {})
@@ -445,6 +449,7 @@ class LutouRefreshAdapter:
                         weather.candidate_manifest["source_max_dates"]["forecast_valid"]
                     )
                     promoted = promoted or weather.promoted
+                    async_reports.update(getattr(weather, "async_reports", {}))
                 except ProviderFailure as failure:
                     domains["weather"] = failure.status.value
                     failures.append(failure)
@@ -492,6 +497,7 @@ class LutouRefreshAdapter:
                     promoted, maxima, domains, status,
                     failures[0].safe_reason,
                     {
+                        "async_updates": async_reports,
                         "preflight": dict(self._preflight_performance),
                         "domains": performance_domains,
                     },
@@ -502,6 +508,7 @@ class LutouRefreshAdapter:
                 maxima,
                 domains,
                 performance={
+                    "async_updates": async_reports,
                     "preflight": dict(self._preflight_performance),
                     "domains": performance_domains,
                 },
@@ -747,6 +754,7 @@ class DomesticBasisRefreshAdapter:
                 result.promoted,
                 {"domestic_basis": result.query_end_date.isoformat()},
                 {"domestic_basis": (ProviderStatus.UPDATED if result.promoted else ProviderStatus.NO_CHANGE).value},
+                performance={"async_updates": {"domestic_basis": dict(result.update_summary)} if hasattr(result, "update_summary") else {}},
             )
         except DomesticBasisPipelineError as exc:
             raise _pipeline_failure(exc, "Lutou Domestic Basis") from None

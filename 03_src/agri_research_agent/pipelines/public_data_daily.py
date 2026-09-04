@@ -11,6 +11,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from .async_contract_rollout import collect_reports, render_reports, DOMAINS
+
 from agri_research_agent.pipelines.public_data_delivery import (
     PrewarmResult,
     PrewarmStatus,
@@ -294,7 +296,13 @@ def run_daily_update(
         },
         "safe_reason": safe_reason,
     }
-    payload["summary"] = render_final_line(payload)
+    payload["async_updates"] = collect_reports(refresh.providers)
+    payload["async_summary_complete"] = set((*DOMAINS, "domestic_basis")) <= set(payload["async_updates"])
+    payload["dataset_update_summary"] = {
+        name: {"status": report["dataset_status"], **report["summary"]}
+        for name, report in payload["async_updates"].items()
+    }
+    payload["summary"] = render_final_line(payload) + "\n" + "\n".join(render_reports(payload["async_updates"]))
     root = assert_runtime_write(runtime, runtime.runtime_root / "public-data-daily" / "runs")
 
     def build(directory: Path) -> None:

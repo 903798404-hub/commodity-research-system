@@ -8,7 +8,7 @@ import json
 import re
 import shutil
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -181,6 +181,7 @@ class WeatherRunResult:
     canonical_manifest: Mapping[str, object]
     current_manifest: Mapping[str, object]
     promoted: bool
+    async_reports: Mapping[str, object] = field(default_factory=dict)
 
 
 def validate_weather_normal_baselines(
@@ -286,6 +287,9 @@ def run_lutou_weather(
         soil,
         baseline,
     )
+    from .async_contract_rollout import weather_reports
+    # Roll out the existing FULL DAILY incremental mode, not initial seed policy.
+    async_reports = {} if full_load else weather_reports(runtime, safe_run_id, current, candidate_directory, merged_directory, catalog, as_of_date, LutouWeatherError)
     if current is not None and (
         str(current.manifest["content_sha256"])
         == str(merged_manifest["content_sha256"])
@@ -305,6 +309,7 @@ def run_lutou_weather(
             merged_manifest,
             current.manifest,
             False,
+            async_reports=async_reports,
         )
     current_directory, current_manifest = _promote(
         runtime,
@@ -327,6 +332,7 @@ def run_lutou_weather(
         merged_manifest,
         current_manifest,
         True,
+        async_reports=async_reports,
     )
 
 

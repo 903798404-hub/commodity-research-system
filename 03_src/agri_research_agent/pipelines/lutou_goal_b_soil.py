@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -107,6 +107,7 @@ class SoilRunResult:
     current_manifest: Mapping[str, object]
     promoted: bool
     performance: Mapping[str, object]
+    async_reports: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +229,9 @@ def run_goal_b_soil(
     )
     stage_started = perf_counter()
     _validate_canonical(observations, series)
+    from .async_contract_rollout import observation_report
+    # Roll out the existing FULL DAILY incremental mode, not initial seed policy.
+    async_reports = {} if full_load else observation_report(runtime, safe_run_id, "soil_moisture", current, window, observations, series, end_date, LutouGoalBSoilError)
     observe("canonical_qc", stage_started, input_rows=observations.num_rows)
     stage_started = perf_counter()
     canonical_directory, canonical_manifest = _seal_canonical(
@@ -273,6 +277,7 @@ def run_goal_b_soil(
                 "stages": stages,
                 "io": io,
             },
+            async_reports=async_reports,
         )
     stage_started = perf_counter()
     current_directory, current_manifest = _promote(
@@ -306,6 +311,7 @@ def run_goal_b_soil(
             "stages": stages,
             "io": io,
         },
+        async_reports=async_reports,
     )
 
 

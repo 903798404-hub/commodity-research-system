@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
@@ -102,6 +102,7 @@ class RunResult:
     canonical_manifest: dict[str, object]
     promoted: bool
     performance: Mapping[str, object]
+    async_reports: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +216,9 @@ def run_goal_a(
     )
     market = pq.read_table(canonical_directory / "market.parquet")
     fx = pq.read_table(canonical_directory / "fx.parquet")
+    from .async_contract_rollout import tankan_reports
+    # Roll out the existing FULL DAILY incremental mode, not initial seed policy.
+    async_reports = {} if full_load else tankan_reports(runtime, safe_run_id, current, market, fx, candidate_directory, end_date, TankanGoalAError)
     io = {
         "current_read": {
             "rows": 0 if current is None else current.market.num_rows + current.fx.num_rows,
@@ -248,6 +252,7 @@ def run_goal_a(
         stages["promote"] = {"duration_seconds": 0.0, "status": "SKIPPED_NO_CHANGE"}
         observe("total", total_started)
         return RunResult(
+            async_reports=async_reports,
             run_id=safe_run_id,
             mode=mode,
             candidate_directory=candidate_directory,
@@ -286,6 +291,7 @@ def run_goal_a(
     }
     observe("total", total_started)
     return RunResult(
+        async_reports=async_reports,
         run_id=safe_run_id,
         mode=mode,
         candidate_directory=candidate_directory,

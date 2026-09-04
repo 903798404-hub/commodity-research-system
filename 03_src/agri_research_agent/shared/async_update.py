@@ -78,6 +78,8 @@ def validate_update_summary(report: Mapping[str, object], *, required: set[str])
 def evaluate_update(
     *, dataset_id: str, required: set[str], series: Mapping[str, SeriesUpdate],
     next_identities: set[str], as_of_date: date, policy: FreshnessPolicy,
+    date_axis: str = "business_date", update_basis: str = "date_advance",
+    source_is_window: bool = False,
 ) -> dict[str, object]:
     """Coverage is about complete next state, never the incremental window.
 
@@ -87,6 +89,9 @@ def evaluate_update(
     """
     if not required or type(as_of_date) is not date:
         raise ValueError("Async update requires identities and an exact as-of date")
+    if (date_axis not in {"business_date", "forecast_valid"}
+            or update_basis not in {"date_advance", "content"} or type(source_is_window) is not bool):
+        raise ValueError("Unsupported async date/update semantics")
     missing, unexpected = required - next_identities, next_identities - required
     counts = {
         "TOTAL_REQUIRED": len(required),
@@ -103,25 +108,27 @@ def evaluate_update(
         identity_missing = identity in missing or following is None
         if identity_missing:
             errors.append("REQUIRED_IDENTITY_MISSING")
-        if source is None:
+        if source is None and not (source_is_window and previous is not None):
             errors.append("SOURCE_IDENTITY_UNVERIFIED")
         if any(type(n) is not int or n < 0 for n in (evidence.new_row_count, evidence.revision_row_count, evidence.source_window_row_count)):
             errors.append("INVALID_ROW_COUNTS")
         if following is not None and previous is not None and following < previous:
             errors.append("LATEST_DATE_REGRESSED")
-        if source is not None and following is not None and following > source:
+        supported = max(value for value in (source, previous if source_is_window else None) if value is not None) if source is not None or (source_is_window and previous is not None) else None
+        if supported is not None and following is not None and following > supported:
             errors.append("NEXT_DATE_NOT_SUPPORTED_BY_SOURCE")
-        if any(value is not None and value > as_of_date for value in (previous, source, following)):
+        if date_axis == "business_date" and any(value is not None and value > as_of_date for value in (previous, source, following)):
             errors.append("FUTURE_BUSINESS_DATE")
         advanced = following is not None and (previous is None or following > previous)
-        if advanced != (evidence.new_row_count > 0):
+        if (update_basis == "date_advance" and advanced != (evidence.new_row_count > 0)) or (advanced and evidence.new_row_count == 0):
             errors.append("UPDATE_DATE_COUNT_MISMATCH")
         age = None if following is None else (as_of_date - following).days
         coverage_status = "MISSING" if identity_missing else "ERROR" if errors else "PRESENT"
         if errors:
             update_status, reason = "ERROR", ";".join(sorted(set(errors)))
-        elif advanced:
-            update_status, reason = "UPDATED", "VALID_NEW_OBSERVATIONS_APPLIED"
+        elif advanced or (update_basis == "content" and (evidence.new_row_count or evidence.revision_row_count)):
+            update_status = "UPDATED"
+            reason = "VALID_NEW_OBSERVATIONS_APPLIED" if advanced or evidence.new_row_count else "VALID_SOURCE_REVISIONS_APPLIED"
         else:
             update_status = "NO_CHANGE"
             reason = (
@@ -162,7 +169,7 @@ def evaluate_update(
         "FAILED" if blocking_reasons else "WARNING" if counts["freshness"]["STALE"] else
         "UPDATED" if changed else "NO_CHANGE"
     )
-    return {
+    report = {
         "schema_version": "async-data-update/2", "dataset_id": dataset_id,
         "as_of_date": as_of_date.isoformat(), "policy": asdict(policy),
         "freshness_assessment_available": threshold is not None, "summary": counts, "series": details,
@@ -175,3 +182,12 @@ def evaluate_update(
         "dataset_status": dataset_status, "blocking_reasons": blocking_reasons,
         "promotion_allowed": not blocking_reasons,
     }
+    # Keep the already-approved Domestic Basis /2 shape and defaults unchanged.
+    if date_axis != "business_date" or update_basis != "date_advance" or source_is_window:
+        report.update(date_axis=date_axis, update_basis=update_basis, source_is_window=source_is_window)
+    if date_axis == "forecast_valid":
+        for item in details:
+            item["previous_valid_through"] = item["previous_latest_date"]
+            item["next_valid_through"] = item["next_latest_date"]
+            item["horizon_days"] = None if item["age_days"] is None else -item["age_days"]
+    return report

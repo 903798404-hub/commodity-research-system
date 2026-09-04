@@ -275,6 +275,8 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
     root_failure: RootFailure | None = None
     try:
         refreshed = adapter.refresh()
+        from .async_contract_rollout import validate_provider_reports
+        validate_provider_reports(refreshed.performance)
         details = refreshed.performance
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
@@ -399,6 +401,8 @@ def _refresh_preflighted(
     root_failure: RootFailure | None = None
     try:
         refreshed = adapter.refresh()
+        from .async_contract_rollout import validate_provider_reports
+        validate_provider_reports(refreshed.performance)
         details = refreshed.performance
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
