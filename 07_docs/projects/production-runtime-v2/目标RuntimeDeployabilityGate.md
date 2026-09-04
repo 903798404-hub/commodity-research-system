@@ -15,9 +15,12 @@ sources，核对 service、Dockerfile、entrypoint、working directory、环境�
 全部 mount target。每个 v2 source Compose 必须把 host 控制的 grant 目录只读挂载到
 `/run/market-data-grants`，并把 `MARKET_DATA_EXECUTION_GRANT` 精确设为其中的 `grant.json`；缺失、
 可写或改道均 FAIL。实际候选 Compose 再把 runtime mount target 映射到受保护的一次性 scope；
+source Compose 的 rendered build 只允许 `context` 与 `dockerfile`，context 必须精确等于候选仓库根，
+Dockerfile 必须精确等于 manifest 声明；任何额外 build option、父/子目录或路径别名均 FAIL。
 placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
 `secret_references` 只在 checked-in Compose 上精确核对 file-backed secret 名称、绝对容器挂载
-目标与顶层 file 引用；拒绝额外或重复 secret mount、external secret 和 secret driver。静态检查不
+目标与顶层 file 引用；target 只能是 `/run/secrets/` 的直接安全子文件，且顶层定义与 service 引用
+集合必须精确相等；拒绝额外或重复 secret mount、external secret 和 secret driver。静态检查不
 展开或读取宿主 secret file。candidate
 Compose 不注入 production secret、空白替代 secret 或调用方临时 secret；初始化命令必须在不读取
 secret 的情况下验证 runtime wiring。真实 secret source、文件权限与实际 Compose identity 留在

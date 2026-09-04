@@ -151,6 +151,7 @@ def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tm
                            "dockerfile": "Dockerfile"}, secret_references=[])
     rendered = {"services": {"demo": {
         "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
+        "build": {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"},
         "working_dir": "/app", "environment": {
             "DEMO_MODE": "${DEMO_MODE}",
             "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
@@ -176,6 +177,7 @@ def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_pat
     rendered = {"secrets": {"tankan-secret": {"file": "${TANKAN_SECRET_FILE:?required}"}},
                 "services": {"demo": {
         "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
+        "build": {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"},
         "working_dir": "/app", "environment": {
             "DEMO_MODE": "candidate",
             "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
@@ -207,12 +209,19 @@ def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_pat
         {"source": "tankan-secret", "target": "relative-secret"}]
     with pytest.raises(engine.ValidationError, match="secret targets are invalid"):
         engine.validate_source_compose(tmp_path, contract)
+    rendered["services"]["demo"]["secrets"][0]["target"] = "/app/RELEASE.json"
+    with pytest.raises(engine.ValidationError, match="secret targets are invalid"):
+        engine.validate_source_compose(tmp_path, contract)
     rendered["services"]["demo"]["secrets"][0]["target"] = "/run/secrets/tankan.env"
+    rendered["secrets"]["unused-secret"] = {"file": "${UNUSED_SECRET_FILE:?required}"}
+    with pytest.raises(engine.ValidationError, match="secret definitions are invalid"):
+        engine.validate_source_compose(tmp_path, contract)
+    rendered["secrets"].pop("unused-secret")
     rendered["secrets"]["tankan-secret"] = {"external": True}
     with pytest.raises(engine.ValidationError, match="must be file-backed"):
         engine.validate_source_compose(tmp_path, contract)
     rendered["secrets"].clear()
-    with pytest.raises(engine.ValidationError, match="must be file-backed"):
+    with pytest.raises(engine.ValidationError, match="secret definitions are invalid"):
         engine.validate_source_compose(tmp_path, contract)
 
 
@@ -223,6 +232,7 @@ def test_source_compose_requires_readonly_host_grant_injection(monkeypatch, tmp_
                     secret_references=[])
     service = {
         "image": "demo@sha256:" + "d" * 64,
+        "build": {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"},
         "entrypoint": contract["entrypoint"], "working_dir": "/app",
         "environment": {"DEMO_MODE": "candidate",
                         "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
@@ -250,6 +260,56 @@ def test_source_compose_requires_readonly_host_grant_injection(monkeypatch, tmp_
     service["environment"]["MARKET_DATA_EXECUTION_GRANT"] = "/run/market-data-grants/grant.json"
     service["volumes"].append(dict(service["volumes"][0]))
     with pytest.raises(engine.ValidationError, match="duplicate mount target"):
+        engine.validate_source_compose(tmp_path, contract)
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing", "string", "parent", "child", "relative", "alias", "wrong-dockerfile",
+    "dockerfile-inline", "additional-contexts", "args", "target", "network",
+    "secrets", "ssh",
+])
+def test_source_compose_build_is_exact_candidate_root(monkeypatch, tmp_path, mutation):
+    engine = load_engine()
+    contract = v2_contract()
+    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"},
+                    secret_references=[])
+    build = {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"}
+    if mutation == "missing":
+        build = None
+    elif mutation == "string":
+        build = str(tmp_path)
+    elif mutation == "parent":
+        build["context"] = str(tmp_path.parent.resolve())
+    elif mutation == "child":
+        child = tmp_path / "child"
+        child.mkdir()
+        build["context"] = str(child.resolve())
+    elif mutation == "relative":
+        build["context"] = "."
+    elif mutation == "alias":
+        build["context"] = str(tmp_path / "child" / "..")
+    elif mutation == "wrong-dockerfile":
+        build["dockerfile"] = "OtherDockerfile"
+    else:
+        key = mutation.replace("-", "_")
+        build[key] = "unexpected"
+    service = {
+        "image": "demo@sha256:" + "d" * 64,
+        "entrypoint": contract["entrypoint"], "working_dir": "/app",
+        "environment": {"DEMO_MODE": "candidate",
+                        "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
+        "volumes": [
+            {"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
+            {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+            {"type": "bind", "source": "${GRANTS}", "target": "/run/market-data-grants", "read_only": True},
+        ],
+    }
+    if build is not None:
+        service["build"] = build
+    from types import SimpleNamespace
+    monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(
+        stdout=json.dumps({"services": {"demo": service}}).encode()))
+    with pytest.raises(engine.ValidationError, match="build contract|build context|Dockerfile"):
         engine.validate_source_compose(tmp_path, contract)
 
 

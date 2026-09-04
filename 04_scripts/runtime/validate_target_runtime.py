@@ -477,9 +477,16 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     if not isinstance(service.get("image"), str) or not service["image"]:
         raise ValidationError("source Compose image contract is missing")
     build = service.get("build")
-    if build is not None:
-        if not isinstance(build, dict) or build.get("dockerfile") != contract["build"]["dockerfile"]:
-            raise ValidationError("source Compose Dockerfile differs from runtime manifest")
+    if type(build) is not dict or set(build) != {"context", "dockerfile"}:
+        raise ValidationError("source Compose build contract is not reproducible")
+    context = build.get("context")
+    expected_context = root.resolve(strict=True)
+    if (not isinstance(context, str) or not context
+            or not Path(context).is_absolute() or Path(context) != expected_context
+            or Path(context).resolve(strict=True) != expected_context):
+        raise ValidationError("source Compose build context differs from candidate root")
+    if build.get("dockerfile") != contract["build"]["dockerfile"]:
+        raise ValidationError("source Compose Dockerfile differs from runtime manifest")
     environment = service.get("environment") or {}
     if not isinstance(environment, dict) or not set(contract["required_environment"]).issubset(environment):
         raise ValidationError("source Compose required environment contract is incomplete")
@@ -494,11 +501,13 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     if (len(secret_names) != len(set(secret_names))
             or set(secret_names) != set(contract["secret_references"])):
         raise ValidationError("source Compose secret references differ from runtime manifest")
-    if (any(not isinstance(target, str) or not target.startswith("/") for target in secret_targets)
+    if (any(not isinstance(target, str)
+            or not re.fullmatch(r"/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]*", target)
+            for target in secret_targets)
             or len(secret_targets) != len(set(secret_targets))):
         raise ValidationError("source Compose secret targets are invalid")
     top_secrets = rendered.get("secrets") or {}
-    if not isinstance(top_secrets, dict):
+    if not isinstance(top_secrets, dict) or set(top_secrets) != set(secret_names):
         raise ValidationError("source Compose secret definitions are invalid")
     for name in secret_names:
         definition = top_secrets.get(name)
