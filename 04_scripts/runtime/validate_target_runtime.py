@@ -132,7 +132,16 @@ def _docker(*args: str, input_bytes: bytes | None = None,
 
 
 def _git(root: Path, *args: str, binary: bool = False):
-    result = _run(("git", "-C", str(root), *args), timeout=120)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    try:
+        result = subprocess.run(("git", "--no-replace-objects", "-C", str(root), *args),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                timeout=120, check=False, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValidationError("Git command unavailable or timed out") from exc
+    if result.returncode:
+        raise ValidationError("Git command failed: " + result.stderr.decode("utf-8", "replace")[-800:])
     return result.stdout if binary else result.stdout.decode("utf-8", "strict").strip()
 
 
@@ -189,6 +198,8 @@ def _candidate_binding(root: Path, project: Mapping[str, Any],
 
 
 def source_contract(root: Path, project_id: str, runtime_contract: str):
+    if any(key.startswith("GIT_") for key in os.environ):
+        raise ValidationError("caller Git environment is forbidden")
     project = _project(root, project_id)
     if project.get("runtime_contract") != runtime_contract:
         raise ValidationError("runtime contract differs from Registry")
@@ -203,6 +214,8 @@ def source_contract(root: Path, project_id: str, runtime_contract: str):
     binding = _candidate_binding(root, project, contract)
     if set(contract["validation_probes"]) != REQUIRED_PROBES:
         raise ValidationError("runtime manifest probe set differs from engine")
+    if contract["secret_references"]:
+        raise ValidationError("runtime-manifest/2 has no candidate-safe secret source contract")
     return project, contract, binding
 
 
@@ -235,7 +248,8 @@ def require_builder() -> str:
     if (sys.platform != "linux" or os.name != "posix" or not hasattr(os, "geteuid")
             or os.geteuid() != 0):
         raise BuilderUnavailable(BLOCKED_REASON)
-    if any(os.environ.get(name) for name in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")):
+    if any(os.environ.get(name) for name in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+                                             "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")):
         raise BuilderUnavailable(BLOCKED_REASON)
     for command in (("docker", "version", "--format", "{{.Server.Os}}"),
                     ("docker", "compose", "version", "--short")):
@@ -247,6 +261,14 @@ def require_builder() -> str:
             raise BuilderUnavailable(BLOCKED_REASON)
     try:
         if _run(("docker", "context", "show"), timeout=30).stdout.decode().strip() != "default":
+            raise BuilderUnavailable(BLOCKED_REASON)
+        endpoint = _run(("docker", "context", "inspect", "default", "--format",
+                         "{{json .Endpoints.docker.Host}}"), timeout=30).stdout.decode().strip()
+        if endpoint not in {'"unix:///var/run/docker.sock"', '"unix:///run/docker.sock"'}:
+            raise BuilderUnavailable(BLOCKED_REASON)
+        socket_path = Path(json.loads(endpoint).removeprefix("unix://"))
+        socket_state = socket_path.stat()
+        if not stat.S_ISSOCK(socket_state.st_mode) or socket_state.st_uid != 0 or socket_state.st_mode & 0o002:
             raise BuilderUnavailable(BLOCKED_REASON)
         server = _strict_json(_run(("docker", "info", "--format", "{{json .}}"),
                                   timeout=30).stdout, "Docker server")
@@ -348,6 +370,7 @@ def _labels(image: Mapping[str, Any], binding: Mapping[str, Any], service: str) 
 def build_image(root: Path, context: Path, contract: Mapping[str, Any],
                 binding: Mapping[str, Any]) -> str:
     tag = f"market-data-runtime-validation:{binding['commit'][:12]}-{os.getpid()}"
+    build_time = datetime.now(timezone.utc).isoformat()
     release_id = (f"{contract['service_id']}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-"
                   f"{binding['commit'][:12]}-b01")
     args = ["build", "--no-cache", "--iidfile", str(context.parent / "image.id"),
@@ -355,11 +378,15 @@ def build_image(root: Path, context: Path, contract: Mapping[str, Any],
             "--label", f"org.opencontainers.image.revision={binding['commit']}",
             "--label", f"market-data.git.tree={binding['tree']}",
             "--label", f"market-data.service={contract['service_id']}",
-            "--label", "market-data.artifact.origin=candidate"]
+            "--label", "market-data.artifact.origin=candidate",
+            "--label", "market-data.artifact.promotable=true",
+            "--label", f"market-data.release.id={release_id}",
+            "--label", "org.opencontainers.image.source=target-runtime-validator/1",
+            "--label", f"org.opencontainers.image.created={build_time}"]
     build_args = {
         "MARKET_DATA_GIT_HEAD": binding["commit"], "MARKET_DATA_GIT_TREE": binding["tree"],
         "MARKET_DATA_RELEASE_ID": release_id,
-        "MARKET_DATA_BUILD_TIME": datetime.now(timezone.utc).isoformat(),
+        "MARKET_DATA_BUILD_TIME": build_time,
         "MARKET_DATA_SOURCE": "target-runtime-validator/1",
         "MARKET_DATA_SERVICE": contract["service_id"],
         "MARKET_DATA_ARTIFACT_ORIGIN": "candidate",
@@ -486,14 +513,29 @@ def _render_compose(work: Path, compose: Path, env_file: Path) -> tuple[dict[str
 
 def _release_identity(raw: bytes, binding: Mapping[str, Any],
                       expected_application: str | None = None,
-                      expected_release_id: str | None = None) -> dict[str, Any]:
+                      expected_release_id: str | None = None,
+                      image_labels: Mapping[str, Any] | None = None) -> dict[str, Any]:
     release = _strict_json(raw, "RELEASE")
+    required = {"application", "release_id", "git_commit", "git_tree", "build_time", "source"}
+    if set(release) != required:
+        raise ValidationError("embedded RELEASE fields are incomplete or unknown")
     if release.get("git_commit") != binding["commit"] or release.get("git_tree") != binding["tree"]:
         raise ValidationError("embedded RELEASE differs from candidate")
     if expected_application is not None and release.get("application") != expected_application:
         raise ValidationError("embedded RELEASE application differs from runtime project")
     if expected_release_id is not None and release.get("release_id") != expected_release_id:
         raise ValidationError("embedded RELEASE ID differs from OCI image")
+    if image_labels is not None:
+        if (release.get("source") != image_labels.get("org.opencontainers.image.source")
+                or release.get("build_time") != image_labels.get("org.opencontainers.image.created")
+                or release.get("source") != "target-runtime-validator/1"):
+            raise ValidationError("embedded RELEASE build origin differs from OCI image")
+        try:
+            created = datetime.fromisoformat(release["build_time"].replace("Z", "+00:00"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("embedded RELEASE build time is invalid") from exc
+        if created.tzinfo is None or created.utcoffset() is None:
+            raise ValidationError("embedded RELEASE build time is not timezone-aware")
     return release
 
 
@@ -572,10 +614,8 @@ def _expect_rejected(action, label: str) -> None:
     raise ValidationError(f"negative identity probe was accepted: {label}")
 
 
-def _negative_observation_probes(host, parser, observed: Mapping[str, Any],
-                                 policy: Mapping[str, Any], manifest_raw: bytes,
-                                 release_raw: bytes, contract: Mapping[str, Any],
-                                 binding: Mapping[str, Any]) -> dict[str, str]:
+def _negative_observation_probes(host, observed: Mapping[str, Any],
+                                 policy: Mapping[str, Any]) -> dict[str, str]:
     import copy
     probes: dict[str, str] = {}
     mutations = {
@@ -592,18 +632,96 @@ def _negative_observation_probes(host, parser, observed: Mapping[str, Any],
         _expect_rejected(lambda c=candidate: host.validate_observation(
             observed, c, role="candidate_validation"), probe)
         probes[probe] = "PASS"
-    bad_manifest = _strict_json(manifest_raw, "runtime manifest")
-    bad_manifest["service_id"] = "wrong-service"
-    _expect_rejected(lambda: _manifest_identity(_canonical(bad_manifest), contract, parser),
-                     "wrong_manifest_rejected")
-    probes["wrong_manifest_rejected"] = "PASS"
-    bad_release = _strict_json(release_raw, "RELEASE")
-    bad_release["git_commit"] = "0" * 40
-    _expect_rejected(lambda: _release_identity(_canonical(bad_release), binding,
-                                               contract["project_id"]),
-        "release_mismatch_rejected")
-    probes["release_mismatch_rejected"] = "PASS"
     return probes
+
+
+def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
+                           binding: Mapping[str, Any], image_id: str,
+                           image: Mapping[str, Any], work: Path,
+                           mutation: str) -> None:
+    """Require the real host grant issuer to reject altered identity material."""
+    if mutation not in {"manifest", "release"}:
+        raise ValidationError("unknown host rejection probe")
+    probe_work = work / ("negative-" + mutation)
+    probe_work.mkdir(mode=0o700)
+    grant_dir = probe_work / "grants"
+    grant_dir.mkdir(mode=0o755)
+    compose = probe_work / "compose.json"
+    env_file = probe_work / "compose.env"
+    project_name = "market-data-runtime-negative-" + mutation
+    scope = None
+    container_id = None
+    try:
+        uid, gid = _numeric_user(image)
+        contract["_numeric_uid"] = uid
+        contract["_container_user"] = image["Config"]["User"]
+        contract["_grant_dir"] = grant_dir
+        scope = host.create_candidate_scope(_runtime_bindings(contract, uid, gid))
+        identity_root = next(item["container_path"] for item in contract["runtime_roots"]
+                             if item["role"] == contract["identity_root_role"])
+        identity_source = next(Path(item["source"]) for item in scope["mounts"]
+                               if item["target"] == identity_root)
+        marker = {"schema_version": 1, "runtime_id": "target-validation",
+                  "module_id": contract["module_id"], "classification": "candidate-validation",
+                  "created_at": datetime.now(timezone.utc).isoformat()}
+        marker_path = identity_source / ".market-data-runtime.json"
+        marker_path.write_bytes(_canonical(marker) + b"\n")
+        os.chmod(marker_path, 0o444)
+        compose.write_bytes(_canonical(_compose_document(
+            contract, image_id, scope["mounts"], grant_dir, os.urandom(16).hex())) + b"\n")
+        os.chmod(compose, 0o600)
+        env_file.write_text("", encoding="utf-8")
+        os.chmod(env_file, 0o600)
+        _, rendered_hash = _render_compose(probe_work, compose, env_file)
+        _docker("compose", "--project-name", project_name, "--project-directory", str(probe_work),
+                "--env-file", str(env_file), "-f", str(compose), "create", "--no-build",
+                contract["service_id"], timeout=300)
+        ids = _docker("compose", "--project-name", project_name, "--project-directory", str(probe_work),
+                      "--env-file", str(env_file), "-f", str(compose), "ps", "-q", "--all",
+                      contract["service_id"]).stdout.decode().split()
+        if len(ids) != 1:
+            raise ValidationError("negative host probe did not create one container")
+        container_id = ids[0]
+        container = inspect_one("container", container_id)
+        manifest_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/" + contract["_runtime_contract"])
+        release_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/RELEASE.json")
+        policy = _policy(contract, binding, image_id, image, container, scope, compose,
+                         env_file, rendered_hash, _sha(manifest_raw), _sha(marker_path.read_bytes()),
+                         _sha(release_raw), host)
+        field = "runtime_manifest_sha256" if mutation == "manifest" else "release_sha256"
+        policy[field] = "0" * 64
+        policy_path = probe_work / "policy.json"
+        policy_path.write_bytes(_canonical(policy))
+        os.chmod(policy_path, 0o600)
+        trust = _strict_json((root / "02_configs/production_runtime_trust.json").read_bytes(), "trust")
+        key_id = next(item["key_id"] for item in trust["keys"]
+                      if item.get("domain") == "candidate_validation")
+        try:
+            host.issue_execution_grant(container_id, expected_policy_path=policy_path,
+                                       key_path=_KEY_ROOT / (key_id + ".pem"),
+                                       grant_path=grant_dir / "grant.json", grant_dir=grant_dir,
+                                       role="candidate_validation", ttl_seconds=900)
+        except host.HostAuthorizationError as exc:
+            expected = ("runtime manifest/marker differs" if mutation == "manifest"
+                        else "RELEASE bytes differs")
+            if expected not in str(exc):
+                raise ValidationError(f"host {mutation} rejection occurred at wrong check: {exc}") from exc
+        else:
+            raise ValidationError(f"host issuer accepted wrong {mutation} identity")
+    finally:
+        if container_id:
+            _docker("rm", "-f", container_id, check=False, timeout=120)
+        _docker("compose", "--project-name", project_name, "--project-directory", str(probe_work),
+                "--env-file", str(env_file), "-f", str(compose), "down", "--remove-orphans",
+                check=False, timeout=120)
+        if scope is not None:
+            shutil.rmtree(scope["candidate_host_root"], ignore_errors=True)
+            descriptor = Path(scope["candidate_scope"]["descriptor_path"])
+            for candidate in (descriptor.with_name(descriptor.name + ".consumed"), descriptor):
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 @contextmanager
@@ -638,30 +756,33 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         contract["_numeric_uid"] = uid
         contract["_container_user"] = image["Config"]["User"]
         contract["_runtime_contract"] = project["runtime_contract"]
+        _actual_host_rejection(root, host, contract, binding, image_id, image, work, "manifest")
+        _actual_host_rejection(root, host, contract, binding, image_id, image, work, "release")
         grant_dir = work / "grants"
         grant_dir.mkdir(mode=0o755)
         contract["_grant_dir"] = grant_dir
-        scope = host.create_candidate_scope(_runtime_bindings(contract, uid, gid))
-        identity_root = next(item["container_path"] for item in contract["runtime_roots"] if item["role"] == contract["identity_root_role"])
-        marker = {"schema_version": 1, "runtime_id": "target-validation",
-                  "module_id": contract["module_id"], "classification": "candidate-validation",
-                  "created_at": datetime.now(timezone.utc).isoformat()}
-        identity_source = next(Path(item["source"]) for item in scope["mounts"]
-                               if item["target"] == identity_root)
-        marker_path = identity_source / ".market-data-runtime.json"
-        marker_path.write_bytes(_canonical(marker) + b"\n")
-        os.chmod(marker_path, 0o444)
-        hostname = os.urandom(16).hex()
-        compose_doc = _compose_document(contract, image_id, scope["mounts"], grant_dir, hostname)
         compose = work / "compose.json"
-        compose.write_bytes(_canonical(compose_doc) + b"\n")
-        os.chmod(compose, 0o600)
         env_file = work / "compose.env"
-        env_file.write_text("", encoding="utf-8")
-        os.chmod(env_file, 0o600)
-        rendered, rendered_hash = _render_compose(work, compose, env_file)
         project_name = "market-data-runtime-validation"
+        scope = None
         try:
+            scope = host.create_candidate_scope(_runtime_bindings(contract, uid, gid))
+            identity_root = next(item["container_path"] for item in contract["runtime_roots"] if item["role"] == contract["identity_root_role"])
+            marker = {"schema_version": 1, "runtime_id": "target-validation",
+                      "module_id": contract["module_id"], "classification": "candidate-validation",
+                      "created_at": datetime.now(timezone.utc).isoformat()}
+            identity_source = next(Path(item["source"]) for item in scope["mounts"]
+                                   if item["target"] == identity_root)
+            marker_path = identity_source / ".market-data-runtime.json"
+            marker_path.write_bytes(_canonical(marker) + b"\n")
+            os.chmod(marker_path, 0o444)
+            hostname = os.urandom(16).hex()
+            compose_doc = _compose_document(contract, image_id, scope["mounts"], grant_dir, hostname)
+            compose.write_bytes(_canonical(compose_doc) + b"\n")
+            os.chmod(compose, 0o600)
+            env_file.write_text("", encoding="utf-8")
+            os.chmod(env_file, 0o600)
+            rendered, rendered_hash = _render_compose(work, compose, env_file)
             _docker("compose", "--project-name", project_name, "--project-directory", str(work),
                     "--env-file", str(env_file), "-f", str(compose), "create", "--no-build",
                     contract["service_id"], timeout=300)
@@ -683,7 +804,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             release_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/RELEASE.json")
             image_labels = image["Config"]["Labels"]
             _release_identity(release_raw, binding, contract["project_id"],
-                              image_labels["market-data.release.id"])
+                              image_labels["market-data.release.id"], image_labels)
             marker_raw = marker_path.read_bytes()
             policy = _policy(contract, binding, image_id, image, container, scope, compose,
                              env_file, rendered_hash, _sha(manifest_raw), _sha(marker_raw),
@@ -693,8 +814,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             os.chmod(policy_path, 0o600)
             observed = host.normalize_observation(container, image,
                                                   _strict_json(release_raw, "RELEASE"))
-            probes = _negative_observation_probes(host, parser, observed, policy,
-                                                  manifest_raw, release_raw, contract, binding)
+            probes = _negative_observation_probes(host, observed, policy)
+            probes["wrong_manifest_rejected"] = "PASS"
+            probes["release_mismatch_rejected"] = "PASS"
             key_path = _KEY_ROOT / (policy["key_id"] + ".pem")
             host.issue_execution_grant(container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
@@ -763,13 +885,14 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             _docker("compose", "--project-name", "market-data-runtime-validation",
                     "--project-directory", str(work), "--env-file", str(env_file),
                     "-f", str(compose), "down", "--remove-orphans", check=False, timeout=120)
-            shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
-            descriptor = Path(scope["candidate_scope"]["descriptor_path"])
-            for candidate in (descriptor.with_name(descriptor.name + ".consumed"), descriptor):
-                try:
-                    candidate.unlink()
-                except FileNotFoundError:
-                    pass
+            if scope is not None:
+                shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
+                descriptor = Path(scope["candidate_scope"]["descriptor_path"])
+                for candidate in (descriptor.with_name(descriptor.name + ".consumed"), descriptor):
+                    try:
+                        candidate.unlink()
+                    except FileNotFoundError:
+                        pass
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

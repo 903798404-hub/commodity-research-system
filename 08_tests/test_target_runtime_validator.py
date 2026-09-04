@@ -80,6 +80,13 @@ def test_caller_selected_docker_endpoint_is_never_a_builder(monkeypatch):
         engine.require_builder()
 
 
+def test_caller_git_environment_is_rejected(monkeypatch, tmp_path):
+    engine = load_engine()
+    monkeypatch.setenv("GIT_REPLACE_REF_BASE", "refs/replace/")
+    with pytest.raises(engine.ValidationError, match="Git environment"):
+        engine.source_contract(tmp_path, "demo", "runtime.json")
+
+
 def test_evidence_output_is_new_strict_and_never_overwritten(tmp_path):
     engine = load_engine()
     output = tmp_path / "evidence.json"
@@ -163,8 +170,10 @@ def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tm
 def test_release_mismatch_is_a_failure(field, value):
     engine = load_engine()
     candidate = binding()
-    release = {"application": "demo", "git_commit": candidate["commit"],
-               "git_tree": candidate["tree"]}
+    release = {"application": "demo", "release_id": "demo-release",
+               "git_commit": candidate["commit"], "git_tree": candidate["tree"],
+               "build_time": "2026-01-01T00:00:00+00:00",
+               "source": "target-runtime-validator/1"}
     release[field] = value
     with pytest.raises(engine.ValidationError, match="RELEASE"):
         engine._release_identity(json.dumps(release).encode(), candidate)
@@ -174,13 +183,39 @@ def test_release_application_and_oci_release_id_are_bound():
     engine = load_engine()
     candidate = binding()
     release = {"application": "demo", "release_id": "demo-release",
-               "git_commit": candidate["commit"], "git_tree": candidate["tree"]}
+               "git_commit": candidate["commit"], "git_tree": candidate["tree"],
+               "build_time": "2026-01-01T00:00:00+00:00",
+               "source": "target-runtime-validator/1"}
     assert engine._release_identity(json.dumps(release).encode(), candidate,
                                     "demo", "demo-release") == release
     for application, release_id in (("other", "demo-release"), ("demo", "other")):
         with pytest.raises(engine.ValidationError, match="RELEASE"):
             engine._release_identity(json.dumps(release).encode(), candidate,
                                      application, release_id)
+
+
+@pytest.mark.parametrize("mutation", ["missing-source", "wrong-source", "wrong-time", "label-time"])
+def test_release_build_origin_is_bound_to_oci_labels(mutation):
+    engine = load_engine()
+    candidate = binding()
+    release = {"application": "demo", "release_id": "demo-release",
+               "git_commit": candidate["commit"], "git_tree": candidate["tree"],
+               "build_time": "2026-01-01T00:00:00+00:00",
+               "source": "target-runtime-validator/1"}
+    labels = {"org.opencontainers.image.created": release["build_time"],
+              "org.opencontainers.image.source": release["source"]}
+    if mutation == "missing-source":
+        del release["source"]
+    elif mutation == "wrong-source":
+        release["source"] = "caller"
+    elif mutation == "wrong-time":
+        release["build_time"] = "not-a-time"
+        labels["org.opencontainers.image.created"] = "not-a-time"
+    else:
+        labels["org.opencontainers.image.created"] = "2026-01-02T00:00:00+00:00"
+    with pytest.raises(engine.ValidationError, match="RELEASE"):
+        engine._release_identity(json.dumps(release).encode(), candidate,
+                                 "demo", "demo-release", labels)
 
 
 def test_strict_json_rejects_duplicate_and_nonfinite_values():
