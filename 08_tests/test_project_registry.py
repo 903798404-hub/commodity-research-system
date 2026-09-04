@@ -205,6 +205,29 @@ PUBLIC_INTRADAY_RUNTIME_REGISTRATION = {'project_id': 'public-intraday-runtime',
                    'deploy. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; '
                    'REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED.'}
 
+PUBLIC_INTRADAY_RUNTIME_PRODUCTION_REGISTRATION = copy.deepcopy(
+    PUBLIC_INTRADAY_RUNTIME_REGISTRATION)
+PUBLIC_INTRADAY_RUNTIME_PRODUCTION_REGISTRATION.update(
+    runtime_target='production_container',
+    runtime_contract='02_configs/runtime_contracts/public-intraday-runtime.json',
+    owned_paths=PUBLIC_INTRADAY_RUNTIME_REGISTRATION['future_owned_paths'],
+    future_owned_paths=[],
+    required_tests=[*PUBLIC_INTRADAY_RUNTIME_REGISTRATION['required_tests'],
+                    '08_tests/test_public_intraday_runtime_v2.py'],
+    future_required_tests=[],
+    boundary_notes='PROD-RUNTIME-V2 Goal E/F production-container promotion. The exact manifest, '
+                   'wrapper, Dockerfile, Compose, test and runtime documentation are closed source '
+                   'inputs and project-owned. Promotion requires isolated Linux target-runtime '
+                   'validation of the exact candidate before main. It grants no automatic execution, '
+                   'deployment or capture authority. Existing Shared Intraday, Tankan and identity '
+                   'code remain read-only dependencies. It must not change business logic, use the '
+                   'parked Soybean worktree, fix a business date, read a production secret during '
+                   'candidate validation, capture data, mutate old SEALED snapshots, add schedules, '
+                   'join FULL DAILY/Production Wrapper/Daily Summary, activate Notification or issue '
+                   'a production grant. AM_PM_AUTO_EXECUTION=NO; '
+                   'INTRADAY_FULL_DAILY_DEPENDENCY=NONE; '
+                   'REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED.')
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -251,6 +274,16 @@ def registration_baseline():
         if 'public-intraday-runtime' not in baseline_ids:
             expected = copy.deepcopy(baseline)
             expected['projects'].append(PUBLIC_INTRADAY_RUNTIME_REGISTRATION)
+            assert current == expected
+            baseline = expected
+        baseline_by_id = {p['project_id']: p for p in baseline['projects']}
+        if baseline_by_id.get('public-intraday-runtime') == PUBLIC_INTRADAY_RUNTIME_REGISTRATION:
+            expected = copy.deepcopy(baseline)
+            expected['projects'] = [
+                PUBLIC_INTRADAY_RUNTIME_PRODUCTION_REGISTRATION
+                if p['project_id'] == 'public-intraday-runtime' else p
+                for p in expected['projects']
+            ]
             assert current == expected
             baseline = expected
     return baseline
@@ -1677,16 +1710,15 @@ def test_tankan_fixture_isolation_registration():
         assert not registry.owns(project, path)
 
 
-def test_public_intraday_runtime_staged_registration_is_exact_and_inert():
+def test_public_intraday_runtime_production_registration_is_exact_and_inert():
     data, project = registry.select_project(ROOT, "public-intraday-runtime")
     assert data["schema_version"] == "project-registry/4"
-    assert project == PUBLIC_INTRADAY_RUNTIME_REGISTRATION
+    assert project == PUBLIC_INTRADAY_RUNTIME_PRODUCTION_REGISTRATION
     assert project["status"] == "ready"
     assert project["change_class"] == "shared"
-    assert project["runtime_target"] == "none"
-    assert "runtime_contract" not in project
-    assert project["owned_paths"] == []
-    assert project["future_owned_paths"] == [
+    assert project["runtime_target"] == "production_container"
+    assert project["runtime_contract"] == "02_configs/runtime_contracts/public-intraday-runtime.json"
+    assert project["owned_paths"] == [
         "02_configs/runtime_contracts/public-intraday-runtime.json",
         "04_scripts/runtime/public_intraday_runtime.py",
         "09_deploy/public_intraday_runtime/Dockerfile.public-intraday",
@@ -1694,6 +1726,9 @@ def test_public_intraday_runtime_staged_registration_is_exact_and_inert():
         "08_tests/test_public_intraday_runtime_v2.py",
         "07_docs/projects/public-intraday-runtime/运行合同.md",
     ]
+    assert project["future_owned_paths"] == []
+    assert project["future_required_tests"] == []
+    assert "08_tests/test_public_intraday_runtime_v2.py" in project["required_tests"]
     assert "02_configs/project_registry.json" in project["forbidden_paths"]
     assert "04_scripts/capture_public_intraday.py" in project["shared_dependencies"]
     assert "AM_PM_AUTO_EXECUTION=NO" in project["boundary_notes"]
