@@ -764,6 +764,12 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     "--project-directory", str(work), "--env-file", str(env_file),
                     "-f", str(compose), "down", "--remove-orphans", check=False, timeout=120)
             shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
+            descriptor = Path(scope["candidate_scope"]["descriptor_path"])
+            for candidate in (descriptor.with_name(descriptor.name + ".consumed"), descriptor):
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

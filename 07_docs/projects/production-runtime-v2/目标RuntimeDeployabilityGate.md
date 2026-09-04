@@ -10,6 +10,11 @@
 的环境只能返回 `LINUX_BUILDER_UNAVAILABLE` 和退出码 3；镜像、Compose、身份、依赖、路径、
 权限或探针错误均为 FAIL。
 
+引擎先以 `docker compose config --no-interpolate` 读取 manifest 声明的 checked-in Compose
+sources，核对 service、Dockerfile、entrypoint、working directory、环境变量名、secret 引用和
+全部 mount target。实际候选 Compose 再把这些 mount target 映射到受保护的一次性 scope；
+placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
+
 候选验证只能创建一次性 candidate scope。候选容器使用不可变 Image ID、只读 rootfs、非 root
 数字用户、无网络、drop all capabilities、no-new-privileges，并只挂载 candidate scope 与只读
 grant 目录。生产 volume、secret、Docker socket、宿主控制目录、开发 worktree 和 ignored file
