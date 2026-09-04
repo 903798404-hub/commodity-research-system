@@ -41,6 +41,8 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
               "baseline_tree":registry.git(root,"rev-parse","origin/main^{tree}"),
               "branch":branch,"worktree":str(destination),"owned_paths":project["owned_paths"],
               "required_tests":project["required_tests"],"created":False,**mirror}
+    result.update(future_owned_paths=project.get("future_owned_paths", []),
+                  future_required_tests=project.get("future_required_tests", []))
     if create:
         # Recheck drift at the mutation boundary; never update the main checkout.
         if registry.git(root,"ls-remote","--exit-code","origin","refs/heads/main").split()[0] != live:

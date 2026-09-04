@@ -153,11 +153,11 @@ def _changed_paths(project_root: Path, baseline: str, git: Callable[..., str]) -
 
 
 def _is_allowed(path: str, allowed: Sequence[str]) -> bool:
-    return any(path == item or path.startswith(f"{item}/") for item in allowed)
+    return any(project_registry.under_path(path, item) for item in allowed)
 
 
 def _is_shared(path: str, patterns: Sequence[str]) -> bool:
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+    return any(fnmatch.fnmatchcase(path.replace("\\", "/").casefold(), pattern.casefold()) for pattern in patterns)
 
 
 def parse_finding(value: str) -> dict[str, object]:
@@ -181,6 +181,7 @@ def run_audit(
     baseline: str,
     allowed: Sequence[str],
     *,
+    exact_allowed: Sequence[str] = (),
     dependencies: Sequence[str] = (),
     tests: Sequence[str] = (),
     configs: Sequence[str] = (),
@@ -199,7 +200,12 @@ def run_audit(
     status_before = git(project_root, "status", "--porcelain=v1", "--no-renames", "--untracked-files=all")
 
     allowed_paths = _safe_paths(project_root, allowed, "--allow")
-    if not allowed_paths:
+    exact_keys = {project_registry.canonical_path(p) for p in exact_allowed}
+    for value in exact_allowed:
+        project_registry.future_file(project_root, value)
+    def permitted(path):
+        return _is_allowed(path, allowed_paths) or project_registry.canonical_path(path) in exact_keys
+    if not allowed_paths and not exact_keys:
         raise ValueError("至少提供一个 --owned/--allow 文件或目录")
     if change_class not in CHANGE_CLASSES:
         raise ValueError(f"未知 change class: {change_class}")
@@ -207,7 +213,7 @@ def run_audit(
     changed = _changed_paths(project_root, baseline, git)
     preexisting_changes = [path for path in changed if _is_allowed(path, known_existing_paths)]
     audited_changes = [path for path in changed if path not in preexisting_changes]
-    out_of_scope = [path for path in audited_changes if not _is_allowed(path, allowed_paths)]
+    out_of_scope = [path for path in audited_changes if not permitted(path)]
     # Shared changes can never be hidden with --known-existing. An isolated feature
     # worktree containing any protected change must classify the whole task as shared.
     shared_changes = [path for path in changed if _is_shared(path, shared_patterns)]
@@ -256,7 +262,8 @@ def run_audit(
         "audited_changed_files": audited_changes,
         "allowed_scope": allowed_paths,
         "owned_paths": allowed_paths,
-        "allowed_changed_files": [path for path in audited_changes if _is_allowed(path, allowed_paths)],
+        "future_owned_paths": list(exact_allowed),
+        "allowed_changed_files": [path for path in audited_changes if permitted(path)],
         "out_of_scope_changes": out_of_scope,
         "shared_changes": shared_changes,
         "declared_direct_dependencies": _safe_paths(project_root, dependencies, "--dependency"),
@@ -297,6 +304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         project = None
         protected = SHARED_PATH_PATTERNS
         allowed = args.allowed
+        exact_allowed = []
         if args.project:
             if args.baseline != "origin/main" or args.known_existing:
                 raise ValueError("Project mode requires origin/main and cannot exempt known-existing changes")
@@ -311,9 +319,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 trusted = project_registry.git(PROJECT_ROOT, "show", f"origin/main:{project_registry.REGISTRY_PATH}")
                 if json.loads(trusted) != registry:
                     raise ValueError("Business registry differs from origin/main; separate shared approval required")
-            allowed = allowed or project["owned_paths"]
-            if any(not _is_allowed(path, project["owned_paths"]) for path in allowed):
+            if allowed and any(not project_registry.owns(project, path) for path in allowed):
                 raise ValueError("--owned may only narrow registry scope")
+            if allowed:
+                exact_allowed = [p for p in allowed if not _is_allowed(p, project["owned_paths"])]
+                allowed = [p for p in allowed if p not in exact_allowed]
+            else:
+                allowed = project["owned_paths"]
+                exact_allowed = project.get("future_owned_paths", [])
             protected += tuple(pattern for path in registry["protected_paths"] for pattern in (path, path + "/**"))
             project_registry.assert_main_mirror(PROJECT_ROOT)
             branch = project_registry.git(PROJECT_ROOT, "branch", "--show-current")
@@ -326,6 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             PROJECT_ROOT,
             args.baseline,
             allowed or [],
+            exact_allowed=exact_allowed,
             dependencies=args.dependency,
             tests=args.test,
             configs=args.config,
@@ -345,6 +359,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report["next_stage_reason"] = "Registry forbidden paths changed"
             report.update(project_id=args.project, registry=project_registry.REGISTRY_PATH,
                           forbidden_changes=forbidden, required_tests=project["required_tests"],
+                          future_required_tests=project.get("future_required_tests", []),
                           shared_dependencies=project["shared_dependencies"])
     except (RuntimeError, ValueError, WorktreeChangedError) as exc:
         print(f"审计失败: {exc}", file=sys.stderr)

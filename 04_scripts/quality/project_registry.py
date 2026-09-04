@@ -9,6 +9,49 @@ from pathlib import Path, PurePosixPath
 REGISTRY_PATH = "02_configs/project_registry.json"
 
 
+def canonical_path(value: str) -> str:
+    """Portable Windows-safe identity; registry existing-path syntax stays strict."""
+    if not isinstance(value, str):
+        raise ValueError("Invalid path type")
+    value = relative_path(value.replace("\\", "/"))
+    for part in value.split("/"):
+        if (part.endswith((".", " ")) or any(ord(c) < 32 or c in '<>"|' for c in part)
+                or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", part)):
+            raise ValueError(f"Ambiguous Windows path: {value}")
+    return value.casefold()
+
+
+def under_path(value: str, parent: str) -> bool:
+    value, parent = canonical_path(value), canonical_path(parent)
+    return value == parent or value.startswith(parent + "/")
+
+
+def future_file(root: Path, value: str, *, test: bool = False) -> Path:
+    """Exact file only, even after creation; never traverse links or junctions."""
+    key = canonical_path(value)
+    if not PurePosixPath(key).suffix or key.startswith(".git/"):
+        raise ValueError(f"Future path must name an exact file: {value}")
+    if test and not (key.startswith("08_tests/") and PurePosixPath(key).name.startswith("test_") and key.endswith(".py")):
+        raise ValueError(f"Future test outside test area: {value}")
+    current = root.resolve()
+    for part in value.replace("\\", "/").split("/"):
+        # Resolve case aliases on case-sensitive hosts too, for portable governance.
+        matches = [p for p in current.iterdir() if p.name.casefold() == part.casefold()] if current.is_dir() else []
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous case aliases: {value}")
+        current = matches[0] if matches else current / part
+        if current.is_symlink() or current.is_junction():
+            raise ValueError(f"Future path traverses link: {value}")
+    if root.resolve() not in current.resolve().parents or (current.exists() and not current.is_file()):
+        raise ValueError(f"Future path is not a repository file: {value}")
+    return current
+
+
+def owns(project: dict, value: str) -> bool:
+    return (any(under_path(value, p) for p in project["owned_paths"])
+            or canonical_path(value) in {canonical_path(p) for p in project.get("future_owned_paths", [])})
+
+
 def relative_path(value: str) -> str:
     if (not isinstance(value, str) or not value or value != value.strip()
             or "\\" in value or ":" in value or any(c in value for c in "*?[]\x00\r\n")
@@ -18,7 +61,7 @@ def relative_path(value: str) -> str:
 
 
 def validate_registry(data: dict, root: Path) -> dict:
-    if not isinstance(data, dict) or data.get("schema_version") != "project-registry/1":
+    if not isinstance(data, dict) or data.get("schema_version") not in ("project-registry/1", "project-registry/2"):
         raise ValueError("Invalid project registry schema")
     if set(data) != {"schema_version", "protected_paths", "projects"}:
         raise ValueError("Unexpected registry fields")
@@ -37,7 +80,8 @@ def validate_registry(data: dict, root: Path) -> dict:
     keys = {"project_id", "change_class", "status", "owned_paths", "shared_dependencies",
             "forbidden_paths", "required_tests", "capabilities", "boundary_notes"}
     for item in data["projects"]:
-        if not isinstance(item, dict) or set(item) != keys:
+        optional = {"future_owned_paths", "future_required_tests"} if data["schema_version"] == "project-registry/2" else set()
+        if not isinstance(item, dict) or not keys <= set(item) or set(item) - keys - optional:
             raise ValueError("Invalid project fields")
         pid = item["project_id"]
         if not isinstance(pid, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", pid) or pid in seen:
@@ -49,12 +93,43 @@ def validate_registry(data: dict, root: Path) -> dict:
             raise ValueError("Invalid project status")
         for key in ("owned_paths", "shared_dependencies", "forbidden_paths", "required_tests"):
             paths(item[key])
-        if item["status"] == "ready" and (not item["owned_paths"] or not item["required_tests"]):
+        for key in optional:
+            values = item.get(key, [])
+            if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                raise ValueError("Future paths must be a list of strings")
+            if len({canonical_path(p) for p in values}) != len(values):
+                raise ValueError("Duplicate future path identity")
+            for value in values:
+                future_file(root, value, test=key == "future_required_tests")
+        if item["status"] == "ready" and (not (item["owned_paths"] or item.get("future_owned_paths")) or not (item["required_tests"] or item.get("future_required_tests"))):
             raise ValueError("Ready project needs owned paths and tests")
         if not isinstance(item["capabilities"], list) or not all(isinstance(x,str) and x for x in item["capabilities"]):
             raise ValueError("Invalid capabilities")
         if not isinstance(item["boundary_notes"], str) or not item["boundary_notes"]:
             raise ValueError("Missing boundary evidence/limitations")
+    for item in data["projects"]:
+        for value in item.get("future_owned_paths", []):
+            if any(canonical_path(value) != canonical_path(p) and (under_path(value, p) or under_path(p, value)) for p in item.get("future_owned_paths", [])):
+                raise ValueError(f"Future exact files cannot contain one another: {value}")
+            if any(under_path(value, p) for p in item["forbidden_paths"] + item["shared_dependencies"]):
+                raise ValueError(f"Future ownership conflicts with read-only/forbidden scope: {value}")
+            for other in data["projects"]:
+                if other is not item and (owns(other, value) or any(under_path(p, value) or under_path(value, p) for p in other.get("future_owned_paths", []))):
+                    raise ValueError(f"Future ownership collision with {other['project_id']}: {value}")
+            if item["change_class"] == "business":
+                try:
+                    from .audit_changed_scope import SHARED_PATH_PATTERNS, _is_shared
+                except ImportError:
+                    from audit_changed_scope import SHARED_PATH_PATTERNS, _is_shared
+                if any(under_path(value, p) for p in data["protected_paths"]) or _is_shared(canonical_path(value), SHARED_PATH_PATTERNS):
+                    raise ValueError(f"Future business path is protected: {value}")
+        for value in item.get("future_required_tests", []):
+            if not owns(item, value):
+                raise ValueError(f"Future required test not owned by project: {value}")
+            if any(under_path(value, p) for p in item["forbidden_paths"] + item["shared_dependencies"]):
+                raise ValueError(f"Future test conflicts with read-only/forbidden scope: {value}")
+            if any(other is not item and owns(other, value) for other in data["projects"]):
+                raise ValueError(f"Future test ownership collision: {value}")
     return data
 
 
