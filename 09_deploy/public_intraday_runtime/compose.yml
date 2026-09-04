@@ -1,0 +1,36 @@
+services:
+  public-intraday-runtime:
+    image: ${PUBLIC_INTRADAY_IMAGE:?PUBLIC_INTRADAY_IMAGE is required}
+    build:
+      context: ../..
+      dockerfile: 09_deploy/public_intraday_runtime/Dockerfile.public-intraday
+    entrypoint: ["python", "-B", "/app/04_scripts/runtime/public_intraday_runtime.py", "serve"]
+    working_dir: /app
+    read_only: true
+    user: "65532:65532"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      MARKET_DATA_EXECUTION_GRANT: /run/market-data-grants/grant.json
+    volumes:
+      - type: bind
+        source: ${PUBLIC_INTRADAY_IDENTITY_ROOT:?PUBLIC_INTRADAY_IDENTITY_ROOT is required}
+        target: /runtime
+        read_only: true
+      - type: bind
+        source: ${PUBLIC_INTRADAY_INPUT_ROOT:?PUBLIC_INTRADAY_INPUT_ROOT is required}
+        target: /runtime/inputs
+        read_only: true
+      - type: bind
+        source: ${PUBLIC_INTRADAY_SNAPSHOT_ROOT:?PUBLIC_INTRADAY_SNAPSHOT_ROOT is required}
+        target: /runtime/snapshots
+      - type: bind
+        source: ${PUBLIC_INTRADAY_GRANT_ROOT:?PUBLIC_INTRADAY_GRANT_ROOT is required}
+        target: /run/market-data-grants
+        read_only: true
+    secrets:
+      - source: tankan-reader
+        target: tankan.env
+secrets:
+  tankan-reader:
+    file: ${TANKAN_SECRET_FILE:?TANKAN_SECRET_FILE is required}

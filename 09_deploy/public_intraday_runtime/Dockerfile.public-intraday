@@ -1,0 +1,78 @@
+FROM python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9
+
+ARG MARKET_DATA_GIT_HEAD
+ARG MARKET_DATA_GIT_TREE
+ARG MARKET_DATA_RELEASE_ID
+ARG MARKET_DATA_BUILD_TIME
+ARG MARKET_DATA_SOURCE
+ARG MARKET_DATA_SERVICE=public-intraday-runtime
+ARG MARKET_DATA_ARTIFACT_ORIGIN=candidate
+ARG MARKET_DATA_ARTIFACT_PROMOTABLE=true
+ARG MARKET_DATA_DEPLOYMENT_ROLE=candidate
+
+LABEL org.opencontainers.image.revision="${MARKET_DATA_GIT_HEAD}" \
+      org.opencontainers.image.version="${MARKET_DATA_RELEASE_ID}" \
+      org.opencontainers.image.created="${MARKET_DATA_BUILD_TIME}" \
+      org.opencontainers.image.source="${MARKET_DATA_SOURCE}" \
+      market-data.git.tree="${MARKET_DATA_GIT_TREE}" \
+      market-data.release.id="${MARKET_DATA_RELEASE_ID}" \
+      market-data.service="${MARKET_DATA_SERVICE}" \
+      market-data.artifact.origin="${MARKET_DATA_ARTIFACT_ORIGIN}" \
+      market-data.artifact.promotable="${MARKET_DATA_ARTIFACT_PROMOTABLE}" \
+      market-data.deployment.role="${MARKET_DATA_DEPLOYMENT_ROLE}"
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/03_src
+ENV PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
+ENV PIP_DEFAULT_TIMEOUT=120
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.txt \
+    && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
+
+COPY 02_configs/production_runtime_trust.json /app/02_configs/production_runtime_trust.json
+COPY 02_configs/runtime_manifest.schema.json /app/02_configs/runtime_manifest.schema.json
+COPY 02_configs/runtime_contracts/public-intraday-runtime.json /app/02_configs/runtime_contracts/public-intraday-runtime.json
+COPY 03_src/agri_research_agent/__init__.py /app/03_src/agri_research_agent/
+COPY 03_src/agri_research_agent/data_sources/__init__.py /app/03_src/agri_research_agent/data_sources/
+COPY 03_src/agri_research_agent/data_sources/tankan/__init__.py \
+     03_src/agri_research_agent/data_sources/tankan/client.py \
+     03_src/agri_research_agent/data_sources/tankan/intraday_adapter.py \
+     03_src/agri_research_agent/data_sources/tankan/models.py \
+     03_src/agri_research_agent/data_sources/tankan/queries.py \
+     /app/03_src/agri_research_agent/data_sources/tankan/
+COPY 03_src/agri_research_agent/market_data/__init__.py \
+     03_src/agri_research_agent/market_data/calendars.py \
+     03_src/agri_research_agent/market_data/contracts.py \
+     03_src/agri_research_agent/market_data/intraday.py \
+     03_src/agri_research_agent/market_data/quotes.py \
+     /app/03_src/agri_research_agent/market_data/
+COPY 03_src/agri_research_agent/pipelines/__init__.py \
+     03_src/agri_research_agent/pipelines/public_intraday.py \
+     /app/03_src/agri_research_agent/pipelines/
+COPY 03_src/agri_research_agent/research_data/__init__.py \
+     03_src/agri_research_agent/research_data/canonical_spreads.py \
+     03_src/agri_research_agent/research_data/catalog.py \
+     03_src/agri_research_agent/research_data/identities.py \
+     03_src/agri_research_agent/research_data/three_oil_v1.py \
+     /app/03_src/agri_research_agent/research_data/
+COPY 03_src/agri_research_agent/shared/__init__.py \
+     03_src/agri_research_agent/shared/async_update.py \
+     03_src/agri_research_agent/shared/file_identity.py \
+     03_src/agri_research_agent/shared/immutable_candidate.py \
+     03_src/agri_research_agent/shared/production_grant.py \
+     03_src/agri_research_agent/shared/production_identity.py \
+     03_src/agri_research_agent/shared/runtime_context.py \
+     03_src/agri_research_agent/shared/runtime_manifest.py \
+     /app/03_src/agri_research_agent/shared/
+COPY 04_scripts/runtime/public_intraday_runtime.py /app/04_scripts/runtime/public_intraday_runtime.py
+
+RUN python -c 'import json,re,sys; commit,tree,release_id,build_time,source=sys.argv[1:]; assert re.fullmatch(r"[0-9a-f]{40}",commit); assert re.fullmatch(r"[0-9a-f]{40}",tree) and tree != commit; assert release_id.startswith("public-intraday-runtime-") and commit[:12] in release_id; assert build_time and source; payload={"application":"public-intraday-runtime","release_id":release_id,"git_commit":commit,"git_tree":tree,"build_time":build_time,"source":source}; open("/app/RELEASE.json","w",encoding="utf-8").write(json.dumps(payload,ensure_ascii=False,indent=2,sort_keys=True)+"\n")' \
+    "$MARKET_DATA_GIT_HEAD" "$MARKET_DATA_GIT_TREE" "$MARKET_DATA_RELEASE_ID" "$MARKET_DATA_BUILD_TIME" "$MARKET_DATA_SOURCE" \
+    && chmod -R a-w /app \
+    && chmod 0444 /app/RELEASE.json
+
+USER 65532:65532
+ENTRYPOINT ["python", "-B", "/app/04_scripts/runtime/public_intraday_runtime.py", "serve"]

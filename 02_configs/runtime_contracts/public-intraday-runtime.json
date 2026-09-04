@@ -1,0 +1,226 @@
+{
+  "schema_version": "runtime-manifest/2",
+  "project_id": "public-intraday-runtime",
+  "module_id": "shared-intraday",
+  "service_id": "public-intraday-runtime",
+  "runtime_target": "production_container",
+  "identity_kind": "oci_container",
+  "build": {
+    "dockerfile": "09_deploy/public_intraday_runtime/Dockerfile.public-intraday",
+    "dockerignore": ".dockerignore",
+    "dependency_contracts": [
+      "requirements.txt"
+    ],
+    "compose_sources": [
+      "09_deploy/public_intraday_runtime/compose.yml"
+    ]
+  },
+  "entrypoint": [
+    "python",
+    "-B",
+    "/app/04_scripts/runtime/public_intraday_runtime.py",
+    "serve"
+  ],
+  "working_directory": "/app",
+  "runtime_roots": [
+    {
+      "role": "identity",
+      "container_path": "/runtime",
+      "access": "ro"
+    },
+    {
+      "role": "inputs",
+      "container_path": "/runtime/inputs",
+      "access": "ro"
+    },
+    {
+      "role": "snapshots",
+      "container_path": "/runtime/snapshots",
+      "access": "rw"
+    }
+  ],
+  "required_mounts": [
+    {
+      "role": "identity",
+      "container_path": "/runtime",
+      "read_only": true
+    },
+    {
+      "role": "inputs",
+      "container_path": "/runtime/inputs",
+      "read_only": true
+    },
+    {
+      "role": "snapshots",
+      "container_path": "/runtime/snapshots",
+      "read_only": false
+    }
+  ],
+  "required_environment": [
+    "MARKET_DATA_EXECUTION_GRANT"
+  ],
+  "secret_references": [
+    "tankan-reader"
+  ],
+  "required_executables": [
+    "python"
+  ],
+  "required_python_modules": [
+    "agri_research_agent",
+    "cryptography",
+    "psycopg"
+  ],
+  "production_policy": {
+    "deployment_role": "production",
+    "write_grant_required": true
+  },
+  "preview_policy": {
+    "production_write": false,
+    "production_rw_mounts": false
+  },
+  "validation_probes": [
+    "entrypoint_initialization",
+    "runtime_identity",
+    "dependencies",
+    "runtime_paths",
+    "mount_permissions",
+    "missing_grant_rejected",
+    "wrong_commit_rejected",
+    "wrong_tree_rejected",
+    "wrong_image_rejected",
+    "wrong_service_rejected",
+    "wrong_manifest_rejected",
+    "preview_write_rejected",
+    "release_mismatch_rejected"
+  ],
+  "identity_root_role": "identity",
+  "initialization_commands": [
+    {
+      "name": "readonly-runtime-preflight",
+      "argv": [
+        "python",
+        "-B",
+        "/app/04_scripts/runtime/public_intraday_runtime.py",
+        "readonly-preflight"
+      ]
+    }
+  ],
+  "source_inputs": [
+    {
+      "path": "02_configs/production_runtime_trust.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/runtime/public_intraday_runtime.py",
+      "role": "entrypoint"
+    },
+    {
+      "path": "03_src/agri_research_agent/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/client.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/intraday_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/models.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/queries.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/calendars.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/contracts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/quotes.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/canonical_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/catalog.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/identities.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/three_oil_v1.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/async_update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/file_identity.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/immutable_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/production_grant.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/production_identity.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/runtime_context.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/runtime_manifest.py",
+      "role": "runtime_configuration"
+    }
+  ]
+}
