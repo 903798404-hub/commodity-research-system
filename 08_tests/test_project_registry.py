@@ -13,6 +13,70 @@ from quality import start_project
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Independently authorized Goal B registration; exact files, no directory grants.
+PRODUCTION_INFRA_REGISTRATION = {'project_id': 'shared-production-infrastructure',
+ 'change_class': 'shared',
+ 'status': 'ready',
+ 'runtime_target': 'library_only',
+ 'owned_paths': ['03_src/agri_research_agent/shared/runtime_context.py',
+                 '08_tests/shared/test_runtime_context.py'],
+ 'future_owned_paths': ['03_src/agri_research_agent/shared/production_identity.py',
+                        '02_configs/production_runtime_trust.json',
+                        '09_deploy/runtime_identity/说明.md',
+                        '09_deploy/runtime_identity/host_authorization.py',
+                        '09_deploy/runtime_identity/production_authorization.schema.json',
+                        '07_docs/projects/production-runtime-v2/说明.md',
+                        '07_docs/projects/production-runtime-v2/生产执行身份合同.md',
+                        '08_tests/shared/test_production_identity.py',
+                        '08_tests/test_host_runtime_authorization.py'],
+ 'shared_dependencies': ['03_src/agri_research_agent/shared/file_identity.py',
+                         '03_src/agri_research_agent/automation/full_daily_windows.py',
+                         '04_scripts/automation/full_daily_windows_bootstrap.py',
+                         '09_deploy/spread_release/release_contract.py',
+                         '04_scripts/quality/target_runtime_gate.py'],
+ 'forbidden_paths': ['02_configs/project_registry.json',
+                     '03_src/agri_research_agent/automation',
+                     '03_src/agri_research_agent/data_sources',
+                     '03_src/agri_research_agent/market_data',
+                     '03_src/agri_research_agent/pipelines',
+                     '03_src/agri_research_agent/import_profit',
+                     '03_src/agri_research_agent/summary_engine',
+                     '03_src/agri_research_agent/alerts',
+                     '04_scripts',
+                     '05_apps',
+                     '09_deploy/spread_release',
+                     'Dockerfile',
+                     '.dockerignore',
+                     'docker-compose.yml',
+                     'requirements.txt',
+                     'requirements.in',
+                     'AGENTS.md'],
+ 'required_tests': ['08_tests/test_project_registry.py',
+                    '08_tests/test_quality_controls.py',
+                    '08_tests/test_documentation_contract.py',
+                    '08_tests/shared/test_runtime_context.py',
+                    '08_tests/pipelines/test_full_daily_windows_wrapper.py'],
+ 'future_required_tests': ['08_tests/shared/test_production_identity.py',
+                           '08_tests/test_host_runtime_authorization.py'],
+ 'capabilities': ['versioned explicit git_worktree / oci_container execution identity and Approved '
+                  'Commit/Tree binding',
+                  'trusted host authorization verifier, signed evidence and protected read-only '
+                  'injection contract',
+                  'distinct artifact origin, deployment role and production write grant; '
+                  'candidate-validation isolation',
+                  'additive RuntimeContext integration preserving runtime marker, readonly and path '
+                  'boundaries'],
+ 'boundary_notes': 'PROD-RUNTIME-V2 Goal '
+                   'B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container '
+                   'deployability必须由后续Goal '
+                   'D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project '
+                   'owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private '
+                   'key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity '
+                   'fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY '
+                   'bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared '
+                   'Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring '
+                   'worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。'}
+
 # Exact reviewed PM registration delta; no directory or shared ownership grant.
 PM_EXISTING_ADDITIONS = [
     '03_src/agri_research_agent/pipelines/import_profit_daily.py',
@@ -52,6 +116,15 @@ def registration_baseline():
                         boundary_notes=current['boundary_notes'])
         assert current == expected
         old.update(expected)
+    current = json.loads((ROOT / registry.REGISTRY_PATH).read_text(encoding='utf-8'))
+    if baseline['schema_version'] == 'project-registry/3' and current['schema_version'] == 'project-registry/4':
+        expected = copy.deepcopy(baseline)
+        expected['schema_version'] = 'project-registry/4'
+        expected['legacy_registry_commit'] = '0839be9b57674b3e4ad41a7accffe502d918ff33'
+        next(p for p in expected['projects'] if p['project_id'] == 'dev-governance')['runtime_target'] = 'none'
+        expected['projects'].append(PRODUCTION_INFRA_REGISTRATION)
+        assert current == expected
+        baseline = expected
     return baseline
 
 
@@ -403,13 +476,38 @@ def test_runtime_build_input_case_aliases_and_duplicate_roles_rejected(repositor
             registry.validate_registry(data, root)
 
 
-def test_goal_a_preserves_real_legacy_registry_and_scope():
-    # Capability rollout is not a migration of real business runtime intent.
+def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
     current = registry.load_registry(ROOT)
-    trusted = json.loads(registry.git(ROOT, 'show', f'origin/main:{registry.REGISTRY_PATH}'))
-    assert current == trusted
-    assert current['schema_version'] == 'project-registry/3'
-    assert all('runtime_target' not in p for p in current['projects'])
+    assert current == registration_baseline()
+    assert current['schema_version'] == 'project-registry/4'
+    legacy = json.loads(registry.git(ROOT, 'show', f"{current['legacy_registry_commit']}:{registry.REGISTRY_PATH}"))
+    assert current['protected_paths'] == legacy['protected_paths']
+    by_id = {p['project_id']: p for p in current['projects']}
+    for old in legacy['projects']:
+        expected = copy.deepcopy(old)
+        if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
+        assert by_id[old['project_id']] == expected
+    assert by_id['shared-production-infrastructure'] == PRODUCTION_INFRA_REGISTRATION
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure'}
+
+
+def test_production_infrastructure_registration_has_only_exact_new_ownership():
+    current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
+    assert project == PRODUCTION_INFRA_REGISTRATION
+    assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
+    assert not project.get('reserved_paths')
+    for path in project['owned_paths'] + project['future_owned_paths']:
+        assert Path(path).suffix
+        assert registry.owns(project, path)
+        assert all(not registry.owns(other, path) for other in current['projects'] if other is not project)
+    for path in ['Dockerfile', 'docker-compose.yml', '04_scripts/quality/complete_project.py',
+                 '03_src/agri_research_agent/automation/full_daily_windows.py',
+                 '03_src/agri_research_agent/shared/async_update.py',
+                 '03_src/agri_research_agent/import_profit/cnf_store.py',
+                 '03_src/agri_research_agent/market_data/intraday.py',
+                 '09_deploy/spread_release/release_contract.py',
+                 '09_deploy/runtime_identity/unapproved.py']:
+        assert not registry.owns(project, path), path
 
 
 def test_pm_unfreeze_exact_registration_contract():
@@ -1182,7 +1280,7 @@ def test_notification_registration_contract():
     baseline = registration_baseline()
     current_by_id = {p['project_id']: p for p in data['projects']}
     assert all(current_by_id[p['project_id']] == p for p in baseline['projects'] if p['project_id'] != 'notification-push')
-    assert data['schema_version'] == baseline['schema_version'] == 'project-registry/3'
+    assert data['schema_version'] == baseline['schema_version'] == 'project-registry/4'
     assert data['protected_paths'] == baseline['protected_paths']
     assert project['change_class'] == 'business' and project['status'] == 'ready'
     assert project['owned_paths'] == ['03_src/agri_research_agent/alerts']
