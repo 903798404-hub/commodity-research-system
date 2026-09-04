@@ -135,12 +135,29 @@ def test_spread_formula_is_unchanged_for_tankan_prices() -> None:
     assert result.iloc[0]["leg1_price"] - result.iloc[0]["leg2_price"] == result.iloc[0]["spread_value"] == 500.0
 
 
-def test_unified_producer_invokes_tankan_not_akshare(monkeypatch) -> None:
+def test_unified_producer_invokes_tankan_not_akshare(monkeypatch, tmp_path: Path) -> None:
     refresh = load_script("04_scripts/refresh_public_data.py", "refresh_public_data_e2")
     seen: list[str] = []
+    artifact = tmp_path / "01_data" / "historical_spread_database.parquet"
+    expected = pd.DataFrame({
+        "date": [pd.Timestamp("2026-08-24")],
+        "spread_name": ["M09-RM09"],
+        "spread_value": [500.0],
+        "status": ["success"],
+        "error": [""],
+    })
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
 
-    def run(command, **_):
+    def run(command, **kwargs):
         seen.extend(str(value) for value in command)
+        assert kwargs["cwd"] == tmp_path
+        assert Path(command[1]) == tmp_path / "04_scripts" / "server_update_spreads.py"
+        assert "--update-from-tankan" in command
+        assert "--update-from-akshare" not in command
+        # Simulate the external producer, including its real local output.
+        # Never depend on an ignored artifact in the developer's checkout.
+        artifact.parent.mkdir()
+        expected.to_parquet(artifact, index=False)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(refresh.subprocess, "run", run)
@@ -148,8 +165,28 @@ def test_unified_producer_invokes_tankan_not_akshare(monkeypatch) -> None:
         tankan_secret_file=Path("safe-secret-file"), end_date=date(2026, 8, 24)
     )
     assert result["domestic-spread"].name == "historical_spread_database.parquet"
+    assert result["domestic-spread"] == artifact
+    pd.testing.assert_frame_equal(pd.read_parquet(result["domestic-spread"]), expected)
     assert "--update-from-tankan" in seen
     assert "--update-from-akshare" not in seen
+
+
+@pytest.mark.parametrize("returncode, exception, message", [
+    (0, FileNotFoundError, "Domestic Spread producer did not create Parquet"),
+    (1, RuntimeError, "Domestic Spread producer failed"),
+])
+def test_unified_producer_without_artifact_fails_closed(
+    monkeypatch, tmp_path: Path, returncode, exception, message
+) -> None:
+    refresh = load_script("04_scripts/refresh_public_data.py", "refresh_public_missing_artifact")
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    monkeypatch.setattr(refresh.subprocess, "run", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=returncode, stdout="", stderr=""))
+    with pytest.raises(exception, match=message):
+        refresh._refresh_domestic_spread_artifact(
+            tankan_secret_file=Path("unused-test-secret"), end_date=date(2026, 8, 24)
+        )
+    assert not (tmp_path / "01_data").exists()
 
 
 def test_tankan_update_failure_restores_all_domestic_spread_files(
