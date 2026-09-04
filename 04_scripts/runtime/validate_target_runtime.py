@@ -703,7 +703,7 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
                                        role="candidate_validation", ttl_seconds=900)
         except host.HostAuthorizationError as exc:
             expected = ("runtime manifest/marker differs" if mutation == "manifest"
-                        else "RELEASE bytes differs")
+                        else "RELEASE bytes differ")
             if expected not in str(exc):
                 raise ValidationError(f"host {mutation} rejection occurred at wrong check: {exc}") from exc
         else:
