@@ -730,7 +730,8 @@ def test_existing_project_scope_classification_unchanged():
 def test_notification_registration_contract():
     data, project = registry.select_project(ROOT, 'notification-push')
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
-    assert [p for p in data['projects'] if p['project_id'] != 'notification-push'] == [p for p in baseline['projects'] if p['project_id'] != 'notification-push']
+    current_by_id = {p['project_id']: p for p in data['projects']}
+    assert all(current_by_id[p['project_id']] == p for p in baseline['projects'] if p['project_id'] != 'notification-push')
     assert data['schema_version'] == baseline['schema_version'] == 'project-registry/3'
     assert data['protected_paths'] == baseline['protected_paths']
     assert project['change_class'] == 'business' and project['status'] == 'ready'
@@ -793,3 +794,19 @@ def test_notification_registered_scope_in_temporary_git(tmp_path, monkeypatch, c
         else:path.write_bytes(original)
     assert registry.git(main,'status','--porcelain')==''
     assert registry.git(feature,'status','--porcelain')==''
+
+
+def test_tankan_fixture_isolation_registration():
+    data, project = registry.select_project(ROOT, 'tankan-fixture-isolation')
+    baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
+    assert data['schema_version'] == baseline['schema_version']
+    assert data['protected_paths'] == baseline['protected_paths']
+    current = {p['project_id']: p for p in data['projects']}
+    assert all(current[p['project_id']] == p for p in baseline['projects'])
+    assert project['status'] == 'ready' and project['change_class'] == 'shared'
+    assert project['owned_paths'] == ['08_tests/data_sources/tankan/test_domestic_spread.py']
+    assert not project.get('reserved_paths') and not project.get('future_owned_paths')
+    assert project['owned_paths'][0] in project['required_tests']
+    for path in ['04_scripts/refresh_public_data.py', '03_src/agri_research_agent/data_sources/tankan/client.py',
+                 '08_tests/data_sources/tankan/test_client.py', '01_data/historical_spread_database.parquet']:
+        assert not registry.owns(project, path)

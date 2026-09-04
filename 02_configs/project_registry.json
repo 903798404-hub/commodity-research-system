@@ -482,6 +482,34 @@
       "boundary_notes": "目前无法确认独立Canola专属代码路径，散落在多品种共享模块，禁止猜测授予整目录；登记身份，具体owned/tests另审。"
     },
     {
+      "project_id": "tankan-fixture-isolation",
+      "change_class": "shared",
+      "status": "ready",
+      "owned_paths": [
+        "08_tests/data_sources/tankan/test_domestic_spread.py"
+      ],
+      "shared_dependencies": [
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src",
+        "04_scripts",
+        "05_apps",
+        "02_configs",
+        "09_deploy"
+      ],
+      "required_tests": [
+        "08_tests/data_sources/tankan/test_domestic_spread.py",
+        "08_tests/test_project_registry.py",
+        "08_tests/test_quality_controls.py",
+        "08_tests/test_documentation_contract.py"
+      ],
+      "capabilities": [
+        "isolated temporary Parquet fixture for mocked Tankan producer orchestration"
+      ],
+      "boundary_notes": "Explicitly approved independent fixture isolation repair after main passed by finding an ignored local artifact. Only this exact test module is writable; preserve Tankan-not-AkShare assertions and execute the real refresh orchestration. Generate minimum real Parquet only under pytest tmp_path; never copy or read production artifacts as fixtures. No Public refresh, producer, business, data, deployment, or helper changes authorized."
+    },
+    {
       "project_id": "tankan-live-query",
       "change_class": "shared",
       "status": "ready",
