@@ -661,6 +661,56 @@
         "治理测试"
       ],
       "boundary_notes": "只能在任务明确批准shared开发治理时使用；注册表不是授权。治理范围不允许业务源码、生产数据或部署代码修改；每次--owned可进一步缩小。"
+    },
+    {
+      "project_id": "notification-push",
+      "change_class": "business",
+      "status": "ready",
+      "owned_paths": [
+        "03_src/agri_research_agent/alerts"
+      ],
+      "reserved_paths": [
+        "04_scripts/notifications",
+        "08_tests/alerts",
+        "02_configs/notifications",
+        "07_docs/projects/notification"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/market_data/activated_runtime.py",
+        "03_src/agri_research_agent/market_data/public_weather_current.py",
+        "03_src/agri_research_agent/market_data/public_basis_current.py",
+        "03_src/agri_research_agent/summary_engine/weather.py",
+        "03_src/agri_research_agent/summary_engine/weather_cache.py",
+        "03_src/agri_research_agent/summary_engine/basis.py",
+        "03_src/agri_research_agent/shared/async_update.py",
+        "03_src/agri_research_agent/automation/full_daily_windows.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/summary_engine",
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/pipelines",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/import_profit",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "04_scripts/import_profit",
+        "09_deploy"
+      ],
+      "required_tests": [],
+      "future_required_tests": [
+        "08_tests/alerts/test_notification.py"
+      ],
+      "capabilities": [
+        "Notification Core / message identity / deterministic rendering / idempotency / delivery evidence",
+        "Notification domain modules, CLI, config, tests and project documentation",
+        "Channel-neutral sender adapters within Notification ownership",
+        "Weather Notification Candidate; Domestic Basis Notification Candidate"
+      ],
+      "boundary_notes": "长期 Notification / Push 项目；ownership 不因新增 message type 或 Sender 渠道而扩展上游写权限。当前只允许下一阶段 Weather / Domestic Basis Candidate；Soybean Notification BLOCKED，等待正式 PM / SEALED Snapshot interface 闭包。其他业务 capability 需独立业务授权；project ready 不代表业务全部 ready。本次仅登记，不开发或真实发送。正式数据只读：activated_runtime、Public Current、既有 Summary；Daily evidence 仅复用 full_daily_windows.validate_daily_manifest，Async evidence 仅复用 async_update.validate_update_summary / async_contract_rollout.validate_report；不得调用刷新、provider、wrapper 执行或推导新成功语义。shared_dependencies 均为精确只读接口，不允许写入；其他非 owned 路径默认 out of scope。上游接口不足时停止并报告 SHARED_CHANGE_REQUIRED=YES，独立审批。未来新 consumer 仅通过小型 dependency extension 登记。08_tests/alerts/test_notification.py 是稳定基础验收入口，覆盖核心消息、import/compile 和边界；feature 可增加其他专项测试，completion 前必须实际创建并执行通过。06_outputs/push_logs 依照数据与输出规范作为 Git-ignored runtime delivery evidence，不是源码 ownership，不新增 runtime schema；仅保存脱敏证据，secret/token/webhook/password 不得进入 Git。Registration Candidate 未进入 origin/main 前 start authority 应拒绝；本条不替代正式启动审批。"
     }
   ]
 }

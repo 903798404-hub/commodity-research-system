@@ -641,7 +641,9 @@ def test_reserved_link_rejected(repository,tmp_path):
 def test_real_records_compatibility_and_docs_partition():
     baseline=json.loads(registry.git(ROOT,'show',f'HEAD:{registry.REGISTRY_PATH}'))
     current=registry.load_registry(ROOT)
-    for old,new in zip(baseline['projects'],current['projects'],strict=True):
+    current_by_id = {p['project_id']: p for p in current['projects']}
+    for old in baseline['projects']:
+        new = current_by_id[old['project_id']]
         if old['project_id']!='dev-governance': assert old==new
         else:
             assert {k:v for k,v in old.items() if k!='owned_paths'}=={k:v for k,v in new.items() if k!='owned_paths'}
@@ -704,7 +706,9 @@ def test_reserved_ancestor_of_exact_future_file_conflicts(repository):
 def test_existing_project_scope_classification_unchanged():
     before=json.loads(registry.git(ROOT,'show',f'HEAD:{registry.REGISTRY_PATH}'))
     after=registry.load_registry(ROOT)
-    for old,new in zip(before['projects'],after['projects'],strict=True):
+    after_by_id = {p['project_id']: p for p in after['projects']}
+    for old in before['projects']:
+        new = after_by_id[old['project_id']]
         probes=old['owned_paths']+old.get('future_owned_paths',[])
         probes=probes+['04_scripts/not_owned.py','03_src/agri_research_agent/pipelines/public_data_daily.py']
         for path in probes:
@@ -721,3 +725,71 @@ def test_existing_project_scope_classification_unchanged():
                 except ValueError as exc:
                     return ('REJECTED', str(exc))
             assert outcome(old)==outcome(new),(old['project_id'],path)
+
+
+def test_notification_registration_contract():
+    data, project = registry.select_project(ROOT, 'notification-push')
+    baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
+    assert [p for p in data['projects'] if p['project_id'] != 'notification-push'] == [p for p in baseline['projects'] if p['project_id'] != 'notification-push']
+    assert data['schema_version'] == baseline['schema_version'] == 'project-registry/3'
+    assert data['protected_paths'] == baseline['protected_paths']
+    assert project['change_class'] == 'business' and project['status'] == 'ready'
+    assert project['owned_paths'] == ['03_src/agri_research_agent/alerts']
+    assert project['reserved_paths'] == ['04_scripts/notifications', '08_tests/alerts', '02_configs/notifications', '07_docs/projects/notification']
+    assert project['future_required_tests'] == ['08_tests/alerts/test_notification.py']
+    assert len(project['shared_dependencies']) == 9
+    assert all((ROOT/p).is_file() and not registry.owns(project,p) for p in project['shared_dependencies'])
+    assert 'Soybean Notification BLOCKED' in project['boundary_notes']
+    assert '06_outputs/push_logs' in project['boundary_notes']
+
+
+def test_notification_registered_scope_in_temporary_git(tmp_path, monkeypatch, capsys):
+    _, project = registry.select_project(ROOT, 'notification-push')
+    main = tmp_path/'main'
+    main.mkdir()
+    for name in project['owned_paths'] + project['shared_dependencies'] + project['forbidden_paths']:
+        path=main/name
+        if (ROOT/name).is_file():
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('# fixture\n')
+        else:
+            path.mkdir(parents=True,exist_ok=True)
+            (path/'fixture_anchor.txt').write_text('# fixture\n')
+    for name in ['03_src/agri_research_agent/alerts/__init__.py','04_scripts/anchor.py',
+                 '08_tests/test_anchor.py','02_configs/anchor.json','07_docs/projects/anchor.md']:
+        path=main/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# fixture\n')
+    data={'schema_version':'project-registry/3','protected_paths':[], 'projects':[copy.deepcopy(project)]}
+    write_registry(main,data)
+    registry.validate_registry(data,main)
+    registry.git(main,'init','-b','main')
+    registry.git(main,'config','user.name','Scope Fixture')
+    registry.git(main,'config','user.email','fixture@example.invalid')
+    registry.git(main,'add','.')
+    registry.git(main,'-c','commit.gpgsign=false','commit','-m','fixture approved registration')
+    registry.git(main,'update-ref','refs/remotes/origin/main','HEAD')
+    feature=tmp_path/'feature'
+    registry.git(main,'worktree','add','-b','feat/notification',str(feature),'HEAD')
+    monkeypatch.setattr(scope,'PROJECT_ROOT',feature)
+    positives=['03_src/agri_research_agent/alerts/new_module.py','04_scripts/notifications/preview.py',
+               '08_tests/alerts/test_notification.py','02_configs/notifications/channel.yaml',
+               '07_docs/projects/notification/contract.md']
+    negatives=project['shared_dependencies']+[
+        '03_src/agri_research_agent/pipelines/lutou_weather.py',
+        '03_src/agri_research_agent/pipelines/lutou_domestic_basis.py',
+        '03_src/agri_research_agent/pipelines/public_data_daily.py',
+        '04_scripts/automation/run_full_daily_windows.ps1',
+        '03_src/agri_research_agent/import_profit/market_snapshot.py',
+        '03_src/agri_research_agent/pipelines/public_data_prewarm.py',
+        '03_src/agri_research_agent/pipelines/public_data_providers.py',
+        '07_docs/03_标准开发与生产发布规范.md',
+        '07_docs/projects/other.md','07_docs/projects/canola/contract.md']
+    for name in positives+negatives:
+        path=feature/name;original=path.read_bytes() if path.is_file() else None
+        path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# simulated change\n')
+        expected='PASS' if name in positives else 'FAIL'
+        assert scope.main(['--project','notification-push']) == (0 if expected=='PASS' else 1), name
+        assert json.loads(capsys.readouterr().out)['PROJECT_SCOPE']==expected, name
+        if original is None:path.unlink()
+        else:path.write_bytes(original)
+    assert registry.git(main,'status','--porcelain')==''
+    assert registry.git(feature,'status','--porcelain')==''
