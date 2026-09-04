@@ -449,3 +449,44 @@ def test_shared_future_cannot_change_closed_scope(repository, monkeypatch, capsy
     (root/'other/code.py').write_text('# closed infrastructure changed\n')
     assert scope.main(['--project', 'demo', '--change-class', 'shared']) == 1
     assert json.loads(capsys.readouterr().out)['forbidden_changes'] == ['other/code.py']
+
+
+def test_registered_shared_intraday_exact_boundary():
+    _, project = registry.select_project(ROOT, 'shared-intraday')
+    assert project['change_class'] == 'shared' and project['status'] == 'ready'
+    assert project['owned_paths'] == []
+    assert len(project['future_owned_paths']) == 8
+    assert len(project['future_required_tests']) == 4
+    assert set(project['future_required_tests']) <= set(project['future_owned_paths'])
+    assert 'REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED' in project['boundary_notes']
+    assert 'REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED' in project['boundary_notes']
+    assert 'DEFERRED_TEMPORAL_ACCEPTANCE_BLOCKING=NO' in project['boundary_notes']
+    for path in project['future_owned_paths']:
+        assert registry.owns(project, path)
+        assert not registry.owns(project, path + '/unapproved.py')
+    for path in project['forbidden_paths'] + project['shared_dependencies']:
+        assert not registry.owns(project, path)
+    assert registry.select_project(ROOT, 'soybean-pm')[1]['status'] == 'frozen'
+
+
+@pytest.mark.parametrize('path,expected', [
+    ('03_src/agri_research_agent/market_data/intraday.py', 'PASS'),
+    ('03_src/agri_research_agent/market_data/intraday_helper_random.py', 'FAIL'),
+    ('03_src/agri_research_agent/pipelines/public_data_daily.py', 'FAIL'),
+    ('03_src/agri_research_agent/pipelines/lutou_weather.py', 'FAIL'),
+    ('03_src/agri_research_agent/pipelines/lutou_domestic_basis.py', 'FAIL'),
+    ('03_src/agri_research_agent/shared/async_update.py', 'FAIL'),
+    ('05_apps/import_profit_page.py', 'FAIL'),
+])
+def test_registered_intraday_synthetic_scope(path, expected):
+    _, project = registry.select_project(ROOT, 'shared-intraday')
+    def synthetic_git(root, *args):
+        if args == ('diff', '--name-only', '--no-renames', 'base...HEAD'):
+            return path + '\n'
+        if args[:1] == ('rev-parse',):
+            return 'fixture-head'
+        return ''
+    report = scope.run_audit(ROOT, 'base', project['owned_paths'],
+                             exact_allowed=project['future_owned_paths'],
+                             change_class=project['change_class'], git=synthetic_git)
+    assert report['PROJECT_SCOPE'] == expected
