@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -70,14 +71,19 @@ def test_current_docs_preserve_release_safety_and_baseline_semantics() -> None:
 
 
 def test_current_authority_internal_markdown_links_resolve() -> None:
-    files = [INDEX, SPEC, MANUAL, FEATURE_TEMPLATE, SERVICE_TEMPLATE]
-    files.extend(sorted((DOCS / "projects").glob("*.md")))
+    names = subprocess.check_output(['git','-C',str(ROOT),'ls-files','--cached','--others','--exclude-standard','-z']).decode('utf-8').split('\0')
+    files = [ROOT/name for name in sorted(set(names)) if name.endswith('.md') and '/archive/' not in name and (ROOT/name).is_file()]
+    broken=[]
     for source in files:
+        if re.search(r'^> ARCHIVED / NOT AUTHORITATIVE / DO NOT EXECUTE', read(source), re.MULTILINE):
+            continue
         targets = re.findall(r"\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)", read(source))
         for target in targets:
             if "://" in target or target.startswith("mailto:"):
                 continue
-            assert (source.parent / unquote(target)).resolve().exists(), (source, target)
+            if not (source.parent / unquote(target)).resolve().exists():
+                broken.append((str(source.relative_to(ROOT)),target))
+    assert not broken, broken
 
 
 def test_templates_have_scope_and_release_decision_fields() -> None:
@@ -88,3 +94,35 @@ def test_templates_have_scope_and_release_decision_fields() -> None:
     service = read(SERVICE_TEMPLATE)
     for field in ("容器名称", "正式端口", "Compose 路径", "project name", "正式环境文件路径", "健康检查", "候选本机端口", "回滚镜像", "Build Cache"):
         assert field in service
+
+
+def test_development_authority_chain_and_no_old_execution_rules():
+    root=read(ROOT/'AGENTS.md')
+    index=read(INDEX)
+    spec=read(SPEC)
+    feature=read(FEATURE_TEMPLATE)
+    assert 'archive 不在执行权威链中' in root
+    assert 'ARCHIVED / NOT AUTHORITATIVE / DO NOT EXECUTE' in index
+    for body in (root,spec,feature):
+        assert '--project' in body and 'Registry' in body
+        assert '独立' in body and 'worktree' in body.lower()
+        assert 'ls-remote' in body
+    assert '聊天历史 SHA 不是执行权威' in root
+    for phrase in ('稳定集成线','提交、main 集成','本地 `main` 只领先预期提交'):
+        assert phrase not in '\n'.join((root,index,spec,read(MANUAL),feature))
+    assert 'Prewarm Separation 仍为未闭包 candidate' in spec
+    assert '不要求开发 caller 是 clean main' in index
+
+
+def test_archive_is_not_an_executable_dependency():
+    names=subprocess.check_output(['git','-C',str(ROOT),'ls-files','-z']).decode('utf-8').split('\0')
+    for name in names:
+        path=ROOT/name
+        if not path.is_file() or name==str(Path(__file__).relative_to(ROOT)).replace('\\','/'):
+            continue
+        if name.endswith(('.py','.ps1','.sh','.yaml','.yml','.json')):
+            text=read(path)
+            assert '07_docs/archive/legacy-sources/' not in text, name
+    archive=DOCS/'archive'
+    for name in ('2026-09-04-AsyncContractRollout候选记录.md','2026-09-04-Missing非阻断候选记录.md'):
+        assert 'ARCHIVED / NOT AUTHORITATIVE / DO NOT EXECUTE' in read(archive/name)

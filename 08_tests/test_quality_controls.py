@@ -41,10 +41,10 @@ def _stable_git(_: Path, *args: str) -> str:
     responses = {
         ("rev-parse", "--verify", "base^{commit}"): "base\n",
         ("rev-parse", "HEAD"): "head\n",
-        ("status", "--porcelain=v1", "--untracked-files=all"): "",
-        ("diff", "--name-only", "base...HEAD"): "03_src/feature.py\n05_apps/unrelated.py\n",
-        ("diff", "--name-only", "--cached"): "",
-        ("diff", "--name-only"): "",
+        ("status", "--porcelain=v1", "--no-renames", "--untracked-files=all"): "",
+        ("diff", "--name-only", "--no-renames", "base...HEAD"): "03_src/feature.py\n05_apps/unrelated.py\n",
+        ("diff", "--name-only", "--no-renames", "--cached"): "",
+        ("diff", "--name-only", "--no-renames"): "",
     }
     return responses[command]
 
@@ -61,7 +61,7 @@ def test_incremental_audit_reports_out_of_scope_changes(tmp_path: Path) -> None:
 
 def test_business_feature_cannot_approve_its_own_shared_change(tmp_path: Path) -> None:
     def shared_git(_: Path, *args: str) -> str:
-        if args == ("diff", "--name-only", "base...HEAD"):
+        if args == ("diff", "--name-only", "--no-renames", "base...HEAD"):
             return "04_scripts/refresh_public_data.py\n"
         return _stable_git(tmp_path, *args).replace(
             "03_src/feature.py\n05_apps/unrelated.py\n", "04_scripts/refresh_public_data.py\n"
@@ -82,7 +82,7 @@ def test_business_feature_cannot_approve_its_own_shared_change(tmp_path: Path) -
 
 def test_explicit_shared_change_can_pass_with_owned_paths(tmp_path: Path) -> None:
     def shared_git(_: Path, *args: str) -> str:
-        if args == ("diff", "--name-only", "base...HEAD"):
+        if args == ("diff", "--name-only", "--no-renames", "base...HEAD"):
             return "04_scripts/refresh_public_data.py\n"
         return _stable_git(tmp_path, *args).replace(
             "03_src/feature.py\n05_apps/unrelated.py\n", "04_scripts/refresh_public_data.py\n"
@@ -128,7 +128,7 @@ def test_repository_protected_boundaries_are_shared(path: str) -> None:
 
 def test_known_existing_cannot_hide_shared_change(tmp_path: Path) -> None:
     def shared_git(_: Path, *args: str) -> str:
-        if args == ("diff", "--name-only", "base...HEAD"):
+        if args == ("diff", "--name-only", "--no-renames", "base...HEAD"):
             return "04_scripts/refresh_public_data.py\n"
         return _stable_git(tmp_path, *args).replace(
             "03_src/feature.py\n05_apps/unrelated.py\n", "04_scripts/refresh_public_data.py\n"
@@ -155,7 +155,7 @@ def test_audit_stops_when_worktree_changes(tmp_path: Path) -> None:
     statuses = iter(["", "", " M 03_src/feature.py\n"])
 
     def moving_git(_: Path, *args: str) -> str:
-        if args == ("status", "--porcelain=v1", "--untracked-files=all"):
+        if args == ("status", "--porcelain=v1", "--no-renames", "--untracked-files=all"):
             return next(statuses)
         return _stable_git(tmp_path, *args)
 

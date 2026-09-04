@@ -3,7 +3,7 @@
 ## 权威文档与优先级
 
 - 当前文档唯一入口是 [`07_docs/00_文档索引与适用范围.md`](07_docs/00_文档索引与适用范围.md)。
-- 规则优先级：`AGENTS.md` → 当前任务或项目专项契约 → [`07_docs/03_标准开发与生产发布规范.md`](07_docs/03_标准开发与生产发布规范.md) → [`07_docs/04_开发与发布检查清单.md`](07_docs/04_开发与发布检查清单.md) → [`07_docs/06_日常运行与数据更新手册.md`](07_docs/06_日常运行与数据更新手册.md) → [`07_docs/archive/`](07_docs/archive/) 历史材料。
+- 规则优先级：`AGENTS.md` → 当前任务或项目专项契约（只能收紧边界）→ [`07_docs/03_标准开发与生产发布规范.md`](07_docs/03_标准开发与生产发布规范.md)；检查清单、运行手册和模板只帮助执行。archive 不在执行权威链中。
 - 系统架构和目录边界见 [`07_docs/01_系统架构与项目边界.md`](07_docs/01_系统架构与项目边界.md)，数据与输出规则见 [`07_docs/02_数据与输出规范.md`](07_docs/02_数据与输出规范.md)，执行环境和跨环境传输细则见 [`07_docs/05_执行环境与跨环境传输规范.md`](07_docs/05_执行环境与跨环境传输规范.md)。
 - [`07_docs/archive/`](07_docs/archive/) 和 `legacy-sources/` 只保存历史证据，不得作为当前执行依据。
 
@@ -11,6 +11,9 @@
 
 - 整个 `market-data` 仓库是农产品研究系统唯一开发源、唯一 Git 根目录和唯一代码基线；服务器仅用于生产运行，不作为日常开发环境。
 - GitHub 仓库 `commodity-research-system` 的 `main` 是唯一远程可信主线；本地 `main` checkout 必须保持为 clean `origin/main` 镜像，只用于只读审计和同步，不得作为 feature 开发、临时 merge、集成验收或 release 工作区。所有 feature、integration 和 release 工作都必须使用自己的 branch/worktree；验收通过后从获批 branch 以普通 fast-forward 更新 `origin/main`，再同步本地 `main`。所有可部署代码都必须有明确的完整 Git SHA。
+- 新业务启动必须读取 [Project Registry](02_configs/project_registry.json)，确认 `project_id`、`change_class`、状态、owned/protected paths 和 required tests。执行 `git fetch origin` 与 `git ls-remote origin refs/heads/main`；聊天历史 SHA 不是执行权威。从 fresh `origin/main` 创建独立 feature branch/worktree，不修改 local main。机器入口为 `04_scripts/quality/start_project.py`（默认仅预检，`--create` 才创建）。远程漂移、main 非 clean 镜像、unknown project、Registry 缺失、frozen 或边界未确认时停止。
+- Registry 不授予业务解冻、shared、数据或部署权限。普通 business 不得自行修改 Registry、扩大 owned paths 或改为 shared；shared infrastructure change 必须事先得到明确任务授权。首次 Registry candidate 未合入远程前，只可用获批 shared 低层 Scope Gate 验收，不能称项目启动器已主线生效。
+- 正式 FULL DAILY 只使用 Approved Production Commit 对应的 clean detached control-plane / tool-repo；开发 caller 不需要是 main，不提供业务源码。生产 Approved 不自动跟随远程 main；数据更新与镜像/代码发布独立。详见 [正式入口说明](04_scripts/automation/说明.md)。
 - USDA 子项目正式位置为 `11_独立应用/USDA平衡表/`，继续保持独立前端项目结构，但不得拥有嵌套 `.git`。
 - Oil World 子项目正式位置为 `11_独立应用/OilWorld平衡表/`，源码、配置和发布数据受主仓库管理，授权原始资料保存在 Git 仓库外。
 - 禁止重新创建与 `market-data` 同级的独立 USDA 开发目录；历史独立目录只能作为过渡备份保留，不得继续开发。
@@ -26,7 +29,7 @@
 
 - 开始任何超过简单文本修改的任务前，必须先按[执行环境与跨环境传输规范](07_docs/05_执行环境与跨环境传输规范.md)完成预检并输出结果。
 - 预检至少确认：操作系统、Shell、当前目录、Git 根目录、HEAD、分支、`git status --short`；所有任务输入的实际绝对路径、存在性、可读性及必要时的 SHA-256；命令所属执行环境、该环境能否直接访问输入、是否需要跨环境传输；本任务依赖的工具与权限是否可用。
-- Windows 本地、Codex 执行与附件环境、ChatGPT 会话沙箱、Ubuntu 生产服务器是四个相互隔离的环境。路径只在所属环境有效，同名文件不代表同一文件；跨环境后必须重新核验文件身份。
+- 环境分类以执行环境规范的六类环境为准。路径只在所属环境有效，同名文件不代表同一文件；跨环境后必须重新核验文件身份。
 - 预检失败必须停止正式执行并准确报告单一缺失条件。不得自行安装软件、创建替代文件、从未知目录复制相似文件、修改 `PATH`、扩大权限或绕过身份与主机校验。
 - 长命令必须前台运行并返回明确退出码，外层超时必须长于命令内部超时并留有缓冲。禁止以 `nohup`、后台执行、`Start-Job`、忽略退出码或刚启动时输出文件仍为 0 字节来绕过超时或判断失败；不得因此重复启动同一任务。
 - 涉及跨环境传输、中文路径、中文正文、JSON 或 Markdown 时，必须执行 UTF-8 严格读取、传输后身份复核和编码往返检查；发现损坏立即停止，不得覆盖正式文件。
@@ -47,7 +50,7 @@
 标准流程：独立 feature branch/worktree → 本地修改 → Direct Tests → Project Scope Gate → Impact/必要 Full Tests → 查看 Git diff → 显式 Git commit → 独立 integration/release 验收 → 从获批 branch 普通 fast-forward 更新 `origin/main` → 同步 clean local main 镜像 → 服务器独立只读浅克隆并核验精确提交 → 构建和验证候选镜像 → 密封候选结果和证据 → 删除候选容器并确认不存在 → 生成部署计划 → 使用同一 Image ID 正式切换且禁止 build → 密封部署结果与 Manifest。
 
 - 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
-- 普通业务 feature 必须声明 owned paths，并在进入 Impact/完整回归、commit 或 integration 前运行 `04_scripts/quality/audit_changed_scope.py`。默认禁止跨项目以及修改 Weather producer、shared Public refresh、统一 refresh、shared infrastructure 和部署基础设施；出现这些变化时，只有任务事先明确分类为 `shared` change 才可继续。
+- 普通业务 feature 必须运行 `04_scripts/quality/audit_changed_scope.py --project <project_id>`，在进入 Impact/完整回归、commit 或 integration 前得到 `PROJECT_SCOPE=PASS`。Registry owned paths 不包含只读 shared dependencies；全局 protected 不可被 owned 覆盖。禁止业务用 `--owned`、`--known-existing`、旧 baseline 或修改 Registry 绕过门禁；低层 `--owned` 仅用于测试或获批 shared 任务。Scope Gate 不是权限沙箱，修改门禁本身必须独立治理审查。
 - Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负责生产镜像构建，本地 Docker 构建不再是 commit、push 或部署的前置条件。
 - 不得再建议用户安装 Docker Desktop、Podman 或 WSL，也不得要求用户为本项目安装这些工具。Windows 本地只负责代码修改、Python 和前端测试、Streamlit 启动检查、Dockerfile 与 Compose 静态检查、构建上下文文件存在性检查，以及 Git 差异和工作区检查。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须在服务器隔离候选目录中重建对应镜像，不得在服务器正式仓库中直接构建。

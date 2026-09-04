@@ -1,5 +1,9 @@
 # 开发与部署规则
 
+本文件只补充 USDA 数据/UI 保护；最高开发治理为[根 AGENTS](../../AGENTS.md)，
+标准开发/发布唯一规则见[根规范](../../07_docs/03_标准开发与生产发布规范.md)。
+使用 Project Registry 的 `usda`；独立 feature/integration worktree，local main 只读 clean mirror。
+
 ## 代码基线
 
 - 本目录是 `market-data` 唯一 Git 仓库内的正式 USDA 子项目，正式位置为 `11_独立应用/USDA平衡表/`；不得创建嵌套 `.git` 或恢复同级独立开发目录。
@@ -20,7 +24,7 @@
 
 ## 测试与部署
 
-标准流程：本地修改 → 本地完整测试 → 查看 Git diff → 提交版本 → 备份服务器当前版本 → 仅同步代码与配置 → 构建对应镜像 → 替换对应容器 → HTTP 与页面验收 → 短期保留回滚版本。
+不在此复制发布流程。先 Scope Gate `--project usda` 和专项验证，获授权后依根规范进行独立 integration/release、可信检出、候选和同一 Image ID 切换；不得在正式目录构建或直接覆盖代码。
 
 - 修改 USDA 后必须运行前端测试、TypeScript 检查和生产构建。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须重建对应镜像。

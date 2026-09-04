@@ -10,14 +10,25 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
+try:
+    from . import project_registry
+except ImportError:  # Direct CLI invocation
+    import project_registry
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FINDING_CLASSES = ("BLOCKER", "FOLLOW_UP", "OUT_OF_SCOPE", "INSUFFICIENT_EVIDENCE")
 CHANGE_CLASSES = ("business", "shared")
-# These are repository-level boundaries, not a complete project ownership registry.
-# A business feature still has to declare its narrower owned paths with --owned.
+# Minimum protections cannot be removed by a project's owned declaration/registry.
 SHARED_PATH_PATTERNS = (
     "AGENTS.md",
+    "**/AGENTS.md",
+    "02_configs/project_registry.json",
+    "02_configs/lutou_domestic_basis.yaml",
+    "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+    "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+    "03_src/agri_research_agent/pipelines/tankan_*",
+    "03_src/agri_research_agent/pipelines/lutou_*",
     "02_configs/app_catalog.yaml",
     "02_configs/public_*",
     "02_configs/*weather*.yaml",
@@ -133,10 +144,10 @@ def _status_paths(status: str) -> list[str]:
 
 def _changed_paths(project_root: Path, baseline: str, git: Callable[..., str]) -> list[str]:
     sources = (
-        git(project_root, "diff", "--name-only", f"{baseline}...HEAD"),
-        git(project_root, "diff", "--name-only", "--cached"),
-        git(project_root, "diff", "--name-only"),
-        "\n".join(_status_paths(git(project_root, "status", "--porcelain=v1", "--untracked-files=all"))),
+        git(project_root, "diff", "--name-only", "--no-renames", f"{baseline}...HEAD"),
+        git(project_root, "diff", "--name-only", "--no-renames", "--cached"),
+        git(project_root, "diff", "--name-only", "--no-renames"),
+        "\n".join(_status_paths(git(project_root, "status", "--porcelain=v1", "--no-renames", "--untracked-files=all"))),
     )
     return sorted({_decode_git_path(line).replace("\\", "/") for source in sources for line in source.splitlines() if line})
 
@@ -185,7 +196,7 @@ def run_audit(
     """Return a JSON-ready read-only report; fail if the worktree moves mid-audit."""
     git(project_root, "rev-parse", "--verify", f"{baseline}^{{commit}}")
     current_head = git(project_root, "rev-parse", "HEAD").strip()
-    status_before = git(project_root, "status", "--porcelain=v1", "--untracked-files=all")
+    status_before = git(project_root, "status", "--porcelain=v1", "--no-renames", "--untracked-files=all")
 
     allowed_paths = _safe_paths(project_root, allowed, "--allow")
     if not allowed_paths:
@@ -222,8 +233,8 @@ def run_audit(
             "suggested_follow_up": "停止并另建明确分类为 shared infrastructure change 的任务",
         })
 
-    status_after = git(project_root, "status", "--porcelain=v1", "--untracked-files=all")
-    if status_before != status_after:
+    status_after = git(project_root, "status", "--porcelain=v1", "--no-renames", "--untracked-files=all")
+    if status_before != status_after or current_head != git(project_root, "rev-parse", "HEAD").strip():
         raise WorktreeChangedError("审计期间工作区发生变化；报告已作废，请在稳定工作区重新运行")
 
     has_blocker = any(
@@ -266,7 +277,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", default="origin/main", help="merge-base 比较基线，默认 origin/main")
     parser.add_argument("--change-class", choices=CHANGE_CLASSES, default="business", help="普通业务变更或经明确批准的 shared infrastructure change")
-    parser.add_argument("--owned", "--allow", dest="allowed", required=True, nargs="+", metavar="PATH", help="本项目明确拥有并允许修改的文件或目录")
+    parser.add_argument("--project", help="Project Registry 中的 project_id；普通业务 CLI 必填")
+    parser.add_argument("--owned", "--allow", dest="allowed", nargs="+", metavar="PATH", help="低层测试/明确批准 shared 任务的范围；不可扩大 business registry")
     parser.add_argument("--known-existing", action="append", default=[], metavar="PATH", help="preflight 已记录、非本任务的稳定原有修改")
     parser.add_argument("--dependency", action="append", default=[], metavar="PATH")
     parser.add_argument("--test", action="append", default=[], metavar="PATH")
@@ -281,11 +293,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        registry = None
+        project = None
+        protected = SHARED_PATH_PATTERNS
+        allowed = args.allowed
+        if args.project:
+            if args.baseline != "origin/main" or args.known_existing:
+                raise ValueError("Project mode requires origin/main and cannot exempt known-existing changes")
+            registry, project = project_registry.select_project(PROJECT_ROOT, args.project)
+            if project["change_class"] != args.change_class:
+                raise ValueError("Registry change_class cannot be overridden; shared tasks require explicit --change-class shared")
+            if project["status"] != "ready":
+                raise ValueError(f"Project is {project['status']}; scope registration is not unfreeze approval")
+            if args.change_class == "business":
+                if allowed:
+                    raise ValueError("Business --project cannot override --owned")
+                trusted = project_registry.git(PROJECT_ROOT, "show", f"origin/main:{project_registry.REGISTRY_PATH}")
+                if json.loads(trusted) != registry:
+                    raise ValueError("Business registry differs from origin/main; separate shared approval required")
+            allowed = allowed or project["owned_paths"]
+            if any(not _is_allowed(path, project["owned_paths"]) for path in allowed):
+                raise ValueError("--owned may only narrow registry scope")
+            protected += tuple(pattern for path in registry["protected_paths"] for pattern in (path, path + "/**"))
+            project_registry.assert_main_mirror(PROJECT_ROOT)
+            branch = project_registry.git(PROJECT_ROOT, "branch", "--show-current")
+            if not branch or branch == "main":
+                raise ValueError("Project Gate requires independent non-main branch/worktree")
+        elif args.change_class == "business":
+            raise ValueError("Business CLI requires --project; --owned is a low-level shared/test interface")
         findings = [parse_finding(value) for value in args.finding]
         report = run_audit(
             PROJECT_ROOT,
             args.baseline,
-            args.allowed,
+            allowed or [],
             dependencies=args.dependency,
             tests=args.test,
             configs=args.config,
@@ -295,7 +335,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             findings=findings,
             full_regression_reasons=args.full_regression_reason,
             change_class=args.change_class,
+            shared_patterns=protected,
         )
+        if project:
+            forbidden = [p for p in report["changed_files"] if _is_allowed(p, project["forbidden_paths"])]
+            if forbidden:
+                report["PROJECT_SCOPE"] = "FAIL"
+                report["allow_next_stage"] = False
+                report["next_stage_reason"] = "Registry forbidden paths changed"
+            report.update(project_id=args.project, registry=project_registry.REGISTRY_PATH,
+                          forbidden_changes=forbidden, required_tests=project["required_tests"],
+                          shared_dependencies=project["shared_dependencies"])
     except (RuntimeError, ValueError, WorktreeChangedError) as exc:
         print(f"审计失败: {exc}", file=sys.stderr)
         return 2

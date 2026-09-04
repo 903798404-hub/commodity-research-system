@@ -1,5 +1,7 @@
 # ASYNC-CONTRACT-ROLLOUT — 未提交候选
 
+> ARCHIVED / NOT AUTHORITATIVE / DO NOT EXECUTE。以下为当时的候选和闭包阶段原文；已由后续正式主线与生产验收替代。不得复用其中旧 SHA、Approved 值或停止指令作为新任务依据。
+
 Project: shared contract rollout。遵守根 AGENTS.md，不是新的治理权威来源。
 Baseline: `08640a255e02014d577b990a1878ecc03c4d90c1`；Tree: `df1fceff92aee3065c2dafd44a07225d86e0f415`。
 Worktree: `market-data-worktrees/async-contract-rollout`；branch: `feat/async-contract-rollout`。

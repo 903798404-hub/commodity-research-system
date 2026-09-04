@@ -1,0 +1,522 @@
+{
+  "schema_version": "project-registry/1",
+  "protected_paths": [
+    "AGENTS.md",
+    "02_configs/project_registry.json",
+    "03_src/agri_research_agent/shared",
+    "03_src/agri_research_agent/market_data",
+    "03_src/agri_research_agent/automation",
+    "03_src/agri_research_agent/data_sources/tankan",
+    "03_src/agri_research_agent/data_sources/lutou",
+    "04_scripts/automation",
+    "04_scripts/quality",
+    "09_deploy",
+    "03_src/agri_research_agent/pipelines/lutou_weather.py",
+    "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+    "03_src/agri_research_agent/pipelines/public_data_daily.py",
+    "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+    "03_src/agri_research_agent/pipelines/public_data_providers.py",
+    "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+    "04_scripts/refresh_public_data.py",
+    "03_src/agri_research_agent/research_data/catalog.py",
+    "03_src/agri_research_agent/research_data/identities.py",
+    "11_独立应用/USDA平衡表/AGENTS.md"
+  ],
+  "projects": [
+    {
+      "project_id": "soybean-pm",
+      "change_class": "business",
+      "status": "frozen",
+      "owned_paths": [
+        "03_src/agri_research_agent/import_profit",
+        "04_scripts/import_profit",
+        "02_configs/import_profit_soybean.yaml",
+        "05_apps/import_profit_components.py",
+        "05_apps/import_profit_page.py",
+        "05_apps/import_profit_runtime_page.py",
+        "08_tests/test_import_profit_business_days.py",
+        "08_tests/test_import_profit_cnf_repricing.py",
+        "08_tests/test_import_profit_cnf_store.py",
+        "08_tests/test_import_profit_components.py",
+        "08_tests/test_import_profit_config.py",
+        "08_tests/test_import_profit_contract.py",
+        "08_tests/test_import_profit_contract_mapping.py",
+        "08_tests/test_import_profit_daily_cli.py",
+        "08_tests/test_import_profit_daily_increment.py",
+        "08_tests/test_import_profit_daily_pipeline.py",
+        "08_tests/test_import_profit_dce_candidate.py",
+        "08_tests/test_import_profit_dce_daily.py",
+        "08_tests/test_import_profit_fx.py",
+        "08_tests/test_import_profit_historical_candidate.py",
+        "08_tests/test_import_profit_historical_cnf_adapter.py",
+        "08_tests/test_import_profit_historical_dce_adapter.py",
+        "08_tests/test_import_profit_historical_recalculation.py",
+        "08_tests/test_import_profit_historical_results_candidate.py",
+        "08_tests/test_import_profit_market_snapshot.py",
+        "08_tests/test_import_profit_models.py",
+        "08_tests/test_import_profit_morning_external_inputs.py",
+        "08_tests/test_import_profit_page.py",
+        "08_tests/test_import_profit_query.py",
+        "08_tests/test_import_profit_recalculation.py",
+        "08_tests/test_import_profit_result_store.py",
+        "08_tests/test_import_profit_results_pipeline.py",
+        "08_tests/test_import_profit_reuters_adapter.py",
+        "08_tests/test_import_profit_reuters_candidate.py",
+        "08_tests/test_import_profit_route.py",
+        "08_tests/test_import_profit_runtime_cli.py",
+        "08_tests/test_import_profit_runtime_page.py",
+        "08_tests/test_import_profit_runtime_pipeline.py",
+        "08_tests/test_import_profit_runtime_store.py",
+        "08_tests/test_import_profit_seasonality.py",
+        "08_tests/test_import_profit_soybean.py",
+        "08_tests/test_import_profit_standard_io.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "08_tests/test_import_profit_market_snapshot.py",
+        "08_tests/test_import_profit_cnf_store.py",
+        "08_tests/test_import_profit_result_store.py",
+        "08_tests/test_import_profit_runtime_page.py"
+      ],
+      "capabilities": [
+        "PM业务逻辑",
+        "AM/PM snapshot业务层",
+        "CNF",
+        "Soybean profit materialization",
+        "PM history",
+        "PM UI",
+        "PM专项tests"
+      ],
+      "boundary_notes": "依据现有 import_profit 专属目录及专项测试最小登记。PM冻结；登记不授权解冻。AM/PM公共producer或shared snapshot adapter不因PM消费而转归PM；冻结分支新增PM专属文件需解冻任务审查登记，不猜测路径。"
+    },
+    {
+      "project_id": "weather-basis-push",
+      "change_class": "business",
+      "status": "needs-boundary-review",
+      "owned_paths": [],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [],
+      "capabilities": [
+        "notification formatting",
+        "notification consumer",
+        "send adapter",
+        "notification tests"
+      ],
+      "boundary_notes": "Consumer / Notification 项目，尚无已实现专属路径；alerts sender目前为空占位，不把通用目录授予推送。仅可读正式 Public / Consumer / Daily Summary，不自行刷新数据库；启动前以独立治理审批登记具体新路径及tests。"
+    },
+    {
+      "project_id": "international-spread",
+      "change_class": "business",
+      "status": "ready",
+      "owned_paths": [
+        "03_src/agri_research_agent/application/international_spreads.py",
+        "05_apps/international_spread_page.py",
+        "08_tests/test_international_spread_page.py",
+        "08_tests/research_data/test_international_spread_payload.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "08_tests/test_international_spread_page.py",
+        "08_tests/research_data/test_international_spread_payload.py"
+      ],
+      "capabilities": [],
+      "boundary_notes": "依据专属application/page/tests登记；通用spread计算、Public payload/schema、provider仍只读依赖。"
+    },
+    {
+      "project_id": "weather",
+      "change_class": "business",
+      "status": "ready",
+      "owned_paths": [
+        "03_src/agri_research_agent/weather",
+        "05_apps/crop_weather_page.py",
+        "05_apps/soybean_weather_page.py",
+        "05_apps/weather_research_page.py",
+        "08_tests/test_crop_weather_runtime_display.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "08_tests/test_crop_weather_runtime_display.py",
+        "08_tests/test_soybean_weather.py"
+      ],
+      "capabilities": [],
+      "boundary_notes": "普通Weather业务只登记consumer/页面域。Weather producer、source、weather配置和公共current均protected；修改它们须另行shared任务。"
+    },
+    {
+      "project_id": "domestic-basis",
+      "change_class": "business",
+      "status": "ready",
+      "owned_paths": [
+        "05_apps/basis_page.py",
+        "03_src/agri_research_agent/summary_engine/basis.py",
+        "08_tests/test_basis_page_formal.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "08_tests/test_basis_page_formal.py"
+      ],
+      "capabilities": [],
+      "boundary_notes": "普通Basis consumer边界；producer、mapping、normalization、Async及Public规则不在本business项目owned内。"
+    },
+    {
+      "project_id": "usda",
+      "change_class": "business",
+      "status": "ready",
+      "owned_paths": [
+        "11_独立应用/USDA平衡表/src"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "11_独立应用/USDA平衡表/src/utils/marketYear.test.ts",
+        "11_独立应用/USDA平衡表/src/utils/runtimeDataClient.test.ts"
+      ],
+      "capabilities": [],
+      "boundary_notes": "仅登记独立应用源码及测试；public/data为受保护发布资产，AGENTS、依赖及部署须另行shared/data授权。"
+    },
+    {
+      "project_id": "oil-world",
+      "change_class": "business",
+      "status": "ready",
+      "owned_paths": [
+        "11_独立应用/OilWorld平衡表/05_apps/oil_world_dashboard/src",
+        "11_独立应用/OilWorld平衡表/08_tests"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "11_独立应用/OilWorld平衡表/08_tests"
+      ],
+      "capabilities": [],
+      "boundary_notes": "仅登记前端源码及专项tests；授权原始资料与受控发布快照不属于普通business开发写入范围。"
+    },
+    {
+      "project_id": "palm",
+      "change_class": "business",
+      "status": "needs-boundary-review",
+      "owned_paths": [
+        "02_configs/international_palm_core_six.sealed.json"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [
+        "08_tests/research_data/test_canonical_spreads.py"
+      ],
+      "capabilities": [],
+      "boundary_notes": "仅确认六核心现货价差配置文件；通用canonical_spreads还服务其他品种，不授予整个目录；独立Palm模块路径待补充。"
+    },
+    {
+      "project_id": "canola",
+      "change_class": "business",
+      "status": "needs-boundary-review",
+      "owned_paths": [],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "forbidden_paths": [
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py"
+      ],
+      "required_tests": [],
+      "capabilities": [],
+      "boundary_notes": "目前无法确认独立Canola专属代码路径，散落在多品种共享模块，禁止猜测授予整目录；登记身份，具体owned/tests另审。"
+    },
+    {
+      "project_id": "dev-governance",
+      "change_class": "shared",
+      "status": "ready",
+      "owned_paths": [
+        "AGENTS.md",
+        "README.md",
+        "02_configs/project_registry.json",
+        "04_scripts/quality",
+        "04_scripts/automation/说明.md",
+        "07_docs",
+        "08_tests/test_quality_controls.py",
+        "08_tests/test_documentation_contract.py",
+        "08_tests/test_project_registry.py",
+        "11_独立应用/USDA平衡表/AGENTS.md",
+        "11_独立应用/USDA平衡表/docs",
+        "09_deploy/README_TENCENT_LIGHTHOUSE.md",
+        "11_独立应用/OilWorld平衡表/deploy"
+      ],
+      "shared_dependencies": [],
+      "forbidden_paths": [
+        "03_src",
+        "05_apps"
+      ],
+      "required_tests": [
+        "08_tests/test_quality_controls.py",
+        "08_tests/test_documentation_contract.py",
+        "08_tests/test_project_registry.py"
+      ],
+      "capabilities": [
+        "开发规则",
+        "Project Scope Gate",
+        "Project Registry",
+        "治理测试"
+      ],
+      "boundary_notes": "只能在任务明确批准shared开发治理时使用；注册表不是授权。治理范围不允许业务源码、生产数据或部署代码修改；每次--owned可进一步缩小。"
+    }
+  ]
+}
