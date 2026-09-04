@@ -39,7 +39,8 @@ def v2_contract():
             {"role": "identity", "container_path": "/runtime", "read_only": True},
             {"role": "state", "container_path": "/runtime/state", "read_only": False},
         ],
-        "required_environment": ["DEMO_MODE"], "entrypoint": ["python", "app.py"],
+        "required_environment": ["DEMO_MODE", "MARKET_DATA_EXECUTION_GRANT"],
+        "entrypoint": ["python", "app.py"],
         "working_directory": "/app", "service_id": "demo", "_numeric_uid": 1000,
         "_container_user": "1000:1000",
     }
@@ -150,10 +151,13 @@ def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tm
                            "dockerfile": "Dockerfile"}, secret_references=[])
     rendered = {"services": {"demo": {
         "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
-        "working_dir": "/app", "environment": {"DEMO_MODE": "${DEMO_MODE}"},
+        "working_dir": "/app", "environment": {
+            "DEMO_MODE": "${DEMO_MODE}",
+            "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
         "volumes": [
             {"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
             {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+            {"type": "bind", "source": "${GRANTS}", "target": "/run/market-data-grants", "read_only": True},
         ]}}}
     from types import SimpleNamespace
     monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(
@@ -172,11 +176,14 @@ def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_pat
     rendered = {"secrets": {"tankan-secret": {"file": "${TANKAN_SECRET_FILE:?required}"}},
                 "services": {"demo": {
         "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
-        "working_dir": "/app", "environment": {"DEMO_MODE": "candidate"},
+        "working_dir": "/app", "environment": {
+            "DEMO_MODE": "candidate",
+            "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
         "secrets": [{"source": "tankan-secret", "target": "/run/secrets/tankan.env"}],
         "volumes": [
             {"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
             {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+            {"type": "bind", "source": "${GRANTS}", "target": "/run/market-data-grants", "read_only": True},
         ]}}}
     from types import SimpleNamespace
     monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(
@@ -206,6 +213,43 @@ def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_pat
         engine.validate_source_compose(tmp_path, contract)
     rendered["secrets"].clear()
     with pytest.raises(engine.ValidationError, match="must be file-backed"):
+        engine.validate_source_compose(tmp_path, contract)
+
+
+def test_source_compose_requires_readonly_host_grant_injection(monkeypatch, tmp_path):
+    engine = load_engine()
+    contract = v2_contract()
+    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"},
+                    secret_references=[])
+    service = {
+        "image": "demo@sha256:" + "d" * 64,
+        "entrypoint": contract["entrypoint"], "working_dir": "/app",
+        "environment": {"DEMO_MODE": "candidate",
+                        "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"},
+        "volumes": [
+            {"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
+            {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+            {"type": "bind", "source": "${GRANTS}", "target": "/run/market-data-grants", "read_only": True},
+        ],
+    }
+    from types import SimpleNamespace
+    monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(
+        stdout=json.dumps({"services": {"demo": service}}).encode()))
+    assert engine.validate_source_compose(tmp_path, contract)
+    service["volumes"].pop()
+    with pytest.raises(engine.ValidationError, match="mounts"):
+        engine.validate_source_compose(tmp_path, contract)
+    service["volumes"].append({"type": "bind", "source": "${GRANTS}",
+                               "target": "/run/market-data-grants", "read_only": False})
+    with pytest.raises(engine.ValidationError, match="mounts|grant mount"):
+        engine.validate_source_compose(tmp_path, contract)
+    service["volumes"][-1]["read_only"] = True
+    service["environment"]["MARKET_DATA_EXECUTION_GRANT"] = "/tmp/grant.json"
+    with pytest.raises(engine.ValidationError, match="grant environment"):
+        engine.validate_source_compose(tmp_path, contract)
+    service["environment"]["MARKET_DATA_EXECUTION_GRANT"] = "/run/market-data-grants/grant.json"
+    service["volumes"].append(dict(service["volumes"][0]))
+    with pytest.raises(engine.ValidationError, match="duplicate mount target"):
         engine.validate_source_compose(tmp_path, contract)
 
 

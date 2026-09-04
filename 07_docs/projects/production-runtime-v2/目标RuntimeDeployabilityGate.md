@@ -12,7 +12,9 @@
 
 引擎先以 `docker compose config --no-interpolate` 读取 manifest 声明的 checked-in Compose
 sources，核对 service、Dockerfile、entrypoint、working directory、环境变量名、secret 引用和
-全部 mount target。实际候选 Compose 再把这些 mount target 映射到受保护的一次性 scope；
+全部 mount target。每个 v2 source Compose 必须把 host 控制的 grant 目录只读挂载到
+`/run/market-data-grants`，并把 `MARKET_DATA_EXECUTION_GRANT` 精确设为其中的 `grant.json`；缺失、
+可写或改道均 FAIL。实际候选 Compose 再把 runtime mount target 映射到受保护的一次性 scope；
 placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
 `secret_references` 只在 checked-in Compose 上精确核对 file-backed secret 名称、绝对容器挂载
 目标与顶层 file 引用；拒绝额外或重复 secret mount、external secret 和 secret driver。静态检查不

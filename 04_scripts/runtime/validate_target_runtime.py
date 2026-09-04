@@ -483,6 +483,9 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     environment = service.get("environment") or {}
     if not isinstance(environment, dict) or not set(contract["required_environment"]).issubset(environment):
         raise ValidationError("source Compose required environment contract is incomplete")
+    if ("MARKET_DATA_EXECUTION_GRANT" not in contract["required_environment"]
+            or environment.get("MARKET_DATA_EXECUTION_GRANT") != _GRANT_ROOT + "/grant.json"):
+        raise ValidationError("source Compose execution grant environment is invalid")
     secrets = service.get("secrets") or []
     if any(not isinstance(item, dict) for item in secrets):
         raise ValidationError("source Compose secret references are invalid")
@@ -508,11 +511,21 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     if any(not isinstance(item, dict) or item.get("type") not in {"bind", "volume"}
            for item in volumes):
         raise ValidationError("source Compose mounts are not explicit contracts")
+    mount_targets = [item.get("target") for item in volumes]
+    if len(mount_targets) != len(set(mount_targets)):
+        raise ValidationError("source Compose has a duplicate mount target")
     actual_mounts = {item.get("target"): bool(item.get("read_only", False)) for item in volumes}
     expected_mounts = {item["container_path"]: item["read_only"]
                        for item in contract["required_mounts"]}
+    expected_mounts[_GRANT_ROOT] = True
     if actual_mounts != expected_mounts:
         raise ValidationError("source Compose mounts differ from runtime manifest")
+    grant_mounts = [item for item in volumes if item.get("target") == _GRANT_ROOT]
+    if (len(grant_mounts) != 1 or grant_mounts[0].get("type") != "bind"
+            or not isinstance(grant_mounts[0].get("source"), str)
+            or not grant_mounts[0]["source"].strip()
+            or grant_mounts[0].get("read_only") is not True):
+        raise ValidationError("source Compose execution grant mount is invalid")
     if any("docker.sock" in str(item.get("source", "")) for item in volumes):
         raise ValidationError("source Compose exposes a Docker control socket")
     return rendered
