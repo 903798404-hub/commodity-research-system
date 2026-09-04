@@ -60,6 +60,31 @@ def _unique_object(pairs):
     return result
 
 
+def _evidence_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate target runtime evidence JSON key")
+        result[key] = value
+    return result
+
+
+def _reject_evidence_constant(value):
+    raise ValueError(f"Non-finite target runtime evidence JSON value: {value}")
+
+
+def _read_evidence(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"),
+                           object_pairs_hook=_evidence_object,
+                           parse_constant=_reject_evidence_constant)
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("Invalid target runtime evidence JSON") from exc
+    if type(value) is not dict:
+        raise ValueError("Target runtime evidence JSON must be an object")
+    return value
+
+
 def _read_v2(root: Path, project: dict, path: Path) -> dict:
     # Resolve from this gate's checkout, never an installed package, PYTHONPATH,
     # or a caller-provided module object. The candidate binds these files below.
@@ -266,7 +291,7 @@ def validate_target(root: Path, project: dict) -> dict:
         code = execute_engine(root, project, output)
         if not output.is_file():
             raise ValueError("Target runtime validator produced no machine evidence")
-        evidence = json.loads(output.read_text(encoding="utf-8"))
+        evidence = _read_evidence(output)
     if before != candidate_binding(root, project):
         raise ValueError("Candidate changed during target runtime validation")
     return validate_evidence(evidence, before, code)

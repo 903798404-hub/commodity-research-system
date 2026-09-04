@@ -599,6 +599,23 @@ def test_container_no_output_or_mutation_cannot_complete(repository, monkeypatch
         gate.validate_target(root, project)
 
 
+@pytest.mark.parametrize('raw', [
+    '{"schema_version":"target-runtime-evidence/1","schema_version":"forged"}',
+    '{"schema_version":"target-runtime-evidence/1","image_id":NaN}',
+    '[]',
+])
+def test_container_evidence_json_is_strict_and_object(repository, monkeypatch, raw):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = approved_runtime_fixture(root)
+    def engine(candidate, selected, output):
+        output.write_text(raw, encoding='utf-8')
+        return 0
+    monkeypatch.setattr(gate, 'execute_engine', engine)
+    with pytest.raises(ValueError, match='evidence JSON'):
+        gate.validate_target(root, project)
+
+
 @pytest.mark.parametrize('mutation', ['windows', 'builder_missing', 'wrong_observed_image',
                                     'wrong_observed_commit', 'wrong_observed_compose', 'git_present',
                                     'production_mount', 'production_role', 'missing_probe', 'failed_probe'])
