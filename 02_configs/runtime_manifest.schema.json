@@ -1,0 +1,712 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:market-data:runtime-manifest:1-2",
+  "title": "Versioned source runtime manifest",
+  "description": "Structural validation only. The shared Python parser additionally enforces cross-field path, role, permission, identity-root and duplicate-input invariants. Git/OCI/deployability evidence is validated separately.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/v1"
+    },
+    {
+      "$ref": "#/$defs/v2"
+    }
+  ],
+  "$defs": {
+    "v1": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "runtime-manifest/1"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "service_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "runtime_target": {
+          "const": "production_container"
+        },
+        "identity_kind": {
+          "const": "oci_container"
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "dockerfile": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+            },
+            "dockerignore": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+            },
+            "dependency_contracts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "compose_sources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "dockerfile",
+            "dockerignore",
+            "dependency_contracts",
+            "compose_sources"
+          ],
+          "additionalProperties": false
+        },
+        "entrypoint": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+          },
+          "minItems": 1
+        },
+        "working_directory": {
+          "type": "string",
+          "pattern": "^/[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+          "not": {
+            "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+          }
+        },
+        "runtime_roots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "container_path": {
+                "type": "string",
+                "pattern": "^/[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+                "not": {
+                  "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                }
+              },
+              "access": {
+                "enum": [
+                  "ro",
+                  "rw"
+                ]
+              }
+            },
+            "required": [
+              "role",
+              "container_path",
+              "access"
+            ],
+            "additionalProperties": false
+          },
+          "uniqueItems": true
+        },
+        "required_mounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "container_path": {
+                "type": "string",
+                "pattern": "^/[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+                "not": {
+                  "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                }
+              },
+              "read_only": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "role",
+              "container_path",
+              "read_only"
+            ],
+            "additionalProperties": false
+          },
+          "uniqueItems": true
+        },
+        "required_environment": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+          },
+          "uniqueItems": true
+        },
+        "secret_references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+          },
+          "uniqueItems": true
+        },
+        "required_executables": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+          },
+          "uniqueItems": true
+        },
+        "required_python_modules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+          },
+          "uniqueItems": true
+        },
+        "production_policy": {
+          "type": "object",
+          "properties": {
+            "deployment_role": {
+              "const": "production"
+            },
+            "write_grant_required": {
+              "const": true
+            }
+          },
+          "required": [
+            "deployment_role",
+            "write_grant_required"
+          ],
+          "additionalProperties": false
+        },
+        "preview_policy": {
+          "type": "object",
+          "properties": {
+            "production_write": {
+              "const": false
+            },
+            "production_rw_mounts": {
+              "const": false
+            }
+          },
+          "required": [
+            "production_write",
+            "production_rw_mounts"
+          ],
+          "additionalProperties": false
+        },
+        "validation_probes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "entrypoint_initialization",
+              "runtime_identity",
+              "dependencies",
+              "runtime_paths",
+              "mount_permissions",
+              "missing_grant_rejected",
+              "wrong_commit_rejected",
+              "wrong_tree_rejected",
+              "wrong_image_rejected",
+              "wrong_service_rejected",
+              "wrong_manifest_rejected",
+              "preview_write_rejected",
+              "release_mismatch_rejected"
+            ]
+          },
+          "minItems": 13,
+          "uniqueItems": true,
+          "maxItems": 13
+        }
+      },
+      "required": [
+        "schema_version",
+        "project_id",
+        "module_id",
+        "service_id",
+        "runtime_target",
+        "identity_kind",
+        "build",
+        "entrypoint",
+        "working_directory",
+        "runtime_roots",
+        "required_mounts",
+        "required_environment",
+        "secret_references",
+        "required_executables",
+        "required_python_modules",
+        "production_policy",
+        "preview_policy",
+        "validation_probes"
+      ],
+      "additionalProperties": false
+    },
+    "v2": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "runtime-manifest/2"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "module_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "service_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "runtime_target": {
+          "const": "production_container"
+        },
+        "identity_kind": {
+          "const": "oci_container"
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "dockerfile": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+(?:/[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+)*$",
+              "not": {
+                "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+              }
+            },
+            "dockerignore": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+(?:/[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+)*$",
+              "not": {
+                "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+              }
+            },
+            "dependency_contracts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+(?:/[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+)*$",
+                "not": {
+                  "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                }
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "compose_sources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+(?:/[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+)*$",
+                "not": {
+                  "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                }
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "dockerfile",
+            "dockerignore",
+            "dependency_contracts",
+            "compose_sources"
+          ],
+          "additionalProperties": false
+        },
+        "entrypoint": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "allOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              {
+                "not": {
+                  "pattern": "[\\x00-\\x1f\\x7f]"
+                }
+              }
+            ]
+          },
+          "minItems": 1
+        },
+        "working_directory": {
+          "allOf": [
+            {
+              "type": "string",
+              "pattern": "^/[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+              "not": {
+                "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+              }
+            },
+            {
+              "not": {
+                "pattern": "[\\s\\x00-\\x1f\\x7f]"
+              }
+            }
+          ]
+        },
+        "runtime_roots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "container_path": {
+                "allOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^/[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+                    "not": {
+                      "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                    }
+                  },
+                  {
+                    "not": {
+                      "pattern": "[\\s\\x00-\\x1f\\x7f]"
+                    }
+                  }
+                ]
+              },
+              "access": {
+                "enum": [
+                  "ro",
+                  "rw"
+                ]
+              }
+            },
+            "required": [
+              "role",
+              "container_path",
+              "access"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "required_mounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "container_path": {
+                "allOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^/[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+                    "not": {
+                      "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                    }
+                  },
+                  {
+                    "not": {
+                      "pattern": "[\\s\\x00-\\x1f\\x7f]"
+                    }
+                  }
+                ]
+              },
+              "read_only": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "role",
+              "container_path",
+              "read_only"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "required_environment": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "allOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              {
+                "not": {
+                  "pattern": "[\\x00-\\x1f\\x7f]"
+                }
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "secret_references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "allOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              {
+                "not": {
+                  "pattern": "[\\x00-\\x1f\\x7f]"
+                }
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "required_executables": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "allOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              {
+                "not": {
+                  "pattern": "[\\x00-\\x1f\\x7f]"
+                }
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "required_python_modules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "allOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+              },
+              {
+                "not": {
+                  "pattern": "[\\x00-\\x1f\\x7f]"
+                }
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "production_policy": {
+          "type": "object",
+          "properties": {
+            "deployment_role": {
+              "const": "production"
+            },
+            "write_grant_required": {
+              "const": true
+            }
+          },
+          "required": [
+            "deployment_role",
+            "write_grant_required"
+          ],
+          "additionalProperties": false
+        },
+        "preview_policy": {
+          "type": "object",
+          "properties": {
+            "production_write": {
+              "const": false
+            },
+            "production_rw_mounts": {
+              "const": false
+            }
+          },
+          "required": [
+            "production_write",
+            "production_rw_mounts"
+          ],
+          "additionalProperties": false
+        },
+        "validation_probes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "entrypoint_initialization",
+              "runtime_identity",
+              "dependencies",
+              "runtime_paths",
+              "mount_permissions",
+              "missing_grant_rejected",
+              "wrong_commit_rejected",
+              "wrong_tree_rejected",
+              "wrong_image_rejected",
+              "wrong_service_rejected",
+              "wrong_manifest_rejected",
+              "preview_write_rejected",
+              "release_mismatch_rejected"
+            ]
+          },
+          "minItems": 13,
+          "uniqueItems": true,
+          "maxItems": 13
+        },
+        "identity_root_role": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "initialization_commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "argv": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "allOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[^\\s\\x00](?:[^\\x00]*[^\\s\\x00])?$"
+                    },
+                    {
+                      "not": {
+                        "pattern": "[\\x00-\\x1f\\x7f]"
+                      }
+                    }
+                  ]
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "name",
+              "argv"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "source_inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+(?:/[^/\\\\:*?\\[\\]\\x00-\\x20\\x7f]+)*$",
+                "not": {
+                  "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+                }
+              },
+              "role": {
+                "enum": [
+                  "entrypoint",
+                  "initialization",
+                  "runtime_configuration"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "role"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "contains": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "const": "entrypoint"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "project_id",
+        "module_id",
+        "service_id",
+        "runtime_target",
+        "identity_kind",
+        "build",
+        "entrypoint",
+        "working_directory",
+        "runtime_roots",
+        "required_mounts",
+        "required_environment",
+        "secret_references",
+        "required_executables",
+        "required_python_modules",
+        "production_policy",
+        "preview_policy",
+        "validation_probes",
+        "identity_root_role",
+        "initialization_commands",
+        "source_inputs"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
