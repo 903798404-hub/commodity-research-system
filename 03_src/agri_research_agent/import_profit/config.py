@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, replace
-from datetime import time
+from datetime import date, time
 from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
+
+from .models import CbotContract, ContractMappingError, DceContract
 
 
 class ImportProfitConfigError(ValueError):
@@ -54,6 +56,7 @@ TOP_LEVEL_KEYS = {
     "fx_policy",
     "business_calendar_policy",
     "contract_mapping",
+    "contract_override",
     "display_policy",
     "seasonality_policy",
     "source_policy",
@@ -106,6 +109,133 @@ class ContractMappingRule:
     shipment_month: int
     cbot: ContractLegRule
     dce: ContractLegRule
+
+
+@dataclass(frozen=True, slots=True)
+class ContractOverrideRule:
+    origin: str
+    shipment_year: int
+    shipment_month: int
+    effective_from_business_date: date
+    effective_to_business_date: date | None
+    cbot_contract: CbotContract | None
+    soymeal_contract: DceContract | None
+    soyoil_contract: DceContract | None
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.origin, str) or not self.origin:
+            raise ImportProfitConfigError(
+                "contract override origin must be non-empty"
+            )
+        if (
+            isinstance(self.shipment_year, bool)
+            or not isinstance(self.shipment_year, int)
+            or not 1900 <= self.shipment_year <= 2199
+        ):
+            raise ImportProfitConfigError(
+                "contract override shipment year is invalid"
+            )
+        if (
+            isinstance(self.shipment_month, bool)
+            or not isinstance(self.shipment_month, int)
+            or not 1 <= self.shipment_month <= 12
+        ):
+            raise ImportProfitConfigError(
+                "contract override shipment month is invalid"
+            )
+        if type(self.effective_from_business_date) is not date:
+            raise ImportProfitConfigError(
+                "contract override effective_from must be a date"
+            )
+        if self.effective_to_business_date is not None and (
+            type(self.effective_to_business_date) is not date
+            or self.effective_to_business_date
+            < self.effective_from_business_date
+        ):
+            raise ImportProfitConfigError(
+                "contract override effective date range is invalid"
+            )
+        if self.cbot_contract is not None and not isinstance(
+            self.cbot_contract, CbotContract
+        ):
+            raise ImportProfitConfigError("CBOT override contract is invalid")
+        if self.soymeal_contract is not None and (
+            not isinstance(self.soymeal_contract, DceContract)
+            or self.soymeal_contract.symbol != "M"
+        ):
+            raise ImportProfitConfigError("Soymeal override contract is invalid")
+        if self.soyoil_contract is not None and (
+            not isinstance(self.soyoil_contract, DceContract)
+            or self.soyoil_contract.symbol != "Y"
+        ):
+            raise ImportProfitConfigError("Soyoil override contract is invalid")
+        if all(
+            contract is None
+            for contract in (
+                self.cbot_contract,
+                self.soymeal_contract,
+                self.soyoil_contract,
+            )
+        ):
+            raise ImportProfitConfigError(
+                "contract override rule must override at least one leg"
+            )
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise ImportProfitConfigError(
+                "contract override reason must be non-empty"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ContractOverrideConfig:
+    enabled: bool
+    rules: tuple[ContractOverrideRule, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ImportProfitConfigError(
+                "contract override enabled state must be boolean"
+            )
+        if not isinstance(self.rules, tuple) or any(
+            not isinstance(rule, ContractOverrideRule) for rule in self.rules
+        ):
+            raise ImportProfitConfigError(
+                "contract override rules must be an immutable tuple"
+            )
+        for index, left in enumerate(self.rules):
+            for right in self.rules[index + 1 :]:
+                if (
+                    left.origin,
+                    left.shipment_year,
+                    left.shipment_month,
+                ) != (
+                    right.origin,
+                    right.shipment_year,
+                    right.shipment_month,
+                ):
+                    continue
+                latest_start = max(
+                    left.effective_from_business_date,
+                    right.effective_from_business_date,
+                )
+                earliest_end = min(
+                    left.effective_to_business_date or date.max,
+                    right.effective_to_business_date or date.max,
+                )
+                if latest_start > earliest_end:
+                    continue
+                if any(
+                    getattr(left, f"{leg}_contract") is not None
+                    and getattr(right, f"{leg}_contract") is not None
+                    for leg in ("cbot", "soymeal", "soyoil")
+                ):
+                    raise ImportProfitConfigError(
+                        "contract override rules contain overlapping periods"
+                    )
+
+
+DEFAULT_CONTRACT_OVERRIDE = ContractOverrideConfig(False, ())
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,10 +342,23 @@ class SoybeanImportProfitConfig:
     display_policy: DisplayPolicy
     seasonality_policy: SeasonalityPolicy
     dce_daily_policy: DceDailyPolicy = DEFAULT_DCE_DAILY_POLICY
+    contract_override: ContractOverrideConfig = DEFAULT_CONTRACT_OVERRIDE
 
     @property
     def origin_codes(self) -> tuple[str, ...]:
         return tuple(origin.code for origin in self.origins)
+
+    @property
+    def contract_mapping_hash(self) -> str:
+        from .mapping_snapshot import mapping_hash_for_rules
+
+        return mapping_hash_for_rules(self.commodity, self.contract_mapping)
+
+    @property
+    def contract_override_hash(self) -> str:
+        from .override_snapshot import contract_override_hash_for_config
+
+        return contract_override_hash_for_config(self.contract_override)
 
     def resolve_parameters(self, origin: str) -> SoybeanParameters:
         if origin not in self.origin_codes:
@@ -258,6 +401,9 @@ def load_soybean_config(path: str | Path) -> SoybeanImportProfitConfig:
         raise ImportProfitConfigError("cnf_unit must be cents_per_bushel")
 
     mapping = _parse_contract_mapping(root["contract_mapping"], schema_version)
+    contract_override = _parse_contract_override(
+        root["contract_override"], origins
+    )
     fx_policy = _parse_fx_policy(root["fx_policy"])
     calendar_policy = _parse_calendar_policy(root["business_calendar_policy"])
     display_policy = _parse_display_policy(root["display_policy"])
@@ -280,6 +426,7 @@ def load_soybean_config(path: str | Path) -> SoybeanImportProfitConfig:
         display_policy=display_policy,
         seasonality_policy=seasonality_policy,
         dce_daily_policy=dce_daily_policy,
+        contract_override=contract_override,
     )
 
 
@@ -377,6 +524,179 @@ def _parse_contract_leg(value: object, path: str) -> ContractLegRule:
     if offset not in {0, 1}:
         raise ImportProfitConfigError(f"{path}.year_offset must be 0 or 1")
     return ContractLegRule(month, offset)
+
+
+def _parse_contract_override(
+    value: object,
+    origins: tuple[Origin, ...],
+) -> ContractOverrideConfig:
+    raw = _mapping(value, "contract_override")
+    _require_exact_keys(raw, {"enabled", "rules"}, "contract_override")
+    enabled = raw["enabled"]
+    if not isinstance(enabled, bool):
+        raise ImportProfitConfigError(
+            "contract_override.enabled must be boolean"
+        )
+    allowed_origins = {origin.code for origin in origins}
+    parsed: list[ContractOverrideRule] = []
+    for index, item in enumerate(_list(raw["rules"], "contract_override.rules")):
+        path = f"contract_override.rules[{index}]"
+        rule = _mapping(item, path)
+        _require_exact_keys(
+            rule,
+            {
+                "origin",
+                "shipment_year",
+                "shipment_month",
+                "effective_from_business_date",
+                "effective_to_business_date",
+                "contracts",
+                "reason",
+            },
+            path,
+        )
+        origin = rule["origin"]
+        if not isinstance(origin, str) or origin not in allowed_origins:
+            raise ImportProfitConfigError(
+                f"{path}.origin must be a configured origin"
+            )
+        shipment_year = _integer(
+            rule["shipment_year"], f"{path}.shipment_year"
+        )
+        if not 1900 <= shipment_year <= 2199:
+            raise ImportProfitConfigError(
+                f"{path}.shipment_year is outside the business range"
+            )
+        shipment_month = _month(
+            rule["shipment_month"], f"{path}.shipment_month"
+        )
+        effective_from = _date_value(
+            rule["effective_from_business_date"],
+            f"{path}.effective_from_business_date",
+        )
+        effective_to = (
+            None
+            if rule["effective_to_business_date"] is None
+            else _date_value(
+                rule["effective_to_business_date"],
+                f"{path}.effective_to_business_date",
+            )
+        )
+        if effective_to is not None and effective_to < effective_from:
+            raise ImportProfitConfigError(
+                f"{path} effective date range is invalid"
+            )
+        contracts = _mapping(rule["contracts"], f"{path}.contracts")
+        _require_exact_keys(
+            contracts, {"cbot", "soymeal", "soyoil"}, f"{path}.contracts"
+        )
+        cbot_contract = _parse_override_contract(
+            contracts["cbot"], f"{path}.contracts.cbot", "cbot"
+        )
+        soymeal_contract = _parse_override_contract(
+            contracts["soymeal"], f"{path}.contracts.soymeal", "soymeal"
+        )
+        soyoil_contract = _parse_override_contract(
+            contracts["soyoil"], f"{path}.contracts.soyoil", "soyoil"
+        )
+        if all(
+            contract is None
+            for contract in (cbot_contract, soymeal_contract, soyoil_contract)
+        ):
+            raise ImportProfitConfigError(
+                f"{path} must override at least one contract"
+            )
+        reason = rule["reason"]
+        if not isinstance(reason, str) or not reason.strip():
+            raise ImportProfitConfigError(f"{path}.reason must be non-empty")
+        parsed.append(
+            ContractOverrideRule(
+                origin=origin,
+                shipment_year=shipment_year,
+                shipment_month=shipment_month,
+                effective_from_business_date=effective_from,
+                effective_to_business_date=effective_to,
+                cbot_contract=cbot_contract,
+                soymeal_contract=soymeal_contract,
+                soyoil_contract=soyoil_contract,
+                reason=reason.strip(),
+            )
+        )
+    _validate_override_rule_conflicts(parsed)
+    return ContractOverrideConfig(enabled, tuple(parsed))
+
+
+def _parse_override_contract(
+    value: object,
+    path: str,
+    leg: str,
+) -> CbotContract | DceContract | None:
+    if value is None:
+        return None
+    raw = _mapping(value, path)
+    _require_exact_keys(raw, {"contract_year", "contract_month"}, path)
+    year = _integer(raw["contract_year"], f"{path}.contract_year")
+    month = _month(raw["contract_month"], f"{path}.contract_month")
+    try:
+        if leg == "cbot":
+            return CbotContract(year, month)
+        if leg == "soymeal":
+            return DceContract.soymeal(year, month)
+        return DceContract.soyoil(year, month)
+    except ContractMappingError as exc:
+        raise ImportProfitConfigError(f"{path} contract is invalid") from exc
+
+
+def _validate_override_rule_conflicts(
+    rules: list[ContractOverrideRule],
+) -> None:
+    for index, left in enumerate(rules):
+        for right in rules[index + 1 :]:
+            if (
+                left.origin,
+                left.shipment_year,
+                left.shipment_month,
+            ) != (
+                right.origin,
+                right.shipment_year,
+                right.shipment_month,
+            ) or not _date_ranges_overlap(left, right):
+                continue
+            overlapping_legs = [
+                leg
+                for leg in ("cbot", "soymeal", "soyoil")
+                if getattr(left, f"{leg}_contract") is not None
+                and getattr(right, f"{leg}_contract") is not None
+            ]
+            if overlapping_legs:
+                raise ImportProfitConfigError(
+                    "contract_override rules contain overlapping effective "
+                    f"periods for legs: {overlapping_legs}"
+                )
+
+
+def _date_ranges_overlap(
+    left: ContractOverrideRule,
+    right: ContractOverrideRule,
+) -> bool:
+    latest_start = max(
+        left.effective_from_business_date,
+        right.effective_from_business_date,
+    )
+    left_end = left.effective_to_business_date or date.max
+    right_end = right.effective_to_business_date or date.max
+    return latest_start <= min(left_end, right_end)
+
+
+def _date_value(value: object, path: str) -> date:
+    if type(value) is date:
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise ImportProfitConfigError(f"{path} must be an ISO date") from exc
+    raise ImportProfitConfigError(f"{path} must be an ISO date")
 
 
 def _parse_fx_policy(value: object) -> FxPolicy:

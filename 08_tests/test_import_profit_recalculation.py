@@ -200,6 +200,8 @@ def dce(code: str, price: float) -> DcePricePoint:
         source="akshare",
         source_function="futures_zh_spot",
         is_usable=True,
+        quote_date_evidence_status="source_confirmed",
+        source_quote_date=BUSINESS_DATE,
         source_snapshot_sha256="DCE-SHA",
     )
 

@@ -29,12 +29,12 @@ origins:
     label: 阿根廷
 
 default_parameters:
-  meal_yield: 0.785
-  oil_yield: 0.185
+  meal_yield: 0.795
+  oil_yield: 0.19
   cents_per_bushel_to_usd_per_tonne: 0.367437
   tariff_rate: 0.03
   vat_rate: 0.09
-  port_charge_cny_per_tonne: 100
+  port_charge_cny_per_tonne: 50
   processing_fee_cny_per_tonne: 150
   additional_fees_cny_per_tonne: 0
 
@@ -161,19 +161,19 @@ contract_mapping:
       dce: {contract_month: 5, year_offset: 0}
     - shipment_month: 4
       cbot: {contract_month: 5, year_offset: 0}
-      dce: {contract_month: 9, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
     - shipment_month: 5
       cbot: {contract_month: 5, year_offset: 0}
-      dce: {contract_month: 9, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
     - shipment_month: 6
       cbot: {contract_month: 7, year_offset: 0}
-      dce: {contract_month: 9, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
     - shipment_month: 7
       cbot: {contract_month: 7, year_offset: 0}
-      dce: {contract_month: 9, year_offset: 0}
+      dce: {contract_month: 5, year_offset: 0}
     - shipment_month: 8
       cbot: {contract_month: 9, year_offset: 0}
-      dce: {contract_month: 1, year_offset: 1}
+      dce: {contract_month: 5, year_offset: 0}
     - shipment_month: 9
       cbot: {contract_month: 9, year_offset: 0}
       dce: {contract_month: 1, year_offset: 1}
@@ -186,6 +186,10 @@ contract_mapping:
     - shipment_month: 12
       cbot: {contract_month: 1, year_offset: 1}
       dce: {contract_month: 1, year_offset: 1}
+
+contract_override:
+  enabled: false
+  rules: []
 
 display_policy:
   application: spread-dashboard

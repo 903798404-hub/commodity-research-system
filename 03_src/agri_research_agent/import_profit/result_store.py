@@ -18,13 +18,16 @@ import pyarrow.parquet as pq
 from agri_research_agent.pipelines.import_profit_results import (
     SoybeanResultCandidate,
 )
+from .parameter_snapshot import build_parameter_snapshot
+from .mapping_snapshot import build_mapping_snapshot
+from .override_snapshot import build_contract_override_snapshot
 
 
 SNAPSHOT_FILENAME = "soybean_market_snapshots.parquet"
 RESULT_FILENAME = "soybean_net_crush_results.parquet"
 MANIFEST_FILENAME = "manifest.json"
 QUALITY_FILENAME = "quality_report.json"
-RESULT_SCHEMA_VERSION = "1"
+RESULT_SCHEMA_VERSION = "4"
 
 SNAPSHOT_KEY_FIELDS = (
     "business_date",
@@ -34,7 +37,7 @@ SNAPSHOT_KEY_FIELDS = (
     "shipment_month",
 )
 
-SNAPSHOT_SCHEMA = pa.schema(
+LEGACY_SNAPSHOT_SCHEMA = pa.schema(
     [
         pa.field("business_date", pa.date32(), nullable=False),
         pa.field("commodity", pa.string(), nullable=False),
@@ -72,7 +75,67 @@ SNAPSHOT_SCHEMA = pa.schema(
         pa.field("missing_reasons", pa.list_(pa.string()), nullable=False),
     ]
 )
-RESULT_SCHEMA = pa.schema(
+LEGACY_CONTRACT_IDENTITY_SNAPSHOT_SCHEMA = pa.schema(
+    [
+        *LEGACY_SNAPSHOT_SCHEMA,
+        pa.field("parameter_hash", pa.string(), nullable=False),
+    ]
+)
+LEGACY_QUOTE_DATE_SNAPSHOT_SCHEMA = pa.schema(
+    [
+        *LEGACY_CONTRACT_IDENTITY_SNAPSHOT_SCHEMA,
+        pa.field("soymeal_contract_identity_status", pa.string(), nullable=True),
+        pa.field("soymeal_source_contract_code", pa.string(), nullable=True),
+        pa.field("soymeal_source_delivery_month", pa.int8(), nullable=True),
+        pa.field("soyoil_contract_identity_status", pa.string(), nullable=True),
+        pa.field("soyoil_source_contract_code", pa.string(), nullable=True),
+        pa.field("soyoil_source_delivery_month", pa.int8(), nullable=True),
+    ]
+)
+LEGACY_MAPPING_PROVENANCE_SNAPSHOT_SCHEMA = pa.schema(
+    [
+        *LEGACY_QUOTE_DATE_SNAPSHOT_SCHEMA,
+        pa.field("soymeal_quote_date_evidence_status", pa.string(), nullable=True),
+        pa.field("soymeal_source_quote_date", pa.date32(), nullable=True),
+        pa.field("soymeal_source_quote_time", pa.time64("us"), nullable=True),
+        pa.field("soyoil_quote_date_evidence_status", pa.string(), nullable=True),
+        pa.field("soyoil_source_quote_date", pa.date32(), nullable=True),
+        pa.field("soyoil_source_quote_time", pa.time64("us"), nullable=True),
+    ]
+)
+LEGACY_OVERRIDE_PROVENANCE_SNAPSHOT_SCHEMA = pa.schema(
+    [
+        *LEGACY_MAPPING_PROVENANCE_SNAPSHOT_SCHEMA,
+        pa.field("mapping_hash", pa.string(), nullable=False),
+    ]
+)
+SNAPSHOT_SCHEMA = pa.schema(
+    [
+        *LEGACY_OVERRIDE_PROVENANCE_SNAPSHOT_SCHEMA,
+        pa.field("cbot_automatic_contract_year", pa.int16(), nullable=False),
+        pa.field("cbot_automatic_contract_month", pa.int8(), nullable=False),
+        pa.field("cbot_override_contract_year", pa.int16(), nullable=True),
+        pa.field("cbot_override_contract_month", pa.int8(), nullable=True),
+        pa.field("cbot_selection_mode", pa.string(), nullable=False),
+        pa.field("cbot_override_reason", pa.string(), nullable=True),
+        pa.field("cbot_override_effective_from", pa.date32(), nullable=True),
+        pa.field("cbot_override_effective_to", pa.date32(), nullable=True),
+        pa.field("soymeal_automatic_contract_code", pa.string(), nullable=False),
+        pa.field("soymeal_override_contract_code", pa.string(), nullable=True),
+        pa.field("soymeal_selection_mode", pa.string(), nullable=False),
+        pa.field("soymeal_override_reason", pa.string(), nullable=True),
+        pa.field("soymeal_override_effective_from", pa.date32(), nullable=True),
+        pa.field("soymeal_override_effective_to", pa.date32(), nullable=True),
+        pa.field("soyoil_automatic_contract_code", pa.string(), nullable=False),
+        pa.field("soyoil_override_contract_code", pa.string(), nullable=True),
+        pa.field("soyoil_selection_mode", pa.string(), nullable=False),
+        pa.field("soyoil_override_reason", pa.string(), nullable=True),
+        pa.field("soyoil_override_effective_from", pa.date32(), nullable=True),
+        pa.field("soyoil_override_effective_to", pa.date32(), nullable=True),
+        pa.field("contract_override_hash", pa.string(), nullable=False),
+    ]
+)
+LEGACY_RESULT_SCHEMA = pa.schema(
     [
         pa.field("business_date", pa.date32(), nullable=False),
         pa.field("commodity", pa.string(), nullable=False),
@@ -92,6 +155,24 @@ RESULT_SCHEMA = pa.schema(
             pa.timestamp("us", tz="UTC"),
             nullable=False,
         ),
+    ]
+)
+LEGACY_MAPPING_PROVENANCE_RESULT_SCHEMA = pa.schema(
+    [
+        *LEGACY_RESULT_SCHEMA,
+        pa.field("parameter_hash", pa.string(), nullable=False),
+    ]
+)
+LEGACY_OVERRIDE_PROVENANCE_RESULT_SCHEMA = pa.schema(
+    [
+        *LEGACY_MAPPING_PROVENANCE_RESULT_SCHEMA,
+        pa.field("mapping_hash", pa.string(), nullable=False),
+    ]
+)
+RESULT_SCHEMA = pa.schema(
+    [
+        *LEGACY_OVERRIDE_PROVENANCE_RESULT_SCHEMA,
+        pa.field("contract_override_hash", pa.string(), nullable=False),
     ]
 )
 
@@ -297,14 +378,46 @@ def _snapshot_rows(candidate: SoybeanResultCandidate) -> list[dict[str, Any]]:
                 "soymeal_price_cny_per_tonne": snapshot.soymeal_price_cny_per_tonne,
                 "soymeal_price_type": snapshot.soymeal_price_type,
                 "soymeal_source": snapshot.soymeal_source,
+                "soymeal_contract_identity_status": (
+                    snapshot.soymeal_contract_identity_status
+                ),
+                "soymeal_source_contract_code": (
+                    snapshot.soymeal_source_contract_code
+                ),
+                "soymeal_source_delivery_month": (
+                    snapshot.soymeal_source_delivery_month
+                ),
+                "soymeal_quote_date_evidence_status": (
+                    snapshot.soymeal_quote_date_evidence_status
+                ),
+                "soymeal_source_quote_date": snapshot.soymeal_source_quote_date,
+                "soymeal_source_quote_time": snapshot.soymeal_source_quote_time,
                 "soyoil_contract_code": snapshot.soyoil_contract_code,
                 "soyoil_price_cny_per_tonne": snapshot.soyoil_price_cny_per_tonne,
                 "soyoil_price_type": snapshot.soyoil_price_type,
                 "soyoil_source": snapshot.soyoil_source,
+                "soyoil_contract_identity_status": (
+                    snapshot.soyoil_contract_identity_status
+                ),
+                "soyoil_source_contract_code": (
+                    snapshot.soyoil_source_contract_code
+                ),
+                "soyoil_source_delivery_month": (
+                    snapshot.soyoil_source_delivery_month
+                ),
+                "soyoil_quote_date_evidence_status": (
+                    snapshot.soyoil_quote_date_evidence_status
+                ),
+                "soyoil_source_quote_date": snapshot.soyoil_source_quote_date,
+                "soyoil_source_quote_time": snapshot.soyoil_source_quote_time,
                 "snapshot_status": snapshot.snapshot_status.value,
                 "missing_reasons": [
                     reason.value for reason in snapshot.missing_reasons
                 ],
+                "parameter_hash": snapshot.parameter_hash,
+                "mapping_hash": snapshot.mapping_hash,
+                **contract_selection_row(snapshot),
+                "contract_override_hash": snapshot.contract_override_hash,
             }
         )
     _validate_rows(rows)
@@ -334,6 +447,9 @@ def _result_rows(candidate: SoybeanResultCandidate) -> list[dict[str, Any]]:
                 "parameter_version": result.parameter_version,
                 "mapping_identity": result.mapping_identity,
                 "calculated_at": candidate.calculated_at,
+                "parameter_hash": result.parameter_hash,
+                "mapping_hash": result.mapping_hash,
+                "contract_override_hash": result.contract_override_hash,
             }
         )
     _validate_rows(rows)
@@ -348,8 +464,29 @@ def _validate_rows(rows: list[dict[str, Any]]) -> None:
         raise ResultStoreValidationError("candidate rows are not stably sorted")
 
 
+def with_legacy_contract_identity(row: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade a pre-Goal-B snapshot row without inventing source evidence."""
+
+    upgraded = dict(row)
+    for leg in ("soymeal", "soyoil"):
+        status = f"{leg}_contract_identity_status"
+        if status not in upgraded:
+            upgraded[status] = "legacy_unknown"
+            upgraded[f"{leg}_source_contract_code"] = None
+            upgraded[f"{leg}_source_delivery_month"] = None
+        quote_status = f"{leg}_quote_date_evidence_status"
+        if quote_status not in upgraded:
+            upgraded[quote_status] = "legacy_unknown"
+            upgraded[f"{leg}_source_quote_date"] = None
+            upgraded[f"{leg}_source_quote_time"] = None
+    return upgraded
+
+
 def _quality_payload(candidate: SoybeanResultCandidate) -> dict[str, Any]:
     batch = candidate.recalculation_batch
+    provenance = build_parameter_snapshot(candidate.config)
+    mapping_provenance = build_mapping_snapshot(candidate.config)
+    override_provenance = build_contract_override_snapshot(candidate.config)
     return {
         "schema_version": RESULT_SCHEMA_VERSION,
         "synthetic_input": candidate.synthetic_input,
@@ -391,6 +528,22 @@ def _quality_payload(candidate: SoybeanResultCandidate) -> dict[str, Any]:
             else ["one_or_more_requested_keys_are_incomplete"]
         ),
         "candidate_status": candidate.candidate_status.value,
+        "parameter_snapshot_present": True,
+        "parameter_hash_valid": True,
+        "result_parameter_identity_consistent": (
+            provenance.parameter_hash == batch.parameter_hash
+        ),
+        "mapping_snapshot_present": True,
+        "mapping_hash_valid": True,
+        "result_mapping_identity_consistent": (
+            mapping_provenance.mapping_hash == batch.mapping_hash
+        ),
+        "contract_override_snapshot_present": True,
+        "contract_override_hash_valid": True,
+        "result_contract_override_identity_consistent": (
+            override_provenance.contract_override_hash
+            == batch.contract_override_hash
+        ),
     }
 
 
@@ -399,6 +552,54 @@ def _manifest_payload(
     output_files: tuple[OutputFileIdentity, ...],
 ) -> dict[str, Any]:
     batch = candidate.recalculation_batch
+    provenance = build_parameter_snapshot(candidate.config)
+    mapping_provenance = build_mapping_snapshot(candidate.config)
+    override_provenance = build_contract_override_snapshot(candidate.config)
+    if provenance.parameter_hash != batch.parameter_hash:
+        raise ResultStoreValidationError(
+            "candidate parameter identity does not match configuration"
+        )
+    row_hashes = {
+        item.market_snapshot.parameter_hash for item in batch.items
+    } | {
+        item.calculation_result.parameter_hash for item in batch.items
+    }
+    if row_hashes and row_hashes != {provenance.parameter_hash}:
+        raise ResultStoreValidationError(
+            "candidate rows do not match the parameter snapshot"
+        )
+    row_mapping_hashes = {
+        item.market_snapshot.mapping_hash for item in batch.items
+    } | {
+        item.calculation_result.mapping_hash for item in batch.items
+    }
+    if (
+        mapping_provenance.mapping_hash != batch.mapping_hash
+        or (
+            row_mapping_hashes
+            and row_mapping_hashes != {mapping_provenance.mapping_hash}
+        )
+    ):
+        raise ResultStoreValidationError(
+            "candidate rows do not match the mapping snapshot"
+        )
+    row_override_hashes = {
+        item.market_snapshot.contract_override_hash for item in batch.items
+    } | {
+        item.calculation_result.contract_override_hash for item in batch.items
+    }
+    if (
+        override_provenance.contract_override_hash
+        != batch.contract_override_hash
+        or (
+            row_override_hashes
+            and row_override_hashes
+            != {override_provenance.contract_override_hash}
+        )
+    ):
+        raise ResultStoreValidationError(
+            "candidate rows do not match the contract override snapshot"
+        )
     return {
         "schema_version": RESULT_SCHEMA_VERSION,
         "pipeline_version": candidate.pipeline_version,
@@ -414,7 +615,13 @@ def _manifest_payload(
         "requested_keys": [_key_dict(key) for key in batch.requested_keys],
         "config_schema_version": int(batch.parameter_version),
         "parameter_version": batch.parameter_version,
+        "parameter_snapshot": provenance.snapshot,
+        "parameter_hash": provenance.parameter_hash,
         "mapping_identity": batch.mapping_identity,
+        "mapping_snapshot": mapping_provenance.snapshot,
+        "mapping_hash": mapping_provenance.mapping_hash,
+        "contract_override_snapshot": override_provenance.snapshot,
+        "contract_override_hash": override_provenance.contract_override_hash,
         "input_files": [
             identity.as_manifest_dict() for identity in candidate.input_files
         ],
@@ -422,6 +629,61 @@ def _manifest_payload(
             identity.as_manifest_dict() for identity in output_files
         ],
         "generated_at": candidate.generated_at.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def contract_selection_row(snapshot) -> dict[str, object]:
+    selection = snapshot.contract_selection
+    cbot_override = selection.cbot.override_contract
+    soymeal_override = selection.soymeal.override_contract
+    soyoil_override = selection.soyoil.override_contract
+    return {
+        "cbot_automatic_contract_year": (
+            selection.cbot.automatic_contract.contract_year
+        ),
+        "cbot_automatic_contract_month": (
+            selection.cbot.automatic_contract.contract_month
+        ),
+        "cbot_override_contract_year": (
+            None if cbot_override is None else cbot_override.contract_year
+        ),
+        "cbot_override_contract_month": (
+            None if cbot_override is None else cbot_override.contract_month
+        ),
+        "cbot_selection_mode": selection.cbot.selection_mode.value,
+        "cbot_override_reason": selection.cbot.reason,
+        "cbot_override_effective_from": (
+            selection.cbot.effective_from_business_date
+        ),
+        "cbot_override_effective_to": selection.cbot.effective_to_business_date,
+        "soymeal_automatic_contract_code": (
+            selection.soymeal.automatic_contract.code
+        ),
+        "soymeal_override_contract_code": (
+            None if soymeal_override is None else soymeal_override.code
+        ),
+        "soymeal_selection_mode": selection.soymeal.selection_mode.value,
+        "soymeal_override_reason": selection.soymeal.reason,
+        "soymeal_override_effective_from": (
+            selection.soymeal.effective_from_business_date
+        ),
+        "soymeal_override_effective_to": (
+            selection.soymeal.effective_to_business_date
+        ),
+        "soyoil_automatic_contract_code": (
+            selection.soyoil.automatic_contract.code
+        ),
+        "soyoil_override_contract_code": (
+            None if soyoil_override is None else soyoil_override.code
+        ),
+        "soyoil_selection_mode": selection.soyoil.selection_mode.value,
+        "soyoil_override_reason": selection.soyoil.reason,
+        "soyoil_override_effective_from": (
+            selection.soyoil.effective_from_business_date
+        ),
+        "soyoil_override_effective_to": (
+            selection.soyoil.effective_to_business_date
+        ),
     }
 
 

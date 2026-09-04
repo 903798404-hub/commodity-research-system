@@ -36,12 +36,16 @@ STANDARDIZED_RECORD_FIELDS = (
     "contract_code",
     "contract_year",
     "contract_month",
+    "contract_identity_status",
+    "source_contract_code",
+    "source_delivery_month",
     "price_cny_per_tonne",
     "price_type",
     "source",
     "source_function",
     "source_quote_date",
     "source_quote_time",
+    "quote_date_evidence_status",
     "captured_at",
     "capture_timezone",
     "quality_status",
@@ -78,12 +82,16 @@ class DceNightSessionCloseRecord:
     contract_code: str
     contract_year: int
     contract_month: int
+    contract_identity_status: str
+    source_contract_code: str
+    source_delivery_month: int
     price_cny_per_tonne: float
     price_type: str
     source: str
     source_function: str
     source_quote_date: date | None
     source_quote_time: time
+    quote_date_evidence_status: str
     captured_at: datetime
     capture_timezone: str
     quality_status: str
@@ -102,6 +110,7 @@ class DceSpotContractResult:
     matched_source_symbol: str | None
     source_quote_date: date | None
     source_quote_time: time | None
+    quote_date_evidence_status: str | None
     current_price: float | None
     error_type: str | None
     error_message: str | None
@@ -114,6 +123,7 @@ class DceSpotContractResult:
             "matched_source_symbol": self.matched_source_symbol,
             "source_quote_date": _date_text(self.source_quote_date),
             "source_quote_time": _time_text(self.source_quote_time),
+            "quote_date_evidence_status": self.quote_date_evidence_status,
             "current_price": self.current_price,
             "error_type": self.error_type,
             "error_message": self.error_message,
@@ -283,6 +293,27 @@ def fetch_dce_night_session_close_snapshot(
             trade_calendar_source="akshare.tool_trade_date_hist_sina",
         )
     previous_trading_date = max((item for item in trading_dates if item < target), default=None)
+    if previous_trading_date is None:
+        return DceSpotBatchResult(
+            requested_contracts=tuple(item.code for item in contracts),
+            request_symbol=request_symbol,
+            elapsed_seconds=0.0,
+            returned_fields=(),
+            source_row_count=0,
+            captured_at=timestamp,
+            capture_gate_status=gate,
+            contract_results=tuple(
+                _failure(
+                    item,
+                    "missing_previous_trading_date",
+                    error_message=(
+                        "trade calendar does not contain the expected night-session date"
+                    ),
+                )
+                for item in contracts
+            ),
+            trade_calendar_source="akshare.tool_trade_date_hist_sina",
+        )
 
     started = perf_counter()
     try:
@@ -329,7 +360,13 @@ def fetch_dce_night_session_close_snapshot(
         )
 
     results = tuple(
-        _adapt_contract(normalized, contract, target, timestamp)
+        _adapt_contract(
+            normalized,
+            contract,
+            target,
+            previous_trading_date,
+            timestamp,
+        )
         for contract in contracts
     )
     return DceSpotBatchResult(
@@ -354,6 +391,7 @@ def _adapt_contract(
     frame: pd.DataFrame,
     contract: DceFullContract,
     business_date: date,
+    expected_night_session_date: date,
     captured_at: datetime,
 ) -> DceSpotContractResult:
     normalized_symbols = frame["symbol"].map(_normalize_source_symbol)
@@ -393,6 +431,9 @@ def _adapt_contract(
             error_message="quote time is outside the night-session close window",
         )
     quote_date: date | None = None
+    quote_date_evidence_status = "time_only_unconfirmed"
+    quality_status = "quote_date_unconfirmed"
+    usable = False
     if "date" in frame.columns and not pd.isna(row["date"]):
         quote_date = _parse_quote_date(row["date"])
         if quote_date is None:
@@ -401,17 +442,16 @@ def _adapt_contract(
                 "source_schema_error",
                 matched_source_symbol=source_symbol,
                 source_quote_time=quote_time,
+                quote_date_evidence_status=None,
                 error_message="date field is invalid",
             )
-        if quote_date != business_date:
-            return _failure(
-                contract,
-                "stale_quote_date",
-                matched_source_symbol=source_symbol,
-                source_quote_date=quote_date,
-                source_quote_time=quote_time,
-                error_message="source quote date does not match business_date",
-            )
+        if quote_date != expected_night_session_date:
+            quote_date_evidence_status = "date_mismatch"
+            quality_status = "stale_quote_date"
+        else:
+            quote_date_evidence_status = "source_confirmed"
+            quality_status = "valid"
+            usable = True
     price = row["current_price"]
     if not _valid_price(price):
         return _failure(
@@ -431,27 +471,30 @@ def _adapt_contract(
         contract_code=contract.code,
         contract_year=contract.contract_year,
         contract_month=contract.contract_month,
+        contract_identity_status="source_confirmed_exact",
+        source_contract_code=contract.code,
+        source_delivery_month=contract.contract_month,
         price_cny_per_tonne=numeric_price,
         price_type=PRICE_TYPE,
         source=SOURCE,
         source_function=SOURCE_FUNCTION,
         source_quote_date=quote_date,
         source_quote_time=quote_time,
+        quote_date_evidence_status=quote_date_evidence_status,
         captured_at=captured_at,
         capture_timezone=CAPTURE_TIMEZONE,
-        quality_status=(
-            "valid" if quote_date is not None else "valid_time_only"
-        ),
-        is_usable=True,
+        quality_status=quality_status,
+        is_usable=usable,
     )
     return DceSpotContractResult(
         contract=contract,
         quality_status=record.quality_status,
-        is_usable=True,
+        is_usable=usable,
         record=record,
         matched_source_symbol=source_symbol,
         source_quote_date=quote_date,
         source_quote_time=quote_time,
+        quote_date_evidence_status=quote_date_evidence_status,
         current_price=numeric_price,
         error_type=None,
         error_message=None,
@@ -545,6 +588,7 @@ def _failure(
     matched_source_symbol: str | None = None,
     source_quote_date: date | None = None,
     source_quote_time: time | None = None,
+    quote_date_evidence_status: str | None = None,
     error_type: str | None = None,
     error_message: str | None = None,
 ) -> DceSpotContractResult:
@@ -556,6 +600,7 @@ def _failure(
         matched_source_symbol=matched_source_symbol,
         source_quote_date=source_quote_date,
         source_quote_time=source_quote_time,
+        quote_date_evidence_status=quote_date_evidence_status,
         current_price=None,
         error_type=error_type,
         error_message=error_message,

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from agri_research_agent.import_profit.config import load_soybean_config
+from agri_research_agent.import_profit.config import (
+    ContractOverrideConfig,
+    ContractOverrideRule,
+    load_soybean_config,
+)
 from agri_research_agent.import_profit.historical_dce_adapter import (
     HISTORICAL_DCE_CONTINUOUS_SCHEMA,
     PRICE_TYPE,
@@ -14,7 +19,7 @@ from agri_research_agent.import_profit.historical_dce_adapter import (
     adapt_historical_dce_sql,
     resolve_historical_dce_points,
 )
-from agri_research_agent.import_profit.models import BusinessKey
+from agri_research_agent.import_profit.models import BusinessKey, DceContract
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -201,14 +206,76 @@ def test_resolution_uses_exact_date_mapping_full_contracts_and_deduplication(
     )
     assert keys == original
     by_code = {item.contract_code: item for item in resolved}
-    assert set(by_code) == {"M2701", "Y2701", "M2705", "Y2705"}
+    assert set(by_code) == {
+        "M2605", "Y2605", "M2701", "Y2701", "M2705", "Y2705"
+    }
+    assert by_code["M2605"].price_cny_per_tonne == 3005
+    assert by_code["Y2605"].price_cny_per_tonne == 8005
     assert by_code["M2701"].price_cny_per_tonne == 3001
     assert by_code["Y2701"].price_cny_per_tonne == 8001
     assert by_code["M2705"].price_cny_per_tonne == 3005
     assert by_code["Y2705"].price_cny_per_tonne == 8005
     assert all(item.source == "reuters_sql" for item in resolved)
     assert all(item.price_type == PRICE_TYPE for item in resolved)
+    assert all(
+        item.contract_identity_status == "continuous_inferred"
+        for item in resolved
+    )
+    assert all(item.source_contract_code is None for item in resolved)
+    assert all(
+        item.quote_date_evidence_status == "source_confirmed"
+        and item.is_usable
+        for item in resolved
+    )
+    assert {
+        (item.contract_code, item.source_delivery_month)
+        for item in resolved
+    } == {
+        ("M2605", 5),
+        ("Y2605", 5),
+        ("M2701", 1),
+        ("Y2701", 1),
+        ("M2705", 5),
+        ("Y2705", 5),
+    }
     assert [item.key for item in resolved] == sorted(item.key for item in resolved)
+
+
+def test_historical_resolution_uses_effective_override_delivery_month(tmp_path):
+    result = adapt_historical_dce_sql(sql_fixture(tmp_path / "dce.sql"))
+    config = load_soybean_config(CONFIG)
+    overridden = replace(
+        config,
+        contract_override=ContractOverrideConfig(
+            True,
+            (
+                ContractOverrideRule(
+                    origin="brazil",
+                    shipment_year=2026,
+                    shipment_month=12,
+                    effective_from_business_date=date(2026, 6, 10),
+                    effective_to_business_date=None,
+                    cbot_contract=None,
+                    soymeal_contract=DceContract.soymeal(2028, 9),
+                    soyoil_contract=None,
+                    reason="source contract anomaly",
+                ),
+            ),
+        ),
+    )
+    business_key = key(date(2026, 6, 10), 2026, 12)
+
+    resolved = resolve_historical_dce_points(
+        [business_key],
+        config=overridden,
+        continuous_points=result.records,
+    )
+    by_code = {item.contract_code: item for item in resolved}
+
+    assert by_code["M2809"].price_cny_per_tonne == 3009
+    assert by_code["M2809"].contract_identity_status == "continuous_inferred"
+    assert "M2701" not in by_code
+    assert by_code["Y2701"].price_cny_per_tonne == 8001
 
 
 def test_missing_exact_date_price_is_not_filled_and_extra_source_dates_do_not_expand(

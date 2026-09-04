@@ -23,6 +23,7 @@ from .models import (
     CalculationStatus,
     MissingReason,
 )
+from .parameter_snapshot import build_parameter_snapshot
 from .soybean import (
     SoybeanCalculationOutput,
     calculate_soybean_net_crush_margin,
@@ -57,7 +58,10 @@ class SoybeanRecalculationBatch:
     items: tuple[SoybeanRecalculationItem, ...]
     requested_keys: tuple[BusinessKey, ...]
     parameter_version: str
+    parameter_hash: str
     mapping_identity: str
+    mapping_hash: str
+    contract_override_hash: str
 
 
 def recalculate_soybean_keys(
@@ -144,6 +148,8 @@ def recalculate_soybean_keys(
         )
         for reason in MARKET_MISSING_REASON_ORDER
     )
+    provenance = build_parameter_snapshot(config)
+    assert provenance.parameter_hash is not None
     return SoybeanRecalculationBatch(
         requested_count=len(sorted_keys),
         success_count=success_count,
@@ -152,5 +158,8 @@ def recalculate_soybean_keys(
         items=immutable_items,
         requested_keys=sorted_keys,
         parameter_version=str(config.schema_version),
+        parameter_hash=provenance.parameter_hash,
         mapping_identity=config.contract_mapping_identity,
+        mapping_hash=config.contract_mapping_hash,
+        contract_override_hash=config.contract_override_hash,
     )

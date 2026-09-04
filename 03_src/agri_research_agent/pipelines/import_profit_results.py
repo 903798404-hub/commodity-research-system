@@ -44,6 +44,7 @@ class SoybeanResultCandidate:
     synthetic_input: bool
     input_files: tuple[StandardFileIdentity, ...]
     recalculation_batch: SoybeanRecalculationBatch
+    config: SoybeanImportProfitConfig
 
 
 def build_soybean_result_candidate(
@@ -98,6 +99,7 @@ def build_soybean_result_candidate(
         synthetic_input=synthetic_input,
         input_files=identities,
         recalculation_batch=batch,
+        config=config,
     )
 
 

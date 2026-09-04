@@ -27,6 +27,15 @@ from agri_research_agent.import_profit.morning_external_inputs import (
     MANIFEST_FILENAME as INPUT_MANIFEST_FILENAME,
     load_current_external_input_candidate,
 )
+from agri_research_agent.import_profit.parameter_snapshot import (
+    build_parameter_snapshot,
+)
+from agri_research_agent.import_profit.mapping_snapshot import (
+    build_mapping_snapshot,
+)
+from agri_research_agent.import_profit.override_snapshot import (
+    build_contract_override_snapshot,
+)
 from agri_research_agent.import_profit.query import (
     HISTORICAL_BUSINESS_KEY_SCHEMA,
     load_soybean_query_dataset,
@@ -36,6 +45,7 @@ from agri_research_agent.import_profit.result_store import (
     SNAPSHOT_SCHEMA,
     _result_rows,
     _snapshot_rows,
+    with_legacy_contract_identity,
 )
 from agri_research_agent.import_profit.runtime_store import (
     BUSINESS_KEYS_FILENAME,
@@ -161,6 +171,39 @@ def try_materialize_import_profit_business_day(
             expected_index_sha256=expected_runtime_index_sha256,
         )
         current = loaded.resolved
+        config_provenance = build_parameter_snapshot(config)
+        config_mapping = build_mapping_snapshot(config)
+        config_override = build_contract_override_snapshot(config)
+        if not current.parameter_provenance.available:
+            raise DailyMaterializationError(
+                "legacy Release parameter snapshot is unavailable"
+            )
+        if (
+            config_provenance.parameter_hash
+            != current.parameter_provenance.parameter_hash
+        ):
+            raise DailyMaterializationError(
+                "Current Release parameters do not match the supplied config"
+            )
+        if not current.mapping_provenance.available:
+            raise DailyMaterializationError(
+                "legacy Release mapping snapshot is unavailable"
+            )
+        if config_mapping.mapping_hash != current.mapping_provenance.mapping_hash:
+            raise DailyMaterializationError(
+                "Current Release mapping does not match the supplied config"
+            )
+        if not current.contract_override_provenance.available:
+            raise DailyMaterializationError(
+                "legacy Release contract override snapshot is unavailable"
+            )
+        if (
+            config_override.contract_override_hash
+            != current.contract_override_provenance.contract_override_hash
+        ):
+            raise DailyMaterializationError(
+                "Current Release contract override does not match the supplied config"
+            )
         if current.identity.manual_cnf_sha256 != expected_manual_cnf_sha256:
             raise RuntimeConcurrentUpdateError(
                 "expected manual CNF identity is stale"
@@ -217,7 +260,7 @@ def try_materialize_import_profit_business_day(
         fx = load_fx_parquet(external.candidate_dir / FX_FILENAME)
         dce_records = (
             load_dce_parquet(dce.candidate_dir / DCE_FILENAME).records
-            if dce.attempt_status in {"success", "passed_with_incomplete"}
+            if dce.record_count > 0
             else ()
         )
         candidate = build_soybean_result_candidate(
@@ -250,7 +293,10 @@ def try_materialize_import_profit_business_day(
         new_snapshot_rows = _snapshot_rows(candidate)
         new_result_rows = _result_rows(candidate)
         old_key_rows = pq.read_table(current.business_keys_path).to_pylist()
-        old_snapshot_rows = pq.read_table(current.snapshots_path).to_pylist()
+        old_snapshot_rows = [
+            with_legacy_contract_identity(row)
+            for row in pq.read_table(current.snapshots_path).to_pylist()
+        ]
         old_result_rows = pq.read_table(current.results_path).to_pylist()
         old_rows_copy = (
             [dict(row) for row in old_key_rows],
@@ -332,6 +378,15 @@ def try_materialize_import_profit_business_day(
             )[:12],
             "missing_reason_counts": missing_counts,
             "old_record_protection": "full_row_equality",
+            "parameter_snapshot_present": True,
+            "parameter_hash_valid": True,
+            "result_parameter_identity_consistent": True,
+            "mapping_snapshot_present": True,
+            "mapping_hash_valid": True,
+            "result_mapping_identity_consistent": True,
+            "contract_override_snapshot_present": True,
+            "contract_override_hash_valid": True,
+            "result_contract_override_identity_consistent": True,
             "manual_cnf_protection": "byte_identity",
             "current_previous_relation": {
                 "current": release_id,
@@ -396,6 +451,16 @@ def try_materialize_import_profit_business_day(
                 new_dataset.date_range[1].isoformat(),
             ],
             "config": current.manifest["config"],
+            "parameter_snapshot": current.parameter_provenance.snapshot,
+            "parameter_hash": current.parameter_provenance.parameter_hash,
+            "mapping_snapshot": current.mapping_provenance.snapshot,
+            "mapping_hash": current.mapping_provenance.mapping_hash,
+            "contract_override_snapshot": (
+                current.contract_override_provenance.snapshot
+            ),
+            "contract_override_hash": (
+                current.contract_override_provenance.contract_override_hash
+            ),
             "origin_counts": dict(
                 sorted(Counter(record.origin for record in new_dataset.records).items())
             ),

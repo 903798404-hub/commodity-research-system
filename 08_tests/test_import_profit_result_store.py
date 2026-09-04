@@ -18,6 +18,9 @@ from agri_research_agent.import_profit.result_store import (
     ResultStoreWriteError,
     write_soybean_result_candidate,
 )
+from agri_research_agent.import_profit.parameter_snapshot import (
+    build_parameter_snapshot,
+)
 from agri_research_agent.import_profit.standard_io import StandardFileIdentity
 from agri_research_agent.pipelines.import_profit_results import (
     CandidateStatus,
@@ -97,6 +100,10 @@ def test_fixed_schemas_dual_readback_and_output_sha(tmp_path) -> None:
     assert tuple(pd.read_parquet(output / RESULT_FILENAME).columns) == tuple(
         RESULT_SCHEMA.names
     )
+    snapshot_row = snapshot_arrow.to_pylist()[0]
+    assert snapshot_row["soymeal_contract_identity_status"] == "legacy_unknown"
+    assert snapshot_row["soymeal_source_contract_code"] is None
+    assert snapshot_row["soymeal_source_delivery_month"] is None
     by_name = {item.filename: item for item in write_result.output_files}
     for name in by_name:
         assert by_name[name].sha256 == file_sha(output / name)
@@ -129,6 +136,17 @@ def test_manifest_quality_and_candidate_status_are_bounded(tmp_path) -> None:
     assert manifest["requested_key_count"] == 1
     assert manifest["success_count"] == 0
     assert manifest["incomplete_count"] == 1
+    provenance = build_parameter_snapshot(CONFIG)
+    assert manifest["parameter_snapshot"] == provenance.snapshot
+    assert manifest["parameter_hash"] == provenance.parameter_hash
+    snapshot_rows = pq.read_table(output / SNAPSHOT_FILENAME).to_pylist()
+    result_rows = pq.read_table(output / RESULT_FILENAME).to_pylist()
+    assert {
+        row["parameter_hash"] for row in snapshot_rows
+    } == {provenance.parameter_hash}
+    assert {
+        row["parameter_hash"] for row in result_rows
+    } == {provenance.parameter_hash}
     cnf_identity = next(
         item for item in manifest["input_files"] if item["filename"] == "cnf.parquet"
     )

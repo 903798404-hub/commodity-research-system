@@ -245,6 +245,30 @@ def test_candidate_preserves_historical_and_reuters_provenance(tmp_path):
     assert {row["soyoil_price_type"] for row in snapshots} == {
         "historical_continuous_close"
     }
+    assert {
+        row["soymeal_contract_identity_status"] for row in snapshots
+    } == {"continuous_inferred"}
+    assert {
+        row["soyoil_contract_identity_status"] for row in snapshots
+    } == {"continuous_inferred"}
+    assert {row["soymeal_source_contract_code"] for row in snapshots} == {
+        None
+    }
+    assert {row["soyoil_source_contract_code"] for row in snapshots} == {
+        None
+    }
+    assert {
+        row["soymeal_source_delivery_month"] for row in snapshots
+    } <= {1, 5, 9}
+    assert {
+        row["soyoil_source_delivery_month"] for row in snapshots
+    } <= {1, 5, 9}
+    assert {
+        row["soymeal_quote_date_evidence_status"] for row in snapshots
+    } == {"source_confirmed"}
+    assert {
+        row["soyoil_quote_date_evidence_status"] for row in snapshots
+    } == {"source_confirmed"}
 
 
 def test_source_identity_failure_is_fatal_and_writes_nothing(tmp_path):

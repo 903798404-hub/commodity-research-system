@@ -19,6 +19,7 @@ from import_profit import probe_dce_daily_source as probe
 
 CONFIG = candidate.REPOSITORY_ROOT / "02_configs" / "import_profit_soybean.yaml"
 TARGET = date(2026, 7, 28)
+PREVIOUS_TRADING_DATE = date(2026, 7, 27)
 FIXED_TIME = datetime(2026, 7, 28, 8, 30, 30, tzinfo=dce_daily.CAPTURE_ZONE)
 OUTSIDE_TIME = datetime(2026, 7, 28, 20, 0, tzinfo=dce_daily.CAPTURE_ZONE)
 SHIPMENTS = [
@@ -35,7 +36,7 @@ SHIPMENTS = [
     "2027-06",
     "2027-07",
 ]
-EXPECTED_CONTRACTS = ["M2701", "M2705", "M2709", "Y2701", "Y2705", "Y2709"]
+EXPECTED_CONTRACTS = ["M2605", "M2701", "M2705", "Y2605", "Y2701", "Y2705"]
 
 
 def good_batch(batch_symbol: str) -> pd.DataFrame:
@@ -44,6 +45,7 @@ def good_batch(batch_symbol: str) -> pd.DataFrame:
         {
             "symbol": symbols,
             "time": ["23:00:00"] * len(symbols),
+            "date": [PREVIOUS_TRADING_DATE] * len(symbols),
             "current_price": [
                 3000.0 + index if symbol.startswith("M") else 8000.0 + index
                 for index, symbol in enumerate(symbols)
@@ -64,7 +66,7 @@ def stable_trade_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
         dce_daily,
         "default_trade_calendar_fetcher",
         lambda: pd.DataFrame(
-            {"trade_date": [date(2026, 7, 27), TARGET]}
+            {"trade_date": [PREVIOUS_TRADING_DATE, TARGET]}
         ),
     )
 
@@ -115,13 +117,13 @@ def test_multiple_shipment_periods_use_existing_mapping_and_deduplicate() -> Non
     assert resolved["mapping_identity"] == "import_profit_soybean:schema_version=1"
     assert resolved["contract_mappings"][0] == {
         "shipment_period": "2026-08",
-        "soymeal_contract": "M2701",
-        "soyoil_contract": "Y2701",
+        "soymeal_contract": "M2605",
+        "soyoil_contract": "Y2605",
     }
     assert resolved["contract_mappings"][-1] == {
         "shipment_period": "2027-07",
-        "soymeal_contract": "M2709",
-        "soyoil_contract": "Y2709",
+        "soymeal_contract": "M2705",
+        "soyoil_contract": "Y2705",
     }
 
 
@@ -225,7 +227,9 @@ def test_quality_report_is_bounded_and_contains_request_and_contract_evidence(
     assert report["requests"][0]["request_symbol"] == ",".join(EXPECTED_CONTRACTS)
     assert len(report["contract_results"]) == 6
     for item in report["contract_results"]:
-        assert item["request_status"] == "valid_time_only"
+        assert item["request_status"] == "valid"
+        assert item["quote_date_evidence_status"] == "source_confirmed"
+        assert item["source_quote_date"] == PREVIOUS_TRADING_DATE.isoformat()
         assert item["source_quote_time"] == "23:00:00"
         assert item["current_price"] > 0
         assert "rows" not in item
@@ -317,31 +321,37 @@ def test_quote_at_end_boundary_fails_without_candidate_files(tmp_path: Path) -> 
     } == {"quote_time_outside_allowed_range"}
 
 
-def test_previous_date_quotes_fail_without_candidate_files(tmp_path: Path) -> None:
+def test_previous_date_quotes_persist_as_failed_diagnostics(tmp_path: Path) -> None:
     output = tmp_path / "previous-date"
 
     def fetch(batch: str) -> pd.DataFrame:
         frame = good_batch(batch)
-        frame["date"] = "2026-07-27"
+        frame["date"] = TARGET.isoformat()
         return frame
 
-    with pytest.raises(candidate.DceCandidateBuildError) as caught:
-        candidate.build_dce_daily_candidate(
-            CONFIG,
-            TARGET,
-            SHIPMENTS,
-            output,
-            fetcher=fetch,
-            clock=fixed_clock,
-            akshare_version="test-version",
-        )
-    assert not output.exists() or list(output.iterdir()) == []
-    report = caught.value.quality_report
-    assert report is not None
+    result = candidate.build_dce_daily_candidate(
+        CONFIG,
+        TARGET,
+        SHIPMENTS,
+        output,
+        fetcher=fetch,
+        clock=fixed_clock,
+        akshare_version="test-version",
+    )
+    report = result["quality_report"]
     assert report["candidate_status"] == "failed"
     assert {
         item["request_status"] for item in report["contract_results"]
     } == {"stale_quote_date"}
+    assert {
+        item["quote_date_evidence_status"] for item in report["contract_results"]
+    } == {"date_mismatch"}
+    loaded = load_dce_parquet(output / candidate.PARQUET_FILENAME)
+    assert len(loaded.records) == len(EXPECTED_CONTRACTS)
+    assert all(not item.is_usable for item in loaded.records)
+    assert {
+        item.quote_date_evidence_status for item in loaded.records
+    } == {"date_mismatch"}
 
 
 def test_retry_requests_one_complete_contract_batch(tmp_path: Path) -> None:
@@ -352,7 +362,7 @@ def test_retry_requests_one_complete_contract_batch(tmp_path: Path) -> None:
         calls.append(batch)
         frame = good_batch(batch)
         if len(calls) == 1:
-            frame = frame[frame["symbol"] != "Y2709"].reset_index(drop=True)
+                frame = frame[frame["symbol"] != "Y2705"].reset_index(drop=True)
         return frame
 
     _, result = (
@@ -387,7 +397,7 @@ def test_retry_limit_exhaustion_keeps_valid_subset(tmp_path: Path) -> None:
 
     def fetch(batch: str) -> pd.DataFrame:
         calls[batch] += 1
-        return good_batch("Y2701")
+        return good_batch("Y2605")
 
     result = candidate.build_dce_daily_candidate(
         CONFIG,
@@ -400,9 +410,9 @@ def test_retry_limit_exhaustion_keeps_valid_subset(tmp_path: Path) -> None:
         clock=fixed_clock,
         akshare_version="test-version",
     )
-    assert calls["M2701,Y2701"] == 3
+    assert calls["M2605,Y2605"] == 3
     assert result["manifest"]["candidate_status"] == "passed_with_incomplete"
-    assert result["manifest"]["missing_contracts"] == ["M2701"]
+    assert result["manifest"]["missing_contracts"] == ["M2605"]
 
 
 @pytest.mark.parametrize(

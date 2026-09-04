@@ -97,7 +97,13 @@ def test_candidate_with_sample_has_five_atomic_outputs_and_safe_manifest(
     assert prices == {"M2701": 3001.0, "Y2701": 8001.0}
     assert pq.read_table(output / candidate.CNF_FILENAME).num_rows == 96
     assert pq.read_table(output / candidate.DCE_FILENAME).num_rows == 10
-    assert pq.read_table(output / candidate.RESOLVED_FILENAME).num_rows == 2
+    resolved = pq.read_table(output / candidate.RESOLVED_FILENAME)
+    assert resolved.num_rows == 2
+    assert set(resolved.column("contract_identity_status").to_pylist()) == {
+        "continuous_inferred"
+    }
+    assert set(resolved.column("source_delivery_month").to_pylist()) == {1}
+    assert set(resolved.column("source_contract_code").to_pylist()) == {None}
     assert result["manifest"] == manifest
 
 

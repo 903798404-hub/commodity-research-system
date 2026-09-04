@@ -30,6 +30,7 @@ from .market_snapshot import (
     HistoricalCnfMarketPoint,
 )
 from .models import BusinessKey, MissingReason
+from .parameter_snapshot import build_parameter_snapshot
 from .recalculation import (
     SoybeanRecalculationBatch,
     SoybeanRecalculationItem,
@@ -450,6 +451,8 @@ def _combine_batches(
     success_count = sum(
         not item.calculation_result.missing_reasons for item in items
     )
+    provenance = build_parameter_snapshot(config)
+    assert provenance.parameter_hash is not None
     return SoybeanRecalculationBatch(
         requested_count=len(requested_keys),
         success_count=success_count,
@@ -458,7 +461,10 @@ def _combine_batches(
         items=items,
         requested_keys=requested_keys,
         parameter_version=str(config.schema_version),
+        parameter_hash=provenance.parameter_hash,
         mapping_identity=config.contract_mapping_identity,
+        mapping_hash=config.contract_mapping_hash,
+        contract_override_hash=config.contract_override_hash,
     )
 
 

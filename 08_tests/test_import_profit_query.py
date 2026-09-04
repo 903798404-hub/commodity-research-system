@@ -1,5 +1,5 @@
 from dataclasses import FrozenInstanceError
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 import hashlib
 from pathlib import Path
 
@@ -32,6 +32,15 @@ from agri_research_agent.import_profit.result_store import (
     RESULT_SCHEMA,
     SNAPSHOT_SCHEMA,
 )
+from agri_research_agent.import_profit.parameter_snapshot import (
+    build_parameter_snapshot,
+)
+from agri_research_agent.import_profit.mapping_snapshot import (
+    build_mapping_snapshot,
+)
+from agri_research_agent.import_profit.override_snapshot import (
+    build_contract_override_snapshot,
+)
 
 
 CALCULATED_AT = datetime(2026, 7, 30, tzinfo=timezone.utc)
@@ -39,6 +48,11 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_soybean_config(
     ROOT / "02_configs" / "import_profit_soybean.yaml"
 )
+PARAMETER_HASH = build_parameter_snapshot(CONFIG).parameter_hash
+MAPPING_HASH = build_mapping_snapshot(CONFIG).mapping_hash
+CONTRACT_OVERRIDE_HASH = build_contract_override_snapshot(
+    CONFIG
+).contract_override_hash
 
 
 def joined_rows(
@@ -115,14 +129,65 @@ def joined_rows(
             "historical_continuous_close" if soymeal is not None else None
         ),
         "soymeal_source": "reuters_sql" if soymeal is not None else None,
+        "soymeal_contract_identity_status": (
+            "continuous_inferred" if soymeal is not None else None
+        ),
+        "soymeal_source_contract_code": None,
+        "soymeal_source_delivery_month": 1 if soymeal is not None else None,
+        "soymeal_quote_date_evidence_status": (
+            "source_confirmed" if soymeal is not None else None
+        ),
+        "soymeal_source_quote_date": (
+            business_date if soymeal is not None else None
+        ),
+        "soymeal_source_quote_time": (
+            time(23, 0) if soymeal is not None else None
+        ),
         "soyoil_contract_code": f"Y{shipment_year % 100:02d}01",
         "soyoil_price_cny_per_tonne": soyoil,
         "soyoil_price_type": (
             "historical_continuous_close" if soyoil is not None else None
         ),
         "soyoil_source": "reuters_sql" if soyoil is not None else None,
+        "soyoil_contract_identity_status": (
+            "continuous_inferred" if soyoil is not None else None
+        ),
+        "soyoil_source_contract_code": None,
+        "soyoil_source_delivery_month": 1 if soyoil is not None else None,
+        "soyoil_quote_date_evidence_status": (
+            "source_confirmed" if soyoil is not None else None
+        ),
+        "soyoil_source_quote_date": (
+            business_date if soyoil is not None else None
+        ),
+        "soyoil_source_quote_time": (
+            time(23, 0) if soyoil is not None else None
+        ),
         "snapshot_status": "complete" if complete else "incomplete",
         "missing_reasons": list(reasons),
+        "parameter_hash": PARAMETER_HASH,
+        "mapping_hash": MAPPING_HASH,
+        "cbot_automatic_contract_year": shipment_year,
+        "cbot_automatic_contract_month": shipment_month,
+        "cbot_override_contract_year": None,
+        "cbot_override_contract_month": None,
+        "cbot_selection_mode": "automatic",
+        "cbot_override_reason": None,
+        "cbot_override_effective_from": None,
+        "cbot_override_effective_to": None,
+        "soymeal_automatic_contract_code": f"M{shipment_year % 100:02d}01",
+        "soymeal_override_contract_code": None,
+        "soymeal_selection_mode": "automatic",
+        "soymeal_override_reason": None,
+        "soymeal_override_effective_from": None,
+        "soymeal_override_effective_to": None,
+        "soyoil_automatic_contract_code": f"Y{shipment_year % 100:02d}01",
+        "soyoil_override_contract_code": None,
+        "soyoil_selection_mode": "automatic",
+        "soyoil_override_reason": None,
+        "soyoil_override_effective_from": None,
+        "soyoil_override_effective_to": None,
+        "contract_override_hash": CONTRACT_OVERRIDE_HASH,
     }
     result = {
         "business_date": business_date,
@@ -139,6 +204,9 @@ def joined_rows(
         "parameter_version": "1",
         "mapping_identity": "mapping-v1",
         "calculated_at": CALCULATED_AT,
+        "parameter_hash": PARAMETER_HASH,
+        "mapping_hash": MAPPING_HASH,
+        "contract_override_hash": CONTRACT_OVERRIDE_HASH,
     }
     return key, snapshot, result
 
@@ -349,8 +417,12 @@ def test_missing_cnf_record_supplies_existing_pure_calculator_preview_input(
             "parameter_version": str(CONFIG.schema_version),
             "cbot_contract_year": mapped.cbot.contract_year,
             "cbot_contract_month": mapped.cbot.contract_month,
+            "cbot_automatic_contract_year": mapped.cbot.contract_year,
+            "cbot_automatic_contract_month": mapped.cbot.contract_month,
             "soymeal_contract_code": mapped.soymeal.code,
+            "soymeal_automatic_contract_code": mapped.soymeal.code,
             "soyoil_contract_code": mapped.soyoil.code,
+            "soyoil_automatic_contract_code": mapped.soyoil.code,
         }
     )
     parts[2].update(
@@ -399,6 +471,7 @@ def test_missing_cnf_record_supplies_existing_pure_calculator_preview_input(
             soyoil_price_cny_per_tonne=record.soyoil_price_cny_per_tonne,
             resolved_parameters=CONFIG.resolve_parameters(record.origin),
             mapping_identity=record.mapping_identity,
+            mapping_hash=record.mapping_hash,
         ),
         CONFIG,
     )

@@ -17,7 +17,9 @@ from agri_research_agent.import_profit import (
     SoybeanImportProfitConfig,
     SoybeanParameters,
     calculate_soybean_net_crush_margin,
-    map_soybean_contracts,
+)
+from agri_research_agent.import_profit.contract_override import (
+    select_soybean_contracts,
 )
 from agri_research_agent.import_profit.historical_cnf_adapter import (
     shipment_year_for,
@@ -192,10 +194,15 @@ def price_basis_note(
 
 
 def parameter_summary(
-    config: SoybeanImportProfitConfig, origin: str
+    config: SoybeanImportProfitConfig,
+    origin: str,
+    *,
+    parameters_available: bool = True,
 ) -> str:
     """Render the selected origin's authoritative calculation parameters."""
 
+    if not parameters_available:
+        return "旧版Release未封存计算参数，参数快照不可用。"
     params = config.resolve_parameters(origin)
     return (
         f"出粕率{params.meal_yield:.1%}｜"
@@ -280,6 +287,7 @@ def formal_daily_table(
     business_date: date,
     origin: str,
     config: SoybeanImportProfitConfig,
+    parameters_available: bool = True,
 ) -> pd.DataFrame:
     """Build the read-only official-value table with explicit NULL markers."""
 
@@ -292,7 +300,11 @@ def formal_daily_table(
             if record is not None
             else shipment_year_for(business_date, month)
         )
-        params = config.resolve_parameters(origin)
+        params = (
+            config.resolve_parameters(origin)
+            if parameters_available
+            else None
+        )
         product_costs = _display_product_costs(record, params)
         rows.append(
             {
@@ -321,8 +333,12 @@ def formal_daily_table(
                 "豆油盘面": _display_number(
                     record.soyoil_price_cny_per_tonne if record else None
                 ),
-                "关税%": f"{params.tariff_rate:.0%}",
-                "增值税%": f"{params.vat_rate:.0%}",
+                "关税%": (
+                    f"{params.tariff_rate:.0%}" if params else "—"
+                ),
+                "增值税%": (
+                    f"{params.vat_rate:.0%}" if params else "—"
+                ),
                 "完税成本": _display_number(
                     (
                         record.duty_paid_cost_cny_per_tonne
@@ -364,11 +380,15 @@ def _domestic_contract_label(
 
 def _display_product_costs(
     record: SoybeanQueryRecord | None,
-    params: SoybeanParameters,
+    params: SoybeanParameters | None,
 ) -> tuple[str, str]:
     """Derive the two residual product costs for presentation only."""
 
-    if record is None or record.duty_paid_cost_cny_per_tonne is None:
+    if (
+        record is None
+        or params is None
+        or record.duty_paid_cost_cny_per_tonne is None
+    ):
         return "—", "—"
     total = (
         record.duty_paid_cost_cny_per_tonne
@@ -492,19 +512,6 @@ def calculate_cnf_preview(
     """Replace only CNF and delegate all calculations to the existing kernel."""
 
     cnf_value = parse_cnf_editor_value(edited_cnf)
-    mapped = map_soybean_contracts(
-        config, record.shipment_year, record.shipment_month
-    )
-    if (
-        record.cbot_contract != mapped.cbot.label
-        or record.soymeal_contract != mapped.soymeal.code
-        or record.soyoil_contract != mapped.soyoil.code
-        or record.mapping_identity != mapped.mapping_identity
-        or record.parameter_version != str(config.schema_version)
-    ):
-        raise PreviewCompatibilityError(
-            "持久化合约、映射或参数身份与当前配置不一致"
-        )
     key = BusinessKey(
         record.business_date,
         record.commodity,
@@ -515,23 +522,39 @@ def calculate_cnf_preview(
         config.commodity,
         record.shipment_period,
     )
+    selection = select_soybean_contracts(config, key)
+    mapped = selection.automatic
+    if (
+        record.cbot_contract != selection.cbot.effective_contract.label
+        or record.soymeal_contract != selection.soymeal.effective_contract.code
+        or record.soyoil_contract != selection.soyoil.effective_contract.code
+        or record.mapping_identity != mapped.mapping_identity
+        or record.mapping_hash != mapped.mapping_hash
+        or record.contract_override_hash != selection.contract_override_hash
+        or record.parameter_version != str(config.schema_version)
+    ):
+        raise PreviewCompatibilityError(
+            "持久化合约、映射或参数身份与当前配置不一致"
+        )
     result = calculate_soybean_net_crush_margin(
         SoybeanCalculationInput(
             business_key=key,
             cnf_cents_per_bushel=cnf_value,
-            cbot_contract=mapped.cbot,
+            cbot_contract=selection.cbot.effective_contract,
             cbot_daily_price_cents_per_bushel=(
                 record.cbot_price_cents_per_bushel
             ),
             fx_value=record.fx_value,
-            soymeal_contract=mapped.soymeal,
+            soymeal_contract=selection.soymeal.effective_contract,
             soymeal_price_cny_per_tonne=(
                 record.soymeal_price_cny_per_tonne
             ),
-            soyoil_contract=mapped.soyoil,
+            soyoil_contract=selection.soyoil.effective_contract,
             soyoil_price_cny_per_tonne=record.soyoil_price_cny_per_tonne,
             resolved_parameters=config.resolve_parameters(record.origin),
             mapping_identity=record.mapping_identity,
+            mapping_hash=record.mapping_hash,
+            contract_override_hash=record.contract_override_hash,
         ),
         config,
     )

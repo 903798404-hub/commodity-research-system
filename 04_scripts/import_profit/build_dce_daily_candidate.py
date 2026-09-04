@@ -74,6 +74,10 @@ DCE_NIGHT_SESSION_CLOSE_SCHEMA = pa.schema(
         pa.field("capture_timezone", pa.string(), nullable=False),
         pa.field("quality_status", pa.string(), nullable=False),
         pa.field("is_usable", pa.bool_(), nullable=False),
+        pa.field("contract_identity_status", pa.string(), nullable=False),
+        pa.field("source_contract_code", pa.string(), nullable=True),
+        pa.field("source_delivery_month", pa.int8(), nullable=True),
+        pa.field("quote_date_evidence_status", pa.string(), nullable=False),
     ]
 )
 DCE_MORNING_OPEN_SCHEMA = DCE_NIGHT_SESSION_CLOSE_SCHEMA
@@ -223,7 +227,12 @@ def build_dce_daily_candidate(
         snapshot_batch_id,
         snapshot_captured_at,
     )
-    if len(missing) == len(mapping["required_contracts"]):
+    diagnostic_records = tuple(
+        item.record
+        for item in final_results.values()
+        if item.record is not None
+    )
+    if len(missing) == len(mapping["required_contracts"]) and not diagnostic_records:
         raise DceCandidateBuildError(
             "all required contracts failed",
             quality_report=quality_report,
@@ -281,16 +290,17 @@ def build_dce_daily_candidate(
         manifest = {
             "schema_version": 2,
             "adapter_version": ADAPTER_VERSION,
-            "candidate_status": (
-                "success" if not missing else "passed_with_incomplete"
-            ),
+            "candidate_status": quality_report["candidate_status"],
             "business_date": target_date.isoformat(),
             "commodity": "soybean",
             "shipment_periods": mapping["shipment_periods"],
             "contract_mappings": mapping["contract_mappings"],
             "required_contracts": mapping["required_contracts"],
             "required_contract_count": len(mapping["required_contracts"]),
-            "successful_contract_count": len(records),
+            "successful_contract_count": sum(
+                item.is_usable for item in final_results.values()
+            ),
+            "diagnostic_record_count": len(records),
             "missing_contracts": missing,
             "mapping_identity": mapping["mapping_identity"],
             "source": SOURCE,

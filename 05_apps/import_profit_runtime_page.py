@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
@@ -12,7 +13,20 @@ import streamlit as st
 
 from agri_research_agent.import_profit import (
     ImportProfitConfigError,
+    ParameterSnapshotError,
+    build_parameter_snapshot,
+    config_with_parameter_provenance,
     load_soybean_config,
+)
+from agri_research_agent.import_profit.mapping_snapshot import (
+    MappingSnapshotError,
+    build_mapping_snapshot,
+    config_with_mapping_provenance,
+)
+from agri_research_agent.import_profit.override_snapshot import (
+    ContractOverrideSnapshotError,
+    build_contract_override_snapshot,
+    config_with_contract_override_provenance,
 )
 from agri_research_agent.import_profit.query import (
     ImportProfitQueryError,
@@ -109,6 +123,12 @@ def render_import_profit_runtime_page(
 ) -> None:
     """Resolve Current once, cache its exact dataset, and render formal mode."""
 
+    if os.getenv("IMPORT_PROFIT_INTRADAY_RESULT_ROOT", "").strip():
+        from import_profit_intraday_runtime_page import render_configured_intraday_runtime_page
+        render_configured_intraday_runtime_page(runtime_root, config_path=config_path,
+                                                allow_save=allow_cnf_save)
+        return
+
     if runtime_root is None or not str(runtime_root).strip():
         _render_unavailable("运行数据尚未配置。")
         return
@@ -158,10 +178,51 @@ def render_import_profit_runtime_page(
             )
         config_file = Path(config_path)
         config_stat = config_file.stat()
-        config = _load_config_cached(
+        current_config = _load_config_cached(
             str(config_file),
             config_stat.st_mtime_ns,
             config_stat.st_size,
+        )
+        release_parameters_available = (
+            resolved.parameter_provenance.available
+        )
+        release_mapping_available = resolved.mapping_provenance.available
+        release_contract_override_available = (
+            resolved.contract_override_provenance.available
+        )
+        config_matches_release = (
+            release_parameters_available
+            and release_mapping_available
+            and release_contract_override_available
+            and build_parameter_snapshot(current_config).parameter_hash
+            == resolved.parameter_provenance.parameter_hash
+            and build_mapping_snapshot(current_config).mapping_hash
+            == resolved.mapping_provenance.mapping_hash
+            and build_contract_override_snapshot(
+                current_config
+            ).contract_override_hash
+            == resolved.contract_override_provenance.contract_override_hash
+        )
+        parameter_config = (
+            config_with_parameter_provenance(
+                current_config, resolved.parameter_provenance
+            )
+            if release_parameters_available
+            else current_config
+        )
+        config = (
+            config_with_mapping_provenance(
+                parameter_config, resolved.mapping_provenance
+            )
+            if release_mapping_available
+            else parameter_config
+        )
+        config = (
+            config_with_contract_override_provenance(
+                config, resolved.contract_override_provenance
+            )
+            if release_contract_override_available
+            else config
         )
     except FileNotFoundError:
         _render_unavailable("正式配置文件不存在或运行文件缺失。", error=True)
@@ -170,6 +231,9 @@ def render_import_profit_runtime_page(
         RuntimeStoreError,
         ImportProfitQueryError,
         ImportProfitConfigError,
+        ParameterSnapshotError,
+        MappingSnapshotError,
+        ContractOverrideSnapshotError,
         OSError,
     ):
         _render_unavailable(
@@ -209,7 +273,13 @@ def render_import_profit_runtime_page(
         dataset,
         config=config,
         runtime_identity=identity,
-        allow_cnf_save=allow_cnf_save,
+        allow_cnf_save=allow_cnf_save and config_matches_release,
+        release_parameters_available=release_parameters_available,
+        release_mapping_available=release_mapping_available,
+        release_contract_override_available=(
+            release_contract_override_available
+        ),
+        parameter_provenance=resolved.parameter_provenance,
         runtime_save_handler=save_handler,
     )
     st.caption(

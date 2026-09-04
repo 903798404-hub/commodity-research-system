@@ -103,7 +103,13 @@ def test_fixed_real_meaning_sample_matches_expected_results(tmp_path):
     ] == pytest.approx(3456.931637545483)
     assert result.updated_result_row[
         "net_crush_margin_cny_per_tonne"
-    ] == pytest.approx(179.828362454517)
+    ] == pytest.approx(
+        2995.0 * 0.795
+        + 8301.0 * 0.19
+        - 3456.931637545483
+        - 50.0
+        - 150.0
+    )
 
 
 @pytest.mark.parametrize(

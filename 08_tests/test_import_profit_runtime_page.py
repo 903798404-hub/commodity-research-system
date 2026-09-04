@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from dataclasses import replace
+import hashlib
 import importlib
 import inspect
+import json
 from pathlib import Path
 import sys
 
@@ -23,7 +26,9 @@ from agri_research_agent.import_profit.runtime_store import (
     RuntimeConcurrentUpdateError,
     RuntimeLockedError,
     RuntimeWriteError,
+    file_sha256,
     resolve_current_runtime_release,
+    write_release_index_atomically,
 )
 from agri_research_agent.pipelines.import_profit_runtime import (
     RuntimePipelineError,
@@ -242,6 +247,112 @@ def test_formal_runtime_page_shows_identity_and_save_only_in_formal_mode(
     assert str(runtime_root) not in visible
 
 
+def test_runtime_scenario_is_release_backed_transient_and_resettable(
+    tmp_path,
+):
+    runtime_root = runtime_fixture(tmp_path)
+
+    def file_hashes():
+        return {
+            str(path.relative_to(runtime_root)): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in runtime_root.rglob("*")
+            if path.is_file()
+        }
+
+    before = file_hashes()
+    app = AppTest.from_string(
+        app_script(runtime_root), default_timeout=40
+    ).run(timeout=40)
+    assert not app.exception
+    visible = "\n".join(
+        str(item.value)
+        for collection in (
+            app.subheader,
+            app.markdown,
+            app.info,
+            app.warning,
+            app.caption,
+        )
+        for item in collection
+    )
+    assert "SESSION-ONLY" in visible
+    inputs = {item.label: item for item in app.number_input}
+    assert inputs["Scenario关税（%）"].value == pytest.approx(3.0)
+    assert inputs["Scenario VAT（%）"].value == pytest.approx(9.0)
+
+    def current_scenario_table(application):
+        return next(
+            item.value
+            for item in application.dataframe
+            if "Scenario Impact (CNY/t)" in item.value.columns
+            and "船期" in item.value.columns
+        )
+
+    official = current_scenario_table(app).copy()
+    assert official.shape[0] == 12
+    scenario_matrices = [
+        item.value
+        for item in app.dataframe
+        if tuple(item.value.columns)
+        == ("日期", *(f"{month}月船期" for month in range(1, 13)))
+    ]
+    assert len(scenario_matrices) >= 2
+    assert scenario_matrices[0].shape == (10, 13)
+    assert scenario_matrices[1].shape == (10, 13)
+    inputs["Scenario关税（%）"].set_value(20.0)
+    app.run(timeout=40)
+    changed = current_scenario_table(app)
+    assert changed["Official Tariff (%)"].eq(3.0).all()
+    assert changed["Scenario Tariff (%)"].eq(20.0).all()
+    pd.testing.assert_series_equal(
+        changed["Official Net Crush Margin (CNY/t)"],
+        official["Official Net Crush Margin (CNY/t)"],
+    )
+    assert changed["Scenario Impact (CNY/t)"].dropna().ne(0.0).any()
+
+    next(
+        button for button in app.button if button.label == "Reset to Official"
+    ).click()
+    app.run(timeout=40)
+    reset = current_scenario_table(app)
+    assert reset["Scenario Tariff (%)"].eq(3.0).all()
+    assert reset["Scenario VAT (%)"].eq(9.0).all()
+    assert reset["Scenario Impact (CNY/t)"].dropna().eq(0.0).all()
+    assert file_hashes() == before
+
+
+def test_legacy_runtime_disables_scenario_without_yaml_fallback(tmp_path):
+    runtime_root = runtime_fixture(tmp_path)
+    resolved = resolve_current_runtime_release(runtime_root)
+    manifest = dict(resolved.manifest)
+    manifest.pop("parameter_snapshot")
+    manifest.pop("parameter_hash")
+    resolved.manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    write_release_index_atomically(
+        runtime_root,
+        replace(
+            resolved.index,
+            current_manifest_sha256=file_sha256(resolved.manifest_path),
+        ),
+        expected_previous_sha256=resolved.identity.index_sha256,
+    )
+
+    app = AppTest.from_string(
+        app_script(runtime_root), default_timeout=40
+    ).run(timeout=40)
+    assert not app.exception
+    assert not app.number_input
+    assert any(
+        "Official parameter snapshot unavailable" in item.value
+        for item in app.info
+    )
+
+
 @pytest.mark.parametrize(
     ("previous", "new", "expected_type"),
     [
@@ -390,7 +501,7 @@ def test_real_page_save_reloads_new_release_and_preserves_other_rows(
     assert "CNF来源" not in official
     assert row["美元成本"] == "460.12"
     assert row["完税成本"] == "3456.93"
-    assert row["盘面榨利"] == "179.83"
+    assert row["盘面榨利"] == "301.28"
     assert app.session_state[
         components.STATE_RUNTIME_CONTEXT
     ].loaded_generation == 2

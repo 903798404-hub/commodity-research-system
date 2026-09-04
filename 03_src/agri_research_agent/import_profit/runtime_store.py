@@ -22,7 +22,33 @@ from .query import (
     SoybeanQueryDataset,
     load_soybean_query_dataset,
 )
-from .result_store import RESULT_SCHEMA, SNAPSHOT_SCHEMA
+from .parameter_snapshot import (
+    ParameterProvenance,
+    ParameterSnapshotError,
+    read_parameter_provenance,
+)
+from .mapping_snapshot import (
+    MappingProvenance,
+    MappingSnapshotError,
+    read_mapping_provenance,
+)
+from .override_snapshot import (
+    ContractOverrideProvenance,
+    ContractOverrideSnapshotError,
+    read_contract_override_provenance,
+)
+from .result_store import (
+    LEGACY_CONTRACT_IDENTITY_SNAPSHOT_SCHEMA,
+    LEGACY_QUOTE_DATE_SNAPSHOT_SCHEMA,
+    LEGACY_RESULT_SCHEMA,
+    LEGACY_SNAPSHOT_SCHEMA,
+    LEGACY_MAPPING_PROVENANCE_RESULT_SCHEMA,
+    LEGACY_MAPPING_PROVENANCE_SNAPSHOT_SCHEMA,
+    LEGACY_OVERRIDE_PROVENANCE_RESULT_SCHEMA,
+    LEGACY_OVERRIDE_PROVENANCE_SNAPSHOT_SCHEMA,
+    RESULT_SCHEMA,
+    SNAPSHOT_SCHEMA,
+)
 
 
 RUNTIME_CONTRACT_VERSION = "1"
@@ -188,6 +214,9 @@ class ResolvedRuntimeRelease:
     quality_report_path: Path
     files: tuple[RuntimeFileIdentity, ...]
     manifest: Mapping[str, object]
+    parameter_provenance: ParameterProvenance
+    mapping_provenance: MappingProvenance
+    contract_override_provenance: ContractOverrideProvenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,16 +287,53 @@ def resolve_current_runtime_release(
         )
     manifest = read_json(manifest_path, "Release Manifest")
     _validate_manifest_header(manifest, index)
+    try:
+        parameter_provenance = read_parameter_provenance(manifest)
+    except ParameterSnapshotError as exc:
+        raise RuntimeReleaseValidationError(
+            "Release parameter provenance is invalid"
+        ) from exc
+    try:
+        mapping_provenance = read_mapping_provenance(manifest)
+    except MappingSnapshotError as exc:
+        raise RuntimeReleaseValidationError(
+            "Release mapping provenance is invalid"
+        ) from exc
+    try:
+        contract_override_provenance = read_contract_override_provenance(
+            manifest
+        )
+    except ContractOverrideSnapshotError as exc:
+        raise RuntimeReleaseValidationError(
+            "Release contract override provenance is invalid"
+        ) from exc
     output_payload = manifest.get("output_files")
     if not isinstance(output_payload, dict):
         raise RuntimeReleaseValidationError(
             "Release Manifest output_files must be an object"
         )
 
-    required = {
+    snapshot_schemas: list[pa.Schema] = [SNAPSHOT_SCHEMA]
+    result_schemas: list[pa.Schema] = [RESULT_SCHEMA]
+    if not contract_override_provenance.available:
+        snapshot_schemas.append(LEGACY_OVERRIDE_PROVENANCE_SNAPSHOT_SCHEMA)
+        result_schemas.append(LEGACY_OVERRIDE_PROVENANCE_RESULT_SCHEMA)
+    if not mapping_provenance.available:
+        snapshot_schemas.extend(
+            [
+                LEGACY_MAPPING_PROVENANCE_SNAPSHOT_SCHEMA,
+                LEGACY_QUOTE_DATE_SNAPSHOT_SCHEMA,
+                LEGACY_CONTRACT_IDENTITY_SNAPSHOT_SCHEMA,
+            ]
+        )
+        result_schemas.append(LEGACY_MAPPING_PROVENANCE_RESULT_SCHEMA)
+    if not parameter_provenance.available:
+        snapshot_schemas.append(LEGACY_SNAPSHOT_SCHEMA)
+        result_schemas.append(LEGACY_RESULT_SCHEMA)
+    required: dict[str, pa.Schema | tuple[pa.Schema, ...]] = {
         BUSINESS_KEYS_FILENAME: HISTORICAL_BUSINESS_KEY_SCHEMA,
-        SNAPSHOTS_FILENAME: SNAPSHOT_SCHEMA,
-        RESULTS_FILENAME: RESULT_SCHEMA,
+        SNAPSHOTS_FILENAME: tuple(snapshot_schemas),
+        RESULTS_FILENAME: tuple(result_schemas),
     }
     files: list[RuntimeFileIdentity] = []
     for filename, schema in required.items():
@@ -348,6 +414,9 @@ def resolve_current_runtime_release(
         quality_report_path=release_dir / QUALITY_FILENAME,
         files=tuple(files),
         manifest=manifest,
+        parameter_provenance=parameter_provenance,
+        mapping_provenance=mapping_provenance,
+        contract_override_provenance=contract_override_provenance,
     )
 
 
@@ -384,6 +453,40 @@ def load_runtime_release_dataset(
     ):
         raise RuntimeReleaseValidationError(
             "Release record statistics do not match Manifest"
+        )
+    row_hashes = {record.parameter_hash for record in dataset.records}
+    if resolved.parameter_provenance.available:
+        if row_hashes != {resolved.parameter_provenance.parameter_hash}:
+            raise RuntimeReleaseValidationError(
+                "Result parameter identity does not match Release Manifest"
+            )
+    elif row_hashes != {None} and row_hashes:
+        raise RuntimeReleaseValidationError(
+            "legacy Release contains unsealed parameter identities"
+        )
+    row_mapping_hashes = {record.mapping_hash for record in dataset.records}
+    if resolved.mapping_provenance.available:
+        if row_mapping_hashes != {resolved.mapping_provenance.mapping_hash}:
+            raise RuntimeReleaseValidationError(
+                "Result mapping identity does not match Release Manifest"
+            )
+    elif row_mapping_hashes != {None} and row_mapping_hashes:
+        raise RuntimeReleaseValidationError(
+            "legacy Release contains unsealed mapping identities"
+        )
+    row_override_hashes = {
+        record.contract_override_hash for record in dataset.records
+    }
+    if resolved.contract_override_provenance.available:
+        if row_override_hashes != {
+            resolved.contract_override_provenance.contract_override_hash
+        }:
+            raise RuntimeReleaseValidationError(
+                "Result contract override identity does not match Release Manifest"
+            )
+    elif row_override_hashes != {None} and row_override_hashes:
+        raise RuntimeReleaseValidationError(
+            "legacy Release contains unsealed contract override identities"
         )
     manual = load_cnf_store(
         resolved.manual_cnf_path,
@@ -806,7 +909,7 @@ def _manifest_file_identity(
 def _verify_file_identity(
     path: Path,
     identity: RuntimeFileIdentity,
-    schema: pa.Schema | None,
+    schema: pa.Schema | tuple[pa.Schema, ...] | None,
 ) -> None:
     if not path.is_file():
         raise RuntimeReleaseValidationError(
@@ -820,7 +923,17 @@ def _verify_file_identity(
             f"Release file identity mismatch: {identity.filename}"
         )
     if schema is not None:
-        actual = parquet_identity(path, identity.filename, schema)
+        schemas = schema if isinstance(schema, tuple) else (schema,)
+        table = pq.read_table(path)
+        actual_schema = next(
+            (candidate for candidate in schemas if table.schema == candidate),
+            None,
+        )
+        if actual_schema is None:
+            raise RuntimeReleaseValidationError(
+                f"{identity.filename} does not match a supported schema"
+            )
+        actual = parquet_identity(path, identity.filename, actual_schema)
         if (
             actual.record_count != identity.record_count
             or actual.schema_fingerprint != identity.schema_fingerprint

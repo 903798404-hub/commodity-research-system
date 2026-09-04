@@ -180,6 +180,42 @@ def test_complete_page_renders_controls_tables_tabs_and_figures(tmp_path):
     assert "写入成功" not in visible_text
 
 
+def test_page_only_announces_actual_manual_contract_override(tmp_path):
+    records = page_records()
+    automatic_paths = write_dataset(tmp_path / "automatic", records)
+    automatic_app = AppTest.from_string(
+        _app_script(automatic_paths), default_timeout=40
+    ).run(timeout=40)
+    assert "MANUAL CONTRACT OVERRIDE" not in "\n".join(
+        _texts(automatic_app.info)
+    )
+
+    manual_records = list(page_records())
+    parts = list(manual_records[0])
+    parts[1].update(
+        {
+            "soymeal_contract_code": "M2709",
+            "soymeal_override_contract_code": "M2709",
+            "soymeal_selection_mode": "manual_override",
+            "soymeal_override_reason": "source contract anomaly",
+            "soymeal_override_effective_from": date(2026, 6, 25),
+            "soymeal_override_effective_to": None,
+            "soymeal_source_delivery_month": 9,
+        }
+    )
+    manual_records[0] = tuple(parts)
+    manual_paths = write_dataset(tmp_path / "manual", manual_records)
+    manual_app = AppTest.from_string(
+        _app_script(manual_paths), default_timeout=40
+    ).run(timeout=40)
+    notices = "\n".join(_texts(manual_app.info))
+
+    assert "MANUAL CONTRACT OVERRIDE" in notices
+    assert "M2705 → M2709" in notices
+    assert "source contract anomaly" in notices
+    assert not any("合约" in item.label for item in manual_app.selectbox)
+
+
 def test_weekend_selection_is_rejected_without_date_fallback(tmp_path):
     paths = _page_paths(tmp_path)
     app = AppTest.from_string(
@@ -337,8 +373,10 @@ def test_cnf_repricing_preserves_morning_snapshot_price_type(tmp_path) -> None:
     snapshot_row = dict(snapshot_row)
     snapshot_row["soymeal_price_type"] = "night_session_close"
     snapshot_row["soymeal_source"] = "akshare"
+    snapshot_row["soymeal_source_quote_date"] = date(2026, 7, 24)
     snapshot_row["soyoil_price_type"] = "night_session_close"
     snapshot_row["soyoil_source"] = "akshare"
+    snapshot_row["soyoil_source_quote_date"] = date(2026, 7, 24)
     paths = write_dataset(
         tmp_path,
         [(key_row, snapshot_row, result_row)],

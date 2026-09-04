@@ -21,8 +21,10 @@ import pyarrow.parquet as pq
 from .business_days import require_business_weekday
 from .config import SoybeanImportProfitConfig
 from .contract_mapping import map_soybean_contracts
+from .contract_override import select_soybean_contracts
 from .fx import calculate_tenor_months, select_fx
 from .historical_cnf_adapter import shipment_year_for
+from .models import BusinessKey
 from .models import FxCurve, FxSelectionStatus
 from .standard_io import (
     CBOT_SCHEMA,
@@ -118,6 +120,7 @@ def build_morning_external_inputs_candidate(
     loaded_fx = load_fx_parquet(source_dir / FX_SOURCE_FILENAME)
 
     shipment_mappings = []
+    contract_override_selections = []
     required_contracts: dict[tuple[int, int], None] = {}
     target_tenors: list[int] = []
     for month in range(1, 13):
@@ -139,6 +142,50 @@ def build_morning_external_inputs_candidate(
                 "fx_target_tenor": tenor,
             }
         )
+        for origin in config.origin_codes:
+            business_key = BusinessKey(
+                business_date,
+                config.commodity,
+                origin,
+                year,
+                month,
+                config.origin_codes,
+                config.commodity,
+            )
+            selection = select_soybean_contracts(config, business_key)
+            effective_cbot = selection.cbot.effective_contract
+            required_contracts[
+                (effective_cbot.contract_year, effective_cbot.contract_month)
+            ] = None
+            if not selection.all_automatic:
+                contract_override_selections.append(
+                    {
+                        "origin": origin,
+                        "shipment_period": business_key.shipment_period,
+                        "automatic_cbot_contract": mapped.cbot.label,
+                        "effective_cbot_contract": effective_cbot.label,
+                        "cbot_selection_mode": (
+                            selection.cbot.selection_mode.value
+                        ),
+                        "automatic_soymeal_contract": mapped.soymeal.code,
+                        "effective_soymeal_contract": (
+                            selection.soymeal.effective_contract.code
+                        ),
+                        "soymeal_selection_mode": (
+                            selection.soymeal.selection_mode.value
+                        ),
+                        "automatic_soyoil_contract": mapped.soyoil.code,
+                        "effective_soyoil_contract": (
+                            selection.soyoil.effective_contract.code
+                        ),
+                        "soyoil_selection_mode": (
+                            selection.soyoil.selection_mode.value
+                        ),
+                        "contract_override_hash": (
+                            selection.contract_override_hash
+                        ),
+                    }
+                )
 
     required_set = set(required_contracts)
     selected_cbot = tuple(
@@ -261,6 +308,7 @@ def build_morning_external_inputs_candidate(
                 record.tenor_months for record in selected_fx
             ),
             "shipment_mappings": shipment_mappings,
+            "contract_override_selections": contract_override_selections,
             "fx_selection_status_by_shipment": [
                 {
                     "shipment_month": month,

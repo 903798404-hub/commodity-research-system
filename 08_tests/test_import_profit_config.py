@@ -32,7 +32,9 @@ def test_real_config_loads_into_immutable_models() -> None:
     assert config.commodity == "soybean"
     assert config.origin_codes == ("brazil", "us_gulf", "us_pnw", "argentina")
     assert len(config.contract_mapping) == 12
-    assert config.default_parameters.meal_yield == 0.785
+    assert config.default_parameters.meal_yield == 0.795
+    assert config.default_parameters.oil_yield == 0.19
+    assert config.default_parameters.port_charge_cny_per_tonne == 50
     assert config.origin_overrides == ()
     assert config.business_calendar_policy.timezone == "Asia/Shanghai"
     assert config.business_calendar_policy.calendar_type == "weekday"

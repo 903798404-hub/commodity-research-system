@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import date, datetime, time, timezone
 
 import pytest
@@ -33,6 +33,9 @@ from agri_research_agent.import_profit.models import (
     BusinessKey,
     FxSelectionStatus,
     MissingReason,
+)
+from agri_research_agent.import_profit.soybean import (
+    calculate_soybean_net_crush_margin,
 )
 
 
@@ -212,6 +215,7 @@ def make_dce(
     price_type: str = "post_close_current_price",
     source: str = "akshare",
     usable: bool = True,
+    quote_date_evidence_status: str = "source_confirmed",
 ) -> DcePricePoint:
     return DcePricePoint(
         business_date=business_date,
@@ -221,7 +225,15 @@ def make_dce(
         source=source,
         source_function="futures_zh_spot",
         is_usable=usable,
-        source_quote_date=business_date,
+        quote_date_evidence_status=quote_date_evidence_status,
+        contract_identity_status="source_confirmed_exact",
+        source_contract_code=contract_code,
+        source_delivery_month=int(contract_code[3:5]),
+        source_quote_date=(
+            None
+            if quote_date_evidence_status == "time_only_unconfirmed"
+            else business_date
+        ),
         source_quote_time=time(15, 1),
         source_snapshot_sha256="DCE-SHA",
     )
@@ -270,6 +282,86 @@ def test_complete_snapshot_and_calculation_input_use_exact_standard_points() -> 
     assert calculation_input.fx_value == 7.2
     assert calculation_input.soymeal_price_cny_per_tonne == 3200
     assert calculation_input.soyoil_price_cny_per_tonne == 8000
+
+
+def test_contract_identity_provenance_has_zero_numerical_effect() -> None:
+    key = make_key()
+    legacy_points = [make_dce("M2701", 3200), make_dce("Y2701", 8000)]
+    inferred_points = [
+        replace(
+            point,
+            contract_identity_status="continuous_inferred",
+            source_contract_code=None,
+            source_delivery_month=1,
+        )
+        for point in legacy_points
+    ]
+
+    before = build_snapshot(key, dce_records=legacy_points)
+    after = build_snapshot(key, dce_records=inferred_points)
+    before_result = calculate_soybean_net_crush_margin(
+        snapshot_to_calculation_input(before, config=CONFIG), CONFIG
+    )
+    after_result = calculate_soybean_net_crush_margin(
+        snapshot_to_calculation_input(after, config=CONFIG), CONFIG
+    )
+
+    assert before.business_key == after.business_key
+    assert before.mapped_contracts == after.mapped_contracts
+    assert before.cbot_price_cents_per_bushel == after.cbot_price_cents_per_bushel
+    assert before.fx_value == after.fx_value
+    assert before.cnf_cents_per_bushel == after.cnf_cents_per_bushel
+    assert before.soymeal_price_cny_per_tonne == after.soymeal_price_cny_per_tonne
+    assert before.soyoil_price_cny_per_tonne == after.soyoil_price_cny_per_tonne
+    assert before.snapshot_status == after.snapshot_status
+    assert before.missing_reasons == after.missing_reasons
+    assert before_result == after_result
+    assert after.soymeal_contract_code == "M2701"
+    assert after.soymeal_contract_identity_status == "continuous_inferred"
+
+
+def test_source_confirmed_quote_keeps_exact_pre_goal_c_numerics() -> None:
+    key = make_key()
+    snapshot = build_snapshot(key)
+    result = calculate_soybean_net_crush_margin(
+        snapshot_to_calculation_input(snapshot, config=CONFIG), CONFIG
+    )
+
+    assert snapshot.business_key == key
+    assert snapshot.soymeal_price_cny_per_tonne == 3200
+    assert snapshot.soyoil_price_cny_per_tonne == 8000
+    assert snapshot.soymeal_quote_date_evidence_status == "source_confirmed"
+    assert snapshot.soyoil_quote_date_evidence_status == "source_confirmed"
+    assert result.usd_cost_per_tonne == pytest.approx(496.03995000000003)
+    assert result.duty_paid_cost_cny_per_tonne == pytest.approx(4009.7091734280007)
+    assert result.net_crush_margin_cny_per_tonne == pytest.approx(
+        -267.70917342800067
+    )
+
+
+def test_time_only_exact_contract_is_not_selected_for_formal_snapshot() -> None:
+    key = make_key()
+    time_only = [
+        make_dce(
+            "M2701",
+            3200,
+            usable=False,
+            quote_date_evidence_status="time_only_unconfirmed",
+        ),
+        make_dce(
+            "Y2701",
+            8000,
+            usable=False,
+            quote_date_evidence_status="time_only_unconfirmed",
+        ),
+    ]
+    snapshot = build_snapshot(key, dce_records=time_only)
+
+    assert snapshot.soymeal_contract_identity_status == "source_confirmed_exact"
+    assert snapshot.soymeal_quote_date_evidence_status == "time_only_unconfirmed"
+    assert snapshot.soymeal_price_cny_per_tonne is None
+    assert snapshot.soyoil_price_cny_per_tonne is None
+    assert snapshot.snapshot_status is SnapshotStatus.INCOMPLETE
 
 
 @pytest.mark.parametrize("value", [150, -25, 0])

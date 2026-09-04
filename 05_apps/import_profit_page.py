@@ -22,6 +22,19 @@ from agri_research_agent.import_profit.query import (
     SoybeanQueryDataset,
     load_soybean_query_dataset,
 )
+from agri_research_agent.import_profit.parameter_snapshot import (
+    ParameterProvenance,
+)
+from agri_research_agent.import_profit.scenario import (
+    SCENARIO_CONTEXT_STATE,
+    SCENARIO_TARIFF_STATE,
+    SCENARIO_VAT_STATE,
+    ScenarioError,
+    ScenarioRates,
+    calculate_scenario_batch,
+    initialize_scenario_state,
+    reset_scenario_state,
+)
 from import_profit_components import (
     METRIC_SECTIONS,
     STATE_EDITED_CNF,
@@ -76,6 +89,10 @@ RUNTIME_NOTICE = (
     "正式运行模式：当前页面读取的是正式运行Release；"
     "保存操作会建立新的不可变Release。"
 )
+SCENARIO_TARIFF_PERCENT_STATE = (
+    "import_profit_page:scenario_tariff_percent"
+)
+SCENARIO_VAT_PERCENT_STATE = "import_profit_page:scenario_vat_percent"
 
 RuntimeSaveHandler = Callable[
     [RuntimeEditorContext, tuple[CnfEditDifference, ...]],
@@ -197,6 +214,10 @@ def render_import_profit_page_from_dataset(
     runtime_identity: PageRuntimeIdentity | None = None,
     allow_cnf_save: bool = False,
     runtime_save_handler: RuntimeSaveHandler | None = None,
+    release_parameters_available: bool = True,
+    release_mapping_available: bool = True,
+    release_contract_override_available: bool = True,
+    parameter_provenance: ParameterProvenance | None = None,
 ) -> None:
     """Render from an injected immutable dataset for tests and future routing."""
 
@@ -240,7 +261,13 @@ def render_import_profit_page_from_dataset(
         )
     with control_columns[2]:
         st.caption("计算参数摘要")
-        st.markdown(parameter_summary(config, selected_origin))
+        st.markdown(
+            parameter_summary(
+                config,
+                selected_origin,
+                parameters_available=release_parameters_available,
+            )
+        )
 
     if not isinstance(selected_date, date):
         st.error("业务日期选择无效。")
@@ -301,8 +328,28 @@ def render_import_profit_page_from_dataset(
         origin=selected_origin,
         origin_label=labels[selected_origin],
         business_date=selected_date,
+        parameters_available=release_parameters_available,
     )
-    if allow_cnf_preview:
+    _render_contract_override_notice(prepared.records)
+    if runtime_identity is not None:
+        _render_tariff_vat_scenario(
+            dataset,
+            prepared,
+            config=config,
+            provenance=parameter_provenance,
+            origin=selected_origin,
+            context_id=runtime_identity.release_id,
+            mapping_available=release_mapping_available,
+            contract_override_available=(
+                release_contract_override_available
+            ),
+        )
+    if (
+        allow_cnf_preview
+        and release_parameters_available
+        and release_mapping_available
+        and release_contract_override_available
+    ):
         _render_cnf_editor(
             prepared,
             config=config,
@@ -320,6 +367,206 @@ def render_import_profit_page_from_dataset(
     _render_seasonality(
         prepared,
         business_date=selected_date,
+    )
+
+
+def _render_tariff_vat_scenario(
+    dataset: SoybeanQueryDataset,
+    prepared: PreparedPageData,
+    *,
+    config: SoybeanImportProfitConfig,
+    provenance: ParameterProvenance | None,
+    origin: str,
+    context_id: str,
+    mapping_available: bool,
+    contract_override_available: bool,
+) -> None:
+    render_section_heading(
+        "SCENARIO｜关税 / VAT 情景试算",
+        "仅改变当前Release的关税率和增值税率",
+    )
+    st.warning(
+        "SESSION-ONLY / NO WRITES｜仅页面内存："
+        "不写入Release、Runtime、CNF、YAML或Parquet，"
+        "Official结果始终保持不变。"
+    )
+    if not mapping_available:
+        st.info(
+            "Official mapping snapshot unavailable；"
+            "历史Release无可信换月规则快照，Scenario已禁用。"
+        )
+        return
+    if not contract_override_available:
+        st.info(
+            "Official contract override snapshot unavailable；"
+            "历史Release无可信人工合约覆盖信息，Scenario已禁用。"
+        )
+        return
+    if provenance is None or not provenance.available:
+        st.info(
+            "Official parameter snapshot unavailable；"
+            "历史Release无可信参数快照，Scenario已禁用。"
+        )
+        return
+    previous_context = st.session_state.get(SCENARIO_CONTEXT_STATE)
+    try:
+        official = initialize_scenario_state(
+            st.session_state,
+            context_id=context_id,
+            origin=origin,
+            provenance=provenance,
+        )
+    except ScenarioError:
+        st.info("Official parameter snapshot unavailable；Scenario已禁用。")
+        return
+    current_context = st.session_state.get(SCENARIO_CONTEXT_STATE)
+    if previous_context != current_context:
+        st.session_state[SCENARIO_TARIFF_PERCENT_STATE] = (
+            official.tariff_rate * 100.0
+        )
+        st.session_state[SCENARIO_VAT_PERCENT_STATE] = (
+            official.vat_rate * 100.0
+        )
+    controls = st.columns((1, 1, 1, 3))
+    tariff_percent = controls[0].number_input(
+        "Scenario关税（%）",
+        min_value=0.0,
+        max_value=100.0,
+        step=0.1,
+        key=SCENARIO_TARIFF_PERCENT_STATE,
+    )
+    vat_percent = controls[1].number_input(
+        "Scenario VAT（%）",
+        min_value=0.0,
+        max_value=100.0,
+        step=0.1,
+        key=SCENARIO_VAT_PERCENT_STATE,
+    )
+    def reset_to_official() -> None:
+        reset = reset_scenario_state(
+            st.session_state,
+            origin=origin,
+            provenance=provenance,
+        )
+        st.session_state[SCENARIO_TARIFF_PERCENT_STATE] = (
+            reset.tariff_rate * 100.0
+        )
+        st.session_state[SCENARIO_VAT_PERCENT_STATE] = reset.vat_rate * 100.0
+
+    controls[2].button(
+        "Reset to Official",
+        key="import_profit_page:scenario_reset",
+        on_click=reset_to_official,
+    )
+    rates = ScenarioRates(tariff_percent / 100.0, vat_percent / 100.0)
+    st.session_state[SCENARIO_TARIFF_STATE] = rates.tariff_rate
+    st.session_state[SCENARIO_VAT_STATE] = rates.vat_rate
+    metrics = st.columns(4)
+    metrics[0].metric("Official Tariff", f"{official.tariff_rate:.2%}")
+    metrics[1].metric("Scenario Tariff", f"{rates.tariff_rate:.2%}")
+    metrics[2].metric("Official VAT", f"{official.vat_rate:.2%}")
+    metrics[3].metric("Scenario VAT", f"{rates.vat_rate:.2%}")
+    try:
+        current = calculate_scenario_batch(
+            (record for record in prepared.records if record is not None),
+            config=config,
+            provenance=provenance,
+            rates=rates,
+        )
+        st.dataframe(
+            _scenario_current_frame(current),
+            hide_index=True,
+            width="stretch",
+            height=460,
+        )
+        margin_frame, impact_frame = _scenario_recent_frames(
+            dataset,
+            prepared,
+            config=config,
+            provenance=provenance,
+            origin=origin,
+            rates=rates,
+        )
+    except ScenarioError:
+        st.error("Scenario计算与当前Release记录不兼容，未展示试算。")
+        return
+    st.caption("Scenario Net Crush Margin｜近10个业务日 × 12船期")
+    st.dataframe(margin_frame, hide_index=True, width="stretch")
+    st.caption("Scenario Impact (CNY/t)｜Scenario - Official")
+    st.dataframe(impact_frame, hide_index=True, width="stretch")
+
+
+def _scenario_current_frame(calculations) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "船期": item.shipment_period,
+                "Official Tariff (%)": item.official_tariff_rate * 100.0,
+                "Scenario Tariff (%)": item.scenario_tariff_rate * 100.0,
+                "Official VAT (%)": item.official_vat_rate * 100.0,
+                "Scenario VAT (%)": item.scenario_vat_rate * 100.0,
+                "Official Net Crush Margin (CNY/t)": (
+                    item.official_net_crush_margin_cny_per_tonne
+                ),
+                "Scenario Net Crush Margin (CNY/t)": (
+                    item.scenario_net_crush_margin_cny_per_tonne
+                ),
+                "Scenario Impact (CNY/t)": item.scenario_impact_cny_per_tonne,
+            }
+            for item in calculations
+        ]
+    )
+
+
+def _scenario_recent_frames(
+    dataset,
+    prepared,
+    *,
+    config,
+    provenance,
+    origin,
+    rates,
+):
+    margin_rows = []
+    impact_rows = []
+    for recent_row in prepared.matrix(QueryMetric.NET_CRUSH_MARGIN).rows:
+        records = tuple(
+            record
+            for month in range(1, 13)
+            if (
+                record := dataset.get_by_date_origin_month(
+                    recent_row.business_date, origin, month
+                )
+            )
+            is not None
+        )
+        calculated = calculate_scenario_batch(
+            records,
+            config=config,
+            provenance=provenance,
+            rates=rates,
+        )
+        by_month = {
+            item.business_key.shipment_month: item for item in calculated
+        }
+        margin = {"日期": recent_row.business_date}
+        impact = {"日期": recent_row.business_date}
+        for month in range(1, 13):
+            item = by_month.get(month)
+            margin[f"{month}月船期"] = (
+                None
+                if item is None
+                else item.scenario_net_crush_margin_cny_per_tonne
+            )
+            impact[f"{month}月船期"] = (
+                None if item is None else item.scenario_impact_cny_per_tonne
+            )
+        margin_rows.append(margin)
+        impact_rows.append(impact)
+    columns = ["日期", *(f"{month}月船期" for month in range(1, 13))]
+    return (
+        pd.DataFrame(margin_rows, columns=columns),
+        pd.DataFrame(impact_rows, columns=columns),
     )
 
 
@@ -406,6 +653,7 @@ def _render_daily_table(
     origin: str,
     origin_label: str,
     business_date: date,
+    parameters_available: bool = True,
 ) -> None:
     render_section_heading(
         origin_profit_title(origin, origin_label),
@@ -416,6 +664,7 @@ def _render_daily_table(
         business_date=business_date,
         origin=origin,
         config=config,
+        parameters_available=parameters_available,
     )
     st.dataframe(
         table,
@@ -424,6 +673,46 @@ def _render_daily_table(
         height=460,
     )
     st.caption(price_basis_note(prepared.records))
+
+
+def _render_contract_override_notice(records) -> None:
+    notices = []
+    for record in records:
+        if record is None:
+            continue
+        for label, mode, automatic, effective, reason in (
+            (
+                "CBOT Soybeans",
+                record.cbot_selection_mode,
+                record.cbot_automatic_contract,
+                record.cbot_contract,
+                record.cbot_override_reason,
+            ),
+            (
+                "DCE Soymeal",
+                record.soymeal_selection_mode,
+                record.soymeal_automatic_contract,
+                record.soymeal_contract,
+                record.soymeal_override_reason,
+            ),
+            (
+                "DCE Soybean Oil",
+                record.soyoil_selection_mode,
+                record.soyoil_automatic_contract,
+                record.soyoil_contract,
+                record.soyoil_override_reason,
+            ),
+        ):
+            if mode == "manual_override":
+                notices.append(
+                    f"{record.shipment_period} {label}: "
+                    f"{automatic} → {effective}（{reason}）"
+                )
+    if notices:
+        st.info(
+            "MANUAL CONTRACT OVERRIDE｜人工合约覆盖\n\n"
+            + "\n\n".join(notices)
+        )
 
 
 def _render_cnf_editor(

@@ -61,12 +61,12 @@ def test_identity_scope_origins_and_parameters_are_locked() -> None:
     ]
 
     parameters = config["default_parameters"]
-    assert parameters["meal_yield"] == 0.785
-    assert parameters["oil_yield"] == 0.185
+    assert parameters["meal_yield"] == 0.795
+    assert parameters["oil_yield"] == 0.19
     assert parameters["cents_per_bushel_to_usd_per_tonne"] == 0.367437
     assert parameters["tariff_rate"] == 0.03
     assert parameters["vat_rate"] == 0.09
-    assert parameters["port_charge_cny_per_tonne"] == 100
+    assert parameters["port_charge_cny_per_tonne"] == 50
     assert parameters["processing_fee_cny_per_tonne"] == 150
     assert parameters["additional_fees_cny_per_tonne"] == 0
     assert config["origin_overrides"] == {}
@@ -155,11 +155,11 @@ EXPECTED_MAPPING = [
     (1, 1, 0, 5, 0),
     (2, 3, 0, 5, 0),
     (3, 3, 0, 5, 0),
-    (4, 5, 0, 9, 0),
-    (5, 5, 0, 9, 0),
-    (6, 7, 0, 9, 0),
-    (7, 7, 0, 9, 0),
-    (8, 9, 0, 1, 1),
+    (4, 5, 0, 5, 0),
+    (5, 5, 0, 5, 0),
+    (6, 7, 0, 5, 0),
+    (7, 7, 0, 5, 0),
+    (8, 9, 0, 5, 0),
     (9, 9, 0, 1, 1),
     (10, 11, 0, 1, 1),
     (11, 11, 0, 1, 1),
@@ -347,7 +347,7 @@ def test_unique_contract_is_registered_and_contains_required_business_rules() ->
         "棕榈油使用直接进口利润模型，不得套用出粕率或出油率",
         "美元成本 = (CBOT日度价格 + CNF升贴水) × 0.367437",
         "完税成本 = 美元成本 × 汇率 × (1 + 关税率) × (1 + 增值税率)",
-        "盘面净榨利 = 豆粕盘面 × 0.785",
+        "盘面净榨利 = 豆粕盘面 × 0.795",
         "数字 `0` 是有效平水报价",
         "同一 `business_date` 的相邻有效期限",
         "不得依据 AkShare 是否返回行情推断交易所开市或休市",

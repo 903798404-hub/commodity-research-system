@@ -17,7 +17,7 @@ import pyarrow.parquet as pq
 from .business_days import require_business_weekday
 from .cnf_store import ALLOWED_SOURCE, CnfQuoteRecord
 from .config import SoybeanImportProfitConfig
-from .contract_mapping import map_soybean_contracts
+from .contract_override import select_soybean_contracts
 from .dce_daily import (
     CAPTURE_ZONE,
     DceSpotBatchResult,
@@ -114,12 +114,10 @@ def required_dce_contracts(
     business_date: date, config: SoybeanImportProfitConfig
 ) -> tuple[str, ...]:
     required: dict[str, None] = {}
-    for month in range(1, 13):
-        mapped = map_soybean_contracts(
-            config, shipment_year_for(business_date, month), month
-        )
-        required[mapped.soymeal.code] = None
-        required[mapped.soyoil.code] = None
+    for business_key in generate_daily_business_keys(business_date, config):
+        selection = select_soybean_contracts(config, business_key)
+        required[selection.soymeal.effective_contract.code] = None
+        required[selection.soyoil.effective_contract.code] = None
     return tuple(sorted(required))
 
 
@@ -213,7 +211,7 @@ def capture_and_store_dce_night_session_close(
             raise DailyIncrementError("DCE candidate_id already exists")
         building.mkdir()
         outputs = {}
-        if status in {"success", "passed_with_incomplete"}:
+        if batch.records:
             _write_dce_parquet(building / DCE_FILENAME, batch)
             outputs[DCE_FILENAME] = _file_identity(building / DCE_FILENAME)
         quality = {
@@ -383,14 +381,14 @@ def _validate_dce_candidate(candidate_dir: Path, manifest: dict) -> None:
     if outputs.get(QUALITY_FILENAME) != _file_identity(quality_path):
         raise DailyIncrementError("DCE quality identity mismatch")
     parquet_path = candidate_dir / DCE_FILENAME
-    if status in {"success", "passed_with_incomplete"}:
+    if manifest.get("record_count", 0) > 0:
         if outputs.get(DCE_FILENAME) != _file_identity(parquet_path):
             raise DailyIncrementError("DCE Parquet identity mismatch")
         loaded = load_dce_parquet(parquet_path)
         if len(loaded.records) != manifest["record_count"]:
             raise DailyIncrementError("DCE record count mismatch")
     elif parquet_path.exists() or DCE_FILENAME in outputs:
-        raise DailyIncrementError("failed DCE outcome must not contain Parquet")
+        raise DailyIncrementError("empty DCE outcome must not contain Parquet")
     if manifest.get("capture_gate_status") != "valid":
         raise DailyIncrementError("DCE outcome lacks a legal capture attempt")
 

@@ -17,8 +17,12 @@ from agri_research_agent.data_sources.navicat_sql_stream import (
 )
 
 from .config import SoybeanImportProfitConfig
-from .contract_mapping import map_soybean_contracts
-from .market_snapshot import DcePricePoint
+from .contract_override import select_soybean_contracts
+from .market_snapshot import (
+    CONTINUOUS_INFERRED,
+    QUOTE_DATE_SOURCE_CONFIRMED,
+    DcePricePoint,
+)
 from .models import BusinessKey
 from .reuters_adapter import (
     SourceIdentity,
@@ -341,12 +345,10 @@ def resolve_historical_dce_points(
 
     resolved: dict[tuple[date, str], DcePricePoint] = {}
     for business_key in requested:
-        mapped = map_soybean_contracts(
-            config, business_key.shipment_year, business_key.shipment_month
-        )
+        selection = select_soybean_contracts(config, business_key)
         for instrument, contract in (
-            ("soymeal", mapped.soymeal),
-            ("soyoil", mapped.soyoil),
+            ("soymeal", selection.soymeal.effective_contract),
+            ("soyoil", selection.soyoil.effective_contract),
         ):
             source_point = available.get(
                 (business_key.business_date, instrument, contract.contract_month)
@@ -361,9 +363,13 @@ def resolve_historical_dce_points(
                 source=source_point.source,
                 source_function=source_point.source_table,
                 is_usable=True,
+                quote_date_evidence_status=QUOTE_DATE_SOURCE_CONFIRMED,
                 source_quote_date=source_point.business_date,
                 source_quote_time=None,
                 source_snapshot_sha256=source_point.source_snapshot_sha256,
+                contract_identity_status=CONTINUOUS_INFERRED,
+                source_contract_code=None,
+                source_delivery_month=source_point.delivery_month,
             )
             previous = resolved.get(point.key)
             if (

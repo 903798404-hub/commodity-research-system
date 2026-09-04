@@ -11,13 +11,19 @@ from typing import Generic, TypeVar
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .market_snapshot import CbotPricePoint, DcePricePoint, FxPricePoint
+from .market_snapshot import (
+    LEGACY_UNKNOWN,
+    QUOTE_DATE_LEGACY_UNKNOWN,
+    CbotPricePoint,
+    DcePricePoint,
+    FxPricePoint,
+)
 
 
 CBOT_SCHEMA_VERSION = "reuters-cbot-v2"
 FX_SCHEMA_VERSION = "reuters-fx-v2"
-DCE_INCREMENTAL_SCHEMA_VERSION = "dce-post-close-v2"
-DCE_HISTORICAL_SCHEMA_VERSION = "dce-explicit-history-v1"
+DCE_INCREMENTAL_SCHEMA_VERSION = "dce-post-close-v4"
+DCE_HISTORICAL_SCHEMA_VERSION = "dce-explicit-history-v3"
 
 CBOT_SCHEMA = pa.schema(
     [
@@ -49,7 +55,7 @@ FX_SCHEMA = pa.schema(
         pa.field("is_usable", pa.bool_(), nullable=False),
     ]
 )
-DCE_INCREMENTAL_SCHEMA = pa.schema(
+LEGACY_DCE_INCREMENTAL_SCHEMA = pa.schema(
     [
         pa.field("business_date", pa.date32(), nullable=False),
         pa.field("instrument", pa.string(), nullable=False),
@@ -74,7 +80,21 @@ DCE_INCREMENTAL_SCHEMA = pa.schema(
         pa.field("is_usable", pa.bool_(), nullable=False),
     ]
 )
-DCE_HISTORICAL_SCHEMA = pa.schema(
+LEGACY_QUOTE_DATE_DCE_INCREMENTAL_SCHEMA = pa.schema(
+    [
+        *LEGACY_DCE_INCREMENTAL_SCHEMA,
+        pa.field("contract_identity_status", pa.string(), nullable=False),
+        pa.field("source_contract_code", pa.string(), nullable=True),
+        pa.field("source_delivery_month", pa.int8(), nullable=True),
+    ]
+)
+DCE_INCREMENTAL_SCHEMA = pa.schema(
+    [
+        *LEGACY_QUOTE_DATE_DCE_INCREMENTAL_SCHEMA,
+        pa.field("quote_date_evidence_status", pa.string(), nullable=False),
+    ]
+)
+LEGACY_DCE_HISTORICAL_SCHEMA = pa.schema(
     [
         pa.field("business_date", pa.date32(), nullable=False),
         pa.field("instrument", pa.string(), nullable=False),
@@ -92,6 +112,20 @@ DCE_HISTORICAL_SCHEMA = pa.schema(
         pa.field("source_snapshot_sha256", pa.string(), nullable=False),
         pa.field("quality_status", pa.string(), nullable=False),
         pa.field("is_usable", pa.bool_(), nullable=False),
+    ]
+)
+LEGACY_QUOTE_DATE_DCE_HISTORICAL_SCHEMA = pa.schema(
+    [
+        *LEGACY_DCE_HISTORICAL_SCHEMA,
+        pa.field("contract_identity_status", pa.string(), nullable=False),
+        pa.field("source_contract_code", pa.string(), nullable=True),
+        pa.field("source_delivery_month", pa.int8(), nullable=True),
+    ]
+)
+DCE_HISTORICAL_SCHEMA = pa.schema(
+    [
+        *LEGACY_QUOTE_DATE_DCE_HISTORICAL_SCHEMA,
+        pa.field("quote_date_evidence_status", pa.string(), nullable=False),
     ]
 )
 
@@ -275,10 +309,38 @@ def load_dce_parquet(path: str | Path) -> LoadedDceDataset:
         schema = DCE_INCREMENTAL_SCHEMA
         schema_version = DCE_INCREMENTAL_SCHEMA_VERSION
         historical = False
+        legacy_identity = False
+        legacy_quote_date = False
+    elif table.schema == LEGACY_QUOTE_DATE_DCE_INCREMENTAL_SCHEMA:
+        schema = LEGACY_QUOTE_DATE_DCE_INCREMENTAL_SCHEMA
+        schema_version = "dce-post-close-v3"
+        historical = False
+        legacy_identity = False
+        legacy_quote_date = True
+    elif table.schema == LEGACY_DCE_INCREMENTAL_SCHEMA:
+        schema = LEGACY_DCE_INCREMENTAL_SCHEMA
+        schema_version = "dce-post-close-v2"
+        historical = False
+        legacy_identity = True
+        legacy_quote_date = True
     elif table.schema == DCE_HISTORICAL_SCHEMA:
         schema = DCE_HISTORICAL_SCHEMA
         schema_version = DCE_HISTORICAL_SCHEMA_VERSION
         historical = True
+        legacy_identity = False
+        legacy_quote_date = False
+    elif table.schema == LEGACY_QUOTE_DATE_DCE_HISTORICAL_SCHEMA:
+        schema = LEGACY_QUOTE_DATE_DCE_HISTORICAL_SCHEMA
+        schema_version = "dce-explicit-history-v2"
+        historical = True
+        legacy_identity = False
+        legacy_quote_date = True
+    elif table.schema == LEGACY_DCE_HISTORICAL_SCHEMA:
+        schema = LEGACY_DCE_HISTORICAL_SCHEMA
+        schema_version = "dce-explicit-history-v1"
+        historical = True
+        legacy_identity = True
+        legacy_quote_date = True
     else:
         raise StandardSchemaError(
             "DCE Parquet schema does not match an approved ordered schema"
@@ -301,10 +363,30 @@ def load_dce_parquet(path: str | Path) -> LoadedDceDataset:
                 source=row["source"],
                 source_function=row["source_function"],
                 is_usable=row["is_usable"],
-                source_quote_date=row["source_quote_date"],
-                source_quote_time=row["source_quote_time"],
+                quote_date_evidence_status=(
+                    QUOTE_DATE_LEGACY_UNKNOWN
+                    if legacy_quote_date
+                    else row["quote_date_evidence_status"]
+                ),
+                source_quote_date=(
+                    None if legacy_quote_date else row["source_quote_date"]
+                ),
+                source_quote_time=(
+                    None if legacy_quote_date else row["source_quote_time"]
+                ),
                 source_snapshot_sha256=(
                     row["source_snapshot_sha256"] if historical else None
+                ),
+                contract_identity_status=(
+                    LEGACY_UNKNOWN
+                    if legacy_identity
+                    else row["contract_identity_status"]
+                ),
+                source_contract_code=(
+                    None if legacy_identity else row["source_contract_code"]
+                ),
+                source_delivery_month=(
+                    None if legacy_identity else row["source_delivery_month"]
                 ),
             )
         except ValueError as exc:
