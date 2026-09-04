@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from agri_research_agent.shared import production_identity
+from agri_research_agent.shared.production_identity import GitExecutionRequest
 from agri_research_agent.shared.runtime_context import (
     MARKER_FILENAME,
     RuntimeAuthorizationError,
@@ -55,6 +57,8 @@ def test_no_context_and_path_traversal_fail_closed(tmp_path: Path) -> None:
         assert_runtime_write(None, root / "state.json")
     with pytest.raises(RuntimeAuthorizationError, match="outside"):
         assert_runtime_write(context, root / ".." / "escape.json")
+    with pytest.raises(RuntimeAuthorizationError, match="marker cannot be changed"):
+        assert_runtime_write(context, root / MARKER_FILENAME)
 
 
 def test_missing_marker_module_mismatch_and_classification_mismatch_reject(tmp_path: Path) -> None:
@@ -134,20 +138,87 @@ def test_production_write_requires_expected_runtime_id(tmp_path: Path) -> None:
         )
 
 
-def test_production_validation_accepts_normal_repository_without_writing(tmp_path: Path) -> None:
+def test_empty_git_directory_cannot_authorize_production(tmp_path: Path) -> None:
     root = marked_runtime(tmp_path, "formal")
     identity = load_runtime_identity(root)
     repository = tmp_path / "repository"
     (repository / ".git").mkdir(parents=True)
+    with pytest.raises(RuntimeAuthorizationError, match="explicit execution_request"):
+        RuntimeContext(
+            RuntimeMode.PRODUCTION_WRITE,
+            "architecture-foundation",
+            root,
+            formal_identity=identity,
+            expected_runtime_id=identity.runtime_id,
+            repository_root=repository,
+        )
+
+
+def test_marker_alone_cannot_authorize_production(tmp_path: Path) -> None:
+    root = marked_runtime(tmp_path, "formal")
+    identity = load_runtime_identity(root)
+    with pytest.raises(RuntimeAuthorizationError, match="execution_request is required"):
+        RuntimeContext(
+            RuntimeMode.PRODUCTION_WRITE, "architecture-foundation", root,
+            formal_identity=identity, expected_runtime_id=identity.runtime_id,
+        )
+
+
+def test_candidate_validation_requires_separate_identity(tmp_path: Path) -> None:
+    root = marked_runtime(tmp_path, "candidate-validation")
+    identity = load_runtime_identity(root)
+    with pytest.raises(RuntimeAuthorizationError, match="execution_request is required"):
+        RuntimeContext(
+            RuntimeMode.CANDIDATE_VALIDATION, "architecture-foundation", root,
+            expected_runtime_id=identity.runtime_id,
+        )
+    with pytest.raises(RuntimeAuthorizationError, match="classification mismatch"):
+        RuntimeContext(
+            RuntimeMode.PRODUCTION_WRITE, "architecture-foundation", root,
+            formal_identity=identity, expected_runtime_id=identity.runtime_id,
+        )
+
+
+def test_runtime_marker_change_invalidates_existing_context(tmp_path: Path) -> None:
+    root = marked_runtime(tmp_path, "isolated-dev")
+    context = RuntimeContext(RuntimeMode.ISOLATED_DEV, "architecture-foundation", root)
+    marker = root / MARKER_FILENAME
+    marker.write_text(marker.read_text(encoding="utf-8").replace("fixture-isolated-dev", "replaced"), encoding="utf-8")
+    with pytest.raises(RuntimeAuthorizationError, match="identity changed"):
+        assert_runtime_write(context, root / "state.json")
+
+
+def test_symbolic_marker_is_rejected_before_identity_read(tmp_path: Path, monkeypatch) -> None:
+    root = marked_runtime(tmp_path, "formal")
+    original = Path.is_symlink
+    monkeypatch.setattr(Path, "is_symlink", lambda self: self == root / MARKER_FILENAME or original(self))
+    with pytest.raises(RuntimeAuthorizationError, match="symbolic link"):
+        load_runtime_identity(root)
+
+
+def test_production_git_identity_is_rechecked_before_each_write(tmp_path: Path, monkeypatch) -> None:
+    repository = tmp_path / "source"
+    repository.mkdir()
+    def git(*arguments: str) -> str:
+        return subprocess.check_output(["git", "-C", str(repository), *arguments], text=True).strip()
+    git("init", "--quiet")
+    (repository / "source.txt").write_text("approved source\n", encoding="utf-8")
+    git("add", "source.txt")
+    git("-c", "user.name=Runtime Test", "-c", "user.email=runtime@example.invalid", "commit", "--quiet", "-m", "fixture")
+    commit, tree = git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
+    # Simulate the source location only; Git itself and its clean checks are real.
+    monkeypatch.setattr(production_identity, "_ROOT", repository)
+    root = marked_runtime(tmp_path, "formal")
+    identity = load_runtime_identity(root)
     context = RuntimeContext(
-        RuntimeMode.PRODUCTION_WRITE,
-        "architecture-foundation",
-        root,
-        formal_identity=identity,
-        expected_runtime_id=identity.runtime_id,
-        repository_root=repository,
+        RuntimeMode.PRODUCTION_WRITE, "architecture-foundation", root,
+        formal_identity=identity, expected_runtime_id=identity.runtime_id,
+        execution_request=GitExecutionRequest(repository, commit, tree),
     )
-    assert context.write_allowed is True
+    assert assert_runtime_write(context, root / "result.json") == root / "result.json"
+    (repository / "source.txt").write_text("modified after authorization\n", encoding="utf-8")
+    with pytest.raises(RuntimeAuthorizationError, match="dirty"):
+        assert_runtime_write(context, root / "result.json")
 
 
 def test_symlink_or_junction_escape_is_rejected(tmp_path: Path) -> None:

@@ -1,0 +1,551 @@
+"""Host-side observation and validation for production execution grants.
+
+This module deliberately does not trust container supplied identity claims.  All
+observed values come from Docker's inspect API (and the immutable RELEASE file
+copied from the inspected container).  Signing is kept out of the pure
+validators so a caller cannot turn a hand-crafted mapping into authorization.
+"""
+from __future__ import annotations
+
+import io
+import json
+import hashlib
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tarfile
+import base64
+from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping, Sequence
+
+
+class HostAuthorizationError(ValueError):
+    """Raised whenever host observations cannot establish the contract."""
+
+
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_IMAGE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+TRUST_CONFIG_PATH = Path(__file__).resolve().parents[2] / "02_configs" / "production_runtime_trust.json"
+
+
+def _run_docker(args: Sequence[str], *, runner=None) -> bytes:
+    command = ["docker", *args]
+    if runner is not None:
+        result = runner(command)
+        if isinstance(result, str):
+            return result.encode("utf-8")
+        return bytes(result)
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HostAuthorizationError("Docker command unavailable") from exc
+    if result.returncode != 0:
+        raise HostAuthorizationError(result.stderr.decode("utf-8", "replace").strip() or "Docker command failed")
+    return result.stdout
+
+
+def _container_id(value: str) -> str:
+    if not isinstance(value, str) or not _HEX64.fullmatch(value):
+        raise HostAuthorizationError("container ID must be a complete 64-hex ID")
+    return value
+
+
+def docker_inspect(container_id: str, *, runner=None) -> dict[str, Any]:
+    """Return exactly one actual Docker container inspection."""
+    cid = _container_id(container_id)
+    raw = _run_docker(["container", "inspect", cid], runner=runner)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise HostAuthorizationError("docker inspect returned invalid JSON") from exc
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        raise HostAuthorizationError("docker inspect must return exactly one container")
+    actual = value[0]
+    if actual.get("Id") != cid:
+        raise HostAuthorizationError("docker inspect container ID mismatch")
+    return actual
+
+
+def docker_image_inspect(image_id: str, *, runner=None) -> dict[str, Any]:
+    """Inspect an immutable image ID, never a mutable tag."""
+    if not isinstance(image_id, str) or not _IMAGE.fullmatch(image_id):
+        raise HostAuthorizationError("image must be an immutable sha256 ID")
+    raw = _run_docker(["image", "inspect", image_id], runner=runner)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise HostAuthorizationError("docker image inspect returned invalid JSON") from exc
+    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
+        raise HostAuthorizationError("docker image inspect must return exactly one image")
+    if value[0].get("Id") != image_id:
+        raise HostAuthorizationError("image inspect ID mismatch")
+    return value[0]
+
+
+def copy_container_bytes(container_id: str, path: str = "/app/RELEASE.json", *, runner=None) -> bytes:
+    """Read JSON from a real container via ``docker cp`` tar output.
+
+    Using an archive avoids executing a container process and makes it
+    impossible for a caller to substitute a host-side file.
+    """
+    cid = _container_id(container_id)
+    if not isinstance(path, str) or not path.startswith("/") or ".." in path.split("/"):
+        raise HostAuthorizationError("container path is unsafe")
+    raw = _run_docker(["cp", f"{cid}:{path}", "-"], runner=runner)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as archive:
+            members = [m for m in archive.getmembers() if m.isfile()]
+            if len(members) != 1:
+                raise HostAuthorizationError("docker cp archive must contain exactly one file")
+            member = members[0]
+            stream = archive.extractfile(member)
+            if stream is None:
+                raise HostAuthorizationError("cannot read copied container file")
+            return stream.read()
+    except tarfile.TarError as exc:
+        raise HostAuthorizationError("container archive is invalid") from exc
+
+
+def copy_container_json(container_id: str, path: str = "/app/RELEASE.json", *, runner=None) -> dict[str, Any]:
+    try:
+        value = json.loads(copy_container_bytes(container_id, path, runner=runner).decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise HostAuthorizationError("container RELEASE.json is invalid") from exc
+    if not isinstance(value, dict):
+        raise HostAuthorizationError("container RELEASE.json must be an object")
+    return value
+
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _json(raw: bytes) -> dict:
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise HostAuthorizationError("duplicate JSON field")
+            result[key] = value
+        return result
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+    except (ValueError, UnicodeError) as exc:
+        raise HostAuthorizationError("invalid identity JSON") from exc
+    if not isinstance(value, dict):
+        raise HostAuthorizationError("identity JSON must be an object")
+    return value
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _absolute(value: str) -> str:
+    from pathlib import PurePosixPath
+    if not isinstance(value, str) or not value.startswith("/") or str(PurePosixPath(value)) != value or ".." in value.split("/") or "\\" in value:
+        raise HostAuthorizationError("non-canonical container path")
+    return value
+
+
+def _within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def _env(values: list[str]) -> dict[str, str]:
+    if not isinstance(values, list):
+        raise HostAuthorizationError("invalid environment")
+    result = {}
+    for value in values:
+        if not isinstance(value, str) or "=" not in value:
+            raise HostAuthorizationError("invalid environment entry")
+        key, content = value.split("=", 1)
+        if not key or key in result:
+            raise HostAuthorizationError("duplicate environment key")
+        result[key] = content
+    return result
+
+
+def _mounts(container: Mapping) -> list[dict]:
+    mounts = container.get("Mounts")
+    if not isinstance(mounts, list):
+        raise HostAuthorizationError("mount observations missing")
+    result = []
+    for item in mounts:
+        if not isinstance(item, dict) or item.get("Type") != "bind" or type(item.get("RW")) is not bool:
+            raise HostAuthorizationError("only explicit bind mounts are supported by authorization v1")
+        result.append({"source": _absolute(item.get("Source")), "target": _absolute(item.get("Destination")), "read_only": not item["RW"]})
+    if len({m["target"] for m in result}) != len(result):
+        raise HostAuthorizationError("duplicate mount target")
+    return sorted(result, key=lambda m: m["target"])
+
+
+def normalize_observation(container: Mapping, image: Mapping, release: Mapping) -> dict:
+    config, host = container.get("Config"), container.get("HostConfig")
+    if not isinstance(config, dict) or not isinstance(host, dict):
+        raise HostAuthorizationError("Docker configuration missing")
+    labels = image.get("Config", {}).get("Labels") or {}
+    return {
+        "container_id": container.get("Id"), "image_id": container.get("Image"),
+        "config": config, "host_config": host, "image_config": image.get("Config", {}),
+        "image_labels": labels, "release_manifest": release,
+        "mounts": _mounts(container), "state": container.get("State", {}),
+        "actual_config_sha256": _digest({"config": config, "host_config": host, "path": container.get("Path"), "args": container.get("Args")}),
+    }
+
+
+_POLICY_FIELDS = {
+    "schema_version", "role", "key_id", "project_id", "module_id", "service_id", "runtime_id",
+    "approved_commit", "approved_tree", "image_id", "artifact_service", "release_application",
+    "source_root", "runtime_root", "runtime_manifest_path", "runtime_manifest_sha256",
+    "runtime_marker_sha256", "release_sha256", "actual_config_sha256", "mounts",
+    "compose_sources", "compose_project_directory", "compose_environment_file", "rendered_compose_sha256",
+    "grant_container_directory", "candidate_host_root",
+}
+
+
+def validate_policy(policy: Mapping, role: str) -> None:
+    if set(policy) != _POLICY_FIELDS or policy.get("schema_version") != "host-runtime-policy/1" or policy.get("role") != role:
+        raise HostAuthorizationError("protected policy schema or role mismatch")
+    if role not in {"production", "candidate_validation"}:
+        raise HostAuthorizationError("unknown authorization role")
+    for name in ("project_id", "module_id", "service_id", "runtime_id", "key_id", "artifact_service", "release_application"):
+        if not isinstance(policy[name], str) or not re.fullmatch(r"[a-z][a-z0-9-]*", policy[name]):
+            raise HostAuthorizationError("invalid policy identity")
+    for name in ("approved_commit", "approved_tree"):
+        if not isinstance(policy[name], str) or not _COMMIT.fullmatch(policy[name]):
+            raise HostAuthorizationError("invalid Approved Git identity")
+    for name in ("runtime_manifest_sha256", "runtime_marker_sha256", "release_sha256", "actual_config_sha256", "rendered_compose_sha256"):
+        if not isinstance(policy[name], str) or not _HEX64.fullmatch(policy[name]):
+            raise HostAuthorizationError("invalid expected identity hash")
+    if not isinstance(policy["image_id"], str) or not _IMAGE.fullmatch(policy["image_id"]):
+        raise HostAuthorizationError("policy must bind immutable image ID")
+    for name in ("source_root", "runtime_root", "runtime_manifest_path", "grant_container_directory", "compose_project_directory", "compose_environment_file"):
+        _absolute(policy[name])
+    if not _within(policy["runtime_manifest_path"], policy["source_root"]):
+        raise HostAuthorizationError("runtime manifest is outside source image")
+    if not isinstance(policy["mounts"], list) or not isinstance(policy["compose_sources"], list) or not policy["compose_sources"]:
+        raise HostAuthorizationError("deployment contract missing")
+    source_paths = []
+    for item in policy["compose_sources"]:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise HostAuthorizationError("invalid ordered Compose source")
+        source_paths.append(_absolute(item["path"]))
+        if not isinstance(item["sha256"], str) or not _HEX64.fullmatch(item["sha256"]):
+            raise HostAuthorizationError("Compose source identity missing")
+    if len(set(source_paths)) != len(source_paths):
+        raise HostAuthorizationError("duplicate Compose source")
+    if role == "candidate_validation":
+        if not _within(policy["runtime_root"], "/tmp") or policy["runtime_root"] == "/tmp":
+            raise HostAuthorizationError("candidate container root is not temporary")
+        _absolute(policy["candidate_host_root"])
+        if not _within(policy["candidate_host_root"], "/tmp") or policy["candidate_host_root"] == "/tmp":
+            raise HostAuthorizationError("candidate host root is not temporary")
+    elif policy["candidate_host_root"] is not None:
+        raise HostAuthorizationError("production cannot use a candidate root")
+
+
+def validate_observation(observed: Mapping, expected: Mapping, *, role: str) -> dict:
+    """Validate actual metadata without signing; mappings are never authority."""
+    validate_policy(expected, role)
+    config, host = observed["config"], observed["host_config"]
+    if observed["image_id"] != expected["image_id"] or not _HEX64.fullmatch(str(observed["container_id"])):
+        raise HostAuthorizationError("actual container/image identity mismatch")
+    if observed["actual_config_sha256"] != expected["actual_config_sha256"]:
+        raise HostAuthorizationError("actual configuration differs from approved deployment")
+    if observed["state"].get("Status") != "created" or observed["state"].get("Running") is not False:
+        raise HostAuthorizationError("grant requires a fresh, unstarted container")
+    if not re.fullmatch(r"[1-9][0-9]*(?::[1-9][0-9]*)?", str(config.get("User", ""))):
+        raise HostAuthorizationError("explicit non-root numeric user is required")
+    if not re.fullmatch(r"[0-9a-f]{32}", str(config.get("Hostname", ""))):
+        raise HostAuthorizationError("host-assigned random container nonce is required")
+    if host.get("ReadonlyRootfs") is not True or host.get("Privileged") is not False:
+        raise HostAuthorizationError("root filesystem or privilege policy rejected")
+    security = host.get("SecurityOpt") or []
+    if (host.get("CapAdd") or set(host.get("CapDrop") or []) != {"ALL"}
+            or not any(s in security for s in ("no-new-privileges", "no-new-privileges:true"))
+            or any("unconfined" in str(s) for s in security)
+            or host.get("Devices") or host.get("DeviceRequests") or host.get("DeviceCgroupRules")):
+        raise HostAuthorizationError("container capabilities/devices policy rejected")
+    if (host.get("PidMode") not in (None, "") or host.get("IpcMode") not in (None, "", "private")
+            or host.get("NetworkMode") == "host" or str(host.get("NetworkMode", "")).startswith("container:")
+            or host.get("UTSMode") not in (None, "") or host.get("UsernsMode") not in (None, "")
+            or host.get("VolumesFrom") or host.get("CgroupnsMode") == "host"):
+        raise HostAuthorizationError("shared host/container namespace rejected")
+    labels, release = observed["image_labels"], observed["release_manifest"]
+    for label, value in {"org.opencontainers.image.revision": expected["approved_commit"], "market-data.git.tree": expected["approved_tree"], "market-data.service": expected["artifact_service"], "market-data.artifact.promotable": "true", "market-data.release.id": release.get("release_id")}.items():
+        if not value or labels.get(label) != value:
+            raise HostAuthorizationError("actual OCI release label mismatch")
+    origin = labels.get("market-data.artifact.origin")
+    if origin not in ({"candidate"} if role == "candidate_validation" else {"candidate", "production"}):
+        raise HostAuthorizationError("artifact origin cannot authorize deployment role")
+    if any(release.get(k) != v for k, v in {"git_commit": expected["approved_commit"], "git_tree": expected["approved_tree"], "application": expected["release_application"]}.items()):
+        raise HostAuthorizationError("actual RELEASE differs from Approved identity")
+    if observed["mounts"] != expected["mounts"]:
+        raise HostAuthorizationError("actual mounts differ from deployment contract")
+    source = expected["source_root"]
+    immutable = [source + "/" + name for name in ("03_src", "02_configs", "04_scripts", "05_apps", "RELEASE.json")]
+    for mount in observed["mounts"]:
+        target = mount["target"]
+        if target == "/" or target == source or any(_within(target, path) or _within(path, target) for path in immutable):
+            raise HostAuthorizationError("mount shadows immutable source identity")
+    return dict(observed)
+
+
+def _require_linux_root() -> None:
+    if sys.platform != "linux" or os.name != "posix" or not hasattr(os, "geteuid") or os.geteuid() != 0:
+        raise HostAuthorizationError("host authorization requires Linux root")
+
+
+def _protected_path(path: Path, *, directory: bool = False, private: bool = False, temporary: bool = False) -> Path:
+    _require_linux_root()
+    if not path.is_absolute() or path.is_symlink() or path.resolve(strict=True) != path:
+        raise HostAuthorizationError("protected path is missing, aliased or relative")
+    for item in (path, *path.parents):
+        state = item.stat()
+        if temporary and item == Path("/tmp") and state.st_uid == 0 and stat.S_IMODE(state.st_mode) == 0o1777:
+            continue
+        if item.is_symlink() or state.st_uid != 0 or state.st_mode & 0o022:
+            raise HostAuthorizationError("authorization path has an unprotected ancestor")
+    state = path.stat()
+    if directory != path.is_dir() or (not directory and not path.is_file()):
+        raise HostAuthorizationError("authorization path has wrong type")
+    if private and stat.S_IMODE(state.st_mode) != 0o600:
+        raise HostAuthorizationError("private authorization file must have mode 0600")
+    return path
+
+
+def require_protected_key_and_grant_dirs(key_path: str | Path, grant_dir: str | Path) -> None:
+    key = _protected_path(Path(key_path), private=True)
+    grants = _protected_path(Path(grant_dir), directory=True)
+    if stat.S_IMODE(grants.stat().st_mode) != 0o755 or grants in key.parents:
+        raise HostAuthorizationError("grant directory must be public-readable, root-controlled and contain no private key")
+
+
+def _load_policy(path: str | Path) -> dict:
+    return _json(_protected_path(Path(path), private=True).read_bytes())
+
+
+def _load_private_key(path: str | Path):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    try:
+        key = load_pem_private_key(_protected_path(Path(path), private=True).read_bytes(), password=None)
+    except (ValueError, TypeError) as exc:
+        raise HostAuthorizationError("invalid private signing key") from exc
+    if not isinstance(key, Ed25519PrivateKey):
+        raise HostAuthorizationError("only Ed25519 signing keys are supported")
+    return key
+
+
+def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path) -> None:
+    grant_target = policy["grant_container_directory"]
+    if {"source": str(grant_dir), "target": grant_target, "read_only": True} not in observed["mounts"]:
+        raise HostAuthorizationError("protected grant directory is not injected read-only")
+    for mount in observed["mounts"]:
+        source = Path(mount["source"])
+        if not source.exists() or source.is_symlink() or source.resolve(strict=True) != source or (not source.is_dir() and not source.is_file()):
+            raise HostAuthorizationError("mount source is aliased, missing or a control socket/device")
+        if source == grant_dir:
+            if mount["target"] != grant_target or mount["read_only"] is not True:
+                raise HostAuthorizationError("grant source cannot be mounted under another role")
+            continue
+        if policy["role"] == "candidate_validation" and not _within(str(source), policy["candidate_host_root"]):
+            raise HostAuthorizationError("candidate mount source is outside protected temporary root")
+        if source == Path("/") or any(_within(str(source), root) or _within(root, str(source)) for root in ("/var/run", "/run", "/var/lib/docker", "/proc", "/sys", "/dev", "/root")):
+            raise HostAuthorizationError("control or host system directory mount rejected")
+
+
+def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) -> str:
+    labels = container["Config"].get("Labels") or {}
+    paths = labels.get("com.docker.compose.project.config_files", "").split(",")
+    if paths != [item["path"] for item in policy["compose_sources"]] or labels.get("com.docker.compose.project.working_dir") != policy["compose_project_directory"] or labels.get("com.docker.compose.service") != policy["service_id"]:
+        raise HostAuthorizationError("actual Compose source differs from protected deployment policy")
+    command = ["compose", "--project-directory", policy["compose_project_directory"], "--env-file", policy["compose_environment_file"]]
+    _protected_path(Path(policy["compose_environment_file"]), private=True)
+    for path, expected_source in zip(paths, policy["compose_sources"]):
+        file = Path(path)
+        if file.is_symlink() or file.resolve(strict=True) != file or hashlib.sha256(file.read_bytes()).hexdigest() != expected_source["sha256"]:
+            raise HostAuthorizationError("actual Compose source content changed")
+        command.extend(["-f", path])
+    rendered = _json(_run_docker([*command, "config", "--format", "json"]))
+    digest = _digest(rendered)
+    if digest != policy["rendered_compose_sha256"]:
+        raise HostAuthorizationError("actual rendered Compose differs from approval")
+    service = rendered.get("services", {}).get(policy["service_id"])
+    if not isinstance(service, dict) or service.get("image") != policy["image_id"]:
+        raise HostAuthorizationError("rendered service must use the approved immutable image")
+    actual, defaults = container["Config"], image["Config"]
+    for rendered_key, inspect_key in (("entrypoint", "Entrypoint"), ("command", "Cmd"), ("working_dir", "WorkingDir"), ("user", "User"), ("hostname", "Hostname")):
+        value = service.get(rendered_key, defaults.get(inspect_key))
+        if value != actual.get(inspect_key):
+            raise HostAuthorizationError("rendered entrypoint/working directory/user/hostname differs from actual container")
+    environment = _env(defaults.get("Env") or [])
+    extra = service.get("environment") or {}
+    if not isinstance(extra, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in extra.items()):
+        raise HostAuthorizationError("rendered environment is unresolved")
+    environment.update(extra)
+    if environment != _env(actual.get("Env") or []):
+        raise HostAuthorizationError("rendered environment differs from actual container")
+    volumes = service.get("volumes") or []
+    if any(not isinstance(v, dict) or v.get("type") != "bind" for v in volumes):
+        raise HostAuthorizationError("rendered mounts must be explicit bind contracts")
+    expected_mounts = sorted([{"source": v.get("source"), "target": v.get("target"), "read_only": v.get("read_only", False)} for v in volumes], key=lambda m: m["target"])
+    if expected_mounts != _mounts(container):
+        raise HostAuthorizationError("rendered mounts differ from actual container")
+    return digest
+
+
+def _validate_container_layer(container_id: str, mounts: list[dict], *, runner=None) -> None:
+    # ReadonlyRootfs governs execution, but Docker can modify a stopped
+    # container's writable layer. Image ID alone cannot detect that mutation.
+    raw = _run_docker(["diff", container_id], runner=runner).decode("utf-8", "strict")
+    for line in raw.splitlines():
+        if len(line) < 3 or line[1] != " " or line[0] not in {"A", "C"}:
+            raise HostAuthorizationError("container layer differs from the approved image")
+        path = _absolute(line[2:])
+        if not any(_within(path, item["target"]) or _within(item["target"], path) for item in mounts):
+            raise HostAuthorizationError("container layer modifies immutable image content")
+
+
+def observe_and_validate(container_id: str, expected: Mapping, *, role: str, runner=None) -> dict:
+    container = docker_inspect(container_id, runner=runner)
+    image = docker_image_inspect(container.get("Image"), runner=runner)
+    raw = copy_container_bytes(container_id, expected["source_root"] + "/RELEASE.json", runner=runner)
+    observed = normalize_observation(container, image, _json(raw))
+    _validate_container_layer(container_id, observed["mounts"], runner=runner)
+    observed["release_sha256"] = hashlib.sha256(raw).hexdigest()
+    if observed["release_sha256"] != expected["release_sha256"]:
+        raise HostAuthorizationError("actual RELEASE bytes differ from approval")
+    return validate_observation(observed, expected, role=role)
+
+
+def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapping) -> None:
+    required = manifest.get("required_mounts")
+    roots = manifest.get("runtime_roots")
+    if not isinstance(required, list) or not isinstance(roots, list):
+        raise HostAuthorizationError("runtime manifest mount contract missing")
+    by_role = {}
+    for item in roots:
+        if not isinstance(item, dict) or set(item) != {"role", "container_path", "access"} or item["role"] in by_role or item["access"] not in {"ro", "rw"}:
+            raise HostAuthorizationError("invalid runtime root contract")
+        by_role[item["role"]] = item
+    targets = set()
+    for item in required:
+        if not isinstance(item, dict) or set(item) != {"role", "container_path", "read_only"} or type(item["read_only"]) is not bool:
+            raise HostAuthorizationError("invalid required mount contract")
+        root = by_role.pop(item["role"], None)
+        target = _absolute(item["container_path"])
+        if root is None or root["container_path"] != target or (root["access"] == "ro") != item["read_only"] or target in targets:
+            raise HostAuthorizationError("runtime roots and required mounts disagree")
+        targets.add(target)
+        actual = [m for m in mounts if m["target"] == target]
+        if len(actual) != 1 or actual[0]["read_only"] != item["read_only"]:
+            raise HostAuthorizationError("actual mount permission differs from runtime manifest")
+    if by_role or any(m["target"] not in targets | {policy["grant_container_directory"]} for m in mounts):
+        raise HostAuthorizationError("undeclared runtime mount")
+
+
+def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900) -> dict:
+    """Observe a fresh container, sign a bounded grant, and leave it unstarted."""
+    _require_linux_root()
+    policy = _load_policy(expected_policy_path)
+    validate_policy(policy, role)
+    require_protected_key_and_grant_dirs(key_path, grant_dir)
+    if type(ttl_seconds) is not int or not 0 < ttl_seconds <= 3600:
+        raise HostAuthorizationError("invalid grant lifetime")
+    grant_dir, destination = Path(grant_dir), Path(grant_path)
+    if not destination.is_absolute() or destination.parent != grant_dir or destination.exists() or destination.is_symlink():
+        raise HostAuthorizationError("grant path must be new and inside its protected directory")
+    observed = observe_and_validate(container_id, policy, role=role)
+    _validate_mount_sources(observed, policy, grant_dir)
+    if role == "candidate_validation":
+        _protected_path(Path(policy["candidate_host_root"]), directory=True, temporary=True)
+    container = docker_inspect(container_id)
+    image = docker_image_inspect(policy["image_id"])
+    rendered_digest = _render_actual_compose(container, policy, image)
+    marker_path = policy["runtime_root"] + "/.market-data-runtime.json"
+    manifest_raw = copy_container_bytes(container_id, policy["runtime_manifest_path"])
+    marker_raw = copy_container_bytes(container_id, marker_path)
+    manifest, marker = _json(manifest_raw), _json(marker_raw)
+    if hashlib.sha256(manifest_raw).hexdigest() != policy["runtime_manifest_sha256"] or hashlib.sha256(marker_raw).hexdigest() != policy["runtime_marker_sha256"]:
+        raise HostAuthorizationError("actual runtime manifest/marker differs from approval")
+    for key in ("project_id", "module_id", "service_id"):
+        if manifest.get(key) != policy[key]:
+            raise HostAuthorizationError("runtime manifest identity mismatch")
+    if manifest.get("identity_kind") != "oci_container" or manifest.get("runtime_target") != "production_container" or manifest.get("schema_version") != "runtime-manifest/1":
+        raise HostAuthorizationError("runtime manifest identity contract is missing")
+    classification = "formal" if role == "production" else "candidate-validation"
+    if marker.get("classification") != classification or marker.get("module_id") != policy["module_id"] or marker.get("runtime_id") != policy["runtime_id"]:
+        raise HostAuthorizationError("runtime marker cannot authorize this deployment role")
+    mounts = observed["mounts"]
+    _validate_runtime_mounts(manifest, mounts, policy)
+    writable = [m["target"] for m in mounts if not m["read_only"] and _within(m["target"], policy["runtime_root"])]
+    if not writable or any(target == policy["runtime_root"] for target in writable):
+        raise HostAuthorizationError("runtime marker root must remain read-only with explicit writable children")
+    protected = [policy["source_root"], policy["grant_container_directory"], marker_path]
+    def writable_cover(path):
+        matches = [m for m in mounts if _within(path, m["target"])]
+        return bool(matches and not max(matches, key=lambda m: len(m["target"]))["read_only"])
+    if any(writable_cover(path) for path in protected):
+        raise HostAuthorizationError("identity material is writable")
+    trust_raw = TRUST_CONFIG_PATH.read_bytes()
+    if copy_container_bytes(container_id, policy["source_root"] + "/02_configs/production_runtime_trust.json") != trust_raw:
+        raise HostAuthorizationError("host and executing image trust anchors differ")
+    trust = _json(trust_raw)
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    key = _load_private_key(key_path)
+    public = base64.b64encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode("ascii")
+    matches = [item for item in trust.get("keys", []) if item.get("key_id") == policy["key_id"] and item.get("domain") == role and item.get("algorithm") == "ed25519" and item.get("public_key_base64") == public]
+    if len(matches) != 1 or policy["key_id"] in trust.get("revoked_key_ids", []):
+        raise HostAuthorizationError("host signing key is not pinned for this authorization role")
+    now = datetime.now(timezone.utc)
+    payload = {key: policy[key] for key in ("project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "image_id", "runtime_root", "runtime_manifest_sha256", "runtime_marker_sha256")}
+    payload.update(grant_id=os.urandom(16).hex(), issued_at=now.isoformat(), expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(), identity_kind="oci_container", authorization_mode=role, role=role, artifact_origin=observed["image_labels"]["market-data.artifact.origin"], release_commit=policy["approved_commit"], release_tree=policy["approved_tree"], release_sha256=observed["release_sha256"], rendered_compose_sha256=rendered_digest, mount_contract_sha256=_digest(mounts), actual_config_sha256=observed["actual_config_sha256"], container_id=container_id, hostname_nonce=observed["config"]["Hostname"], writable_roots=writable, protected_mounts=protected)
+    envelope = {"schema_version": "production-execution-grant/1", "algorithm": "ed25519", "key_id": policy["key_id"], "payload": payload, "signature": base64.b64encode(key.sign(_canonical(payload))).decode("ascii")}
+    from jsonschema import Draft202012Validator, FormatChecker
+    schema = _json(Path(__file__).with_name("production_authorization.schema.json").read_bytes())
+    try:
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(envelope)
+    except Exception as exc:
+        raise HostAuthorizationError("issued envelope violates the grant schema") from exc
+    if observe_and_validate(container_id, policy, role=role) != observed:
+        raise HostAuthorizationError("container changed before grant sealing")
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(_canonical(envelope))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(destination, 0o444)
+    except FileExistsError as exc:
+        raise HostAuthorizationError("grant already exists; refusing overwrite") from exc
+    return envelope
+
+
+def main(argv=None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--container-id", required=True)
+    parser.add_argument("--policy", required=True)
+    parser.add_argument("--key", required=True)
+    parser.add_argument("--grant-directory", required=True)
+    parser.add_argument("--grant", required=True)
+    parser.add_argument("--role", choices=("production", "candidate_validation"), required=True)
+    args = parser.parse_args(argv)
+    try:
+        result = issue_execution_grant(args.container_id, expected_policy_path=args.policy, key_path=args.key, grant_path=args.grant, grant_dir=args.grant_directory, role=args.role)
+        print(json.dumps({"HOST_AUTHORIZATION": "PASS", "grant_id": result["payload"]["grant_id"], "container_id": args.container_id}))
+        return 0
+    except (HostAuthorizationError, OSError, ValueError, TypeError, KeyError) as exc:
+        print(json.dumps({"HOST_AUTHORIZATION": "FAIL", "reason": type(exc).__name__}))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "algorithm",
+    "key_id",
+    "payload",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "production-execution-grant/1"
+    },
+    "algorithm": {
+      "const": "ed25519"
+    },
+    "key_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,127}$"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{86}==$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_id",
+        "issued_at",
+        "expires_at",
+        "identity_kind",
+        "authorization_mode",
+        "artifact_origin",
+        "role",
+        "project_id",
+        "module_id",
+        "service_id",
+        "runtime_id",
+        "approved_commit",
+        "approved_tree",
+        "release_commit",
+        "release_tree",
+        "image_id",
+        "release_sha256",
+        "runtime_manifest_sha256",
+        "runtime_marker_sha256",
+        "runtime_root",
+        "writable_roots",
+        "protected_mounts",
+        "rendered_compose_sha256",
+        "mount_contract_sha256",
+        "actual_config_sha256",
+        "container_id",
+        "hostname_nonce"
+      ],
+      "properties": {
+        "grant_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "identity_kind": {
+          "const": "oci_container"
+        },
+        "authorization_mode": {
+          "enum": [
+            "production",
+            "candidate_validation"
+          ]
+        },
+        "artifact_origin": {
+          "enum": [
+            "production",
+            "candidate"
+          ]
+        },
+        "role": {
+          "enum": [
+            "production",
+            "candidate_validation"
+          ]
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "module_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "service_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "runtime_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "approved_commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "approved_tree": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "release_commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "release_tree": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "image_id": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "release_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "runtime_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "runtime_marker_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "rendered_compose_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mount_contract_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "actual_config_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "runtime_root": {
+          "type": "string",
+          "pattern": "^/[^\\\\]*$",
+          "minLength": 2
+        },
+        "writable_roots": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^/[^\\\\]*$"
+          }
+        },
+        "protected_mounts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^/[^\\\\]*$"
+          }
+        },
+        "container_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "hostname_nonce": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "role": {
+                "const": "production"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "authorization_mode": {
+                "const": "production"
+              },
+              "artifact_origin": {
+                "enum": [
+                  "candidate",
+                  "production"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "role": {
+                "const": "candidate_validation"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "authorization_mode": {
+                "const": "candidate_validation"
+              },
+              "artifact_origin": {
+                "const": "candidate"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
