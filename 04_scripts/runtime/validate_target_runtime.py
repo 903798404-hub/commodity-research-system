@@ -40,6 +40,10 @@ _SOURCE_ROOT = "/app"
 _GRANT_ROOT = "/run/market-data-grants"
 _PROTECTED_WORK_ROOT = Path("/var/lib/market-data/runtime-validation")
 _KEY_ROOT = Path("/etc/market-data/runtime-identity")
+_ENGINE_PATH = "04_scripts/runtime/validate_target_runtime.py"
+_MANIFEST_PARSER = "03_src/agri_research_agent/shared/runtime_manifest.py"
+_MANIFEST_SCHEMA = "02_configs/runtime_manifest.schema.json"
+_VALIDATOR_VERSION = "target-runtime-validator/1"
 
 
 class ValidationError(RuntimeError):
@@ -141,26 +145,62 @@ def _project(root: Path, project_id: str) -> dict[str, Any]:
     return matches[0]
 
 
-def source_contract(root: Path, project_id: str, runtime_contract: str):
-    registry_module = _load(root / "04_scripts/quality/project_registry.py",
-                            "project_registry")
-    previous_registry = sys.modules.get("project_registry")
-    sys.modules["project_registry"] = registry_module
+def _exact_source(root: Path, relative: str) -> Path:
+    pure = PurePosixPath(relative) if isinstance(relative, str) else PurePosixPath("/")
+    if (not isinstance(relative, str) or not relative or pure.is_absolute()
+            or str(pure) != relative or ".." in pure.parts or "\\" in relative):
+        raise ValidationError("runtime input path is unsafe")
+    path = root.joinpath(*pure.parts)
+    if path.is_symlink() or not path.is_file():
+        raise ValidationError(f"runtime input is missing or aliased: {relative}")
     try:
-        gate = _load(root / "04_scripts/quality/target_runtime_gate.py",
-                     "_target_runtime_gate_engine")
-    finally:
-        if previous_registry is None:
-            sys.modules.pop("project_registry", None)
-        else:
-            sys.modules["project_registry"] = previous_registry
+        if path.resolve(strict=True).relative_to(root.resolve(strict=True)).as_posix() != relative:
+            raise ValidationError(f"runtime input path identity differs: {relative}")
+    except ValueError as exc:
+        raise ValidationError("runtime input escaped repository") from exc
+    return path
+
+
+def _candidate_binding(root: Path, project: Mapping[str, Any],
+                       contract: Mapping[str, Any]) -> dict[str, Any]:
+    if _git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise ValidationError("container validation requires a clean committed candidate")
+    build = contract["build"]
+    paths = [project["runtime_contract"], build["dockerfile"], build["dockerignore"],
+             *build["dependency_contracts"], *build["compose_sources"], _ENGINE_PATH,
+             *(item["path"] for item in contract["source_inputs"]),
+             _MANIFEST_PARSER, _MANIFEST_SCHEMA]
+    if len({name.casefold() for name in paths}) != len(paths):
+        raise ValidationError("runtime binding paths overlap")
+    hashes = {}
+    for name in paths:
+        path = _exact_source(root, name)
+        _git(root, "ls-files", "--error-unmatch", "--", name)
+        raw = _git(root, "show", "HEAD:" + name, binary=True)
+        if path.read_bytes() != raw:
+            disk_blob = _git(root, "hash-object", "--path", name, str(path))
+            git_blob = _git(root, "rev-parse", "HEAD:" + name)
+            if disk_blob != git_blob:
+                raise ValidationError(f"runtime input differs from Git object: {name}")
+        hashes[name] = _sha(raw)
+    return {"project_id": project["project_id"], "commit": _git(root, "rev-parse", "HEAD"),
+            "tree": _git(root, "rev-parse", "HEAD^{tree}"), "source_sha256": hashes,
+            "validator_version": _VALIDATOR_VERSION}
+
+
+def source_contract(root: Path, project_id: str, runtime_contract: str):
     project = _project(root, project_id)
     if project.get("runtime_contract") != runtime_contract:
         raise ValidationError("runtime contract differs from Registry")
-    contract = gate.read_contract(root, project)
-    if contract.get("schema_version") != "runtime-manifest/2":
+    parser = _load(root / _MANIFEST_PARSER, "_runtime_manifest_source_contract")
+    try:
+        contract = parser.load_runtime_manifest(_exact_source(root, runtime_contract)).to_dict()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValidationError("runtime manifest violates v2 source contract") from exc
+    if (contract.get("schema_version") != "runtime-manifest/2"
+            or contract.get("project_id") != project_id):
         raise ValidationError("actual container validation requires runtime-manifest/2")
-    binding = gate.candidate_binding(root, project)
+    binding = _candidate_binding(root, project, contract)
     if set(contract["validation_probes"]) != REQUIRED_PROBES:
         raise ValidationError("runtime manifest probe set differs from engine")
     return project, contract, binding

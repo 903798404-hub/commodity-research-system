@@ -198,3 +198,41 @@ def test_probe_evidence_cannot_be_complete_without_every_actual_result():
         "wrong_tree_rejected", "wrong_image_rejected", "wrong_service_rejected",
         "wrong_manifest_rejected", "preview_write_rejected", "release_mismatch_rejected",
     }
+
+
+def test_engine_binding_matches_completion_gate_for_same_v2_candidate(tmp_path):
+    engine = load_engine()
+    sys.path.insert(0, str(ROOT / "04_scripts"))
+    from quality import target_runtime_gate as gate
+    # The infrastructure project itself is library_only, so compare the exact
+    # hashing algorithm over a minimal v2-shaped selection of its owned files.
+    contract = {
+        "build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                  "dependency_contracts": ["requirements.txt"],
+                  "compose_sources": ["docker-compose.yml"]},
+        "source_inputs": [{"path": "03_src/agri_research_agent/shared/production_identity.py"}],
+    }
+    selected = {"project_id": "shared-production-infrastructure",
+                "runtime_contract": "02_configs/production_runtime_trust.json"}
+    paths = [selected["runtime_contract"], "Dockerfile", ".dockerignore", "requirements.txt",
+             "docker-compose.yml", gate.ENGINE,
+             "03_src/agri_research_agent/shared/production_identity.py",
+             gate.MANIFEST_PARSER, gate.MANIFEST_SCHEMA]
+    repo = tmp_path / "binding-repo"
+    import shutil
+    for name in paths:
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, target)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=test", "-c",
+                    "user.email=test@example.invalid", "commit", "-qm", "binding"], check=True)
+    actual = engine._candidate_binding(repo, selected, contract)
+    expected_hashes = {name: engine._sha(engine._git(repo, "show", "HEAD:" + name, binary=True))
+                       for name in paths}
+    assert actual == {"project_id": selected["project_id"],
+                      "commit": engine._git(repo, "rev-parse", "HEAD"),
+                      "tree": engine._git(repo, "rev-parse", "HEAD^{tree}"),
+                      "source_sha256": expected_hashes,
+                      "validator_version": gate.VALIDATOR_VERSION}
