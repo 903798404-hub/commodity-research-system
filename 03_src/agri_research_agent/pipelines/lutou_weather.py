@@ -207,6 +207,7 @@ def run_lutou_weather(
     baseline_root: str | Path,
     source_catalog: WeatherSourceCatalog | None = None,
     failure_hook: str | None = None,
+    async_report_sink: dict | None = None,
 ) -> WeatherRunResult:
     safe_run_id = validate_candidate_id(run_id)
     _require_runtime(runtime)
@@ -289,7 +290,7 @@ def run_lutou_weather(
     )
     from .async_contract_rollout import weather_reports
     # Roll out the existing FULL DAILY incremental mode, not initial seed policy.
-    async_reports = {} if full_load else weather_reports(runtime, safe_run_id, current, candidate_directory, merged_directory, catalog, as_of_date, LutouWeatherError)
+    async_reports = {} if full_load else weather_reports(runtime, safe_run_id, current, candidate_directory, merged_directory, catalog, as_of_date, LutouWeatherError, report_sink=async_report_sink)
     if current is not None and (
         str(current.manifest["content_sha256"])
         == str(merged_manifest["content_sha256"])

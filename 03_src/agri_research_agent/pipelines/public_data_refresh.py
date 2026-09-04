@@ -276,8 +276,10 @@ def _run_provider(adapter: ProviderAdapter) -> ProviderOutcome:
     try:
         refreshed = adapter.refresh()
         from .async_contract_rollout import validate_provider_reports
-        validate_provider_reports(refreshed.performance)
         details = refreshed.performance
+        validate_provider_reports(details, already_failed=refreshed.status in {
+            ProviderStatus.INGESTION_FAILURE, ProviderStatus.QC_FAILURE, ProviderStatus.PROMOTION_FAILURE,
+        })
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
         )
@@ -402,8 +404,10 @@ def _refresh_preflighted(
     try:
         refreshed = adapter.refresh()
         from .async_contract_rollout import validate_provider_reports
-        validate_provider_reports(refreshed.performance)
         details = refreshed.performance
+        validate_provider_reports(details, already_failed=refreshed.status in {
+            ProviderStatus.INGESTION_FAILURE, ProviderStatus.QC_FAILURE, ProviderStatus.PROMOTION_FAILURE,
+        })
         status = refreshed.status or (
             ProviderStatus.UPDATED if refreshed.promoted else ProviderStatus.NO_CHANGE
         )

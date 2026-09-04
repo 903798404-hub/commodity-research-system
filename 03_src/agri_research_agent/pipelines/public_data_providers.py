@@ -436,6 +436,7 @@ class LutouRefreshAdapter:
                         policy_path=self.weather_policy_path,
                         baseline_root=self.weather_baseline_root,
                         source_catalog=self._weather_catalog,
+                        async_report_sink=async_reports,
                     )
                     domains["weather"] = (
                         ProviderStatus.UPDATED

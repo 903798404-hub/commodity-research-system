@@ -51,7 +51,7 @@ def test_each_domain_updated_no_change_dates_summary(domain):
 def test_each_domain_missing_and_source_row_dropped_are_blocking(domain):
     previous = [row(), row("b")]
     missing = account(domain, previous, [row()], [row()])
-    assert missing["summary"]["coverage"]["MISSING"] == 1
+    assert missing["summary"]["coverage"]["ERROR"] == 1
     assert not missing["promotion_allowed"]
     dropped = account(domain, previous, [*previous, row(day=3)], previous)
     assert dropped["summary"]["updates"]["ERROR"] == 1

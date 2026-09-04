@@ -80,6 +80,7 @@ def evaluate_update(
     next_identities: set[str], as_of_date: date, policy: FreshnessPolicy,
     date_axis: str = "business_date", update_basis: str = "date_advance",
     source_is_window: bool = False,
+    verified_empty_source: set[str] | None = None,
 ) -> dict[str, object]:
     """Coverage is about complete next state, never the incremental window.
 
@@ -93,6 +94,12 @@ def evaluate_update(
             or update_basis not in {"date_advance", "content"} or type(source_is_window) is not bool):
         raise ValueError("Unsupported async date/update semantics")
     missing, unexpected = required - next_identities, next_identities - required
+    # None preserves the approved Domestic Basis policy and report shape.
+    # An explicit set is adapter evidence, never an inference from a missing Next.
+    source_missing_policy = verified_empty_source is not None
+    verified_empty_source = set(verified_empty_source or ())
+    if not verified_empty_source <= required:
+        raise ValueError("EMPTY_SOURCE_IDENTITY_NOT_IN_CATALOG")
     counts = {
         "TOTAL_REQUIRED": len(required),
         "coverage": {"PRESENT": 0, "MISSING": 0, "ERROR": 0},
@@ -106,9 +113,16 @@ def evaluate_update(
         errors = list(evidence.errors)
         previous, source, following = evidence.previous_latest_date, evidence.source_latest_date, evidence.next_latest_date
         identity_missing = identity in missing or following is None
-        if identity_missing:
+        allowed_missing = (
+            identity in verified_empty_source and identity_missing
+            and previous is None and source is None and following is None
+            and identity not in next_identities
+            and evidence.new_row_count == evidence.revision_row_count == evidence.source_window_row_count == 0
+            and not errors
+        )
+        if identity_missing and not allowed_missing:
             errors.append("REQUIRED_IDENTITY_MISSING")
-        if source is None and not (source_is_window and previous is not None):
+        if source is None and not allowed_missing and not (source_is_window and previous is not None):
             errors.append("SOURCE_IDENTITY_UNVERIFIED")
         if any(type(n) is not int or n < 0 for n in (evidence.new_row_count, evidence.revision_row_count, evidence.source_window_row_count)):
             errors.append("INVALID_ROW_COUNTS")
@@ -124,6 +138,8 @@ def evaluate_update(
             errors.append("UPDATE_DATE_COUNT_MISMATCH")
         age = None if following is None else (as_of_date - following).days
         coverage_status = "MISSING" if identity_missing else "ERROR" if errors else "PRESENT"
+        if source_missing_policy and errors:
+            coverage_status = "ERROR"
         if errors:
             update_status, reason = "ERROR", ";".join(sorted(set(errors)))
         elif advanced or (update_basis == "content" and (evidence.new_row_count or evidence.revision_row_count)):
@@ -132,12 +148,15 @@ def evaluate_update(
         else:
             update_status = "NO_CHANGE"
             reason = (
+                "SOURCE_NO_VALID_OBSERVATION" if allowed_missing else
                 "HISTORICAL_REVISION_APPLIED_WITHOUT_DATE_ADVANCE" if evidence.revision_row_count else
                 "SOURCE_PRESENT_OUTSIDE_WINDOW" if evidence.source_window_row_count == 0 else
                 "NO_VALID_NEW_OBSERVATIONS"
             )
         if errors or age is None:
             freshness_status, freshness_reason = "UNASSESSED", "DATA_INTEGRITY_NOT_VERIFIED"
+            if allowed_missing:
+                freshness_reason = "NO_VALID_OBSERVATION"
         elif threshold is None:
             freshness_status, freshness_reason = "UNASSESSED", "NO_APPROVED_FRESHNESS_THRESHOLD"
         elif age > threshold:
@@ -157,10 +176,13 @@ def evaluate_update(
             "new_rows": evidence.new_row_count, "age_days": age, "age_business_days": None,
             "threshold": threshold,
         })
+        if source_missing_policy:
+            details[-1]["blocking"] = bool(errors) or (freshness_status == "STALE" and policy.stale_is_blocking)
     blocking_reasons = []
-    if missing or unexpected:
+    unaccounted = missing - {item["identity"] for item in details if item["coverage_status"] == "MISSING" and item["update_status"] != "ERROR"}
+    if (unaccounted if source_missing_policy else missing) or unexpected:
         blocking_reasons.append("IDENTITY_COVERAGE_FAILED")
-    if counts["updates"]["ERROR"] or counts["coverage"]["ERROR"] or counts["coverage"]["MISSING"]:
+    if counts["updates"]["ERROR"] or counts["coverage"]["ERROR"] or (counts["coverage"]["MISSING"] and not source_missing_policy):
         blocking_reasons.append("SERIES_ERROR")
     if counts["freshness"]["STALE"] and policy.stale_is_blocking:
         blocking_reasons.append("BLOCKING_STALE")
@@ -182,6 +204,13 @@ def evaluate_update(
         "dataset_status": dataset_status, "blocking_reasons": blocking_reasons,
         "promotion_allowed": not blocking_reasons,
     }
+    if source_missing_policy:
+        report["verified_empty_source"] = sorted(verified_empty_source)
+        report["missing_source_is_blocking"] = False
+        report["identity_coverage"].update(
+            status="FAIL" if unaccounted or unexpected or counts["coverage"]["ERROR"] else "PASS",
+            accounted_for_count=counts["coverage"]["PRESENT"] + counts["coverage"]["MISSING"],
+        )
     # Keep the already-approved Domestic Basis /2 shape and defaults unchanged.
     if date_axis != "business_date" or update_basis != "date_advance" or source_is_window:
         report.update(date_axis=date_axis, update_basis=update_basis, source_is_window=source_is_window)
