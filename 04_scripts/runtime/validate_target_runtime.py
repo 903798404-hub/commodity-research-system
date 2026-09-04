@@ -214,8 +214,6 @@ def source_contract(root: Path, project_id: str, runtime_contract: str):
     binding = _candidate_binding(root, project, contract)
     if set(contract["validation_probes"]) != REQUIRED_PROBES:
         raise ValidationError("runtime manifest probe set differs from engine")
-    if contract["secret_references"]:
-        raise ValidationError("runtime-manifest/2 has no candidate-safe secret source contract")
     return project, contract, binding
 
 
@@ -486,10 +484,26 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     if not isinstance(environment, dict) or not set(contract["required_environment"]).issubset(environment):
         raise ValidationError("source Compose required environment contract is incomplete")
     secrets = service.get("secrets") or []
-    secret_names = {item if isinstance(item, str) else item.get("source")
-                    for item in secrets if isinstance(item, (str, dict))}
-    if not set(contract["secret_references"]).issubset(secret_names):
-        raise ValidationError("source Compose secret references are incomplete")
+    if any(not isinstance(item, dict) for item in secrets):
+        raise ValidationError("source Compose secret references are invalid")
+    secret_names = [item.get("source") for item in secrets]
+    secret_targets = [item.get("target") for item in secrets]
+    if (len(secret_names) != len(set(secret_names))
+            or set(secret_names) != set(contract["secret_references"])):
+        raise ValidationError("source Compose secret references differ from runtime manifest")
+    if (any(not isinstance(target, str) or not target.startswith("/") for target in secret_targets)
+            or len(secret_targets) != len(set(secret_targets))):
+        raise ValidationError("source Compose secret targets are invalid")
+    top_secrets = rendered.get("secrets") or {}
+    if not isinstance(top_secrets, dict):
+        raise ValidationError("source Compose secret definitions are invalid")
+    for name in secret_names:
+        definition = top_secrets.get(name)
+        if (not isinstance(definition, dict)
+                or not isinstance(definition.get("file"), str)
+                or not definition["file"].strip()
+                or any(key in definition for key in ("external", "driver", "driver_opts"))):
+            raise ValidationError("source Compose secrets must be file-backed")
     volumes = service.get("volumes") or []
     if any(not isinstance(item, dict) or item.get("type") not in {"bind", "volume"}
            for item in volumes):

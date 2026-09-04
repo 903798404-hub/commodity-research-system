@@ -14,9 +14,12 @@
 sources，核对 service、Dockerfile、entrypoint、working directory、环境变量名、secret 引用和
 全部 mount target。实际候选 Compose 再把这些 mount target 映射到受保护的一次性 scope；
 placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
-`runtime-manifest/2` 尚未声明 candidate-safe secret 的值来源；只要 `secret_references` 非空，
-当前引擎就 fail closed。补齐这一能力必须先独立扩展 manifest contract，不能把 production secret
-或调用方临时值传给引擎。
+`secret_references` 只在 checked-in Compose 上精确核对 file-backed secret 名称、绝对容器挂载
+目标与顶层 file 引用；拒绝额外或重复 secret mount、external secret 和 secret driver。静态检查不
+展开或读取宿主 secret file。candidate
+Compose 不注入 production secret、空白替代 secret 或调用方临时 secret；初始化命令必须在不读取
+secret 的情况下验证 runtime wiring。真实 secret source、文件权限与实际 Compose identity 留在
+pre-release/deployment host revalidation 中验证。
 
 候选验证只能创建一次性 candidate scope。候选容器使用不可变 Image ID、只读 rootfs、非 root
 数字用户、无网络、drop all capabilities、no-new-privileges，并只挂载 candidate scope 与只读

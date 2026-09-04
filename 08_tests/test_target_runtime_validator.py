@@ -164,6 +164,51 @@ def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tm
         engine.validate_source_compose(tmp_path, contract)
 
 
+def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_path, monkeypatch):
+    engine = load_engine()
+    contract = v2_contract()
+    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"},
+                    secret_references=["tankan-secret"])
+    rendered = {"secrets": {"tankan-secret": {"file": "${TANKAN_SECRET_FILE:?required}"}},
+                "services": {"demo": {
+        "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
+        "working_dir": "/app", "environment": {"DEMO_MODE": "candidate"},
+        "secrets": [{"source": "tankan-secret", "target": "/run/secrets/tankan.env"}],
+        "volumes": [
+            {"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
+            {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+        ]}}}
+    from types import SimpleNamespace
+    monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(
+        stdout=json.dumps(rendered).encode()))
+    assert engine.validate_source_compose(tmp_path, contract) == rendered
+    candidate = engine._compose_document(
+        contract, "sha256:" + "e" * 64,
+        [{"source": "/tmp/candidate/identity", "target": "/runtime", "read_only": True},
+         {"source": "/tmp/candidate/identity/state", "target": "/runtime/state", "read_only": False}],
+        tmp_path / "grants", "f" * 32)["services"]["demo"]
+    assert "secrets" not in candidate
+    assert "/run/secrets/tankan.env" not in json.dumps(candidate)
+    assert set(candidate["environment"]) == {"DEMO_MODE", "MARKET_DATA_EXECUTION_GRANT"}
+    assert {item["target"] for item in candidate["volumes"]} == {
+        "/runtime", "/runtime/state", "/run/market-data-grants"}
+
+    rendered["services"]["demo"]["secrets"].append({"source": "undeclared-secret"})
+    with pytest.raises(engine.ValidationError, match="differ from runtime manifest"):
+        engine.validate_source_compose(tmp_path, contract)
+    rendered["services"]["demo"]["secrets"] = [
+        {"source": "tankan-secret", "target": "relative-secret"}]
+    with pytest.raises(engine.ValidationError, match="secret targets are invalid"):
+        engine.validate_source_compose(tmp_path, contract)
+    rendered["services"]["demo"]["secrets"][0]["target"] = "/run/secrets/tankan.env"
+    rendered["secrets"]["tankan-secret"] = {"external": True}
+    with pytest.raises(engine.ValidationError, match="must be file-backed"):
+        engine.validate_source_compose(tmp_path, contract)
+    rendered["secrets"].clear()
+    with pytest.raises(engine.ValidationError, match="must be file-backed"):
+        engine.validate_source_compose(tmp_path, contract)
+
+
 @pytest.mark.parametrize("field,value", [
     ("git_commit", "0" * 40), ("git_tree", "1" * 40),
 ])
