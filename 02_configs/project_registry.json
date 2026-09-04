@@ -934,9 +934,8 @@
       "project_id": "public-intraday-runtime",
       "change_class": "shared",
       "status": "ready",
-      "runtime_target": "none",
-      "owned_paths": [],
-      "future_owned_paths": [
+      "runtime_target": "production_container",
+      "owned_paths": [
         "02_configs/runtime_contracts/public-intraday-runtime.json",
         "04_scripts/runtime/public_intraday_runtime.py",
         "09_deploy/public_intraday_runtime/Dockerfile.public-intraday",
@@ -944,6 +943,7 @@
         "08_tests/test_public_intraday_runtime_v2.py",
         "07_docs/projects/public-intraday-runtime/运行合同.md"
       ],
+      "future_owned_paths": [],
       "shared_dependencies": [
         ".dockerignore",
         "requirements.txt",
@@ -974,18 +974,18 @@
       ],
       "required_tests": [
         "08_tests/pipelines/test_public_intraday.py",
-        "08_tests/test_public_intraday_capture.py"
-      ],
-      "future_required_tests": [
+        "08_tests/test_public_intraday_capture.py",
         "08_tests/test_public_intraday_runtime_v2.py"
       ],
+      "future_required_tests": [],
       "capabilities": [
         "explicit OCI production identity wiring for the shared-intraday module",
         "candidate-safe read-only initialization without Tankan secret access or capture",
         "separate snapshot, input, identity and evidence runtime roots",
         "manual explicit-date AM/PM capture entrypoint with no scheduler or FULL DAILY integration"
       ],
-      "boundary_notes": "PROD-RUNTIME-V2 Goal E/F staged registration. runtime_target=none is a temporary governance state while exact future files are absent; it grants no deployment or production authority. A later independent dev-governance phase may promote this record to production_container only after the manifest and all bound inputs exist and the exact candidate passes isolated Linux target validation. The project may add only the listed exact wiring files and treats existing Shared Intraday, Tankan and identity code as read-only dependencies. It must not change business logic, use the parked Soybean worktree, fix a business date, read a production secret during candidate validation, capture data, mutate old SEALED snapshots, add schedules, join FULL DAILY/Production Wrapper/Daily Summary, activate Notification, issue a production grant or deploy. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED."
+      "boundary_notes": "PROD-RUNTIME-V2 Goal E/F production-container promotion. The exact manifest, wrapper, Dockerfile, Compose, test and runtime documentation are closed source inputs and project-owned. Promotion requires isolated Linux target-runtime validation of the exact candidate before main. It grants no automatic execution, deployment or capture authority. Existing Shared Intraday, Tankan and identity code remain read-only dependencies. It must not change business logic, use the parked Soybean worktree, fix a business date, read a production secret during candidate validation, capture data, mutate old SEALED snapshots, add schedules, join FULL DAILY/Production Wrapper/Daily Summary, activate Notification or issue a production grant. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED.",
+      "runtime_contract": "02_configs/runtime_contracts/public-intraday-runtime.json"
     }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"
