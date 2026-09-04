@@ -5,14 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 import math
+import re
 from pathlib import Path
-from typing import Callable, Iterator, Sequence
+from typing import Callable, Iterator, Sequence, Mapping
+from types import MappingProxyType
 
 import psycopg
 from psycopg.rows import dict_row
 
 from .models import ConnectionProof, PostgresColumn, QueryPlanProof, QuerySpec, SourceBatch
-from .queries import require_approved_query
+from .queries import (require_approved_query, require_approved_live_query,
+                      CBOT_SOYBEAN_LIVE_QUERY, DCE_SOYMEAL_LIVE_QUERY,
+                      DCE_SOYOIL_LIVE_QUERY, USD_CNH_SPOT_LIVE_QUERY)
 
 
 class TankanClientError(RuntimeError):
@@ -86,6 +90,17 @@ class TankanConnectionSettings:
 
     def clear_password(self) -> None:
         self.password = ""
+
+
+@dataclass(frozen=True)
+class LiveReadResult:
+    requested: tuple[str, ...]
+    available: tuple[Mapping[str, object], ...]
+    unavailable: tuple[Mapping[str, object], ...]
+    query: QuerySpec
+    plan: QueryPlanProof
+    connection_proof: ConnectionProof
+    retrieved_at: datetime
 
 
 class TankanClient:
@@ -302,6 +317,95 @@ ORDER BY ordinal_position
             query, parameters, batch_size=batch_size
         )
         yield from batches
+
+    def read_live(self, query: QuerySpec, identities: Sequence[str]) -> LiveReadResult:
+        """Allowlisted exact reads; independent of daily date-window APIs."""
+        query = require_approved_live_query(query)
+        if isinstance(identities, (str, bytes)):
+            raise ValueError("live identities must be an explicit sequence")
+        requested = tuple(identities)
+        if not 1 <= len(requested) <= 32 or any(not isinstance(v, str) for v in requested):
+            raise ValueError("live request requires 1..32 exact identities")
+        if len(set(requested)) != len(requested):
+            raise ValueError("duplicate requested identity")
+        prefix, product = "", "大豆"
+        if query == USD_CNH_SPOT_LIVE_QUERY:
+            if requested != ("USD/CNH:SPOT",):
+                raise ValueError("FX requires USD/CNH:SPOT")
+            parameters = ("spot",)
+        else:
+            if query == DCE_SOYMEAL_LIVE_QUERY:
+                prefix, product = "M", "豆粕"
+            elif query == DCE_SOYOIL_LIVE_QUERY:
+                prefix, product = "Y", "豆油"
+            pattern = prefix + r"\d{2}(?:0[1-9]|1[0-2])"
+            if any(re.fullmatch(pattern, v) is None for v in requested):
+                raise ValueError("live request requires full exact YYMM identity")
+            # Prefixless and prefixed source representations are the SAME month,
+            # never neighboring contracts. Product predicate is independently fixed.
+            physical = sorted({v for key in requested for v in (key, key[len(prefix):])})
+            parameters = (physical,)
+        connection = self._require_connection()
+        proof = self.proof
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"EXPLAIN (FORMAT JSON) {query.sql}", parameters)
+                plan_rows, plan_cost = self._plan_bounds(self._extract_plan(cursor.fetchone()))
+            plan = QueryPlanProof(query.sha256, plan_rows, plan_cost,
+                                  query.max_plan_rows, query.max_total_cost)
+        except (TypeError, ValueError, KeyError, IndexError):
+            raise TankanPlanRejectedError("live query plan rejected") from None
+        except Exception as exc:
+            raise TankanClientError(f"live planning failed: {type(exc).__name__}") from None
+        rows_by_identity: dict[str, list[Mapping[str, object]]] = {key: [] for key in requested}
+        retrieved_at = datetime.now(timezone.utc)
+        total = 0
+        for batch in self._stream_after_plan(query, parameters, plan, batch_size=128):
+            retrieved_at = batch.extracted_at
+            for row in batch.rows:
+                total += 1
+                if total > query.max_plan_rows:
+                    raise TankanSchemaError("live result exceeds approved bound")
+                if query == USD_CNH_SPOT_LIVE_QUERY:
+                    if row.get("tenor") != "spot":
+                        raise TankanSchemaError("unexpected FX identity")
+                    key = "USD/CNH:SPOT"
+                else:
+                    if row.get("product_name") != product:
+                        raise TankanSchemaError("unexpected live product identity")
+                    if query == CBOT_SOYBEAN_LIVE_QUERY and row.get("exchange") != "CBOT":
+                        raise TankanSchemaError("unexpected live exchange identity")
+                    raw = row.get("contract")
+                    if not isinstance(raw, str):
+                        raise TankanSchemaError("invalid source contract")
+                    key = raw if not prefix or raw.startswith(prefix) else prefix + raw
+                if key not in rows_by_identity:
+                    raise TankanSchemaError("unrequested source exact identity")
+                rows_by_identity[key].append(row)
+        available, unavailable = [], []
+        for key in requested:
+            matches = rows_by_identity[key]
+            reason = "NOT_FOUND" if not matches else "DUPLICATE_SOURCE_IDENTITY" if len(matches) != 1 else ""
+            if not reason:
+                row = matches[0]
+                price = row.get("mid" if query == USD_CNH_SPOT_LIVE_QUERY else "last")
+                stamp = row.get("update_time")
+                try:
+                    valid_price = not isinstance(price, (bool, str)) and math.isfinite(float(price)) and float(price) > 0
+                except (ValueError, TypeError, OverflowError):
+                    valid_price = False
+                if not valid_price:
+                    reason = "INVALID_PRICE"
+                elif not isinstance(stamp, datetime) or stamp.tzinfo is None or stamp.utcoffset() is None:
+                    reason = "SOURCE_TIMESTAMP_UNAVAILABLE"
+                else:
+                    available.append(MappingProxyType({**row, "requested_identity": key,
+                                                       "price": price, "source_updated_at": stamp}))
+            if reason:
+                unavailable.append(MappingProxyType({"requested_identity": key, "reason": reason,
+                                                     "price": None}))
+        return LiveReadResult(requested, tuple(available), tuple(unavailable), query,
+                              plan, proof, retrieved_at)
 
     def plan_stream(
         self,
