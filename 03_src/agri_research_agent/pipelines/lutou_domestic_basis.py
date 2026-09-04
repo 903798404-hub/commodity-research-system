@@ -22,6 +22,7 @@ from agri_research_agent.data_sources.lutou.domestic_basis import (
     DomesticBasisExtraction,
     DomesticBasisSeries,
     DomesticBasisSourceAdapter,
+    DomesticBasisSourceRow,
     load_domestic_basis_catalog,
 )
 from agri_research_agent.market_data.basis import BasisMarket, BasisQuote, BasisQuoteType
@@ -973,6 +974,33 @@ def _update_report(
     return report
 
 
+def _retained_historical_null(
+    source: DomesticBasisSourceRow, row: Mapping[str, object], previous_latest: date | None,
+) -> bool:
+    """Narrow approved subset of the old retain-as-exception policy, not a code whitelist.
+
+    Only historical all-NULL factory spot quotes for the two proven rapeseed
+    mappings are approved here. Check original input as well as Standard so an
+    invalid raw string cannot become an exempt NULL through normalization.
+    """
+    return (
+        previous_latest is not None and source.business_date <= previous_latest
+        and source.source_product == "菜籽油" and source.region in {"华东", "华南"}
+        and row["product"] == "rapeseed_oil_3"
+        and source.source_quote_type == "现货基差" and source.row_type == "工厂"
+        and row["raw_quote_type"] == "现货基差" and row["row_type"] == "工厂"
+        and all(value is None for value in (
+            source.basis_value, source.raw_basis_value, source.source_contract_code,
+            source.raw_price_text, source.cash_price, source.futures_price, source.volume,
+            row["basis_value"], row["raw_basis_value"], row["raw_contract_code"],
+            row["raw_price_text"], row["cash_price"], row["futures_price"], row["volume"],
+        ))
+        and row["exception_reason"] == "BASIS_NULL_OR_NONNUMERIC"
+        and row["is_usable"] is False and row["quality_status"] == "RETAINED_EXCEPTION"
+        and row["canonical_selection_status"] == "NOT_ELIGIBLE_FOR_CANONICAL"
+    )
+
+
 def assemble_domestic_basis_candidate(
     *, current: pa.Table | None, extraction: DomesticBasisExtraction,
     catalog: DomesticBasisCatalog, as_of_date: date,
@@ -981,6 +1009,24 @@ def assemble_domestic_basis_candidate(
     required = {item.series_id for item in catalog.series}
     next_state, window = current, None
     errors: dict[str, tuple[str, ...]] = {}
+    retained: list[str] = []
+    blocking_normalization: list[str] = []
+
+    def with_quality_diagnostics(report: dict[str, object]) -> dict[str, object]:
+        # Additional diagnostics, never a fourth series status or summary dimension.
+        report["quality_diagnostics"] = {
+            "retained_exception_policy": "historical-rapeseed-null-factory-spot/1",
+            "retained_exception_rows": len(retained),
+            "retained_exception_identities": sorted(set(retained)),
+            "blocking_normalization_errors": len(blocking_normalization),
+            "blocking_normalization_identities": sorted(set(blocking_normalization)),
+            "not_evaluated_due_to_batch_abort": sum(
+                item["reason"] == "CANDIDATE_NOT_EVALUATED_AFTER_BATCH_ERROR"
+                for item in report["series"]
+            ),
+        }
+        return report
+
     try:
         if current is not None:
             if set(current["series_id"].to_pylist()) != required:
@@ -1034,6 +1080,10 @@ def assemble_domestic_basis_candidate(
         ) for row in standard.to_pylist())
         if normalized_keys != raw_keys:
             raise DomesticBasisPipelineError("SOURCE_PRESENT_NORMALIZATION_DROPPED_OR_CHANGED")
+        raw_by_key = {
+            (catalog.match(row.source_product, row.region).series_id, row.business_date, row.source_row_identity): row
+            for row in extraction.records
+        }
         selected: dict[tuple[str, date], list[dict[str, object]]] = {}
         for row in standard.to_pylist():
             mapping = next(item for item in catalog.series if item.series_id == row["series_id"])
@@ -1047,7 +1097,12 @@ def assemble_domestic_basis_candidate(
             }.items()):
                 raise DomesticBasisPipelineError("STANDARD_MAPPING_IDENTITY_MISMATCH")
             if row["exception_reason"] in {"BASIS_NULL_OR_NONNUMERIC", "CONTRACT_INVALID"}:
-                errors[row["series_id"]] = ("SOURCE_PRESENT_NORMALIZATION_FAILED",)
+                source = raw_by_key[row["series_id"], row["business_date"], row["source_row_identity"]]
+                if _retained_historical_null(source, row, previous.get(row["series_id"])):
+                    retained.append(row["series_id"])
+                else:
+                    blocking_normalization.append(row["series_id"])
+                    errors[row["series_id"]] = ("SOURCE_PRESENT_NORMALIZATION_FAILED",)
             if row["raw_quote_type"] == "现货基差" and row["basis_value"] is not None:
                 contract = _parsed_contract(row["raw_contract_code"], mapping)
                 if contract is not None and (contract.year, contract.month) >= (row["business_date"].year, row["business_date"].month):
@@ -1086,7 +1141,7 @@ def assemble_domestic_basis_candidate(
                 expected = old[key]
             if row != expected:
                 raise DomesticBasisPipelineError("NEXT_STATE_CONTENT_OR_TIMESTAMP_CHANGED")
-        report = _update_report(catalog, current, next_state, window, extraction, as_of_date, errors)
+        report = with_quality_diagnostics(_update_report(catalog, current, next_state, window, extraction, as_of_date, errors))
         try:
             validate_update_summary(report, required=required)
         except ValueError as exc:
@@ -1110,7 +1165,7 @@ def assemble_domestic_basis_candidate(
             # A batch aborted before canonical assembly cannot certify the other
             # series as NO_CHANGE just because their old Current is still present.
             errors = {identity: errors.get(identity, ("CANDIDATE_NOT_EVALUATED_AFTER_BATCH_ERROR",)) for identity in required}
-        report = _update_report(catalog, current, next_state, window, extraction, as_of_date, errors)
+        report = with_quality_diagnostics(_update_report(catalog, current, next_state, window, extraction, as_of_date, errors))
         raise DomesticBasisPipelineError(str(exc), update_report=report) from exc
 
 
