@@ -809,14 +809,18 @@
         "07_docs/projects/production-runtime-v2/说明.md",
         "07_docs/projects/production-runtime-v2/生产执行身份合同.md",
         "08_tests/shared/test_production_identity.py",
-        "08_tests/test_host_runtime_authorization.py"
+        "08_tests/test_host_runtime_authorization.py",
+        "03_src/agri_research_agent/shared/production_grant.py",
+        "08_tests/shared/test_production_grant.py"
       ],
       "shared_dependencies": [
         "03_src/agri_research_agent/shared/file_identity.py",
         "03_src/agri_research_agent/automation/full_daily_windows.py",
         "04_scripts/automation/full_daily_windows_bootstrap.py",
         "09_deploy/spread_release/release_contract.py",
-        "04_scripts/quality/target_runtime_gate.py"
+        "04_scripts/quality/target_runtime_gate.py",
+        "03_src/agri_research_agent/shared/runtime_manifest.py",
+        "02_configs/runtime_manifest.schema.json"
       ],
       "forbidden_paths": [
         "02_configs/project_registry.json",
@@ -846,7 +850,8 @@
       ],
       "future_required_tests": [
         "08_tests/shared/test_production_identity.py",
-        "08_tests/test_host_runtime_authorization.py"
+        "08_tests/test_host_runtime_authorization.py",
+        "08_tests/shared/test_production_grant.py"
       ],
       "capabilities": [
         "versioned explicit git_worktree / oci_container execution identity and Approved Commit/Tree binding",
@@ -854,7 +859,7 @@
         "distinct artifact origin, deployment role and production write grant; candidate-validation isolation",
         "additive RuntimeContext integration preserving runtime marker, readonly and path boundaries"
       ],
-      "boundary_notes": "PROD-RUNTIME-V2 Goal B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container deployability必须由后续Goal D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。"
+      "boundary_notes": "PROD-RUNTIME-V2 Goal B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container deployability必须由后续Goal D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。"
     },
     {
       "project_id": "shared-runtime-manifest",

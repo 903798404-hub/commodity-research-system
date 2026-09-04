@@ -90,6 +90,19 @@ RUNTIME_MANIFEST_REGISTRATION = {
  'boundary_notes':'PROD-RUNTIME-V2 Goal C独立授权。library_only表示通用schema/validator源码交付，不是独立业务容器；不宣称真实container deployability。仅新增四个精确文件，没有ownership转移或目录扩权。源码manifest不得存放host绝对路径、当前container/image identity或secret值；实例值由受保护deployment evidence提供。明确区分实际entrypoint与初始化验证命令，不把--help或单纯import作为完整部署证明。版本演进必须明确，旧合同不得被隐式重解释；quality gate与host identity消费者的适配由各自合法owner在后续独立阶段实施。当前只交付清单，不修改治理入口、身份库、Docker/Compose、信任公钥或任何业务模块。FULL DAILY/Wrapper只读不改，旧Wiring保持PARKED；不部署、不capture、不修改旧SEALED、不启用Notification或任何schedule、不提升Approved identity。'
 }
 
+# Goal B grant-contract extension: preserve the original B registration and
+# apply only the two exact future files, one future test, and two read-only
+# dependencies authorized by the review record.
+GRANT_CONTRACT_REGISTRATION = copy.deepcopy(PRODUCTION_INFRA_REGISTRATION)
+GRANT_CONTRACT_REGISTRATION['future_owned_paths'] += [
+    '03_src/agri_research_agent/shared/production_grant.py',
+    '08_tests/shared/test_production_grant.py']
+GRANT_CONTRACT_REGISTRATION['shared_dependencies'] += [
+    '03_src/agri_research_agent/shared/runtime_manifest.py',
+    '02_configs/runtime_manifest.schema.json']
+GRANT_CONTRACT_REGISTRATION['future_required_tests'] += ['08_tests/shared/test_production_grant.py']
+GRANT_CONTRACT_REGISTRATION['boundary_notes'] += ' 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。'
+
 # Exact reviewed PM registration delta; no directory or shared ownership grant.
 PM_EXISTING_ADDITIONS = [
     '03_src/agri_research_agent/pipelines/import_profit_daily.py',
@@ -143,6 +156,13 @@ def registration_baseline():
         expected['projects'].append(RUNTIME_MANIFEST_REGISTRATION)
         assert current == expected
         baseline = expected
+    if baseline['schema_version'] == 'project-registry/4':
+        baseline_by_id = {p['project_id']: p for p in baseline['projects']}
+        if baseline_by_id.get('shared-production-infrastructure') == PRODUCTION_INFRA_REGISTRATION:
+            expected = copy.deepcopy(baseline)
+            expected['projects'] = [GRANT_CONTRACT_REGISTRATION if p['project_id'] == 'shared-production-infrastructure' else p for p in expected['projects']]
+            assert current == expected
+            baseline = expected
     return baseline
 
 
@@ -619,13 +639,13 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         expected = copy.deepcopy(old)
         if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
         assert by_id[old['project_id']] == expected
-    assert by_id['shared-production-infrastructure'] == PRODUCTION_INFRA_REGISTRATION
+    assert by_id['shared-production-infrastructure'] == GRANT_CONTRACT_REGISTRATION
     assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == PRODUCTION_INFRA_REGISTRATION
+    assert project == GRANT_CONTRACT_REGISTRATION
     assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
     assert not project.get('reserved_paths')
     for path in project['owned_paths'] + project['future_owned_paths']:
@@ -640,6 +660,29 @@ def test_production_infrastructure_registration_has_only_exact_new_ownership():
                  '09_deploy/spread_release/release_contract.py',
                  '09_deploy/runtime_identity/unapproved.py']:
         assert not registry.owns(project, path), path
+
+
+def test_production_grant_contract_registration_is_exact_and_readonly_dependencies():
+    current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
+    assert project == GRANT_CONTRACT_REGISTRATION
+    assert project['runtime_target'] == 'library_only'
+    assert project['future_owned_paths'][-2:] == [
+        '03_src/agri_research_agent/shared/production_grant.py',
+        '08_tests/shared/test_production_grant.py']
+    assert project['future_required_tests'][-1] == '08_tests/shared/test_production_grant.py'
+    assert project['shared_dependencies'][-2:] == [
+        '03_src/agri_research_agent/shared/runtime_manifest.py',
+        '02_configs/runtime_manifest.schema.json']
+    for path in project['future_owned_paths'][-2:]:
+        assert registry.owns(project, path)
+        assert not registry.owns(project, path + '/sibling.py')
+        assert all(not registry.owns(other, path) for other in current['projects'] if other is not project)
+    for path in project['shared_dependencies'][-2:]:
+        assert not registry.owns(project, path)
+    for path in ['03_src/agri_research_agent/shared/production_grant_extra.py',
+                 '08_tests/shared/test_production_grant_other.py',
+                 '03_src/agri_research_agent/shared/runtime_manifest.py/child.py']:
+        assert not registry.owns(project, path)
 
 
 def test_runtime_manifest_registration_is_exact_and_non_overlapping():
