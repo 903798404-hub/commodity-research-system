@@ -14,6 +14,9 @@
 sources，核对 service、Dockerfile、entrypoint、working directory、环境变量名、secret 引用和
 全部 mount target。实际候选 Compose 再把这些 mount target 映射到受保护的一次性 scope；
 placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
+`runtime-manifest/2` 尚未声明 candidate-safe secret 的值来源；只要 `secret_references` 非空，
+当前引擎就 fail closed。补齐这一能力必须先独立扩展 manifest contract，不能把 production secret
+或调用方临时值传给引擎。
 
 候选验证只能创建一次性 candidate scope。候选容器使用不可变 Image ID、只读 rootfs、非 root
 数字用户、无网络、drop all capabilities、no-new-privileges，并只挂载 candidate scope 与只读
@@ -40,6 +43,9 @@ Compose、环境、命令、mount 和 hardening，随后使用 candidate 域私�
 - `wrong_manifest_rejected`
 - `preview_write_rejected`
 - `release_mismatch_rejected`
+
+其中错误 manifest 与错误 RELEASE 各使用独立的 candidate scope 和 stopped container，实际调用
+host grant issuer；只有分别在 manifest hash 与 RELEASE hash 检查点拒绝才可记 PASS。
 
 证据绑定 clean Commit、Tree、全部 source SHA256、不可变 Image ID、rendered Compose SHA256、Linux
 builder identity、candidate authorization role、`.git` absence 和 production volume absence。任何
