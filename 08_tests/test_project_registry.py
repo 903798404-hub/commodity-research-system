@@ -148,6 +148,63 @@ PM_EXISTING_TEST_ADDITIONS = ['08_tests/test_import_profit_' + name + '.py' for 
     'recalculation', 'runtime_pipeline', 'runtime_store', 'soybean', 'standard_io')]
 
 
+PUBLIC_INTRADAY_RUNTIME_REGISTRATION = {'project_id': 'public-intraday-runtime',
+ 'change_class': 'shared',
+ 'status': 'ready',
+ 'runtime_target': 'none',
+ 'owned_paths': [],
+ 'future_owned_paths': ['02_configs/runtime_contracts/public-intraday-runtime.json',
+                        '04_scripts/runtime/public_intraday_runtime.py',
+                        '09_deploy/public_intraday_runtime/Dockerfile.public-intraday',
+                        '09_deploy/public_intraday_runtime/compose.yml',
+                        '08_tests/test_public_intraday_runtime_v2.py',
+                        '07_docs/projects/public-intraday-runtime/运行合同.md'],
+ 'shared_dependencies': ['.dockerignore',
+                         'requirements.txt',
+                         '04_scripts/capture_public_intraday.py',
+                         '03_src/agri_research_agent/market_data/intraday.py',
+                         '03_src/agri_research_agent/market_data/calendars.py',
+                         '03_src/agri_research_agent/data_sources/tankan/client.py',
+                         '03_src/agri_research_agent/data_sources/tankan/intraday_adapter.py',
+                         '03_src/agri_research_agent/pipelines/public_intraday.py',
+                         '03_src/agri_research_agent/shared/runtime_context.py',
+                         '03_src/agri_research_agent/shared/production_identity.py',
+                         '03_src/agri_research_agent/shared/production_grant.py',
+                         '03_src/agri_research_agent/shared/runtime_manifest.py',
+                         '02_configs/runtime_manifest.schema.json',
+                         '04_scripts/runtime/validate_target_runtime.py',
+                         '09_deploy/runtime_identity/host_authorization.py'],
+ 'forbidden_paths': ['02_configs/project_registry.json',
+                     'Dockerfile',
+                     'docker-compose.yml',
+                     '03_src/agri_research_agent/import_profit',
+                     '03_src/agri_research_agent/automation',
+                     '03_src/agri_research_agent/summary_engine',
+                     '04_scripts/import_profit',
+                     '04_scripts/automation',
+                     '05_apps'],
+ 'required_tests': ['08_tests/pipelines/test_public_intraday.py',
+                    '08_tests/test_public_intraday_capture.py'],
+ 'future_required_tests': ['08_tests/test_public_intraday_runtime_v2.py'],
+ 'capabilities': ['explicit OCI production identity wiring for the shared-intraday module',
+                  'candidate-safe read-only initialization without Tankan secret access or capture',
+                  'separate snapshot, input, identity and evidence runtime roots',
+                  'manual explicit-date AM/PM capture entrypoint with no scheduler or FULL DAILY '
+                  'integration'],
+ 'boundary_notes': 'PROD-RUNTIME-V2 Goal E/F staged registration. runtime_target=none is a '
+                   'temporary governance state while exact future files are absent; it grants no '
+                   'deployment or production authority. A later independent dev-governance phase '
+                   'may promote this record to production_container only after the manifest and '
+                   'all bound inputs exist and the exact candidate passes isolated Linux target '
+                   'validation. The project may add only the listed exact wiring files and treats '
+                   'existing Shared Intraday, Tankan and identity code as read-only dependencies. '
+                   'It must not change business logic, use the parked Soybean worktree, fix a '
+                   'business date, read a production secret during candidate validation, capture '
+                   'data, mutate old SEALED snapshots, add schedules, join FULL DAILY/Production '
+                   'Wrapper/Daily Summary, activate Notification, issue a production grant or '
+                   'deploy. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; '
+                   'REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED.'}
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -188,6 +245,12 @@ def registration_baseline():
         if baseline_by_id.get('shared-production-infrastructure') == GRANT_CONTRACT_REGISTRATION:
             expected = copy.deepcopy(baseline)
             expected['projects'] = [DEPLOYABILITY_ENGINE_REGISTRATION if p['project_id'] == 'shared-production-infrastructure' else p for p in expected['projects']]
+            assert current == expected
+            baseline = expected
+        baseline_ids = {p['project_id'] for p in baseline['projects']}
+        if 'public-intraday-runtime' not in baseline_ids:
+            expected = copy.deepcopy(baseline)
+            expected['projects'].append(PUBLIC_INTRADAY_RUNTIME_REGISTRATION)
             assert current == expected
             baseline = expected
     return baseline
@@ -667,7 +730,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == DEPLOYABILITY_ENGINE_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -1595,3 +1658,26 @@ def test_tankan_fixture_isolation_registration():
     for path in ['04_scripts/refresh_public_data.py', '03_src/agri_research_agent/data_sources/tankan/client.py',
                  '08_tests/data_sources/tankan/test_client.py', '01_data/historical_spread_database.parquet']:
         assert not registry.owns(project, path)
+
+
+def test_public_intraday_runtime_staged_registration_is_exact_and_inert():
+    data, project = registry.select_project(ROOT, "public-intraday-runtime")
+    assert data["schema_version"] == "project-registry/4"
+    assert project == PUBLIC_INTRADAY_RUNTIME_REGISTRATION
+    assert project["status"] == "ready"
+    assert project["change_class"] == "shared"
+    assert project["runtime_target"] == "none"
+    assert "runtime_contract" not in project
+    assert project["owned_paths"] == []
+    assert project["future_owned_paths"] == [
+        "02_configs/runtime_contracts/public-intraday-runtime.json",
+        "04_scripts/runtime/public_intraday_runtime.py",
+        "09_deploy/public_intraday_runtime/Dockerfile.public-intraday",
+        "09_deploy/public_intraday_runtime/compose.yml",
+        "08_tests/test_public_intraday_runtime_v2.py",
+        "07_docs/projects/public-intraday-runtime/运行合同.md",
+    ]
+    assert "02_configs/project_registry.json" in project["forbidden_paths"]
+    assert "04_scripts/capture_public_intraday.py" in project["shared_dependencies"]
+    assert "AM_PM_AUTO_EXECUTION=NO" in project["boundary_notes"]
+    assert "INTRADAY_FULL_DAILY_DEPENDENCY=NONE" in project["boundary_notes"]
