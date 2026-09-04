@@ -666,7 +666,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     contract["service_id"], timeout=300)
             ids = _docker("compose", "--project-name", project_name, "--project-directory", str(work),
                           "--env-file", str(env_file), "-f", str(compose), "ps", "-q",
-                          contract["service_id"]).stdout.decode().split()
+                          "--all", contract["service_id"]).stdout.decode().split()
             if len(ids) != 1:
                 raise ValidationError("Compose did not create exactly one candidate container")
             container_id = ids[0]
