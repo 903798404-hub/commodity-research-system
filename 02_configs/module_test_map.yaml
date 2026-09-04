@@ -63,6 +63,12 @@ modules:
     impact_tests: [08_tests/shared/test_runtime_context.py]
     dependents: []
     full_regression_when_changed: false
+  shared.async_update:
+    code_paths: [03_src/agri_research_agent/shared/async_update.py]
+    direct_tests: [08_tests/shared/test_async_update.py]
+    impact_tests: [08_tests/pipelines/test_domestic_basis_async_update.py, 08_tests/pipelines/test_public_data_refresh.py]
+    dependents: [market_data.domestic_basis]
+    full_regression_when_changed: false
   shared.runtime_context:
     code_paths: [03_src/agri_research_agent/shared/runtime_context.py]
     direct_tests: [08_tests/shared/test_runtime_context.py]
@@ -295,6 +301,7 @@ modules:
       - 08_tests/market_data/test_basis_contract.py
       - 08_tests/data_sources/lutou/test_domestic_basis.py
       - 08_tests/pipelines/test_lutou_domestic_basis.py
+      - 08_tests/pipelines/test_domestic_basis_async_update.py
       - 08_tests/pipelines/test_lutou_domestic_basis_formal_current.py
       - 08_tests/pipelines/test_public_data_domestic_basis_provider.py
       - 08_tests/market_data/test_public_basis_current.py

@@ -35,6 +35,14 @@ canonical_policy:
   cash_futures_policy: preserve_in_standard_legacy_compatible_null_in_canonical
   date_fill_policy: none
   promotion_requires: LIVE_CONFIRMED
+freshness_policy:
+  policy_version: domestic-basis-freshness/2-candidate
+  threshold_approved: false
+  age_basis: calendar_days
+  freshness_threshold: null
+  stale_is_blocking: false
+# Approved behavior: NO_CHANGE allowed; STALE warns; no threshold => UNASSESSED.
+# Threshold remains unapproved. No holiday/calendar inference or global 7-day default.
 formal_current:
   contract_version: public-domestic-basis-current/3
   cutover_date: 2026-06-01
@@ -54,8 +62,8 @@ formal_current:
   live_segment:
     start_date: 2026-06-01
     cash_futures_policy: null
-    refresh_policy: existing_live_history_plus_31_day_lookback
-  daily_refresh_reads: [sealed_historical_seed, live_lutou_recent_window]
+    refresh_policy: current_upsert_valid_increment_preserve_absent_keys
+  daily_refresh_reads: [sealed_historical_seed, live_lutou_recent_window, live_lutou_series_inventory]
   daily_refresh_forbidden_reads: [historical_excel, legacy_basis_sql, formal_basis_quotes_parquet]
 series:
   - {series_id: market.basis.domestic.china.palm_oil_24.east_china.spot, source_product: 棕榈油, consumer_product: 24度, product: palm_oil_24, region: 华东, region_id: east_china, underlying_exchange: DCE, underlying_product: P, legacy_status: LEGACY_IDENTIFIED, live_status: LIVE_CONFIRMED, expected_source_status: LIVE_CONFIRMED}

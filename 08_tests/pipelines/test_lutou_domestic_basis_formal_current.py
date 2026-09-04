@@ -8,11 +8,13 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import yaml
 
 from agri_research_agent.data_sources.lutou.domestic_basis import (
     DomesticBasisEvidenceType,
     DomesticBasisExtraction,
     DomesticBasisSourceRow,
+    DomesticBasisSourceInventory,
     load_domestic_basis_catalog,
 )
 from agri_research_agent.pipelines import lutou_domestic_basis as pipeline
@@ -123,6 +125,12 @@ class FakeLiveAdapter:
             plan_estimated_rows=len(rows),
             connection_proof={"transaction_read_only": True, "write_privileges": []},
             schema_proof={"column_count": 19, "index_entry_count": 1, "date_indexed": True},
+            source_inventory=tuple(DomesticBasisSourceInventory(
+                item.source_product, item.region,
+                max((row.business_date for row in self.records if (row.source_product, row.region) == (item.source_product, item.region)), default=None),
+                sum((row.source_product, row.region) == (item.source_product, item.region) for row in rows),
+            ) for item in catalog.series),
+            inventory_query_identity="fixture-independent-inventory", inventory_plan_estimated_rows=len(self.records),
         )
 
 
@@ -149,7 +157,13 @@ def _legacy_baseline(table: pa.Table) -> pa.Table:
 def test_formal_alignment_parity_incremental_and_immutable_seed(
     runtime: RuntimeContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mapping = Path("02_configs/lutou_domestic_basis.yaml")
+    payload = yaml.safe_load(Path("02_configs/lutou_domestic_basis.yaml").read_text(encoding="utf-8"))
+    payload["freshness_policy"] = {
+        "policy_version": "test-only-not-business-approved", "threshold_approved": True,
+        "freshness_threshold": (date(2026, 8, 20) - date(2026, 8, 14)).days, "stale_is_blocking": False,
+    }
+    mapping = tmp_path / "fixture-mapping.yaml"
+    mapping.write_text(yaml.safe_dump(payload, allow_unicode=True), encoding="utf-8")
     catalog = load_domestic_basis_catalog(mapping)
     adapter = FakeLiveAdapter(_live_records())
     initial = pipeline.run_domestic_basis_live(

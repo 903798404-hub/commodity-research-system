@@ -13,6 +13,7 @@ from agri_research_agent.data_sources.lutou.domestic_basis import (
     DomesticBasisEvidenceType,
     DomesticBasisExtraction,
     DomesticBasisSourceRow,
+    DomesticBasisSourceInventory,
     load_domestic_basis_catalog,
 )
 from agri_research_agent.pipelines.lutou_domestic_basis import (
@@ -91,6 +92,10 @@ def _extraction(*, extra: tuple[DomesticBasisSourceRow, ...] = ()) -> DomesticBa
 def _live_mapping(tmp_path: Path) -> Path:
     payload = yaml.safe_load(Path("02_configs/lutou_domestic_basis.yaml").read_text(encoding="utf-8"))
     payload["mapping_version"] = "domestic-basis-live-confirmed-test/1"
+    payload["freshness_policy"] = {
+        "policy_version": "test-only-not-business-approved", "threshold_approved": True,
+        "freshness_threshold": (date(2026, 8, 20) - DAY).days, "stale_is_blocking": False,
+    }
     payload["source_contract"]["database_schema"] = "油脂油料价格"
     payload["source_contract"]["table_status"] = "LIVE_CONFIRMED"
     payload["source_contract"]["query_identity_status"] = "LIVE_CONFIRMED"
@@ -137,6 +142,12 @@ class FakeLiveAdapter:
             plan_estimated_rows=len(self.records),
             connection_proof={"transaction_read_only": True, "write_privileges": []},
             schema_proof={"column_count": 19, "index_entry_count": 1, "date_indexed": True},
+            source_inventory=tuple(DomesticBasisSourceInventory(
+                item.source_product, item.region,
+                max((row.business_date for row in self.records if (row.source_product, row.region) == (item.source_product, item.region)), default=None),
+                sum((row.source_product, row.region) == (item.source_product, item.region) and start_date <= row.business_date <= end_date for row in self.records),
+            ) for item in catalog.series),
+            inventory_query_identity="fixture-independent-inventory", inventory_plan_estimated_rows=len(self.records),
         )
 def test_standard_candidate_is_source_preserving_complete_and_has_no_fill() -> None:
     catalog = load_domestic_basis_catalog()

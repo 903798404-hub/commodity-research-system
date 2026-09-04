@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -17,6 +17,7 @@ import yaml
 
 from agri_research_agent.data_sources.lutou.live import LutouClient, LutouQuery, LutouSchemaError
 from agri_research_agent.market_data.contracts import Exchange
+from agri_research_agent.shared.async_update import FreshnessPolicy
 
 DEFAULT_MAPPING_PATH = Path(__file__).resolve().parents[4] / "02_configs" / "lutou_domestic_basis.yaml"
 LUTOU_DOMESTIC_BASIS_SCHEMA = "油脂油料价格"
@@ -81,6 +82,7 @@ class DomesticBasisCatalog:
     source_contract: dict[str, object]
     canonical_policy: dict[str, object]
     series: tuple[DomesticBasisSeries, ...]
+    freshness_policy: FreshnessPolicy = field(default_factory=lambda: FreshnessPolicy("domestic-basis-freshness/pending"))
 
     @property
     def live_verified(self) -> bool:
@@ -163,6 +165,22 @@ class DomesticBasisSourceRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DomesticBasisSourceInventory:
+    source_product: str
+    region: str
+    source_latest_date: date | None
+    window_row_count: int
+
+    def __post_init__(self) -> None:
+        if any(not isinstance(value, str) or not value.strip() for value in (self.source_product, self.region)):
+            raise ValueError("Domestic Basis inventory identity is invalid")
+        if self.source_latest_date is not None and type(self.source_latest_date) is not date:
+            raise ValueError("Domestic Basis inventory latest must be an exact date or null")
+        if type(self.window_row_count) is not int or self.window_row_count < 0:
+            raise ValueError("Domestic Basis inventory count must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
 class DomesticBasisExtraction:
     records: tuple[DomesticBasisSourceRow, ...]
     evidence_type: DomesticBasisEvidenceType
@@ -176,12 +194,17 @@ class DomesticBasisExtraction:
     schema_proof: Mapping[str, object] | None = None
     partition_count: int = 1
     partition_windows: tuple[tuple[date, date], ...] = ()
+    source_inventory: tuple[DomesticBasisSourceInventory, ...] = ()
+    inventory_query_identity: str | None = None
+    inventory_plan_estimated_rows: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.evidence_type, DomesticBasisEvidenceType):
             raise TypeError("evidence_type must be DomesticBasisEvidenceType")
-        if not self.records:
-            raise ValueError("Domestic Basis extraction must not be empty")
+        # An empty increment is legal only with independently verified inventory;
+        # full/offline coverage gates still reject an empty dataset.
+        if not self.records and not self.source_inventory:
+            raise ValueError("Empty Domestic Basis extraction requires source inventory")
         if not self.query_identity.strip() or not self.snapshot_identity.strip():
             raise ValueError("Domestic Basis extraction identities must be non-empty")
         if self.extracted_at.tzinfo is None or self.extracted_at.utcoffset() is None:
@@ -244,6 +267,27 @@ class LutouDomesticBasisLiveAdapter:
     def extract(self, *, catalog: DomesticBasisCatalog, start_date: date, end_date: date) -> DomesticBasisExtraction:
         schema_proof = self.verify_schema()
         self._client.inspect_query(self.query)
+        inventory = self._client.series_inventory(self.query, ("品种", "地区"), start_date, end_date)
+        inventories: dict[tuple[str, str], DomesticBasisSourceInventory] = {}
+        for item in inventory["rows"]:
+            pair = (_optional_text(item.get("品种")), _optional_text(item.get("地区")))
+            if pair not in catalog.source_pairs:
+                continue
+            latest = item["source_latest_date"]
+            count = item["window_row_count"]
+            if type(latest) is not date or latest > end_date or int(count) != count or count < 0:
+                raise ValueError("Domestic Basis source inventory is invalid")
+            # SQL groups untrimmed text; normalized aliases are combined exactly
+            # as the existing source-pair filter does, not silently overwritten.
+            before = inventories.get(pair)
+            inventories[pair] = DomesticBasisSourceInventory(
+                *pair, max(latest, before.source_latest_date) if before else latest,
+                int(count) + (before.window_row_count if before else 0),
+            )
+        source_inventory = tuple(
+            inventories.get(pair, DomesticBasisSourceInventory(*pair, None, 0))
+            for pair in sorted(catalog.source_pairs)
+        )
         raw_rows: list[dict[str, object]] = []
         plan_rows = 0
         windows: list[tuple[date, date]] = []
@@ -273,8 +317,9 @@ class LutouDomesticBasisLiveAdapter:
             if self._progress_callback is not None:
                 self._progress_callback(len(windows), partition_start, partition_end, len(raw_rows))
             partition_start = partition_end + timedelta(days=1)
-        if not raw_rows:
-            raise ValueError("Domestic Basis live extraction returned no consumer-needed rows")
+        observed = Counter((_optional_text(row.get("品种")), _optional_text(row.get("地区"))) for row in raw_rows)
+        if any(observed[(item.source_product, item.region)] != item.window_row_count for item in source_inventory):
+            raise ValueError("Domestic Basis source extraction/inventory count mismatch")
         identity_fields = catalog.source_contract.get("source_row_identity_fields")
         if not isinstance(identity_fields, list) or not identity_fields:
             raise ValueError("Domestic Basis configured source identity fields are missing")
@@ -292,6 +337,8 @@ class LutouDomesticBasisLiveAdapter:
                 business_date = business_date.date()
             if type(business_date) is not date:
                 raise ValueError("Domestic Basis live business date is invalid")
+            if not start_date <= business_date <= end_date:
+                raise ValueError("Domestic Basis source row is outside extraction window")
             raw_basis = raw.get("基差")
             records.append(DomesticBasisSourceRow(
                 business_date=business_date,
@@ -323,6 +370,9 @@ class LutouDomesticBasisLiveAdapter:
             connection_proof=self._client.proof.safe_manifest_fields(),
             schema_proof=schema_proof,
             partition_count=len(windows), partition_windows=tuple(windows),
+            source_inventory=source_inventory,
+            inventory_query_identity=str(inventory["query_identity"]),
+            inventory_plan_estimated_rows=int(inventory["plan_estimated_rows"]),
         )
 
 
@@ -390,7 +440,8 @@ def load_domestic_basis_catalog(path: str | Path = DEFAULT_MAPPING_PATH) -> Dome
         raise ValueError("Live-confirmed Domestic Basis mapping requires the proven relation")
     if policy.get("promotion_requires") != "LIVE_CONFIRMED":
         raise ValueError("Domestic Basis promotion policy must require LIVE_CONFIRMED")
-    return DomesticBasisCatalog(str(payload.get("schema_version", "")), str(payload.get("mapping_version", "")), str(payload.get("provider", "")), dict(source), dict(policy), series)
+    freshness = FreshnessPolicy.from_mapping(payload.get("freshness_policy", {"policy_version": "domestic-basis-freshness/pending"}))
+    return DomesticBasisCatalog(str(payload.get("schema_version", "")), str(payload.get("mapping_version", "")), str(payload.get("provider", "")), dict(source), dict(policy), series, freshness)
 
 
 __all__ = [

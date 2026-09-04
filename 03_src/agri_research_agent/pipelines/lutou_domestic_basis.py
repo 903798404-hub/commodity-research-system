@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import statistics
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -26,6 +28,7 @@ from agri_research_agent.market_data.basis import BasisMarket, BasisQuote, Basis
 from agri_research_agent.market_data.contracts import ContractId, Exchange
 from agri_research_agent.market_data.quotes import Currency, PriceUnit
 from agri_research_agent.shared.atomic_storage import atomic_write_json
+from agri_research_agent.shared.async_update import SeriesUpdate, evaluate_update, validate_update_summary
 from agri_research_agent.shared.file_identity import identify_file
 from agri_research_agent.shared.immutable_candidate import seal_immutable_candidate, validate_candidate_id
 from agri_research_agent.shared.runtime_context import RuntimeContext, assert_runtime_write
@@ -115,7 +118,9 @@ FORMAL_CURRENT_SCHEMA = pa.schema([
 
 
 class DomesticBasisPipelineError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, update_report: Mapping[str, object] | None = None) -> None:
+        super().__init__(message)
+        self.update_report = update_report
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,10 +149,23 @@ class DomesticBasisRunResult:
     query_end_date: date
     candidate_directory: Path
     canonical_directory: Path | None
-    current: DomesticBasisCurrent
+    current: DomesticBasisCurrent | None
     promoted: bool
     candidate_quality: Mapping[str, object]
     canonical_quality: Mapping[str, object]
+
+    @property
+    def update_summary(self) -> Mapping[str, object]:
+        return self.canonical_quality["async_update"]
+
+
+@dataclass(frozen=True, slots=True)
+class DomesticBasisCandidateState:
+    standard: pa.Table
+    next_state: pa.Table
+    candidate_quality: Mapping[str, object]
+    canonical_quality: Mapping[str, object]
+    update_report: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,8 +264,9 @@ def validate_candidate(
     *,
     require_complete_series: bool = True,
     require_complete_usable_series: bool | None = None,
+    allow_empty_increment: bool = False,
 ) -> dict[str, object]:
-    if table.schema != STANDARD_SCHEMA or table.num_rows == 0:
+    if table.schema != STANDARD_SCHEMA or (table.num_rows == 0 and not allow_empty_increment):
         raise DomesticBasisPipelineError("Domestic Basis Candidate schema is invalid")
     duplicates = _duplicate_count(table, STANDARD_STABLE_KEY)
     if duplicates:
@@ -256,7 +275,7 @@ def validate_candidate(
     expected = {x.series_id for x in catalog.series}
     observed = {str(x["series_id"]) for x in rows}
     usable_series = {str(x["series_id"]) for x in rows if x["is_usable"]}
-    if require_complete_series and observed != expected:
+    if observed - expected or (require_complete_series and observed != expected):
         raise DomesticBasisPipelineError("Domestic Basis Candidate coverage is incomplete")
     require_usable = (
         require_complete_series
@@ -268,9 +287,9 @@ def validate_candidate(
     required = ("series_id", "product", "location", "provider_series_id", "source_series_id",
                 "source_locator", "source_row_identity", "source_identity_sha256", "source_row_sha256",
                 "query_identity", "snapshot_identity")
-    if any(not str(row[field]).strip() for row in rows for field in required):
+    if any(not isinstance(row[field], str) or not row[field].strip() for row in rows for field in required):
         raise DomesticBasisPipelineError("Domestic Basis Candidate identity is incomplete")
-    if set(table["currency"].to_pylist()) != {"CNY"} or set(table["unit"].to_pylist()) != {"CNY/metric_tonne"}:
+    if rows and (set(table["currency"].to_pylist()) != {"CNY"} or set(table["unit"].to_pylist()) != {"CNY/metric_tonne"}):
         raise DomesticBasisPipelineError("Domestic Basis Candidate currency/unit is invalid")
     identity_contents: dict[str, set[str]] = {}
     for row in rows:
@@ -301,8 +320,8 @@ def validate_candidate(
         "regions": sorted({str(x["location"]) for x in rows}),
         "raw_quote_types": sorted({str(x["raw_quote_type"]) for x in rows}),
         "raw_contracts": sorted({str(x["raw_contract_code"]) for x in rows}),
-        "min_date": min(x["business_date"] for x in rows).isoformat(),
-        "max_date": max(x["business_date"] for x in rows).isoformat(),
+        "min_date": min(x["business_date"] for x in rows).isoformat() if rows else None,
+        "max_date": max(x["business_date"] for x in rows).isoformat() if rows else None,
         "stable_key_duplicate_count": 0, "source_identity_collision_count": 0,
         "missing_value_policy": "retain_as_exception",
         "date_fill_policy": "none", "signed_basis_policy": "negative_zero_positive_allowed",
@@ -315,12 +334,14 @@ def build_canonical_table(
     *,
     require_complete_series: bool = True,
     require_complete_usable_series: bool | None = None,
+    allow_empty_increment: bool = False,
 ) -> tuple[pa.Table, dict[str, object]]:
     gate = validate_candidate(
         table,
         catalog,
         require_complete_series=require_complete_series,
         require_complete_usable_series=require_complete_usable_series,
+        allow_empty_increment=allow_empty_increment,
     )
     groups: dict[tuple[str, date], list[dict[str, object]]] = {}
     far_counts: dict[tuple[str, date], int] = {}
@@ -897,10 +918,272 @@ def align_formal_domestic_basis_current(
     return DomesticBasisAlignmentResult(safe_run_id, seed, current, parity)
 
 
+def _latest_dates(table: pa.Table | None) -> dict[str, date]:
+    latest: dict[str, date] = {}
+    if table is not None and {"series_id", "business_date"} <= set(table.column_names):
+        for row in table.select(["series_id", "business_date"]).to_pylist():
+            identity, day = row["series_id"], row["business_date"]
+            latest[identity] = max(day, latest.get(identity, day))
+    return latest
+
+
+def _same_business(left: Mapping[str, object], right: Mapping[str, object]) -> bool:
+    return all(left[key] == right[key] for key in CANONICAL_SCHEMA.names if key not in {"captured_at", "snapshot_identity", "query_identity"})
+
+
+def _update_report(
+    catalog: DomesticBasisCatalog, current: pa.Table | None, next_state: pa.Table | None,
+    window: pa.Table | None, extraction: DomesticBasisExtraction | None, as_of: date,
+    errors: Mapping[str, tuple[str, ...]],
+) -> dict[str, object]:
+    previous, following = _latest_dates(current), _latest_dates(next_state)
+    required = {item.series_id for item in catalog.series}
+    # A mapping cannot silently shrink the required lifecycle of an existing Current.
+    required.update(previous)
+    inventory = {} if extraction is None else {(item.source_product, item.region): item for item in extraction.source_inventory}
+    old = {} if current is None or current.schema != CANONICAL_SCHEMA else {(row["series_id"], row["business_date"]): row for row in current.to_pylist()}
+    new_counts, revisions = Counter(), Counter()
+    if window is not None:
+        for row in window.to_pylist():
+            identity, day = row["series_id"], row["business_date"]
+            if identity not in previous or day > previous[identity]:
+                new_counts[identity] += 1
+            elif (identity, day) not in old or not _same_business(old[identity, day], row):
+                revisions[identity] += 1
+    items = {}
+    for mapping in catalog.series:
+        identity = mapping.series_id
+        source = inventory.get((mapping.source_product, mapping.region))
+        items[identity] = SeriesUpdate(
+            previous.get(identity), None if source is None else source.source_latest_date,
+            following.get(identity), new_counts[identity], revisions[identity],
+            0 if source is None else source.window_row_count, errors.get(identity, ()),
+        )
+    for identity in required - items.keys():
+        items[identity] = SeriesUpdate(previous[identity], None, following.get(identity), errors=("MAPPING_IDENTITY_DRIFT",))
+    report = evaluate_update(
+        dataset_id="domestic_basis", required=required, series=items,
+        next_identities=set(following), as_of_date=as_of, policy=catalog.freshness_policy,
+    )
+    report["source_latest_definition"] = "raw product/region latest across all quote types through query_end; not canonical freshness"
+    report["mapping_version"] = catalog.mapping_version
+    report["query_identity"] = None if extraction is None else extraction.query_identity
+    report["snapshot_identity"] = None if extraction is None else extraction.snapshot_identity
+    report["inventory_query_identity"] = None if extraction is None else extraction.inventory_query_identity
+    return report
+
+
+def assemble_domestic_basis_candidate(
+    *, current: pa.Table | None, extraction: DomesticBasisExtraction,
+    catalog: DomesticBasisCatalog, as_of_date: date,
+) -> DomesticBasisCandidateState:
+    """Pure candidate assembly. Does not read/write a runtime or call a provider."""
+    required = {item.series_id for item in catalog.series}
+    next_state, window = current, None
+    errors: dict[str, tuple[str, ...]] = {}
+    try:
+        if current is not None:
+            if set(current["series_id"].to_pylist()) != required:
+                raise DomesticBasisPipelineError("MAPPING_OR_CURRENT_IDENTITY_DRIFT")
+            _validate_canonical(current, catalog)
+        inventory = {(item.source_product, item.region): item for item in extraction.source_inventory}
+        if (len(inventory) != len(extraction.source_inventory) or set(inventory) != catalog.source_pairs
+                or not extraction.inventory_query_identity or extraction.inventory_plan_estimated_rows is None
+                or extraction.inventory_plan_estimated_rows < 0):
+            raise DomesticBasisPipelineError("SOURCE_INVENTORY_UNVERIFIED")
+        raw_counts = Counter((row.source_product, row.region) for row in extraction.records)
+        if set(raw_counts) - catalog.source_pairs:
+            raise DomesticBasisPipelineError("SOURCE_PRESENT_MAPPING_MISSING")
+        previous = _latest_dates(current)
+        for mapping in catalog.series:
+            item = inventory[mapping.source_product, mapping.region]
+            identity = mapping.series_id
+            if type(item.window_row_count) is not int or item.window_row_count < 0 or raw_counts[mapping.source_product, mapping.region] != item.window_row_count:
+                errors[identity] = ("SOURCE_PRESENT_EXTRACTION_DROPPED",)
+            elif item.source_latest_date is None:
+                errors[identity] = ("SOURCE_IDENTITY_UNVERIFIED",)
+            elif extraction.source_min_date is None or extraction.source_max_date is None or item.source_latest_date > extraction.source_max_date:
+                errors[identity] = ("SOURCE_INVENTORY_WINDOW_INVALID",)
+            elif bool(item.window_row_count) != (item.source_latest_date >= extraction.source_min_date):
+                errors[identity] = ("SOURCE_INVENTORY_COUNT_DATE_INCONSISTENT",)
+            elif (item.window_row_count == 0 and identity in previous and item.source_latest_date > previous[identity]):
+                errors[identity] = ("NEW_SOURCE_OUTSIDE_WINDOW_REQUIRES_BACKFILL",)
+        if errors:
+            raise DomesticBasisPipelineError("Domestic Basis source inventory reconciliation failed")
+        for row in extraction.records:
+            if (extraction.source_min_date is None or extraction.source_max_date is None
+                    or not extraction.source_min_date <= row.business_date <= extraction.source_max_date
+                    or row.business_date > inventory[row.source_product, row.region].source_latest_date):
+                raise DomesticBasisPipelineError("SOURCE_WINDOW_IDENTITY_INVALID")
+        standard = build_standard_table(extraction, catalog)
+        candidate_gate = validate_candidate(
+            standard, catalog, require_complete_series=current is None,
+            require_complete_usable_series=current is None, allow_empty_increment=current is not None,
+        )
+        # Independent source -> Standard reconciliation, before any policy filtering.
+        raw_keys = Counter((
+            catalog.match(row.source_product, row.region).series_id, row.business_date,
+            row.source_row_identity, row.source_identity_sha256, row.source_row_sha256,
+            row.source_quote_type, row.source_contract_code,
+            None if row.basis_value is None else row.basis_value.quantize(Decimal("0.0001")),
+            row.source_created_at,
+        ) for row in extraction.records)
+        normalized_keys = Counter((
+            row["series_id"], row["business_date"], row["source_row_identity"], row["source_identity_sha256"],
+            row["source_row_sha256"], row["raw_quote_type"], row["raw_contract_code"], row["basis_value"], row["source_created_at"],
+        ) for row in standard.to_pylist())
+        if normalized_keys != raw_keys:
+            raise DomesticBasisPipelineError("SOURCE_PRESENT_NORMALIZATION_DROPPED_OR_CHANGED")
+        selected: dict[tuple[str, date], list[dict[str, object]]] = {}
+        for row in standard.to_pylist():
+            mapping = next(item for item in catalog.series if item.series_id == row["series_id"])
+            if any(row[key] != value for key, value in {
+                "provider_series_id": mapping.provider_series_id, "source_series_id": mapping.source_series_id,
+                "provider_dataset_id": mapping.provider_dataset_id, "source_locator": mapping.source_locator,
+                "product": mapping.product, "region_id": mapping.region_id, "location": mapping.region,
+                "quote_type": "DOMESTIC_SPOT_BASIS", "mapping_version": catalog.mapping_version,
+                "query_identity": extraction.query_identity, "snapshot_identity": extraction.snapshot_identity,
+                "captured_at": extraction.extracted_at, "evidence_type": extraction.evidence_type.value,
+            }.items()):
+                raise DomesticBasisPipelineError("STANDARD_MAPPING_IDENTITY_MISMATCH")
+            if row["exception_reason"] in {"BASIS_NULL_OR_NONNUMERIC", "CONTRACT_INVALID"}:
+                errors[row["series_id"]] = ("SOURCE_PRESENT_NORMALIZATION_FAILED",)
+            if row["raw_quote_type"] == "现货基差" and row["basis_value"] is not None:
+                contract = _parsed_contract(row["raw_contract_code"], mapping)
+                if contract is not None and (contract.year, contract.month) >= (row["business_date"].year, row["business_date"].month):
+                    if not row["is_usable"]:
+                        raise DomesticBasisPipelineError("VALID_SOURCE_INCORRECTLY_FILTERED")
+                    selected.setdefault((row["series_id"], row["business_date"]), []).append(row)
+        if errors:
+            raise DomesticBasisPipelineError("Domestic Basis normalization failed")
+        window, canonical_gate = build_canonical_table(
+            standard, catalog, require_complete_series=current is None,
+            require_complete_usable_series=current is None, allow_empty_increment=current is not None,
+        )
+        canonical_rows = {(row["series_id"], row["business_date"]): row for row in window.to_pylist()}
+        if set(canonical_rows) != set(selected):
+            raise DomesticBasisPipelineError("CANDIDATE_BUILD_DROPPED_OR_ADDED")
+        for key, group in selected.items():
+            nearest = min((str(row["underlying_futures_reference"]) for row in group), key=_contract_sort_key)
+            chosen = [row for row in group if row["underlying_futures_reference"] == nearest]
+            output = canonical_rows[key]
+            if (output["source_row_count"] != len(chosen) or output["source_group_sha256"] != _source_group_sha(chosen)
+                    or output["value"] != statistics.median(row["basis_value"] for row in chosen).quantize(Decimal("0.0001"))
+                    or output["underlying_futures_reference"] != nearest
+                    or output["query_identity"] != extraction.query_identity or output["snapshot_identity"] != extraction.snapshot_identity
+                    or output["captured_at"] != extraction.extracted_at):
+                raise DomesticBasisPipelineError("CANDIDATE_NORMALIZATION_OR_LINEAGE_INVALID")
+        next_state = _merge_current(current, window, extraction.source_min_date)
+        _validate_canonical(next_state, catalog)
+        # Retaining identities is insufficient: do not silently drop historical keys.
+        actual = {(row["series_id"], row["business_date"]): row for row in next_state.to_pylist()}
+        old = {} if current is None else {(row["series_id"], row["business_date"]): row for row in current.to_pylist()}
+        if set(actual) != set(old) | set(canonical_rows):
+            raise DomesticBasisPipelineError("NEXT_STATE_HISTORY_DROPPED_OR_ADDED")
+        for key, row in actual.items():
+            expected = canonical_rows.get(key, old.get(key))
+            if key in old and _same_business(old[key], expected):
+                expected = old[key]
+            if row != expected:
+                raise DomesticBasisPipelineError("NEXT_STATE_CONTENT_OR_TIMESTAMP_CHANGED")
+        report = _update_report(catalog, current, next_state, window, extraction, as_of_date, errors)
+        try:
+            validate_update_summary(report, required=required)
+        except ValueError as exc:
+            raise DomesticBasisPipelineError(str(exc)) from exc
+        if report["summary"]["updates"]["ERROR"]:
+            raise DomesticBasisPipelineError("Domestic Basis asynchronous series ERROR", update_report=report)
+        candidate_gate["coverage_scope"] = "increment_only; complete identity gate is next_state"
+        canonical_gate["window_row_count"] = window.num_rows
+        canonical_gate["row_count"] = next_state.num_rows
+        canonical_gate["series_count"] = len(required)
+        canonical_gate["coverage_scope"] = "complete_next_state"
+        canonical_gate["async_update"] = report
+        return DomesticBasisCandidateState(standard, next_state, candidate_gate, canonical_gate, report)
+    except (DomesticBasisPipelineError, ValueError, TypeError, KeyError) as exc:
+        if isinstance(exc, DomesticBasisPipelineError) and exc.update_report is not None:
+            raise
+        if not errors:
+            reason = str(exc) if isinstance(exc, DomesticBasisPipelineError) else f"ASSEMBLY_{type(exc).__name__}"
+            errors = {identity: (reason,) for identity in required}
+        elif window is None:
+            # A batch aborted before canonical assembly cannot certify the other
+            # series as NO_CHANGE just because their old Current is still present.
+            errors = {identity: errors.get(identity, ("CANDIDATE_NOT_EVALUATED_AFTER_BATCH_ERROR",)) for identity in required}
+        report = _update_report(catalog, current, next_state, window, extraction, as_of_date, errors)
+        raise DomesticBasisPipelineError(str(exc), update_report=report) from exc
+
+
 def run_domestic_basis_live(
     *, runtime: RuntimeContext, run_id: str, adapter: DomesticBasisSourceAdapter,
     mapping_path: str | Path, mode: str = "auto", failure_hook: Callable[[str], None] | None = None,
+    require_formal_current: bool = False, candidate_only: bool = False,
+) -> DomesticBasisRunResult:
+    """Persist a per-series report for success, NO_CHANGE, policy stops and errors."""
+    safe_run_id = validate_candidate_id(run_id)
+    root = assert_runtime_write(runtime, runtime.runtime_root / "public-market-data" / "lutou-domestic-basis")
+    try:
+        result = _run_domestic_basis_live(
+            runtime=runtime, run_id=safe_run_id, adapter=adapter, mapping_path=mapping_path,
+            mode=mode, failure_hook=failure_hook, require_formal_current=require_formal_current,
+            candidate_only=candidate_only,
+        )
+    except Exception as exc:
+        report = exc.update_report if isinstance(exc, DomesticBasisPipelineError) else None
+        if report is None:
+            # Do not invent source/next dates when acquisition never completed.
+            reason = f"REFRESH_FAILED_{type(exc).__name__}"
+            try:
+                catalog = load_domestic_basis_catalog(mapping_path)
+                try:
+                    before = load_domestic_basis_current(root)
+                    previous = None if before is None else _extract_live_canonical(before)
+                except Exception:
+                    previous = None
+                report = _update_report(
+                    catalog, previous, None, None, None, datetime.now(ZoneInfo("Asia/Shanghai")).date(),
+                    {item.series_id: (reason,) for item in catalog.series},
+                )
+                for item in report["series"]:
+                    item["reason"] = reason
+                    item["coverage_status"] = "ERROR"
+                report["summary"]["coverage"] = {"PRESENT": 0, "MISSING": 0, "ERROR": len(report["series"])}
+            except Exception:
+                report = {
+                    "schema_version": "async-data-update/2", "dataset_id": "domestic_basis",
+                    "required_identities_known": False, "series": [],
+                    "summary": {"TOTAL_REQUIRED": 0,
+                                "coverage": {"PRESENT": 0, "MISSING": 0, "ERROR": 0},
+                                "updates": {"UPDATED": 0, "NO_CHANGE": 0, "ERROR": 0},
+                                "freshness": {"FRESH": 0, "STALE": 0, "UNASSESSED": 0}},
+                }
+            report.update({
+                "dataset_status": "FAILED", "promotion_allowed": False, "blocking_reasons": [reason],
+                "identity_coverage": {"status": "NOT_EVALUATED", "expected_count": report["summary"]["TOTAL_REQUIRED"] or None,
+                                      "actual_required_count": None, "missing": None, "unexpected": None},
+            })
+        try:
+            _seal_update_report(runtime, root, safe_run_id, report)
+        except Exception as report_error:
+            exc.add_note(f"Async update report could not be sealed: {type(report_error).__name__}")
+        raise
+    _seal_update_report(runtime, root, safe_run_id, result.update_summary)
+    return result
+
+
+def _seal_update_report(runtime: RuntimeContext, root: Path, run_id: str, report: Mapping[str, object]) -> None:
+    def build(directory: Path) -> dict[str, object]:
+        manifest = {"run_id": run_id, **dict(report)}
+        _write_json(directory / "manifest.json", manifest)
+        return manifest
+    seal_immutable_candidate(assert_runtime_write(runtime, root / "async-update-reports"), run_id, build)
+
+
+def _run_domestic_basis_live(
+    *, runtime: RuntimeContext, run_id: str, adapter: DomesticBasisSourceAdapter,
+    mapping_path: str | Path, mode: str = "auto", failure_hook: Callable[[str], None] | None = None,
     require_formal_current: bool = False,
+    candidate_only: bool = False,
 ) -> DomesticBasisRunResult:
     safe_run_id = validate_candidate_id(run_id)
     catalog = load_domestic_basis_catalog(mapping_path)
@@ -929,24 +1212,24 @@ def run_domestic_basis_live(
     start = source_min if actual_mode == "full" else date.fromisoformat(str(before.manifest["source_max_date"])) - timedelta(days=LOOKBACK_DAYS)
     extraction = adapter.extract(catalog=catalog, start_date=start, end_date=source_max)
     _validate_live_extraction(extraction, start, source_max)
-    standard = build_standard_table(extraction, catalog)
-    candidate_gate = validate_candidate(
-        standard,
-        catalog,
-        require_complete_series=True,
-        require_complete_usable_series=actual_mode == "full",
+    state = assemble_domestic_basis_candidate(
+        current=before_live, extraction=extraction, catalog=catalog,
+        as_of_date=extraction.extracted_at.astimezone(ZoneInfo("Asia/Shanghai")).date(),
     )
-    candidate_dir, _ = _seal_candidate(runtime, public_root, safe_run_id, standard, extraction, catalog, candidate_gate)
+    standard, merged = state.standard, state.next_state
+    candidate_gate, canonical_gate = state.candidate_quality, state.canonical_quality
+    candidate_dir, _ = _seal_candidate(
+        runtime, public_root, safe_run_id, standard, extraction, catalog, candidate_gate,
+        next_state=merged, update_report=state.update_report,
+    )
     if failure_hook:
         failure_hook("candidate_sealed")
-    window, canonical_gate = build_canonical_table(
-        standard,
-        catalog,
-        require_complete_series=True,
-        require_complete_usable_series=actual_mode == "full",
-    )
-    merged = _merge_current(before_live, window, start)
-    _validate_canonical(merged, catalog)
+    if candidate_only:
+        return DomesticBasisRunResult(safe_run_id, actual_mode, start, source_max, candidate_dir, None, before, False, candidate_gate, canonical_gate)
+    if not state.update_report["promotion_allowed"]:
+        raise DomesticBasisPipelineError(
+            "Domestic Basis async update policy blocks promotion", update_report=state.update_report,
+        )
     if before_live is not None and _business_sha(before_live) == _business_sha(merged):
         return DomesticBasisRunResult(safe_run_id, actual_mode, start, source_max, candidate_dir, None, before, False, candidate_gate, canonical_gate)
     canonical_dir, manifest = _seal_canonical(runtime, public_root, safe_run_id, candidate_dir, merged, extraction, catalog, canonical_gate, source_max)
@@ -1003,6 +1286,15 @@ def promote_domestic_basis(*, runtime: RuntimeContext, canonical_directory: str 
         raise DomesticBasisPipelineError("Domestic Basis LIVE_CONFIRMED mapping is required")
     canonical_path = Path(canonical_directory)
     manifest = _read_json(canonical_path / "manifest.json")
+    update_report = manifest.get("quality", {}).get("async_update", {})
+    try:
+        validate_update_summary(update_report, required={item.series_id for item in catalog.series})
+    except ValueError as exc:
+        raise DomesticBasisPipelineError(str(exc)) from exc
+    if (update_report.get("schema_version") != "async-data-update/2"
+            or update_report.get("promotion_allowed") is not True
+            or update_report.get("policy") != asdict(catalog.freshness_policy)):
+        raise DomesticBasisPipelineError("Domestic Basis async update promotion evidence is invalid")
     data_path = canonical_path / "observations.parquet"
     if manifest.get("evidence_type") != "LIVE_DATABASE" or manifest.get("production_authorized") is not True or manifest.get("quality_status") != "PASS":
         raise DomesticBasisPipelineError("Domestic Basis Canonical is not promotion-authorized")
@@ -1178,8 +1470,14 @@ def _nullable_number_equal(left: object, right: object) -> bool:
 def _merge_current(current: pa.Table | None, window: pa.Table, start: date) -> pa.Table:
     if current is None:
         return window
-    history = [x for x in current.to_pylist() if x["business_date"] < start]
-    merged = pa.Table.from_pylist(history + window.to_pylist(), schema=CANONICAL_SCHEMA)
+    # The query window is not a deletion boundary. Preserve old observations and
+    # their timestamps; upsert only valid canonical keys actually returned.
+    rows = {(row["series_id"], row["business_date"]): row for row in current.to_pylist()}
+    for row in window.to_pylist():
+        key = row["series_id"], row["business_date"]
+        if key not in rows or not _same_business(rows[key], row):
+            rows[key] = row
+    merged = pa.Table.from_pylist(list(rows.values()), schema=CANONICAL_SCHEMA)
     return merged.sort_by([(x, "ascending") for x in CANONICAL_STABLE_KEY])
 
 
@@ -1190,20 +1488,38 @@ def _validate_canonical(table: pa.Table, catalog: DomesticBasisCatalog | None) -
         raise DomesticBasisPipelineError("Domestic Basis Canonical series coverage is incomplete")
     if set(table["currency"].to_pylist()) != {"CNY"} or set(table["unit"].to_pylist()) != {"CNY/metric_tonne"}:
         raise DomesticBasisPipelineError("Domestic Basis Canonical currency/unit is invalid")
+    if catalog is not None:
+        mappings = {item.series_id: item for item in catalog.series}
+        for row in table.to_pylist():
+            mapping = mappings[row["series_id"]]
+            if any(row[key] != value for key, value in {
+                "provider_series_id": mapping.provider_series_id, "source_series_id": mapping.source_series_id,
+                "provider_dataset_id": mapping.provider_dataset_id, "source_locator": mapping.source_locator,
+                "product": mapping.product, "consumer_product": mapping.consumer_product,
+                "region_id": mapping.region_id, "location": mapping.region, "quote_type": "DOMESTIC_SPOT_BASIS",
+            }.items()) or any(row[key] is None for key in CANONICAL_SCHEMA.names if not CANONICAL_SCHEMA.field(key).nullable):
+                raise DomesticBasisPipelineError("Domestic Basis Canonical mapping/schema identity is invalid")
 
 
-def _seal_candidate(runtime: RuntimeContext, public_root: Path, run_id: str, standard: pa.Table, extraction: DomesticBasisExtraction, catalog: DomesticBasisCatalog, gate: Mapping[str, object]) -> tuple[Path, dict[str, object]]:
+def _seal_candidate(runtime: RuntimeContext, public_root: Path, run_id: str, standard: pa.Table, extraction: DomesticBasisExtraction, catalog: DomesticBasisCatalog, gate: Mapping[str, object], *, next_state: pa.Table | None = None, update_report: Mapping[str, object] | None = None) -> tuple[Path, dict[str, object]]:
     result: dict[str, object] = {}
     def build(directory: Path) -> dict[str, object]:
         pq.write_table(standard, directory / "standard.parquet")
+        names = ["standard.parquet"]
+        if next_state is not None:
+            pq.write_table(next_state, directory / "next-state.parquet")
+            names.append("next-state.parquet")
+        if update_report is not None:
+            _write_json(directory / "async-update.json", update_report)
+            names.append("async-update.json")
         dates = standard["business_date"].to_pylist()
         manifest = {
             "schema_version": "lutou-domestic-basis-candidate/2", "run_id": run_id, "source": "lutou",
             "scope": "domestic-basis-consumer-needed", "evidence_type": extraction.evidence_type.value,
             "live_verification_status": "LIVE_CONFIRMED" if catalog.live_verified else "LIVE_CONFIRMATION_PENDING",
             "mapping_version": catalog.mapping_version, "query_identity": extraction.query_identity,
-            "snapshot_identity": extraction.snapshot_identity, "min_date": min(dates).isoformat(),
-            "max_date": max(dates).isoformat(), "row_count": standard.num_rows,
+            "snapshot_identity": extraction.snapshot_identity, "min_date": min(dates).isoformat() if dates else None,
+            "max_date": max(dates).isoformat() if dates else None, "row_count": standard.num_rows,
             "source_min_date": None if extraction.source_min_date is None else extraction.source_min_date.isoformat(),
             "source_max_date": None if extraction.source_max_date is None else extraction.source_max_date.isoformat(),
             "query_plan_estimated_rows": extraction.plan_estimated_rows,
@@ -1215,8 +1531,16 @@ def _seal_candidate(runtime: RuntimeContext, public_root: Path, run_id: str, sta
             "connection_proof": None if extraction.connection_proof is None else dict(extraction.connection_proof),
             "source_schema_proof": None if extraction.schema_proof is None else dict(extraction.schema_proof),
             "quality_status": "PASS", "quality": dict(gate),
-            "promotion_authorized": catalog.live_verified and extraction.evidence_type is DomesticBasisEvidenceType.LIVE_DATABASE,
-            "files": _file_identities(directory, ("standard.parquet",)),
+            "promotion_authorized": bool(update_report and update_report["promotion_allowed"]) and catalog.live_verified and extraction.evidence_type is DomesticBasisEvidenceType.LIVE_DATABASE,
+            "async_update": None if update_report is None else dict(update_report),
+            "inventory_query_identity": extraction.inventory_query_identity,
+            "inventory_plan_estimated_rows": extraction.inventory_plan_estimated_rows,
+            "source_inventory": [
+                {"source_product": item.source_product, "region": item.region,
+                 "source_latest_date": None if item.source_latest_date is None else item.source_latest_date.isoformat(),
+                 "window_row_count": item.window_row_count} for item in extraction.source_inventory
+            ],
+            "files": _file_identities(directory, names),
         }
         _write_json(directory / "manifest.json", manifest); result.update(manifest); return manifest
     directory, _ = seal_immutable_candidate(assert_runtime_write(runtime, public_root / "candidates"), run_id, build)

@@ -124,6 +124,13 @@ class FakeClient:
     def inspect_query(self, query):
         return ()
 
+    def series_inventory(self, query, groups, start, end):
+        assert groups == ("品种", "地区")
+        latest = date(2026, 8, 19)
+        return {"rows": ({"品种": "大豆油", "地区": "华东", "source_latest_date": latest,
+                          "window_row_count": int(start <= latest <= end)},),
+                "query_identity": "fixture-independent-inventory", "plan_estimated_rows": 2}
+
     def date_bounds(self, query):
         return date(2022, 6, 15), date(2026, 8, 19)
 
@@ -150,7 +157,8 @@ class FakeClient:
             "期货收盘价": Decimal("8100"),
         }
         outside = dict(base, 品种="玉米", 地区="华北", 文章ID="outside")
-        batch = LutouBatch(query, plan, (base, outside), datetime.now(timezone.utc))
+        rows = (base, outside) if start <= base["日期"] <= end else ()
+        batch = LutouBatch(query, plan, rows, datetime.now(timezone.utc))
         return plan, iter((batch,))
 
 
@@ -190,3 +198,23 @@ def test_live_adapter_uses_daily_physical_partitions_for_incremental_window() ->
         (date(2026, 8, 19), date(2026, 8, 19)),
     ]
     assert extraction.partition_count == 3
+
+
+def test_live_adapter_rejects_independent_count_mismatch():
+    class DroppedClient(FakeClient):
+        def plan_stream(self, query, start, end, *, batch_size):
+            plan, _ = super().plan_stream(query, start, end, batch_size=batch_size)
+            return plan, iter(())
+    with pytest.raises(ValueError, match="inventory count mismatch"):
+        LutouDomesticBasisLiveAdapter(DroppedClient()).extract(
+            catalog=load_domestic_basis_catalog(), start_date=date(2026, 8, 19), end_date=date(2026, 8, 19),
+        )
+
+
+def test_live_adapter_empty_window_keeps_source_latest_evidence():
+    result = LutouDomesticBasisLiveAdapter(FakeClient()).extract(
+        catalog=load_domestic_basis_catalog(), start_date=date(2026, 8, 20), end_date=date(2026, 8, 20),
+    )
+    assert result.records == ()
+    item = next(item for item in result.source_inventory if item.source_product == "大豆油" and item.region == "华东")
+    assert item.source_latest_date == date(2026, 8, 19) and item.window_row_count == 0

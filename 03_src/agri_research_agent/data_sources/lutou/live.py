@@ -585,6 +585,41 @@ class LutouClient:
                 f"Lutou query planning failed: {type(exc).__name__}"
             ) from None
 
+    def series_inventory(
+        self, query: LutouQuery, group_columns: tuple[str, ...], start: date, end: date,
+    ) -> dict[str, object]:
+        """Independent raw source latest/count evidence in this read-only transaction.
+
+        Opt-in API; no other producer is changed. Dates/identifiers are validated,
+        values parameterized, EXPLAIN bounded by the existing query budget.
+        Latest is across history through end; count is only inside [start, end].
+        """
+        _window(query, start, end)
+        if not group_columns or len(set(group_columns)) != len(group_columns) or not set(group_columns) <= set(query.value_columns):
+            raise ValueError("Lutou inventory group columns are outside approved query")
+        groups = ", ".join(_quote(item) for item in group_columns)
+        day = _quote(query.date_column)
+        sql = (
+            f"SELECT {groups}, MAX({day}) AS source_latest_date, "
+            f"SUM(CASE WHEN {day} >= %s THEN 1 ELSE 0 END) AS window_row_count "
+            f"FROM {_quote(query.schema)}.{_quote(query.table)} WHERE {day} <= %s GROUP BY {groups}"
+        )
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                self._execute(cursor, f"EXPLAIN FORMAT=JSON {sql}", (start, end))
+                estimates = _plan_row_estimates(json.loads(str(next(iter(cursor.fetchone().values())))))
+                if not estimates or not 0 <= max(estimates) <= query.max_plan_rows:
+                    raise LutouPlanRejectedError("Lutou inventory has no acceptable bounded plan estimate")
+                proof = LutouPlanProof(hashlib.sha256(sql.encode("utf-8")).hexdigest(), max(estimates), query.max_plan_rows)
+                self._execute(cursor, sql, (start, end))
+                rows = tuple(dict(row) for row in cursor.fetchall())
+            return {"rows": rows, "query_identity": proof.query_sha256, "plan_estimated_rows": proof.estimated_rows}
+        except LutouClientError:
+            raise
+        except Exception as exc:
+            raise LutouClientError(f"Lutou read-only series inventory failed: {type(exc).__name__}") from None
+
     def plan_stream(
         self,
         query: LutouQuery,

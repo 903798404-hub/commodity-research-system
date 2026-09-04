@@ -151,6 +151,41 @@ def test_settings_load_machine_local_env_style_secret(tmp_path: Path) -> None:
     assert "fixture-password" not in reprlib.repr(loaded)
 
 
+def test_series_inventory_uses_parameterized_bounded_read_only_query():
+    class InventoryCursor(FakeCursor):
+        def execute(self, statement, parameters=()):
+            super().execute(statement, parameters)
+            if statement.startswith("SELECT `group`"):
+                self._rows = [{"group": "a", "source_latest_date": date(2026, 7, 28), "window_row_count": 0}]
+
+    class InventoryConnection(FakeConnection):
+        def cursor(self, *_args, **_kwargs):
+            return InventoryCursor(self)
+
+    connection = InventoryConnection()
+    approved = query(value_columns=("group", "value"))
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        evidence = client.series_inventory(approved, ("group",), date(2026, 7, 31), date(2026, 9, 3))
+        assert evidence["rows"][0]["window_row_count"] == 0
+        assert evidence["rows"][0]["source_latest_date"] == date(2026, 7, 28)
+        assert evidence["plan_estimated_rows"] == 10
+    sql, params = next((sql, params) for sql, params in connection.statements if sql.startswith("SELECT `group`"))
+    assert "MAX(`Date`)" in sql and "CASE WHEN `Date` >= %s" in sql and "WHERE `Date` <= %s" in sql
+    assert params == (date(2026, 7, 31), date(2026, 9, 3))
+    assert any(sql.startswith("EXPLAIN FORMAT=JSON SELECT `group`") for sql, _ in connection.statements)
+
+
+def test_series_inventory_rejects_unapproved_group_or_excessive_plan():
+    from agri_research_agent.data_sources.lutou.live import LutouClientError
+    connection = FakeConnection(plan_rows=1_000_000)
+    with LutouClient(settings(), connector=lambda **_: connection) as client:
+        with pytest.raises(ValueError, match="outside approved"):
+            client.series_inventory(query(), ("unapproved",), date(2026, 8, 1), date(2026, 8, 2))
+        with pytest.raises(LutouClientError):
+            client.series_inventory(query(value_columns=("group",)), ("group",), date(2026, 8, 1), date(2026, 8, 2))
+    assert not any(sql.startswith("SELECT `group`") for sql, _ in connection.statements)
+
+
 @pytest.mark.parametrize(
     "content",
     [
