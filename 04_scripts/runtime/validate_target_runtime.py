@@ -540,14 +540,15 @@ def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: s
 
 
 def _exec(container_id: str, argv: Sequence[str], *, cwd: str | None = None,
-          expect_success: bool = True) -> None:
+          expect_success: bool = True, label: str = "unnamed") -> None:
     args = ["exec"]
     if cwd:
         args.extend(("--workdir", cwd))
     args.extend((container_id, *argv))
     result = _docker(*args, check=False, timeout=300)
     if (result.returncode == 0) != expect_success:
-        raise ValidationError("container probe returned an unexpected result")
+        detail = result.stderr.decode("utf-8", "replace")[-800:].strip()
+        raise ValidationError(f"container probe {label} returned an unexpected result: {detail}")
 
 
 def _identity_probe_argv(contract: Mapping[str, Any], marker_hash: str, *,
@@ -702,25 +703,30 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             started = inspect_one("container", container_id)
             if started.get("State", {}).get("Running") is not True:
                 raise ValidationError("declared entrypoint did not remain running")
-            _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw)))
+            _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw)), label="runtime_identity")
             probes["runtime_identity"] = "PASS"
-            _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw), missing=True), expect_success=False)
+            _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw), missing=True),
+                  expect_success=False, label="missing_grant_rejected")
             probes["missing_grant_rejected"] = "PASS"
             for executable in contract["required_executables"]:
                 _exec(container_id, ["python", "-B", "-c",
-                      "import shutil,sys;sys.exit(shutil.which(sys.argv[1]) is None)", executable])
+                      "import shutil,sys;sys.exit(shutil.which(sys.argv[1]) is None)", executable],
+                      label="executable:" + executable)
             for module in contract["required_python_modules"]:
-                _exec(container_id, ["python", "-B", "-c", "import importlib.util,sys;sys.exit(importlib.util.find_spec(sys.argv[1]) is None)", module])
+                _exec(container_id, ["python", "-B", "-c", "import importlib.util,sys;sys.exit(importlib.util.find_spec(sys.argv[1]) is None)", module],
+                      label="python-module:" + module)
             probes["dependencies"] = "PASS"
             for command in contract["initialization_commands"]:
-                _exec(container_id, command["argv"], cwd=contract["working_directory"])
+                _exec(container_id, command["argv"], cwd=contract["working_directory"],
+                      label="initialization:" + command["name"])
             probes["entrypoint_initialization"] = "PASS"
             # Permission checks use direct argv. The first readonly root must reject,
             # every declared writable child must accept and remove a sentinel.
             for item in contract["runtime_roots"]:
                 sentinel = item["container_path"] + "/.target-runtime-write-probe"
                 argv = ["python", "-B", "-c", "from pathlib import Path; p=Path(__import__('sys').argv[1]); p.write_text('x'); p.unlink()", sentinel]
-                _exec(container_id, argv, expect_success=item["access"] == "rw")
+                _exec(container_id, argv, expect_success=item["access"] == "rw",
+                      label="mount-permission:" + item["role"])
             probes["runtime_paths"] = "PASS"
             probes["mount_permissions"] = "PASS"
             # Preview/candidate execution has no production mount authority and
@@ -731,10 +737,10 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                    for item in actual_mounts):
                 raise ValidationError("candidate contains a non-candidate mount")
             _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw), role="production"),
-                  expect_success=False)
+                  expect_success=False, label="candidate-cannot-authorize-production")
             _exec(container_id, ["python", "-B", "-c",
                   "from pathlib import Path; p=Path('/app/.preview-write-probe'); p.write_text('x')"],
-                  expect_success=False)
+                  expect_success=False, label="preview-source-write-rejected")
             probes["preview_write_rejected"] = "PASS"
             if set(probes) != REQUIRED_PROBES or any(value != "PASS" for value in probes.values()):
                 raise ValidationError("required probe set was not actually completed")
