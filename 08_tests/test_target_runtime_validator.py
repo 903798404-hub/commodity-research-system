@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "04_scripts/runtime/validate_target_runtime.py"
+BASE_IMAGE = "python:3.12-slim@sha256:" + "a" * 64
 
 
 def load_engine():
@@ -148,7 +149,8 @@ def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tm
     engine = load_engine()
     contract = v2_contract()
     contract.update(build={"compose_sources": ["compose.yml"],
-                           "dockerfile": "Dockerfile"}, secret_references=[])
+                           "dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "dependency_contracts": ["requirements.txt"]}, secret_references=[])
     rendered = {"services": {"demo": {
         "image": "demo@sha256:" + "d" * 64, "entrypoint": contract["entrypoint"],
         "build": {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"},
@@ -172,7 +174,8 @@ def test_source_compose_must_match_manifest_mount_and_entrypoint(monkeypatch, tm
 def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_path, monkeypatch):
     engine = load_engine()
     contract = v2_contract()
-    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"},
+    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile",
+                           "dockerignore": ".dockerignore", "dependency_contracts": ["requirements.txt"]},
                     secret_references=["tankan-secret"])
     rendered = {"secrets": {"tankan-secret": {"file": "${TANKAN_SECRET_FILE:?required}"}},
                 "services": {"demo": {
@@ -228,7 +231,8 @@ def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_pat
 def test_source_compose_requires_readonly_host_grant_injection(monkeypatch, tmp_path):
     engine = load_engine()
     contract = v2_contract()
-    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"},
+    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile",
+                           "dockerignore": ".dockerignore", "dependency_contracts": ["requirements.txt"]},
                     secret_references=[])
     service = {
         "image": "demo@sha256:" + "d" * 64,
@@ -271,7 +275,8 @@ def test_source_compose_requires_readonly_host_grant_injection(monkeypatch, tmp_
 def test_source_compose_build_is_exact_candidate_root(monkeypatch, tmp_path, mutation):
     engine = load_engine()
     contract = v2_contract()
-    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"},
+    contract.update(build={"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile",
+                           "dockerignore": ".dockerignore", "dependency_contracts": ["requirements.txt"]},
                     secret_references=[])
     build = {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"}
     if mutation == "missing":
@@ -420,3 +425,215 @@ def test_engine_binding_matches_completion_gate_for_same_v2_candidate(tmp_path):
                       "tree": engine._git(repo, "rev-parse", "HEAD^{tree}"),
                       "source_sha256": expected_hashes,
                       "validator_version": gate.VALIDATOR_VERSION}
+
+
+def test_public_dockerfile_inputs_are_all_declared_and_bound(monkeypatch):
+    engine = load_engine()
+    parser = engine._load(ROOT / engine._MANIFEST_PARSER, "manifest_parser_for_dockerfile_test")
+    contract = parser.load_runtime_manifest(
+        ROOT / "02_configs/runtime_contracts/public-intraday-runtime.json").to_dict()
+    names = ["02_configs/runtime_contracts/public-intraday-runtime.json",
+             contract["build"]["dockerfile"], contract["build"]["dockerignore"],
+             *contract["build"]["dependency_contracts"],
+             *contract["build"]["compose_sources"],
+             *(item["path"] for item in contract["source_inputs"]),
+             engine._MANIFEST_PARSER, engine._MANIFEST_SCHEMA]
+    binding = {"source_sha256": {
+        name: engine._sha(engine._git(ROOT, "show", "HEAD:" + name, binary=True))
+        for name in names}}
+    engine.validate_dockerfile_inputs(ROOT, contract, binding)
+
+
+@pytest.mark.parametrize("dockerfile,files,expected", [
+    ("FROM python:3.12-slim\nCOPY app.py /app/app.py\n", {"app.py"}, True),
+    ("FROM python:3.12-slim\nCOPY [\"app.py\", \"/app/app.py\"]\n", {"app.py"}, True),
+    ("FROM python:3.12-slim\nCOPY app.py init.py /app/\n", {"app.py", "init.py"}, True),
+    ("FROM python:3.12-slim\nCOPY app.py \\\n     init.py /app/\n", {"app.py", "init.py"}, True),
+    ("FROM python:3.12-slim\nCOPY src /app/src\n", {"src"}, False),
+    ("FROM python:3.12-slim\nCOPY *.py /app/\n", {"*.py"}, False),
+    ("FROM python:3.12-slim\nCOPY $SOURCE /app/app.py\n", {"$SOURCE"}, False),
+    ("FROM python:3.12-slim\nCOPY ./app.py /app/app.py\n", {"./app.py"}, False),
+    ("FROM python:3.12-slim\nADD app.py /app/app.py\n", {"app.py"}, False),
+    ("FROM python:3.12-slim\nONBUILD COPY app.py /app/app.py\n", {"app.py"}, False),
+    ("# syntax=docker/dockerfile:1\nFROM python:3.12-slim\nCOPY app.py /app/app.py\n", {"app.py"}, False),
+    ("# escape=\\\\\nFROM python:3.12-slim\nCOPY app.py /app/app.py\n", {"app.py"}, False),
+    ("FROM python:3.12-slim\nRUN --mount=type=bind,target=/src true\nCOPY app.py /app/app.py\n", {"app.py"}, False),
+    ("FROM builder\nCOPY --from=builder /out/app.py /app/app.py\n", {"app.py"}, False),
+    ("FROM python:3.12-slim AS base\nFROM base\nCOPY app.py /app/app.py\n", {"app.py"}, False),
+])
+def test_validate_dockerfile_inputs_rejects_unbound_or_ambiguous_sources(
+        tmp_path, dockerfile, files, expected):
+    engine = load_engine()
+    dockerfile = dockerfile.replace("FROM python:3.12-slim", "FROM " + BASE_IMAGE)
+    dockerfile_path = tmp_path / "Dockerfile"
+    dockerfile_path.write_text(dockerfile, encoding="utf-8")
+    for name in files:
+        if name == "src":
+            (tmp_path / name).mkdir()
+        elif name in {"app.py", "init.py"}:
+            (tmp_path / name).write_text("fixture\n", encoding="utf-8")
+    contract = {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "compose_sources": ["compose.yml"],
+                           "dependency_contracts": ["requirements.txt"]}}
+    binding = {"source_sha256": {
+        name: __import__("hashlib").sha256((tmp_path / name).read_bytes()).hexdigest()
+        for name in files if (tmp_path / name).is_file()}}
+    if expected:
+        engine.validate_dockerfile_inputs(tmp_path, contract, binding)
+    else:
+        with pytest.raises(engine.ValidationError):
+            engine.validate_dockerfile_inputs(tmp_path, contract, binding)
+
+
+def test_base_image_onbuild_metadata_is_rejected(monkeypatch):
+    engine = load_engine()
+    monkeypatch.setattr(engine, "_docker", lambda *args, **kwargs: type(
+        "Result", (), {"stdout": b"", "stderr": b"", "returncode": 0})())
+    monkeypatch.setattr(engine, "inspect_one", lambda kind, identity: {
+        "Config": {"OnBuild": ["COPY hidden /app/hidden"]}})
+    with pytest.raises(engine.ValidationError, match="ONBUILD"):
+        engine.require_base_image(BASE_IMAGE)
+
+
+@pytest.mark.parametrize("onbuild", [None, []])
+def test_base_image_explicitly_allows_empty_onbuild_metadata(monkeypatch, onbuild):
+    engine = load_engine()
+    monkeypatch.setattr(engine, "_docker", lambda *args, **kwargs: type(
+        "Result", (), {"stdout": b"", "stderr": b"", "returncode": 0})())
+    monkeypatch.setattr(engine, "inspect_one", lambda kind, identity: {
+        "Config": {"OnBuild": onbuild}})
+    engine.require_base_image(BASE_IMAGE)
+
+
+@pytest.mark.parametrize("config", [{}, None])
+def test_base_image_metadata_must_be_observed(monkeypatch, config):
+    engine = load_engine()
+    monkeypatch.setattr(engine, "_docker", lambda *args, **kwargs: type(
+        "Result", (), {"stdout": b"", "stderr": b"", "returncode": 0})())
+    monkeypatch.setattr(engine, "inspect_one", lambda kind, identity: {"Config": config})
+    with pytest.raises(engine.ValidationError, match="ONBUILD"):
+        engine.require_base_image(BASE_IMAGE)
+
+
+def test_source_contract_connects_dockerfile_closure_to_main_validation(monkeypatch):
+    engine = load_engine()
+    for key in tuple(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(engine, "_candidate_binding", lambda *args: {"source_sha256": {}})
+    with pytest.raises(engine.ValidationError, match="COPY source"):
+        engine.source_contract(ROOT, "public-intraday-runtime",
+                               "02_configs/runtime_contracts/public-intraday-runtime.json")
+
+
+def test_dockerfile_copy_requires_existing_bound_regular_file(tmp_path):
+    engine = load_engine()
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {BASE_IMAGE}\nCOPY app.py /app/app.py\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("fixture\n", encoding="utf-8")
+    with pytest.raises(engine.ValidationError, match="COPY source"):
+        engine.validate_dockerfile_inputs(
+            tmp_path, {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                                  "compose_sources": ["compose.yml"],
+                                  "dependency_contracts": ["requirements.txt"]}},
+            {"source_sha256": {}})
+
+
+def test_dockerfile_copy_rejects_bound_directory(tmp_path):
+    engine = load_engine()
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {BASE_IMAGE}\nCOPY src /app/src\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    with pytest.raises(engine.ValidationError, match="missing|regular file|COPY source"):
+        engine.validate_dockerfile_inputs(
+            tmp_path, {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                                  "compose_sources": ["compose.yml"],
+                                  "dependency_contracts": ["requirements.txt"]}},
+            {"source_sha256": {"src": "a" * 64}})
+
+
+@pytest.mark.parametrize("dockerfile", [
+    f"FROM python:3.12-slim\nCOPY app.py /app/app.py\n",
+    f"FROM {BASE_IMAGE}\nRUN --network=host true\nCOPY app.py /app/app.py\n",
+    f"FROM {BASE_IMAGE}\nCOPY --chown=1000:1000 app.py /app/app.py\n",
+])
+def test_dockerfile_rejects_unpinned_or_flagged_input_semantics(tmp_path, dockerfile):
+    engine = load_engine()
+    (tmp_path / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    (tmp_path / "app.py").write_text("fixture\n", encoding="utf-8")
+    with pytest.raises(engine.ValidationError):
+        engine.validate_dockerfile_inputs(
+            tmp_path, {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                                  "compose_sources": ["compose.yml"],
+                                  "dependency_contracts": ["requirements.txt"]}},
+            {"source_sha256": {"app.py": "a" * 64}})
+
+
+@pytest.mark.parametrize("forbidden", [
+    "Dockerfile", ".dockerignore", "compose.yml",
+    "04_scripts/runtime/validate_target_runtime.py",
+])
+def test_dockerfile_cannot_copy_build_or_validation_inputs(tmp_path, forbidden):
+    engine = load_engine()
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {BASE_IMAGE}\nCOPY {forbidden} /app/input\n", encoding="utf-8")
+    source = tmp_path / forbidden
+    source.parent.mkdir(parents=True, exist_ok=True)
+    if source != tmp_path / "Dockerfile":
+        source.write_text("fixture\n", encoding="utf-8")
+    binding = {"source_sha256": {
+        forbidden: __import__("hashlib").sha256(source.read_bytes()).hexdigest()}}
+    contract = {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "compose_sources": ["compose.yml"],
+                           "dependency_contracts": ["requirements.txt"]}}
+    with pytest.raises(engine.ValidationError, match="COPY source|runtime COPY"):
+        engine.validate_dockerfile_inputs(tmp_path, contract, binding)
+
+
+def test_dockerfile_must_copy_every_required_runtime_input(tmp_path):
+    engine = load_engine()
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {BASE_IMAGE}\nCOPY app.py /app/app.py\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("fixture\n", encoding="utf-8")
+    (tmp_path / "init.py").write_text("fixture\n", encoding="utf-8")
+    contract = {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "compose_sources": ["compose.yml"],
+                           "dependency_contracts": ["requirements.txt"]}}
+    binding = {"source_sha256": {
+        name: __import__("hashlib").sha256((tmp_path / name).read_bytes()).hexdigest()
+        for name in ("app.py", "init.py")}}
+    with pytest.raises(engine.ValidationError, match="required runtime COPY"):
+        engine.validate_dockerfile_inputs(tmp_path, contract, binding)
+
+
+def test_dependency_contract_must_also_be_copied_for_closed_inputs(tmp_path):
+    engine = load_engine()
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {BASE_IMAGE}\nCOPY app.py /app/app.py\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("fixture\n", encoding="utf-8")
+    contract = {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "compose_sources": ["compose.yml"],
+                           "dependency_contracts": ["requirements.txt"]}}
+    binding = {"source_sha256": {
+        "app.py": __import__("hashlib").sha256((tmp_path / "app.py").read_bytes()).hexdigest(),
+        "requirements.txt": "a" * 64}}
+    with pytest.raises(engine.ValidationError, match="required runtime COPY"):
+        engine.validate_dockerfile_inputs(tmp_path, contract, binding)
+
+
+@pytest.mark.parametrize("module_name,body,returncode", [
+    ("healthy_module", "VALUE = 1\n", 0),
+    ("import_failure", "raise ImportError('fixture failure')\n", 1),
+    ("os_failure", "raise OSError('fixture failure')\n", 1),
+])
+def test_python_module_probe_imports_and_reports_runtime_failures(
+        tmp_path, module_name, body, returncode):
+    engine = load_engine()
+    (tmp_path / (module_name + ".py")).write_text(body, encoding="utf-8")
+    argv = list(engine._python_module_probe_argv(module_name))
+    argv[0] = sys.executable
+    environment = {**os.environ, "PYTHONPATH": str(tmp_path), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run(argv, cwd=tmp_path, env=environment,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            check=False)
+    assert (result.returncode == 0) is (returncode == 0), result.stderr.decode()

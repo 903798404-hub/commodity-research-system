@@ -197,6 +197,109 @@ def _candidate_binding(root: Path, project: Mapping[str, Any],
             "validator_version": _VALIDATOR_VERSION}
 
 
+def validate_dockerfile_inputs(root: Path, contract: Mapping[str, Any],
+                               binding: Mapping[str, Any]) -> str:
+    """Accept only explicit file COPY inputs in the supported build grammar.
+
+    This checks context membership, not arbitrary RUN program behavior. Network
+    dependencies still belong to the declared dependency contracts. Reject build
+    features whose input provenance this validator cannot establish.
+    """
+    text = _exact_source(root, contract["build"]["dockerfile"]).read_text(encoding="utf-8")
+    build = contract["build"]
+    metadata = {build["dockerfile"], build["dockerignore"],
+                *build["compose_sources"], _ENGINE_PATH}
+    allowed = set(binding["source_sha256"]) - metadata
+    required = allowed
+    copied = set()
+    instructions = []
+    pending = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            if re.match(r"#\s*(syntax|escape)\s*=", stripped, re.IGNORECASE):
+                raise ValidationError("Dockerfile parser directives are unsupported")
+            continue
+        if not stripped:
+            continue
+        if stripped.endswith("\\"):
+            pending += stripped[:-1] + " "
+            continue
+        instructions.append(pending + stripped)
+        pending = ""
+    if pending:
+        raise ValidationError("Dockerfile has an unfinished continuation")
+    stages = 0
+    base_image = ""
+    known = {"FROM", "ARG", "LABEL", "ENV", "WORKDIR", "RUN", "COPY", "USER",
+             "ENTRYPOINT", "CMD", "EXPOSE", "HEALTHCHECK", "STOPSIGNAL"}
+    for instruction in instructions:
+        fields = instruction.split(None, 1)
+        op = fields[0].upper()
+        if op not in known or len(fields) != 2:
+            raise ValidationError("unsupported Dockerfile instruction or input semantics: " + op)
+        value = fields[1].strip()
+        if op == "FROM":
+            stages += 1
+            if stages != 1 or not re.fullmatch(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}", value):
+                raise ValidationError("Dockerfile requires a single digest-pinned base image without flags")
+            base_image = value
+        elif op == "RUN":
+            if value.startswith("--") or "<<" in value:
+                raise ValidationError("Dockerfile RUN mounts, flags and heredocs are unsupported")
+        elif op == "COPY":
+            if stages != 1 or value.startswith("--"):
+                raise ValidationError("Dockerfile COPY flags or stage sources are unsupported")
+            if value.startswith("["):
+                try:
+                    operands = json.loads(value)
+                except ValueError as exc:
+                    raise ValidationError("invalid Dockerfile COPY JSON") from exc
+                if (not isinstance(operands, list) or len(operands) < 2
+                        or any(not isinstance(item, str) or not item for item in operands)):
+                    raise ValidationError("Dockerfile COPY requires source and destination strings")
+            else:
+                # Do not pretend shlex matches Docker's variable/escape grammar.
+                if any(char in value for char in "\"'\\"):
+                    raise ValidationError("Dockerfile COPY quoting requires JSON form")
+                operands = value.split()
+                if len(operands) < 2:
+                    raise ValidationError("Dockerfile COPY requires source and destination")
+            for source in operands[:-1]:
+                if (any(char in source for char in "$*?[]<>")
+                        or any(ord(char) < 32 or ord(char) == 127 for char in source)
+                        or source not in allowed):
+                    raise ValidationError("Dockerfile COPY source is not an exact bound input: " + source)
+                _exact_source(root, source)
+                copied.add(source)
+            destination = operands[-1]
+            pure_destination = PurePosixPath(destination)
+            if (not pure_destination.is_absolute() or ".." in pure_destination.parts
+                    or any(char in destination for char in "$\\")
+                    or any(ord(char) < 32 or ord(char) == 127 for char in destination)):
+                raise ValidationError("Dockerfile COPY destination must be an absolute literal path")
+    if stages != 1:
+        raise ValidationError("Dockerfile requires one source stage")
+    if missing := required - copied:
+        raise ValidationError("Dockerfile omits required runtime COPY inputs: " + ", ".join(sorted(missing)))
+    return base_image
+
+
+def require_base_image(base_image: str) -> None:
+    # ONBUILD COPY/ADD in the base executes even if this Dockerfile has no such
+    # instruction. Inspect the exact digest before allowing the candidate build.
+    _docker("pull", base_image, timeout=600)
+    base = inspect_one("image", base_image)
+    config = base.get("Config")
+    if not isinstance(config, dict) or "OnBuild" not in config or config["OnBuild"] not in (None, []):
+        raise ValidationError("base image ONBUILD contract is missing or contains inherited instructions")
+
+
+def _python_module_probe_argv(module: str) -> list[str]:
+    return ["python", "-B", "-c",
+            "import importlib,sys;importlib.import_module(sys.argv[1])", module]
+
+
 def source_contract(root: Path, project_id: str, runtime_contract: str):
     if any(key.startswith("GIT_") for key in os.environ):
         raise ValidationError("caller Git environment is forbidden")
@@ -212,6 +315,7 @@ def source_contract(root: Path, project_id: str, runtime_contract: str):
             or contract.get("project_id") != project_id):
         raise ValidationError("actual container validation requires runtime-manifest/2")
     binding = _candidate_binding(root, project, contract)
+    validate_dockerfile_inputs(root, contract, binding)
     if set(contract["validation_probes"]) != REQUIRED_PROBES:
         raise ValidationError("runtime manifest probe set differs from engine")
     return project, contract, binding
@@ -367,6 +471,7 @@ def _labels(image: Mapping[str, Any], binding: Mapping[str, Any], service: str) 
 
 def build_image(root: Path, context: Path, contract: Mapping[str, Any],
                 binding: Mapping[str, Any]) -> str:
+    require_base_image(validate_dockerfile_inputs(context, contract, binding))
     tag = f"market-data-runtime-validation:{binding['commit'][:12]}-{os.getpid()}"
     build_time = datetime.now(timezone.utc).isoformat()
     release_id = (f"{contract['service_id']}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-"
@@ -871,7 +976,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                       "import shutil,sys;sys.exit(shutil.which(sys.argv[1]) is None)", executable],
                       label="executable:" + executable)
             for module in contract["required_python_modules"]:
-                _exec(container_id, ["python", "-B", "-c", "import importlib.util,sys;sys.exit(importlib.util.find_spec(sys.argv[1]) is None)", module],
+                _exec(container_id, _python_module_probe_argv(module),
                       label="python-module:" + module)
             probes["dependencies"] = "PASS"
             for command in contract["initialization_commands"]:
