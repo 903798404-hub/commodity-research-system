@@ -17,6 +17,36 @@ ENGINE = ROOT / "04_scripts/runtime/validate_target_runtime.py"
 BASE_IMAGE = "python:3.12-slim@sha256:" + "a" * 64
 
 
+def test_spread_source_contract_preserves_full_entrypoint_and_readonly_page_policy():
+    engine = load_engine()
+    parser = engine._load(ROOT / engine._MANIFEST_PARSER, "spread_source_manifest_test")
+    path = ROOT / "02_configs/runtime_contracts/spread-production-runtime.json"
+    contract = parser.load_runtime_manifest(path).to_dict()
+    assert contract["project_id"] == "spread-production-runtime-wiring"
+    assert contract["runtime_target"] == "production_container"
+    assert contract["entrypoint"] == ["streamlit", "run", "05_apps/streamlit_app.py",
+                                      "--server.address=0.0.0.0", "--server.port=8501"]
+    assert contract["service_id"] == "spread-dashboard"
+    assert contract["identity_kind"] == "oci_container"
+    environment = engine._candidate_environment(contract)
+    assert environment["IMPORT_PROFIT_INTRADAY_PAGE_MODE"] == "STRICT_RUNTIME"
+    assert environment["IMPORT_PROFIT_INTRADAY_ENVIRONMENT"] == "FORMAL"
+    assert {"IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE", "IMPORT_PROFIT_INTRADAY_BUSINESS_DATE",
+            "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
+            "IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT", "IMPORT_PROFIT_INTRADAY_WRITE_MODE"
+            } <= set(contract["forbidden_environment"])
+    inputs = {item["path"] for item in contract["source_inputs"]}
+    assert {"05_apps/streamlit_app.py", "05_apps/import_profit_intraday_runtime_page.py",
+            "05_apps/weather_research_page.py", "05_apps/basis_page.py",
+            "02_configs/historical_spread_config.xlsx", ".streamlit/config.toml"} <= inputs
+    build = contract["build"]
+    tracked = set(subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode("utf-8").split("\0"))
+    for name in inputs | {build["dockerfile"], build["dockerignore"],
+                          *build["dependency_contracts"], *build["compose_sources"]}:
+        assert (ROOT / name).is_file() and not (ROOT / name).is_symlink()
+        assert name in tracked
+
+
 def load_engine():
     spec = importlib.util.spec_from_file_location("target_runtime_validator_under_test", ENGINE)
     assert spec and spec.loader

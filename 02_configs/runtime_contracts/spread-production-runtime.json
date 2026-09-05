@@ -1,0 +1,1557 @@
+{
+  "schema_version": "runtime-manifest/3",
+  "project_id": "spread-production-runtime-wiring",
+  "module_id": "shared-intraday",
+  "service_id": "spread-dashboard",
+  "runtime_target": "production_container",
+  "identity_kind": "oci_container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "dockerignore": ".dockerignore",
+    "dependency_contracts": [
+      "requirements.txt"
+    ],
+    "compose_sources": [
+      "docker-compose.yml"
+    ]
+  },
+  "entrypoint": [
+    "streamlit",
+    "run",
+    "05_apps/streamlit_app.py",
+    "--server.address=0.0.0.0",
+    "--server.port=8501"
+  ],
+  "working_directory": "/app",
+  "runtime_roots": [
+    {
+      "role": "identity",
+      "container_path": "/runtime",
+      "access": "ro"
+    },
+    {
+      "role": "data",
+      "container_path": "/runtime/01_data",
+      "access": "ro"
+    },
+    {
+      "role": "weather",
+      "container_path": "/runtime/weather",
+      "access": "ro"
+    },
+    {
+      "role": "history",
+      "container_path": "/runtime/import-profit/history",
+      "access": "ro"
+    },
+    {
+      "role": "snapshots",
+      "container_path": "/runtime/import-profit/snapshots",
+      "access": "ro"
+    },
+    {
+      "role": "results",
+      "container_path": "/runtime/import-profit/results",
+      "access": "ro"
+    },
+    {
+      "role": "cnf",
+      "container_path": "/runtime/import-profit/cnf",
+      "access": "ro"
+    },
+    {
+      "role": "outputs",
+      "container_path": "/runtime/06_outputs",
+      "access": "rw"
+    },
+    {
+      "role": "logs",
+      "container_path": "/runtime/10_logs",
+      "access": "rw"
+    }
+  ],
+  "required_mounts": [
+    {
+      "role": "identity",
+      "container_path": "/runtime",
+      "read_only": true
+    },
+    {
+      "role": "data",
+      "container_path": "/runtime/01_data",
+      "read_only": true
+    },
+    {
+      "role": "weather",
+      "container_path": "/runtime/weather",
+      "read_only": true
+    },
+    {
+      "role": "history",
+      "container_path": "/runtime/import-profit/history",
+      "read_only": true
+    },
+    {
+      "role": "snapshots",
+      "container_path": "/runtime/import-profit/snapshots",
+      "read_only": true
+    },
+    {
+      "role": "results",
+      "container_path": "/runtime/import-profit/results",
+      "read_only": true
+    },
+    {
+      "role": "cnf",
+      "container_path": "/runtime/import-profit/cnf",
+      "read_only": true
+    },
+    {
+      "role": "outputs",
+      "container_path": "/runtime/06_outputs",
+      "read_only": false
+    },
+    {
+      "role": "logs",
+      "container_path": "/runtime/10_logs",
+      "read_only": false
+    }
+  ],
+  "required_environment": [
+    "MARKET_DATA_EXECUTION_GRANT",
+    "PUBLIC_MARKET_DATA_RUNTIME_ROOT",
+    "PUBLIC_DATA_SERVER_STORE_ROOT",
+    "IMPORT_PROFIT_RUNTIME_ROOT",
+    "IMPORT_PROFIT_INTRADAY_RESULT_ROOT",
+    "IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT",
+    "IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH",
+    "HOME",
+    "MPLCONFIGDIR",
+    "IMPORT_PROFIT_INTRADAY_PAGE_MODE",
+    "IMPORT_PROFIT_INTRADAY_ENVIRONMENT",
+    "IMPORT_PROFIT_CONFIG_PATH",
+    "USDA_DASHBOARD_URL",
+    "OIL_WORLD_DASHBOARD_URL"
+  ],
+  "secret_references": [],
+  "required_executables": [
+    "python",
+    "streamlit"
+  ],
+  "required_python_modules": [
+    "agri_research_agent",
+    "cryptography",
+    "streamlit",
+    "pandas",
+    "plotly",
+    "matplotlib",
+    "yaml",
+    "akshare",
+    "openpyxl",
+    "pyarrow",
+    "psycopg"
+  ],
+  "production_policy": {
+    "deployment_role": "production",
+    "write_grant_required": true
+  },
+  "preview_policy": {
+    "production_write": false,
+    "production_rw_mounts": false
+  },
+  "validation_probes": [
+    "entrypoint_initialization",
+    "runtime_identity",
+    "dependencies",
+    "runtime_paths",
+    "mount_permissions",
+    "missing_grant_rejected",
+    "wrong_commit_rejected",
+    "wrong_tree_rejected",
+    "wrong_image_rejected",
+    "wrong_service_rejected",
+    "wrong_manifest_rejected",
+    "preview_write_rejected",
+    "release_mismatch_rejected"
+  ],
+  "identity_root_role": "identity",
+  "initialization_commands": [
+    {
+      "name": "domestic-spread-readonly-initialization",
+      "argv": [
+        "python",
+        "-B",
+        "-c",
+        "from agri_research_agent.market_data.activated_runtime import resolve_domestic_spread_path; from agri_research_agent.application.domestic_spreads import load_domestic_spread_database; p=resolve_domestic_spread_path('/runtime/01_data'); data=load_domestic_spread_database(p); assert not data.empty, 'Domestic Spread runtime is empty'"
+      ]
+    }
+  ],
+  "source_inputs": [
+    {
+      "path": ".streamlit/config.toml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/agent_schedule.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/app_catalog.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/basis_excel.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/basis_sql.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/basis_varieties.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/commodities.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/cotton_weather_ind.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/data_sources.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/foreign_seats.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/historical_spread_config.xlsx",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/import_profit_soybean.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/international_palm_core_six.sealed.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/international_three_oil_v1.sealed.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/lutou_domestic_basis.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/lutou_weather_current.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/module_test_map.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/palm_oil_weather_idn.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/palm_oil_weather_mys.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/production_runtime_trust.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/project_registry.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/public_research_data_catalog.approval.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/public_research_data_catalog.candidate.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/rapeseed_weather_aus.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/rapeseed_weather_can.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/rapeseed_weather_eu.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/rapeseed_weather_rus.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/rapeseed_weather_ukr.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/report_catalog.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/report_templates.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/runtime_contracts/public-intraday-runtime.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/soybean_crop_progress_display.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/soybean_weather_ar.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/soybean_weather_br.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/soybean_weather_us.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/sugarcane_weather_ind.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/summary_rules_v1.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/tankan_fx.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/tankan_goal_a_market_price.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/tankan_market_price.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/thresholds.yaml",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/说明.md",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/agents/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/agents/alert_agent.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/agents/daily_research_agent.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/agents/event_agent.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/basis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/core.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/email_sender.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/feishu_sender.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/gate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/preview.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/senders.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/views.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/alerts/weather.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/application/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/application/domestic_spreads.py",
+      "role": "initialization"
+    },
+    {
+      "path": "03_src/agri_research_agent/application/international_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/automation/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/automation/full_daily_windows.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/automation/说明.md",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/core/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/core/config_loader.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/core/logger.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/core/paths.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/core/schemas.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/akshare_client.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/basis_database.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/basis_entry.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/basis_excel_loader.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/basis_sql_loader.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/basis_upload.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/customs_loader.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/foreign_seats.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/acl.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/domestic_basis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/live.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/soil_moisture_live.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/three_oil_live.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/three_oil_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/lutou/weather_live.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/mpob_client.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/navicat_sql_stream.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/client.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/domestic_spread.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/fx_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/intraday_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/market_price_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/models.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/tankan/queries.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/usda_client.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/data_sources/weather_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/domains/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/domains/spreads/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/domains/spreads/calculation.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/domains/spreads/history.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/domains/spreads/models.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/domains/spreads/parsing.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/business_days.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/cnf_repricing.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/cnf_store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/config.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/contract_mapping.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/contract_override.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/daily_increment.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/dce_daily.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/fx.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/historical_cnf_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/historical_dce_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/historical_margin.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/historical_recalculation.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/intraday_history.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/intraday_store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/mapping_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/market_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/models.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/morning_external_inputs.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/override_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/parameter_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/public_market_input_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/query.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/recalculation.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/result_store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/reuters_adapter.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/runtime_store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/scenario.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/seasonality.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/soybean.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/standard_io.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/activated_runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/basis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/calendars.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/contracts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/loader.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/providers/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/providers/akshare.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/public_basis_current.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/public_current.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/public_weather_current.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/quotes.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/soybean_readiness.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/soybean_shadow.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/import_profit_daily.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/import_profit_results.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/import_profit_runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/lutou_goal_b.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/lutou_goal_b_soil.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/lutou_weather.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_daily.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_freshness.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_prewarm.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_providers.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/run_alert_check.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/run_daily_report.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/soybean_crop_comparison.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/soybean_crop_progress.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/soybean_crop_weekly_update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/soybean_intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/tankan_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/tankan_goal_a.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/update_basis_data.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/update_basis_from_sql.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/update_market_data.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/reports/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/reports/chart_report.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/reports/excel_report.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/reports/markdown_report.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/canonical_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/catalog.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/identities.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/research_data/three_oil_v1.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/arrow_window_upsert.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/async_update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/atomic_storage.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/file_identity.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/immutable_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/production_grant.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/production_identity.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/runtime_context.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/skills/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/skills/basis_spread_skill.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/skills/indonesia_b50_skill.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/skills/mpob_skill.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/skills/position_change_skill.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/skills/usda_skill.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/common.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/fas.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/fgis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/research.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/basis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/crop.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/io.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/rules.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/schema.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/weather.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/summary_engine/weather_cache.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/utils/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/utils/dataframe_utils.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/utils/date_utils.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/utils/excel_utils.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/utils/matplotlib_config.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/weather/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/weather/crop_weather.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/weather/soybean_weather.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/说明.md",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/activate_public_data_package.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/automation/full_daily_windows_bootstrap.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/automation/run_full_daily_windows.ps1",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/automation/run_full_daily_windows.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/automation/说明.md",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/build_dashboard_workbook.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/build_public_research_candidate_catalog.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/build_seasonal_spread_history.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/build_spread_config.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/calc_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/calculate_historical_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/capture_public_intraday.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/check_env.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/environment/merge_production_platform_lock.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/environment/verify_development_environment.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_basis_excel.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_crop_weather_30y_normal.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_crop_weather_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_historical_prices.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/bootstrap_import_profit_runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/build_dce_daily_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/build_final_ui_preview_cnf_cache.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/build_historical_inputs_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/build_historical_soybean_results_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/build_reuters_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/build_soybean_results_candidate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/capture_import_profit_night_session_close.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/materialize_import_profit_daily_release.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/materialize_intraday_profit.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/probe_dce_daily_source.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/refresh_import_profit_external_inputs.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/update_import_profit_cnf.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_soybean_weather_30y_normal.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_soybean_weather_snapshot.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/init_project_structure.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/initialize_lutou_secret.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/notifications/preview.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/plot_seasonal_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/probe_akshare_futures.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/quality/audit_changed_scope.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/quality/complete_project.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/quality/project_registry.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/quality/run_scoped_tests.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/quality/start_project.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/quality/target_runtime_gate.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/refresh_public_data.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/report_foreign_seats_coverage.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/run_basis_agent.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/run_basis_import.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/run_daily_agent.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/run_historical_spread_pipeline.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/run_local_dashboard.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/run_streamlit.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/runtime/pre_release_runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/runtime/public_intraday_runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/server_update_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_crop_progress/fetch_soybeans_crop_weekly.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_crop_progress/fetch_soybeans_planted.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_crop_progress/update_soybeans_crop_weekly.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_exports/run_fas_export_sales.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_exports/run_fgis_export_inspections.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/transfer_public_data_package.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/update_basis_data.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/update_foreign_seats.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/update_price_long_from_akshare.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/update_price_long_from_tankan.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/weather/refresh_weather_from_sql.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/说明.md",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/basis_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/crop_weather_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/deprecated_pages/01_行情总览.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/deprecated_pages/02_基差月差.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/deprecated_pages/03_报告解读.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/deprecated_pages/05_Agent日志.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/foreign_seats_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/home.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/import_profit_components.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/import_profit_intraday_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/import_profit_intraday_runtime_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/import_profit_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/import_profit_runtime_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/international_spread_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/navigation.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/research_overview_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/soybean_crop_progress_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/soybean_exports_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/soybean_weather_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/soybean_weekly_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/streamlit_app.py",
+      "role": "entrypoint"
+    },
+    {
+      "path": "05_apps/summary_panel.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/ui_theme.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/weather_research_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/说明.md",
+      "role": "runtime_configuration"
+    }
+  ],
+  "environment_bindings": [
+    {
+      "name": "MARKET_DATA_EXECUTION_GRANT",
+      "kind": "execution_grant"
+    },
+    {
+      "name": "PUBLIC_MARKET_DATA_RUNTIME_ROOT",
+      "kind": "runtime_path",
+      "role": "data",
+      "relative_path": ""
+    },
+    {
+      "name": "PUBLIC_DATA_SERVER_STORE_ROOT",
+      "kind": "runtime_path",
+      "role": "data",
+      "relative_path": "public-data-server-store"
+    },
+    {
+      "name": "IMPORT_PROFIT_RUNTIME_ROOT",
+      "kind": "runtime_path",
+      "role": "history",
+      "relative_path": ""
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_RESULT_ROOT",
+      "kind": "runtime_path",
+      "role": "results",
+      "relative_path": ""
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT",
+      "kind": "runtime_path",
+      "role": "snapshots",
+      "relative_path": ""
+    },
+    {
+      "name": "IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH",
+      "kind": "runtime_path",
+      "role": "cnf",
+      "relative_path": "historical_cnf_cache.parquet"
+    },
+    {
+      "name": "HOME",
+      "kind": "runtime_path",
+      "role": "outputs",
+      "relative_path": ""
+    },
+    {
+      "name": "MPLCONFIGDIR",
+      "kind": "runtime_path",
+      "role": "logs",
+      "relative_path": "matplotlib"
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_PAGE_MODE",
+      "kind": "literal",
+      "value": "STRICT_RUNTIME"
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_ENVIRONMENT",
+      "kind": "literal",
+      "value": "FORMAL"
+    },
+    {
+      "name": "IMPORT_PROFIT_CONFIG_PATH",
+      "kind": "literal",
+      "value": "/app/02_configs/import_profit_soybean.yaml"
+    },
+    {
+      "name": "USDA_DASHBOARD_URL",
+      "kind": "deployment",
+      "value_type": "http_url",
+      "candidate_value": "http://127.0.0.1:9/usda"
+    },
+    {
+      "name": "OIL_WORLD_DASHBOARD_URL",
+      "kind": "deployment",
+      "value_type": "http_url",
+      "candidate_value": "http://127.0.0.1:9/oil-world"
+    }
+  ],
+  "forbidden_environment": [
+    "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE",
+    "IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT",
+    "IMPORT_PROFIT_INTRADAY_WRITE_MODE",
+    "IMPORT_PROFIT_INTRADAY_EXPECTED_RUNTIME_ID",
+    "IMPORT_PROFIT_INTRADAY_BUSINESS_DATE",
+    "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH"
+  ],
+  "candidate_runtime_inputs": []
+}

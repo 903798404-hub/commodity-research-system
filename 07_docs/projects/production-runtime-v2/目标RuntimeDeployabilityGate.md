@@ -1,5 +1,21 @@
 # Target Runtime Deployability Gate
 
+`02_configs/runtime_contracts/spread-production-runtime.json` 是完整 spread dashboard 的
+源码合同，项目身份为 `spread-production-runtime-wiring`。初始合同由获准的 shared
+infrastructure owner 创建；它引用既有 tracked 文件，保留完整 Streamlit 入口、页面依赖和
+配置资源，禁止 CNF 保存及固定历史业务日期，声明只读历史/结果/快照输入与独立可写日志。
+`07_docs` 仅有 core path 常量，没有应用读取方，不作为运行输入。初始化命令实际解析
+Current 数据位置并加载 Domestic Spread 数据；空目录或空数据不能计为初始化成功。
+CNF store 沿用已验证历史 release 的默认路径，禁止环境变量覆盖该路径；页面历史 CNF
+cache 单独绑定只读 cnf root。source inputs 穷举现有配置、源码、脚本、页面与 Streamlit
+打包文件，包含未激活脚本不授予其执行权限；这些文件变化仍须使候选绑定失效。
+
+该文件可解析、路径存在不代表当前镜像可部署。初始 candidate inputs 为空，现有 root
+Dockerfile/Compose 的目录 COPY、grant 缺失、旧挂载、用户权限和 RELEASE 命名仍须在
+后续独立生产接线项目中满足目标合同。先由独立治理提交转移 manifest ownership 并登记
+真实 production_container 项目，再开发接线并执行 Linux 候选验证；不能用此源码合同
+替代 Target Runtime Gate、Production Approval、正式数据验收或真实 AM/PM 时间证据。
+
 `runtime_target=production_container` 的项目必须在 code closure 前，由候选源码自身的
 `04_scripts/runtime/validate_target_runtime.py` 生成 `target-runtime-evidence/1`。Completion
 只消费并重新绑定这份证据，不接受项目调用方提供 Image ID、探针结果或 evidence 文件。
