@@ -1,13 +1,19 @@
 """Registry and startup boundaries using isolated Git fixtures, never production."""
 from __future__ import annotations
 
+import base64
 import copy
+from datetime import datetime, timedelta, timezone
+import hashlib
+import importlib.util
 import json
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from quality import audit_changed_scope as scope
 from quality import project_registry as registry
 from quality import start_project
@@ -358,6 +364,98 @@ def approved_runtime_fixture(root):
     return data['projects'][0]
 
 
+def approved_candidate_record_fixture(root, *, trust_mutation=None):
+    """Commit the real record parser and its test signing trust on approved main."""
+    data = runtime_v4_fixture(root)
+    project = data['projects'][0]
+    parser = root / '09_deploy/runtime_identity/candidate_validation_record.py'
+    parser.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / '09_deploy/runtime_identity/candidate_validation_record.py', parser)
+    private = Ed25519PrivateKey.generate()
+    public = base64.b64encode(
+        private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode('ascii')
+    trust = {
+        'schema_version': 'production-runtime-trust/1',
+        'keys': [{
+            'key_id': 'candidate-record-fixture',
+            'domain': 'candidate_validation',
+            'algorithm': 'ed25519',
+            'public_key_base64': public,
+        }],
+        'revoked_key_ids': [],
+        'revoked_grant_ids': [],
+    }
+    if trust_mutation == 'wrongdomain':
+        trust['keys'][0]['domain'] = 'production'
+    elif trust_mutation == 'revoked':
+        trust['revoked_key_ids'] = ['candidate-record-fixture']
+    (root / '02_configs/production_runtime_trust.json').write_text(
+        json.dumps(trust), encoding='utf-8'
+    )
+    (root / 'tests/test_feature.py').write_text(
+        'def test_required(): assert True\n', encoding='utf-8'
+    )
+    write_registry(root, data)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'approved record authority')
+    remote = root.parent / 'approved-origin.git'
+    registry.git(root, 'init', '--bare', str(remote))
+    registry.git(root, 'remote', 'add', 'origin', str(remote))
+    registry.git(root, 'push', 'origin', 'HEAD:refs/heads/main')
+    registry.git(root, 'fetch', 'origin', 'main')
+    return project, private, remote
+
+
+def allow_fixture_record_remote(gate, monkeypatch, remote):
+    monkeypatch.setattr(gate, 'APPROVED_RECORD_REMOTES', frozenset({str(remote)}))
+
+
+def signed_candidate_record(root, project, private, *, mutation=None):
+    """Create an external signed record through the parser copied into approved main."""
+    from quality import target_runtime_gate as gate
+
+    spec = importlib.util.spec_from_file_location(
+        'fixture_candidate_record_parser', root / gate.RECORD_PARSER
+    )
+    assert spec and spec.loader
+    parser = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parser)
+    evidence = runtime_pass_evidence(gate.candidate_binding(root, project))
+    if mutation == 'wrongcommit':
+        evidence['binding']['commit'] = '0' * 40
+    elif mutation == 'probeFAIL':
+        evidence['probes']['dependencies'] = 'FAIL'
+    payload = {
+        'record_id': '1' * 32,
+        'purpose': 'target-runtime-validation',
+        'authorization_role': 'candidate_validation',
+        'issued_at': (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+        'evidence': evidence,
+    }
+    if mutation == 'expired':
+        payload['issued_at'] = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        payload['expires_at'] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    payload['evidence_sha256'] = hashlib.sha256(parser.canonical(evidence)).hexdigest()
+    unsigned = {
+        'schema_version': 'candidate-validation-record/1',
+        'algorithm': 'ed25519',
+        'key_id': 'candidate-record-fixture',
+        'payload': payload,
+    }
+    signature_key = Ed25519PrivateKey.generate() if mutation == 'badsig' else private
+    envelope = {
+        **unsigned,
+        'signature': base64.b64encode(signature_key.sign(parser.canonical(unsigned))).decode('ascii'),
+    }
+    if mutation == 'unsigned':
+        del envelope['signature']
+    path = root.parent / 'candidate-validation-record.json'
+    path.write_bytes(json.dumps(envelope, sort_keys=True, separators=(',', ':')).encode('utf-8'))
+    return path
+
+
 def runtime_manifest_v2_fixture(root):
     """A production target using the v2 manifest source-input contract."""
     from quality import target_runtime_gate as gate
@@ -572,6 +670,134 @@ def test_container_completion_executes_validator_and_binds_evidence(repository, 
     result = complete_project.complete(root, 'demo')
     assert calls == [(root, 'demo')]
     assert result['target_runtime_evidence']['binding'] == gate.candidate_binding(root, project)
+
+
+def test_signed_candidate_record_completes_without_rebuilding_and_preserves_record(repository, monkeypatch):
+    from quality import complete_project, target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = signed_candidate_record(root, project, private)
+    original = record_path.read_bytes()
+    monkeypatch.setattr(
+        gate, 'execute_engine',
+        lambda *_: pytest.fail('authenticated record must not rebuild the candidate'),
+    )
+    result = complete_project.complete(root, 'demo', candidate_record=record_path)
+    assert result['PROJECT_COMPLETION'] == 'PASS'
+    assert result['executed_tests'] == [{
+        'path': 'tests/test_feature.py', 'passed': 1,
+        'sha256': hashlib.sha256((root / 'tests/test_feature.py').read_bytes()).hexdigest(),
+    }]
+    assert result['authenticated_candidate_record']['record_id'] == '1' * 32
+    assert record_path.read_bytes() == original
+
+
+@pytest.mark.parametrize('mutation', ['unsigned', 'badsig', 'wrongcommit', 'probeFAIL', 'expired'])
+def test_signed_candidate_record_rejects_untrusted_or_nonpass_facts(repository, monkeypatch, mutation):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = signed_candidate_record(root, project, private, mutation=mutation)
+    with pytest.raises(ValueError):
+        gate.validate_target(root, project, candidate_record=record_path)
+
+
+@pytest.mark.parametrize('trust_mutation', ['wrongdomain', 'revoked'])
+def test_signed_candidate_record_rejects_unapproved_trust_domain_or_revocation(repository, monkeypatch, trust_mutation):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root, trust_mutation=trust_mutation)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = signed_candidate_record(root, project, private)
+    with pytest.raises(ValueError):
+        gate.validate_target(root, project, candidate_record=record_path)
+
+
+@pytest.mark.parametrize('changed', ['parser', 'trust'])
+def test_signed_candidate_record_requires_candidate_parser_and_trust_equal_approved_main(repository, monkeypatch, changed):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = signed_candidate_record(root, project, private)
+    registry.git(root, 'checkout', '-b', 'feat/record-drift')
+    target = root / (gate.RECORD_PARSER if changed == 'parser' else gate.RECORD_TRUST)
+    target.write_text(target.read_text(encoding='utf-8') + '\n', encoding='utf-8')
+    registry.git(root, 'add', target.relative_to(root).as_posix())
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', f'candidate {changed} change')
+    with pytest.raises(ValueError, match='parser/trust'):
+        gate.validate_target(root, project, candidate_record=record_path)
+
+
+def test_signed_candidate_record_detects_external_record_drift(repository, monkeypatch):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = signed_candidate_record(root, project, private)
+    original_authority = gate._approved_record_authority
+    calls = 0
+
+    def authority(candidate):
+        nonlocal calls
+        calls += 1
+        value = original_authority(candidate)
+        if calls == 1:
+            record_path.write_bytes(record_path.read_bytes() + b' ')
+        return value
+
+    monkeypatch.setattr(gate, '_approved_record_authority', authority)
+    with pytest.raises(ValueError, match='changed'):
+        gate.validate_target(root, project, candidate_record=record_path)
+
+
+def test_signed_candidate_record_rejects_unapproved_origin_remote(repository, monkeypatch):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = signed_candidate_record(root, project, private)
+    registry.git(root, 'remote', 'set-url', 'origin', str(root.parent / 'unapproved-origin.git'))
+    with pytest.raises(ValueError, match='approved GitHub repository'):
+        gate.validate_target(root, project, candidate_record=record_path)
+
+
+def test_completion_rejects_record_drift_during_required_tests(repository, monkeypatch):
+    from quality import complete_project, target_runtime_gate as gate
+    _, root = repository
+    project, private, remote = approved_candidate_record_fixture(root)
+    allow_fixture_record_remote(gate, monkeypatch, remote)
+    record_path = root.parent / 'candidate-validation-record.json'
+    registry.git(root, 'checkout', '-b', 'feat/record-completion-drift')
+    (root / 'tests/test_feature.py').write_text(
+        "from pathlib import Path\n\n"
+        "def test_required():\n"
+        f"    target = Path({str(record_path)!r})\n"
+        "    target.write_bytes(target.read_bytes() + b' ')\n"
+        "    assert True\n",
+        encoding='utf-8',
+    )
+    registry.git(root, 'add', 'tests/test_feature.py')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'record drift test')
+    signed_candidate_record(root, project, private)
+    monkeypatch.setattr(
+        gate, 'execute_engine',
+        lambda *_: pytest.fail('authenticated record must not rebuild the candidate'),
+    )
+    with pytest.raises(ValueError, match='Candidate record or authority changed during completion'):
+        complete_project.complete(root, 'demo', candidate_record=record_path)
+
+
+def test_candidate_record_is_rejected_for_noncontainer_project(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project = runtime_v4_fixture(root, target='library_only')['projects'][0]
+    record_path = root.parent / 'ordinary-record.json'
+    record_path.write_text('{}', encoding='utf-8')
+    with pytest.raises(ValueError, match='production_container'):
+        gate.validate_target(root, project, candidate_record=record_path)
 
 
 @pytest.mark.parametrize('mutation', ['static_missing', 'container_missing', 'container_failed',

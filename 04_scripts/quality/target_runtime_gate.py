@@ -1,7 +1,8 @@
 """Completion consumer for versioned target-runtime evidence, never a PASS importer.
 
 The trusted candidate's engine must execute static and actual container checks.
-No command-line option accepts caller-supplied evidence. Engine absence is BLOCKED.
+An authenticated Linux candidate record can carry the engine's observed result
+across environments. Raw caller-supplied PASS evidence is never accepted.
 The engine implementation belongs to the independent runtime infrastructure project.
 """
 from __future__ import annotations
@@ -24,6 +25,13 @@ except ImportError:
 ENGINE = "04_scripts/runtime/validate_target_runtime.py"
 MANIFEST_PARSER = "03_src/agri_research_agent/shared/runtime_manifest.py"
 MANIFEST_SCHEMA = "02_configs/runtime_manifest.schema.json"
+RECORD_PARSER = "09_deploy/runtime_identity/candidate_validation_record.py"
+RECORD_TRUST = "02_configs/production_runtime_trust.json"
+APPROVED_RECORD_REMOTES = frozenset({
+    "https://github.com/903798404-hub/commodity-research-system.git",
+    "git@github.com:903798404-hub/commodity-research-system.git",
+    "ssh://git@github.com/903798404-hub/commodity-research-system.git",
+})
 VALIDATOR_VERSION = "target-runtime-validator/1"
 EVIDENCE_SCHEMA = "target-runtime-evidence/1"
 REQUIRED_PROBES = frozenset({"entrypoint_initialization", "runtime_identity", "dependencies",
@@ -279,10 +287,66 @@ def execute_engine(root: Path, project: dict, output: Path) -> int:
         raise ValueError("Target runtime validator timed out; validation not complete") from exc
 
 
-def validate_target(root: Path, project: dict) -> dict:
+def record_bytes(path: Path) -> bytes:
+    """Snapshot an external ordinary artifact without following path aliases."""
+    path = Path(path)
+    if not path.is_absolute():
+        raise ValueError("Candidate record requires an absolute path")
+    if any(item.is_symlink() or item.is_junction() for item in (path, *path.parents)):
+        raise ValueError("Candidate record cannot traverse a link")
+    if not path.is_file():
+        raise ValueError("Candidate record must be an existing regular file")
+    return path.read_bytes()
+
+
+def _approved_record_authority(root: Path):
+    if registry.git(root, "remote", "get-url", "origin") not in APPROVED_RECORD_REMOTES:
+        raise ValueError("Candidate record authority requires the approved GitHub repository")
+    approved = registry.git(root, "rev-parse", "origin/main")
+    live = registry.git(root, "ls-remote", "--exit-code", "origin", "refs/heads/main").split()[0]
+    if approved != live:
+        raise ValueError("Candidate record authority is not current GitHub main")
+    registry.git(root, "merge-base", "--is-ancestor", approved, "HEAD")
+    blobs = {}
+    for name in (RECORD_PARSER, RECORD_TRUST):
+        approved_raw = subprocess.check_output(["git", "-C", str(root), "show", f"{approved}:{name}"])
+        candidate_raw = subprocess.check_output(["git", "-C", str(root), "show", f"HEAD:{name}"])
+        if approved_raw != candidate_raw:
+            raise ValueError("Candidate record parser/trust requires prior main approval")
+        blobs[name] = approved_raw
+    # Execute approved source bytes directly, never candidate pycache or imports.
+    namespace = {"__name__": "_approved_candidate_record", "__file__": str(root / RECORD_PARSER)}
+    exec(compile(blobs[RECORD_PARSER], str(root / RECORD_PARSER), "exec"), namespace)
+    trust = json.loads(blobs[RECORD_TRUST].decode("utf-8"), object_pairs_hook=_unique_object)
+    return approved, blobs, namespace["verify_record"], trust
+
+
+def _validate_record(root: Path, project: dict, path: Path) -> dict:
+    path = Path(path)
+    if root.resolve() in path.resolve().parents:
+        raise ValueError("Candidate record must be outside the source repository")
+    before = candidate_binding(root, project)
+    raw = record_bytes(path)
+    approved, blobs, verify, trust = _approved_record_authority(root)
+    payload = verify(raw, trust)
+    evidence = validate_evidence(payload["evidence"], before, 0)
+    after_approved, after_blobs, after_verify, after_trust = _approved_record_authority(root)
+    if (after_approved != approved or after_blobs != blobs or record_bytes(path) != raw
+            or candidate_binding(root, project) != before):
+        raise ValueError("Candidate record or approved authority changed during validation")
+    # Recheck time validity at the end as well as the signature and revocations.
+    after_verify(raw, after_trust)
+    return evidence
+
+
+def validate_target(root: Path, project: dict, *, candidate_record: Path | None = None) -> dict:
     if project.get("runtime_target") != "production_container":
+        if candidate_record is not None:
+            raise ValueError("Candidate record requires a production_container project")
         return {"TARGET_RUNTIME_VALIDATION": "NOT_REQUIRED"}
     read_contract(root, project)
+    if candidate_record is not None:
+        return _validate_record(root, project, candidate_record)
     if not (root / ENGINE).is_file():
         raise RuntimeValidationBlocked("TARGET_RUNTIME_CONTAINER_VALIDATION=BLOCKED: target runtime engine unavailable")
     before = candidate_binding(root, project)

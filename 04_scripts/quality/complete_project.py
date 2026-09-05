@@ -19,7 +19,7 @@ except ImportError:
     import target_runtime_gate
 
 
-def complete(root: Path, project_id: str) -> dict:
+def complete(root: Path, project_id: str, *, candidate_record: Path | None = None) -> dict:
     data, project = registry.select_project(root, project_id)
     if project['status'] != 'ready':
         raise ValueError('Project is not ready')
@@ -44,6 +44,8 @@ def complete(root: Path, project_id: str) -> dict:
         return registry.git(root, 'rev-parse', 'HEAD'), digest.hexdigest()
 
     before = identity()
+    record_before = target_runtime_gate.record_bytes(candidate_record) if candidate_record is not None else None
+    authority_before = registry.git(root, 'rev-parse', 'origin/main') if candidate_record is not None else None
     results = []
     with tempfile.TemporaryDirectory(prefix='project-completion-') as directory:
         for number, (name, path) in enumerate(zip(tests, paths)):
@@ -57,23 +59,40 @@ def complete(root: Path, project_id: str) -> dict:
             if not cases or any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
                 raise ValueError(f'Required test must run and PASS without skip/xfail: {name}')
             results.append({'path': name, 'passed': len(cases), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-    runtime_evidence = target_runtime_gate.validate_target(root, project)
+    runtime_evidence = (target_runtime_gate.validate_target(root, project)
+                        if candidate_record is None else
+                        target_runtime_gate.validate_target(root, project, candidate_record=candidate_record))
     if before != identity():
         raise ValueError('Candidate changed during completion')
+    authentication = {}
+    if candidate_record is not None:
+        if (target_runtime_gate.record_bytes(candidate_record) != record_before
+                or registry.git(root, 'rev-parse', 'origin/main') != authority_before):
+            raise ValueError('Candidate record or authority changed during completion')
+        # The exact snapshotted bytes have just passed the approved verifier.
+        # Keep authentication metadata outside the unchanged evidence/1 schema.
+        payload = json.loads(record_before)['payload']
+        authentication['authenticated_candidate_record'] = {
+            'schema_version': 'candidate-validation-record/1',
+            'sha256': hashlib.sha256(record_before).hexdigest(), 'record_id': payload['record_id'],
+            'authority_commit': authority_before, 'expires_at': payload['expires_at'],
+        }
     return {'PROJECT_COMPLETION': 'PASS', 'project_id': project_id, 'head': before[0],
             'candidate_content_sha256': before[1], 'executed_tests': results,
-            'target_runtime_evidence': runtime_evidence}
+            'target_runtime_evidence': runtime_evidence, **authentication}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', required=True)
+    parser.add_argument('--candidate-record', type=Path,
+                        help='Authenticated Linux candidate-validation-record; never raw PASS evidence')
     args = parser.parse_args(argv)
     try:
         _, project = registry.select_project(scope.PROJECT_ROOT, args.project)
         if scope.main(['--project', args.project, '--change-class', project['change_class']]) != 0:
             raise ValueError('Project Scope must PASS before completion')
-        print(json.dumps(complete(scope.PROJECT_ROOT, args.project), ensure_ascii=False, indent=2))
+        print(json.dumps(complete(scope.PROJECT_ROOT, args.project, candidate_record=args.candidate_record), ensure_ascii=False, indent=2))
         return 0
     except target_runtime_gate.RuntimeValidationBlocked as exc:
         print(json.dumps({'PROJECT_COMPLETION': 'BLOCKED', 'TARGET_RUNTIME_CONTAINER_VALIDATION': 'BLOCKED', 'reason': str(exc)}))
