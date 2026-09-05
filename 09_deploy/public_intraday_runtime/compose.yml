@@ -2,7 +2,7 @@ services:
   public-intraday-runtime:
     image: ${PUBLIC_INTRADAY_IMAGE:?PUBLIC_INTRADAY_IMAGE is required}
     build:
-      context: ../..
+      context: .
       dockerfile: 09_deploy/public_intraday_runtime/Dockerfile.public-intraday
     entrypoint: ["python", "-B", "/app/04_scripts/runtime/public_intraday_runtime.py", "serve"]
     working_dir: /app
@@ -30,7 +30,7 @@ services:
         read_only: true
     secrets:
       - source: tankan-reader
-        target: tankan.env
+        target: /run/secrets/tankan.env
 secrets:
   tankan-reader:
     file: ${TANKAN_SECRET_FILE:?TANKAN_SECRET_FILE is required}

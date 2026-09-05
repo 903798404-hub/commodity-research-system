@@ -54,12 +54,16 @@ def test_manifest_and_deployment_contract_are_isolated_and_non_root():
     compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
     service = compose["services"]["public-intraday-runtime"]
     assert service["read_only"] is True and service["user"] == "65532:65532"
+    assert service["build"] == {
+        "context": ".",
+        "dockerfile": "09_deploy/public_intraday_runtime/Dockerfile.public-intraday",
+    }
     assert service["cap_drop"] == ["ALL"]
     assert service["security_opt"] == ["no-new-privileges:true"]
     assert service["environment"] == {
         "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json"}
     assert service["secrets"] == [
-        {"source": "tankan-reader", "target": "tankan.env"}]
+        {"source": "tankan-reader", "target": "/run/secrets/tankan.env"}]
     assert compose["secrets"]["tankan-reader"] == {
         "file": "${TANKAN_SECRET_FILE:?TANKAN_SECRET_FILE is required}"}
     assert {item["target"]: item.get("read_only", False) for item in service["volumes"]} == {
