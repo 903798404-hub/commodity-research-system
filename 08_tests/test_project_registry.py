@@ -498,6 +498,145 @@ def approved_runtime_manifest_v2_fixture(root):
     return project
 
 
+def approved_runtime_manifest_v3_fixture(root):
+    data, project = runtime_manifest_v2_fixture(root)
+    path = root / project['runtime_contract']
+    contract = json.loads(path.read_text(encoding='utf-8'))
+    contract.update(schema_version='runtime-manifest/3',
+        required_environment=['MODE', 'HISTORY_ROOT', 'MARKET_DATA_EXECUTION_GRANT'],
+        environment_bindings=[
+            {'name': 'MODE', 'kind': 'literal', 'value': 'STRICT_RUNTIME'},
+            {'name': 'HISTORY_ROOT', 'kind': 'runtime_path', 'role': 'history', 'relative_path': ''},
+            {'name': 'MARKET_DATA_EXECUTION_GRANT', 'kind': 'execution_grant'}],
+        forbidden_environment=['ENABLE_WRITES'])
+    contract['runtime_roots'].append({'role': 'history', 'container_path': '/runtime/history', 'access': 'ro'})
+    contract['required_mounts'].append({'role': 'history', 'container_path': '/runtime/history', 'read_only': True})
+    seed = root / '08_tests/fixtures/runtime/history.json'
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_bytes(b'{"fixture":true}\n')
+    contract['candidate_runtime_inputs'] = [{'source_path': seed.relative_to(root).as_posix(),
+        'sha256': hashlib.sha256(seed.read_bytes()).hexdigest(), 'role': 'history', 'relative_path': 'current.json'}]
+    path.write_text(json.dumps(contract), encoding='utf-8')
+    (root / 'tests/test_feature.py').write_text('def test_required(): assert True\n', encoding='utf-8')
+    write_registry(root, data)
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'runtime manifest v3 fixture')
+    registry.git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    return project, seed
+
+
+def test_runtime_manifest_v3_governance_binds_fixture_and_requires_new_validator(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, seed = approved_runtime_manifest_v3_fixture(root)
+    binding = gate.candidate_binding(root, project)
+    assert binding['validator_version'] == 'target-runtime-validator/2'
+    assert binding['source_sha256'][seed.relative_to(root).as_posix()] == hashlib.sha256(seed.read_bytes()).hexdigest()
+    assert {gate.MANIFEST_PARSER, gate.MANIFEST_SCHEMA, gate.ENGINE}.issubset(binding['source_sha256'])
+    old_binding = copy.deepcopy(binding)
+    old_binding['validator_version'] = 'target-runtime-validator/1'
+    with pytest.raises(ValueError, match='binding mismatch'):
+        gate.validate_evidence(runtime_pass_evidence(old_binding), binding, 0)
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'ignored', 'untracked', 'wrong_hash', 'case_alias', 'hidden_drift'])
+def test_runtime_manifest_v3_governance_rejects_uncontrolled_fixture(repository, mutation):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, seed = approved_runtime_manifest_v3_fixture(root)
+    relative = seed.relative_to(root).as_posix()
+    if mutation == 'missing':
+        seed.unlink()
+        registry.git(root, 'add', '-u')
+    elif mutation in ('ignored', 'untracked'):
+        registry.git(root, 'rm', '--cached', '--', relative)
+        if mutation == 'ignored':
+            (root / '.gitignore').write_text(relative + '\n', encoding='utf-8')
+            registry.git(root, 'add', '.gitignore')
+    elif mutation == 'hidden_drift':
+        registry.git(root, 'update-index', '--assume-unchanged', relative)
+        seed.write_bytes(b'{"tampered":true}\n')
+        assert registry.git(root, 'status', '--porcelain') == ''
+    else:
+        path = root / project['runtime_contract']
+        contract = json.loads(path.read_text(encoding='utf-8'))
+        if mutation == 'wrong_hash':
+            contract['candidate_runtime_inputs'][0]['sha256'] = 'b' * 64
+        else:
+            contract['candidate_runtime_inputs'][0]['source_path'] = '08_tests/fixtures/runtime/HISTORY.json'
+        path.write_text(json.dumps(contract), encoding='utf-8')
+        registry.git(root, 'add', project['runtime_contract'])
+    if mutation != 'hidden_drift':
+        registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'unusable candidate fixture')
+    with pytest.raises((ValueError, OSError)):
+        gate.candidate_binding(root, project)
+
+
+def test_runtime_manifest_v3_governance_uses_git_fixture_bytes_across_checkout_crlf(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    (root / '.gitattributes').write_text('08_tests/fixtures/runtime/history.json text eol=crlf\n', encoding='utf-8')
+    project, seed = approved_runtime_manifest_v3_fixture(root)
+    canonical = subprocess.check_output(['git', '-C', str(root), 'show', 'HEAD:08_tests/fixtures/runtime/history.json'])
+    seed.unlink()
+    registry.git(root, 'checkout', '--', '08_tests/fixtures/runtime/history.json')
+    assert seed.read_bytes() == canonical.replace(b'\n', b'\r\n')
+    assert registry.git(root, 'status', '--porcelain') == ''
+    binding = gate.candidate_binding(root, project)
+    assert binding['source_sha256']['08_tests/fixtures/runtime/history.json'] == hashlib.sha256(canonical).hexdigest()
+    assert binding['source_sha256']['08_tests/fixtures/runtime/history.json'] != hashlib.sha256(seed.read_bytes()).hexdigest()
+
+
+def test_runtime_manifest_v3_governance_fixture_change_invalidates_previous_evidence(repository):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, seed = approved_runtime_manifest_v3_fixture(root)
+    old = runtime_pass_evidence(gate.candidate_binding(root, project))
+    seed.write_bytes(b'{"fixture":"changed"}\n')
+    path = root / project['runtime_contract']
+    contract = json.loads(path.read_text(encoding='utf-8'))
+    contract['candidate_runtime_inputs'][0]['sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
+    path.write_text(json.dumps(contract), encoding='utf-8')
+    registry.git(root, 'add', '.')
+    registry.git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'changed controlled fixture')
+    with pytest.raises(ValueError, match='binding mismatch'):
+        gate.validate_evidence(old, gate.candidate_binding(root, project), 0)
+
+
+@pytest.mark.parametrize('mutation', ['duplicate_schema', 'missing_binding', 'seed_image_overlap'])
+def test_runtime_manifest_v3_governance_never_bypasses_shared_parser(repository, mutation):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, seed = approved_runtime_manifest_v3_fixture(root)
+    path = root / project['runtime_contract']
+    raw = path.read_text(encoding='utf-8')
+    if mutation == 'duplicate_schema':
+        path.write_text(raw.replace('"schema_version":', '"schema_version":"runtime-manifest/2","schema_version":'), encoding='utf-8')
+    else:
+        contract = json.loads(raw)
+        if mutation == 'missing_binding':
+            contract['environment_bindings'].pop()
+        else:
+            contract['source_inputs'].append({'path': seed.relative_to(root).as_posix(), 'role': 'initialization'})
+        path.write_text(json.dumps(contract), encoding='utf-8')
+    with pytest.raises(ValueError):
+        gate.read_contract(root, project)
+
+
+def test_runtime_manifest_v3_governance_does_not_accept_old_engine_claim(repository, monkeypatch):
+    from quality import target_runtime_gate as gate
+    _, root = repository
+    project, _ = approved_runtime_manifest_v3_fixture(root)
+    def old_engine(candidate, selected, output):
+        binding = gate.candidate_binding(candidate, selected)
+        binding['validator_version'] = 'target-runtime-validator/1'
+        output.write_text(json.dumps(runtime_pass_evidence(binding)), encoding='utf-8')
+        return 0
+    monkeypatch.setattr(gate, 'execute_engine', old_engine)
+    with pytest.raises(ValueError, match='binding mismatch'):
+        gate.validate_target(root, project)
+
+
 def test_runtime_manifest_v2_bridge_accepts_source_inputs_and_binds_all_sources(repository):
     from quality import target_runtime_gate as gate
     _, root = repository
@@ -505,6 +644,7 @@ def test_runtime_manifest_v2_bridge_accepts_source_inputs_and_binds_all_sources(
     contract = gate.read_contract(root, project)
     assert contract['schema_version'] == 'runtime-manifest/2'
     binding = gate.candidate_binding(root, project)
+    assert binding['validator_version'] == 'target-runtime-validator/1'
     for path in ['app.py', 'init.py', 'config.json', '03_src/agri_research_agent/shared/runtime_manifest.py',
                  '02_configs/runtime_manifest.schema.json']:
         assert path in binding['source_sha256']

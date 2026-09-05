@@ -33,6 +33,8 @@ APPROVED_RECORD_REMOTES = frozenset({
     "ssh://git@github.com/903798404-hub/commodity-research-system.git",
 })
 VALIDATOR_VERSION = "target-runtime-validator/1"
+V3_VALIDATOR_VERSION = "target-runtime-validator/2"
+SOURCE_MANIFEST_VERSIONS = ("runtime-manifest/2", "runtime-manifest/3")
 EVIDENCE_SCHEMA = "target-runtime-evidence/1"
 REQUIRED_PROBES = frozenset({"entrypoint_initialization", "runtime_identity", "dependencies",
                            "runtime_paths", "mount_permissions", "missing_grant_rejected",
@@ -93,7 +95,7 @@ def _read_evidence(path: Path) -> dict:
     return value
 
 
-def _read_v2(root: Path, project: dict, path: Path) -> dict:
+def _read_source_contract(root: Path, project: dict, path: Path) -> dict:
     # Resolve from this gate's checkout, never an installed package, PYTHONPATH,
     # or a caller-provided module object. The candidate binds these files below.
     source_root = Path(__file__).resolve().parents[2]
@@ -114,12 +116,14 @@ def _read_v2(root: Path, project: dict, path: Path) -> dict:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = previous
-    if contract['schema_version'] != 'runtime-manifest/2' or contract['project_id'] != project['project_id']:
+    if contract['schema_version'] not in SOURCE_MANIFEST_VERSIONS or contract['project_id'] != project['project_id']:
         raise ValueError("Runtime contract schema or project identity mismatch")
     build = contract['build']
     names = [project['runtime_contract'], build['dockerfile'], build['dockerignore'],
              *build['dependency_contracts'], *build['compose_sources'],
              *(item['path'] for item in contract['source_inputs'])]
+    if contract['schema_version'] == 'runtime-manifest/3':
+        names.extend(item['source_path'] for item in contract['candidate_runtime_inputs'])
     if len({registry.canonical_path(name) for name in names}) != len(names):
         raise ValueError("Runtime input paths contain duplicate identities or aliases")
     for name in names:
@@ -136,8 +140,8 @@ def read_contract(root: Path, project: dict) -> dict:
         contract = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
     except (ValueError, UnicodeError) as exc:
         raise ValueError("Invalid runtime contract JSON") from exc
-    if isinstance(contract, dict) and contract.get('schema_version') == 'runtime-manifest/2':
-        return _read_v2(root, project, path)
+    if isinstance(contract, dict) and contract.get('schema_version') in SOURCE_MANIFEST_VERSIONS:
+        return _read_source_contract(root, project, path)
     if (not isinstance(contract, dict)
             or contract.get("schema_version") != "runtime-manifest/1"
             or contract.get("runtime_target") != "production_container"
@@ -219,9 +223,11 @@ def candidate_binding(root: Path, project: dict) -> dict:
     build = contract["build"]
     paths = [project["runtime_contract"], build["dockerfile"], build["dockerignore"],
              *build["dependency_contracts"], *build["compose_sources"], ENGINE]
-    if contract['schema_version'] == 'runtime-manifest/2':
+    if contract['schema_version'] in SOURCE_MANIFEST_VERSIONS:
         paths.extend(item['path'] for item in contract['source_inputs'])
         paths.extend([MANIFEST_PARSER, MANIFEST_SCHEMA])
+        if contract['schema_version'] == 'runtime-manifest/3':
+            paths.extend(item['source_path'] for item in contract['candidate_runtime_inputs'])
         if len({registry.canonical_path(name) for name in paths}) != len(paths):
             raise ValueError("Runtime source and validator inputs overlap")
     hashes = {}
@@ -236,9 +242,15 @@ def candidate_binding(root: Path, project: dict) -> dict:
                 raise ValueError(f"Runtime input differs from committed source: {name}")
         # Hash canonical Git bytes, not platform-specific checkout CRLF conversion.
         hashes[name] = hashlib.sha256(raw).hexdigest()
+    version = VALIDATOR_VERSION
+    if contract['schema_version'] == 'runtime-manifest/3':
+        version = V3_VALIDATOR_VERSION
+        for item in contract['candidate_runtime_inputs']:
+            if hashes[item['source_path']] != item['sha256']:
+                raise ValueError("Candidate runtime input SHA differs from committed fixture: " + item['source_path'])
     return {"project_id": project["project_id"], "commit": registry.git(root, "rev-parse", "HEAD"),
             "tree": registry.git(root, "rev-parse", "HEAD^{tree}"), "source_sha256": hashes,
-            "validator_version": VALIDATOR_VERSION}
+            "validator_version": version}
 
 
 def validate_evidence(evidence: dict, binding: dict, returncode: int) -> dict:
