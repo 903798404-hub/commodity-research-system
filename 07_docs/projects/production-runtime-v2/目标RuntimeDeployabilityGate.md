@@ -69,3 +69,44 @@ host grant issuer；只有分别在 manifest hash 与 RELEASE hash 检查点拒�
 证据绑定 clean Commit、Tree、全部 source SHA256、不可变 Image ID、rendered Compose SHA256、Linux
 builder identity、candidate authorization role、`.git` absence 和 production volume absence。任何
 缺项、未知项、候选在验证期间变化或验证后重新 build 都会使 Completion fail closed。
+
+## 跨阶段候选记录与生产复验（当前独立候选，尚未发布闭包）
+
+`04_scripts/runtime/pre_release_runtime.py` 的候选记录入口只接受 Registry project、全新
+record 输出路径、受保护的 candidate-domain key 和有限有效期。入口自行执行隔离验证器，
+不接受调用方提交 evidence、Image ID 或 probe 结论。执行前后必须确认自身源码是 root
+控制的 clean detached 普通 Git clone，全部 tracked 字节与 Git archive 一致；不能使用
+linked feature worktree、隐藏 index flags、replacement refs 或忽略的 bytecode。
+
+`candidate-validation-record/1` 以现有 candidate-validation Ed25519 key 签名。签名覆盖
+完整 envelope metadata 与 payload（除 signature 本身）；payload 包含目的、角色、record ID、
+签发/到期时间、完整 `target-runtime-evidence/1` 与其 canonical SHA256。最长有效期七天。
+严格拒绝未知字段、重复 JSON key、非有限数、错误签名/签名域、过期、撤销、缺少探针和
+候选身份漂移。现有 trust 的 `revoked_grant_ids` 同时作为此签名记录的 record ID 撤销列表；
+记录只证明候选验证事实，不授予 production write。输出使用受保护目录、0600 和 exclusive
+创建，不能覆盖已有记录。
+
+生产 host policy 新增 `/3`，必须消费该记录并重新绑定 Approved source Commit/Tree、
+完整 source binding、runtime manifest 和同一不可变 Image ID。`policy/2` 只允许 candidate
+validation；旧 `policy/1` 与 manifest/1 兼容；容器执行授权继续使用 grant/2，不引入第三类
+审批密钥。签发前后必须重新读取 policy、record、trust 和实际实例。
+
+候选 render 和生产 render 分别记录，不能要求临时路径与生产路径相等。生产复验用同一
+受保护 environment file 重新渲染 Approved 源 Compose，再与真正使用的生产 Compose 比较；
+只允许移除 build metadata 和加入 host nonce，其余配置差异拒绝。生产 storage allocation
+与开发 clone、候选临时 scope 物理隔离。file-secret 必须依照其实际 bind mount 观察验证
+source、target 和只读权限；secret 引用校验不能代替容器实际观察。源码 Compose 字节由候选
+record 绑定，实际部署 Compose 字节由 protected policy 绑定；两者路径不必相同，必须通过
+上述 render 比较证明只有明确允许的部署差异。本机 Docker/Compose/socket 身份检查同样
+用于生产复验，但不会执行镜像构建。
+
+生产复验入口使用 `--production-policy --container-id --report-output`，container ID 必须是完整
+64 位小写 hex。此模式只能观察 fresh unstarted 实例，不加载生产私钥、不签 grant、不启动容器；
+结果独立记录候选/生产 render、实际 Image ID、manifest、mount、config 和 policy 身份。
+secret 文件必须 root 控制、无 world access，并允许容器显式 numeric UID:GID 读取；root 的
+owner-write 位不等于业务可写。检查 inode、权限、大小、时间及内容摘要在前后观察间不漂移，
+报告只保存整体 identity hash，不暴露凭据内容。
+
+本阶段仍须完成完整 Scope/Completion、独立 integration 和实际 Linux 候选验证。
+上述候选实现与专项测试不代表 Production Approval，
+不允许因此启动 production grant、自动 capture、FULL DAILY 接入或 Notification activation。

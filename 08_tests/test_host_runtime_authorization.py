@@ -112,6 +112,10 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     if version == 2:
         expected["schema_version"] = "host-runtime-policy/2"
         expected["candidate_scope"] = None if role == "production" else {"descriptor_path":"/tmp/protected/descriptors/scope.json","descriptor_sha256":"3"*64,"scope_id":"4"*32}
+        if role == "production":
+            expected.update(schema_version="host-runtime-policy/3", approved_source_root="/var/lib/approved-source",
+                            production_storage_root="/var/lib/market-data/production-runtime/project",
+                            candidate_record={"path":"/var/lib/validation/record.json", "sha256":"9"*64})
         if role == "candidate_validation":
             old_root = expected["candidate_host_root"]
             expected["candidate_host_root"] = "/tmp/market-data-candidate-scopes/candidate-4"
@@ -196,6 +200,11 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     monkeypatch.setattr(host,"require_protected_key_and_grant_dirs",lambda *args:None)
     monkeypatch.setattr(host,"_validate_mount_sources",lambda *args:None)
     monkeypatch.setattr(host,"_candidate_descriptor",lambda *args,**kwargs:{"scope_id":"4"*32})
+    if version == 2 and role == "production":
+        # This roundtrip isolates grant compatibility after pre-release succeeds.
+        # Record verification and source/production bridges have separate tests.
+        monkeypatch.setattr(host,"_validated_candidate_record",lambda policy:({"record_id":"5"*32}, manifest))
+        monkeypatch.setattr(host,"_production_compose_bridge",lambda *args:[])
     monkeypatch.setattr(host,"_fsync_directory",lambda *args:None)
     monkeypatch.setattr(identity,"_ROOT",image_root)
     monkeypatch.setattr(identity,"TRUST_CONFIG_PATH",trust)
@@ -231,7 +240,7 @@ def test_host_signature_roundtrip_is_accepted_only_for_its_role(tmp_path,monkeyp
         host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grant,grant_dir=grants,role=role)
 
 
-def test_v2_production_issuer_binds_manifest_identity_root_and_null_scope(tmp_path, monkeypatch):
+def test_v3_production_issuer_keeps_grant_v2_identity_root_and_null_scope(tmp_path, monkeypatch):
     expected,container,image,rendered,policy_file,key,grants,manifest,marker,release,identity = signing_fixture(tmp_path,monkeypatch,"production",2)
     grant = grants / "grant-v2.json"
     envelope = host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grant,grant_dir=grants,role="production")
@@ -242,6 +251,146 @@ def test_v2_production_issuer_binds_manifest_identity_root_and_null_scope(tmp_pa
     request=identity.OCIExecutionRequest(grant,release,manifest,marker.parent,marker)
     assert identity.verify_execution(request,expected_role="production",module_id="shared-runtime",runtime_id="runtime",
                                      runtime_root=marker.parent,marker_sha256=expected["runtime_marker_sha256"]).image_id == IMAGE
+
+
+def test_policy_v2_cannot_bypass_candidate_record_with_null_scope():
+    expected = policy("production")
+    expected.update(schema_version="host-runtime-policy/2", candidate_scope=None)
+    with pytest.raises(host.HostAuthorizationError, match="policy/3 record"):
+        host.validate_policy(expected, "production")
+
+
+@pytest.mark.parametrize("mutation", [None, "record", "marker", "manifest", "secret-drift", "policy-drift"])
+def test_readonly_production_revalidation_never_signs_or_starts(tmp_path, monkeypatch, mutation):
+    expected, container, image, rendered, policy_file, key, grants, manifest, marker, release, identity = signing_fixture(tmp_path, monkeypatch, "production", 2)
+    source_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    candidate = {"record_id":"5"*32, "evidence":{"rendered_compose_sha256":"6"*64}}
+    monkeypatch.setattr(host, "_validated_candidate_record", lambda policy:(candidate, source_manifest))
+    monkeypatch.setattr(host, "_load_private_key", lambda *args: (_ for _ in ()).throw(AssertionError("must not sign")))
+    if mutation == "record":
+        monkeypatch.setattr(host, "_validated_candidate_record", lambda policy: (_ for _ in ()).throw(host.HostAuthorizationError("invalid record")))
+    elif mutation == "marker":
+        value = json.loads(marker.read_text(encoding="utf-8")); value["classification"] = "preview"
+        marker.write_text(json.dumps(value), encoding="utf-8")
+        expected["runtime_marker_sha256"] = hashlib.sha256(marker.read_bytes()).hexdigest()
+        policy_file.write_text(json.dumps(expected), encoding="utf-8")
+    elif mutation == "manifest":
+        manifest.write_text("{}", encoding="utf-8")
+    elif mutation == "secret-drift":
+        count = iter([{"secret":"initial"}, {"secret":"changed"}])
+        monkeypatch.setattr(host, "_secret_state", lambda _:next(count))
+    elif mutation == "policy-drift":
+        count = iter([expected, {**expected, "runtime_id":"changed"}])
+        monkeypatch.setattr(host, "_load_policy", lambda _:next(count))
+    if mutation:
+        with pytest.raises(host.HostAuthorizationError):
+            host.revalidate_production(CID, expected_policy_path=policy_file)
+    else:
+        report = host.revalidate_production(CID, expected_policy_path=policy_file)
+        assert report["PRE_RELEASE_VALIDATION"] == "PASS"
+        assert report["production_write_granted"] is False and report["container_started"] is False
+        assert report["candidate_rendered_compose_sha256"] != report["production_rendered_compose_sha256"]
+        assert report["image_id"] == IMAGE
+    assert not list(grants.iterdir())
+
+
+@pytest.mark.parametrize("mode,gid,user,accepted", [(0o640,65532,"65532:65532",True), (0o600,0,"65532:65532",False),
+                                                  (0o644,65532,"65532:65532",False), (0o640,22,"65532:65532",False),
+                                                  (0o640,65532,"65532",False)])
+def test_secret_access_uses_actual_numeric_runtime_identity(monkeypatch, mode, gid, user, accepted):
+    state = SimpleNamespace(st_dev=1, st_ino=2, st_uid=0, st_gid=gid, st_mode=stat.S_IFREG|mode,
+                            st_size=4, st_mtime_ns=10, st_ctime_ns=11)
+    source = SimpleNamespace(stat=lambda:state, read_bytes=lambda:b"test")
+    monkeypatch.setattr(host, "_protected_path", lambda path: path)
+    if accepted:
+        result = host._secret_file_identity(source, user)
+        assert result["sha256"] == hashlib.sha256(b"test").hexdigest()
+    else:
+        with pytest.raises(host.HostAuthorizationError):
+            host._secret_file_identity(source, user)
+
+
+@pytest.mark.parametrize("mutation", [None, "environment", "command", "secret-target", "extra-service", "image", "build"])
+def test_production_compose_bridge_allows_only_explicit_deployment_differences(tmp_path, monkeypatch, mutation):
+    expected = policy("production")
+    manifest = {"build":{"compose_sources":["compose.yml"]}, "service_id":"svc", "entrypoint":["python", "app.py"],
+                "working_directory":"/app", "required_environment":["MODE"], "secret_references":["reader"]}
+    secret = tmp_path / "secret.env"; secret.write_bytes(b"synthetic")
+    desired = {"name":"production-project", "services":{"svc":{"image":IMAGE, "entrypoint":["python", "app.py"],
+               "working_dir":"/app", "user":"65532:65532", "environment":{"MODE":"FORMAL"},
+               "build":{"context":"/approved", "dockerfile":"Dockerfile"},
+               "secrets":[{"source":"reader", "target":"/run/secrets/reader.env"}]}},
+               "secrets":{"reader":{"name":"production-project_reader", "file":str(secret)}}}
+    actual = copy.deepcopy(desired)
+    service = actual["services"]["svc"]
+    service.pop("build"); service["hostname"] = "7"*32
+    if mutation == "environment": service["environment"]["MODE"] = "PREVIEW"
+    elif mutation == "command": service["command"] = ["sh"]
+    elif mutation == "secret-target": service["secrets"][0]["target"] = "/run/secrets/other.env"
+    elif mutation == "extra-service": actual["services"]["other"] = copy.deepcopy(service)
+    elif mutation == "image": service["image"] = "mutable:latest"
+    elif mutation == "build": service["build"] = {"context":"/dev-worktree"}
+    monkeypatch.setattr(host, "_run_docker", lambda args:json.dumps(desired).encode())
+    monkeypatch.setattr(host, "_protected_path", lambda path, **kwargs:path)
+    monkeypatch.setattr(host, "_secret_file_identity", lambda path, user:{"synthetic":True})
+    if mutation:
+        with pytest.raises(host.HostAuthorizationError):
+            host._production_compose_bridge(actual, expected, manifest)
+    else:
+        assert host._production_compose_bridge(actual, expected, manifest) == [
+            {"source":str(secret), "target":"/run/secrets/reader.env", "read_only":True}]
+
+
+@pytest.mark.parametrize("mutation", [None, "image", "commit", "source", "record-hash", "record-signature", "manifest", "source-root"])
+def test_host_consumes_real_signed_candidate_record(tmp_path, monkeypatch, mutation):
+    from datetime import datetime, timedelta, timezone
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("record_test_fixtures", Path(__file__).with_name("test_candidate_validation_record.py"))
+    helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
+    private = Ed25519PrivateKey.generate()
+    value = helpers.envelope(private)
+    now = datetime.now(timezone.utc)
+    value["payload"].update(issued_at=(now-timedelta(seconds=1)).isoformat(), expires_at=(now+timedelta(hours=1)).isoformat())
+    unsigned = {k:v for k,v in value.items() if k != "signature"}
+    value["signature"] = base64.b64encode(private.sign(helpers.record.canonical(unsigned))).decode()
+    raw = helpers.record.canonical(value)
+    record_file = tmp_path / "record.json"; record_file.write_bytes(raw)
+    trust_file = tmp_path / "trust.json"; trust_file.write_text(json.dumps(helpers.trust(private)), encoding="utf-8")
+    evidence = value["payload"]["evidence"]
+    binding = copy.deepcopy(evidence["binding"])
+    expected = policy("production")
+    expected.update(schema_version="host-runtime-policy/3", candidate_scope=None,
+                    approved_source_root=str(host.SOURCE_ROOT), approved_commit=binding["commit"], approved_tree=binding["tree"],
+                    image_id=evidence["image_id"], runtime_manifest_path="/app/02_configs/runtime.json",
+                    runtime_manifest_sha256=binding["source_sha256"]["02_configs/runtime.json"],
+                    candidate_record={"path":str(record_file), "sha256":hashlib.sha256(raw).hexdigest()})
+    manifest = {"project_id":expected["project_id"]}
+    entry = SimpleNamespace(require_source=lambda *args:(binding["commit"], binding["tree"]))
+    engine = SimpleNamespace(require_builder=lambda:None, _project=lambda *args:{"runtime_contract":"02_configs/runtime.json"},
+                             source_contract=lambda *args:({},manifest,binding), validate_source_compose=lambda *args:{})
+    original_loader = host._contract_module
+    def load(path, name):
+        if str(path).endswith("pre_release_runtime.py"): return entry
+        if str(path).endswith("validate_target_runtime.py"): return engine
+        return original_loader(path, name)
+    monkeypatch.setattr(host, "_contract_module", load)
+    monkeypatch.setattr(host, "_protected_path", lambda path, **kwargs:path)
+    monkeypatch.setattr(host, "TRUST_CONFIG_PATH", trust_file)
+    if mutation == "image": expected["image_id"] = IMAGE
+    elif mutation == "commit": expected["approved_commit"] = "0"*40
+    elif mutation == "source": binding["source_sha256"]["02_configs/runtime.json"] = "0"*64
+    elif mutation == "record-hash": expected["candidate_record"]["sha256"] = "0"*64
+    elif mutation == "record-signature":
+        value["signature"] = base64.b64encode(b"x"*64).decode()
+        record_file.write_bytes(helpers.record.canonical(value))
+        expected["candidate_record"]["sha256"] = hashlib.sha256(record_file.read_bytes()).hexdigest()
+    elif mutation == "manifest": expected["runtime_manifest_sha256"] = "0"*64
+    elif mutation == "source-root": expected["approved_source_root"] = "/different/source"
+    if mutation:
+        with pytest.raises(ValueError): host._validated_candidate_record(expected)
+    else:
+        assert host._validated_candidate_record(expected) == (value["payload"], manifest)
 
 
 def test_v2_issuer_requires_protected_authority_source_before_docker_observation(tmp_path, monkeypatch):
