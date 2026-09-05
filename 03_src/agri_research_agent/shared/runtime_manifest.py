@@ -7,12 +7,13 @@ host authorization consumers.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import re
 from types import MappingProxyType
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 
 class ManifestValidationError(ValueError):
@@ -21,6 +22,9 @@ class ManifestValidationError(ValueError):
 
 _V1 = "runtime-manifest/1"
 _V2 = "runtime-manifest/2"
+_V3 = "runtime-manifest/3"
+_ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
+_EXECUTION_GRANT_ROOT = "/run/market-data-grants"
 _IDENTITY = re.compile(r"[a-z][a-z0-9-]*\Z")
 _SOURCE_ROLES = frozenset({"entrypoint", "initialization", "runtime_configuration"})
 _REQUIRED_PROBES = frozenset({
@@ -37,6 +41,7 @@ _V1_FIELDS = frozenset({
     "preview_policy", "validation_probes",
 })
 _V2_FIELDS = _V1_FIELDS | {"identity_root_role", "initialization_commands", "source_inputs"}
+_V3_FIELDS = _V2_FIELDS | {"environment_bindings", "forbidden_environment", "candidate_runtime_inputs"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +108,9 @@ class RuntimeManifest:
     identity_root_role: str | None
     initialization_commands: tuple[InitializationCommand, ...]
     source_inputs: tuple[SourceInput, ...]
+    environment_bindings: tuple[Mapping[str, str], ...] = ()
+    forbidden_environment: tuple[str, ...] = ()
+    candidate_runtime_inputs: tuple[Mapping[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a fresh JSON-shaped copy for consumers that need mappings."""
@@ -137,7 +145,7 @@ class RuntimeManifest:
             "preview_policy": dict(self.preview_policy),
             "validation_probes": list(self.validation_probes),
         }
-        if self.schema_version == _V2:
+        if self.schema_version in (_V2, _V3):
             result.update({
                 "identity_root_role": self.identity_root_role,
                 "initialization_commands": [
@@ -147,6 +155,12 @@ class RuntimeManifest:
                 "source_inputs": [
                     {"path": item.path, "role": item.role} for item in self.source_inputs
                 ],
+            })
+        if self.schema_version == _V3:
+            result.update({
+                "environment_bindings": [dict(item) for item in self.environment_bindings],
+                "forbidden_environment": list(self.forbidden_environment),
+                "candidate_runtime_inputs": [dict(item) for item in self.candidate_runtime_inputs],
             })
         return result
 
@@ -351,6 +365,145 @@ def _parse_v2(raw: dict[str, object], manifest: RuntimeManifest) -> RuntimeManif
     )
 
 
+def _environment_name(value: object) -> str:
+    if not isinstance(value, str) or not _ENVIRONMENT_NAME.fullmatch(value):
+        _fail("invalid environment variable name")
+    return value
+
+
+def _relative_runtime_path(value: object, *, allow_root: bool = False) -> str:
+    if value == "" and allow_root:
+        return ""
+    path = _source_path(value, "invalid relative runtime input path")
+    if any(part.casefold() in {".git", ".market-data-runtime.json"} for part in path.split("/")):
+        _fail("runtime input overlaps identity material")
+    return path
+
+
+def _deployment_value(value: object, value_type: object) -> str:
+    value = _string(value, "invalid candidate environment value", strict_controls=True)
+    if len(value) > 2048:
+        _fail("candidate environment value is too long")
+    if value_type == "nonempty":
+        if not re.fullmatch(r"[A-Za-z0-9_./:+-]+", value):
+            _fail("candidate deployment token is invalid")
+        return value
+    if value_type not in ("http_url", "https_url"):
+        _fail("unsupported deployment environment value type")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        valid = (parsed.scheme in ({"http", "https"} if value_type == "http_url" else {"https"})
+                 and parsed.hostname and parsed.username is None and parsed.password is None
+                 and not parsed.query and not parsed.fragment and not any(char.isspace() for char in value)
+                 and "\\" not in value and (port is None or 0 < port < 65536))
+    except ValueError:
+        valid = False
+    if not valid:
+        _fail("invalid candidate deployment URL")
+    return value
+
+
+def _parse_v3(raw: dict[str, object], base: RuntimeManifest) -> RuntimeManifest:
+    """Validate declarations only; consumers must still prove bytes and instances."""
+    roots = {item.role: item for item in base.runtime_roots}
+    identity = roots[base.identity_root_role].container_path
+    # Unlike v2, candidate seeding uses one explicit identity-root hierarchy.
+    if any(item.container_path != identity and not item.container_path.startswith(identity + "/")
+           for item in base.runtime_roots):
+        _fail("v3 runtime roots must be inside identity root")
+    root_paths = [item.container_path.casefold() for item in base.runtime_roots]
+    if len(root_paths) != len(set(root_paths)):
+        _fail("runtime root has a case alias")
+    if any(path == _EXECUTION_GRANT_ROOT or path.startswith(_EXECUTION_GRANT_ROOT + "/")
+           or _EXECUTION_GRANT_ROOT.startswith(path + "/") for path in root_paths):
+        _fail("runtime root overlaps reserved execution grant namespace")
+    required = {_environment_name(name) for name in base.required_environment}
+    forbidden = _strings(raw["forbidden_environment"], "invalid forbidden environment")
+    for name in forbidden:
+        _environment_name(name)
+    if required.intersection(forbidden):
+        _fail("required and forbidden environment overlap")
+    bindings = raw["environment_bindings"]
+    if not isinstance(bindings, list):
+        _fail("environment bindings must be an explicit list")
+    names: set[str] = set()
+    parsed_bindings = []
+    shapes = {
+        "literal": {"name", "kind", "value"},
+        "runtime_path": {"name", "kind", "role", "relative_path"},
+        "deployment": {"name", "kind", "value_type", "candidate_value"},
+        "execution_grant": {"name", "kind"},
+    }
+    for item in bindings:
+        if not isinstance(item, dict) or not isinstance(item.get("kind"), str):
+            _fail("invalid environment binding")
+        kind = item["kind"]
+        if kind not in shapes or set(item) != shapes[kind]:
+            _fail("environment binding fields incomplete or unknown")
+        name = _environment_name(item["name"])
+        if (name == "MARKET_DATA_EXECUTION_GRANT") != (kind == "execution_grant"):
+            _fail("execution grant environment must use reserved binding")
+        if name in names:
+            _fail("duplicate environment binding")
+        names.add(name)
+        if kind == "literal":
+            _string(item["value"], "invalid literal environment value", strict_controls=True)
+            if len(item["value"]) > 2048:
+                _fail("literal environment value is too long")
+        elif kind == "runtime_path":
+            role = _identity(item["role"], "invalid environment runtime role")
+            if role not in roots:
+                _fail("environment references unknown runtime role")
+            _relative_runtime_path(item["relative_path"], allow_root=True)
+        elif kind == "deployment":
+            _deployment_value(item["candidate_value"], item["value_type"])
+        parsed_bindings.append(MappingProxyType(dict(item)))
+    if names != required:
+        _fail("environment bindings must cover exactly required environment")
+    if "MARKET_DATA_EXECUTION_GRANT" not in names:
+        _fail("execution grant environment binding is required")
+    seeds = raw["candidate_runtime_inputs"]
+    if not isinstance(seeds, list):
+        _fail("candidate runtime inputs must be an explicit list")
+    build = base.build
+    image_inputs = {path.casefold() for path in (
+        build.dockerfile, build.dockerignore, *build.dependency_contracts,
+        *build.compose_sources, *(item.path for item in base.source_inputs))}
+    sources: set[str] = set()
+    targets: set[str] = set()
+    parsed_seeds = []
+    for item in seeds:
+        if not isinstance(item, dict) or set(item) != {"source_path", "sha256", "role", "relative_path"}:
+            _fail("invalid candidate runtime input")
+        source = _source_path(item["source_path"], "invalid candidate input source")
+        if not source.startswith("08_tests/fixtures/") or source == "08_tests/fixtures/":
+            _fail("candidate input must be an exact test fixture file")
+        if source.casefold() in sources | image_inputs:
+            _fail("candidate input duplicates source or image input")
+        sources.add(source.casefold())
+        if not isinstance(item["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"]):
+            _fail("invalid candidate input SHA256")
+        role = _identity(item["role"], "invalid candidate input role")
+        if role not in roots or role == base.identity_root_role or roots[role].access != "ro":
+            _fail("candidate input must name a read-only child runtime role")
+        relative = _relative_runtime_path(item["relative_path"])
+        target = (roots[role].container_path + "/" + relative).casefold()
+        if any(target == other or target.startswith(other + "/") or other.startswith(target + "/")
+               for other in targets):
+            _fail("candidate input targets overlap")
+        for other in base.runtime_roots:
+            other_path = other.container_path.casefold()
+            if other.role != role and (other_path == target or other_path.startswith(target + "/")
+                    or (target.startswith(other_path + "/")
+                        and other_path.startswith(roots[role].container_path.casefold() + "/"))):
+                _fail("candidate input crosses another runtime mount")
+        targets.add(target)
+        parsed_seeds.append(MappingProxyType(dict(item)))
+    return replace(base, schema_version=_V3, environment_bindings=tuple(parsed_bindings),
+                   forbidden_environment=forbidden, candidate_runtime_inputs=tuple(parsed_seeds))
+
+
 def parse_runtime_manifest(raw: object) -> RuntimeManifest:
     """Parse a primitive JSON object into an immutable manifest.
 
@@ -365,9 +518,9 @@ def parse_runtime_manifest(raw: object) -> RuntimeManifest:
     if not primitive:
         _fail("runtime manifest must be a primitive JSON object")
     version = raw.get("schema_version")
-    if version not in (_V1, _V2):
+    if version not in (_V1, _V2, _V3):
         _fail("unsupported runtime manifest schema")
-    expected = _V1_FIELDS if version == _V1 else _V2_FIELDS
+    expected = _V1_FIELDS if version == _V1 else (_V2_FIELDS if version == _V2 else _V3_FIELDS)
     if set(raw) != expected:
         _fail("runtime manifest fields incomplete or unknown")
     if raw["runtime_target"] != "production_container" or raw["identity_kind"] != "oci_container":
@@ -395,7 +548,10 @@ def parse_runtime_manifest(raw: object) -> RuntimeManifest:
         text_fields["secret_references"], text_fields["required_executables"],
         text_fields["required_python_modules"], production, preview, probes, None, (), (),
     )
-    return _parse_v2(raw, manifest) if version == _V2 else manifest
+    if version == _V1:
+        return manifest
+    parsed = _parse_v2(raw, manifest)
+    return _parse_v3(raw, parsed) if version == _V3 else parsed
 
 
 def _reject_constant(value: str) -> object:
