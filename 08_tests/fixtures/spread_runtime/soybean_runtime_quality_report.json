@@ -1,0 +1,19 @@
+{
+  "transaction": "fixture_seed_complete_release",
+  "release_id": "candidate-fixture-historical-002",
+  "record_count_consistent": true,
+  "key_sets_consistent": true,
+  "parameter_snapshot_present": true,
+  "parameter_hash_valid": true,
+  "result_parameter_identity_consistent": true,
+  "mapping_snapshot_present": true,
+  "mapping_hash_valid": true,
+  "result_mapping_identity_consistent": true,
+  "contract_override_snapshot_present": true,
+  "contract_override_hash_valid": true,
+  "result_contract_override_identity_consistent": true,
+  "source_kind": "synthetic-candidate-only",
+  "fatal": [],
+  "warning": [],
+  "final_status": "passed"
+}

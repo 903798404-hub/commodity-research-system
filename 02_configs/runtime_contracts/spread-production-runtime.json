@@ -6,13 +6,13 @@
   "runtime_target": "production_container",
   "identity_kind": "oci_container",
   "build": {
-    "dockerfile": "Dockerfile",
+    "dockerfile": "09_deploy/spread_runtime/Dockerfile.spread-runtime",
     "dockerignore": ".dockerignore",
     "dependency_contracts": [
       "requirements.txt"
     ],
     "compose_sources": [
-      "docker-compose.yml"
+      "09_deploy/spread_runtime/compose.yml"
     ]
   },
   "entrypoint": [
@@ -68,6 +68,11 @@
       "role": "logs",
       "container_path": "/runtime/10_logs",
       "access": "rw"
+    },
+    {
+      "role": "capture-snapshots",
+      "container_path": "/runtime/capture-snapshots",
+      "access": "rw"
     }
   ],
   "required_mounts": [
@@ -115,6 +120,11 @@
       "role": "logs",
       "container_path": "/runtime/10_logs",
       "read_only": false
+    },
+    {
+      "role": "capture-snapshots",
+      "container_path": "/runtime/capture-snapshots",
+      "read_only": false
     }
   ],
   "required_environment": [
@@ -131,9 +141,12 @@
     "IMPORT_PROFIT_INTRADAY_ENVIRONMENT",
     "IMPORT_PROFIT_CONFIG_PATH",
     "USDA_DASHBOARD_URL",
-    "OIL_WORLD_DASHBOARD_URL"
+    "OIL_WORLD_DASHBOARD_URL",
+    "TMPDIR"
   ],
-  "secret_references": [],
+  "secret_references": [
+    "tankan-reader"
+  ],
   "required_executables": [
     "python",
     "streamlit"
@@ -177,12 +190,13 @@
   "identity_root_role": "identity",
   "initialization_commands": [
     {
-      "name": "domestic-spread-readonly-initialization",
+      "name": "spread-runtime-readonly-initialization",
       "argv": [
         "python",
         "-B",
-        "-c",
-        "from agri_research_agent.market_data.activated_runtime import resolve_domestic_spread_path; from agri_research_agent.application.domestic_spreads import load_domestic_spread_database; p=resolve_domestic_spread_path('/runtime/01_data'); data=load_domestic_spread_database(p); assert not data.empty, 'Domestic Spread runtime is empty'"
+        "/app/04_scripts/runtime/spread_runtime_preflight.py",
+        "--identity-kind",
+        "oci_container"
       ]
     }
   ],
@@ -1462,6 +1476,10 @@
     {
       "path": "05_apps/说明.md",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/runtime/spread_runtime_preflight.py",
+      "role": "initialization"
     }
   ],
   "environment_bindings": [
@@ -1543,6 +1561,12 @@
       "kind": "deployment",
       "value_type": "http_url",
       "candidate_value": "http://127.0.0.1:9/oil-world"
+    },
+    {
+      "name": "TMPDIR",
+      "kind": "runtime_path",
+      "role": "logs",
+      "relative_path": ""
     }
   ],
   "forbidden_environment": [
@@ -1553,5 +1577,84 @@
     "IMPORT_PROFIT_INTRADAY_BUSINESS_DATE",
     "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH"
   ],
-  "candidate_runtime_inputs": []
+  "candidate_runtime_inputs": [
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/public_current.json",
+      "sha256": "1ac9f33f5a13bca0edf073bc5ef83739c03eaa9e22377eebad5fa6c196986797",
+      "role": "data",
+      "relative_path": "public-data-server-store/current.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/public_release_manifest.json",
+      "sha256": "c5ca33fdac3fa52f1b0ca0ade2efe0f835a8e4519bf2c57aa08ae277c9fd0ba6",
+      "role": "data",
+      "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/manifest.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/domestic_spread_database.parquet",
+      "sha256": "c66f6e2ae9fc2c4f9c5c8e43b7a1781aa6a4693fe56270f74e5cb94e23f134f4",
+      "role": "data",
+      "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/data/consumer-artifacts/domestic-spread/historical_spread_database.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_release_index.json",
+      "sha256": "0545c2b2e3f1aa02d4073f0bcedddfb4675667f9e616e4820b0b9e720831484f",
+      "role": "history",
+      "relative_path": "release_index.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_release_manifest.json",
+      "sha256": "e6590ddb92498dbe09a473dfc88d08144c57b44602ec2add145d1c965b172ac8",
+      "role": "history",
+      "relative_path": "releases/candidate-fixture-historical-002/manifest.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_business_keys.parquet",
+      "sha256": "9604356f8f3165e49a7f4218b1e88d72db4d987304d94e5682485203d4429d93",
+      "role": "history",
+      "relative_path": "releases/candidate-fixture-historical-002/soybean_business_keys.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_market_snapshots.parquet",
+      "sha256": "9957bc5786477720e08955d962d2da2c5d1516a84efa8fe312b28849814186f0",
+      "role": "history",
+      "relative_path": "releases/candidate-fixture-historical-002/soybean_market_snapshots.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_net_crush_results.parquet",
+      "sha256": "0d16d5b5ae53acc765e3bd7468e0a2aeda0170064231d5f371d8fac90c07fdcb",
+      "role": "history",
+      "relative_path": "releases/candidate-fixture-historical-002/soybean_net_crush_results.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_quality_report.json",
+      "sha256": "be619195a96cc7e9847b789d539dddf812fa127c3e7b760399da005f0daa8a71",
+      "role": "history",
+      "relative_path": "releases/candidate-fixture-historical-002/quality_report.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_runtime_manual_cnf_quotes.parquet",
+      "sha256": "af71d5b78cd21ee8b3fb86a2450ee5a57965e322676f20f1a8784d72a7f6b618",
+      "role": "history",
+      "relative_path": "releases/candidate-fixture-historical-002/manual_cnf_quotes.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/historical_cnf_cache.parquet",
+      "sha256": "b01ba6383095c1695b3492e5908a81fb6030e8ca80433a94b93b7ed91621c56e",
+      "role": "cnf",
+      "relative_path": "historical_cnf_cache.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/shared_intraday_snapshot_manifest.json",
+      "sha256": "42eb2929106073449f5744dee42b1993b9e3305a00f72c01b3946a02434efa23",
+      "role": "snapshots",
+      "relative_path": "releases/2026-08-31-PM/manifest.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/shared_intraday_snapshot_quotes.json",
+      "sha256": "52783a7e445da746efb479c64d02d3019d26d7f66bd878cd3c125e30ce0b7f99",
+      "role": "snapshots",
+      "relative_path": "releases/2026-08-31-PM/quotes.json"
+    }
+  ]
 }

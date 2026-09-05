@@ -1,0 +1,9 @@
+{
+  "schema_version": "1",
+  "generation": 1,
+  "current_release_id": "candidate-fixture-historical-002",
+  "previous_release_id": null,
+  "updated_at": "2026-08-31T07:30:00Z",
+  "index_reason": "bootstrap_history",
+  "current_manifest_sha256": "E6590DDB92498DBE09A473DFC88D08144C57B44602EC2ADD145D1C965B172AC8"
+}

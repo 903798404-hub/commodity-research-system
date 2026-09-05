@@ -1,0 +1,321 @@
+{
+  "schema_version": "1",
+  "runtime_contract_version": "1",
+  "release_id": "candidate-fixture-historical-002",
+  "parent_release_id": null,
+  "release_reason": "fixture_seed_complete_release",
+  "generation": 1,
+  "created_at": "2026-08-31T07:30:00Z",
+  "calculated_at": "2026-08-31T07:30:00Z",
+  "record_count": 2,
+  "success_count": 2,
+  "incomplete_count": 0,
+  "date_range": [
+    "2026-08-31",
+    "2026-08-31"
+  ],
+  "origin_counts": {
+    "brazil": 1,
+    "us_gulf": 1
+  },
+  "missing_reason_counts": {},
+  "manual_cnf_exists": true,
+  "manual_cnf_record_count": 1,
+  "manual_cnf_sha256": "AF71D5B78CD21EE8B3FB86A2450EE5A57965E322676F20F1A8784D72A7F6B618",
+  "config": {
+    "filename": "import_profit_soybean.yaml",
+    "size_bytes": 9203,
+    "sha256": "D63DAF468E71426C0B94ADE098BA0E575863F0C3846514E26D6CA761B9040055"
+  },
+  "parameter_snapshot": {
+    "snapshot_schema": "soybean-import-profit-parameters/1",
+    "commodity": "soybean",
+    "default_parameters": {
+      "meal_yield": 0.795,
+      "oil_yield": 0.19,
+      "cents_per_bushel_to_usd_per_tonne": 0.367437,
+      "tariff_rate": 0.03,
+      "vat_rate": 0.09,
+      "port_charge_cny_per_tonne": 50.0,
+      "processing_fee_cny_per_tonne": 150.0,
+      "additional_fees_cny_per_tonne": 0.0
+    },
+    "parameters_by_origin": {
+      "argentina": {
+        "meal_yield": 0.795,
+        "oil_yield": 0.19,
+        "cents_per_bushel_to_usd_per_tonne": 0.367437,
+        "tariff_rate": 0.03,
+        "vat_rate": 0.09,
+        "port_charge_cny_per_tonne": 50.0,
+        "processing_fee_cny_per_tonne": 150.0,
+        "additional_fees_cny_per_tonne": 0.0
+      },
+      "brazil": {
+        "meal_yield": 0.795,
+        "oil_yield": 0.19,
+        "cents_per_bushel_to_usd_per_tonne": 0.367437,
+        "tariff_rate": 0.03,
+        "vat_rate": 0.09,
+        "port_charge_cny_per_tonne": 50.0,
+        "processing_fee_cny_per_tonne": 150.0,
+        "additional_fees_cny_per_tonne": 0.0
+      },
+      "us_gulf": {
+        "meal_yield": 0.795,
+        "oil_yield": 0.19,
+        "cents_per_bushel_to_usd_per_tonne": 0.367437,
+        "tariff_rate": 0.03,
+        "vat_rate": 0.09,
+        "port_charge_cny_per_tonne": 50.0,
+        "processing_fee_cny_per_tonne": 150.0,
+        "additional_fees_cny_per_tonne": 0.0
+      },
+      "us_pnw": {
+        "meal_yield": 0.795,
+        "oil_yield": 0.19,
+        "cents_per_bushel_to_usd_per_tonne": 0.367437,
+        "tariff_rate": 0.03,
+        "vat_rate": 0.09,
+        "port_charge_cny_per_tonne": 50.0,
+        "processing_fee_cny_per_tonne": 150.0,
+        "additional_fees_cny_per_tonne": 0.0
+      }
+    }
+  },
+  "parameter_hash": "8EDB152C90ABE5FDE8473BA44EC62608018D0AA5C0FC3E4B07428555E16BC710",
+  "mapping_snapshot": {
+    "snapshot_schema": "soybean-import-profit-contract-mapping/1",
+    "commodity": "soybean",
+    "contract_year_expression": "shipment_year + year_offset",
+    "code_policy": "month_and_year_offset_only",
+    "rows": [
+      {
+        "shipment_month": 1,
+        "cbot": {
+          "contract_month": 1,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 2,
+        "cbot": {
+          "contract_month": 3,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 3,
+        "cbot": {
+          "contract_month": 3,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 4,
+        "cbot": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 5,
+        "cbot": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 6,
+        "cbot": {
+          "contract_month": 7,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 7,
+        "cbot": {
+          "contract_month": 7,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 8,
+        "cbot": {
+          "contract_month": 9,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 5,
+          "year_offset": 0
+        },
+        "soyoil": {
+          "contract_month": 5,
+          "year_offset": 0
+        }
+      },
+      {
+        "shipment_month": 9,
+        "cbot": {
+          "contract_month": 9,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 1,
+          "year_offset": 1
+        },
+        "soyoil": {
+          "contract_month": 1,
+          "year_offset": 1
+        }
+      },
+      {
+        "shipment_month": 10,
+        "cbot": {
+          "contract_month": 11,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 1,
+          "year_offset": 1
+        },
+        "soyoil": {
+          "contract_month": 1,
+          "year_offset": 1
+        }
+      },
+      {
+        "shipment_month": 11,
+        "cbot": {
+          "contract_month": 11,
+          "year_offset": 0
+        },
+        "soymeal": {
+          "contract_month": 1,
+          "year_offset": 1
+        },
+        "soyoil": {
+          "contract_month": 1,
+          "year_offset": 1
+        }
+      },
+      {
+        "shipment_month": 12,
+        "cbot": {
+          "contract_month": 1,
+          "year_offset": 1
+        },
+        "soymeal": {
+          "contract_month": 1,
+          "year_offset": 1
+        },
+        "soyoil": {
+          "contract_month": 1,
+          "year_offset": 1
+        }
+      }
+    ]
+  },
+  "mapping_hash": "40F6E6BBCA8A55669DF41D323D1994884BC274F4256A47B5AD404495FE090F30",
+  "contract_override_snapshot": {
+    "snapshot_schema": "soybean-import-profit-contract-override/1",
+    "commodity": "soybean",
+    "enabled": false,
+    "rules": []
+  },
+  "contract_override_hash": "D5ED83B5A7470A126AD064ED11857EDF552D840B2F446190CCD3168C19E2A6C1",
+  "output_files": {
+    "soybean_business_keys.parquet": {
+      "filename": "soybean_business_keys.parquet",
+      "size_bytes": 2353,
+      "sha256": "9604356F8F3165E49A7F4218B1E88D72DB4D987304D94E5682485203D4429D93",
+      "record_count": 2,
+      "schema_fingerprint": "93FCAF288BAB1B681DAD20133C444BD714271C838EE950D1FD1EB4F88FDD7518"
+    },
+    "soybean_market_snapshots.parquet": {
+      "filename": "soybean_market_snapshots.parquet",
+      "size_bytes": 22559,
+      "sha256": "9957BC5786477720E08955D962D2DA2C5D1516A84EFA8FE312B28849814186F0",
+      "record_count": 2,
+      "schema_fingerprint": "C233C9F8505929BEF7BF22D85E5AF870F3CAFF349C0DE5E233ECA1BC6D105B3D"
+    },
+    "soybean_net_crush_results.parquet": {
+      "filename": "soybean_net_crush_results.parquet",
+      "size_bytes": 6347,
+      "sha256": "0D16D5B5AE53ACC765E3BD7468E0A2AEDA0170064231D5F371D8FAC90C07FDCB",
+      "record_count": 2,
+      "schema_fingerprint": "A98CDEC0B0A8DB1E6A31D1484153C3FF96E4A1ED7CECA1B3EC48FF57F957A3EC"
+    },
+    "manual_cnf_quotes.parquet": {
+      "filename": "manual_cnf_quotes.parquet",
+      "size_bytes": 2882,
+      "sha256": "AF71D5B78CD21EE8B3FB86A2450EE5A57965E322676F20F1A8784D72A7F6B618",
+      "record_count": 1,
+      "schema_fingerprint": "6495E179DC360026D63E3750A1B2BDC6772E7FE935B10F35C9FC7820DC5DDDB2"
+    },
+    "quality_report.json": {
+      "filename": "quality_report.json",
+      "size_bytes": 648,
+      "sha256": "BE619195A96CC7E9847B789D539DDDF812FA127C3E7B760399DA005F0DAA8A71",
+      "record_count": null,
+      "schema_fingerprint": null
+    }
+  },
+  "quality_report_filename": "quality_report.json"
+}

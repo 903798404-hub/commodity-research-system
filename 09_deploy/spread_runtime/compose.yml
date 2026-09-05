@@ -1,0 +1,92 @@
+name: market-data
+services:
+  spread-dashboard:
+    image: ${SPREAD_IMAGE:?SPREAD_IMAGE is required}
+    build:
+      context: .
+      dockerfile: 09_deploy/spread_runtime/Dockerfile.spread-runtime
+    container_name: spread-dashboard
+    entrypoint:
+    - streamlit
+    - run
+    - 05_apps/streamlit_app.py
+    - --server.address=0.0.0.0
+    - --server.port=8501
+    working_dir: /app
+    user: 65532:65532
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    ports:
+    - 8501:8501
+    environment:
+      MARKET_DATA_EXECUTION_GRANT: /run/market-data-grants/grant.json
+      PUBLIC_MARKET_DATA_RUNTIME_ROOT: /runtime/01_data
+      PUBLIC_DATA_SERVER_STORE_ROOT: /runtime/01_data/public-data-server-store
+      IMPORT_PROFIT_RUNTIME_ROOT: /runtime/import-profit/history
+      IMPORT_PROFIT_INTRADAY_RESULT_ROOT: /runtime/import-profit/results
+      IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT: /runtime/import-profit/snapshots
+      IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH: /runtime/import-profit/cnf/historical_cnf_cache.parquet
+      HOME: /runtime/06_outputs
+      MPLCONFIGDIR: /runtime/10_logs/matplotlib
+      IMPORT_PROFIT_INTRADAY_PAGE_MODE: STRICT_RUNTIME
+      IMPORT_PROFIT_INTRADAY_ENVIRONMENT: FORMAL
+      IMPORT_PROFIT_CONFIG_PATH: /app/02_configs/import_profit_soybean.yaml
+      USDA_DASHBOARD_URL: ${USDA_DASHBOARD_URL:?USDA_DASHBOARD_URL is required}
+      OIL_WORLD_DASHBOARD_URL: ${OIL_WORLD_DASHBOARD_URL:?OIL_WORLD_DASHBOARD_URL
+        is required}
+      TMPDIR: /runtime/10_logs
+    volumes:
+    - type: bind
+      source: ${SPREAD_IDENTITY_ROOT:?SPREAD_IDENTITY_ROOT is required}
+      target: /runtime
+      read_only: true
+    - type: bind
+      source: ${SPREAD_DATA_ROOT:?SPREAD_DATA_ROOT is required}
+      target: /runtime/01_data
+      read_only: true
+    - type: bind
+      source: ${WEATHER_RUNTIME_CURRENT_DIR:?WEATHER_RUNTIME_CURRENT_DIR is required}
+      target: /runtime/weather
+      read_only: true
+    - type: bind
+      source: ${SPREAD_HISTORY_ROOT:?SPREAD_HISTORY_ROOT is required}
+      target: /runtime/import-profit/history
+      read_only: true
+    - type: bind
+      source: ${SPREAD_SNAPSHOT_ROOT:?SPREAD_SNAPSHOT_ROOT is required}
+      target: /runtime/import-profit/snapshots
+      read_only: true
+    - type: bind
+      source: ${SPREAD_RESULT_ROOT:?SPREAD_RESULT_ROOT is required}
+      target: /runtime/import-profit/results
+      read_only: true
+    - type: bind
+      source: ${SPREAD_CNF_ROOT:?SPREAD_CNF_ROOT is required}
+      target: /runtime/import-profit/cnf
+      read_only: true
+    - type: bind
+      source: ${SPREAD_OUTPUT_ROOT:?SPREAD_OUTPUT_ROOT is required}
+      target: /runtime/06_outputs
+      read_only: false
+    - type: bind
+      source: ${SPREAD_LOG_ROOT:?SPREAD_LOG_ROOT is required}
+      target: /runtime/10_logs
+      read_only: false
+    - type: bind
+      source: ${SPREAD_SNAPSHOT_ROOT:?SPREAD_SNAPSHOT_ROOT is required}
+      target: /runtime/capture-snapshots
+      read_only: false
+    - type: bind
+      source: ${SPREAD_GRANT_ROOT:?SPREAD_GRANT_ROOT is required}
+      target: /run/market-data-grants
+      read_only: true
+    secrets:
+    - source: tankan-reader
+      target: /run/secrets/tankan.env
+    restart: unless-stopped
+secrets:
+  tankan-reader:
+    file: ${TANKAN_SECRET_FILE:?TANKAN_SECRET_FILE is required}
