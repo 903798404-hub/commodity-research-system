@@ -22,7 +22,6 @@ from agri_research_agent.import_profit.runtime_store import (  # noqa: E402
 )
 from agri_research_agent.market_data.activated_runtime import resolve_domestic_spread_path  # noqa: E402
 from agri_research_agent.market_data.intraday import (  # noqa: E402
-    IntradaySnapshotNotFoundError,
     MarketSession,
     load_intraday_snapshot,
     load_latest_intraday_snapshot,
@@ -90,6 +89,23 @@ def initialize_strict_page(args, snapshot_root: Path, cache: Path) -> None:
         raise ValueError("STRICT_RUNTIME page initialization reported an error or warning")
 
 
+def load_formal_preflight_snapshot(snapshot_root: Path):
+    """Read existing sealed sessions; a valid empty store needs no capture."""
+    if not snapshot_root.is_dir():
+        raise ValueError("snapshot store is unavailable")
+    releases = snapshot_root / "releases"
+    if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
+        raise ValueError("snapshot releases directory is invalid")
+    snapshots = []
+    for session in (MarketSession.AM, MarketSession.PM):
+        if any(releases.glob(f"????-??-??-{session.value}")):
+            # Do not catch NotFound here: an existing incomplete release is
+            # invalid, whereas an absent session is normal before first capture.
+            snapshots.append(load_latest_intraday_snapshot(
+                snapshot_root, session, expected_environment="FORMAL"))
+    return max(snapshots, key=lambda item: (item.business_date, item.session.value), default=None)
+
+
 def readonly_preflight(args) -> dict[str, object]:
     """Read actual mounted consumers without capture, writes, secrets or network."""
     context = initialize_preflight_identity(args)
@@ -120,16 +136,7 @@ def readonly_preflight(args) -> dict[str, object]:
         snapshot = load_intraday_snapshot(snapshot_root, date(2026, 8, 31), MarketSession.PM,
                                           expected_environment="TEST_ISOLATED_NON_PRODUCTION")
     else:
-        snapshots = []
-        for session in (MarketSession.AM, MarketSession.PM):
-            try:
-                snapshots.append(load_latest_intraday_snapshot(snapshot_root, session,
-                                                               expected_environment="FORMAL"))
-            except IntradaySnapshotNotFoundError:
-                continue
-        if not snapshots:
-            raise ValueError("no formal sealed AM/PM snapshot is available")
-        snapshot = max(snapshots, key=lambda item: (item.business_date, item.session.value))
+        snapshot = load_formal_preflight_snapshot(snapshot_root)
     initialize_strict_page(args, snapshot_root, cache)
     return {
         "schema_version": "spread-runtime-preflight/1",
@@ -138,8 +145,9 @@ def readonly_preflight(args) -> dict[str, object]:
         "runtime_id": context.identity.runtime_id,
         "domestic_spread_rows": len(domestic),
         "soybean_release": soybean.release_id,
-        "snapshot_release": snapshot.release_id,
-        "snapshot_business_date": snapshot.business_date.isoformat(),
+        "snapshot_status": "AVAILABLE" if snapshot is not None else "NOT_YET_AVAILABLE",
+        "snapshot_release": snapshot.release_id if snapshot is not None else None,
+        "snapshot_business_date": snapshot.business_date.isoformat() if snapshot is not None else None,
         "capture_executed": False,
         "secret_accessed": False,
         "network_accessed": False,

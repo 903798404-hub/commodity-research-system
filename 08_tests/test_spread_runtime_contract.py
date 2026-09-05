@@ -121,6 +121,47 @@ def test_preflight_rejects_caller_path_overrides():
         preflight.parser().parse_args(["--identity-kind", "oci_container", "--soybean-runtime-root", "/tmp/other"])
 
 
+def test_formal_empty_snapshot_store_initializes_strict_page(mounted_inputs):
+    preflight = load_script("spread_preflight_empty", "04_scripts/runtime/spread_runtime_preflight.py")
+    paths = mounted_inputs
+    empty = paths["capture-snapshots"]
+    assert preflight.load_formal_preflight_snapshot(empty) is None
+    args = SimpleNamespace(soybean_runtime_root=paths["history"], result_root=paths["results"])
+    preflight.initialize_strict_page(args, empty, paths["cnf"] / "historical_cnf_cache.parquet")
+    assert not any(empty.iterdir())
+
+
+def test_formal_pm_snapshot_does_not_require_am(mounted_inputs):
+    from dataclasses import replace
+    from agri_research_agent.market_data.intraday import (
+        MarketSession, _manifest, canonical_json, load_intraday_snapshot,
+    )
+    root = mounted_inputs["snapshots"]
+    snapshot = load_intraday_snapshot(root, date(2026, 8, 31), MarketSession.PM,
+                                     expected_environment="TEST_ISOLATED_NON_PRODUCTION")
+    # A local synthetic unit-test object, never a production data allocation.
+    formal = replace(snapshot, environment="FORMAL")
+    (root / "releases" / snapshot.release_id / "manifest.json").write_bytes(canonical_json(_manifest(formal)))
+    preflight = load_script("spread_preflight_pm", "04_scripts/runtime/spread_runtime_preflight.py")
+    assert preflight.load_formal_preflight_snapshot(root).release_id == snapshot.release_id
+
+
+@pytest.mark.parametrize("invalid", ["missing_root", "invalid_releases", "wrong_environment", "incomplete_release"])
+def test_formal_snapshot_preflight_rejects_invalid_store(mounted_inputs, invalid):
+    from agri_research_agent.market_data.intraday import IntradaySnapshotError
+    root = mounted_inputs["snapshots"]
+    if invalid == "missing_root":
+        root = root / "missing"
+    elif invalid == "invalid_releases":
+        root = mounted_inputs["capture-snapshots"]
+        (root / "releases").write_text("invalid", encoding="utf-8")
+    elif invalid == "incomplete_release":
+        (root / "releases" / "2026-08-31-PM" / "quotes.json").unlink()
+    preflight = load_script("spread_preflight_invalid", "04_scripts/runtime/spread_runtime_preflight.py")
+    with pytest.raises((ValueError, IntradaySnapshotError)):
+        preflight.load_formal_preflight_snapshot(root)
+
+
 def identity_args(cli, monkeypatch, kind):
     identity = SimpleNamespace(runtime_id="test-runtime", marker_sha256="a" * 64)
     monkeypatch.setattr(cli, "load_runtime_identity", lambda _: identity)
