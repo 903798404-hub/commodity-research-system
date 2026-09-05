@@ -145,6 +145,12 @@ PRE_RELEASE_REGISTRATION['capabilities'] += [
 PRE_RELEASE_REGISTRATION['boundary_notes'] += ' Goal D pre-release extension adds only four exact future files and two completion tests; extend the existing target runtime deployability contract document rather than creating a parallel project contract; existing ownership, protected paths, forbidden paths and other projects remain unchanged. The candidate_validation_record parser verifies a typed signed validation artifact, never caller authority. The root-only pre_release_runtime entry must itself run the exact protected clean candidate validator and sign only its successful observed result with the existing candidate-validation trust domain; no CLI imports caller-crafted raw evidence or claims Image ID/probe results. Pre-release consumes that record, revalidates Approved Commit/Tree and source bindings, observes the same immutable image and actual production Compose/environment/mounts, and fails on undeclared differences or drift. Candidate and production rendered Compose identities are recorded separately and checked against the same manifest roles, not equated by pathname or ignored. Reuse existing protected host policy as Approved object and existing production key for execution grants; no new approval-key hierarchy. Production manifest/2 requires policy/3 with validated candidate record; policy/2 remains candidate-only, legacy policy/1 and Git/FULL DAILY remain compatible, execution grant/2 remains unchanged. Host signing rechecks record and actual instance before and after authorization. Record parsing rejects duplicate keys, non-finite values, wrong purpose/domain/signature, revocation, expiry and identity mismatch; protected outputs are exclusive, never overwritten. Registration is not runtime implementation or production approval: no production grant is issued, no deployment/start/capture, no secret access, no business or SEALED mutation, no schedule, FULL DAILY integration or Notification activation. Any later implementation is a new independent shared branch/worktree from this registration on authoritative main.'
 
 # Exact reviewed PM registration delta; no directory or shared ownership grant.
+CONTRACT_SOURCE_ALLOCATION = copy.deepcopy(PRE_RELEASE_REGISTRATION)
+CONTRACT_SOURCE_ALLOCATION['future_owned_paths'] += [
+    '02_configs/runtime_contracts/spread-production-runtime.json']
+CONTRACT_SOURCE_ALLOCATION['boundary_notes'] += ' Production runtime contract bootstrap allocates only 02_configs/runtime_contracts/spread-production-runtime.json as an exact future source-contract file. In a subsequent independent infrastructure branch from approved main, create a valid runtime-manifest/3 for project_id spread-production-runtime-wiring using existing tracked deployment/source inputs. This stage does not own or modify Dockerfile, Compose, business sources or production data and does not claim target container deployability. The infrastructure project remains a library and host-tool project; the future wiring project is not registered under a false runtime target. Before wiring development, a separate dev-governance change must atomically transfer this manifest ownership and register the actual production_container project with its existing valid contract and exact deployment paths. No pending target, missing-contract exception, production approval, deployment, capture, schedule, FULL DAILY integration or Notification activation is authorized by this allocation.'
+
+
 PM_EXISTING_ADDITIONS = [
     '03_src/agri_research_agent/pipelines/import_profit_daily.py',
     '03_src/agri_research_agent/pipelines/import_profit_results.py',
@@ -310,6 +316,12 @@ def registration_baseline():
                 if p['project_id'] == 'public-intraday-runtime' else p
                 for p in expected['projects']
             ]
+            assert current == expected
+            baseline = expected
+        baseline_by_id = {p['project_id']: p for p in baseline['projects']}
+        if baseline_by_id.get('shared-production-infrastructure') == PRE_RELEASE_REGISTRATION:
+            expected = copy.deepcopy(baseline)
+            expected['projects'] = [CONTRACT_SOURCE_ALLOCATION if p['project_id'] == 'shared-production-infrastructure' else p for p in expected['projects']]
             assert current == expected
             baseline = expected
     return baseline
@@ -1165,13 +1177,13 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         expected = copy.deepcopy(old)
         if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
         assert by_id[old['project_id']] == expected
-    assert by_id['shared-production-infrastructure'] == PRE_RELEASE_REGISTRATION
+    assert by_id['shared-production-infrastructure'] == CONTRACT_SOURCE_ALLOCATION
     assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == PRE_RELEASE_REGISTRATION
+    assert project == CONTRACT_SOURCE_ALLOCATION
     assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
     assert not project.get('reserved_paths')
     for path in project['owned_paths'] + project['future_owned_paths']:
@@ -1190,7 +1202,7 @@ def test_production_infrastructure_registration_has_only_exact_new_ownership():
 
 def test_production_grant_contract_registration_is_exact_and_readonly_dependencies():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == PRE_RELEASE_REGISTRATION
+    assert project == CONTRACT_SOURCE_ALLOCATION
     assert project['runtime_target'] == 'library_only'
     assert project['future_owned_paths'][9:11] == [
         '03_src/agri_research_agent/shared/production_grant.py',
@@ -1231,11 +1243,11 @@ def test_deployability_engine_registration_is_exact_and_does_not_grant_scripts_d
 
 def test_pre_release_registration_is_only_four_files_and_two_tests():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == PRE_RELEASE_REGISTRATION
+    assert project == CONTRACT_SOURCE_ALLOCATION
     assert project['runtime_target'] == 'library_only'
-    assert project['future_owned_paths'][:-4] == DEPLOYABILITY_ENGINE_REGISTRATION['future_owned_paths']
+    assert project['future_owned_paths'][:14] == DEPLOYABILITY_ENGINE_REGISTRATION['future_owned_paths']
     assert project['future_required_tests'][:-2] == DEPLOYABILITY_ENGINE_REGISTRATION['future_required_tests']
-    assert project['future_owned_paths'][-4:] == [
+    assert project['future_owned_paths'][14:18] == [
         '09_deploy/runtime_identity/candidate_validation_record.py',
         '04_scripts/runtime/pre_release_runtime.py',
         '08_tests/test_candidate_validation_record.py',
@@ -1245,7 +1257,7 @@ def test_pre_release_registration_is_only_four_files_and_two_tests():
         '08_tests/test_pre_release_runtime.py']
     assert project['forbidden_paths'] == DEPLOYABILITY_ENGINE_REGISTRATION['forbidden_paths']
     assert project['shared_dependencies'] == DEPLOYABILITY_ENGINE_REGISTRATION['shared_dependencies']
-    for path in project['future_owned_paths'][-4:]:
+    for path in project['future_owned_paths'][14:18]:
         assert registry.owns(project, path)
         assert not registry.owns(project, path + '/sibling.py')
         assert not registry.owns(project, path + '/child.py')
@@ -2145,3 +2157,18 @@ def test_public_intraday_runtime_production_registration_is_exact_and_inert():
     assert "04_scripts/capture_public_intraday.py" in project["shared_dependencies"]
     assert "AM_PM_AUTO_EXECUTION=NO" in project["boundary_notes"]
     assert "INTRADAY_FULL_DAILY_DEPENDENCY=NONE" in project["boundary_notes"]
+
+
+def test_spread_contract_allocation_is_one_file_without_production_registration():
+    current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
+    path = '02_configs/runtime_contracts/spread-production-runtime.json'
+    assert project == CONTRACT_SOURCE_ALLOCATION
+    assert project['future_owned_paths'][:-1] == PRE_RELEASE_REGISTRATION['future_owned_paths']
+    assert project['future_owned_paths'][-1] == path
+    for key in PRE_RELEASE_REGISTRATION.keys() - {'future_owned_paths', 'boundary_notes'}:
+        assert project[key] == PRE_RELEASE_REGISTRATION[key]
+    assert 'spread-production-runtime-wiring' not in {p['project_id'] for p in current['projects']}
+    assert registry.owns(project, path)
+    for other in ('02_configs/runtime_contracts/other.json', path + '/child.json',
+                  'Dockerfile', 'docker-compose.yml', '05_apps/streamlit_app.py'):
+        assert not registry.owns(project, other)
