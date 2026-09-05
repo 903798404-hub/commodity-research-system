@@ -22,9 +22,9 @@ SPEC.loader.exec_module(record)
 NOW = datetime(2026, 9, 5, 8, tzinfo=timezone.utc)
 
 
-def evidence():
+def evidence(validator_version=None):
     source = {"02_configs/runtime.json": "a" * 64, "04_scripts/runtime/validate_target_runtime.py": "b" * 64}
-    binding = {"project_id": "demo-runtime", "commit": "c" * 40, "tree": "d" * 40, "source_sha256": source, "validator_version": record._VALIDATOR_VERSION}
+    binding = {"project_id": "demo-runtime", "commit": "c" * 40, "tree": "d" * 40, "source_sha256": source, "validator_version": validator_version or record._VALIDATOR_VERSION}
     return {"schema_version": "target-runtime-evidence/1", "binding": binding, "TARGET_RUNTIME_STATIC_VALIDATION": "PASS", "TARGET_RUNTIME_CONTAINER_VALIDATION": "PASS", "image_id": "sha256:" + "e" * 64, "rendered_compose_sha256": "f" * 64, "builder": {"builder_id": "linux-fixture", "os": "linux", "execution": "isolated"}, "observed_identity": {"image_id": "sha256:" + "e" * 64, "oci_revision": "c" * 40, "git_tree": "d" * 40, "source_sha256": source, "rendered_compose_sha256": "f" * 64, "authorization_role": "candidate_validation", "git_metadata_present": False, "production_volumes_mounted": False}, "probes": {name: "PASS" for name in record._PROBES}}
 
 
@@ -33,8 +33,8 @@ def trust(private, *, domain="candidate_validation", revoked_keys=None, revoked_
     return {"schema_version": "production-runtime-trust/1", "keys": [{"key_id": "candidate-key", "domain": domain, "algorithm": "ed25519", "public_key_base64": public}], "revoked_key_ids": revoked_keys or [], "revoked_grant_ids": revoked_records or []}
 
 
-def envelope(private, *, payload=None):
-    payload = payload or {"record_id": "1" * 32, "purpose": "target-runtime-validation", "authorization_role": "candidate_validation", "issued_at": (NOW - timedelta(minutes=1)).isoformat(), "expires_at": (NOW + timedelta(hours=1)).isoformat(), "evidence": evidence()}
+def envelope(private, *, payload=None, validator_version=None):
+    payload = payload or {"record_id": "1" * 32, "purpose": "target-runtime-validation", "authorization_role": "candidate_validation", "issued_at": (NOW - timedelta(minutes=1)).isoformat(), "expires_at": (NOW + timedelta(hours=1)).isoformat(), "evidence": evidence(validator_version)}
     payload["evidence_sha256"] = hashlib.sha256(record.canonical(payload["evidence"])).hexdigest()
     unsigned = {"schema_version": "candidate-validation-record/1", "algorithm": "ed25519", "key_id": "candidate-key", "payload": payload}
     return {**unsigned, "signature": base64.b64encode(private.sign(record.canonical(unsigned))).decode()}
@@ -89,11 +89,31 @@ def test_record_rejects_security_mutations(mutation):
     elif mutation == "nested_unknown":
         value["payload"]["evidence"]["builder"]["extra"] = True
     elif mutation == "wrong_validator":
-        value["payload"]["evidence"]["binding"]["validator_version"] = "target-runtime-validator/2"
+        value["payload"]["evidence"]["binding"]["validator_version"] = "target-runtime-validator/3"
     if mutation != "wrong_signature":
         resign(value, private)
     with pytest.raises(record.CandidateValidationRecordError):
         record.verify_record(raw(value), selected_trust, now=NOW)
+
+
+def test_v2_validator_binding_is_signed_and_accepted():
+    private = Ed25519PrivateKey.generate()
+    value = envelope(private, validator_version="target-runtime-validator/2")
+    assert record.verify_record(raw(value), trust(private), now=NOW)["evidence"]["binding"]["validator_version"] == "target-runtime-validator/2"
+
+
+def test_v2_record_signature_and_binding_tampering_are_rejected():
+    private = Ed25519PrivateKey.generate()
+    value = envelope(private, validator_version="target-runtime-validator/2")
+    value["signature"] = base64.b64encode(Ed25519PrivateKey.generate().sign(record.canonical({k: v for k, v in value.items() if k != "signature"}))).decode()
+    with pytest.raises(record.CandidateValidationRecordError):
+        record.verify_record(raw(value), trust(private), now=NOW)
+    value = envelope(private, validator_version="target-runtime-validator/2")
+    value["payload"]["evidence"]["binding"]["commit"] = "e" * 40
+    value["payload"]["evidence_sha256"] = hashlib.sha256(record.canonical(value["payload"]["evidence"])).hexdigest()
+    resign(value, private)
+    with pytest.raises(record.CandidateValidationRecordError):
+        record.verify_record(raw(value), trust(private), now=NOW)
 
 
 @pytest.mark.parametrize("text", [

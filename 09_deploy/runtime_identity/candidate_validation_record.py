@@ -39,7 +39,12 @@ _OBSERVED_FIELDS = frozenset({"image_id", "oci_revision", "git_tree", "source_sh
 _TRUST_FIELDS = frozenset({"schema_version", "keys", "revoked_key_ids", "revoked_grant_ids"})
 _TRUST_KEY_FIELDS = frozenset({"key_id", "domain", "algorithm", "public_key_base64"})
 _PROBES = frozenset({"entrypoint_initialization", "runtime_identity", "dependencies", "runtime_paths", "mount_permissions", "missing_grant_rejected", "wrong_commit_rejected", "wrong_tree_rejected", "wrong_image_rejected", "wrong_service_rejected", "wrong_manifest_rejected", "preview_write_rejected", "release_mismatch_rejected"})
+# Keep the historical singular constant for callers that pin the original
+# validator, while explicitly allowing the v2 validator binding in the same
+# signed record schema.  The binding remains an opaque, exact version value;
+# no other versions are accepted.
 _VALIDATOR_VERSION = "target-runtime-validator/1"
+_VALIDATOR_VERSIONS = frozenset({_VALIDATOR_VERSION, "target-runtime-validator/2"})
 
 
 def _fail(message: str) -> None:
@@ -106,7 +111,8 @@ def _validate_evidence(evidence: object) -> None:
     _string(binding["project_id"], "project id", _ID)
     _string(binding["commit"], "candidate commit", _HEX40)
     _string(binding["tree"], "candidate tree", _HEX40)
-    if binding["validator_version"] != _VALIDATOR_VERSION:
+    if (type(binding["validator_version"]) is not str
+            or binding["validator_version"] not in _VALIDATOR_VERSIONS):
         _fail("unsupported validator version")
     source = binding["source_sha256"]
     if type(source) is not dict or not source:

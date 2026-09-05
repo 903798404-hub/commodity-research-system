@@ -21,7 +21,8 @@ from typing import Mapping
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from .production_grant import GrantShapeError, parse_execution_grant_json
+from .production_grant import (GrantShapeError, GrantValidationError,
+                               parse_execution_grant_json, validate_runtime_environment)
 from .runtime_manifest import ManifestValidationError, parse_runtime_manifest
 
 
@@ -313,6 +314,12 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
         if (manifest["schema_version"] != payload["runtime_manifest_schema_version"]
                 or manifest["identity_root_role"] != payload["identity_root_role"]):
             raise ProductionIdentityError("runtime manifest version or identity root mismatch")
+        if manifest["schema_version"] == "runtime-manifest/3":
+            try:
+                validate_runtime_environment(manifest, os.environ, role=role.value,
+                                             grant_path=_runtime_path(request.grant_path))
+            except GrantValidationError as exc:
+                raise ProductionIdentityError("runtime environment violates manifest binding") from exc
     if request.runtime_marker_path.is_symlink():
         raise ProductionIdentityError("runtime marker must not be a symbolic link")
     marker_path = request.runtime_marker_path.resolve(strict=True)

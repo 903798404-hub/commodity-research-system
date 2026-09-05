@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import base64
+from contextlib import nullcontext
 import hashlib
 import io
 import json
@@ -61,6 +62,88 @@ def test_v2_policy_uses_explicit_candidate_scope_instead_of_container_path_heuri
     with pytest.raises(host.HostAuthorizationError, match="scope"): host.validate_policy(production, "production")
     broken=copy.deepcopy(value); broken["extra"]=True
     with pytest.raises(host.HostAuthorizationError): host.validate_policy(broken,"candidate_validation")
+
+
+def v3_policy(role: str) -> dict:
+    value = policy(role)
+    value["schema_version"] = "host-runtime-policy/4" if role == "candidate_validation" else "host-runtime-policy/5"
+    value["grant_container_directory"] = "/run/market-data-grants"
+    value["mounts"][0]["target"] = value["grant_container_directory"]
+    if role == "candidate_validation":
+        value["runtime_root"] = "/runtime/candidate"
+        value["mounts"][1]["target"] = value["runtime_root"]
+        value["mounts"][2]["target"] = value["runtime_root"] + "/data"
+        value["candidate_host_root"] = "/tmp/market-data-candidate-scopes/candidate-4"
+        value["mounts"][1]["source"] = value["candidate_host_root"]
+        value["mounts"][2]["source"] = value["candidate_host_root"] + "/data"
+        value["candidate_scope"] = {"descriptor_path":"/tmp/market-data-candidate-scopes/.candidate-scope-descriptors/scope.json", "descriptor_sha256":"1" * 64, "scope_id":"2" * 32}
+    else:
+        value.update(candidate_scope=None, approved_source_root="/var/lib/approved-source",
+                     production_storage_root="/var/lib/market-data/production-runtime/project",
+                     candidate_record={"path":"/var/lib/validation/record.json", "sha256":"3" * 64})
+    return value
+
+
+@pytest.mark.parametrize("role", ["candidate_validation", "production"])
+def test_policy4_and_policy5_bind_v3_manifest_and_reserved_grant_directory(role: str):
+    value = v3_policy(role)
+    host.validate_policy(value, role)
+    broken = copy.deepcopy(value)
+    broken["grant_container_directory"] = "/run/grants"
+    with pytest.raises(host.HostAuthorizationError, match="reserved"):
+        host.validate_policy(broken, role)
+    assert host._manifest_version(value["schema_version"]) == "runtime-manifest/3"
+
+
+def v3_runtime_manifest() -> dict:
+    return {
+        "schema_version": "runtime-manifest/3",
+        "required_environment": ["MODE", "HISTORY_PATH", "SERVICE_URL", "MARKET_DATA_EXECUTION_GRANT"],
+        "forbidden_environment": ["ENABLE_WRITES"],
+        "runtime_roots": [
+            {"role":"marker", "container_path":"/runtime/candidate", "access":"ro"},
+            {"role":"history", "container_path":"/runtime/candidate/history", "access":"ro"},
+        ],
+        "environment_bindings": [
+            {"name":"MODE", "kind":"literal", "value":"STRICT"},
+            {"name":"HISTORY_PATH", "kind":"runtime_path", "role":"history", "relative_path":"current.json"},
+            {"name":"SERVICE_URL", "kind":"deployment", "value_type":"https_url", "candidate_value":"https://candidate.invalid/"},
+            {"name":"MARKET_DATA_EXECUTION_GRANT", "kind":"execution_grant"},
+        ],
+        "candidate_runtime_inputs": [],
+    }
+
+
+@pytest.mark.parametrize("role,mutation", [("candidate_validation", None), ("production", None),
+                                             ("candidate_validation", "literal"), ("candidate_validation", "forbidden"),
+                                             ("candidate_validation", "candidate-url"), ("production", "deployment-invalid")])
+def test_v3_host_runtime_revalidates_actual_environment(monkeypatch, role, mutation):
+    runtime = v3_runtime_manifest()
+    actual = {"MODE":"STRICT", "HISTORY_PATH":"/runtime/candidate/history/current.json",
+              "SERVICE_URL":"https://candidate.invalid/" if role == "candidate_validation" else "https://production.invalid/", "MARKET_DATA_EXECUTION_GRANT":"/run/market-data-grants/grant.json"}
+    if mutation == "literal": actual["MODE"] = "PREVIEW"
+    elif mutation == "forbidden": actual["ENABLE_WRITES"] = ""
+    elif mutation == "candidate-url": actual["SERVICE_URL"] = "https://production.invalid/"
+    elif mutation == "deployment-invalid": actual["SERVICE_URL"] = "http://production.invalid/"
+    observed_value = {"config":{"Env":[f"{key}={value}" for key, value in actual.items()]}, "mounts":[]}
+    context = pytest.raises(host.HostAuthorizationError) if mutation else nullcontext()
+    with context:
+        host._validate_v3_runtime(runtime, observed_value, v3_policy(role), CID)
+
+
+def test_v3_candidate_seed_requires_host_and_container_bytes_to_match(tmp_path, monkeypatch):
+    runtime = v3_runtime_manifest()
+    runtime["candidate_runtime_inputs"] = [{"role":"history", "relative_path":"current.json", "sha256":hashlib.sha256(b"fixture").hexdigest(), "source_path":"08_tests/fixtures/runtime/current.json"}]
+    source_root = tmp_path / "history"; source_root.mkdir()
+    (source_root / "current.json").write_bytes(b"fixture")
+    observed_value = {"config":{"Env":[]}, "mounts":[{"source":str(source_root), "target":"/runtime/candidate/history", "read_only":True}]}
+    monkeypatch.setattr(host, "_contract_module", lambda *args: SimpleNamespace(validate_runtime_environment=lambda *args, **kwargs: None))
+    monkeypatch.setattr(host, "_protected_path", lambda path, **kwargs:path)
+    monkeypatch.setattr(host, "copy_container_bytes", lambda *_args: b"fixture")
+    host._validate_v3_runtime(runtime, observed_value, v3_policy("candidate_validation"), CID)
+    monkeypatch.setattr(host, "copy_container_bytes", lambda *_args: b"changed")
+    with pytest.raises(host.HostAuthorizationError, match="seed identity"):
+        host._validate_v3_runtime(runtime, observed_value, v3_policy("candidate_validation"), CID)
 
 
 @pytest.mark.parametrize("mutation", ["image","root","socket","namespace","mount"])
@@ -341,8 +424,9 @@ def test_production_compose_bridge_allows_only_explicit_deployment_differences(t
             {"source":str(secret), "target":"/run/secrets/reader.env", "read_only":True}]
 
 
-@pytest.mark.parametrize("mutation", [None, "image", "commit", "source", "record-hash", "record-signature", "manifest", "source-root"])
-def test_host_consumes_real_signed_candidate_record(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize("policy_version,manifest_version", [(3, 2), (5, 3)])
+@pytest.mark.parametrize("mutation", [None, "image", "commit", "source", "record-hash", "record-signature", "manifest", "source-root", "manifest-version"])
+def test_host_consumes_real_signed_candidate_record(tmp_path, monkeypatch, policy_version, manifest_version, mutation):
     from datetime import datetime, timedelta, timezone
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     import importlib.util
@@ -360,12 +444,12 @@ def test_host_consumes_real_signed_candidate_record(tmp_path, monkeypatch, mutat
     evidence = value["payload"]["evidence"]
     binding = copy.deepcopy(evidence["binding"])
     expected = policy("production")
-    expected.update(schema_version="host-runtime-policy/3", candidate_scope=None,
+    expected.update(schema_version=f"host-runtime-policy/{policy_version}", candidate_scope=None,
                     approved_source_root=str(host.SOURCE_ROOT), approved_commit=binding["commit"], approved_tree=binding["tree"],
                     image_id=evidence["image_id"], runtime_manifest_path="/app/02_configs/runtime.json",
                     runtime_manifest_sha256=binding["source_sha256"]["02_configs/runtime.json"],
                     candidate_record={"path":str(record_file), "sha256":hashlib.sha256(raw).hexdigest()})
-    manifest = {"project_id":expected["project_id"]}
+    manifest = {"schema_version":f"runtime-manifest/{manifest_version}", "project_id":expected["project_id"]}
     entry = SimpleNamespace(require_source=lambda *args:(binding["commit"], binding["tree"]))
     engine = SimpleNamespace(require_builder=lambda:None, _project=lambda *args:{"runtime_contract":"02_configs/runtime.json"},
                              source_contract=lambda *args:({},manifest,binding), validate_source_compose=lambda *args:{})
@@ -387,6 +471,7 @@ def test_host_consumes_real_signed_candidate_record(tmp_path, monkeypatch, mutat
         expected["candidate_record"]["sha256"] = hashlib.sha256(record_file.read_bytes()).hexdigest()
     elif mutation == "manifest": expected["runtime_manifest_sha256"] = "0"*64
     elif mutation == "source-root": expected["approved_source_root"] = "/different/source"
+    elif mutation == "manifest-version": manifest["schema_version"] = "runtime-manifest/2" if manifest_version == 3 else "runtime-manifest/3"
     if mutation:
         with pytest.raises(ValueError): host._validated_candidate_record(expected)
     else:

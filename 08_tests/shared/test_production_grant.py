@@ -51,8 +51,8 @@ def payload(version: int = 1, role: str = "production") -> dict:
         "rendered_compose_sha256": SHA, "mount_contract_sha256": SHA, "actual_config_sha256": SHA,
         "container_id": CID, "hostname_nonce": "1" * 32,
     }
-    if version == 2:
-        value.update({"runtime_manifest_schema_version": "runtime-manifest/2",
+    if version in (2, 3):
+        value.update({"runtime_manifest_schema_version": f"runtime-manifest/{version}",
                       "identity_root_role": "marker",
                       "candidate_scope_id": "2" * 32 if candidate else None,
                       "candidate_scope_sha256": SHA if candidate else None})
@@ -64,7 +64,7 @@ def envelope(version: int = 1, role: str = "production") -> dict:
             "key_id": "fixture-key", "payload": payload(version, role), "signature": "A" * 86 + "=="}
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 @pytest.mark.parametrize("role", ["production", "candidate_validation"])
 def test_complete_grant_versions_and_roles(version: int, role: str):
     value = envelope(version, role)
@@ -74,7 +74,7 @@ def test_complete_grant_versions_and_roles(version: int, role: str):
 
 def test_json_schema_and_shared_validator_accept_the_same_complete_versions():
     validator = schema_validator()
-    for version in (1, 2):
+    for version in (1, 2, 3):
         for role in ("production", "candidate_validation"):
             value = envelope(version, role)
             grant.validate_execution_grant_envelope(value)
@@ -99,7 +99,7 @@ def test_production_grant_module_has_only_standard_library_imports():
     tree = ast.parse(path.read_text(encoding="utf-8"))
     roots = {node.names[0].name.split(".")[0] for node in tree.body if isinstance(node, ast.Import)}
     roots |= {str(node.module).split(".")[0] for node in tree.body if isinstance(node, ast.ImportFrom) and node.module != "__future__"}
-    assert roots <= {"datetime", "json", "math", "re"}
+    assert roots <= {"datetime", "json", "math", "re", "typing", "urllib"}
 
 
 @pytest.mark.parametrize("field", ["schema_version", "algorithm", "key_id", "payload", "signature"])
@@ -149,6 +149,63 @@ def test_v2_requires_exact_extensions_and_rejects_version_mixing():
         grant.validate_execution_grant_envelope(item)
 
 
+def test_v3_uses_the_v2_field_shape_and_pins_the_v3_manifest():
+    v2, v3 = envelope(2), envelope(3)
+    assert set(v2["payload"]) == set(v3["payload"])
+    v3["payload"]["runtime_manifest_schema_version"] = "runtime-manifest/2"
+    with pytest.raises(grant.GrantShapeError):
+        grant.validate_execution_grant_envelope(v3)
+
+
+def v3_environment_manifest() -> dict:
+    return {
+        "schema_version": "runtime-manifest/3",
+        "required_environment": ["MODE", "HISTORY_PATH", "SERVICE_URL", "MARKET_DATA_EXECUTION_GRANT"],
+        "forbidden_environment": ["ENABLE_WRITES", "BUSINESS_DATE"],
+        "runtime_roots": [
+            {"role": "marker", "container_path": "/runtime", "access": "ro"},
+            {"role": "history", "container_path": "/runtime/history", "access": "ro"},
+        ],
+        "environment_bindings": [
+            {"name": "MODE", "kind": "literal", "value": "STRICT_RUNTIME"},
+            {"name": "HISTORY_PATH", "kind": "runtime_path", "role": "history", "relative_path": "current.json"},
+            {"name": "SERVICE_URL", "kind": "deployment", "value_type": "https_url", "candidate_value": "https://candidate.invalid/"},
+            {"name": "MARKET_DATA_EXECUTION_GRANT", "kind": "execution_grant"},
+        ],
+    }
+
+
+def test_v3_runtime_environment_binds_all_declared_values_by_role():
+    manifest = v3_environment_manifest()
+    candidate = {"MODE": "STRICT_RUNTIME", "HISTORY_PATH": "/runtime/history/current.json",
+                 "SERVICE_URL": "https://candidate.invalid/", "MARKET_DATA_EXECUTION_GRANT": "/run/grants/grant.json"}
+    assert grant.validate_runtime_environment(manifest, candidate, role="candidate_validation",
+                                              grant_path="/run/grants/grant.json") is None
+    production = {**candidate, "SERVICE_URL": "https://production.invalid/"}
+    assert grant.validate_runtime_environment(manifest, production, role="production",
+                                              grant_path="/run/grants/grant.json") is None
+    candidate["SERVICE_URL"] = "https://production.invalid/"
+    with pytest.raises(grant.GrantValidationError, match="candidate deployment"):
+        grant.validate_runtime_environment(manifest, candidate, role="candidate_validation", grant_path="/run/grants/grant.json")
+
+
+@pytest.mark.parametrize("mutation", ["host_path", "wrong_grant", "forbidden", "missing"])
+def test_v3_runtime_environment_rejects_mismatches_and_forbidden_empty_values(mutation: str):
+    environment = {"MODE": "STRICT_RUNTIME", "HISTORY_PATH": "/runtime/history/current.json",
+                   "SERVICE_URL": "https://candidate.invalid/", "MARKET_DATA_EXECUTION_GRANT": "/run/grants/grant.json"}
+    if mutation == "host_path":
+        environment["HISTORY_PATH"] = "C:/host/history/current.json"
+    elif mutation == "wrong_grant":
+        environment["MARKET_DATA_EXECUTION_GRANT"] = "/tmp/grant.json"
+    elif mutation == "forbidden":
+        environment["ENABLE_WRITES"] = ""
+    else:
+        del environment["MODE"]
+    with pytest.raises(grant.GrantValidationError):
+        grant.validate_runtime_environment(v3_environment_manifest(), environment,
+                                           role="candidate_validation", grant_path="/run/grants/grant.json")
+
+
 @pytest.mark.parametrize("role,field,value", [
     ("candidate_validation", "artifact_origin", "production"),
     ("production", "artifact_origin", "unexpected"),
@@ -164,8 +221,8 @@ def test_cross_role_and_scope_contract_rejected(role: str, field: str, value):
         grant.validate_execution_grant_envelope(item)
 
 
-def test_duplicate_json_keys_rejected_for_both_versions(tmp_path: Path):
-    for version in (1, 2):
+def test_duplicate_json_keys_rejected_for_all_versions(tmp_path: Path):
+    for version in (1, 2, 3):
         raw = (b'{"schema_version":"production-execution-grant/' + str(version).encode() +
                b'","schema_version":"production-execution-grant/' + str(version).encode() + b'"}')
         with pytest.raises(grant.GrantShapeError):

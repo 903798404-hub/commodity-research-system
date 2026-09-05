@@ -98,6 +98,16 @@ def test_production_revalidation_is_readonly_and_does_not_overwrite(monkeypatch,
         runtime.revalidate_production("a" * 64, policy, destination)
 
 
+def test_production_policy_v5_uses_the_same_strict_revalidation_contract(monkeypatch, tmp_path):
+    result = {"schema_version": "production-pre-release-validation/1", "PRE_RELEASE_VALIDATION": "PASS",
+              "production_write_granted": False, "container_started": False,
+              "container_id": "a" * 64}
+    host, policy, destination = _production_host(monkeypatch, tmp_path, result)
+    policy.write_text(json.dumps({"schema_version": "host-runtime-policy/5"}), encoding="utf-8")
+    wrapped = runtime.revalidate_production("a" * 64, policy, destination)
+    assert wrapped["report"] == result
+
+
 def test_production_revalidation_propagates_host_failure_without_output(monkeypatch, tmp_path):
     host, policy, destination = _production_host(monkeypatch, tmp_path, {})
     def fail(*args, **kwargs):

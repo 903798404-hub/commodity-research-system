@@ -17,7 +17,18 @@ sources，核对 service、Dockerfile、entrypoint、working directory、环境�
 可写或改道均 FAIL。实际候选 Compose 再把 runtime mount target 映射到受保护的一次性 scope；
 source Compose 的 rendered build 只允许 `context` 与 `dockerfile`，context 必须精确等于候选仓库根，
 Dockerfile 必须精确等于 manifest 声明；任何额外 build option、父/子目录或路径别名均 FAIL。
-placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
+manifest/2 的 placeholder 只用于候选配置值，不能作为 production 配置值或部署证据。
+manifest/3 使用显式 environment bindings：literal 与 runtime_path 必须和源码 Compose
+精确一致；deployment 使用声明的 candidate_value，生产实际值按声明类型验证；
+execution_grant 使用受信宿主确定的 grant 路径。源码 Compose 环境名集合必须与声明相等，
+实际容器合并后的环境还必须拒绝 forbidden_environment 中的任何键，包括空值。
+
+manifest/3 的 candidate_runtime_inputs 只从绑定 Commit 的精确 Git blob 读取，必须匹配
+声明 SHA256 与完整候选 source binding；总大小上限 64 MiB。引擎从 build context 删除这些
+文件，Dockerfile 也不得 COPY 它们。宿主仅将其独占创建到一次性 scope 的受保护只读子挂载，
+文件权限为 0444；不得覆盖文件、identity marker 或写入其他 scope。签发前及初始化后均核对
+宿主与容器可见字节。生产复验不注入 fixture、不拿 fixture 冒充正式数据，正式数据身份仍需
+单独验收。
 源码检查同时核对 Dockerfile 的上下文输入：COPY 的每个源必须是已绑定的精确常规文件，
 支持无选项的简单参数或 JSON 数组以及续行；拒绝目录、通配符、变量、别名和未声明文件。
 Dockerfile、dockerignore、Compose 和验证引擎仅作为审计元数据绑定，不能因此成为 COPY
@@ -42,7 +53,7 @@ grant 目录。生产 volume、secret、Docker socket、宿主控制目录、开
 
 宿主在容器启动前观察 Image、OCI revision、Git Tree、RELEASE、runtime manifest、marker、实际
 Compose、环境、命令、mount 和 hardening，随后使用 candidate 域私钥签发一次性
-`production-execution-grant/2`。私钥固定在 `/etc/market-data/runtime-identity`，不进入 Git、镜像
+`production-execution-grant/2`（manifest/3 对应 grant/3）。私钥固定在 `/etc/market-data/runtime-identity`，不进入 Git、镜像
 或 evidence。正式 entrypoint 启动后，初始化命令按 manifest argv 逐条执行；不通过 shell 拼接。
 Python 依赖探针在实际候选容器内逐模块执行 import，模块可发现但导入失败、缺少传递依赖
 或动态库加载失败均为 FAIL；仅 find_spec 成功不能计为 dependencies PASS。
@@ -90,6 +101,12 @@ linked feature worktree、隐藏 index flags、replacement refs 或忽略的 byt
 完整 source binding、runtime manifest 和同一不可变 Image ID。`policy/2` 只允许 candidate
 validation；旧 `policy/1` 与 manifest/1 兼容；容器执行授权继续使用 grant/2，不引入第三类
 审批密钥。签发前后必须重新读取 policy、record、trust 和实际实例。
+
+manifest/3 显式使用 `target-runtime-validator/2`，candidate policy/4、production policy/5
+以及 grant/3；旧 manifest/2 保持 validator/1、policy/2 与 /3、grant/2。
+candidate-validation-record/1 的签名载荷只接受这两个明确的 validator 版本，消费时仍须
+与当前源码生成的完整 binding 精确一致。版本不能自动 fallback，旧 validator 证据不能
+证明 manifest/3 的环境和候选输入已验证。
 
 候选 render 和生产 render 分别记录，不能要求临时路径与生产路径相等。生产复验用同一
 受保护 environment file 重新渲染 Approved 源 Compose，再与真正使用的生产 Compose 比较；

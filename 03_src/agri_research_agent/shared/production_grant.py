@@ -10,10 +10,16 @@ from datetime import datetime
 import json
 import math
 import re
+from typing import Mapping
+from urllib.parse import urlsplit
 
 
 class GrantShapeError(ValueError):
     """An execution grant is not one of the exact supported JSON shapes."""
+
+
+class GrantValidationError(ValueError):
+    """A runtime instance does not satisfy its signed v3 environment contract."""
 
 
 _ENVELOPE_FIELDS = frozenset({"schema_version", "algorithm", "key_id", "payload", "signature"})
@@ -127,8 +133,9 @@ def _validate_payload(payload: object, version: str) -> None:
     _paths(payload["protected_mounts"], "invalid protected mounts")
     _string(payload["container_id"], "invalid container id", _HEX64)
     _string(payload["hostname_nonce"], "invalid hostname nonce", _HEX32)
-    if version == "production-execution-grant/2":
-        if payload["runtime_manifest_schema_version"] != "runtime-manifest/2":
+    if version in {"production-execution-grant/2", "production-execution-grant/3"}:
+        expected_manifest = "runtime-manifest/2" if version.endswith("/2") else "runtime-manifest/3"
+        if payload["runtime_manifest_schema_version"] != expected_manifest:
             _fail("invalid runtime manifest schema version")
         _string(payload["identity_root_role"], "invalid identity root role", _ID)
         scope_id, scope_hash = payload["candidate_scope_id"], payload["candidate_scope_sha256"]
@@ -141,7 +148,7 @@ def _validate_payload(payload: object, version: str) -> None:
 
 
 def validate_execution_grant_envelope(value: object) -> None:
-    """Validate a v1 or v2 grant envelope without performing authorization."""
+    """Validate a v1, v2, or v3 grant envelope without authorization."""
     try:
         primitive = type(value) is dict and _primitive(value)
     except RecursionError:
@@ -151,7 +158,7 @@ def validate_execution_grant_envelope(value: object) -> None:
     if set(value) != _ENVELOPE_FIELDS:
         _fail("execution grant envelope fields incomplete or unknown")
     version = value["schema_version"]
-    if version not in {"production-execution-grant/1", "production-execution-grant/2"}:
+    if version not in {"production-execution-grant/1", "production-execution-grant/2", "production-execution-grant/3"}:
         _fail("unsupported execution grant schema")
     if value["algorithm"] != "ed25519":
         _fail("unsupported execution grant algorithm")
@@ -185,3 +192,130 @@ def parse_execution_grant_json(raw: bytes) -> dict:
     validate_execution_grant_envelope(value)
     # json.loads returns a new object; callers receive no reference to internal state.
     return value["payload"]
+
+
+_ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
+_LOGICAL_PATH = re.compile(r"/[^\\]*\Z")
+
+
+def _runtime_environment_error(message: str) -> None:
+    raise GrantValidationError(message)
+
+
+def _logical_path(value: object, message: str) -> str:
+    if type(value) is not str or _LOGICAL_PATH.fullmatch(value) is None or len(value) < 2:
+        _runtime_environment_error(message)
+    if any(part in {"", ".", ".."} for part in value[1:].split("/")):
+        _runtime_environment_error(message)
+    return value
+
+
+def _environment_name(value: object, message: str) -> str:
+    if type(value) is not str or _ENVIRONMENT_NAME.fullmatch(value) is None:
+        _runtime_environment_error(message)
+    return value
+
+
+def _deployment_value(value: object, value_type: object) -> str:
+    # This is deliberately kept consistent with runtime_manifest._deployment_value.
+    if type(value) is not str or not value or value.strip() != value or "\x00" in value:
+        _runtime_environment_error("invalid deployment environment value")
+    if len(value) > 2048:
+        _runtime_environment_error("deployment environment value is too long")
+    if value_type == "nonempty":
+        if re.fullmatch(r"[A-Za-z0-9_./:+-]+", value) is None:
+            _runtime_environment_error("invalid deployment environment value")
+        return value
+    if value_type not in {"http_url", "https_url"}:
+        _runtime_environment_error("unsupported deployment environment value type")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        valid = (parsed.scheme in ({"http", "https"} if value_type == "http_url" else {"https"})
+                 and parsed.hostname and parsed.username is None and parsed.password is None
+                 and not parsed.query and not parsed.fragment and not any(char.isspace() for char in value)
+                 and "\\" not in value and (port is None or 0 < port < 65536))
+    except ValueError:
+        valid = False
+    if not valid:
+        _runtime_environment_error("invalid deployment environment URL")
+    return value
+
+
+def validate_runtime_environment(manifest: dict, environment: Mapping[str, str], *, role: str,
+                                 grant_path: str) -> None:
+    """Validate v3's declared environment against an observed runtime mapping.
+
+    This is intentionally a pure consumer: it accepts only logical container
+    paths and does not import runtime_manifest private helpers, so host code
+    can load it independently of the application package.
+    """
+    if type(manifest) is not dict or manifest.get("schema_version") != "runtime-manifest/3":
+        _runtime_environment_error("runtime environment requires a v3 manifest")
+    if role not in {"production", "candidate_validation"}:
+        _runtime_environment_error("invalid runtime environment role")
+    if not isinstance(environment, Mapping) or any(type(key) is not str or type(value) is not str
+                                                    for key, value in environment.items()):
+        _runtime_environment_error("runtime environment must be a string mapping")
+    trusted_grant = _logical_path(grant_path, "invalid trusted execution grant path")
+    required_raw, bindings = manifest.get("required_environment"), manifest.get("environment_bindings")
+    forbidden_raw, roots_raw = manifest.get("forbidden_environment"), manifest.get("runtime_roots")
+    if type(required_raw) is not list or type(bindings) is not list or type(forbidden_raw) is not list or type(roots_raw) is not list:
+        _runtime_environment_error("runtime environment manifest declarations are invalid")
+    required = {_environment_name(item, "invalid required environment name") for item in required_raw}
+    if len(required) != len(required_raw):
+        _runtime_environment_error("duplicate required environment name")
+    forbidden = {_environment_name(item, "invalid forbidden environment name") for item in forbidden_raw}
+    if len(forbidden) != len(forbidden_raw) or required & forbidden:
+        _runtime_environment_error("invalid forbidden environment declaration")
+    roots: dict[str, str] = {}
+    for item in roots_raw:
+        if type(item) is not dict or set(item) != {"role", "container_path", "access"}:
+            _runtime_environment_error("invalid runtime root declaration")
+        root_role = item["role"]
+        if type(root_role) is not str or _ID.fullmatch(root_role) is None or root_role in roots:
+            _runtime_environment_error("invalid runtime root declaration")
+        roots[root_role] = _logical_path(item["container_path"], "invalid runtime root path")
+    shapes = {"literal": {"name", "kind", "value"}, "runtime_path": {"name", "kind", "role", "relative_path"},
+              "deployment": {"name", "kind", "value_type", "candidate_value"}, "execution_grant": {"name", "kind"}}
+    names: set[str] = set()
+    for binding in bindings:
+        if type(binding) is not dict or type(binding.get("kind")) is not str:
+            _runtime_environment_error("invalid environment binding")
+        kind = binding["kind"]
+        if kind not in shapes or set(binding) != shapes[kind]:
+            _runtime_environment_error("environment binding fields incomplete or unknown")
+        name = _environment_name(binding.get("name"), "invalid environment binding name")
+        if (name == "MARKET_DATA_EXECUTION_GRANT") != (kind == "execution_grant"):
+            _runtime_environment_error("execution grant environment binding is invalid")
+        if name in names or name not in required:
+            _runtime_environment_error("duplicate or undeclared environment binding")
+        names.add(name)
+        actual = environment.get(name)
+        if actual is None:
+            _runtime_environment_error("required runtime environment is missing")
+        if kind == "literal":
+            if type(binding["value"]) is not str or actual != binding["value"]:
+                _runtime_environment_error("literal runtime environment differs from manifest")
+        elif kind == "runtime_path":
+            binding_role = binding["role"]
+            if type(binding_role) is not str or _ID.fullmatch(binding_role) is None:
+                _runtime_environment_error("invalid runtime path binding")
+            root = roots.get(binding_role)
+            relative = binding["relative_path"]
+            if root is None or type(relative) is not str or "\\" in relative or relative.startswith("/") or any(part in {"", ".", ".."} for part in relative.split("/")) and relative != "":
+                _runtime_environment_error("invalid runtime path binding")
+            expected = root if relative == "" else root + "/" + relative
+            if actual != expected:
+                _runtime_environment_error("runtime path environment differs from manifest")
+        elif kind == "deployment":
+            candidate = _deployment_value(binding["candidate_value"], binding["value_type"])
+            if role == "candidate_validation" and actual != candidate:
+                _runtime_environment_error("candidate deployment environment differs from manifest")
+            _deployment_value(actual, binding["value_type"])
+        elif actual != trusted_grant:
+            _runtime_environment_error("execution grant environment differs from trusted grant path")
+    if names != required:
+        _runtime_environment_error("environment bindings do not cover required environment")
+    if any(name in environment for name in forbidden):
+        _runtime_environment_error("forbidden runtime environment is present")

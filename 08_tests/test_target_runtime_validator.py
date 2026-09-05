@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,6 +47,123 @@ def v2_contract():
         "working_directory": "/app", "service_id": "demo", "_numeric_uid": 1000,
         "_container_user": "1000:1000",
     }
+
+
+def v3_contract():
+    contract = v2_contract()
+    contract.update({
+        "schema_version": "runtime-manifest/3",
+        "required_environment": ["DEMO_MODE", "RUNTIME_PATH", "DEPLOYMENT", "MARKET_DATA_EXECUTION_GRANT"],
+        "environment_bindings": [
+            {"name": "DEMO_MODE", "kind": "literal", "value": "candidate"},
+            {"name": "RUNTIME_PATH", "kind": "runtime_path", "role": "state", "relative_path": "input.txt"},
+            {"name": "DEPLOYMENT", "kind": "deployment", "candidate_value": "candidate-value", "production_value": "production-value"},
+            {"name": "MARKET_DATA_EXECUTION_GRANT", "kind": "execution_grant"},
+        ],
+    })
+    return contract
+
+
+def test_v3_candidate_environment_is_typed_and_fixed_bindings_are_exact():
+    engine = load_engine()
+    value = engine._candidate_environment(v3_contract())
+    assert all(type(item) is str and item for item in value.values())
+    assert value == {
+        "DEMO_MODE": "candidate", "RUNTIME_PATH": "/runtime/state/input.txt",
+        "DEPLOYMENT": "candidate-value", "MARKET_DATA_EXECUTION_GRANT": "/run/market-data-grants/grant.json",
+    }
+    broken = v3_contract()
+    broken["environment_bindings"][0]["kind"] = "unknown"
+    with pytest.raises(engine.ValidationError, match="unknown environment"):
+        engine._candidate_environment(broken)
+
+
+def test_v3_source_compose_rejects_fixed_environment_binding_mismatch(monkeypatch, tmp_path):
+    engine = load_engine()
+    contract = v3_contract()
+    contract["build"] = {"compose_sources": ["compose.yml"], "dockerfile": "Dockerfile"}
+    service = {"image": "demo@sha256:" + "d" * 64, "build": {"context": str(tmp_path.resolve()), "dockerfile": "Dockerfile"},
+               "entrypoint": contract["entrypoint"], "working_dir": "/app",
+               "environment": engine._candidate_environment(contract),
+               "volumes": [{"type": "bind", "source": "${IDENTITY}", "target": "/runtime", "read_only": True},
+                           {"type": "bind", "source": "${STATE}", "target": "/runtime/state", "read_only": False},
+                           {"type": "bind", "source": "${GRANTS}", "target": "/run/market-data-grants", "read_only": True}]}
+    service["environment"]["DEMO_MODE"] = "forged"
+    rendered = {"services": {"demo": service}}
+    monkeypatch.setattr(engine, "_docker", lambda *args: SimpleNamespace(stdout=json.dumps(rendered).encode()))
+    (tmp_path / "Dockerfile").write_text("FROM " + BASE_IMAGE + "\n", encoding="utf-8")
+    with pytest.raises(engine.ValidationError, match="fixed environment"):
+        engine.validate_source_compose(tmp_path, contract)
+
+
+def test_v3_fixture_is_removed_from_context_and_cannot_be_copied_into_image(tmp_path):
+    engine = load_engine()
+    raw = b"fixture bytes\n"
+    fixture = tmp_path / "fixtures" / "input.txt"
+    fixture.parent.mkdir()
+    fixture.write_bytes(raw)
+    contract = {"schema_version": "runtime-manifest/3",
+                "candidate_runtime_inputs": [{"source_path": "fixtures/input.txt", "relative_path": "input.txt",
+                                                "role": "state", "sha256": hashlib.sha256(raw).hexdigest()}],
+                "build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "compose_sources": [], "dependency_contracts": []}}
+    (tmp_path / "Dockerfile").write_text("FROM " + BASE_IMAGE + "\nCOPY fixtures/input.txt /app/input.txt\n", encoding="utf-8")
+    with pytest.raises(engine.ValidationError, match="COPY source|runtime input is missing"):
+        engine.validate_dockerfile_inputs(tmp_path, contract,
+                                          {"source_sha256": {"fixtures/input.txt": hashlib.sha256(raw).hexdigest()}})
+    engine._exclude_candidate_inputs(tmp_path, contract)
+    assert not fixture.exists()
+
+
+def test_v3_fixture_seeding_uses_committed_bytes_hash_readonly_and_new_only(monkeypatch, tmp_path):
+    engine = load_engine()
+    raw = b"canonical committed fixture\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    contract = {"schema_version": "runtime-manifest/3", "identity_root_role": "identity",
+                "runtime_roots": [{"role": "identity", "container_path": "/runtime", "access": "ro"},
+                                   {"role": "state", "container_path": "/runtime/state", "access": "ro"}],
+                "candidate_runtime_inputs": [{"source_path": "fixtures/input.txt", "relative_path": "input.txt",
+                                                "role": "state", "sha256": digest}]}
+    candidate_root = tmp_path / "candidate"
+    base = candidate_root / "state"
+    base.mkdir(parents=True)
+    scope = {"candidate_host_root": str(candidate_root),
+             "mounts": [{"source": str(base), "target": "/runtime/state", "read_only": True}]}
+    host = SimpleNamespace(_protected_path=lambda path, **kwargs: Path(path))
+    def git_blob(_root, *args, **kwargs):
+        assert args == ("show", "a" * 40 + ":fixtures/input.txt")
+        assert kwargs == {"binary": True}
+        return raw
+    monkeypatch.setattr(engine, "_git", git_blob)
+    binding_value = {"commit": "a" * 40, "source_sha256": {"fixtures/input.txt": digest}}
+    engine._seed_candidate_runtime_inputs(tmp_path, contract, binding_value, scope, host)
+    seeded = base / "input.txt"
+    assert seeded.read_bytes() == raw
+    assert hashlib.sha256(seeded.read_bytes()).hexdigest() == digest
+    assert seeded.stat().st_mode & 0o777 == 0o444
+    with pytest.raises(engine.ValidationError, match="new absolute"):
+        engine._seed_candidate_runtime_inputs(tmp_path, contract, binding_value, scope, host)
+
+
+@pytest.mark.parametrize("mutation", ["identity-root", "writable", "outside", "unsafe"])
+def test_v3_fixture_seeding_rejects_unsafe_mount_or_target(mutation, tmp_path):
+    engine = load_engine()
+    raw = b"x"
+    digest = hashlib.sha256(raw).hexdigest()
+    contract = {"schema_version": "runtime-manifest/3", "identity_root_role": "identity",
+                "runtime_roots": [{"role": "identity", "container_path": "/runtime", "access": "ro"},
+                                   {"role": "state", "container_path": "/runtime/state", "access": "ro"}],
+                "candidate_runtime_inputs": [{"source_path": "fixture", "relative_path": "../bad" if mutation == "unsafe" else "x",
+                                                "role": "identity" if mutation == "identity-root" else "state", "sha256": digest}]}
+    base = tmp_path / "candidate" / "state"; base.mkdir(parents=True)
+    source = tmp_path / "outside"; source.mkdir()
+    target = str(source if mutation == "outside" else base)
+    scope = {"candidate_host_root": str(tmp_path / "candidate"),
+             "mounts": [{"source": target, "target": "/runtime/state", "read_only": mutation != "writable"}]}
+    host = SimpleNamespace(_protected_path=lambda path, **kwargs: Path(path))
+    with pytest.raises(engine.ValidationError):
+        engine._seed_candidate_runtime_inputs(tmp_path, contract,
+            {"source_sha256": {"fixture": digest}}, scope, host)
 
 
 def test_cli_exposes_only_gate_controlled_source_arguments(tmp_path):

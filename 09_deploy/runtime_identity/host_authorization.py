@@ -215,6 +215,18 @@ _POLICY_V1_FIELDS = {
 }
 _POLICY_V2_FIELDS = _POLICY_V1_FIELDS | {"candidate_scope"}
 _POLICY_V3_FIELDS = _POLICY_V2_FIELDS | {"candidate_record", "approved_source_root", "production_storage_root"}
+_CANDIDATE_POLICIES = {"host-runtime-policy/2", "host-runtime-policy/4"}
+_PRODUCTION_POLICIES = {"host-runtime-policy/3", "host-runtime-policy/5"}
+_SOURCE_POLICIES = _CANDIDATE_POLICIES | _PRODUCTION_POLICIES
+_V3_POLICIES = {"host-runtime-policy/4", "host-runtime-policy/5"}
+
+
+def _manifest_version(version: str) -> str:
+    return {"host-runtime-policy/1": "runtime-manifest/1",
+            "host-runtime-policy/2": "runtime-manifest/2",
+            "host-runtime-policy/3": "runtime-manifest/2",
+            "host-runtime-policy/4": "runtime-manifest/3",
+            "host-runtime-policy/5": "runtime-manifest/3"}[version]
 
 
 def _contract_module(path: Path, name: str):
@@ -242,14 +254,18 @@ def validate_policy(policy: Mapping, role: str) -> None:
     version = policy.get("schema_version")
     expected_fields = {"host-runtime-policy/1": _POLICY_V1_FIELDS,
                        "host-runtime-policy/2": _POLICY_V2_FIELDS,
-                       "host-runtime-policy/3": _POLICY_V3_FIELDS}.get(version, set())
+                       "host-runtime-policy/3": _POLICY_V3_FIELDS,
+                       "host-runtime-policy/4": _POLICY_V2_FIELDS,
+                       "host-runtime-policy/5": _POLICY_V3_FIELDS}.get(version, set())
     if set(policy) != expected_fields or policy.get("role") != role:
         raise HostAuthorizationError("protected policy schema or role mismatch")
     if role not in {"production", "candidate_validation"}:
         raise HostAuthorizationError("unknown authorization role")
-    if version == "host-runtime-policy/2" and role != "candidate_validation":
+    if version in _V3_POLICIES and policy["grant_container_directory"] != "/run/market-data-grants":
+        raise HostAuthorizationError("v3 policy must use the reserved execution grant directory")
+    if version in _CANDIDATE_POLICIES and role != "candidate_validation":
         raise HostAuthorizationError("policy/2 candidate scope cannot authorize production; policy/3 record required")
-    if version == "host-runtime-policy/3":
+    if version in _PRODUCTION_POLICIES:
         if role != "production" or policy["candidate_scope"] is not None:
             raise HostAuthorizationError("policy/3 requires production without a candidate scope")
         record = policy["candidate_record"]
@@ -304,7 +320,7 @@ def validate_policy(policy: Mapping, role: str) -> None:
             raise HostAuthorizationError("candidate host root is not temporary")
     elif role == "production" and policy["candidate_host_root"] is not None:
         raise HostAuthorizationError("production cannot use a candidate root")
-    if version == "host-runtime-policy/2":
+    if version in _CANDIDATE_POLICIES:
         scope = policy["candidate_scope"]
         if role == "production":
             if scope is not None:
@@ -367,7 +383,7 @@ def validate_observation(observed: Mapping, expected: Mapping, *, role: str) -> 
     # v2 source closures can intentionally omit legacy top-level directories.
     # Its signed source root is therefore the whole immutable image boundary;
     # even a read-only child bind could replace code that the image ID bound.
-    immutable = ([source] if expected["schema_version"] in {"host-runtime-policy/2", "host-runtime-policy/3"}
+    immutable = ([source] if expected["schema_version"] in _SOURCE_POLICIES
                  else [source + "/" + name for name in ("03_src", "02_configs", "04_scripts", "05_apps", "RELEASE.json")])
     for mount in observed["mounts"]:
         target = mount["target"]
@@ -473,7 +489,7 @@ def _safe_scope_tree(root: Path) -> None:
 
 def _candidate_descriptor(policy: Mapping, *, consume: bool) -> dict:
     binding = policy.get("candidate_scope")
-    if policy.get("schema_version") != "host-runtime-policy/2" or policy.get("role") != "candidate_validation" or not isinstance(binding, dict):
+    if policy.get("schema_version") not in _CANDIDATE_POLICIES or policy.get("role") != "candidate_validation" or not isinstance(binding, dict):
         raise HostAuthorizationError("candidate scope is unavailable")
     descriptor_path = _protected_path(Path(binding["descriptor_path"]), private=True, temporary=True)
     raw = descriptor_path.read_bytes()
@@ -653,7 +669,7 @@ def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path)
             continue
         if policy["role"] == "candidate_validation" and not _within(str(source), policy["candidate_host_root"]):
             raise HostAuthorizationError("candidate mount source is outside protected temporary root")
-        if policy["schema_version"] == "host-runtime-policy/3":
+        if policy["schema_version"] in _PRODUCTION_POLICIES:
             storage = _protected_path(Path(policy["production_storage_root"]), directory=True)
             if not mount["target"].startswith("/run/secrets/") and not _within(str(source), str(storage)):
                 raise HostAuthorizationError("production mount is outside its approved storage allocation")
@@ -686,6 +702,8 @@ def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
     payload = parser.verify_record(raw, _json(TRUST_CONFIG_PATH.read_bytes()))
     project = engine._project(SOURCE_ROOT, policy["project_id"])
     _, manifest, binding = engine.source_contract(SOURCE_ROOT, policy["project_id"], project["runtime_contract"])
+    if manifest.get("schema_version") != _manifest_version(policy["schema_version"]):
+        raise HostAuthorizationError("candidate source contract manifest version differs from policy")
     evidence = payload["evidence"]
     if (evidence["binding"] != binding or evidence["image_id"] != policy["image_id"]
             or binding["source_sha256"][project["runtime_contract"]] != policy["runtime_manifest_sha256"]
@@ -784,11 +802,11 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) 
         raise HostAuthorizationError("actual Compose source differs from protected deployment policy")
     command = ["compose", "--project-directory", policy["compose_project_directory"], "--env-file", policy["compose_environment_file"]]
     _protected_path(Path(policy["compose_environment_file"]), private=True)
-    if policy["schema_version"] in {"host-runtime-policy/2", "host-runtime-policy/3"}:
+    if policy["schema_version"] in _SOURCE_POLICIES:
         _protected_path(Path(policy["compose_project_directory"]), directory=True)
     for path, expected_source in zip(paths, policy["compose_sources"]):
         file = Path(path)
-        if policy["schema_version"] in {"host-runtime-policy/2", "host-runtime-policy/3"}:
+        if policy["schema_version"] in _SOURCE_POLICIES:
             _protected_path(file)
         if file.is_symlink() or file.resolve(strict=True) != file or hashlib.sha256(file.read_bytes()).hexdigest() != expected_source["sha256"]:
             raise HostAuthorizationError("actual Compose source content changed")
@@ -816,7 +834,7 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) 
     if any(not isinstance(v, dict) or v.get("type") != "bind" for v in volumes):
         raise HostAuthorizationError("rendered mounts must be explicit bind contracts")
     expected_mounts = sorted([{"source": v.get("source"), "target": v.get("target"), "read_only": v.get("read_only", False)} for v in volumes], key=lambda m: m["target"])
-    if policy["schema_version"] == "host-runtime-policy/3":
+    if policy["schema_version"] in _PRODUCTION_POLICIES:
         _, manifest = _validated_candidate_record(policy)
         expected_mounts = sorted([*expected_mounts, *_production_compose_bridge(rendered, policy, manifest)], key=lambda m: m["target"])
     if expected_mounts != _mounts(container):
@@ -872,12 +890,50 @@ def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapp
             raise HostAuthorizationError("actual mount permission differs from runtime manifest")
     # For policy/3 the source/render bridge has already proved the exact secret
     # names, file sources and targets against the Approved manifest and inspect.
-    secrets = [m for m in mounts if m["target"].startswith("/run/secrets/")] if policy["schema_version"] == "host-runtime-policy/3" else []
+    secrets = [m for m in mounts if m["target"].startswith("/run/secrets/")] if policy["schema_version"] in _PRODUCTION_POLICIES else []
     if secrets and (len(secrets) != len(manifest["secret_references"]) or any(m["read_only"] is not True for m in secrets)):
         raise HostAuthorizationError("production secret mount permissions differ")
     allowed = targets | {policy["grant_container_directory"]} | {m["target"] for m in secrets}
     if by_role or any(m["target"] not in allowed for m in mounts):
         raise HostAuthorizationError("undeclared runtime mount")
+
+
+def _validate_v3_runtime(manifest: Mapping, observed: Mapping, policy: Mapping, container_id: str) -> None:
+    if manifest.get("schema_version") != _manifest_version(policy["schema_version"]):
+        raise HostAuthorizationError("policy and executing manifest versions differ")
+    if policy["schema_version"] not in _V3_POLICIES:
+        return
+    grant_contract = _contract_module(GRANT_CONTRACT_PATH, "_host_runtime_environment_contract")
+    try:
+        grant_contract.validate_runtime_environment(
+            manifest, _env(observed["config"].get("Env") or []), role=policy["role"],
+            grant_path=policy["grant_container_directory"] + "/grant.json")
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HostAuthorizationError("actual runtime environment violates manifest") from exc
+    # Only candidate temporary mounts may contain test seed bytes. Production
+    # storage is independently approved and must never be compared to fixtures.
+    if policy["role"] != "candidate_validation":
+        return
+    roots = {item["role"]: item for item in manifest["runtime_roots"]}
+    total = 0
+    for item in manifest["candidate_runtime_inputs"]:
+        target_root = roots[item["role"]]["container_path"]
+        mounts = [mount for mount in observed["mounts"] if mount["target"] == target_root]
+        if len(mounts) != 1 or mounts[0]["read_only"] is not True:
+            raise HostAuthorizationError("candidate seed must have its exact readonly mount")
+        mount_source = _protected_path(Path(mounts[0]["source"]), directory=True, temporary=True)
+        source = _protected_path(mount_source / item["relative_path"], temporary=True)
+        try:
+            source.relative_to(mount_source)
+        except ValueError as exc:
+            raise HostAuthorizationError("candidate seed escapes its declared mount source") from exc
+        total += source.stat().st_size
+        if total > 64 * 1024 * 1024:
+            raise HostAuthorizationError("candidate seed inputs exceed size limit")
+        raw = source.read_bytes()
+        if (hashlib.sha256(raw).hexdigest() != item["sha256"]
+                or copy_container_bytes(container_id, target_root + "/" + item["relative_path"]) != raw):
+            raise HostAuthorizationError("candidate readonly seed identity differs")
 
 
 def revalidate_production(container_id: str, *, expected_policy_path: str | Path) -> dict:
@@ -886,7 +942,7 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
     require_protected_authority_source()
     policy = _load_policy(expected_policy_path)
     validate_policy(policy, "production")
-    if policy["schema_version"] != "host-runtime-policy/3":
+    if policy["schema_version"] not in _PRODUCTION_POLICIES:
         raise HostAuthorizationError("pre-release validation requires production policy/3")
     record, source_manifest = _validated_candidate_record(policy)
     observed = observe_and_validate(container_id, policy, role="production")
@@ -918,6 +974,7 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
             or marker.get("runtime_id") != policy["runtime_id"]):
         raise HostAuthorizationError("pre-release runtime identity root is not the approved formal root")
     _validate_runtime_mounts(manifest, observed["mounts"], policy)
+    _validate_v3_runtime(manifest, observed, policy, container_id)
     writable = [m["target"] for m in observed["mounts"] if not m["read_only"] and _within(m["target"], policy["runtime_root"])]
     if not writable or policy["runtime_root"] in writable:
         raise HostAuthorizationError("pre-release requires explicit writable children under a read-only identity root")
@@ -960,13 +1017,13 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     if not destination.is_absolute() or destination.parent != grant_dir or destination.exists() or destination.is_symlink():
         raise HostAuthorizationError("grant path must be new and inside its protected directory")
     policy_version = policy["schema_version"]
-    candidate_record = _validated_candidate_record(policy) if policy_version == "host-runtime-policy/3" else None
-    if policy_version == "host-runtime-policy/2" and role == "candidate_validation":
+    candidate_record = _validated_candidate_record(policy) if policy_version in _PRODUCTION_POLICIES else None
+    if policy_version in _CANDIDATE_POLICIES and role == "candidate_validation":
         # Consumption deliberately precedes every fallible Docker observation.
         # A failed attempt is not replayable with a mutated scope.
         _candidate_descriptor(policy, consume=True)
     observed = observe_and_validate(container_id, policy, role=role)
-    secret_state = _secret_state(observed) if policy_version == "host-runtime-policy/3" else None
+    secret_state = _secret_state(observed) if policy_version in _PRODUCTION_POLICIES else None
     _validate_mount_sources(observed, policy, grant_dir)
     if role == "candidate_validation":
         _protected_path(Path(policy["candidate_host_root"]), directory=True, temporary=True)
@@ -980,7 +1037,7 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     if hashlib.sha256(manifest_raw).hexdigest() != policy["runtime_manifest_sha256"] or hashlib.sha256(marker_raw).hexdigest() != policy["runtime_marker_sha256"]:
         raise HostAuthorizationError("actual runtime manifest/marker differs from approval")
     manifest = _json(manifest_raw)
-    if policy_version in {"host-runtime-policy/2", "host-runtime-policy/3"}:
+    if policy_version in _SOURCE_POLICIES:
         try:
             manifest_contract = _contract_module(MANIFEST_CONTRACT_PATH, "_market_data_runtime_manifest_host_contract")
             manifest_object = manifest_contract.parse_runtime_manifest(manifest)
@@ -990,11 +1047,11 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     for key in ("project_id", "module_id", "service_id"):
         if manifest.get(key) != policy[key]:
             raise HostAuthorizationError("runtime manifest identity mismatch")
-    expected_manifest_version = "runtime-manifest/1" if policy_version == "host-runtime-policy/1" else "runtime-manifest/2"
+    expected_manifest_version = _manifest_version(policy_version)
     if manifest.get("identity_kind") != "oci_container" or manifest.get("runtime_target") != "production_container" or manifest.get("schema_version") != expected_manifest_version:
         raise HostAuthorizationError("runtime manifest identity contract is missing")
     identity_root_role = manifest.get("identity_root_role")
-    if policy_version in {"host-runtime-policy/2", "host-runtime-policy/3"}:
+    if policy_version in _SOURCE_POLICIES:
         identity_roots = [item for item in manifest["runtime_roots"] if item["role"] == identity_root_role]
         if len(identity_roots) != 1 or identity_roots[0]["access"] != "ro" or identity_roots[0]["container_path"] != policy["runtime_root"]:
             raise HostAuthorizationError("policy runtime root differs from manifest identity root")
@@ -1003,6 +1060,7 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
         raise HostAuthorizationError("runtime marker cannot authorize this deployment role")
     mounts = observed["mounts"]
     _validate_runtime_mounts(manifest, mounts, policy)
+    _validate_v3_runtime(manifest, observed, policy, container_id)
     writable = [m["target"] for m in mounts if not m["read_only"] and _within(m["target"], policy["runtime_root"])]
     if not writable or any(target == policy["runtime_root"] for target in writable):
         raise HostAuthorizationError("runtime marker root must remain read-only with explicit writable children")
@@ -1010,7 +1068,7 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
                  if policy_version == "host-runtime-policy/1"
                  else [policy["source_root"], policy["grant_container_directory"],
                        *[item["container_path"] for item in manifest["runtime_roots"] if item["access"] == "ro"]])
-    if policy_version == "host-runtime-policy/3":
+    if policy_version in _PRODUCTION_POLICIES:
         protected.extend(m["target"] for m in mounts if m["target"].startswith("/run/secrets/"))
     def writable_cover(path):
         matches = [m for m in mounts if _within(path, m["target"])]
@@ -1030,11 +1088,12 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     now = datetime.now(timezone.utc)
     payload = {key: policy[key] for key in ("project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "image_id", "runtime_root", "runtime_manifest_sha256", "runtime_marker_sha256")}
     payload.update(grant_id=os.urandom(16).hex(), issued_at=now.isoformat(), expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(), identity_kind="oci_container", authorization_mode=role, role=role, artifact_origin=observed["image_labels"]["market-data.artifact.origin"], release_commit=policy["approved_commit"], release_tree=policy["approved_tree"], release_sha256=observed["release_sha256"], rendered_compose_sha256=rendered_digest, mount_contract_sha256=_digest(mounts), actual_config_sha256=observed["actual_config_sha256"], container_id=container_id, hostname_nonce=observed["config"]["Hostname"], writable_roots=writable, protected_mounts=protected)
-    grant_version = "production-execution-grant/1" if policy_version == "host-runtime-policy/1" else "production-execution-grant/2"
-    if grant_version == "production-execution-grant/2":
+    grant_version = ("production-execution-grant/3" if policy_version in _V3_POLICIES else
+                     "production-execution-grant/1" if policy_version == "host-runtime-policy/1" else "production-execution-grant/2")
+    if grant_version in {"production-execution-grant/2", "production-execution-grant/3"}:
         scope = policy["candidate_scope"]
         payload.update(
-            runtime_manifest_schema_version="runtime-manifest/2",
+            runtime_manifest_schema_version=expected_manifest_version,
             identity_root_role=identity_root_role,
             candidate_scope_id=scope["scope_id"] if scope is not None else None,
             candidate_scope_sha256=scope["descriptor_sha256"] if scope is not None else None,
@@ -1056,13 +1115,14 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
             or copy_container_bytes(container_id, marker_path) != marker_raw
             or copy_container_bytes(container_id, policy["source_root"] + "/02_configs/production_runtime_trust.json") != trust_raw):
         raise HostAuthorizationError("identity material changed before grant sealing")
-    if policy_version == "host-runtime-policy/2" and role == "candidate_validation":
+    _validate_v3_runtime(manifest, observed, policy, container_id)
+    if policy_version in _CANDIDATE_POLICIES and role == "candidate_validation":
         _candidate_descriptor(policy, consume=False)
     if _load_policy(expected_policy_path) != policy or TRUST_CONFIG_PATH.read_bytes() != trust_raw:
         raise HostAuthorizationError("host approval or trust changed before grant sealing")
-    if policy_version == "host-runtime-policy/3" and _validated_candidate_record(policy) != candidate_record:
+    if policy_version in _PRODUCTION_POLICIES and _validated_candidate_record(policy) != candidate_record:
         raise HostAuthorizationError("candidate record changed before grant sealing")
-    if policy_version == "host-runtime-policy/3" and _secret_state(observed) != secret_state:
+    if policy_version in _PRODUCTION_POLICIES and _secret_state(observed) != secret_state:
         raise HostAuthorizationError("secret file changed before grant sealing")
     try:
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)

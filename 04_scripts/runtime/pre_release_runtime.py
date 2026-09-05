@@ -186,6 +186,21 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
     return payload
 
 
+def _validate_production_revalidation_report(report: object, container_id: str) -> dict:
+    """Apply the common strict report contract for production policy v3/v5."""
+    if not isinstance(report, dict):
+        raise PreReleaseError("host returned an invalid revalidation report")
+    required = {"schema_version", "PRE_RELEASE_VALIDATION", "production_write_granted",
+                "container_started", "container_id"}
+    if (not required.issubset(report) or report["schema_version"] != "production-pre-release-validation/1"
+            or report["PRE_RELEASE_VALIDATION"] != "PASS"
+            or report["production_write_granted"] is not False
+            or report["container_started"] is not False
+            or report["container_id"] != container_id):
+        raise PreReleaseError("host returned an invalid revalidation report")
+    return report
+
+
 def revalidate_production(container_id: str, policy_path: Path, destination: Path) -> dict:
     """Revalidate a fresh, unstarted production instance using host authority.
 
@@ -211,16 +226,7 @@ def revalidate_production(container_id: str, policy_path: Path, destination: Pat
     before = require_source(host, engine)
     _new_output(host, destination)
     report = host.revalidate_production(container_id, expected_policy_path=policy_path)
-    if not isinstance(report, dict):
-        raise PreReleaseError("host returned an invalid revalidation report")
-    required = {"schema_version", "PRE_RELEASE_VALIDATION", "production_write_granted",
-                "container_started", "container_id"}
-    if (not required.issubset(report) or report["schema_version"] != "production-pre-release-validation/1"
-            or report["PRE_RELEASE_VALIDATION"] != "PASS"
-            or report["production_write_granted"] is not False
-            or report["container_started"] is not False
-            or report["container_id"] != container_id):
-        raise PreReleaseError("host returned an invalid revalidation report")
+    report = _validate_production_revalidation_report(report, container_id)
     digest = hashlib.sha256(json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     result = {"report": report, "report_sha256": digest}
     raw = json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()

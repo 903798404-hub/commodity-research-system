@@ -179,6 +179,25 @@ def manifest_v2(root: str) -> dict:
     }
 
 
+def manifest_v3(root: str) -> dict:
+    value = manifest_v2(root)
+    value.update({
+        "schema_version": "runtime-manifest/3",
+        "required_environment": ["MODE", "HISTORY_PATH", "SERVICE_URL", "MARKET_DATA_EXECUTION_GRANT"],
+        "environment_bindings": [
+            {"name": "MODE", "kind": "literal", "value": "STRICT_RUNTIME"},
+            {"name": "HISTORY_PATH", "kind": "runtime_path", "role": "history", "relative_path": "current.json"},
+            {"name": "SERVICE_URL", "kind": "deployment", "value_type": "https_url", "candidate_value": "https://candidate.invalid/"},
+            {"name": "MARKET_DATA_EXECUTION_GRANT", "kind": "execution_grant"},
+        ],
+        "forbidden_environment": ["ENABLE_WRITES"],
+        "candidate_runtime_inputs": [],
+    })
+    value["runtime_roots"].append({"role": "history", "container_path": root + "/history", "access": "ro"})
+    value["required_mounts"].append({"role": "history", "container_path": root + "/history", "read_only": True})
+    return value
+
+
 def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = "production", origin: str = "candidate", version: int = 1):
     source = tmp_path / "image"
     runtime = tmp_path / "runtime"
@@ -193,10 +212,10 @@ def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = 
     manifest = source / "manifests" / "runtime.json"
     commit, tree = "a" * 40, "b" * 40
     release.write_text(json.dumps({"git_commit": commit, "git_tree": tree, "application": "fixture"}), encoding="utf-8")
-    logical_root = "/runtime/fixture" if version == 2 else ("/runtime" if role == "production" else "/tmp/runtime")
-    manifest_value = manifest_v2(logical_root) if version == 2 else {"project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service"}
+    logical_root = "/runtime/fixture" if version in (2, 3) else ("/runtime" if role == "production" else "/tmp/runtime")
+    manifest_value = (manifest_v3(logical_root) if version == 3 else manifest_v2(logical_root)) if version in (2, 3) else {"project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service"}
     manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
-    if version == 2:
+    if version in (2, 3):
         (source / "app.py").write_text("print('fixture')\n", encoding="utf-8")
         (source / "init.py").write_text("print('initialized')\n", encoding="utf-8")
     private = Ed25519PrivateKey.generate()
@@ -227,11 +246,11 @@ def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = 
         "project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service", "runtime_id": "formal-runtime",
         "approved_commit": commit, "approved_tree": tree, "release_commit": commit, "release_tree": tree,
         "image_id": "sha256:" + "c" * 64, "release_sha256": hashlib.sha256(release.read_bytes()).hexdigest(), "runtime_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(), "runtime_marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
-        "runtime_root": root, "writable_roots": [root + "/data"], "protected_mounts": ["/app", root if version == 2 else root + "/.market-data-runtime.json"],
+        "runtime_root": root, "writable_roots": [root + "/data"], "protected_mounts": ["/app", *([root, root + "/history"] if version == 3 else [root] if version == 2 else [root + "/.market-data-runtime.json"])],
         "rendered_compose_sha256": "d" * 64, "mount_contract_sha256": "e" * 64, "actual_config_sha256": "f" * 64, "container_id": "1" * 64, "hostname_nonce": "b" * 32,
     }
-    if version == 2:
-        payload.update(runtime_manifest_schema_version="runtime-manifest/2", identity_root_role="marker",
+    if version in (2, 3):
+        payload.update(runtime_manifest_schema_version=f"runtime-manifest/{version}", identity_root_role="marker",
                        candidate_scope_id="6" * 32 if role == "candidate_validation" else None,
                        candidate_scope_sha256="7" * 64 if role == "candidate_validation" else None)
     grant = source / "auth" / "grant.json"
@@ -242,7 +261,7 @@ def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = 
 
 
 def sign_grant(request: identity.OCIExecutionRequest, payload: dict, private: Ed25519PrivateKey) -> None:
-    version = 2 if "runtime_manifest_schema_version" in payload else 1
+    version = int(payload["runtime_manifest_schema_version"].rsplit("/", 1)[1]) if "runtime_manifest_schema_version" in payload else 1
     envelope = {"schema_version": f"production-execution-grant/{version}", "algorithm": "ed25519", "key_id": payload["role"].replace("_", "-") + "-key", "payload": payload, "signature": base64.b64encode(private.sign(identity._canonical(payload))).decode("ascii")}
     request.grant_path.write_text(json.dumps(envelope), encoding="utf-8")
 
@@ -273,8 +292,30 @@ def test_v2_uses_manifest_identity_root_for_both_roles(tmp_path: Path, monkeypat
     assert payload["runtime_root"] == "/runtime/fixture"
 
 
-def test_v2_rejects_missing_manifest_source_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+@pytest.mark.parametrize("role", ["production", "candidate_validation"])
+def test_v3_requires_observed_environment_bindings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, role=role, version=3)
+    environment = {"MODE": "STRICT_RUNTIME", "HISTORY_PATH": "/runtime/fixture/history/current.json",
+                   "SERVICE_URL": "https://candidate.invalid/" if role == "candidate_validation" else "https://production.invalid/",
+                   "MARKET_DATA_EXECUTION_GRANT": "/app/auth/grant.json"}
+    monkeypatch.setattr(identity.os, "environ", environment)
+    verified = identity.verify_execution(request, expected_role=role, module_id="shared-runtime", runtime_id="formal-runtime",
+                                         runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+    assert verified.writable_roots == (Path("/runtime/fixture/data"),)
+    environment["ENABLE_WRITES"] = ""
+    with pytest.raises(identity.ProductionIdentityError, match="environment"):
+        identity.verify_execution(request, expected_role=role, module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+@pytest.mark.parametrize("version", [2, 3])
+def test_v2_and_v3_reject_missing_manifest_source_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=version)
+    if version == 3:
+        monkeypatch.setattr(identity.os, "environ", {
+            "MODE": "STRICT_RUNTIME", "HISTORY_PATH": "/runtime/fixture/history/current.json",
+            "SERVICE_URL": "https://production.invalid/", "MARKET_DATA_EXECUTION_GRANT": "/app/auth/grant.json",
+        })
     (request.runtime_manifest_path.parent.parent / "app.py").unlink()
     with pytest.raises(identity.ProductionIdentityError, match="source input"):
         identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",

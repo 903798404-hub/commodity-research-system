@@ -44,6 +44,7 @@ _ENGINE_PATH = "04_scripts/runtime/validate_target_runtime.py"
 _MANIFEST_PARSER = "03_src/agri_research_agent/shared/runtime_manifest.py"
 _MANIFEST_SCHEMA = "02_configs/runtime_manifest.schema.json"
 _VALIDATOR_VERSION = "target-runtime-validator/1"
+_V3_VALIDATOR_VERSION = "target-runtime-validator/2"
 
 
 class ValidationError(RuntimeError):
@@ -179,6 +180,8 @@ def _candidate_binding(root: Path, project: Mapping[str, Any],
              *build["dependency_contracts"], *build["compose_sources"], _ENGINE_PATH,
              *(item["path"] for item in contract["source_inputs"]),
              _MANIFEST_PARSER, _MANIFEST_SCHEMA]
+    if contract.get("schema_version") == "runtime-manifest/3":
+        paths.extend(item["source_path"] for item in contract["candidate_runtime_inputs"])
     if len({name.casefold() for name in paths}) != len(paths):
         raise ValidationError("runtime binding paths overlap")
     hashes = {}
@@ -192,9 +195,14 @@ def _candidate_binding(root: Path, project: Mapping[str, Any],
             if disk_blob != git_blob:
                 raise ValidationError(f"runtime input differs from Git object: {name}")
         hashes[name] = _sha(raw)
+    version = _VALIDATOR_VERSION
+    if contract.get("schema_version") == "runtime-manifest/3":
+        version = _V3_VALIDATOR_VERSION
+        if any(hashes[item["source_path"]] != item["sha256"] for item in contract["candidate_runtime_inputs"]):
+            raise ValidationError("candidate runtime fixture differs from declared Git SHA")
     return {"project_id": project["project_id"], "commit": _git(root, "rev-parse", "HEAD"),
             "tree": _git(root, "rev-parse", "HEAD^{tree}"), "source_sha256": hashes,
-            "validator_version": _VALIDATOR_VERSION}
+            "validator_version": version}
 
 
 def validate_dockerfile_inputs(root: Path, contract: Mapping[str, Any],
@@ -209,6 +217,8 @@ def validate_dockerfile_inputs(root: Path, contract: Mapping[str, Any],
     build = contract["build"]
     metadata = {build["dockerfile"], build["dockerignore"],
                 *build["compose_sources"], _ENGINE_PATH}
+    if contract.get("schema_version") == "runtime-manifest/3":
+        metadata.update(item["source_path"] for item in contract["candidate_runtime_inputs"])
     allowed = set(binding["source_sha256"]) - metadata
     required = allowed
     copied = set()
@@ -310,10 +320,10 @@ def source_contract(root: Path, project_id: str, runtime_contract: str):
     try:
         contract = parser.load_runtime_manifest(_exact_source(root, runtime_contract)).to_dict()
     except (AttributeError, TypeError, ValueError) as exc:
-        raise ValidationError("runtime manifest violates v2 source contract") from exc
-    if (contract.get("schema_version") != "runtime-manifest/2"
+        raise ValidationError("runtime manifest violates source contract") from exc
+    if (contract.get("schema_version") not in {"runtime-manifest/2", "runtime-manifest/3"}
             or contract.get("project_id") != project_id):
-        raise ValidationError("actual container validation requires runtime-manifest/2")
+        raise ValidationError("actual container validation requires runtime-manifest/2 or /3")
     binding = _candidate_binding(root, project, contract)
     validate_dockerfile_inputs(root, contract, binding)
     if set(contract["validation_probes"]) != REQUIRED_PROBES:
@@ -484,13 +494,13 @@ def build_image(root: Path, context: Path, contract: Mapping[str, Any],
             "--label", "market-data.artifact.origin=candidate",
             "--label", "market-data.artifact.promotable=true",
             "--label", f"market-data.release.id={release_id}",
-            "--label", "org.opencontainers.image.source=target-runtime-validator/1",
+            "--label", "org.opencontainers.image.source=" + binding["validator_version"],
             "--label", f"org.opencontainers.image.created={build_time}"]
     build_args = {
         "MARKET_DATA_GIT_HEAD": binding["commit"], "MARKET_DATA_GIT_TREE": binding["tree"],
         "MARKET_DATA_RELEASE_ID": release_id,
         "MARKET_DATA_BUILD_TIME": build_time,
-        "MARKET_DATA_SOURCE": "target-runtime-validator/1",
+        "MARKET_DATA_SOURCE": binding["validator_version"],
         "MARKET_DATA_SERVICE": contract["service_id"],
         "MARKET_DATA_ARTIFACT_ORIGIN": "candidate",
         "MARKET_DATA_ARTIFACT_PROMOTABLE": "true",
@@ -545,6 +555,73 @@ def _runtime_bindings(contract: Mapping[str, Any], uid: int, gid: int) -> list[d
     return sorted(result, key=lambda item: (item["relative_path"].count("/"), item["relative_path"]))
 
 
+def _exclude_candidate_inputs(context: Path, contract: Mapping[str, Any]) -> None:
+    for item in contract.get("candidate_runtime_inputs", []):
+        path = context.joinpath(*PurePosixPath(item["source_path"]).parts)
+        if (not path.is_file() or path.is_symlink()
+                or not path.resolve(strict=True).is_relative_to(context.resolve(strict=True))):
+            raise ValidationError("candidate fixture is missing or aliased in build context")
+        path.unlink()
+
+
+def _seed_candidate_runtime_inputs(root: Path, contract: Mapping[str, Any],
+                                   binding: Mapping[str, Any], scope: Mapping[str, Any], host) -> None:
+    roots = {item["role"]: item for item in contract["runtime_roots"]}
+    total = 0
+    for item in contract.get("candidate_runtime_inputs", []):
+        declared = roots[item["role"]]
+        matches = [mount for mount in scope["mounts"]
+                   if mount["target"] == declared["container_path"]]
+        if (declared["access"] != "ro" or item["role"] == contract["identity_root_role"]
+                or len(matches) != 1 or matches[0]["read_only"] is not True):
+            raise ValidationError("candidate fixture requires an exact readonly child mount")
+        base = host._protected_path(Path(matches[0]["source"]), directory=True, temporary=True)
+        candidate_root = host._protected_path(Path(scope["candidate_host_root"]), directory=True, temporary=True)
+        if not base.is_relative_to(candidate_root) or base == candidate_root:
+            raise ValidationError("candidate fixture mount is outside candidate scope")
+        parts = PurePosixPath(item["relative_path"]).parts
+        if (not parts or "/" in parts or any(part in {".", "..", ".git", ".market-data-runtime.json"}
+                                            for part in parts)):
+            raise ValidationError("candidate fixture target is unsafe")
+        raw = _git(root, "show", binding["commit"] + ":" + item["source_path"], binary=True)
+        total += len(raw)
+        if (total > 64 * 1024 * 1024 or _sha(raw) != item["sha256"]
+                or binding["source_sha256"].get(item["source_path"]) != item["sha256"]):
+            raise ValidationError("candidate fixture bytes differ from bound source or exceed size limit")
+        parent = base
+        for part in parts[:-1]:
+            parent = parent / part
+            if not parent.exists():
+                parent.mkdir(mode=0o755)
+            host._protected_path(parent, directory=True, temporary=True)
+        target = parent / parts[-1]
+        _write_new(target, raw, 0o444)
+        host._protected_path(target, temporary=True)
+
+
+def _candidate_environment(contract: Mapping[str, Any]) -> dict[str, str]:
+    environment = {name: f"candidate-validation-{name.lower()}"
+                   for name in contract["required_environment"]}
+    environment["MARKET_DATA_EXECUTION_GRANT"] = _GRANT_ROOT + "/grant.json"
+    if contract.get("schema_version") != "runtime-manifest/3":
+        return environment
+    roots = {item["role"]: item["container_path"] for item in contract["runtime_roots"]}
+    for item in contract["environment_bindings"]:
+        kind = item["kind"]
+        if kind == "literal":
+            value = item["value"]
+        elif kind == "runtime_path":
+            value = roots[item["role"]] + ("/" + item["relative_path"] if item["relative_path"] else "")
+        elif kind == "deployment":
+            value = item["candidate_value"]
+        elif kind == "execution_grant":
+            value = _GRANT_ROOT + "/grant.json"
+        else:
+            raise ValidationError("unknown environment binding kind")
+        environment[item["name"]] = value
+    return environment
+
+
 def _compose_document(contract: Mapping[str, Any], image_id: str,
                       mounts: Sequence[Mapping[str, Any]], grant_dir: Path,
                       hostname: str) -> dict[str, Any]:
@@ -552,8 +629,7 @@ def _compose_document(contract: Mapping[str, Any], image_id: str,
                 "read_only": item["read_only"]} for item in mounts]
     volumes.append({"type": "bind", "source": str(grant_dir),
                     "target": _GRANT_ROOT, "read_only": True})
-    environment = {name: f"candidate-validation-{name.lower()}" for name in contract["required_environment"]}
-    environment.update({"MARKET_DATA_EXECUTION_GRANT": _GRANT_ROOT + "/grant.json"})
+    environment = _candidate_environment(contract)
     return {"name": "market-data-runtime-validation",
             "services": {contract["service_id"]: {
                 "image": image_id, "entrypoint": contract["entrypoint"],
@@ -595,6 +671,16 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     environment = service.get("environment") or {}
     if not isinstance(environment, dict) or not set(contract["required_environment"]).issubset(environment):
         raise ValidationError("source Compose required environment contract is incomplete")
+    if contract.get("schema_version") == "runtime-manifest/3":
+        if set(environment) != set(contract["required_environment"]):
+            raise ValidationError("source Compose environment differs from declared names")
+        expected = _candidate_environment(contract)
+        for item in contract["environment_bindings"]:
+            actual = environment[item["name"]]
+            if item["kind"] != "deployment" and actual != expected[item["name"]]:
+                raise ValidationError("source Compose fixed environment binding differs from manifest")
+            if not isinstance(actual, str) or not actual.strip():
+                raise ValidationError("source Compose environment value is missing")
     if ("MARKET_DATA_EXECUTION_GRANT" not in contract["required_environment"]
             or environment.get("MARKET_DATA_EXECUTION_GRANT") != _GRANT_ROOT + "/grant.json"):
         raise ValidationError("source Compose execution grant environment is invalid")
@@ -669,7 +755,7 @@ def _release_identity(raw: bytes, binding: Mapping[str, Any],
     if image_labels is not None:
         if (release.get("source") != image_labels.get("org.opencontainers.image.source")
                 or release.get("build_time") != image_labels.get("org.opencontainers.image.created")
-                or release.get("source") != "target-runtime-validator/1"):
+                or release.get("source") != binding["validator_version"]):
             raise ValidationError("embedded RELEASE build origin differs from OCI image")
         try:
             created = datetime.fromisoformat(release["build_time"].replace("Z", "+00:00"))
@@ -703,7 +789,8 @@ def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: s
     if len(keys) != 1:
         raise ValidationError("candidate validation trust key is not unique")
     return {
-        "schema_version": "host-runtime-policy/2", "role": "candidate_validation",
+        "schema_version": ("host-runtime-policy/4" if contract.get("schema_version") == "runtime-manifest/3"
+                           else "host-runtime-policy/2"), "role": "candidate_validation",
         "key_id": keys[0]["key_id"], "project_id": contract["project_id"],
         "module_id": contract["module_id"], "service_id": contract["service_id"],
         "runtime_id": "target-validation", "approved_commit": binding["commit"],
@@ -891,6 +978,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         validate_source_compose(root, contract)
         context = work / "context"
         create_archive_context(root, context, binding)
+        _exclude_candidate_inputs(context, contract)
         image_id = build_image(root, context, contract, binding)
         image = inspect_one("image", image_id)
         uid, gid = _numeric_user(image)
@@ -917,6 +1005,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             marker_path = identity_source / ".market-data-runtime.json"
             marker_path.write_bytes(_canonical(marker) + b"\n")
             os.chmod(marker_path, 0o444)
+            _seed_candidate_runtime_inputs(root, contract, binding, scope, host)
             hostname = os.urandom(16).hex()
             compose_doc = _compose_document(contract, image_id, scope["mounts"], grant_dir, hostname)
             compose.write_bytes(_canonical(compose_doc) + b"\n")
@@ -1005,6 +1094,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                   "from pathlib import Path; p=Path('/app/.preview-write-probe'); p.write_text('x')"],
                   expect_success=False, label="preview-source-write-rejected")
             probes["preview_write_rejected"] = "PASS"
+            final_container = inspect_one("container", container_id)
+            host._validate_v3_runtime(contract, host.normalize_observation(
+                final_container, image, _strict_json(release_raw, "RELEASE")), policy, container_id)
             if set(probes) != REQUIRED_PROBES or any(value != "PASS" for value in probes.values()):
                 raise ValidationError("required probe set was not actually completed")
             return {
