@@ -150,6 +150,82 @@ CONTRACT_SOURCE_ALLOCATION['future_owned_paths'] += [
     '02_configs/runtime_contracts/spread-production-runtime.json']
 CONTRACT_SOURCE_ALLOCATION['boundary_notes'] += ' Production runtime contract bootstrap allocates only 02_configs/runtime_contracts/spread-production-runtime.json as an exact future source-contract file. In a subsequent independent infrastructure branch from approved main, create a valid runtime-manifest/3 for project_id spread-production-runtime-wiring using existing tracked deployment/source inputs. This stage does not own or modify Dockerfile, Compose, business sources or production data and does not claim target container deployability. The infrastructure project remains a library and host-tool project; the future wiring project is not registered under a false runtime target. Before wiring development, a separate dev-governance change must atomically transfer this manifest ownership and register the actual production_container project with its existing valid contract and exact deployment paths. No pending target, missing-contract exception, production approval, deployment, capture, schedule, FULL DAILY integration or Notification activation is authorized by this allocation.'
 
+# The bootstrap allocation remains historical evidence.  The wiring registration
+# transfers its one exact manifest and leaves all infrastructure tests intact.
+POST_TRANSFER_INFRA_REGISTRATION = copy.deepcopy(CONTRACT_SOURCE_ALLOCATION)
+POST_TRANSFER_INFRA_REGISTRATION['future_owned_paths'].remove(
+    '02_configs/runtime_contracts/spread-production-runtime.json')
+POST_TRANSFER_INFRA_REGISTRATION['boundary_notes'] += ' The spread source-contract bootstrap is complete. Ownership of its one exact manifest is transferred to spread-production-runtime-wiring by an independent governance stage; all remaining infrastructure ownership and required tests stay unchanged. The new project carries the real production_container target and must pass its own target deployability gate.'
+
+SPREAD_RUNTIME_WIRING_REGISTRATION = {
+ 'project_id': 'spread-production-runtime-wiring', 'change_class': 'shared',
+ 'status': 'ready', 'runtime_target': 'production_container',
+ 'runtime_contract': '02_configs/runtime_contracts/spread-production-runtime.json',
+ 'owned_paths': [],
+ 'future_owned_paths': ['02_configs/runtime_contracts/spread-production-runtime.json',
+                        '04_scripts/capture_public_intraday.py',
+                        '09_deploy/spread_runtime/Dockerfile.spread-runtime',
+                        '09_deploy/spread_runtime/compose.yml',
+                        '09_deploy/spread_runtime/说明.md',
+                        '04_scripts/runtime/spread_runtime_preflight.py',
+                        '08_tests/test_spread_runtime_contract.py',
+                        '08_tests/fixtures/spread_runtime/public_current.json',
+                        '08_tests/fixtures/spread_runtime/public_release_manifest.json',
+                        '08_tests/fixtures/spread_runtime/domestic_spread_database.parquet',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_release_index.json',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_release_manifest.json',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_business_keys.parquet',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_market_snapshots.parquet',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_net_crush_results.parquet',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_quality_report.json',
+                        '08_tests/fixtures/spread_runtime/soybean_runtime_manual_cnf_quotes.parquet',
+                        '08_tests/fixtures/spread_runtime/historical_cnf_cache.parquet',
+                        '08_tests/fixtures/spread_runtime/shared_intraday_snapshot_manifest.json',
+                        '08_tests/fixtures/spread_runtime/shared_intraday_snapshot_quotes.json'],
+ 'shared_dependencies': ['Dockerfile', 'docker-compose.yml', '.dockerignore', 'requirements.txt',
+                         '05_apps/streamlit_app.py', '05_apps/import_profit_intraday_runtime_page.py',
+                         '05_apps/import_profit_intraday_page.py',
+                         '03_src/agri_research_agent/shared/runtime_context.py',
+                         '03_src/agri_research_agent/shared/production_identity.py',
+                         '03_src/agri_research_agent/shared/production_grant.py',
+                         '03_src/agri_research_agent/shared/runtime_manifest.py',
+                         '02_configs/runtime_manifest.schema.json', '02_configs/production_runtime_trust.json',
+                         '02_configs/import_profit_soybean.yaml',
+                         '03_src/agri_research_agent/market_data/activated_runtime.py',
+                         '03_src/agri_research_agent/application/domestic_spreads.py',
+                         '03_src/agri_research_agent/market_data/intraday.py',
+                         '03_src/agri_research_agent/market_data/calendars.py',
+                         '03_src/agri_research_agent/import_profit/runtime_store.py',
+                         '03_src/agri_research_agent/import_profit/cnf_store.py',
+                         '03_src/agri_research_agent/import_profit/intraday_store.py',
+                         '03_src/agri_research_agent/pipelines/public_intraday.py',
+                         '04_scripts/runtime/validate_target_runtime.py',
+                         '04_scripts/runtime/pre_release_runtime.py',
+                         '09_deploy/runtime_identity/host_authorization.py'],
+ 'forbidden_paths': ['02_configs/project_registry.json', '03_src', '05_apps',
+                     '04_scripts/automation', '04_scripts/environment', '04_scripts/quality',
+                     '04_scripts/import_profit', '04_scripts/notifications',
+                     '04_scripts/refresh_public_data.py', '09_deploy/runtime_identity',
+                     '09_deploy/spread_release', '09_deploy/public_intraday_runtime',
+                     'Dockerfile', 'docker-compose.yml', '.dockerignore', 'requirements.txt',
+                     'requirements.in'],
+ 'required_tests': ['08_tests/test_project_registry.py', '08_tests/test_quality_controls.py',
+                    '08_tests/test_documentation_contract.py',
+                    '08_tests/shared/test_runtime_context.py',
+                    '08_tests/shared/test_production_identity.py',
+                    '08_tests/test_target_runtime_validator.py',
+                    '08_tests/test_public_intraday_capture.py',
+                    '08_tests/market_data/test_intraday.py',
+                    '08_tests/pipelines/test_public_intraday.py',
+                    '08_tests/test_import_profit_intraday_page.py',
+                    '08_tests/pipelines/test_full_daily_windows_wrapper.py'],
+ 'future_required_tests': ['08_tests/test_spread_runtime_contract.py'],
+ 'capabilities': ['full spread-dashboard production runtime manifest and exact deployment source wiring',
+                  'explicit Git/OCI capture CLI identity initialization without changing capture semantics',
+                  'candidate-only immutable fixtures and real readonly Domestic Spread, Shared Intraday consumer and Soybean STRICT_RUNTIME initialization',
+                  'candidate-bound Linux container deployability before closure and same-image production promotion'],
+ 'boundary_notes': 'PROD-RUNTIME-V2 Goals E/F authorize an independent shared wiring project from the source-contract stage on authoritative main. Atomically transfer only the existing spread manifest and capture CLI; all new ownership is exact files, without directory or reserved namespace authority. Keep the full 05_apps/streamlit_app.py entrypoint and service spread-dashboard; no fourth or narrowed production service. Root Dockerfile/Compose remain read-only historical deployment sources; the wiring stage must bind the manifest to its new exact Dockerfile.spread-runtime and compose.yml and actual rendered deployment configuration. Registration is not runtime implementation, container PASS, Production Approval or deployment. New fixtures are synthetic Git-tracked candidate-only inputs, excluded from image COPY, hash-bound and seeded only into protected temporary read-only child mounts; never promote them to production data. Production roots require real provenance and physical/identity separation from Preview, dev/feature/old PM worktrees and temporary fixtures. Keep PAGE_MODE=STRICT_RUNTIME, ENVIRONMENT=FORMAL, current business-date behavior and Tankan secret-file contract; do not enable CNF save or configure write authorization just for smoke. Capture CLI changes are limited to explicit execution identity selection and initialization; no fallback, query/model/formula/snapshot changes. Test real CLI identity initialization, strict page and immutable snapshot consumer, dependencies, mounts, missing/mismatched identities and Preview write rejection in the actual clean Linux target image before code closure; no import-only or empty-directory substitute. Temporal capture is not a deployability prerequisite and no historical recapture or old SEALED mutation is allowed. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; NOTIFICATION_AUTO_EXECUTION=NO; REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED. All production-container Completion and pre-release evidence binding remain mandatory. Registry grants no production data writes or scheduling; production release follows the separately authorized whole-main audit and same validated Image ID workflow.'}
+
 
 PM_EXISTING_ADDITIONS = [
     '03_src/agri_research_agent/pipelines/import_profit_daily.py',
@@ -322,6 +398,21 @@ def registration_baseline():
         if baseline_by_id.get('shared-production-infrastructure') == PRE_RELEASE_REGISTRATION:
             expected = copy.deepcopy(baseline)
             expected['projects'] = [CONTRACT_SOURCE_ALLOCATION if p['project_id'] == 'shared-production-infrastructure' else p for p in expected['projects']]
+            assert current == expected
+            baseline = expected
+        baseline_by_id = {p['project_id']: p for p in baseline['projects']}
+        if baseline_by_id.get('shared-production-infrastructure') == CONTRACT_SOURCE_ALLOCATION:
+            expected = copy.deepcopy(baseline)
+            shared_intraday = next(p for p in expected['projects'] if p['project_id'] == 'shared-intraday')
+            shared_intraday['future_owned_paths'].remove('04_scripts/capture_public_intraday.py')
+            shared_intraday['shared_dependencies'].append('04_scripts/capture_public_intraday.py')
+            shared_intraday['runtime_target'] = 'library_only'
+            shared_intraday['boundary_notes'] += ' PROD-RUNTIME-V2 transfers only 04_scripts/capture_public_intraday.py to spread-production-runtime-wiring for explicit Git/OCI identity initialization and argument wiring. Remaining Shared Intraday schema, providers, pipelines and tests are library_only and retain their existing boundaries. The transferred CLI remains a read-only dependency here; this project cannot change it or claim container deployability. Its capture semantics, exact-contract queries, dates, secret-file contract and immutable SEALED behavior must remain unchanged.'
+            expected['projects'] = [
+                POST_TRANSFER_INFRA_REGISTRATION if p['project_id'] == 'shared-production-infrastructure'
+                else shared_intraday if p['project_id'] == 'shared-intraday' else p
+                for p in expected['projects']]
+            expected['projects'].append(SPREAD_RUNTIME_WIRING_REGISTRATION)
             assert current == expected
             baseline = expected
     return baseline
@@ -1175,15 +1266,22 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
     by_id = {p['project_id']: p for p in current['projects']}
     for old in legacy['projects']:
         expected = copy.deepcopy(old)
-        if old['project_id'] == 'dev-governance': expected['runtime_target'] = 'none'
+        if old['project_id'] == 'dev-governance':
+            expected['runtime_target'] = 'none'
+        elif old['project_id'] == 'shared-intraday':
+            expected['future_owned_paths'].remove('04_scripts/capture_public_intraday.py')
+            expected['shared_dependencies'].append('04_scripts/capture_public_intraday.py')
+            expected['runtime_target'] = 'library_only'
+            expected['boundary_notes'] += ' PROD-RUNTIME-V2 transfers only 04_scripts/capture_public_intraday.py to spread-production-runtime-wiring for explicit Git/OCI identity initialization and argument wiring. Remaining Shared Intraday schema, providers, pipelines and tests are library_only and retain their existing boundaries. The transferred CLI remains a read-only dependency here; this project cannot change it or claim container deployability. Its capture semantics, exact-contract queries, dates, secret-file contract and immutable SEALED behavior must remain unchanged.'
         assert by_id[old['project_id']] == expected
-    assert by_id['shared-production-infrastructure'] == CONTRACT_SOURCE_ALLOCATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime'}
+    assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
+    assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == CONTRACT_SOURCE_ALLOCATION
+    assert project == POST_TRANSFER_INFRA_REGISTRATION
     assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
     assert not project.get('reserved_paths')
     for path in project['owned_paths'] + project['future_owned_paths']:
@@ -1202,7 +1300,7 @@ def test_production_infrastructure_registration_has_only_exact_new_ownership():
 
 def test_production_grant_contract_registration_is_exact_and_readonly_dependencies():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == CONTRACT_SOURCE_ALLOCATION
+    assert project == POST_TRANSFER_INFRA_REGISTRATION
     assert project['runtime_target'] == 'library_only'
     assert project['future_owned_paths'][9:11] == [
         '03_src/agri_research_agent/shared/production_grant.py',
@@ -1243,7 +1341,7 @@ def test_deployability_engine_registration_is_exact_and_does_not_grant_scripts_d
 
 def test_pre_release_registration_is_only_four_files_and_two_tests():
     current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
-    assert project == CONTRACT_SOURCE_ALLOCATION
+    assert project == POST_TRANSFER_INFRA_REGISTRATION
     assert project['runtime_target'] == 'library_only'
     assert project['future_owned_paths'][:14] == DEPLOYABILITY_ENGINE_REGISTRATION['future_owned_paths']
     assert project['future_required_tests'][:-2] == DEPLOYABILITY_ENGINE_REGISTRATION['future_required_tests']
@@ -1776,10 +1874,13 @@ def test_shared_future_cannot_change_closed_scope(repository, monkeypatch, capsy
 def test_registered_shared_intraday_exact_boundary():
     _, project = registry.select_project(ROOT, 'shared-intraday')
     assert project['change_class'] == 'shared' and project['status'] == 'ready'
+    assert project['runtime_target'] == 'library_only'
     assert project['owned_paths'] == []
-    assert len(project['future_owned_paths']) == 8
+    assert len(project['future_owned_paths']) == 7
     assert len(project['future_required_tests']) == 4
     assert set(project['future_required_tests']) <= set(project['future_owned_paths'])
+    assert '04_scripts/capture_public_intraday.py' not in project['future_owned_paths']
+    assert '04_scripts/capture_public_intraday.py' in project['shared_dependencies']
     assert 'REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED' in project['boundary_notes']
     assert 'REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED' in project['boundary_notes']
     assert 'DEFERRED_TEMPORAL_ACCEPTANCE_BLOCKING=NO' in project['boundary_notes']
@@ -2159,16 +2260,37 @@ def test_public_intraday_runtime_production_registration_is_exact_and_inert():
     assert "INTRADAY_FULL_DAILY_DEPENDENCY=NONE" in project["boundary_notes"]
 
 
-def test_spread_contract_allocation_is_one_file_without_production_registration():
-    current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
+def test_spread_contract_bootstrap_is_historical_and_transfer_is_exact():
     path = '02_configs/runtime_contracts/spread-production-runtime.json'
-    assert project == CONTRACT_SOURCE_ALLOCATION
-    assert project['future_owned_paths'][:-1] == PRE_RELEASE_REGISTRATION['future_owned_paths']
-    assert project['future_owned_paths'][-1] == path
+    assert CONTRACT_SOURCE_ALLOCATION['future_owned_paths'] == [
+        *PRE_RELEASE_REGISTRATION['future_owned_paths'], path]
+    assert POST_TRANSFER_INFRA_REGISTRATION['future_owned_paths'] == PRE_RELEASE_REGISTRATION['future_owned_paths']
     for key in PRE_RELEASE_REGISTRATION.keys() - {'future_owned_paths', 'boundary_notes'}:
-        assert project[key] == PRE_RELEASE_REGISTRATION[key]
-    assert 'spread-production-runtime-wiring' not in {p['project_id'] for p in current['projects']}
+        assert POST_TRANSFER_INFRA_REGISTRATION[key] == PRE_RELEASE_REGISTRATION[key]
+    current, project = registry.select_project(ROOT, 'shared-production-infrastructure')
+    assert project == POST_TRANSFER_INFRA_REGISTRATION
+    assert not registry.owns(project, path)
+
+
+def test_spread_runtime_wiring_registration_owns_only_exact_paths_and_contract():
+    from quality import target_runtime_gate
+
+    current, project = registry.select_project(ROOT, 'spread-production-runtime-wiring')
+    path = '02_configs/runtime_contracts/spread-production-runtime.json'
+    assert project == SPREAD_RUNTIME_WIRING_REGISTRATION
+    assert project['runtime_target'] == 'production_container'
+    assert project['runtime_contract'] == path
+    assert target_runtime_gate.read_contract(ROOT, project)['project_id'] == project['project_id']
+    assert project['future_required_tests'] == ['08_tests/test_spread_runtime_contract.py']
+    assert project['future_required_tests'][0] in project['future_owned_paths']
     assert registry.owns(project, path)
-    for other in ('02_configs/runtime_contracts/other.json', path + '/child.json',
-                  'Dockerfile', 'docker-compose.yml', '05_apps/streamlit_app.py'):
+    for owned in project['owned_paths'] + project['future_owned_paths']:
+        assert registry.owns(project, owned)
+        assert not registry.owns(project, owned + '/child')
+        assert not registry.owns(project, owned + '.sibling')
+        assert all(not registry.owns(other, owned) for other in current['projects'] if other is not project)
+    for other in ('02_configs/runtime_contracts/other.json', '04_scripts/capture_public_intraday_extra.py',
+                  '04_scripts/runtime/other.py', '09_deploy/spread_runtime/extra.yml',
+                  '08_tests/fixtures/spread_runtime/unregistered.json', 'Dockerfile',
+                  'docker-compose.yml', '05_apps/streamlit_app.py'):
         assert not registry.owns(project, other)

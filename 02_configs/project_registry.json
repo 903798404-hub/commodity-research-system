@@ -615,7 +615,6 @@
         "03_src/agri_research_agent/market_data/intraday.py",
         "03_src/agri_research_agent/data_sources/tankan/intraday_adapter.py",
         "03_src/agri_research_agent/pipelines/public_intraday.py",
-        "04_scripts/capture_public_intraday.py",
         "08_tests/market_data/test_intraday.py",
         "08_tests/data_sources/tankan/test_intraday_adapter.py",
         "08_tests/pipelines/test_public_intraday.py",
@@ -630,7 +629,8 @@
         "03_src/agri_research_agent/data_sources/tankan/models.py",
         "03_src/agri_research_agent/research_data/identities.py",
         "03_src/agri_research_agent/market_data/contracts.py",
-        "03_src/agri_research_agent/market_data/calendars.py"
+        "03_src/agri_research_agent/market_data/calendars.py",
+        "04_scripts/capture_public_intraday.py"
       ],
       "forbidden_paths": [
         "02_configs",
@@ -693,7 +693,8 @@
         "RuntimeContext integration; Machine Evidence; Async accounting; intraday freshness",
         "capture orchestration/CLI; dependency boundary; existing daily behavior unchanged"
       ],
-      "boundary_notes": "基于旧PM shared audit的market_data/intraday.py、pipelines/public_intraday.py、capture_public_intraday.py职责登记；quote/store/consumer/legacy reader集中于intraday.py。当前Tankan包已有client/models及adapter惯例，新增独立intraday_adapter.py承接live queries/provider，不修改daily client/query核心。对应4个精确测试文件分别覆盖schema/hash/immutable/legacy、exact/unavailable、runtime/evidence/async/freshness/dependency、capture CLI与daily零污染；所有父包__init__.py已存在且不授予修改权。只读依赖不等于修改权；Machine Evidence使用现有QueryPlanProof/ConnectionProof/SourceBatch等证明合同，不扩展Provider Preflight domain。FULL DAILY不得依赖Intraday；CNF、船期映射、业务公式、UI、历史榨利、PM materialize和生产身份不在scope。REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED; DEFERRED_TEMPORAL_ACCEPTANCE_BLOCKING=NO。Registry不授予生产数据写入或部署权限；新增路径需求须另行审批，不得扩展父目录。"
+      "boundary_notes": "基于旧PM shared audit的market_data/intraday.py、pipelines/public_intraday.py、capture_public_intraday.py职责登记；quote/store/consumer/legacy reader集中于intraday.py。当前Tankan包已有client/models及adapter惯例，新增独立intraday_adapter.py承接live queries/provider，不修改daily client/query核心。对应4个精确测试文件分别覆盖schema/hash/immutable/legacy、exact/unavailable、runtime/evidence/async/freshness/dependency、capture CLI与daily零污染；所有父包__init__.py已存在且不授予修改权。只读依赖不等于修改权；Machine Evidence使用现有QueryPlanProof/ConnectionProof/SourceBatch等证明合同，不扩展Provider Preflight domain。FULL DAILY不得依赖Intraday；CNF、船期映射、业务公式、UI、历史榨利、PM materialize和生产身份不在scope。REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED; DEFERRED_TEMPORAL_ACCEPTANCE_BLOCKING=NO。Registry不授予生产数据写入或部署权限；新增路径需求须另行审批，不得扩展父目录。 PROD-RUNTIME-V2 transfers only 04_scripts/capture_public_intraday.py to spread-production-runtime-wiring for explicit Git/OCI identity initialization and argument wiring. Remaining Shared Intraday schema, providers, pipelines and tests are library_only and retain their existing boundaries. The transferred CLI remains a read-only dependency here; this project cannot change it or claim container deployability. Its capture semantics, exact-contract queries, dates, secret-file contract and immutable SEALED behavior must remain unchanged.",
+      "runtime_target": "library_only"
     },
     {
       "project_id": "dev-governance",
@@ -818,8 +819,7 @@
         "09_deploy/runtime_identity/candidate_validation_record.py",
         "04_scripts/runtime/pre_release_runtime.py",
         "08_tests/test_candidate_validation_record.py",
-        "08_tests/test_pre_release_runtime.py",
-        "02_configs/runtime_contracts/spread-production-runtime.json"
+        "08_tests/test_pre_release_runtime.py"
       ],
       "shared_dependencies": [
         "03_src/agri_research_agent/shared/file_identity.py",
@@ -880,7 +880,7 @@
         "isolated Linux exact-image Compose and negative deployability probes",
         "typed candidate validation record and fail-closed pre-release same-image revalidation"
       ],
-      "boundary_notes": "PROD-RUNTIME-V2 Goal B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container deployability必须由后续Goal D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。 Goal D独立Deployability Engine仅分配三个精确未来文件，并为该精确测试增加Completion要求；移除04_scripts目录级forbidden仅为容纳已列明的单个engine文件，不授予任何其他脚本ownership。Engine必须从clean committed candidate重新建立source/image/Compose绑定，在真实隔离Linux Docker执行全部13项probe，验证.git缺失、不可变Image ID、OCI revision/tree、实际Compose/mount/env/dependency与candidate-only scope；禁止production volume/secret、业务Docker socket、caller evidence、mutable tag或dev worktree输入。BLOCKED只允许真实LINUX_BUILDER_UNAVAILABLE，任何检查缺失、错误镜像、错误Commit/Tree/service/manifest、Preview写入或release不一致均FAIL。该登记不创建业务runtime contract、不修改Docker/Compose/业务模块、不签发production grant、不部署或提升Approved identity。 Goal D pre-release extension adds only four exact future files and two completion tests; extend the existing target runtime deployability contract document rather than creating a parallel project contract; existing ownership, protected paths, forbidden paths and other projects remain unchanged. The candidate_validation_record parser verifies a typed signed validation artifact, never caller authority. The root-only pre_release_runtime entry must itself run the exact protected clean candidate validator and sign only its successful observed result with the existing candidate-validation trust domain; no CLI imports caller-crafted raw evidence or claims Image ID/probe results. Pre-release consumes that record, revalidates Approved Commit/Tree and source bindings, observes the same immutable image and actual production Compose/environment/mounts, and fails on undeclared differences or drift. Candidate and production rendered Compose identities are recorded separately and checked against the same manifest roles, not equated by pathname or ignored. Reuse existing protected host policy as Approved object and existing production key for execution grants; no new approval-key hierarchy. Production manifest/2 requires policy/3 with validated candidate record; policy/2 remains candidate-only, legacy policy/1 and Git/FULL DAILY remain compatible, execution grant/2 remains unchanged. Host signing rechecks record and actual instance before and after authorization. Record parsing rejects duplicate keys, non-finite values, wrong purpose/domain/signature, revocation, expiry and identity mismatch; protected outputs are exclusive, never overwritten. Registration is not runtime implementation or production approval: no production grant is issued, no deployment/start/capture, no secret access, no business or SEALED mutation, no schedule, FULL DAILY integration or Notification activation. Any later implementation is a new independent shared branch/worktree from this registration on authoritative main. Production runtime contract bootstrap allocates only 02_configs/runtime_contracts/spread-production-runtime.json as an exact future source-contract file. In a subsequent independent infrastructure branch from approved main, create a valid runtime-manifest/3 for project_id spread-production-runtime-wiring using existing tracked deployment/source inputs. This stage does not own or modify Dockerfile, Compose, business sources or production data and does not claim target container deployability. The infrastructure project remains a library and host-tool project; the future wiring project is not registered under a false runtime target. Before wiring development, a separate dev-governance change must atomically transfer this manifest ownership and register the actual production_container project with its existing valid contract and exact deployment paths. No pending target, missing-contract exception, production approval, deployment, capture, schedule, FULL DAILY integration or Notification activation is authorized by this allocation."
+      "boundary_notes": "PROD-RUNTIME-V2 Goal B明确授权。library_only表示本项目交付跨Git/OCI复用的身份库及宿主验证工具，不是可独立部署的业务容器；真实container deployability必须由后续Goal D实现和验证，本登记不宣称容器PASS。只分配精确文件，没有已有owner转移或目录扩权。当前RuntimeContext及其测试此前无project owner；global protected保持。trust配置仅允许公开verification keys/key identity，不允许private key或secret。业务进程不能签发production grant；禁止Docker socket、伪造.git或identity fallback。当前root/writable-rootfs生产容器不自动取得v2写权限；容器hardening和正式接线在后续独立项目完成。FULL DAILY bootstrap/Wrapper只读，行为不得削弱；Soybean/Shared Intraday/Tankan/Weather/Basis/Notification业务逻辑、旧Wiring worktree、旧SEALED和生产数据禁止修改。不部署、不capture、不新增schedule，不提升Approved identity。 后续独立v2 bridge仅增加production_grant结构解析器和测试两个精确文件；既有runtime_manifest解析器及Schema为只读依赖，无ownership转移。宿主与容器共用完整grant字段/类型/时间/角色结构校验；保留JSON Schema作为一致性测试，不因宿主缺少jsonschema而删除任何校验。新host policy/grant版本必须显式分派，候选临时性以受保护host scope和实际mount来源证明，不能依赖容器路径名或fallback。既有trust配置仅可登记受保护宿主生成的公开验证密钥，私钥不得进入Git或镜像；登记不等于已配置或签发production授权。 Goal D独立Deployability Engine仅分配三个精确未来文件，并为该精确测试增加Completion要求；移除04_scripts目录级forbidden仅为容纳已列明的单个engine文件，不授予任何其他脚本ownership。Engine必须从clean committed candidate重新建立source/image/Compose绑定，在真实隔离Linux Docker执行全部13项probe，验证.git缺失、不可变Image ID、OCI revision/tree、实际Compose/mount/env/dependency与candidate-only scope；禁止production volume/secret、业务Docker socket、caller evidence、mutable tag或dev worktree输入。BLOCKED只允许真实LINUX_BUILDER_UNAVAILABLE，任何检查缺失、错误镜像、错误Commit/Tree/service/manifest、Preview写入或release不一致均FAIL。该登记不创建业务runtime contract、不修改Docker/Compose/业务模块、不签发production grant、不部署或提升Approved identity。 Goal D pre-release extension adds only four exact future files and two completion tests; extend the existing target runtime deployability contract document rather than creating a parallel project contract; existing ownership, protected paths, forbidden paths and other projects remain unchanged. The candidate_validation_record parser verifies a typed signed validation artifact, never caller authority. The root-only pre_release_runtime entry must itself run the exact protected clean candidate validator and sign only its successful observed result with the existing candidate-validation trust domain; no CLI imports caller-crafted raw evidence or claims Image ID/probe results. Pre-release consumes that record, revalidates Approved Commit/Tree and source bindings, observes the same immutable image and actual production Compose/environment/mounts, and fails on undeclared differences or drift. Candidate and production rendered Compose identities are recorded separately and checked against the same manifest roles, not equated by pathname or ignored. Reuse existing protected host policy as Approved object and existing production key for execution grants; no new approval-key hierarchy. Production manifest/2 requires policy/3 with validated candidate record; policy/2 remains candidate-only, legacy policy/1 and Git/FULL DAILY remain compatible, execution grant/2 remains unchanged. Host signing rechecks record and actual instance before and after authorization. Record parsing rejects duplicate keys, non-finite values, wrong purpose/domain/signature, revocation, expiry and identity mismatch; protected outputs are exclusive, never overwritten. Registration is not runtime implementation or production approval: no production grant is issued, no deployment/start/capture, no secret access, no business or SEALED mutation, no schedule, FULL DAILY integration or Notification activation. Any later implementation is a new independent shared branch/worktree from this registration on authoritative main. Production runtime contract bootstrap allocates only 02_configs/runtime_contracts/spread-production-runtime.json as an exact future source-contract file. In a subsequent independent infrastructure branch from approved main, create a valid runtime-manifest/3 for project_id spread-production-runtime-wiring using existing tracked deployment/source inputs. This stage does not own or modify Dockerfile, Compose, business sources or production data and does not claim target container deployability. The infrastructure project remains a library and host-tool project; the future wiring project is not registered under a false runtime target. Before wiring development, a separate dev-governance change must atomically transfer this manifest ownership and register the actual production_container project with its existing valid contract and exact deployment paths. No pending target, missing-contract exception, production approval, deployment, capture, schedule, FULL DAILY integration or Notification activation is authorized by this allocation. The spread source-contract bootstrap is complete. Ownership of its one exact manifest is transferred to spread-production-runtime-wiring by an independent governance stage; all remaining infrastructure ownership and required tests stay unchanged. The new project carries the real production_container target and must pass its own target deployability gate."
     },
     {
       "project_id": "shared-runtime-manifest",
@@ -994,6 +994,105 @@
       ],
       "boundary_notes": "PROD-RUNTIME-V2 Goal E/F production-container promotion. The exact manifest, wrapper, Dockerfile, Compose, test and runtime documentation are closed source inputs and project-owned. Promotion requires isolated Linux target-runtime validation of the exact candidate before main. It grants no automatic execution, deployment or capture authority. Existing Shared Intraday, Tankan and identity code remain read-only dependencies. It must not change business logic, use the parked Soybean worktree, fix a business date, read a production secret during candidate validation, capture data, mutate old SEALED snapshots, add schedules, join FULL DAILY/Production Wrapper/Daily Summary, activate Notification or issue a production grant. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED.",
       "runtime_contract": "02_configs/runtime_contracts/public-intraday-runtime.json"
+    },
+    {
+      "project_id": "spread-production-runtime-wiring",
+      "change_class": "shared",
+      "status": "ready",
+      "runtime_target": "production_container",
+      "runtime_contract": "02_configs/runtime_contracts/spread-production-runtime.json",
+      "owned_paths": [],
+      "future_owned_paths": [
+        "02_configs/runtime_contracts/spread-production-runtime.json",
+        "04_scripts/capture_public_intraday.py",
+        "09_deploy/spread_runtime/Dockerfile.spread-runtime",
+        "09_deploy/spread_runtime/compose.yml",
+        "09_deploy/spread_runtime/说明.md",
+        "04_scripts/runtime/spread_runtime_preflight.py",
+        "08_tests/test_spread_runtime_contract.py",
+        "08_tests/fixtures/spread_runtime/public_current.json",
+        "08_tests/fixtures/spread_runtime/public_release_manifest.json",
+        "08_tests/fixtures/spread_runtime/domestic_spread_database.parquet",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_release_index.json",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_release_manifest.json",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_business_keys.parquet",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_market_snapshots.parquet",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_net_crush_results.parquet",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_quality_report.json",
+        "08_tests/fixtures/spread_runtime/soybean_runtime_manual_cnf_quotes.parquet",
+        "08_tests/fixtures/spread_runtime/historical_cnf_cache.parquet",
+        "08_tests/fixtures/spread_runtime/shared_intraday_snapshot_manifest.json",
+        "08_tests/fixtures/spread_runtime/shared_intraday_snapshot_quotes.json"
+      ],
+      "shared_dependencies": [
+        "Dockerfile",
+        "docker-compose.yml",
+        ".dockerignore",
+        "requirements.txt",
+        "05_apps/streamlit_app.py",
+        "05_apps/import_profit_intraday_runtime_page.py",
+        "05_apps/import_profit_intraday_page.py",
+        "03_src/agri_research_agent/shared/runtime_context.py",
+        "03_src/agri_research_agent/shared/production_identity.py",
+        "03_src/agri_research_agent/shared/production_grant.py",
+        "03_src/agri_research_agent/shared/runtime_manifest.py",
+        "02_configs/runtime_manifest.schema.json",
+        "02_configs/production_runtime_trust.json",
+        "02_configs/import_profit_soybean.yaml",
+        "03_src/agri_research_agent/market_data/activated_runtime.py",
+        "03_src/agri_research_agent/application/domestic_spreads.py",
+        "03_src/agri_research_agent/market_data/intraday.py",
+        "03_src/agri_research_agent/market_data/calendars.py",
+        "03_src/agri_research_agent/import_profit/runtime_store.py",
+        "03_src/agri_research_agent/import_profit/cnf_store.py",
+        "03_src/agri_research_agent/import_profit/intraday_store.py",
+        "03_src/agri_research_agent/pipelines/public_intraday.py",
+        "04_scripts/runtime/validate_target_runtime.py",
+        "04_scripts/runtime/pre_release_runtime.py",
+        "09_deploy/runtime_identity/host_authorization.py"
+      ],
+      "forbidden_paths": [
+        "02_configs/project_registry.json",
+        "03_src",
+        "05_apps",
+        "04_scripts/automation",
+        "04_scripts/environment",
+        "04_scripts/quality",
+        "04_scripts/import_profit",
+        "04_scripts/notifications",
+        "04_scripts/refresh_public_data.py",
+        "09_deploy/runtime_identity",
+        "09_deploy/spread_release",
+        "09_deploy/public_intraday_runtime",
+        "Dockerfile",
+        "docker-compose.yml",
+        ".dockerignore",
+        "requirements.txt",
+        "requirements.in"
+      ],
+      "required_tests": [
+        "08_tests/test_project_registry.py",
+        "08_tests/test_quality_controls.py",
+        "08_tests/test_documentation_contract.py",
+        "08_tests/shared/test_runtime_context.py",
+        "08_tests/shared/test_production_identity.py",
+        "08_tests/test_target_runtime_validator.py",
+        "08_tests/test_public_intraday_capture.py",
+        "08_tests/market_data/test_intraday.py",
+        "08_tests/pipelines/test_public_intraday.py",
+        "08_tests/test_import_profit_intraday_page.py",
+        "08_tests/pipelines/test_full_daily_windows_wrapper.py"
+      ],
+      "future_required_tests": [
+        "08_tests/test_spread_runtime_contract.py"
+      ],
+      "capabilities": [
+        "full spread-dashboard production runtime manifest and exact deployment source wiring",
+        "explicit Git/OCI capture CLI identity initialization without changing capture semantics",
+        "candidate-only immutable fixtures and real readonly Domestic Spread, Shared Intraday consumer and Soybean STRICT_RUNTIME initialization",
+        "candidate-bound Linux container deployability before closure and same-image production promotion"
+      ],
+      "boundary_notes": "PROD-RUNTIME-V2 Goals E/F authorize an independent shared wiring project from the source-contract stage on authoritative main. Atomically transfer only the existing spread manifest and capture CLI; all new ownership is exact files, without directory or reserved namespace authority. Keep the full 05_apps/streamlit_app.py entrypoint and service spread-dashboard; no fourth or narrowed production service. Root Dockerfile/Compose remain read-only historical deployment sources; the wiring stage must bind the manifest to its new exact Dockerfile.spread-runtime and compose.yml and actual rendered deployment configuration. Registration is not runtime implementation, container PASS, Production Approval or deployment. New fixtures are synthetic Git-tracked candidate-only inputs, excluded from image COPY, hash-bound and seeded only into protected temporary read-only child mounts; never promote them to production data. Production roots require real provenance and physical/identity separation from Preview, dev/feature/old PM worktrees and temporary fixtures. Keep PAGE_MODE=STRICT_RUNTIME, ENVIRONMENT=FORMAL, current business-date behavior and Tankan secret-file contract; do not enable CNF save or configure write authorization just for smoke. Capture CLI changes are limited to explicit execution identity selection and initialization; no fallback, query/model/formula/snapshot changes. Test real CLI identity initialization, strict page and immutable snapshot consumer, dependencies, mounts, missing/mismatched identities and Preview write rejection in the actual clean Linux target image before code closure; no import-only or empty-directory substitute. Temporal capture is not a deployability prerequisite and no historical recapture or old SEALED mutation is allowed. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; NOTIFICATION_AUTO_EXECUTION=NO; REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED. All production-container Completion and pre-release evidence binding remain mandatory. Registry grants no production data writes or scheduling; production release follows the separately authorized whole-main audit and same validated Image ID workflow."
     }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"
