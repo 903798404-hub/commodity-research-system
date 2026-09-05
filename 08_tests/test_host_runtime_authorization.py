@@ -81,6 +81,27 @@ def test_candidate_image_can_be_promoted_but_candidate_policy_cannot_be_producti
     with pytest.raises(host.HostAuthorizationError): host.validate_policy(candidate,"production")
 
 
+@pytest.mark.parametrize("role", ["production", "candidate_validation"])
+@pytest.mark.parametrize("read_only", [True, False])
+def test_v2_rejects_any_readonly_or_writable_source_root_child_overlay(tmp_path, monkeypatch, role: str, read_only: bool):
+    expected, container, _image, _rendered, _policy_file, _key, _grants, _manifest, _marker, _release, _identity = signing_fixture(tmp_path, monkeypatch, role, 2)
+    value = observed(expected)
+    value["mounts"].append({"source":"/tmp/injected-source", "target":"/app/unlisted.py", "read_only":read_only})
+    expected["mounts"].append({"source":"/tmp/injected-source", "target":"/app/unlisted.py", "read_only":read_only})
+    with pytest.raises(host.HostAuthorizationError, match="immutable source"):
+        host.validate_observation(value, expected, role=role)
+
+
+@pytest.mark.parametrize("role", ["production", "candidate_validation"])
+def test_v1_retains_legacy_unlisted_source_child_mount_behavior(role: str):
+    expected = policy(role)
+    value = observed(expected)
+    overlay = {"source":"/tmp/legacy-overlay", "target":"/app/unlisted.py", "read_only":True}
+    value["mounts"].append(overlay)
+    expected["mounts"].append(overlay)
+    assert host.validate_observation(value, expected, role=role)["image_id"] == IMAGE
+
+
 def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=1):
     """Model Linux mounts/ownership and Docker transport, never the verifier or signer."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -121,6 +142,8 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
             "identity_root_role":"marker", "initialization_commands":[{"name":"initialize","argv":["python","init.py"]}],
             "source_inputs":[{"path":"app.py","role":"entrypoint"},{"path":"init.py","role":"initialization"}],
         })
+        (image_root / "app.py").write_text("print('runtime')\n", encoding="utf-8")
+        (image_root / "init.py").write_text("print('initialize')\n", encoding="utf-8")
     marker = {"schema_version":1,"runtime_id":"runtime","module_id":"shared-runtime","classification":"candidate-validation" if role=="candidate_validation" else "formal", "created_at":"2026-01-01T00:00:00Z"}
     release = {"git_commit":COMMIT,"git_tree":TREE,"application":"app","release_id":"release"}
     manifest_file, marker_file, release_file = image_root / "runtime.json", runtime / ".market-data-runtime.json", image_root / "RELEASE.json"

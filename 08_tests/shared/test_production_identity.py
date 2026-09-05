@@ -182,7 +182,10 @@ def manifest_v2(root: str) -> dict:
 def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = "production", origin: str = "candidate", version: int = 1):
     source = tmp_path / "image"
     runtime = tmp_path / "runtime"
-    for path in (source / "02_configs", source / "03_src", source / "04_scripts", source / "05_apps", source / "auth", source / "manifests", runtime / "data"):
+    image_dirs = [source / "02_configs", source / "03_src", source / "04_scripts", source / "auth", source / "manifests", runtime / "data"]
+    if version != 2:
+        image_dirs.append(source / "05_apps")
+    for path in image_dirs:
         path.mkdir(parents=True, exist_ok=True)
     marker = runtime / ".market-data-runtime.json"
     marker.write_text(json.dumps({"schema_version": 1, "runtime_id": "formal-runtime", "module_id": "shared-runtime", "classification": "formal" if role == "production" else "candidate-validation", "created_at": "2026-01-01T00:00:00Z"}), encoding="utf-8")
@@ -193,6 +196,9 @@ def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = 
     logical_root = "/runtime/fixture" if version == 2 else ("/runtime" if role == "production" else "/tmp/runtime")
     manifest_value = manifest_v2(logical_root) if version == 2 else {"project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service"}
     manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
+    if version == 2:
+        (source / "app.py").write_text("print('fixture')\n", encoding="utf-8")
+        (source / "init.py").write_text("print('initialized')\n", encoding="utf-8")
     private = Ed25519PrivateKey.generate()
     domain = role
     trust = source / "02_configs" / "production_runtime_trust.json"
@@ -260,10 +266,93 @@ def test_candidate_grant_cannot_authorize_production_write(tmp_path: Path, monke
 @pytest.mark.parametrize("role", ["production", "candidate_validation"])
 def test_v2_uses_manifest_identity_root_for_both_roles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str) -> None:
     request, payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, role=role, version=2)
+    assert not (request.runtime_manifest_path.parent.parent / "05_apps").exists()
     verified = identity.verify_execution(request, expected_role=role, module_id="shared-runtime", runtime_id="formal-runtime",
                                          runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
     assert verified.writable_roots == (Path("/runtime/fixture/data"),)
     assert payload["runtime_root"] == "/runtime/fixture"
+
+
+def test_v2_rejects_missing_manifest_source_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+    (request.runtime_manifest_path.parent.parent / "app.py").unlink()
+    with pytest.raises(identity.ProductionIdentityError, match="source input"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+def test_v2_rejects_signed_contract_missing_source_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, payload, private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+    payload["protected_mounts"] = [value for value in payload["protected_mounts"] if value != "/app"]
+    sign_grant(request, payload, private)
+    with pytest.raises(identity.ProductionIdentityError, match="protected mount contract"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+def test_v2_rejects_source_input_mount_that_is_not_read_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+    monkeypatch.setattr(identity, "_mount_options", lambda: {"/": {"ro"}})
+    original_mount_for = identity._mount_for
+
+    def observed_mount(mounts, path: Path):
+        if path.name == "app.py":
+            return {"rw"}
+        return original_mount_for(mounts, path)
+
+    monkeypatch.setattr(identity, "_mount_for", observed_mount)
+    with pytest.raises(identity.ProductionIdentityError, match="mount permissions"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+def test_v2_rejects_source_input_file_resolve_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+    source_root = request.runtime_manifest_path.parent.parent
+    original_resolve = Path.resolve
+
+    def aliased_resolve(path: Path, strict: bool = False):
+        if path == source_root / "app.py":
+            return source_root / "aliased-app.py"
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", aliased_resolve)
+    with pytest.raises(identity.ProductionIdentityError, match="missing or aliased"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+def test_v2_rejects_source_input_ancestor_resolve_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+    source_root = request.runtime_manifest_path.parent.parent
+    original_resolve = Path.resolve
+
+    def aliased_resolve(path: Path, strict: bool = False):
+        if path == source_root:
+            return source_root.parent / "aliased-image"
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", aliased_resolve)
+    with pytest.raises((identity.ProductionIdentityError, OSError), match="source input|source image|executing source|outside"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+@pytest.mark.parametrize("mount_options", [{"ro"}, {"rw"}])
+def test_v2_rejects_any_source_overlay_mount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mount_options: set[str]) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=2)
+    monkeypatch.setattr(identity, "_mount_options", lambda: {"/": {"ro"}, "/app/app.py": mount_options})
+    with pytest.raises(identity.ProductionIdentityError, match="source overlay"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+def test_legacy_still_requires_historical_protected_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=1)
+    (request.runtime_manifest_path.parent.parent / "05_apps").rmdir()
+    with pytest.raises(OSError):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime", runtime_id="formal-runtime",
+                                  runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
 
 
 def test_v2_rejects_manifest_root_drift_and_undeclared_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

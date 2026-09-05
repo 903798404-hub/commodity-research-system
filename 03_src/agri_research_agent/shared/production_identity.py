@@ -357,8 +357,25 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
     if "ro" not in mounts.get("/", set()) or os.geteuid() == 0:
         raise ProductionIdentityError("OCI runtime is not a non-root read-only filesystem")
     protected_paths = [Path(value) for value in protected]
-    required_protected = [request.grant_path, TRUST_CONFIG_PATH, request.release_path, request.runtime_manifest_path, marker_path,
-                          _ROOT / "02_configs", _ROOT / "03_src", _ROOT / "04_scripts", _ROOT / "05_apps"]
+    required_protected = [request.grant_path, TRUST_CONFIG_PATH, request.release_path, request.runtime_manifest_path, marker_path]
+    if grant_v2:
+        # The signed manifest defines image inputs; CLI images need no UI tree.
+        # Protect the whole executing source root, including undeclared children,
+        # and reject even readonly overlays that could replace image bytes.
+        source_root = _ROOT.resolve(strict=True)
+        required_protected.append(source_root)
+        for item in manifest["source_inputs"]:
+            path = source_root / item["path"]
+            try:
+                if not path.is_file() or path.resolve(strict=True) != path:
+                    raise ProductionIdentityError("runtime source input is missing or aliased")
+            except OSError as exc:
+                raise ProductionIdentityError("runtime source input is unavailable") from exc
+            required_protected.append(path)
+        if any(_within_mount(target, _runtime_path(source_root)) for target in mounts):
+            raise ProductionIdentityError("OCI runtime contains a source overlay mount")
+    else:
+        required_protected.extend(_ROOT / name for name in ("02_configs", "03_src", "04_scripts", "05_apps"))
     if any(not any(_runtime_path(path) == value or _runtime_path(path).startswith(value.rstrip("/") + "/") for value in protected) for path in required_protected):
         raise ProductionIdentityError("protected mount contract omits identity material")
     if (any("ro" not in _mount_for(mounts, path) for path in protected_paths + required_protected)

@@ -347,7 +347,11 @@ def validate_observation(observed: Mapping, expected: Mapping, *, role: str) -> 
     if observed["mounts"] != expected["mounts"]:
         raise HostAuthorizationError("actual mounts differ from deployment contract")
     source = expected["source_root"]
-    immutable = [source + "/" + name for name in ("03_src", "02_configs", "04_scripts", "05_apps", "RELEASE.json")]
+    # v2 source closures can intentionally omit legacy top-level directories.
+    # Its signed source root is therefore the whole immutable image boundary;
+    # even a read-only child bind could replace code that the image ID bound.
+    immutable = ([source] if expected["schema_version"] == "host-runtime-policy/2"
+                 else [source + "/" + name for name in ("03_src", "02_configs", "04_scripts", "05_apps", "RELEASE.json")])
     for mount in observed["mounts"]:
         target = mount["target"]
         if target == "/" or target == source or any(_within(target, path) or _within(path, target) for path in immutable):
