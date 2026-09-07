@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Formal historical runtime asset manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "runtime_id",
+    "release_id",
+    "generated_at",
+    "producer",
+    "helper_image",
+    "initial_approval_sha256",
+    "candidate_path",
+    "intended_formal_path",
+    "readonly_consumption",
+    "source",
+    "observations",
+    "payloads"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "production-historical-runtime/1"},
+    "kind": {"type": "string", "const": "historical"},
+    "runtime_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+    "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+    "generated_at": {"type": "string", "minLength": 1},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "helper_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_id", "commit", "tree"],
+      "properties": {
+        "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "initial_approval_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-candidates/[^/].*$"},
+    "intended_formal_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-assets/[^/].*$"},
+    "readonly_consumption": {"type": "boolean", "const": true},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_root",
+        "source_manifest_path",
+        "source_manifest_sha256",
+        "release_manifest_sha256",
+        "index_sha256",
+        "payload_sha256"
+      ],
+      "properties": {
+        "runtime_root": {"type": "string", "pattern": "^/.*"},
+        "source_manifest_path": {"type": "string", "pattern": "^/.*"},
+        "source_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "release_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "payload_sha256": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "soybean_business_keys.parquet",
+            "soybean_market_snapshots.parquet",
+            "soybean_net_crush_results.parquet",
+            "quality_report.json"
+          ],
+          "properties": {
+            "soybean_business_keys.parquet": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "soybean_market_snapshots.parquet": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "soybean_net_crush_results.parquet": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "quality_report.json": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_sha256",
+        "index_sha256",
+        "source_bytes_mutated",
+        "historical_values_recalculated",
+        "record_count",
+        "date_range"
+      ],
+      "properties": {
+        "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_bytes_mutated": {"type": "boolean", "const": false},
+        "historical_values_recalculated": {"type": "boolean", "const": false},
+        "record_count": {"type": "integer", "minimum": 0},
+        "date_range": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "payloads": {
+      "description": "Dynamic release-relative names are closed and verified by expected_payloads and file_set in asset_tool.py.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sha256", "size_bytes"],
+        "properties": {
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

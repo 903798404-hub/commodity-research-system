@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Production historical Tankan CNF cache asset manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "runtime_id",
+    "release_id",
+    "generated_at",
+    "producer",
+    "helper_image",
+    "initial_approval_sha256",
+    "candidate_path",
+    "intended_formal_path",
+    "readonly_consumption",
+    "source",
+    "observations",
+    "payloads"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "production-historical-cnf-cache/1"},
+    "kind": {"type": "string", "const": "cnf"},
+    "runtime_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+    "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+    "generated_at": {"type": "string", "minLength": 1},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree"],
+      "properties": {
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "helper_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_id", "commit", "tree"],
+      "properties": {
+        "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "initial_approval_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-candidates/[^/].*$"},
+    "intended_formal_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-assets/[^/].*$"},
+    "readonly_consumption": {"type": "boolean", "const": true},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "database", "schema", "table", "field", "query_sha256", "query_time_range"],
+      "properties": {
+        "identity": {"type": "string", "const": "tankan:quanyong.market.soybean_param:cnf"},
+        "database": {"type": "string", "const": "quanyong"},
+        "schema": {"type": "string", "const": "market"},
+        "table": {"type": "string", "const": "soybean_param"},
+        "field": {"type": "string", "const": "cnf"},
+        "query_sha256": {"type": "string", "const": "90a9f6fd1d30d6d662c2e3f8c20b11c9eb3a3bae2d46959d3e362680928fec7f"},
+        "query_time_range": {"type": "string", "const": "all_available_at_extraction"}
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_count",
+        "date_range",
+        "schema_fingerprint",
+        "cache_sha256",
+        "cache_size_bytes",
+        "source_rows_sha256",
+        "null_cnf_count",
+        "zero_cnf_count",
+        "null_updated_at_count",
+        "query_started_at",
+        "query_finished_at",
+        "actual_database_identity",
+        "readonly_transaction"
+      ],
+      "properties": {
+        "record_count": {"type": "integer", "minimum": 1},
+        "date_range": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1}},
+        "schema_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cache_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cache_size_bytes": {"type": "integer", "minimum": 1},
+        "source_rows_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "null_cnf_count": {"type": "integer", "minimum": 0},
+        "zero_cnf_count": {"type": "integer", "minimum": 0},
+        "null_updated_at_count": {"type": "integer", "minimum": 0},
+        "query_started_at": {"type": "string", "minLength": 1},
+        "query_finished_at": {"type": "string", "minLength": 1},
+        "actual_database_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["database", "relation_oid", "server_version"],
+          "properties": {
+            "database": {"type": "string", "const": "quanyong"},
+            "relation_oid": {"type": "integer", "minimum": 1},
+            "server_version": {"type": "string", "minLength": 1}
+          }
+        },
+        "readonly_transaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["transaction_read_only", "default_transaction_read_only", "rolled_back"],
+          "properties": {
+            "transaction_read_only": {"type": "string", "const": "on"},
+            "default_transaction_read_only": {"type": "string", "const": "on"},
+            "rolled_back": {"type": "boolean", "const": true}
+          }
+        }
+      }
+    },
+    "payloads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [".market-data-runtime.json", "historical_cnf_cache.parquet"],
+      "properties": {
+        ".market-data-runtime.json": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha256", "size_bytes"],
+          "properties": {
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "historical_cnf_cache.parquet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha256", "size_bytes"],
+          "properties": {
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    }
+  }
+}

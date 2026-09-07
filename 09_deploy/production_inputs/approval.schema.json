@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Production input approval evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "approval_id",
+    "state",
+    "approved_at",
+    "approved_by",
+    "task_evidence_sha256",
+    "scope",
+    "asset_manifest_sha256",
+    "prior_approval_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "production-input-approval/1"},
+    "approval_id": {"type": "string", "minLength": 1},
+    "state": {
+      "type": "string",
+      "enum": ["historical_initialization_approved", "cnf_extraction_approved", "asset_approved"]
+    },
+    "approved_at": {"type": "string", "minLength": 1},
+    "approved_by": {"type": "string", "minLength": 1},
+    "task_evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "runtime_id",
+        "release_id",
+        "candidate_path",
+        "formal_path",
+        "producer",
+        "helper_image",
+        "source"
+      ],
+      "properties": {
+        "kind": {"type": "string", "enum": ["historical", "cnf"]},
+        "runtime_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+        "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+        "candidate_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-candidates/[^/].*$"},
+        "formal_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-assets/[^/].*$"},
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit", "tree"],
+          "properties": {
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+          }
+        },
+        "helper_image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["image_id", "commit", "tree"],
+          "properties": {
+            "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+          }
+        },
+        "source": {
+          "description": "Historical and CNF source fields share one closed shape; asset_tool.py enforces the exact field set for the selected kind.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runtime_root": {"type": "string", "pattern": "^/.*"},
+            "source_manifest_path": {"type": "string", "pattern": "^/.*"},
+            "source_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "release_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "payload_sha256": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "soybean_business_keys.parquet",
+                "soybean_market_snapshots.parquet",
+                "soybean_net_crush_results.parquet",
+                "quality_report.json"
+              ],
+              "properties": {
+                "soybean_business_keys.parquet": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "soybean_market_snapshots.parquet": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "soybean_net_crush_results.parquet": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "quality_report.json": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            },
+            "identity": {"type": "string", "const": "tankan:quanyong.market.soybean_param:cnf"},
+            "database": {"type": "string", "const": "quanyong"},
+            "schema": {"type": "string", "const": "market"},
+            "table": {"type": "string", "const": "soybean_param"},
+            "field": {"type": "string", "const": "cnf"},
+            "query_sha256": {"type": "string", "const": "90a9f6fd1d30d6d662c2e3f8c20b11c9eb3a3bae2d46959d3e362680928fec7f"},
+            "query_time_range": {"type": "string", "const": "all_available_at_extraction"}
+          }
+        }
+      }
+    },
+    "asset_manifest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "prior_approval_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+  }
+}
