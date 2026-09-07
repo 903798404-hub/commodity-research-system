@@ -330,6 +330,61 @@ PUBLIC_INTRADAY_RUNTIME_PRODUCTION_REGISTRATION.update(
                    'INTRADAY_FULL_DAILY_DEPENDENCY=NONE; '
                    'REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED.')
 
+PRODUCTION_INPUT_AUTHORITY_REGISTRATION = {'project_id': 'soybean-production-input-authority',
+ 'change_class': 'shared',
+ 'status': 'ready',
+ 'runtime_target': 'library_only',
+ 'owned_paths': [],
+ 'future_owned_paths': ['09_deploy/production_inputs/asset_tool.py',
+                        '09_deploy/production_inputs/historical_asset.schema.json',
+                        '09_deploy/production_inputs/cnf_asset.schema.json',
+                        '09_deploy/production_inputs/approval.schema.json',
+                        '09_deploy/production_inputs/README.md',
+                        '08_tests/test_production_input_assets.py'],
+ 'shared_dependencies': ['03_src/agri_research_agent/import_profit/runtime_store.py',
+                         '03_src/agri_research_agent/import_profit/cnf_store.py',
+                         '03_src/agri_research_agent/data_sources/tankan/client.py',
+                         '04_scripts/import_profit/build_final_ui_preview_cnf_cache.py',
+                         '02_configs/runtime_contracts/spread-production-runtime.json'],
+ 'forbidden_paths': ['02_configs/project_registry.json',
+                     '03_src',
+                     '05_apps',
+                     '04_scripts',
+                     '09_deploy/runtime_identity',
+                     '09_deploy/spread_runtime',
+                     '09_deploy/spread_release',
+                     'Dockerfile',
+                     'docker-compose.yml',
+                     '.dockerignore',
+                     'requirements.txt'],
+ 'required_tests': [],
+ 'future_required_tests': ['08_tests/test_production_input_assets.py'],
+ 'capabilities': ['byte-preserving formal historical runtime initialization from explicitly '
+                  'approved immutable source',
+                  'production Tankan historical CNF extraction and asset provenance validation',
+                  'protected host-side approval and publication with separate extraction and asset '
+                  'approval evidence'],
+ 'boundary_notes': 'User Goal SOYBEAN-PRODUCTION-INPUT-AUTHORITY authorizes this independent '
+                   'host-tool project, not a production-container application or a Runtime V2 '
+                   'change. Own only six exact new files; no directory/reserved ownership or '
+                   'transfer. Preserve existing stage-a source bytes and historical values; '
+                   'initialize a new dated formal release without retroactive approval or '
+                   'recalculation. Keep Preview producer, existing cache schema/natural key, '
+                   'manual_ui BusinessKey, NULL versus zero, AM/PM CNF identity, page/API/Compose '
+                   'interface and all business code unchanged. Reuse immutable validated '
+                   'application image 47fe35a; host producer Commit/Tree is separately identified. '
+                   'Extraction approval and exact resulting asset approval are distinct protected '
+                   'evidence states; never treat extracted or Preview/synthetic assets as approved '
+                   'production. Root-controlled exclusive candidate/publication paths, '
+                   'source/manifest/payload SHA, explicit approved destinations and readonly '
+                   'consumers are mandatory. Only direct asset/schema/production-preview rejection '
+                   'and consumer compatibility tests; no automatic full regression, image rebuild, '
+                   'AM/PM capture, SEALED mutation, FULL DAILY integration or Notification '
+                   'activation. Registration does not publish assets or issue runtime production '
+                   'grants; actual operations require the separate user task authorization and '
+                   'explicit result approval evidence.'}
+
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -415,6 +470,11 @@ def registration_baseline():
             expected['projects'].append(SPREAD_RUNTIME_WIRING_REGISTRATION)
             assert current == expected
             baseline = expected
+    if not any(p['project_id'] == 'soybean-production-input-authority' for p in baseline['projects']):
+        expected = copy.deepcopy(baseline)
+        expected['projects'].append(PRODUCTION_INPUT_AUTHORITY_REGISTRATION)
+        assert current == expected
+        baseline = expected
     return baseline
 
 
@@ -1276,7 +1336,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -2294,3 +2354,23 @@ def test_spread_runtime_wiring_registration_owns_only_exact_paths_and_contract()
                   '08_tests/fixtures/spread_runtime/unregistered.json', 'Dockerfile',
                   'docker-compose.yml', '05_apps/streamlit_app.py'):
         assert not registry.owns(project, other)
+
+
+def test_production_input_authority_registration_has_exact_host_only_boundary():
+    data, project = registry.select_project(ROOT, 'soybean-production-input-authority')
+    assert project == PRODUCTION_INPUT_AUTHORITY_REGISTRATION
+    assert project['runtime_target'] == 'library_only'
+    assert project['change_class'] == 'shared' and project['status'] == 'ready'
+    assert not project['owned_paths'] and not project.get('reserved_paths')
+    assert len(project['future_owned_paths']) == 6
+    assert project['future_required_tests'] == ['08_tests/test_production_input_assets.py']
+    for path in project['future_owned_paths']:
+        assert registry.owns(project, path)
+        assert not registry.owns(project, path + '.sibling')
+        assert not registry.owns(project, path + '/child')
+        assert all(not registry.owns(other, path) for other in data['projects'] if other is not project)
+    for path in ('03_src/agri_research_agent/import_profit/cnf_store.py',
+                 '05_apps/import_profit_intraday_page.py', '04_scripts/capture_public_intraday.py',
+                 '09_deploy/runtime_identity/host_authorization.py', '09_deploy/spread_runtime/compose.yml'):
+        assert not registry.owns(project, path)
+    assert 'separate' in project['boundary_notes']

@@ -1093,6 +1093,51 @@
         "candidate-bound Linux container deployability before closure and same-image production promotion"
       ],
       "boundary_notes": "PROD-RUNTIME-V2 Goals E/F authorize an independent shared wiring project from the source-contract stage on authoritative main. Atomically transfer only the existing spread manifest and capture CLI; all new ownership is exact files, without directory or reserved namespace authority. Keep the full 05_apps/streamlit_app.py entrypoint and service spread-dashboard; no fourth or narrowed production service. Root Dockerfile/Compose remain read-only historical deployment sources; the wiring stage must bind the manifest to its new exact Dockerfile.spread-runtime and compose.yml and actual rendered deployment configuration. Registration is not runtime implementation, container PASS, Production Approval or deployment. New fixtures are synthetic Git-tracked candidate-only inputs, excluded from image COPY, hash-bound and seeded only into protected temporary read-only child mounts; never promote them to production data. Production roots require real provenance and physical/identity separation from Preview, dev/feature/old PM worktrees and temporary fixtures. Keep PAGE_MODE=STRICT_RUNTIME, ENVIRONMENT=FORMAL, current business-date behavior and Tankan secret-file contract; do not enable CNF save or configure write authorization just for smoke. Capture CLI changes are limited to explicit execution identity selection and initialization; no fallback, query/model/formula/snapshot changes. Test real CLI identity initialization, strict page and immutable snapshot consumer, dependencies, mounts, missing/mismatched identities and Preview write rejection in the actual clean Linux target image before code closure; no import-only or empty-directory substitute. Temporal capture is not a deployability prerequisite and no historical recapture or old SEALED mutation is allowed. AM_PM_AUTO_EXECUTION=NO; INTRADAY_FULL_DAILY_DEPENDENCY=NONE; NOTIFICATION_AUTO_EXECUTION=NO; REAL_AM_TEMPORAL_ACCEPTANCE=DEFERRED; REAL_PM_TEMPORAL_ACCEPTANCE=DEFERRED. All production-container Completion and pre-release evidence binding remain mandatory. Registry grants no production data writes or scheduling; production release follows the separately authorized whole-main audit and same validated Image ID workflow."
+    },
+    {
+      "project_id": "soybean-production-input-authority",
+      "change_class": "shared",
+      "status": "ready",
+      "runtime_target": "library_only",
+      "owned_paths": [],
+      "future_owned_paths": [
+        "09_deploy/production_inputs/asset_tool.py",
+        "09_deploy/production_inputs/historical_asset.schema.json",
+        "09_deploy/production_inputs/cnf_asset.schema.json",
+        "09_deploy/production_inputs/approval.schema.json",
+        "09_deploy/production_inputs/README.md",
+        "08_tests/test_production_input_assets.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/import_profit/runtime_store.py",
+        "03_src/agri_research_agent/import_profit/cnf_store.py",
+        "03_src/agri_research_agent/data_sources/tankan/client.py",
+        "04_scripts/import_profit/build_final_ui_preview_cnf_cache.py",
+        "02_configs/runtime_contracts/spread-production-runtime.json"
+      ],
+      "forbidden_paths": [
+        "02_configs/project_registry.json",
+        "03_src",
+        "05_apps",
+        "04_scripts",
+        "09_deploy/runtime_identity",
+        "09_deploy/spread_runtime",
+        "09_deploy/spread_release",
+        "Dockerfile",
+        "docker-compose.yml",
+        ".dockerignore",
+        "requirements.txt"
+      ],
+      "required_tests": [],
+      "future_required_tests": [
+        "08_tests/test_production_input_assets.py"
+      ],
+      "capabilities": [
+        "byte-preserving formal historical runtime initialization from explicitly approved immutable source",
+        "production Tankan historical CNF extraction and asset provenance validation",
+        "protected host-side approval and publication with separate extraction and asset approval evidence"
+      ],
+      "boundary_notes": "User Goal SOYBEAN-PRODUCTION-INPUT-AUTHORITY authorizes this independent host-tool project, not a production-container application or a Runtime V2 change. Own only six exact new files; no directory/reserved ownership or transfer. Preserve existing stage-a source bytes and historical values; initialize a new dated formal release without retroactive approval or recalculation. Keep Preview producer, existing cache schema/natural key, manual_ui BusinessKey, NULL versus zero, AM/PM CNF identity, page/API/Compose interface and all business code unchanged. Reuse immutable validated application image 47fe35a; host producer Commit/Tree is separately identified. Extraction approval and exact resulting asset approval are distinct protected evidence states; never treat extracted or Preview/synthetic assets as approved production. Root-controlled exclusive candidate/publication paths, source/manifest/payload SHA, explicit approved destinations and readonly consumers are mandatory. Only direct asset/schema/production-preview rejection and consumer compatibility tests; no automatic full regression, image rebuild, AM/PM capture, SEALED mutation, FULL DAILY integration or Notification activation. Registration does not publish assets or issue runtime production grants; actual operations require the separate user task authorization and explicit result approval evidence."
     }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"
