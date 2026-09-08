@@ -62,6 +62,16 @@
             "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
           }
         },
+        "local_extraction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "execution_host", "output_path"],
+          "properties": {
+            "mode": {"type": "string", "const": "windows_local_transfer"},
+            "execution_host": {"type": "string", "minLength": 1},
+            "output_path": {"type": "string", "minLength": 1}
+          }
+        },
         "source": {
           "description": "Historical and CNF source fields share one closed shape; asset_tool.py enforces the exact field set for the selected kind.",
           "type": "object",

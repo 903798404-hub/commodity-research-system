@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
@@ -403,3 +404,165 @@ def test_decimal_numeric_equivalence_is_checked_without_float_conversion():
 
     assert asset_tool.canonical_rows(one) == asset_tool.canonical_rows(padded)
     assert asset_tool.canonical_rows(one) != asset_tool.canonical_rows(changed)
+
+
+def _local_scope(tmp_path: Path) -> dict:
+    producer = {"commit": "a" * 40, "tree": "b" * 40}
+    return {
+        "kind": "cnf", "runtime_id": "cnf-runtime-001", "release_id": "cnf-release-001",
+        "candidate_path": str(tmp_path / "candidate"), "formal_path": str(tmp_path / "formal"),
+        "producer": producer, "helper_image": {"image_id": "sha256:" + "c" * 64, **producer},
+        "source": {"identity": asset_tool.SOURCE_IDENTITY, "database": "quanyong", "schema": "market",
+                   "table": "soybean_param", "field": "cnf", "query_sha256": asset_tool.QUERY_SHA256,
+                   "query_time_range": "all_available_at_extraction"},
+        "local_extraction": {"mode": "windows_local_transfer", "execution_host": "local-host",
+                             "output_path": str(tmp_path / "transfer")},
+    }
+
+
+def _local_initial(scope: dict) -> dict:
+    return {"state": "cnf_extraction_approved", "approved_at": "2026-09-07T01:00:00+00:00", "scope": scope}
+
+
+def _write_local_cache(path: Path) -> dict:
+    rows = [
+        {"trade_date": date(2026, 9, 1), "region_hex": "e5b7b4e8a5bf", "month": 10,
+         "cnf": None, "updated_at": datetime(2026, 9, 1, 8, 30, tzinfo=timezone.utc),
+         "region": "巴西", "origin": "brazil", "source_identity": asset_tool.SOURCE_IDENTITY},
+        {"trade_date": date(2026, 9, 1), "region_hex": "e7be8ee6b9be", "month": 10,
+         "cnf": Decimal("0.00"), "updated_at": datetime(2026, 9, 1, 8, 31, tzinfo=timezone.utc),
+         "region": "美湾", "origin": "us_gulf", "source_identity": asset_tool.SOURCE_IDENTITY},
+    ]
+    pq.write_table(pa.Table.from_pylist(rows), path)
+    return {**asset_tool.inspect_cnf(path), "query_started_at": "2026-09-07T01:02:03+00:00",
+            "query_finished_at": "2026-09-07T01:02:04+00:00",
+            "actual_database_identity": {"database": "quanyong", "relation_oid": 42, "server_version": "16.0"},
+            "readonly_transaction": {"transaction_read_only": "on", "default_transaction_read_only": "on", "rolled_back": True}}
+
+
+def test_local_extract_receive_and_network_none_validate_preserves_database_values(tmp_path, monkeypatch):
+    scope = _local_scope(tmp_path); initial = _local_initial(scope)
+    approval = tmp_path / "approval.json"; approval.write_text(json.dumps(initial), encoding="utf-8")
+    secret = tmp_path / "secret.env"; secret.write_text("not-a-real-credential", encoding="utf-8")
+    transfer = Path(scope["local_extraction"]["output_path"]); incoming = tmp_path / "incoming" / "received"; incoming.parent.mkdir()
+    calls = []
+
+    def extract(_secret, output, app_root=None):
+        calls.append((Path(output), app_root)); return _write_local_cache(Path(output))
+
+    monkeypatch.setattr(asset_tool, "load_local_approval", lambda *args: initial)
+    monkeypatch.setattr(asset_tool, "extract_cnf", extract)
+    monkeypatch.setattr(asset_tool, "local_environment", lambda _: {"extractor": {"tool_sha256": "1" * 64,
+        "query_sha256": asset_tool.QUERY_SHA256, "imported_client_path": asset_tool.TANKAN_CLIENT_RELATIVE, "imported_client_sha256": "2" * 64},
+        "environment": {"execution_host": "local-host", "os": "Windows", "python": {"executable": "python", "implementation": "CPython", "version": "3.12"},
+                        "dependencies": {"psycopg": "3", "pandas": "2", "pyarrow": "16"}}})
+    monkeypatch.setattr(asset_tool, "imported_tankan_client", lambda: tmp_path / "client.py")
+    created = asset_tool.extract_local(approval, asset_tool.sha_file(approval), secret, transfer)
+    assert created["LOCAL_TRANSFER_CREATED"] is True
+    assert set(asset_tool.file_set(transfer)) == {asset_tool.CACHE, asset_tool.TRANSFER_MANIFEST}
+    values = pq.read_table(transfer / asset_tool.CACHE).to_pylist()
+    assert values[0]["cnf"] is None and values[1]["cnf"] == Decimal("0.00")
+    assert values[0]["updated_at"] == datetime(2026, 9, 1, 8, 30, tzinfo=timezone.utc)
+    assert calls == [(transfer / asset_tool.CACHE, asset_tool.ROOT)]
+
+    incoming.mkdir(); (incoming / asset_tool.CACHE).write_bytes((transfer / asset_tool.CACHE).read_bytes())
+    (incoming / asset_tool.TRANSFER_MANIFEST).write_bytes((transfer / asset_tool.TRANSFER_MANIFEST).read_bytes())
+    monkeypatch.setattr(asset_tool, "load_approval", lambda _: initial)
+    monkeypatch.setattr(asset_tool, "protected", lambda path, **kwargs: Path(path))
+    monkeypatch.setattr(asset_tool, "protected_tree", lambda _: None)
+    monkeypatch.setattr(asset_tool, "under", lambda path, parent: Path(path))
+    monkeypatch.setattr(asset_tool, "git_identity", lambda: scope["producer"])
+    real_contract = asset_tool.contract
+
+    def contract_for_tmp_paths(value, kind):
+        checked = deepcopy(value)
+        if kind == "cnf":
+            checked["candidate_path"] = "/var/lib/market-data/production-input-candidates/cnf-001"
+            checked["intended_formal_path"] = "/var/lib/market-data/production-input-assets/cnf-001"
+            checked["transfer"]["incoming_path"] = "/var/lib/market-data/production-input-incoming/cnf-001"
+        return real_contract(checked, kind)
+
+    monkeypatch.setattr(asset_tool, "contract", contract_for_tmp_paths)
+    monkeypatch.setattr(asset_tool, "committed_blob_sha256", lambda relative, **_: "1" * 64
+                        if relative == asset_tool.TOOL_RELATIVE else "2" * 64)
+    received = asset_tool.receive_local(approval, incoming, created["transfer_manifest_sha256"])
+    assert received["CANDIDATE_RECEIVED"] is True
+    workers = []
+    transfer_observations = asset_tool.read_json(incoming / asset_tool.TRANSFER_MANIFEST)["observations"]
+    asset = asset_tool.read_json(Path(scope["candidate_path"]) / asset_tool.ASSET_MANIFEST)
+    assert asset["observations"] == transfer_observations
+    monkeypatch.setattr(asset_tool, "run_worker", lambda operation, *_: workers.append(operation) or transfer_observations)
+    # Validation must invoke exactly one network-none CNF worker; its file and manifest checks stay real.
+    report = asset_tool.validate_candidate(approval, tmp_path / "report.json")
+    assert report["status"] == "PASS"
+    assert workers == ["cnf"]
+
+    drifted = deepcopy(asset); drifted["observations"]["record_count"] += 1
+    original_read_json = asset_tool.read_json
+    candidate_manifest = Path(scope["candidate_path"]) / asset_tool.ASSET_MANIFEST
+    monkeypatch.setattr(asset_tool, "read_json", lambda path: drifted if Path(path) == candidate_manifest else original_read_json(path))
+    with pytest.raises(asset_tool.AssetError, match="Asset observations differ from local transfer"):
+        asset_tool.validate_asset_files(Path(scope["candidate_path"]), initial, asset_tool.sha_file(approval))
+
+
+def test_local_scope_cannot_fall_back_to_server_candidate_creation(tmp_path, monkeypatch):
+    initial = _local_initial(_local_scope(tmp_path))
+    monkeypatch.setattr(asset_tool, "load_approval", lambda _: initial)
+    monkeypatch.setattr(asset_tool, "protected", lambda path, **kwargs: Path(path))
+
+    with pytest.raises(asset_tool.AssetError, match="Local extraction scope cannot use server extraction"):
+        asset_tool.create_candidate(tmp_path / "approval.json", tmp_path / "secret.env")
+
+    assert not Path(initial["scope"]["candidate_path"]).exists()
+
+
+def test_local_extract_rejects_foreign_imported_client_before_database_query(tmp_path, monkeypatch):
+    scope = _local_scope(tmp_path); initial = _local_initial(scope)
+    approval = tmp_path / "approval.json"; approval.write_text(json.dumps(initial), encoding="utf-8")
+    monkeypatch.setattr(asset_tool, "load_local_approval", lambda *args: initial)
+    monkeypatch.setattr(asset_tool, "imported_tankan_client",
+                        lambda: (_ for _ in ()).throw(asset_tool.AssetError("Tankan client imported outside approved 03_src")))
+    monkeypatch.setattr(asset_tool, "extract_cnf", lambda *args, **kwargs: pytest.fail("database query must not run"))
+
+    with pytest.raises(asset_tool.AssetError, match="outside approved 03_src"):
+        asset_tool.extract_local(approval, asset_tool.sha_file(approval), tmp_path / "secret.env",
+                                 scope["local_extraction"]["output_path"])
+
+
+@pytest.mark.parametrize("change, reason", [
+    ("wrong_pin", "Transfer manifest SHA mismatch"), ("changed_cache", "Transferred cache identity mismatch"),
+    ("extra_file", "Unexpected transfer files"), ("wrong_approval", "Transfer approval chain mismatch"),
+    ("wrong_producer", "Transfer producer/source/local scope mismatch"), ("wrong_host", "Transfer execution host mismatch"),
+    ("wrong_extractor", "Transfer extractor identity mismatch"), ("wrong_blob", "Transfer producer source blob mismatch"),
+    ("missing_proof", r"transfer\.observations\.readonly_transaction\.rolled_back: constant mismatch"),
+])
+def test_receive_local_rejects_changed_or_unbound_transfer(tmp_path, monkeypatch, change, reason):
+    scope = _local_scope(tmp_path); initial = _local_initial(scope)
+    approval = tmp_path / "approval.json"; approval.write_text(json.dumps(initial), encoding="utf-8")
+    transfer = tmp_path / "incoming"; transfer.mkdir()
+    observations = _write_local_cache(transfer / asset_tool.CACHE)
+    manifest = {"schema_version": "production-cnf-local-transfer/1", "generated_at": "2026-09-07T01:02:05+00:00",
+                "initial_approval_sha256": asset_tool.sha_file(approval), "producer": scope["producer"], "source": scope["source"],
+                "local_extraction": scope["local_extraction"], "extractor": {"tool_sha256": "1" * 64, "query_sha256": asset_tool.QUERY_SHA256,
+                "imported_client_path": asset_tool.TANKAN_CLIENT_RELATIVE, "imported_client_sha256": "2" * 64},
+                "environment": {"execution_host": "local-host", "os": "Windows", "python": {"executable": "python", "implementation": "CPython", "version": "3.12"},
+                "dependencies": {"psycopg": "3", "pandas": "2", "pyarrow": "16"}}, "observations": observations,
+                "payloads": {asset_tool.CACHE: asset_tool.file_set(transfer)[asset_tool.CACHE]}}
+    if change == "wrong_approval": manifest["initial_approval_sha256"] = "0" * 64
+    elif change == "wrong_producer": manifest["producer"] = {"commit": "3" * 40, "tree": "4" * 40}
+    elif change == "wrong_host": manifest["environment"]["execution_host"] = "other-host"
+    elif change == "wrong_extractor": manifest["extractor"]["imported_client_path"] = "03_src/foreign.py"
+    elif change == "wrong_blob": manifest["extractor"]["tool_sha256"] = "9" * 64
+    elif change == "missing_proof": manifest["observations"]["readonly_transaction"]["rolled_back"] = False
+    asset_tool.write_json(transfer / asset_tool.TRANSFER_MANIFEST, manifest)
+    pinned = asset_tool.sha_file(transfer / asset_tool.TRANSFER_MANIFEST)
+    if change == "changed_cache": (transfer / asset_tool.CACHE).write_bytes(b"changed")
+    elif change == "extra_file": (transfer / "extra").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(asset_tool, "load_approval", lambda _: initial)
+    monkeypatch.setattr(asset_tool, "protected", lambda path, **kwargs: Path(path))
+    monkeypatch.setattr(asset_tool, "protected_tree", lambda _: None)
+    monkeypatch.setattr(asset_tool, "under", lambda path, parent: Path(path))
+    monkeypatch.setattr(asset_tool, "committed_blob_sha256", lambda relative, **_: "1" * 64
+                        if relative == asset_tool.TOOL_RELATIVE else "2" * 64)
+    with pytest.raises(asset_tool.AssetError, match=reason):
+        asset_tool.receive_local(approval, transfer, "0" * 64 if change == "wrong_pin" else pinned)

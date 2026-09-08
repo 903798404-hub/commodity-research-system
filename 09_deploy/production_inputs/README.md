@@ -11,7 +11,7 @@ The JSON schemas describe document shape. A document passing a schema is **not a
 
 Run the host driver with Python 3.10 and the standard library from a clean, detached, independent shallow checkout at the approved producer commit and tree. The producer identity is the checkout containing this tool. It is separate from the helper application image identity.
 
-Parquet reading, the real Tankan query, and application consumer loading run in the already existing approved application image. Supply its immutable Docker image ID, application commit, and application tree as `scope.helper_image`. The tool verifies the image ID, its OCI revision label, and `/app/RELEASE.json`. It never builds or pulls an image, and it does not mount the producer checkout's `.git` directory into the worker. Do not rebuild the existing 47fe image for this closure.
+The real Tankan query for a new CNF update runs only on the approved Windows extraction host. Parquet validation and application consumer loading run later on the server in the already existing approved application image. Supply its immutable Docker image ID, application commit, and application tree as `scope.helper_image`; this image identity means `server_validation_only` for a local transfer and never claims the image performed the Windows query. The tool verifies the image ID, its OCI revision label, and `/app/RELEASE.json`. It never builds or pulls an image. Do not rebuild the existing 47fe image for this closure.
 
 All approval files, candidate paths, formal paths, validation reports, and receipts must be below their fixed protected roots:
 
@@ -19,6 +19,7 @@ All approval files, candidate paths, formal paths, validation reports, and recei
 - candidates: `/var/lib/market-data/production-input-candidates`
 - formal assets: `/var/lib/market-data/production-input-assets`
 - evidence: `/var/lib/market-data/production-input-evidence`
+- incoming local transfers: `/var/lib/market-data/production-input-incoming`
 
 The host must run as root. Existing path components must be root-owned and not group- or world-writable. Paths must be absolute and canonical and may not contain symlinks or junctions. The candidate and formal destinations must differ, may not contain `preview`, and must not already exist when created or published. Publication is exclusive and immutable; it does not refresh or overwrite an existing asset.
 
@@ -32,6 +33,7 @@ Every approval document has `schema_version: production-input-approval/1`, a non
 - `producer.commit` and `producer.tree` for the host tool checkout
 - `helper_image.image_id`, `helper_image.commit`, and `helper_image.tree` for the existing application image
 - `source`, in the kind-specific shape below
+- for a new CNF update, closed `local_extraction` fields `mode: windows_local_transfer`, the approved `execution_host`, and the exact repository-external Windows `output_path`
 
 An initial approval uses `historical_initialization_approved` or `cnf_extraction_approved`. Both `asset_manifest_sha256` and `prior_approval_sha256` must be `null`; the asset does not exist yet.
 
@@ -81,19 +83,32 @@ query_time_range = all_available_at_extraction
 
 This path only accepts a real query against the configured `quanyong` database. It requires both transaction read-only settings to be `on`, records the actual database and relation identity, rolls the transaction back, and preserves the queried CNF and `updated_at` values. It does not accept Preview identity or synthetic rows as production input. It preserves `NULL` separately from zero, performs no filling or interpolation, invents no timestamps, and does not carry values across dates or months. Its natural key remains `(trade_date, origin, month)`.
 
-Create and validate the candidate:
+Run `extract-local` from the exact approved producer checkout on Windows. The checkout must be an independent clean detached Git repository with the canonical GitHub origin; it cannot be a linked worktree. Pin the approval copy independently by its SHA-256. The output directory must match `scope.local_extraction.output_path`, be outside the repository, and not already exist:
 
 ```text
-python3.10 -B 09_deploy/production_inputs/asset_tool.py create \
+python -B 09_deploy/production_inputs/asset_tool.py extract-local \
+  --approval C:\protected\cnf-initial.json \
+  --approval-sha256 <exact-lowercase-sha256> \
+  --secret-file C:\protected\tankan.env \
+  --output C:\production-input-transfer\soybean-cnf-20260908-b01
+```
+
+This creates only `historical_cnf_cache.parquet` and `local_extraction_transfer.json`. It records the actual Python runtime, dependency versions, execution host, fixed Git-blob identities for this extractor and the imported `03_src` Tankan client, query and database identities, read-only proof, timestamps, and cache observations. It creates no formal marker, asset manifest, production approval, or publication.
+
+Transfer that fixed two-file directory to a new root-owned, non-writable incoming directory on the server. Pin the transfer manifest SHA-256 independently. The server has no Tankan network role and performs no extraction:
+
+```text
+python3.10 -B 09_deploy/production_inputs/asset_tool.py receive-local \
   --approval /etc/market-data/production-input-authority/cnf-initial.json \
-  --secret-file /path/to/protected/tankan.env
+  --transfer /var/lib/market-data/production-input-incoming/soybean-cnf-20260908-b01 \
+  --transfer-sha256 <exact-lowercase-manifest-sha256>
 
 python3.10 -B 09_deploy/production_inputs/asset_tool.py validate \
   --approval /etc/market-data/production-input-authority/cnf-initial.json \
   --report /var/lib/market-data/production-input-evidence/cnf-validation.json
 ```
 
-Validation runs without the secret and mounts the candidate read-only. It checks the exact cache columns, natural-key uniqueness, source identity, nullable numeric CNF type, source timestamps, cache SHA and size, row hash, row count, date range, schema fingerprint, null/zero counts, actual database identity, and read-only transaction proof. The host verifies that validation did not mutate the candidate.
+Receive rejects missing or extra files, links, traversal, Preview paths, approval/source/producer/path drift, byte or size changes, and schema or provenance drift. It exclusively copies both transfer files into a new candidate and seals them in `asset_manifest.json`; it does not run Docker. Validation then invokes the existing 47fe image once with `--network none`, mounts the candidate read-only, and recomputes the cache semantics. It checks the exact columns, natural-key uniqueness, source identity, nullable numeric CNF type, source timestamps, cache SHA and size, row hash, row count, date range, schema fingerprint, null/zero counts, actual database identity, and read-only transaction proof. The host verifies that validation did not mutate the candidate.
 
 ## Publication
 

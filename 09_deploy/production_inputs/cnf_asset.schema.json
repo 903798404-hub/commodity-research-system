@@ -48,6 +48,75 @@
     "candidate_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-candidates/[^/].*$"},
     "intended_formal_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-assets/[^/].*$"},
     "readonly_consumption": {"type": "boolean", "const": true},
+    "local_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "extractor", "environment"],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "execution_host", "output_path"],
+          "properties": {
+            "mode": {"type": "string", "const": "windows_local_transfer"},
+            "execution_host": {"type": "string", "minLength": 1},
+            "output_path": {"type": "string", "minLength": 1}
+          }
+        },
+        "extractor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool_sha256", "query_sha256", "imported_client_path", "imported_client_sha256"],
+          "properties": {
+            "tool_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "query_sha256": {"type": "string", "const": "90a9f6fd1d30d6d662c2e3f8c20b11c9eb3a3bae2d46959d3e362680928fec7f"},
+            "imported_client_path": {"type": "string", "const": "03_src/agri_research_agent/data_sources/tankan/client.py"},
+            "imported_client_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["execution_host", "os", "python", "dependencies"],
+          "properties": {
+            "execution_host": {"type": "string", "minLength": 1},
+            "os": {"type": "string", "minLength": 1},
+            "python": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["executable", "implementation", "version"],
+              "properties": {
+                "executable": {"type": "string", "minLength": 1},
+                "implementation": {"type": "string", "minLength": 1},
+                "version": {"type": "string", "minLength": 1}
+              }
+            },
+            "dependencies": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["psycopg", "pandas", "pyarrow"],
+              "properties": {
+                "psycopg": {"type": "string", "minLength": 1},
+                "pandas": {"type": "string", "minLength": 1},
+                "pyarrow": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    },
+    "transfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "incoming_path", "source_output_path", "received_at", "helper_image_use"],
+      "properties": {
+        "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "incoming_path": {"type": "string", "pattern": "^/var/lib/market-data/production-input-incoming/[^/].*$"},
+        "source_output_path": {"type": "string", "minLength": 1},
+        "received_at": {"type": "string", "minLength": 1},
+        "helper_image_use": {"type": "string", "const": "server_validation_only"}
+      }
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -129,6 +198,15 @@
           }
         },
         "historical_cnf_cache.parquet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha256", "size_bytes"],
+          "properties": {
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "local_extraction_transfer.json": {
           "type": "object",
           "additionalProperties": false,
           "required": ["sha256", "size_bytes"],

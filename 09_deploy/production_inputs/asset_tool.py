@@ -11,9 +11,11 @@ import argparse
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import hashlib
+import importlib.metadata
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import platform
 import re
 import stat
 import subprocess
@@ -25,7 +27,9 @@ AUTHORITY_ROOT = Path('/etc/market-data/production-input-authority')
 CANDIDATE_ROOT = Path('/var/lib/market-data/production-input-candidates')
 FORMAL_ROOT = Path('/var/lib/market-data/production-input-assets')
 EVIDENCE_ROOT = Path('/var/lib/market-data/production-input-evidence')
+INCOMING_ROOT = Path('/var/lib/market-data/production-input-incoming')
 SOURCE_IDENTITY = 'tankan:quanyong.market.soybean_param:cnf'
+QUERY_SHA256 = '90a9f6fd1d30d6d662c2e3f8c20b11c9eb3a3bae2d46959d3e362680928fec7f'
 QUERY = """SELECT trade_date, encode(region::bytea, 'hex') AS region_hex,
        month, cnf, updated_at
 FROM market.soybean_param
@@ -40,8 +44,73 @@ PAYLOAD_NAMES = ('soybean_business_keys.parquet', 'soybean_market_snapshots.parq
 MARKER = '.market-data-runtime.json'
 ASSET_MANIFEST = 'asset_manifest.json'
 CACHE = 'historical_cnf_cache.parquet'
+TRANSFER_MANIFEST = 'local_extraction_transfer.json'
 SCHEMAS = {'historical': 'historical_asset.schema.json', 'cnf': 'cnf_asset.schema.json',
            'approval': 'approval.schema.json'}
+CANONICAL_ORIGINS = (
+    'git@github.com:903798404-hub/commodity-research-system.git',
+    'https://github.com/903798404-hub/commodity-research-system.git')
+TOOL_RELATIVE = '09_deploy/production_inputs/asset_tool.py'
+TANKAN_CLIENT_RELATIVE = '03_src/agri_research_agent/data_sources/tankan/client.py'
+
+TRANSFER_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'required': ['schema_version', 'generated_at', 'initial_approval_sha256', 'producer',
+                 'source', 'local_extraction', 'extractor', 'environment', 'observations', 'payloads'],
+    'properties': {
+        'schema_version': {'type': 'string', 'const': 'production-cnf-local-transfer/1'},
+        'generated_at': {'type': 'string', 'minLength': 1},
+        'initial_approval_sha256': {'type': 'string', 'pattern': '^[0-9a-f]{64}$'},
+        'producer': {'type': 'object', 'additionalProperties': False, 'required': ['commit', 'tree'],
+                     'properties': {'commit': {'type': 'string', 'pattern': '^[0-9a-f]{40}$'},
+                                    'tree': {'type': 'string', 'pattern': '^[0-9a-f]{40}$'}}},
+        'source': {'type': 'object', 'additionalProperties': False,
+                   'required': ['identity', 'database', 'schema', 'table', 'field', 'query_sha256', 'query_time_range'],
+                   'properties': {
+                       'identity': {'type': 'string', 'const': SOURCE_IDENTITY},
+                       'database': {'type': 'string', 'const': 'quanyong'},
+                       'schema': {'type': 'string', 'const': 'market'},
+                       'table': {'type': 'string', 'const': 'soybean_param'},
+                       'field': {'type': 'string', 'const': 'cnf'},
+                       'query_sha256': {'type': 'string', 'const': QUERY_SHA256},
+                       'query_time_range': {'type': 'string', 'const': 'all_available_at_extraction'}}},
+        'local_extraction': {'type': 'object', 'additionalProperties': False,
+                             'required': ['mode', 'execution_host', 'output_path'],
+                             'properties': {
+                                 'mode': {'type': 'string', 'const': 'windows_local_transfer'},
+                                 'execution_host': {'type': 'string', 'minLength': 1},
+                                 'output_path': {'type': 'string', 'minLength': 1}}},
+        'extractor': {'type': 'object', 'additionalProperties': False,
+                      'required': ['tool_sha256', 'query_sha256', 'imported_client_path', 'imported_client_sha256'],
+                      'properties': {
+                          'tool_sha256': {'type': 'string', 'pattern': '^[0-9a-f]{64}$'},
+                          'query_sha256': {'type': 'string', 'const': QUERY_SHA256},
+                          'imported_client_path': {'type': 'string', 'minLength': 1},
+                          'imported_client_sha256': {'type': 'string', 'pattern': '^[0-9a-f]{64}$'}}},
+        'environment': {'type': 'object', 'additionalProperties': False,
+                        'required': ['execution_host', 'os', 'python', 'dependencies'],
+                        'properties': {
+                            'execution_host': {'type': 'string', 'minLength': 1},
+                            'os': {'type': 'string', 'minLength': 1},
+                            'python': {'type': 'object', 'additionalProperties': False,
+                                       'required': ['executable', 'implementation', 'version'],
+                                       'properties': {
+                                           'executable': {'type': 'string', 'minLength': 1},
+                                           'implementation': {'type': 'string', 'minLength': 1},
+                                           'version': {'type': 'string', 'minLength': 1}}},
+                            'dependencies': {'type': 'object', 'additionalProperties': False,
+                                             'required': ['psycopg', 'pandas', 'pyarrow'],
+                                             'properties': {name: {'type': 'string', 'minLength': 1}
+                                                            for name in ('psycopg', 'pandas', 'pyarrow')}}}},
+        'observations': {'type': 'object'},
+        'payloads': {'type': 'object', 'additionalProperties': False, 'required': [CACHE],
+                     'properties': {CACHE: {'type': 'object', 'additionalProperties': False,
+                                            'required': ['sha256', 'size_bytes'],
+                                            'properties': {
+                                                'sha256': {'type': 'string', 'pattern': '^[0-9a-f]{64}$'},
+                                                'size_bytes': {'type': 'integer', 'minimum': 1}}}}}
+    }
+}
 
 
 class AssetError(ValueError):
@@ -196,15 +265,40 @@ def under(path, parent):
 def git_identity():
     protected(ROOT)
     def git(*args):
-        return subprocess.check_output(['git', '-C', str(ROOT), *args], text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(['git', '-C', str(ROOT), *args], text=True,
+                                       stderr=subprocess.DEVNULL).strip()
     require(git('status', '--porcelain=v1', '--untracked-files=all') == '', 'Producer checkout must be clean')
     require(git('rev-parse', '--is-shallow-repository') == 'true', 'Producer requires independent shallow checkout')
     require(git('rev-parse', '--git-dir') == '.git', 'Producer must not use linked worktree')
     require(git('rev-parse', '--abbrev-ref', 'HEAD') == 'HEAD', 'Producer requires detached HEAD')
-    require(git('remote', 'get-url', 'origin') in (
-        'git@github.com:903798404-hub/commodity-research-system.git',
-        'https://github.com/903798404-hub/commodity-research-system.git'), 'Unexpected producer origin')
+    require(git('remote', 'get-url', 'origin') in CANONICAL_ORIGINS, 'Unexpected producer origin')
     return {'commit': git('rev-parse', 'HEAD'), 'tree': git('rev-parse', 'HEAD^{tree}')}
+
+
+def local_git_identity():
+    """Identity of the Windows extraction checkout; never applies Linux host policy."""
+    require(os.name == 'nt', 'Local extraction requires Windows')
+    root = no_links(ROOT)
+    require((root / '.git').is_dir(), 'Local producer requires an independent Git repository')
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(root), *args], text=True,
+                                       stderr=subprocess.DEVNULL).strip()
+    require(git('status', '--porcelain=v1', '--untracked-files=all') == '', 'Local producer checkout must be clean')
+    require(git('rev-parse', '--git-dir').replace('\\', '/') == '.git', 'Local producer must not use a linked worktree')
+    require(git('rev-parse', '--abbrev-ref', 'HEAD') == 'HEAD', 'Local producer requires detached HEAD')
+    require(git('remote', 'get-url', 'origin') in CANONICAL_ORIGINS, 'Unexpected producer origin')
+    return {'commit': git('rev-parse', 'HEAD'), 'tree': git('rev-parse', 'HEAD^{tree}')}
+
+
+def committed_blob_sha256(relative, *, verify_worktree=False):
+    require(relative in (TOOL_RELATIVE, TANKAN_CLIENT_RELATIVE), 'Unapproved producer source path')
+    def git_bytes(*args):
+        return subprocess.check_output(['git', '-C', str(ROOT), *args], stderr=subprocess.DEVNULL)
+    blob_id = git_bytes('rev-parse', 'HEAD:' + relative).decode().strip()
+    if verify_worktree:
+        working_id = git_bytes('hash-object', '--path=' + relative, str(ROOT / relative)).decode().strip()
+        require(working_id == blob_id, 'Local producer source differs from approved Git blob')
+    return sha_bytes(git_bytes('show', 'HEAD:' + relative))
 
 
 def file_set(root):
@@ -234,6 +328,15 @@ def approval_document(value):
         require(re.fullmatch('[a-z0-9][a-z0-9-]{2,100}', scope[key]) is not None, 'Invalid runtime/release ID')
     require(scope['candidate_path'] != scope['formal_path'], 'Candidate cannot be formal destination')
     require('preview' not in scope['candidate_path'].lower() and 'preview' not in scope['formal_path'].lower(), 'Preview path rejected')
+    local = scope.get('local_extraction')
+    require(scope['kind'] == 'cnf' or local is None, 'Historical scope cannot request local extraction')
+    if local is not None:
+        require(set(local) == {'mode', 'execution_host', 'output_path'}
+                and local['mode'] == 'windows_local_transfer', 'Invalid local extraction scope')
+        require('preview' not in local['output_path'].lower(), 'Preview path rejected')
+        windows_path = PureWindowsPath(local['output_path'])
+        require(windows_path.is_absolute() and windows_path.drive and '..' not in windows_path.parts,
+                'Local extraction output must be an absolute canonical Windows path')
     if value['state'] == 'asset_approved':
         digest(value['asset_manifest_sha256']); digest(value['prior_approval_sha256'])
     else:
@@ -250,6 +353,24 @@ def load_approval(path):
     protected(under(scope['candidate_path'], CANDIDATE_ROOT), exists=False)
     protected(under(scope['formal_path'], FORMAL_ROOT), exists=False)
     require(scope['producer'] == git_identity(), 'Approved producer identity mismatch')
+    return value
+
+
+def load_local_approval(path, approved_sha256, output):
+    path = no_links(Path(path))
+    require(sha_file(path) == digest(approved_sha256), 'Local approval SHA mismatch')
+    value = approval_document(read_json(path))
+    require(value['state'] == 'cnf_extraction_approved', 'Local CNF extraction approval required')
+    scope = value['scope']
+    require(scope.get('local_extraction') is not None, 'Local extraction scope required')
+    identity = local_git_identity()
+    require(scope['producer'] == identity, 'Approved producer identity mismatch')
+    cnf_source_contract(scope['source'])
+    local = scope['local_extraction']
+    require(local['execution_host'].casefold() == platform.node().casefold(), 'Local execution host mismatch')
+    output = no_links(Path(output))
+    require(str(output) == local['output_path'], 'Local extraction output path mismatch')
+    require(output != ROOT and ROOT not in output.parents, 'Local extraction output must be outside producer repository')
     return value
 
 
@@ -323,8 +444,9 @@ def initialize_history_files(scope, generated_at):
 
 
 def cnf_source_contract(source):
+    require(sha_bytes(QUERY.encode()) == QUERY_SHA256, 'Checked-in CNF query identity mismatch')
     require(source == {'identity': SOURCE_IDENTITY, 'database': 'quanyong', 'schema': 'market',
-                       'table': 'soybean_param', 'field': 'cnf', 'query_sha256': sha_bytes(QUERY.encode()),
+                       'table': 'soybean_param', 'field': 'cnf', 'query_sha256': QUERY_SHA256,
                        'query_time_range': 'all_available_at_extraction'}, 'Unapproved CNF source/query scope')
 
 
@@ -392,10 +514,10 @@ def inspect_cnf(path):
             'null_updated_at_count': sum(r['updated_at'] is None for r in rows)}
 
 
-def extract_cnf(secret_file, output):
+def extract_cnf(secret_file, output, app_root='/app'):
     import psycopg
     from psycopg.rows import dict_row
-    sys.path.insert(0, '/app/03_src')
+    sys.path.insert(0, str(Path(app_root) / '03_src'))
     from agri_research_agent.data_sources.tankan.client import TankanConnectionSettings
     settings = TankanConnectionSettings.from_secret_file(secret_file)
     started = utc_now()
@@ -430,6 +552,68 @@ def extract_cnf(secret_file, output):
             'actual_database_identity': actual,
             'readonly_transaction': {'transaction_read_only': proof, 'default_transaction_read_only': default_proof, 'rolled_back': True}}
 
+
+def local_environment(imported_client):
+    dependencies = {}
+    for name in ('psycopg', 'pandas', 'pyarrow'):
+        try:
+            dependencies[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            raise AssetError('Required local extraction dependency missing') from None
+    return {
+        'extractor': {'tool_sha256': committed_blob_sha256(TOOL_RELATIVE, verify_worktree=True),
+                      'query_sha256': QUERY_SHA256,
+                      'imported_client_path': Path(imported_client).relative_to(ROOT).as_posix(),
+                      'imported_client_sha256': committed_blob_sha256(TANKAN_CLIENT_RELATIVE, verify_worktree=True)},
+        'environment': {'execution_host': platform.node(), 'os': platform.platform(),
+                        'python': {'executable': sys.executable,
+                                   'implementation': platform.python_implementation(),
+                                   'version': platform.python_version()},
+                        'dependencies': dependencies}}
+
+
+def imported_tankan_client():
+    source = no_links(ROOT / '03_src')
+    sys.path.insert(0, str(source))
+    import agri_research_agent.data_sources.tankan.client as client
+    imported = no_links(Path(client.__file__).resolve())
+    require(imported == ROOT / TANKAN_CLIENT_RELATIVE, 'Tankan client imported outside approved 03_src')
+    return imported
+
+
+def extract_local(approval_path, approval_sha256, secret_file, output):
+    output = Path(output)
+    initial = load_local_approval(approval_path, approval_sha256, output)
+    scope = initial['scope']
+    require(not output.exists(), 'Local extraction output already exists; preserve existing evidence')
+    parent = no_links(output.parent)
+    require(parent.exists() and parent.is_dir(), 'Local extraction output parent missing')
+    require(ROOT not in parent.parents and parent != ROOT,
+            'Local extraction output must be outside producer repository')
+    imported_client = imported_tankan_client()
+    before = local_environment(imported_client)
+    secret_file = no_links(Path(secret_file))
+    require(secret_file.is_file(), 'Local Tankan secret file missing')
+    output.mkdir()
+    observations = extract_cnf(secret_file, output / CACHE, app_root=ROOT)
+    # Repeat every approval and producer binding after the query so a concurrent
+    # checkout, approval, or source change cannot be recorded as approved input.
+    require(load_local_approval(approval_path, approval_sha256, output)['scope'] == scope,
+            'Local approval changed during extraction')
+    provenance = local_environment(imported_tankan_client())
+    require(provenance == before, 'Local extraction environment changed during extraction')
+    payload = {CACHE: {'sha256': sha_file(output / CACHE),
+                       'size_bytes': (output / CACHE).stat().st_size}}
+    transfer = {'schema_version': 'production-cnf-local-transfer/1', 'generated_at': utc_now(),
+                'initial_approval_sha256': digest(approval_sha256), 'producer': scope['producer'],
+                'source': scope['source'], 'local_extraction': scope['local_extraction'],
+                **provenance, 'observations': observations, 'payloads': payload}
+    validate_schema(transfer, TRANSFER_SCHEMA, 'transfer')
+    write_json(output / TRANSFER_MANIFEST, transfer)
+    require(set(file_set(output)) == {CACHE, TRANSFER_MANIFEST}, 'Unexpected transfer files')
+    return {'LOCAL_TRANSFER_CREATED': True, 'output_path': str(output),
+            'transfer_manifest_sha256': sha_file(output / TRANSFER_MANIFEST),
+            'cache_sha256': payload[CACHE]['sha256'], 'record_count': observations['record_count']}
 
 def existing_image(image):
     raw = subprocess.check_output(['docker', 'image', 'inspect', image['image_id']], stderr=subprocess.DEVNULL)
@@ -484,12 +668,15 @@ def run_worker(operation, candidate, image, *, secret=None):
 
 def expected_payloads(scope):
     if scope['kind'] == 'cnf':
-        return {MARKER, CACHE}
+        payloads = {MARKER, CACHE}
+        if scope.get('local_extraction') is not None:
+            payloads.add(TRANSFER_MANIFEST)
+        return payloads
     prefix = 'releases/' + scope['release_id'] + '/'
     return {MARKER, 'release_index.json', prefix + 'manifest.json', *(prefix + name for name in PAYLOAD_NAMES)}
 
 
-def asset_document(scope, initial_sha, generated_at, observations):
+def asset_document(scope, initial_sha, generated_at, observations, transfer=None):
     candidate = Path(scope['candidate_path'])
     payloads = file_set(candidate)
     require(set(payloads) == expected_payloads(scope), 'Unexpected candidate files')
@@ -498,7 +685,17 @@ def asset_document(scope, initial_sha, generated_at, observations):
              'generated_at': generated_at, 'producer': scope['producer'], 'helper_image': scope['helper_image'],
              'initial_approval_sha256': initial_sha, 'candidate_path': scope['candidate_path'],
              'intended_formal_path': scope['formal_path'], 'readonly_consumption': True,
-             'source': scope['source'], 'observations': observations, 'payloads': payloads}
+              'source': scope['source'], 'observations': observations, 'payloads': payloads}
+    if scope.get('local_extraction') is not None:
+        require(transfer is not None, 'Local transfer provenance required')
+        value['local_provenance'] = {'scope': scope['local_extraction'],
+                                     'extractor': transfer['document']['extractor'],
+                                     'environment': transfer['document']['environment']}
+        value['transfer'] = {'manifest_sha256': transfer['sha256'],
+                             'incoming_path': transfer['incoming_path'],
+                             'source_output_path': scope['local_extraction']['output_path'],
+                             'received_at': generated_at,
+                             'helper_image_use': 'server_validation_only'}
     contract(value, scope['kind'])
     return value
 
@@ -534,6 +731,23 @@ def validate_asset_files(candidate, initial, initial_sha):
                 <= timestamp(observed['query_finished_at']) <= datetime.now(timezone.utc), 'Invalid extraction time evidence')
         require(observed['cache_sha256'] == files[CACHE]['sha256']
                 and observed['cache_size_bytes'] == files[CACHE]['size_bytes'], 'Cache observation identity mismatch')
+        local = scope.get('local_extraction')
+        require(('local_provenance' in asset) == ('transfer' in asset) == (local is not None),
+                'Local provenance presence mismatch')
+        if local is not None:
+            transfer_path = Path(candidate) / TRANSFER_MANIFEST
+            transfer_doc = read_json(transfer_path)
+            validate_transfer_document(transfer_doc, initial, initial_sha, files[CACHE])
+            require(asset['observations'] == transfer_doc['observations'],
+                    'Asset observations differ from local transfer')
+            require(asset['local_provenance'] == {'scope': local, 'extractor': transfer_doc['extractor'],
+                    'environment': transfer_doc['environment']}, 'Local provenance mismatch')
+            require(asset['transfer']['manifest_sha256'] == sha_file(transfer_path)
+                    and asset['transfer']['source_output_path'] == local['output_path']
+                    and asset['transfer']['helper_image_use'] == 'server_validation_only',
+                    'Transfer provenance mismatch')
+            require(timestamp(transfer_doc['generated_at']) <= timestamp(asset['transfer']['received_at'])
+                    <= datetime.now(timezone.utc), 'Invalid transfer receipt time')
     return asset
 
 
@@ -550,6 +764,7 @@ def create_candidate(approval_path, secret=None):
     else:
         cnf_source_contract(scope['source'])
         require(secret is not None, 'Protected Tankan secret file required')
+        require(scope.get('local_extraction') is None, 'Local extraction scope cannot use server extraction')
         candidate.mkdir(mode=0o755)
         observations = run_worker('extract', candidate, scope['helper_image'], secret=Path(secret))
         write_json(candidate / MARKER, marker(scope, generated))
@@ -557,6 +772,71 @@ def create_candidate(approval_path, secret=None):
     write_json(candidate / ASSET_MANIFEST, asset)
     return {'CANDIDATE_CREATED': True, 'candidate_path': str(candidate), 'asset_manifest_sha256': sha_file(candidate / ASSET_MANIFEST),
             'runtime_id': scope['runtime_id'], 'release_id': scope['release_id'], 'observations': observations}
+
+
+def validate_transfer_document(manifest, initial, initial_sha, cache_file):
+    validate_schema(manifest, TRANSFER_SCHEMA, 'transfer')
+    scope = initial['scope']
+    require(manifest['initial_approval_sha256'] == initial_sha, 'Transfer approval chain mismatch')
+    require(manifest['producer'] == scope['producer'] and manifest['source'] == scope['source']
+            and manifest['local_extraction'] == scope['local_extraction'],
+            'Transfer producer/source/local scope mismatch')
+    require(manifest['environment']['execution_host'].casefold()
+            == scope['local_extraction']['execution_host'].casefold(), 'Transfer execution host mismatch')
+    require(manifest['extractor']['query_sha256'] == QUERY_SHA256
+            and manifest['extractor']['imported_client_path'] == TANKAN_CLIENT_RELATIVE,
+            'Transfer extractor identity mismatch')
+    require(manifest['extractor']['tool_sha256'] == committed_blob_sha256(TOOL_RELATIVE)
+            and manifest['extractor']['imported_client_sha256'] == committed_blob_sha256(TANKAN_CLIENT_RELATIVE),
+            'Transfer producer source blob mismatch')
+    observations = manifest['observations']
+    observation_schema = read_json(Path(__file__).parent / SCHEMAS['cnf'])['properties']['observations']
+    validate_schema(observations, observation_schema, 'transfer.observations')
+    require(timestamp(initial['approved_at']) <= timestamp(observations['query_started_at'])
+            <= timestamp(observations['query_finished_at']) <= timestamp(manifest['generated_at'])
+            <= datetime.now(timezone.utc), 'Invalid local extraction time evidence')
+    require(observations['readonly_transaction'] == {'transaction_read_only': 'on',
+            'default_transaction_read_only': 'on', 'rolled_back': True}, 'Missing readonly extraction proof')
+    require(observations['actual_database_identity']['database'] == 'quanyong', 'Actual database mismatch')
+    require(set(manifest['payloads']) == {CACHE}
+            and manifest['payloads'][CACHE] == cache_file
+            and observations['cache_sha256'] == cache_file['sha256']
+            and observations['cache_size_bytes'] == cache_file['size_bytes'],
+            'Transferred cache identity mismatch')
+
+
+def receive_local(approval_path, transfer_path, transfer_sha256):
+    initial = load_approval(approval_path)
+    require(initial['state'] == 'cnf_extraction_approved' and initial['scope']['kind'] == 'cnf',
+            'CNF initial approval required')
+    scope = initial['scope']; candidate = Path(scope['candidate_path'])
+    require(scope.get('local_extraction') is not None, 'Local extraction scope required')
+    require(not candidate.exists(), 'Candidate already exists; preserve existing evidence')
+    protected(candidate.parent)
+    transfer_path = protected(under(transfer_path, INCOMING_ROOT))
+    require('preview' not in str(transfer_path).lower(), 'Preview transfer path rejected')
+    protected_tree(transfer_path)
+    bundle_files = file_set(transfer_path)
+    require(set(bundle_files) == {TRANSFER_MANIFEST, CACHE}, 'Unexpected transfer files')
+    manifest_path = transfer_path / TRANSFER_MANIFEST
+    require(sha_file(manifest_path) == digest(transfer_sha256), 'Transfer manifest SHA mismatch')
+    manifest = read_json(manifest_path)
+    validate_transfer_document(manifest, initial, sha_file(approval_path), bundle_files[CACHE])
+    generated = utc_now()
+    candidate.mkdir(mode=0o755)
+    write_exclusive(candidate / CACHE, (transfer_path / CACHE).read_bytes())
+    write_exclusive(candidate / TRANSFER_MANIFEST, manifest_path.read_bytes())
+    require(file_set(candidate) == bundle_files, 'Transferred bundle bytes changed')
+    write_json(candidate / MARKER, marker(scope, generated))
+    transfer = {'document': manifest, 'sha256': digest(transfer_sha256),
+                'incoming_path': str(transfer_path)}
+    asset = asset_document(scope, sha_file(approval_path), generated, manifest['observations'], transfer)
+    write_json(candidate / ASSET_MANIFEST, asset)
+    validate_asset_files(candidate, initial, sha_file(approval_path))
+    return {'CANDIDATE_RECEIVED': True, 'candidate_path': str(candidate),
+            'asset_manifest_sha256': sha_file(candidate / ASSET_MANIFEST),
+            'runtime_id': scope['runtime_id'], 'release_id': scope['release_id'],
+            'transfer_manifest_sha256': digest(transfer_sha256)}
 
 
 def validate_candidate(approval_path, report_path):
@@ -661,6 +941,15 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     create = commands.add_parser('create'); create.add_argument('--approval', type=Path, required=True)
     create.add_argument('--secret-file', type=Path)
+    local = commands.add_parser('extract-local')
+    local.add_argument('--approval', type=Path, required=True)
+    local.add_argument('--approval-sha256', required=True)
+    local.add_argument('--secret-file', type=Path, required=True)
+    local.add_argument('--output', type=Path, required=True)
+    receive = commands.add_parser('receive-local')
+    receive.add_argument('--approval', type=Path, required=True)
+    receive.add_argument('--transfer', type=Path, required=True)
+    receive.add_argument('--transfer-sha256', required=True)
     validate = commands.add_parser('validate'); validate.add_argument('--approval', type=Path, required=True)
     validate.add_argument('--report', type=Path, required=True)
     publication = commands.add_parser('publish')
@@ -673,6 +962,10 @@ def main(argv=None):
     try:
         if args.command == '_worker': result = worker_main(args)
         elif args.command == 'create': result = create_candidate(args.approval, args.secret_file)
+        elif args.command == 'extract-local':
+            result = extract_local(args.approval, args.approval_sha256, args.secret_file, args.output)
+        elif args.command == 'receive-local':
+            result = receive_local(args.approval, args.transfer, args.transfer_sha256)
         elif args.command == 'validate': result = validate_candidate(args.approval, args.report)
         else: result = publish(args.approval, args.initial_approval, args.report, args.receipt)
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
