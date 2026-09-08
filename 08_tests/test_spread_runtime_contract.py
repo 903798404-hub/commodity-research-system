@@ -201,3 +201,63 @@ def test_cli_oci_readonly_verifies_grant_and_never_falls_back(monkeypatch, tmp_p
     args.identity_kind = None
     with pytest.raises(ValueError, match="explicit OCI"):
         cli.initialize_execution_identity(args, mode=RuntimeMode.FORMAL_READONLY)
+
+
+def test_spread_image_persists_exact_build_commit_and_tree_for_runtime_identity():
+    dockerfile = (ROOT / "09_deploy/spread_runtime/Dockerfile.spread-runtime").read_text(
+        encoding="utf-8")
+    assert "ARG MARKET_DATA_GIT_HEAD" in dockerfile
+    assert "ARG MARKET_DATA_GIT_TREE" in dockerfile
+    assert 'ENV MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD}"' in dockerfile
+    assert 'ENV MARKET_DATA_GIT_TREE="${MARKET_DATA_GIT_TREE}"' in dockerfile
+    assert dockerfile.index("ARG MARKET_DATA_GIT_HEAD") < dockerfile.index("ENV MARKET_DATA_GIT_HEAD")
+    assert dockerfile.index("ARG MARKET_DATA_GIT_TREE") < dockerfile.index("ENV MARKET_DATA_GIT_TREE")
+
+
+def _release(path, commit, tree):
+    path.write_text(json.dumps({"application": "spread-production-runtime-wiring",
+                                "release_id": "spread-dashboard-20260908-test",
+                                "git_commit": commit, "git_tree": tree,
+                                "build_time": "2026-09-08T00:00:00+00:00",
+                                "source": "target-runtime-validator/2"}), encoding="utf-8")
+
+
+def test_preflight_binds_inherited_git_environment_to_release_and_verified_oci(monkeypatch, tmp_path):
+    preflight = load_script("spread_preflight_deployment_identity", "04_scripts/runtime/spread_runtime_preflight.py")
+    commit, tree = "a" * 40, "b" * 40
+    release = tmp_path / "RELEASE.json"; _release(release, commit, tree)
+    monkeypatch.setattr(preflight, "RELEASE_PATH", release)
+    monkeypatch.setenv("MARKET_DATA_GIT_HEAD", commit)
+    monkeypatch.setenv("MARKET_DATA_GIT_TREE", tree)
+    verified = SimpleNamespace(approved_commit=commit, approved_tree=tree,
+                               image_id="sha256:" + "c" * 64,
+                               role=SimpleNamespace(value="production"))
+    assert preflight.validate_embedded_deployment_identity(verified) == {
+        "git_commit": commit, "git_tree": tree, "image_id": "sha256:" + "c" * 64,
+        "identity_role": "production"}
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    ("missing_env", "missing or invalid"),
+    ("release_commit", "differs from RELEASE"),
+    ("verified_tree", "differs from verified OCI identity"),
+    ("image", "image identity is incomplete"),
+])
+def test_preflight_rejects_deployment_identity_mismatch(monkeypatch, tmp_path, mutation, reason):
+    preflight = load_script("spread_preflight_deployment_mismatch_" + mutation,
+                            "04_scripts/runtime/spread_runtime_preflight.py")
+    commit, tree = "a" * 40, "b" * 40
+    release = tmp_path / "RELEASE.json"
+    _release(release, "d" * 40 if mutation == "release_commit" else commit, tree)
+    monkeypatch.setattr(preflight, "RELEASE_PATH", release)
+    if mutation != "missing_env":
+        monkeypatch.setenv("MARKET_DATA_GIT_HEAD", commit)
+    else:
+        monkeypatch.delenv("MARKET_DATA_GIT_HEAD", raising=False)
+    monkeypatch.setenv("MARKET_DATA_GIT_TREE", tree)
+    verified = SimpleNamespace(approved_commit=commit,
+                               approved_tree="e" * 40 if mutation == "verified_tree" else tree,
+                               image_id="candidate:latest" if mutation == "image" else "sha256:" + "c" * 64,
+                               role=SimpleNamespace(value="production"))
+    with pytest.raises(ValueError, match=reason):
+        preflight.validate_embedded_deployment_identity(verified)

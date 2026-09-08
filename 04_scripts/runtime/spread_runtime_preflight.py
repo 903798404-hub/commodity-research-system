@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+import json
 import os
 from pathlib import Path
+import re
 import sys
 
 
@@ -13,7 +15,11 @@ sys.path.insert(0, str(SOURCE_ROOT / "03_src"))
 sys.path.insert(0, str(SOURCE_ROOT / "04_scripts"))
 sys.path.insert(0, str(SOURCE_ROOT / "05_apps"))
 
-from capture_public_intraday import MODULE_ID, initialize_execution_identity  # noqa: E402
+from capture_public_intraday import (  # noqa: E402
+    MODULE_ID,
+    initialize_execution_identity,
+    oci_execution_request,
+)
 from streamlit.testing.v1 import AppTest  # noqa: E402
 from agri_research_agent.application.domestic_spreads import load_domestic_spread_database  # noqa: E402
 from agri_research_agent.import_profit.runtime_store import (  # noqa: E402
@@ -32,6 +38,7 @@ from agri_research_agent.shared.runtime_context import (  # noqa: E402
     assert_runtime_write,
     load_runtime_identity,
 )
+from agri_research_agent.shared.production_identity import verify_execution  # noqa: E402
 
 
 RUNTIME_ROOT = Path("/runtime")
@@ -41,6 +48,8 @@ RESULT_ROOT = RUNTIME_ROOT / "import-profit" / "results"
 HISTORICAL_CNF_CACHE = RUNTIME_ROOT / "import-profit" / "cnf" / "historical_cnf_cache.parquet"
 CAPTURE_SNAPSHOT_ROOT = RUNTIME_ROOT / "capture-snapshots"
 CONFIG_PATH = SOURCE_ROOT / "02_configs" / "import_profit_soybean.yaml"
+RELEASE_PATH = SOURCE_ROOT / "RELEASE.json"
+_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -72,7 +81,57 @@ def initialize_preflight_identity(args):
     args.expected_marker_sha256 = identity.marker_sha256
     args.approved_commit = None
     args.approved_tree = None
-    return initialize_execution_identity(args, mode=mode)
+    context = initialize_execution_identity(args, mode=mode)
+    verified = verify_execution(
+        oci_execution_request(Path(args.runtime_root)),
+        expected_role="candidate_validation" if mode is RuntimeMode.CANDIDATE_VALIDATION else "production",
+        module_id=MODULE_ID,
+        runtime_id=identity.runtime_id,
+        runtime_root=Path(args.runtime_root),
+        marker_sha256=identity.marker_sha256,
+    )
+    validate_embedded_deployment_identity(verified)
+    args.verified_execution_identity = verified
+    return context
+
+
+def _strict_release() -> dict[str, object]:
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError("RELEASE contains a duplicate field")
+            value[key] = item
+        return value
+    try:
+        release = json.loads(RELEASE_PATH.read_text(encoding="utf-8", errors="strict"),
+                             object_pairs_hook=pairs,
+                             parse_constant=lambda _: (_ for _ in ()).throw(
+                                 ValueError("RELEASE contains a non-finite value")))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("RELEASE identity is unavailable") from exc
+    required = {"application", "release_id", "git_commit", "git_tree", "build_time", "source"}
+    if type(release) is not dict or set(release) != required:
+        raise ValueError("RELEASE identity fields are incomplete or unknown")
+    return release
+
+
+def validate_embedded_deployment_identity(verified) -> dict[str, str]:
+    """Bind inherited build identity to RELEASE and the verified OCI grant."""
+    commit = os.environ.get("MARKET_DATA_GIT_HEAD")
+    tree = os.environ.get("MARKET_DATA_GIT_TREE")
+    if (not isinstance(commit, str) or _COMMIT.fullmatch(commit) is None
+            or not isinstance(tree, str) or _COMMIT.fullmatch(tree) is None):
+        raise ValueError("embedded deployment Git environment is missing or invalid")
+    release = _strict_release()
+    if (release["git_commit"] != commit or release["git_tree"] != tree):
+        raise ValueError("embedded deployment Git environment differs from RELEASE")
+    if verified.approved_commit != commit or verified.approved_tree != tree:
+        raise ValueError("embedded deployment Git environment differs from verified OCI identity")
+    if not isinstance(verified.image_id, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", verified.image_id):
+        raise ValueError("verified OCI image identity is incomplete")
+    return {"git_commit": commit, "git_tree": tree, "image_id": verified.image_id,
+            "identity_role": verified.role.value}
 
 
 def initialize_strict_page(args, snapshot_root: Path, cache: Path) -> None:
@@ -138,11 +197,13 @@ def readonly_preflight(args) -> dict[str, object]:
     else:
         snapshot = load_formal_preflight_snapshot(snapshot_root)
     initialize_strict_page(args, snapshot_root, cache)
+    safe_identity = validate_embedded_deployment_identity(args.verified_execution_identity)
     return {
         "schema_version": "spread-runtime-preflight/1",
         "status": "PASS",
         "mode": context.mode.value,
         "runtime_id": context.identity.runtime_id,
+        **safe_identity,
         "domestic_spread_rows": len(domestic),
         "soybean_release": soybean.release_id,
         "snapshot_status": "AVAILABLE" if snapshot is not None else "NOT_YET_AVAILABLE",
@@ -157,11 +218,9 @@ def readonly_preflight(args) -> dict[str, object]:
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
     try:
-        import json
         print(json.dumps(readonly_preflight(args), ensure_ascii=False, sort_keys=True))
         return 0
     except Exception as exc:
-        import json
         print(json.dumps({"schema_version": "spread-runtime-preflight/1", "status": "FAILED",
                           "error_type": type(exc).__name__}, ensure_ascii=False, sort_keys=True))
         return 1
