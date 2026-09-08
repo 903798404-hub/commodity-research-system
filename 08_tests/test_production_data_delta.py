@@ -176,3 +176,25 @@ def test_windows_child_uses_actual_git_identity_without_container_markers(tmp_pa
         "print('\u5df2验证Git身份')",
     ])
     assert child.stdout.strip() == "已验证Git身份"
+
+
+def test_fas_provider_is_explicitly_direct_without_inherited_proxy(monkeypatch, tmp_path: Path):
+    module = load_module()
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1088")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(tmp_path / "unapproved-ca.pem"))
+    environment = module.safe_child_environment(
+        {"FAS_EXPORT_SALES_API_KEY": "fixture-only"})
+    assert environment["NO_PROXY"] == "*"
+    assert not any(key.upper().endswith("_PROXY") for key in environment
+                   if key.upper() != "NO_PROXY")
+    assert not set(environment) & {
+        "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+    import requests.utils
+    monkeypatch.setenv("NO_PROXY", environment["NO_PROXY"])
+    monkeypatch.setattr(requests.utils, "getproxies", lambda: {
+        "http": "http://127.0.0.1:1088", "https": "http://127.0.0.1:1088"})
+    assert requests.utils.get_environ_proxies("https://apps.fas.usda.gov/") == {}
+    assert module._provider_flags("soybean_export_sales", tmp_path) == [
+        "--runtime-root", str(tmp_path), "--candidate-only",
+        "--ignore-environment-proxy",
+    ]

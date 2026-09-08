@@ -230,11 +230,28 @@ def validate_delta_document(value: object) -> dict[str, object]:
         require(type(metadata["current_year"]) is int and metadata["current_year"] >= 2021,
                 "crop current_year is invalid")
         _timestamp(metadata["retrieved_at_utc"], "crop retrieved_at_utc")
-        require(type(metadata["raw_snapshot"]) is str
-                and re.fullmatch(
-                    r"01_data/raw/soybean_crop_progress/"
-                    r"nass_soybeans_crop_weekly_[0-9]{4}_[0-9]{8}T[0-9]{6}Z\.json",
-                    metadata["raw_snapshot"]), "crop raw snapshot identity is invalid")
+        raw_match = (re.fullmatch(
+            r"01_data/raw/soybean_crop_progress/"
+            r"nass_soybeans_crop_weekly_([0-9]{4})_"
+            r"([0-9]{8}T(?:[0-9]{6}|[0-9]{12})Z)\.json",
+            metadata["raw_snapshot"])
+            if type(metadata["raw_snapshot"]) is str else None)
+        calendar_valid = False
+        if raw_match is not None:
+            captured = raw_match.group(2)
+            try:
+                datetime.strptime(
+                    captured,
+                    "%Y%m%dT%H%M%SZ" if len(captured) == 16
+                    else "%Y%m%dT%H%M%S%fZ")
+                calendar_valid = True
+            except ValueError:
+                pass
+        require(raw_match is not None
+                and calendar_valid
+                and int(raw_match.group(1)) == metadata["current_year"]
+                and raw_match.group(2)[:4] == raw_match.group(1),
+                "crop raw snapshot identity is invalid")
         counts = _exact(metadata["duplicate_counts"], {"PROGRESS", "CONDITION"},
                         "crop duplicate counts")
         require(all(type(item) is int and item >= 0 for item in counts.values()),

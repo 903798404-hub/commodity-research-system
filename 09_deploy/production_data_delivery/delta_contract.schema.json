@@ -121,7 +121,7 @@
             "properties": {
               "current_year": {"type": "integer", "minimum": 2021},
               "retrieved_at_utc": {"type": "string", "minLength": 1},
-              "raw_snapshot": {"type": "string", "pattern": "^01_data/raw/soybean_crop_progress/nass_soybeans_crop_weekly_[0-9]{4}_[0-9]{8}T[0-9]{6}Z\\.json$"},
+              "raw_snapshot": {"type": "string", "pattern": "^01_data/raw/soybean_crop_progress/nass_soybeans_crop_weekly_[0-9]{4}_[0-9]{8}T(?:[0-9]{6}|[0-9]{12})Z\\.json$"},
               "duplicate_counts": {
                 "type": "object",
                 "additionalProperties": false,

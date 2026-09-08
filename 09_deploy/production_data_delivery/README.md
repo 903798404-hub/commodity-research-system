@@ -13,6 +13,9 @@ producer 的 Commit/Tree 与校验镜像的 Commit/Tree 分别固定，不要求
 | `soybean_export_sales` | `04_scripts/soybean_exports/run_fas_export_sales.py --candidate-only` | FAS stable Parquet、主机生成的 manifest/status |
 
 Windows 正式入口为 `04_scripts/automation/run_production_data_delta_windows.py`：
+该入口的 provider 子环境固定 `NO_PROXY=*`，不继承 Windows 用户代理或 CA
+覆盖，并保持 TLS 证书验证；FAS 还通过现有
+`--ignore-environment-proxy` 参数明确直连。
 
 ```text
 <approved-python> -I -B <approved-control-clone>/04_scripts/automation/run_production_data_delta_windows.py --config <private-config.json> --domain <domain>

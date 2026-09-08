@@ -165,7 +165,8 @@ def safe_child_environment(extra: dict | None = None) -> dict:
     env = {key: value for key, value in os.environ.items() if key.upper() in allowed}
     env.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                 "GIT_NO_REPLACE_OBJECTS": "1", "GIT_TERMINAL_PROMPT": "0",
-                "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
+                "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1",
+                "NO_PROXY": "*"})
     if extra:
         require(set(extra) <= {"NASS_API_KEY", "FAS_EXPORT_SALES_API_KEY", "MARKET_DATA_GIT_HEAD", "MARKET_DATA_GIT_TREE"},
                 "unapproved child environment key")
@@ -349,6 +350,16 @@ def _candidate_path(source: Path, value: str, domain: str) -> Path:
     require(path.is_relative_to(source / "01_data/candidates" / domain), "producer did not reference fresh candidate artifact")
     _identity(path)
     return path
+
+
+def _provider_flags(domain: str, source: Path) -> list[str]:
+    if domain == "akshare":
+        return ["--update-from-akshare"]
+    if domain == "soybean_crop_progress":
+        return ["--dry-run"]
+    require(domain == "soybean_export_sales", "unapproved producer domain")
+    return ["--runtime-root", str(source), "--candidate-only",
+            "--ignore-environment-proxy"]
 
 
 def _crop_out_of_season_audit(source: Path, producer: dict) -> tuple[Path, dict] | None:
@@ -672,7 +683,7 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
         # git rev-parse; setting the container marker would also require the
         # matching immutable /app/RELEASE.json and must therefore be avoided.
         env = safe_child_environment(credentials)
-        flags = ["--update-from-akshare"] if domain == "akshare" else (["--dry-run"] if domain == "soybean_crop_progress" else ["--runtime-root", str(source), "--candidate-only"])
+        flags = _provider_flags(domain, source)
         try:
             _run([config["python"], "-I", "-B", "-X", "utf8",
                   str(source / SOURCES[domain]), *flags], cwd=source, env=env)

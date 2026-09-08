@@ -9,6 +9,7 @@ import subprocess
 
 import pandas as pd
 import pytest
+from jsonschema import Draft202012Validator, ValidationError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +52,7 @@ def crop_delta(module) -> dict[str, object]:
         "baseline": {"files": baseline},
         "domain_metadata": {
             "current_year": 2026, "retrieved_at_utc": "2026-09-08T00:00:00Z",
-            "raw_snapshot": "01_data/raw/soybean_crop_progress/nass_soybeans_crop_weekly_2026_20260908T000000Z.json",
+            "raw_snapshot": "01_data/raw/soybean_crop_progress/nass_soybeans_crop_weekly_2026_20260908T100835123456Z.json",
             "duplicate_counts": {"PROGRESS": 0, "CONDITION": 0},
             "source_manifest_sha256": "e" * 64,
         },
@@ -110,6 +111,39 @@ def test_delta_contract_is_closed_and_rejects_preview_origin_path_escape_and_bas
     module = load_module()
     document = crop_delta(module)
     assert module.validate_delta_document(document) == document
+    schema = json.loads((ROOT / "09_deploy/production_data_delivery/delta_contract.schema.json").read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+    validator.validate(document)
+
+    second_precision = json.loads(json.dumps(document))
+    second_precision["domain_metadata"]["raw_snapshot"] = (
+        "01_data/raw/soybean_crop_progress/"
+        "nass_soybeans_crop_weekly_2026_20260908T100835Z.json")
+    assert module.validate_delta_document(second_precision) == second_precision
+    validator.validate(second_precision)
+
+    invalid_precision = json.loads(json.dumps(document))
+    invalid_precision["domain_metadata"]["raw_snapshot"] = (
+        "01_data/raw/soybean_crop_progress/"
+        "nass_soybeans_crop_weekly_2026_20260908T100835123Z.json")
+    with pytest.raises(module.DeltaError, match="crop raw snapshot identity"):
+        module.validate_delta_document(invalid_precision)
+    with pytest.raises(ValidationError):
+        validator.validate(invalid_precision)
+
+    wrong_year = json.loads(json.dumps(document))
+    wrong_year["domain_metadata"]["raw_snapshot"] = (
+        "01_data/raw/soybean_crop_progress/"
+        "nass_soybeans_crop_weekly_2025_20250908T100835123456Z.json")
+    with pytest.raises(module.DeltaError, match="crop raw snapshot identity"):
+        module.validate_delta_document(wrong_year)
+
+    invalid_calendar = json.loads(json.dumps(document))
+    invalid_calendar["domain_metadata"]["raw_snapshot"] = (
+        "01_data/raw/soybean_crop_progress/"
+        "nass_soybeans_crop_weekly_2026_20261399T999999123456Z.json")
+    with pytest.raises(module.DeltaError, match="crop raw snapshot identity"):
+        module.validate_delta_document(invalid_calendar)
 
     preview = json.loads(json.dumps(document))
     preview["producer"]["origin"] = "https://example.invalid/preview.git"
