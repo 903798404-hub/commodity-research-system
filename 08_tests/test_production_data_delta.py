@@ -5,6 +5,7 @@ import importlib.util
 import json
 from contextlib import nullcontext
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -149,3 +150,29 @@ def test_crop_out_of_season_is_an_explicit_non_delivery(monkeypatch, tmp_path: P
     assert result["published"] is False
     assert "candidate" not in result and "manifest_sha256" not in result
     assert "receipt_path" not in result and Path(result["audit_path"]).is_file()
+
+
+def test_windows_child_uses_actual_git_identity_without_container_markers(tmp_path: Path):
+    module = load_module()
+    environment = module.safe_child_environment({"FAS_EXPORT_SALES_API_KEY": "fixture-only"})
+    assert "MARKET_DATA_GIT_HEAD" not in environment
+    assert "MARKET_DATA_GIT_TREE" not in environment
+
+    source_root = ROOT
+    expected = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source_root, check=True,
+        capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    sys.path.insert(0, str(source_root / "03_src"))
+    try:
+        from agri_research_agent.soybean_exports.common import resolve_runtime_git_head
+        observed = resolve_runtime_git_head(
+            project_root=source_root, environment=environment,
+            release_path=tmp_path / "absent-container-release.json")
+    finally:
+        sys.path.remove(str(source_root / "03_src"))
+    assert observed == expected
+    child = module._run([
+        sys.executable, "-I", "-B", "-X", "utf8", "-c",
+        "print('\u5df2验证Git身份')",
+    ])
+    assert child.stdout.strip() == "已验证Git身份"

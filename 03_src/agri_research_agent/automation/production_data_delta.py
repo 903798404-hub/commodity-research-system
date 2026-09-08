@@ -667,10 +667,15 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
         if domain != "akshare":
             entry = config["secrets"]["nass" if domain == "soybean_crop_progress" else "fas-export-sales"]
             credentials = _secret_environment(Path(entry["path"]), entry["keys"])
-        env = safe_child_environment({**credentials, "MARKET_DATA_GIT_HEAD": producer["commit"], "MARKET_DATA_GIT_TREE": producer["tree"]})
+        # This child is a verified Windows Git checkout, not the sealed /app
+        # container runtime.  Its business entrypoints bind identity through
+        # git rev-parse; setting the container marker would also require the
+        # matching immutable /app/RELEASE.json and must therefore be avoided.
+        env = safe_child_environment(credentials)
         flags = ["--update-from-akshare"] if domain == "akshare" else (["--dry-run"] if domain == "soybean_crop_progress" else ["--runtime-root", str(source), "--candidate-only"])
         try:
-            _run([config["python"], "-I", "-B", str(source / SOURCES[domain]), *flags], cwd=source, env=env)
+            _run([config["python"], "-I", "-B", "-X", "utf8",
+                  str(source / SOURCES[domain]), *flags], cwd=source, env=env)
         finally:
             credentials.clear()
             env.clear()
@@ -692,7 +697,8 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
                            "status": "CANDIDATE" if changed else "NO_CHANGE"})
             if publish and changed:
                 _check_public_pointer(_public_pointer(config), previous)
-                transported = _run([config["python"], "-I", "-B", str(source / "04_scripts/transfer_public_data_package.py"),
+                transported = _run([config["python"], "-I", "-B", "-X", "utf8",
+                                    str(source / "04_scripts/transfer_public_data_package.py"),
                                     "--package", str(package.directory), "--ssh-target", config["ssh_target"],
                                     "--remote-store-root", config["remote_store_root"], "--activation-image-id", config["image_id"]], cwd=source)
                 receipt = strict_json(transported.stdout.strip().splitlines()[-1])
