@@ -49,6 +49,8 @@
 
 标准流程：独立 feature branch/worktree → 本地修改 → Direct Tests → Project Scope Gate → Impact/必要 Full Tests → 查看 Git diff → 显式 Git commit → 独立 integration/release 验收 → 从获批 branch 普通 fast-forward 更新 `origin/main` → 同步 clean local main 镜像 → 服务器独立只读浅克隆并核验精确提交 → 构建和验证候选镜像 → 密封候选结果和证据 → 删除候选容器并确认不存在 → 生成部署计划 → 使用同一 Image ID 正式切换且禁止 build → 密封部署结果与 Manifest。
 
+`runtime_target=production_container` 必须在 code closure 前取得真实容器证据。其 Direct Tests 和 Project Scope 通过且候选验证获明确授权后，允许先创建独立 candidate snapshot commit 并推送获批候选 ref，供受保护 builder 获取同一 SHA 的 clean detached 独立源码。此快照不是完成提交，不得进入 main 或生产。全部 required tests、签名容器 Completion 和独立 integration 验收通过后，才可 fast-forward main，再按明确批准的生产 Commit/Tree 提升同一已验证 Image ID。候选 ref、正式 main 历史和固定 Approved Production SHA 分别核验，不能相互替代；详细顺序见发布规范的候选快照阶段。
+
 - 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
 - 普通业务 feature 必须运行 `04_scripts/quality/audit_changed_scope.py --project <project_id>`，在进入 Impact/完整回归、commit 或 integration 前得到 `PROJECT_SCOPE=PASS`。Registry owned paths 不包含只读 shared dependencies；全局 protected 不可被 owned 覆盖。禁止业务用 `--owned`、`--known-existing`、旧 baseline 或修改 Registry 绕过门禁；低层 `--owned` 仅用于测试或获批 shared 任务。Scope Gate 不是权限沙箱，修改门禁本身必须独立治理审查。
 - Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负责生产镜像构建，本地 Docker 构建不再是 commit、push 或部署的前置条件。

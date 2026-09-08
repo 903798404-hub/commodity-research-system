@@ -385,6 +385,44 @@ PRODUCTION_INPUT_AUTHORITY_REGISTRATION = {'project_id': 'soybean-production-inp
                    'explicit result approval evidence.'}
 
 
+XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION = {
+    'project_id': 'xiaoran-production-data-delivery', 'change_class': 'shared', 'status': 'ready',
+    'owned_paths': [],
+    'future_owned_paths': [
+        '03_src/agri_research_agent/automation/production_data_delta.py',
+        '04_scripts/automation/run_production_data_delta_windows.py',
+        '09_deploy/production_data_delivery/delta_contract.schema.json',
+        '09_deploy/production_data_delivery/activate_production_data_delta.py',
+        '09_deploy/production_data_delivery/README.md',
+        '08_tests/test_production_data_delta.py',
+        '08_tests/test_production_data_delta_activation.py'],
+    'shared_dependencies': [
+        '04_scripts/server_update_spreads.py', '04_scripts/update_price_long_from_akshare.py',
+        '04_scripts/calculate_historical_spreads.py',
+        '04_scripts/soybean_crop_progress/update_soybeans_crop_weekly.py',
+        '04_scripts/soybean_exports/run_fas_export_sales.py', '04_scripts/transfer_public_data_package.py',
+        '03_src/agri_research_agent/pipelines/public_data_delivery.py',
+        '03_src/agri_research_agent/automation/full_daily_windows.py'],
+    'forbidden_paths': [
+        '02_configs/project_registry.json', '05_apps', '04_scripts/refresh_public_data.py',
+        '04_scripts/capture_public_intraday.py', '09_deploy/runtime_identity',
+        '03_src/agri_research_agent/shared', '03_src/agri_research_agent/import_profit',
+        '03_src/agri_research_agent/pipelines/public_data_daily.py',
+        '03_src/agri_research_agent/pipelines/public_data_refresh.py'],
+    'required_tests': ['08_tests/test_project_registry.py', '08_tests/test_quality_controls.py',
+                       '08_tests/test_documentation_contract.py'],
+    'future_required_tests': ['08_tests/test_production_data_delta.py',
+                              '08_tests/test_production_data_delta_activation.py'],
+    'capabilities': [
+        'Xiaoran execution of approved unchanged AkShare, crop progress and FAS producers',
+        'Read-only production baseline transfer and exact producer Commit/Tree and data provenance',
+        'Existing public-package publication for the domestic-spread consumer artifact',
+        'Strict host-validated crop and FAS delta publication with backup and rollback',
+        'Auditable local scheduling replacing explicitly selected legacy host cron entries'],
+    'runtime_target': 'windows_git_worktree',
+    'boundary_notes': 'User explicitly authorized deployment-contract repair, a new validated image and migration of the affected legacy updates to Xiaoran. Only these exact infrastructure files are owned. Run unchanged business producers from an independent approved clean detached local checkout with explicitly hashed baseline replicas; never use canonical main, dev/Preview assets or old runtime worktrees. AkShare must publish the domestic-spread artifact through the existing public package contract while preserving every current public dataset; legacy root-file writes alone are not consumer activation. Crop and FAS use an independent strict delta contract, host policy, exact path allowlists, byte/schema validation, baseline drift checks and rollback; no server provider execution or Tailscale. Credentials remain local secret files and never enter manifests or transfers. New scheduling and old-cron replacement must bind approved code, allocation and rollback evidence under the explicit migration authorization. Do not change business formulas, CNF/manual-ui keys, FULL DAILY code or source approval, capture AM/PM, existing SEALED, notifications or USDA/Oil World services. Registration does not claim implementation, data validity, tested scheduling or deployment completion.'}
+
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -473,6 +511,11 @@ def registration_baseline():
     if not any(p['project_id'] == 'soybean-production-input-authority' for p in baseline['projects']):
         expected = copy.deepcopy(baseline)
         expected['projects'].append(PRODUCTION_INPUT_AUTHORITY_REGISTRATION)
+        assert current == expected
+        baseline = expected
+    if not any(p['project_id'] == 'xiaoran-production-data-delivery' for p in baseline['projects']):
+        expected = copy.deepcopy(baseline)
+        expected['projects'].append(XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION)
         assert current == expected
         baseline = expected
     return baseline
@@ -1336,7 +1379,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -2374,3 +2417,24 @@ def test_production_input_authority_registration_has_exact_host_only_boundary():
                  '09_deploy/runtime_identity/host_authorization.py', '09_deploy/spread_runtime/compose.yml'):
         assert not registry.owns(project, path)
     assert 'separate' in project['boundary_notes']
+
+
+def test_xiaoran_update_migration_has_exact_infrastructure_ownership():
+    data, project = registry.select_project(ROOT, 'xiaoran-production-data-delivery')
+    expected = set(XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION['future_owned_paths'])
+    assert project == XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION
+    assert project['change_class'] == 'shared'
+    assert project['runtime_target'] == 'windows_git_worktree'
+    assert not project['owned_paths'] and not project.get('reserved_paths')
+    assert set(project['future_owned_paths']) == expected
+    assert set(project['future_required_tests']) == {p for p in expected if p.startswith('08_tests/')}
+    for path in expected:
+        assert registry.owns(project, path)
+        assert not registry.owns(project, path + '.unapproved')
+        assert not any(registry.owns(other, path) for other in data['projects'] if other is not project)
+    for path in project['shared_dependencies'] + [
+            '04_scripts/refresh_public_data.py', '05_apps/streamlit_app.py',
+            '09_deploy/runtime_identity/host_authorization.py',
+            '03_src/agri_research_agent/import_profit/cnf_store.py',
+            '09_deploy/production_data_delivery/unregistered.py']:
+        assert not registry.owns(project, path)
