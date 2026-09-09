@@ -1,4 +1,10 @@
-"""Explicit candidate gate: run every declared test, never accept claimed PASS evidence."""
+"""Strict Completion for shared/governance/production lanes; optional for ordinary business.
+
+Ordinary business main acceptance uses hosted trusted-main-admission-v1 PASS,
+human approval and exact candidate Commit/Tree fast-forward, without requiring
+this command or an integration worktree. Calling this command still runs every
+declared test and all applicable runtime checks; it never imports claimed PASS.
+"""
 from __future__ import annotations
 
 import argparse

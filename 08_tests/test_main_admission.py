@@ -105,6 +105,10 @@ def test_normal_business_pass_and_identity(fixture_repo, tmp_path):
     ("protected.py", "protected"), ("secret.py", "forbidden"),
     ("09_deploy/evil.py", "production-control-plane"),
     ("04_scripts/automation/evil.py", "production-control-plane"),
+    ("04_scripts/automation/full_daily_windows.py", "production-control-plane"),
+    ("04_scripts/runtime/probe.py", "production-control-plane"),
+    ("03_src/agri_research_agent/automation/full_daily.py", "production-control-plane"),
+    ("01_data/probe.py", "production-control-plane"),
     (admission.SCOPE, "governance"), (admission.MAP, "governance"),
     (admission.IMPLEMENTATION, "governance"), (admission.WORKFLOW, "governance"),
     (admission.SCHEMA, "governance"), ("03_src/conftest.py", "governance"),
@@ -184,6 +188,52 @@ def test_pass_evidence_invalidated_by_new_sha(fixture_repo, tmp_path, moving):
     next_sha = commit(repo)
     assert not admission.evidence_valid(receipt, repo, next_sha if moving == "main" else base,
                                         next_sha if moving == "candidate" else head)
+
+
+def test_business_fast_lane_exact_ff_without_completion_or_integration(fixture_repo, tmp_path, monkeypatch):
+    """Local Git contract only; hosted provider authentication remains a GitHub check."""
+    from quality import complete_project
+
+    monkeypatch.setattr(complete_project, "complete", lambda *a, **k: pytest.fail("Completion is not a Business prerequisite"))
+    repo, base = fixture_repo
+    assert not (repo / "04_scripts/quality/complete_project.py").exists()
+    write(repo, "03_src/alpha.py", "VALUE = 2\n")
+    receipt, head = evaluate(fixture_repo, tmp_path)
+    assert receipt["final_result"] == "PASS"
+    assert receipt["test_result"]["test_count"] > 0
+    assert admission.evidence_valid(receipt, repo, base, head)
+    assert git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
+    git(repo, "branch", "main", base)
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "--ff-only", head)
+    assert git(repo, "rev-parse", "main") == receipt["candidate"]["commit"]
+    assert git(repo, "rev-parse", "main^{tree}") == receipt["candidate"]["tree"]
+    assert git(repo, "branch", "--list", "integration/*") == ""
+
+
+def test_same_tree_new_commit_cannot_reuse_business_pass(fixture_repo, tmp_path):
+    repo, base = fixture_repo
+    write(repo, "03_src/alpha.py", "VALUE = 2\n")
+    receipt, head = evaluate(fixture_repo, tmp_path)
+    assert receipt["final_result"] == "PASS"
+    git(repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "new candidate identity")
+    new_head = git(repo, "rev-parse", "HEAD")
+    assert new_head != head
+    assert git(repo, "rev-parse", new_head + "^{tree}") == receipt["candidate"]["tree"]
+    assert not admission.evidence_valid(receipt, repo, base, new_head)
+
+
+def test_shared_project_cannot_use_business_fast_lane_for_owned_source(fixture_repo, tmp_path):
+    repo, _ = fixture_repo
+    data = json.loads((repo / admission.REGISTRY).read_text())
+    data["projects"][0]["change_class"] = "shared"
+    write(repo, admission.REGISTRY, json.dumps(data))
+    base = commit(repo)
+    git(repo, "update-ref", "refs/remotes/origin/main", base)
+    write(repo, "03_src/alpha.py", "VALUE = 2\n")
+    result, _ = evaluate((repo, base), tmp_path, executor=lambda *a: pytest.fail("Shared candidate must not execute in Business lane"))
+    assert result["final_result"] == "FAIL"
+    assert "ESCALATION_REQUIRED" in result["failure_codes"]
 
 
 def test_candidate_cannot_supply_executor(fixture_repo, tmp_path):

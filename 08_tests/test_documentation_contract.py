@@ -70,6 +70,36 @@ def test_current_docs_preserve_release_safety_and_baseline_semantics() -> None:
     assert "oil_world/RELEASE.json" not in "\n".join((read(INDEX), spec, manual))
 
 
+def test_business_fast_lane_and_strict_lane_are_consistent_at_all_entrypoints():
+    for path in (ROOT / 'AGENTS.md', SPEC, MANUAL, FEATURE_TEMPLATE):
+        body = read(path)
+        assert 'START / RESUME → development → push feature → trusted-main-admission-v1 PASS → human approval → exact fast-forward main' in body
+        assert '不再是普通 Business 进入 main 的强制 Gate' in body
+        assert '不得因未执行它们判定未完成' in body
+        assert '任何新 commit 都必须重新获得 hosted PASS' in body.replace('\n', '')
+        assert '高风险 lane 仍必须通过 `complete_project.py` 和独立 integration 验收' in body
+        for boundary in ('shared infrastructure', 'governance', 'protected paths', 'production-control-plane',
+                         'FULL DAILY', 'Production Wrapper', 'Runtime', 'deployment', 'production data/write path'):
+            assert boundary in body
+    spec = read(SPEC)
+    for marker in ('app.id=15368', 'conclusion=success', 'main-admission/1', 'candidate Commit/Tree',
+                   'git push origin <approved_candidate_sha>:refs/heads/main', '不自行 Disabled Ruleset'):
+        assert marker in spec
+    assert 'git push origin HEAD:main' not in spec + read(MANUAL)
+    assert '仍要求登记已进入可信 origin/main' not in spec
+
+
+def test_strict_completion_entrypoint_keeps_all_runtime_and_test_validation():
+    """The CLI remains callable and advertises the ordinary-business exception."""
+    from quality import complete_project
+
+    assert 'optional for ordinary business' in complete_project.__doc__
+    spec = read(SPEC)
+    assert '`complete_project.py --candidate-record <记录>` 的全部 required' in spec
+    assert 'tests 与签名容器门禁，并在独立 integration 中验收' in spec
+    assert '全部 required' in read(ROOT / 'AGENTS.md')
+
+
 def test_current_authority_internal_markdown_links_resolve() -> None:
     names = subprocess.check_output(['git','-C',str(ROOT),'ls-files','--cached','--others','--exclude-standard','-z']).decode('utf-8').split('\0')
     files = [ROOT/name for name in sorted(set(names)) if name.endswith('.md') and '/archive/' not in name and (ROOT/name).is_file()]

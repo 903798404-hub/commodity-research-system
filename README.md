@@ -90,7 +90,12 @@ pnpm --dir 05_apps/oil_world_dashboard dev --host 127.0.0.1 --port 5175
 三个正式服务使用各自独立 Compose/project；以[系统边界](07_docs/01_系统架构与项目边界.md)为准，不能用根 Compose 顺带操作其他服务。服务器保留一个 `market-data` 正式项目目录。
 
 新开发先读根 `AGENTS.md`，使用 [Project Registry](02_configs/project_registry.json) 的 project_id。
-fresh fetch/ls-remote → 独立 feature worktree → Scope Gate `--project` → project tests → 独立 integration/release。
+普通 Business：START / RESUME → development → push feature → trusted-main-admission-v1 PASS → human approval → exact fast-forward main。
+正式测试、Scope 和身份以 hosted Admission 为准；Completion 和独立 integration 不再是普通业务强制前置。
+仅接纳获批且获得 successful check 的同一个 Commit/Tree，新 commit 必须重新获得 hosted PASS。
+shared/governance/protected/production-control-plane、FULL DAILY、Production Wrapper、Runtime、
+deployment 和 production data/write path 保留原严格 Completion/integration lane。
+精确 GitHub check/provider/artifact 与 fresh main 回查见开发规范第 6 节。
 local main 仅为 clean origin/main 镜像；生产 FULL DAILY 只认显式 Approved 与 detached control-plane/tool-repo。
 
 `spread-dashboard` 的发布规则以 [`07_docs/03_标准开发与生产发布规范.md`](07_docs/03_标准开发与生产发布规范.md) 为准。`09_deploy/spread_release/` 当前仍是候选实现，真实 Docker Compose 门槛通过前不得用于生产部署；任何正式切换都不得使用根 Compose 隐式命名、`latest`、`new` 或 `up --build`。
