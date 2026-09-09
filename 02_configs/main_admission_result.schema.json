@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:market-data:main-admission:1",
+  "title": "Shadow main admission evidence (not an authenticated approval)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "final_result",
+    "business_scope",
+    "failure_codes",
+    "trusted_main",
+    "candidate",
+    "merge_base",
+    "ahead",
+    "behind",
+    "trusted_governance",
+    "registry_blob_digest",
+    "diff_digest",
+    "changed_paths",
+    "test_plan",
+    "test_identities",
+    "test_result",
+    "execution_environment",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "main-admission/1"
+    },
+    "mode": {
+      "const": "shadow"
+    },
+    "final_result": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "business_scope": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "failure_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "trusted_main": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit",
+            "tree"
+          ],
+          "properties": {
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "tree": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          }
+        }
+      ]
+    },
+    "candidate": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit",
+            "tree"
+          ],
+          "properties": {
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "tree": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          }
+        }
+      ]
+    },
+    "merge_base": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ahead": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "behind": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "trusted_governance": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "registry_blob_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diff_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "status",
+          "rename_paths",
+          "old_mode",
+          "new_mode",
+          "classifications"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[AMDTRC][0-9]*$"
+          },
+          "rename_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "old_mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classifications": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": [
+                "owned",
+                "other-project",
+                "shared",
+                "protected",
+                "forbidden",
+                "governance",
+                "production-control-plane"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "test_plan": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "test_identities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "trusted_blob",
+          "sha256"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "trusted_blob": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "test_result": {
+      "type": "object",
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "test_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_or_skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "junit_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "per_test": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "result",
+              "test_count"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "result": {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ]
+              },
+              "test_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "execution_environment": {
+      "type": "object",
+      "required": [
+        "python",
+        "platform",
+        "executable_sha256",
+        "sandbox",
+        "production_access"
+      ],
+      "properties": {
+        "python": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "executable_sha256": {
+          "type": "string"
+        },
+        "sandbox": {
+          "enum": [
+            "github-hosted-ephemeral",
+            "bubblewrap",
+            "test-fixture-only"
+          ]
+        },
+        "production_access": {
+          "const": false
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "final_result": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "failure_codes": {
+            "maxItems": 0
+          },
+          "business_scope": {
+            "const": "PASS"
+          },
+          "ahead": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "behind": {
+            "const": 0
+          },
+          "trusted_main": {
+            "type": "object"
+          },
+          "candidate": {
+            "type": "object"
+          },
+          "test_plan": {
+            "minItems": 1
+          },
+          "test_result": {
+            "required": [
+              "test_count"
+            ],
+            "properties": {
+              "result": {
+                "const": "PASS"
+              },
+              "test_count": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "failure_codes": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

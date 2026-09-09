@@ -1,0 +1,137 @@
+name: trusted-main-admission-v1
+
+# SHADOW ONLY. This workflow is not an authenticated approval publisher. A PR
+# may modify its workflow; never configure this check as required in Phase 1A.
+# No pull_request_target, production environment, secrets, write token or deploy.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ['feat/**', 'fix/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admission-shadow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shadow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      result: ${{ steps.admission.outcome }}
+    steps:
+      - name: Checkout independently selected main governance
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact candidate separately
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Trusted hashed dependencies
+        if: hashFiles('trusted/04_scripts/quality/main_admission.py') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -m pip install --require-hashes -r trusted/requirements-dev.txt
+      - name: Trusted admission (bootstrap absence fails closed)
+        id: admission
+        continue-on-error: true
+        shell: bash
+        env:
+          EXPECTED_CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          BASE=$(git -C trusted rev-parse HEAD)
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_CANDIDATE"
+          test -z "$(git -C trusted status --porcelain)"
+          test -z "$(git -C candidate status --porcelain)"
+          if [ ! -f trusted/04_scripts/quality/main_admission.py ]; then
+            mkdir -p evidence
+            python -I - <<'PY'
+          import json, os, platform, subprocess
+          from pathlib import Path
+          def identity(root):
+              return {key: subprocess.check_output(['git','-C',root,'rev-parse',ref],text=True).strip()
+                      for key,ref in [('commit','HEAD'),('tree','HEAD^{tree}') ]}
+          record = dict(schema_version='main-admission/1', mode='shadow', final_result='FAIL',
+              business_scope='FAIL', failure_codes=['TRUSTED_ADMISSION_NOT_BOOTSTRAPPED'],
+              trusted_main=identity('trusted'), candidate=identity('candidate'), merge_base=None,
+              ahead=None, behind=None, trusted_governance={}, registry_blob_digest=None,
+              diff_digest=None, changed_paths=[], test_plan=[], test_identities=[],
+              test_result={'result':'NOT_RUN'}, checks={}, execution_environment={
+              'python':platform.python_version(),'platform':platform.platform(),
+              'executable_sha256':__import__('hashlib').sha256(Path(__import__('sys').executable).read_bytes()).hexdigest(),
+              'sandbox':'github-hosted-ephemeral','production_access':False})
+          Path('evidence/main-admission.json').write_text(json.dumps(record,indent=2),encoding='utf-8')
+          PY
+            exit 1
+          fi
+          python -I trusted/04_scripts/quality/main_admission.py \
+            --repo candidate --base "$BASE" --candidate "$EXPECTED_CANDIDATE" \
+            --project auto --evidence evidence
+      - name: Reobserve main and candidate identities
+        if: always() && steps.admission.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CANDIDATE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          python -I - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          def get(path):
+              req=urllib.request.Request('https://api.github.com/repos/'+os.environ['REPOSITORY']+path,
+                  headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=30) as response: return json.load(response)
+          p=Path('evidence/main-admission.json'); r=json.loads(p.read_text())
+          r['final_result']='FAIL'; r['failure_codes'].append('FRESHNESS_NOT_CONFIRMED')
+          p.write_text(json.dumps(r,indent=2))
+          main=get('/git/ref/heads/main')['object']['sha']
+          number=os.environ['PR_NUMBER']
+          head=get('/pulls/'+number)['head']['sha'] if number else get('/git/ref/'+os.environ['CANDIDATE_REF'].removeprefix('refs/'))['object']['sha']
+          if main != r['trusted_main']['commit'] or head != r['candidate']['commit']:
+              r['final_result']='FAIL'; r['failure_codes'].append('IDENTITY_CHANGED')
+              p.write_text(json.dumps(r,indent=2)); raise SystemExit(1)
+          r['failure_codes'].remove('FRESHNESS_NOT_CONFIRMED'); r['final_result']='PASS'
+          p.write_text(json.dumps(r,indent=2))
+          PY
+      - name: Upload shadow JSON and test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: main-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  final:
+    name: trusted-main-admission-v1
+    if: always()
+    needs: shadow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Aggregate exact run (non-required Shadow result)
+        env:
+          JOB_RESULT: ${{ needs.shadow.result }}
+          ADMISSION_RESULT: ${{ needs.shadow.outputs.result }}
+        run: test "$JOB_RESULT" = success && test "$ADMISSION_RESULT" = success

@@ -20,6 +20,14 @@ from quality import start_project
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Phase 1A shared governance authorization: exact files only, no .github subtree.
+ADMISSION_GOVERNANCE_FILES = [
+    '.github/workflows/trusted-main-admission.yml',
+    '02_configs/main_admission_result.schema.json',
+    '08_tests/test_main_admission.py',
+]
+ADMISSION_GOVERNANCE_TESTS = ['08_tests/test_main_admission.py']
+
 # Independently authorized Goal B registration; exact files, no directory grants.
 PRODUCTION_INFRA_REGISTRATION = {'project_id': 'shared-production-infrastructure',
  'change_class': 'shared',
@@ -516,6 +524,14 @@ def registration_baseline():
     if not any(p['project_id'] == 'xiaoran-production-data-delivery' for p in baseline['projects']):
         expected = copy.deepcopy(baseline)
         expected['projects'].append(XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION)
+        assert current == expected
+        baseline = expected
+    governance = next(p for p in baseline['projects'] if p['project_id'] == 'dev-governance')
+    if not governance.get('future_owned_paths'):
+        expected = copy.deepcopy(baseline)
+        target = next(p for p in expected['projects'] if p['project_id'] == 'dev-governance')
+        target['future_owned_paths'] = ADMISSION_GOVERNANCE_FILES
+        target['future_required_tests'] = ADMISSION_GOVERNANCE_TESTS
         assert current == expected
         baseline = expected
     return baseline
@@ -1371,6 +1387,8 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         expected = copy.deepcopy(old)
         if old['project_id'] == 'dev-governance':
             expected['runtime_target'] = 'none'
+            expected['future_owned_paths'] = ADMISSION_GOVERNANCE_FILES
+            expected['future_required_tests'] = ADMISSION_GOVERNANCE_TESTS
         elif old['project_id'] == 'shared-intraday':
             expected['future_owned_paths'].remove('04_scripts/capture_public_intraday.py')
             expected['shared_dependencies'].append('04_scripts/capture_public_intraday.py')

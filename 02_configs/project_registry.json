@@ -740,7 +740,15 @@
         "治理测试"
       ],
       "boundary_notes": "只能在任务明确批准shared开发治理时使用；注册表不是授权。治理范围不允许业务源码、生产数据或部署代码修改；每次--owned可进一步缩小。",
-      "runtime_target": "none"
+      "runtime_target": "none",
+      "future_owned_paths": [
+        ".github/workflows/trusted-main-admission.yml",
+        "02_configs/main_admission_result.schema.json",
+        "08_tests/test_main_admission.py"
+      ],
+      "future_required_tests": [
+        "08_tests/test_main_admission.py"
+      ]
     },
     {
       "project_id": "notification-push",
