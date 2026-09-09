@@ -405,3 +405,88 @@ def test_hosted_baseline_does_not_require_bubblewrap(monkeypatch, tmp_path):
     monkeypatch.setattr(admission.subprocess, 'run', fake_runner)
     evidence = tmp_path / 'evidence'; evidence.mkdir()
     assert admission.run_tests(tmp_path, evidence, ['08_tests/test_alpha.py'])['result'] == 'PASS'
+
+
+def bootstrap_candidate(fixture_repo):
+    from quality import project_registry
+    repo, _ = fixture_repo
+    data = json.loads((repo / admission.REGISTRY).read_text())
+    data['schema_version'] = 'project-registry/3'
+    write(repo, '03_src/agri_research_agent/__init__.py', '')
+    write(repo, admission.REGISTRY, json.dumps(data))
+    base = commit(repo)
+    git(repo, 'update-ref', 'refs/remotes/origin/main', base)
+    project = project_registry.bootstrap_record('bootstrap-omega', data['protected_paths'])
+    project.pop('runtime_target')
+    data['projects'].append(project)
+    write(repo, admission.REGISTRY, json.dumps(data))
+    source, tests = project['reserved_paths']
+    write(repo, source + '/value.py', 'VALUE = 7\n')
+    write(repo, tests + '/test_project.py',
+          'from agri_research_agent.bootstrap_omega.value import VALUE\ndef test_value():\n    assert VALUE == 7\n')
+    return repo, base, data, source, tests
+
+
+def test_bootstrap_registry_source_and_all_candidate_tests_pass(fixture_repo, tmp_path):
+    repo, base, data, source, tests = bootstrap_candidate(fixture_repo)
+    write(repo, tests + '/test_extra.py', 'def test_extra():\n    assert True\n')
+    head = commit(repo)
+    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
+    assert result['final_result'] == 'PASS', result
+    assert result['test_plan'] == [tests+'/test_extra.py', tests+'/test_project.py']
+    assert result['test_result']['test_count'] == 2
+    assert result['checks']['test_source_commit'] == head
+    assert result['trusted_main']['commit'] == base
+    jsonschema.validate(result, json.loads((ROOT/admission.SCHEMA).read_text()))
+
+
+@pytest.mark.parametrize('attack', ['existing', 'root-policy', 'ownership', 'shared', 'protected',
+    'production', 'runtime', 'no-tests', 'empty-policy', 'admission', 'scope', 'registry-code',
+    'pytest-policy', 'conftest', 'second-project', 'foreign-file'])
+def test_bootstrap_rejects_authority_changes(fixture_repo, tmp_path, attack):
+    repo, base, data, source, tests = bootstrap_candidate(fixture_repo)
+    if attack == 'existing': data['projects'][0]['required_tests'] = []
+    elif attack == 'root-policy': data['protected_paths'] = []
+    elif attack == 'ownership': data['projects'][-1]['reserved_paths'].append('03_src')
+    elif attack == 'runtime': data['projects'][-1]['runtime_target'] = 'production_container'
+    elif attack == 'empty-policy': data['projects'][-1]['future_required_tests'] = []
+    elif attack == 'second-project': data['projects'].append(dict(data['projects'][-1], project_id='extra'))
+    elif attack == 'no-tests': (repo/tests/'test_project.py').unlink()
+    else:
+        path = {'shared':'03_src/shared.py', 'protected':'protected.py',
+                'production':'09_deploy/evil.py', 'admission':admission.IMPLEMENTATION,
+                'scope':admission.SCOPE, 'registry-code':'04_scripts/quality/project_registry.py',
+                'pytest-policy':'pyproject.toml', 'conftest':tests+'/conftest.py',
+                'foreign-file':'03_src/beta.py'}[attack]
+        write(repo, path, '# candidate cannot change judge\n')
+    write(repo, admission.REGISTRY, json.dumps(data))
+    head = commit(repo)
+    def forbidden(*args): pytest.fail('Denied bootstrap executed candidate tests')
+    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=forbidden)
+    assert result['final_result'] == 'FAIL'
+    assert 'ESCALATION_REQUIRED' in result['failure_codes'], result
+
+
+@pytest.mark.parametrize('body', ['', 'import pytest\ndef test_skip():\n    pytest.skip("candidate")\n',
+                                  'def test_bad():\n    assert False\n'])
+def test_bootstrap_requires_nonempty_passing_collection(fixture_repo, tmp_path, body):
+    repo, base, data, source, tests = bootstrap_candidate(fixture_repo)
+    write(repo, tests+'/test_extra.py', body)
+    head = commit(repo)
+    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
+    assert result['final_result'] == 'FAIL'
+    assert 'REQUIRED_TEST_FAILED' in result['failure_codes']
+
+
+def test_bootstrap_namespace_conflict_denied(fixture_repo, tmp_path):
+    repo, base, data, source, tests = bootstrap_candidate(fixture_repo)
+    # The trusted namespace is already reserved by an existing project.
+    trusted = json.loads(git(repo, 'show', base+':'+admission.REGISTRY))
+    trusted['projects'][0]['reserved_paths'] = [source]
+    write(repo, admission.REGISTRY, json.dumps(trusted))
+    base = commit(repo)
+    data['projects'][0] = trusted['projects'][0]
+    write(repo, admission.REGISTRY, json.dumps(data))
+    head = commit(repo)
+    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
+    assert 'ESCALATION_REQUIRED' in result['failure_codes']

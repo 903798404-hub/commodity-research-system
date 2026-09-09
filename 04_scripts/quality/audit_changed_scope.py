@@ -213,10 +213,18 @@ def run_audit(
     changed = _changed_paths(project_root, baseline, git)
     preexisting_changes = [path for path in changed if _is_allowed(path, known_existing_paths)]
     audited_changes = [path for path in changed if path not in preexisting_changes]
-    out_of_scope = [path for path in audited_changes if not permitted(path)]
+    bootstrap = None
+    if change_class == "business" and project_registry.REGISTRY_PATH in changed:
+        try:
+            bootstrap, _ = project_registry.local_bootstrap(project_root, shared_patterns)
+        except ValueError:
+            pass  # Invalid Registry changes retain the ordinary protected FAIL result.
+    out_of_scope = [path for path in audited_changes if not permitted(path)
+                    and not (bootstrap and path == project_registry.REGISTRY_PATH)]
     # Shared changes can never be hidden with --known-existing. An isolated feature
     # worktree containing any protected change must classify the whole task as shared.
-    shared_changes = [path for path in changed if _is_shared(path, shared_patterns)]
+    shared_changes = [path for path in changed if _is_shared(path, shared_patterns)
+                      and not (bootstrap and path == project_registry.REGISTRY_PATH)]
     report_findings = list(findings)
     report_findings.extend(
         {
@@ -318,7 +326,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     raise ValueError("Business --project cannot override --owned")
                 trusted = project_registry.git(PROJECT_ROOT, "show", f"origin/main:{project_registry.REGISTRY_PATH}")
                 if json.loads(trusted) != registry:
-                    raise ValueError("Business registry differs from origin/main; separate shared approval required")
+                    bootstrapped, _ = project_registry.local_bootstrap(PROJECT_ROOT, SHARED_PATH_PATTERNS)
+                    if bootstrapped != project:
+                        raise ValueError("ESCALATION_REQUIRED: Registry delta belongs to another project")
             if allowed and any(not project_registry.owns(project, path) for path in allowed):
                 raise ValueError("--owned may only narrow registry scope")
             if allowed:

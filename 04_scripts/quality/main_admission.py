@@ -300,7 +300,26 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         if behind or not ahead or receipt["merge_base"] != base:
             failures.append("NOT_STRICT_FAST_FORWARD")
         paths = changed(repo, base, candidate, old, new)
-        if project_id == "auto":
+        bootstrap = None
+        bootstrap_tests = []
+        if any(p["path"] == REGISTRY for p in paths):
+            # Execute only the policy blob selected from trusted main, never candidate imports.
+            policy = {"__name__": "trusted_bootstrap_policy"}
+            exec(compile(sources["04_scripts/quality/project_registry.py"],
+                         "<trusted bootstrap policy>", "exec"), policy)
+            try:
+                bootstrap, bootstrap_tests = policy["validate_bootstrap"](
+                    registry, json.loads(blob(repo, candidate, REGISTRY)), old, new,
+                    [p["path"] for p in paths], patterns)
+                if project_id not in {"auto", bootstrap["project_id"]}:
+                    raise ValueError("ESCALATION_REQUIRED: bootstrap project mismatch")
+            except (ValueError, KeyError, TypeError) as exc:
+                bootstrap = None
+                failures.extend(["ESCALATION_REQUIRED", str(exc)[:300]])
+        if bootstrap:
+            project = bootstrap
+            receipt["checks"]["bootstrap"] = "EXACT_NEW_BUSINESS_PROJECT"
+        elif project_id == "auto":
             candidates = [p for p in registry["projects"] if p["change_class"] == "business"
                           and p["status"] == "ready" and any(owns(p, i["path"]) for i in paths)]
             if len(candidates) != 1:
@@ -317,19 +336,24 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         receipt["changed_paths"] = paths
         receipt["diff_digest"] = digest(json.dumps(paths, sort_keys=True, ensure_ascii=False).encode("utf-8"))
         if (project["change_class"] != "business" or project["status"] != "ready"
-                or not paths or any(p["classifications"] != ["owned"] for p in paths)):
+                or not paths or any(p["classifications"] != ["owned"]
+                    and not (bootstrap and p["path"] == REGISTRY) for p in paths)):
             failures.append("ESCALATION_REQUIRED")
         if any(e["mode"] not in {"100644", "100755"} for e in list(old.values()) + list(new.values())):
             failures.extend(["UNSUPPORTED_GIT_MODE", "ESCALATION_REQUIRED"])
         receipt["business_scope"] = "FAIL" if "ESCALATION_REQUIRED" in failures else "PASS"
-        tests = list(dict.fromkeys(project["required_tests"] + project.get("future_required_tests", [])))
+        tests = bootstrap_tests if bootstrap else list(dict.fromkeys(project["required_tests"] + project.get("future_required_tests", [])))
+        test_commit = candidate if bootstrap else base
+        test_tree = new if bootstrap else old
         receipt["test_plan"] = tests
-        receipt["checks"]["test_policy"] = "trusted Registry; module map recorded, not automated"
-        if not tests or any(p not in old or not p.startswith("08_tests/") or not p.endswith(".py") for p in tests):
+        receipt["checks"]["test_policy"] = ("trusted bootstrap discovery; all candidate namespace tests" if bootstrap
+                                              else "trusted Registry; module map recorded, not automated")
+        receipt["checks"]["test_source_commit"] = test_commit
+        if not tests or any(p not in test_tree or not p.startswith("08_tests/") or not p.endswith(".py") for p in tests):
             failures.extend(["TRUSTED_TEST_UNAVAILABLE", "ESCALATION_REQUIRED"])
         else:
-            receipt["test_identities"] = [{"path": p, "trusted_blob": old[p]["oid"],
-                                          "sha256": digest(blob(repo, base, p))} for p in tests]
+            receipt["test_identities"] = [{"path": p, "trusted_blob": test_tree[p]["oid"],
+                                          "sha256": digest(blob(repo, test_commit, p))} for p in tests]
         try:
             git(repo, "diff", "--check", base, candidate, "--")
             receipt["checks"]["diff_check"] = "PASS"
@@ -353,6 +377,13 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                 if suite.exists():
                     shutil.rmtree(suite)
                 export(repo, base, workspace, trusted_tests=True)
+                if bootstrap:
+                    # Restore only this new project's candidate test namespace; base policy/config stays authoritative.
+                    for path in new:
+                        if under(path, bootstrap["reserved_paths"][1]):
+                            target = workspace / path
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            target.write_bytes(blob(repo, candidate, path))
                 test_evidence = evidence / "tests"
                 test_evidence.mkdir()
                 per_test = []

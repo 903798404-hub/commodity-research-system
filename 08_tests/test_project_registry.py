@@ -2456,3 +2456,93 @@ def test_xiaoran_update_migration_has_exact_infrastructure_ownership():
             '03_src/agri_research_agent/import_profit/cnf_store.py',
             '09_deploy/production_data_delivery/unregistered.py']:
         assert not registry.owns(project, path)
+
+
+@pytest.fixture
+def bootstrap_start_base(repository, monkeypatch):
+    main, _ = repository
+    data = minimal_registry()
+    data['schema_version'] = 'project-registry/3'
+    write_registry(main, data)
+    for name in ['03_src/agri_research_agent/__init__.py', '08_tests/existing.py']:
+        path = main/name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('# trusted parent\n')
+    registry.git(main, 'add', '.')
+    registry.git(main, '-c', 'commit.gpgsign=false', 'commit', '-m', 'bootstrap fixture parents')
+    registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    original = registry.git
+    def local_git(root, *args):
+        if args == ('fetch', 'origin'): return ''
+        if args[:1] == ('ls-remote',): return original(main, 'rev-parse', 'HEAD') + '\trefs/heads/main'
+        return original(root, *args)
+    monkeypatch.setattr(registry, 'git', local_git)
+    return main
+
+
+def test_auto_bootstrap_start_resume_scope_and_completion_cycle(bootstrap_start_base, tmp_path, monkeypatch):
+    from quality import complete_project
+    main = bootstrap_start_base
+    feature = tmp_path/'new-business'
+    result = start_project.prepare(main, 'new-business', 'feat/new-business', feature, create=True)
+    assert result['action'] == 'STARTED' and result['auto_bootstrap']
+    assert result['changed_files'] == [registry.REGISTRY_PATH]
+    assert registry.git(main, 'status', '--porcelain') == ''
+    source = feature/'03_src/agri_research_agent/new_business/code.py'
+    source.parent.mkdir(parents=True)
+    source.write_text('VALUE = 1\n')
+    test = feature/'08_tests/new_business/test_project.py'
+    test.parent.mkdir(parents=True)
+    test.write_text('def test_business():\n    assert True\n')
+    resumed = start_project.prepare(main, 'new-business', 'feat/new-business', feature)
+    assert resumed['action'] == 'RESUMED' and not resumed['created']
+    assert set(resumed['changed_files']) == {registry.REGISTRY_PATH, source.relative_to(feature).as_posix(), test.relative_to(feature).as_posix()}
+    monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
+    assert scope.main(['--project', 'new-business']) == 0
+    result = complete_project.complete(feature, 'new-business')
+    assert result['PROJECT_COMPLETION'] == 'PASS'
+    assert result['executed_tests'][0]['passed'] == 1
+    registry.git(feature, 'add', '.')
+    registry.git(feature, '-c', 'commit.gpgsign=false', 'commit', '-m', 'first business with registry')
+    assert start_project.prepare(main, 'new-business', 'feat/new-business', feature)['action'] == 'RESUMED'
+
+
+def test_existing_resume_and_identity_dirty_conflicts(bootstrap_start_base, tmp_path):
+    main = bootstrap_start_base
+    feature = tmp_path/'resume-demo'
+    start_project.prepare(main, 'demo', 'feat/resume-demo', feature, create=True)
+    (feature/'feature/code.py').write_text('# legitimate owned work\n')
+    assert start_project.prepare(main, 'demo', 'feat/resume-demo', feature)['action'] == 'RESUMED'
+    with pytest.raises(ValueError, match='IDENTITY_CONFLICT'):
+        start_project.prepare(main, 'other', 'feat/resume-demo', feature)
+    with pytest.raises(ValueError, match='IDENTITY_CONFLICT'):
+        start_project.prepare(main, 'demo', 'feat/wrong', feature)
+    (feature/'other/code.py').write_text('# unknown dirty state\n')
+    with pytest.raises(ValueError, match='UNKNOWN_DIRTY'):
+        start_project.prepare(main, 'demo', 'feat/resume-demo', feature)
+
+
+@pytest.mark.parametrize('name', ['shared', 'market-data', 'automation'])
+def test_auto_start_cannot_acquire_protected_namespace(bootstrap_start_base, tmp_path, name):
+    main = bootstrap_start_base
+    # Shared class never gets automatic registration, independent of namespace.
+    with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
+        start_project.prepare(main, name, 'feat/'+name, tmp_path/name, change_class='shared', create=True)
+    if name in {'shared', 'automation'}:
+        with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
+            start_project.prepare(main, name, 'feat/'+name, tmp_path/name, create=True)
+    assert not (tmp_path/name).exists()
+
+
+def test_bootstrap_scope_and_completion_reject_self_expansion(bootstrap_start_base, tmp_path, monkeypatch):
+    from quality import complete_project
+    main = bootstrap_start_base
+    feature = tmp_path/'self-expansion'
+    start_project.prepare(main, 'new-business', 'feat/new-business', feature, create=True)
+    data = json.loads((feature/registry.REGISTRY_PATH).read_text())
+    data['projects'][0]['required_tests'] = []
+    write_registry(feature, data)
+    monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
+    assert scope.main(['--project', 'new-business']) == 2
+    with pytest.raises(ValueError):
+        complete_project.complete(feature, 'new-business')

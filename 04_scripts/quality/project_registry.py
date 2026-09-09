@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import fnmatch
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -261,3 +262,87 @@ def assert_main_mirror(root: Path) -> dict:
     if not mains:
         raise ValueError("MAIN_CHECKOUT_NOT_FOUND")
     return {"main_head": remote, "main_clean_mirror": True, "main_checkouts": mains}
+
+
+def bootstrap_record(project_id: str, protected_paths=()) -> dict:
+    """Fixed business-only metadata; no candidate-chosen authority or test policy."""
+    if not isinstance(project_id, str) or not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", project_id):
+        raise ValueError("ESCALATION_REQUIRED: invalid bootstrap project identity")
+    slug = project_id.replace("-", "_")
+    return dict(project_id=project_id, change_class="business", status="ready",
+                owned_paths=[], reserved_paths=[f"03_src/agri_research_agent/{slug}", f"08_tests/{slug}"],
+                shared_dependencies=[], forbidden_paths=[p for p in protected_paths if p != REGISTRY_PATH], required_tests=[],
+                future_required_tests=[f"08_tests/{slug}/test_project.py"], runtime_target="none",
+                capabilities=["ordinary business source and tests"],
+                boundary_notes="Auto bootstrap: own source/tests only; no shared, governance or production permissions.")
+
+
+def validate_bootstrap(trusted: dict, candidate: dict, base_files, candidate_files,
+                       changed_files, patterns, *, require_tests=True) -> tuple[dict, list[str]]:
+    """Validate an exact append against trusted rules and Git/file identities."""
+    def deny(reason):
+        raise ValueError("ESCALATION_REQUIRED: " + reason)
+    if trusted.get("schema_version") not in {"project-registry/3", "project-registry/4"}:
+        deny("bootstrap requires existing reserved namespace schema")
+    old = trusted["projects"]
+    new = candidate.get("projects", [])
+    if not isinstance(new, list) or len(new) != len(old) + 1 or new[:-1] != old:
+        deny("existing Registry projects changed")
+    if not isinstance(new[-1], dict):
+        deny("invalid project record")
+    project = bootstrap_record(new[-1].get("project_id"), trusted["protected_paths"])
+    if trusted["schema_version"] == "project-registry/3":
+        project.pop("runtime_target")
+    if new[-1] != project or candidate != dict(trusted, projects=old + [project]):
+        deny("noncanonical bootstrap metadata or Registry policy changed")
+    if any(p["project_id"] == project["project_id"] for p in old):
+        deny("project already exists")
+    roots = project["reserved_paths"]
+    for namespace in roots:
+        if any(overlaps(namespace, p) for p in base_files):
+            deny("namespace already contains trusted files")
+        for other in old:
+            if any(overlaps(namespace, p) for p in ownership_paths(other) + other["shared_dependencies"]):
+                deny("namespace ownership/read-only conflict")
+        if any(overlaps(namespace, p) for p in trusted["protected_paths"]):
+            deny("protected namespace")
+        if any(fnmatch.fnmatchcase(probe.casefold(), pattern.casefold())
+               for probe in (namespace, namespace + "/probe.py") for pattern in patterns):
+            deny("shared namespace")
+    forbidden_names = {"agents.md", "conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "setup.py",
+                       ".gitattributes", ".gitmodules", "dockerfile"}
+    for path in changed_files:
+        if path == REGISTRY_PATH:
+            continue
+        canonical_path(path)
+        if not any(under_path(path, root) for root in roots):
+            deny("change outside new business namespace: " + path)
+        if (any(part.startswith(".") for part in path.split("/"))
+                or PurePosixPath(path).name.casefold() in forbidden_names
+                or PurePosixPath(path).name.casefold().startswith(("requirements", "docker-compose"))
+                or any(fnmatch.fnmatchcase(path.casefold(), pattern.casefold()) for pattern in patterns)):
+            deny("governance/shared file in bootstrap namespace: " + path)
+    tests = sorted(p for p in candidate_files if under_path(p, roots[1])
+                   and PurePosixPath(p).name.startswith("test_") and p.endswith(".py"))
+    if require_tests and (not tests or project["future_required_tests"][0] not in tests):
+        deny("bootstrap requires test_project.py and all discovered test files")
+    return project, tests
+
+
+def local_bootstrap(root: Path, patterns, *, require_tests=False) -> tuple[dict, list[str]]:
+    trusted = json.loads(git(root, "show", f"origin/main:{REGISTRY_PATH}"))
+    candidate = json.loads((root / REGISTRY_PATH).read_text(encoding="utf-8"))
+    base_files = git(root, "ls-tree", "-r", "--name-only", "-z", "origin/main").split("\0")
+    files = [p for p in git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z").split("\0")
+             if p and (root / p).exists()]
+    changes = set()
+    for args in [("diff", "--name-only", "--no-renames", "-z", "origin/main...HEAD"),
+                 ("diff", "--name-only", "--no-renames", "-z", "HEAD"),
+                 ("ls-files", "--others", "--exclude-standard", "-z")]:
+        changes.update(p for p in git(root, *args).split("\0") if p)
+    project, tests = validate_bootstrap(trusted, candidate, [p for p in base_files if p], files,
+                                        changes, patterns, require_tests=require_tests)
+    for p in files:
+        if owns(project, p):
+            future_file(root, p, exact_file=False)
+    return project, tests

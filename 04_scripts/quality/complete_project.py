@@ -23,9 +23,13 @@ def complete(root: Path, project_id: str, *, candidate_record: Path | None = Non
     data, project = registry.select_project(root, project_id)
     if project['status'] != 'ready':
         raise ValueError('Project is not ready')
-    if data != json.loads(registry.git(root, 'show', f'origin/main:{registry.REGISTRY_PATH}')):
-        raise ValueError('Completion requires approved registry on origin/main')
     tests = project['required_tests'] + project.get('future_required_tests', [])
+    trusted = json.loads(registry.git(root, 'show', f'origin/main:{registry.REGISTRY_PATH}'))
+    if data != trusted:
+        bootstrapped, discovered = registry.local_bootstrap(root, scope.SHARED_PATH_PATTERNS, require_tests=True)
+        if bootstrapped != project:
+            raise ValueError('ESCALATION_REQUIRED: existing Registry cannot change its own test policy')
+        tests = discovered
     paths = []
     for name in tests:
         path = registry.future_file(root, name)
