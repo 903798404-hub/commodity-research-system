@@ -89,7 +89,6 @@ def default_runtime_root(environ: Mapping[str, str] | None = None) -> Path:
     return root / "market-data-runtime" / "automation"
 
 
-DEFAULT_RUNTIME_ROOT = default_runtime_root()
 
 
 def _reparse_tag(path: Path) -> int | None:

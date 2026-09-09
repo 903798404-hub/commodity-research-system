@@ -92,6 +92,39 @@ def _repository_with_remote(tmp_path: Path) -> tuple[Path, str, str]:
     return repository, production, _git(repository, "rev-parse", f"{production}^{{tree}}")
 
 
+def test_import_and_manifest_validation_without_local_app_data(tmp_path: Path) -> None:
+    manifest = _write(tmp_path / "manifest.json", _manifest("import-only"))
+    script = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from agri_research_agent.automation import full_daily_windows as wrapper
+result = wrapper.validate_daily_manifest(Path(sys.argv[2]), "import-only", 0)
+assert result["manifest"]["run_id"] == "import-only"
+assert result["warnings"] == []
+"""
+    environment = {key: value for key, value in os.environ.items()
+                   if key.upper() != "LOCALAPPDATA"}
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(ROOT / "03_src"), str(manifest)],
+        env=environment, capture_output=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_production_runtime_still_fails_closed_without_local_app_data(monkeypatch) -> None:
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    def forbidden():
+        pytest.fail("Production execution started before runtime validation")
+
+    monkeypatch.setattr(wrapper, "new_run_id", forbidden)
+    for request in (wrapper.default_runtime_root, lambda: wrapper.run_wrapper("manual")):
+        with pytest.raises(wrapper.WrapperFailure, match="LOCALAPPDATA is unavailable") as error:
+            request()
+        assert error.value.stage == "RUNTIME_FILESYSTEM"
+
+
 def test_default_automation_runtime_is_local_app_data() -> None:
     root = wrapper.default_runtime_root(
         {"LOCALAPPDATA": r"C:\Users\tester\AppData\Local"}
