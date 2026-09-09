@@ -42,12 +42,12 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
-      - name: Trusted hashed dependencies
+      - name: Trusted development dependencies
         if: hashFiles('trusted/04_scripts/quality/main_admission.py') != ''
         shell: bash
         run: |
           set -euo pipefail
-          python -I -m pip install --require-hashes -r trusted/requirements-dev.txt
+          python -I -m pip install -r trusted/requirements-dev.in
       - name: Trusted admission (bootstrap absence fails closed)
         id: admission
         continue-on-error: true
@@ -95,13 +95,16 @@ jobs:
         run: |
           set -euo pipefail
           python -I - <<'PY'
-          import json, os, urllib.request
+          import hashlib, json, os, subprocess, urllib.request
           from pathlib import Path
           def get(path):
               req=urllib.request.Request('https://api.github.com/repos/'+os.environ['REPOSITORY']+path,
                   headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
               with urllib.request.urlopen(req,timeout=30) as response: return json.load(response)
           p=Path('evidence/main-admission.json'); r=json.loads(p.read_text())
+          for name in ('requirements-dev.in', 'requirements.in'):
+              source=subprocess.check_output(['git','-C','trusted','show',r['trusted_main']['commit']+':'+name])
+              r['trusted_governance'][name]=hashlib.sha256(source).hexdigest()
           r['final_result']='FAIL'; r['failure_codes'].append('FRESHNESS_NOT_CONFIRMED')
           p.write_text(json.dumps(r,indent=2))
           main=get('/git/ref/heads/main')['object']['sha']
