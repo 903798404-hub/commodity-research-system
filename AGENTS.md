@@ -11,7 +11,7 @@
 
 - 整个 `market-data` 仓库是农产品研究系统唯一开发源、唯一 Git 根目录和唯一代码基线；服务器仅用于生产运行，不作为日常开发环境。
 - GitHub 仓库 `commodity-research-system` 的 `main` 是唯一远程可信主线；本地 `main` checkout 必须保持为 clean `origin/main` 镜像，只用于只读审计和同步，不得作为 feature 开发、临时 merge、集成验收或 release 工作区。所有 feature、integration 和 release 工作都必须使用自己的 branch/worktree；验收通过后从获批 branch 以普通 fast-forward 更新 `origin/main`，再同步本地 `main`。所有可部署代码都必须有明确的完整 Git SHA。
-- 新业务启动必须读取 [Project Registry](02_configs/project_registry.json)，确认 `project_id`、`change_class`、状态、owned/protected paths 和 required tests。执行 `git fetch origin` 与 `git ls-remote origin refs/heads/main`；聊天历史 SHA 不是执行权威。从 fresh `origin/main` 创建独立 feature branch/worktree，不修改 local main。机器入口为 `04_scripts/quality/start_project.py`（默认预检，`--create` 创建；身份一致的已有 branch/worktree 返回 `RESUMED`）。新普通 business project 由可信规则自动 bootstrap 最小 Registry 元数据和独立 source/test namespace，不再要求 Project Existence Approval。远程漂移、main 非 clean 镜像、Registry 缺失、frozen、身份或 ownership 冲突、未知 dirty state 时停止。HEAD/Tree、branch/worktree、baseline、owned paths 和 changed files 由工具生成，人工只填写业务目标、验收标准及特殊权限决定。
+- 新业务启动必须读取 [Project Registry](02_configs/project_registry.json)，确认 `project_id`、`change_class`、状态、owned/protected paths 和 required tests。执行 `git fetch origin` 与 `git ls-remote origin refs/heads/main`；聊天历史 SHA 不是执行权威。从 fresh `origin/main` 创建独立 feature branch/worktree，不修改 local main。机器入口为 `04_scripts/quality/start_project.py`（默认预检，`--create` 创建；身份一致的已有 branch/worktree 返回 `RESUMED`）。新普通 business project 由可信规则自动 bootstrap 最小 Registry 元数据和独立 source/test namespace，不再要求 Project Existence Approval。远程漂移、Registry 缺失、frozen、身份或 ownership 冲突、未知 dirty state 时停止。普通 Business START / RESUME 与本地 Scope 不依赖无关 local main checkout 是否 clean、mirror 或存在；高风险 lane 与实际 main 同步仍保留 main mirror 要求。HEAD/Tree、branch/worktree、baseline、owned paths 和 changed files 由工具生成，人工只填写业务目标、验收标准及特殊权限决定。
 - Registry 不授予业务解冻、shared、数据或部署权限。普通 business 仅可携带可信 bootstrap policy 验证的一个精确新增项目记录，不得修改现有 Registry project、扩大 owned paths 或改为 shared；shared infrastructure change 必须事先得到明确任务授权。首次 Registry candidate 未合入远程前，只可用获批 shared 低层 Scope Gate 验收，不能称项目启动器已主线生效。
 - 正式 FULL DAILY 只使用 Approved Production Commit 对应的 clean detached control-plane / tool-repo；开发 caller 不需要是 main，不提供业务源码。生产 Approved 不自动跟随远程 main；数据更新与镜像/代码发布独立。详见 [正式入口说明](04_scripts/automation/说明.md)。
 - USDA 子项目正式位置为 `11_独立应用/USDA平衡表/`，继续保持独立前端项目结构，但不得拥有嵌套 `.git`。
@@ -24,6 +24,9 @@
 - 紧急线上修复必须立即同步回本地，完成测试、commit、push，并重新按正式 Git 提交部署；在完成回流前不得开始下一轮开发或部署。
 - 禁止未经差异比较就以整个本地目录覆盖服务器，或以整个服务器目录覆盖本地。版本分叉时，先比较文件内容、Git diff 与哈希，再合并。
 - 服务器地址通过环境变量注入；不得将公网 IP 写入源码。本地只保留 `.env.example`，不得提交 `.env`。
+
+普通 Business 的 candidate Registry 未自行修改、最新可信 main 仅追加无关项目记录时，允许身份与 ownership 仍兼容的已有项目 RESUME；不得把这种可信漂移误判为自我扩权。candidate 修改 Registry 仍严格检查，最终接纳仍须取得针对最新可信 main 的 hosted PASS。
+`runtime_target=none` 的 ordinary Business 不要求 runtime root、marker 或 production evidence；只有实际使用 Runtime 的任务才核验相应 Runtime Mode/root/marker。
 
 ## 执行环境预检
 

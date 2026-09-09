@@ -16,6 +16,26 @@ except ImportError:  # Direct CLI invocation
     import project_registry
 
 
+def requires_main_mirror(project: dict) -> bool:
+    return (project["change_class"] != "business"
+            or project.get("runtime_target") in {"windows_git_worktree", "production_container"})
+
+
+def unchanged_registry_before_main_additions(root: Path, candidate: dict, trusted: dict) -> bool:
+    """Allow only an untouched candidate Registry behind trusted additive records.
+
+    This is local development compatibility, not a freshness waiver for Admission.
+    Candidate edits and any changes to preexisting trusted policy remain rejected.
+    """
+    base = project_registry.git(root, "merge-base", "HEAD", "origin/main")
+    original = json.loads(project_registry.git(root, "show", f"{base}:{project_registry.REGISTRY_PATH}"))
+    projects = original["projects"]
+    return (candidate == original
+            and trusted == dict(original, projects=trusted["projects"])
+            and len(trusted["projects"]) > len(projects)
+            and trusted["projects"][:len(projects)] == projects)
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FINDING_CLASSES = ("BLOCKER", "FOLLOW_UP", "OUT_OF_SCOPE", "INSUFFICIENT_EVIDENCE")
 CHANGE_CLASSES = ("business", "shared")
@@ -325,7 +345,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if allowed:
                     raise ValueError("Business --project cannot override --owned")
                 trusted = project_registry.git(PROJECT_ROOT, "show", f"origin/main:{project_registry.REGISTRY_PATH}")
-                if json.loads(trusted) != registry:
+                if (json.loads(trusted) != registry
+                        and not (not requires_main_mirror(project)
+                                 and unchanged_registry_before_main_additions(PROJECT_ROOT, registry, json.loads(trusted)))):
                     bootstrapped, _ = project_registry.local_bootstrap(PROJECT_ROOT, SHARED_PATH_PATTERNS)
                     if bootstrapped != project:
                         raise ValueError("ESCALATION_REQUIRED: Registry delta belongs to another project")
@@ -338,7 +360,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 allowed = (project["owned_paths"] + project.get("reserved_paths", []))
                 exact_allowed = project.get("future_owned_paths", [])
             protected += tuple(pattern for path in registry["protected_paths"] for pattern in (path, path + "/**"))
-            project_registry.assert_main_mirror(PROJECT_ROOT)
+            if requires_main_mirror(project):
+                project_registry.assert_main_mirror(PROJECT_ROOT)
             branch = project_registry.git(PROJECT_ROOT, "branch", "--show-current")
             if not branch or branch == "main":
                 raise ValueError("Project Gate requires independent non-main branch/worktree")

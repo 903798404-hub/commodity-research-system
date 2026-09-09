@@ -20,7 +20,7 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
     live = registry.git(root, "ls-remote", "--exit-code", "origin", "refs/heads/main").split()[0]
     if registry.git(root, "rev-parse", "origin/main") != live:
         raise ValueError("REMOTE_MOVED_DURING_PREFLIGHT")
-    mirror = registry.assert_main_mirror(root)
+    mirror = registry.assert_main_mirror(root) if change_class != "business" else {}
     trusted = json.loads(registry.git(root, "show", f"origin/main:{registry.REGISTRY_PATH}"))
     if not branch.startswith("feat/") or branch == "feat/":
         raise ValueError("New business development requires feat/<name>")
@@ -65,10 +65,14 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
         base_files = registry.git(root, "ls-tree", "-r", "--name-only", "-z", live).split("\0")
         registry.validate_bootstrap(trusted, data, [p for p in base_files if p], [],
                                     [registry.REGISTRY_PATH], scope.SHARED_PATH_PATTERNS, require_tests=False)
-    elif data != trusted:
+    elif (data != trusted and not (resumed and change_class == "business"
+          and not scope.requires_main_mirror(project)
+          and scope.unchanged_registry_before_main_additions(destination, data, trusted))):
         raise ValueError("ESCALATION_REQUIRED: existing Registry changed")
     if project["change_class"] != change_class or project["status"] != "ready":
         raise ValueError("PROJECT_CLASS_OR_READINESS_REQUIRES_SEPARATE_APPROVAL")
+    if scope.requires_main_mirror(project) and not mirror:
+        mirror = registry.assert_main_mirror(root)
     if resumed:
         report = scope.run_audit(destination, "origin/main", project["owned_paths"] + project.get("reserved_paths", []),
                                  exact_allowed=project.get("future_owned_paths", []), change_class=change_class,
@@ -82,7 +86,8 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
     if not resumed and create:
         if registry.git(root, "ls-remote", "--exit-code", "origin", "refs/heads/main").split()[0] != live:
             raise ValueError("REMOTE_MOVED_BEFORE_CREATE")
-        registry.assert_main_mirror(root)
+        if scope.requires_main_mirror(project):
+            registry.assert_main_mirror(root)
         registry.git(root, "worktree", "add", "-b", branch, str(destination), live)
         if registry.git(destination, "rev-parse", "HEAD") != live or registry.git(destination, "status", "--porcelain=v1"):
             raise ValueError("NEW_WORKTREE_IDENTITY_FAILED; preserve worktree and stop")

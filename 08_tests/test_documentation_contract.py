@@ -100,6 +100,16 @@ def test_strict_completion_entrypoint_keeps_all_runtime_and_test_validation():
     assert '全部 required' in read(ROOT / 'AGENTS.md')
 
 
+def test_ordinary_development_does_not_require_unrelated_main_or_runtime_marker():
+    for path in (ROOT/'AGENTS.md', SPEC, MANUAL):
+        body = read(path).replace('\n', '')
+        assert '不依赖无关 local main checkout 是否 clean、mirror' in body
+        assert '只有实际使用 Runtime 的任务' in body
+        assert '不要求 runtime root、marker 或 production evidence' in body
+        assert '高风险 lane' in body and 'main mirror' in body
+        assert '最新' in body and 'hosted PASS' in body
+
+
 def test_current_authority_internal_markdown_links_resolve() -> None:
     names = subprocess.check_output(['git','-C',str(ROOT),'ls-files','--cached','--others','--exclude-standard','-z']).decode('utf-8').split('\0')
     files = [ROOT/name for name in sorted(set(names)) if name.endswith('.md') and '/archive/' not in name and (ROOT/name).is_file()]

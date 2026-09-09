@@ -2546,3 +2546,131 @@ def test_bootstrap_scope_and_completion_reject_self_expansion(bootstrap_start_ba
     assert scope.main(['--project', 'new-business']) == 2
     with pytest.raises(ValueError):
         complete_project.complete(feature, 'new-business')
+
+
+@pytest.mark.parametrize('main_state', ['dirty', 'stale', 'no-checkout', 'no-main-ref'])
+def test_business_resume_independent_of_local_main(bootstrap_start_base, tmp_path, monkeypatch, main_state):
+    main = bootstrap_start_base
+    feature = tmp_path/'independent-business'
+    start_project.prepare(main, 'demo', 'feat/independent', feature, create=True)
+    if main_state == 'dirty':
+        (main/'unrelated.txt').write_text('unrelated local work')
+    elif main_state == 'stale':
+        registry.git(main, 'commit', '--allow-empty', '-m', 'remote advanced')
+        registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        latest = registry.git(main, 'rev-parse', 'HEAD')
+        registry.git(main, 'checkout', '--detach', latest)
+        registry.git(main, 'update-ref', 'refs/heads/main', latest+'^')
+    else:
+        registry.git(main, 'checkout', '--detach')
+        if main_state == 'no-main-ref':
+            registry.git(main, 'branch', '-D', 'main')
+    before = registry.git(main, 'status', '--porcelain')
+    (feature/'feature/code.py').write_text('# owned work\n')
+    result = start_project.prepare(feature, 'demo', 'feat/independent', feature)
+    assert result['action'] == 'RESUMED' and not result['created']
+    assert 'main_clean_mirror' not in result  # Never claim an unperformed check passed.
+    monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
+    assert scope.main(['--project', 'demo']) == 0
+    assert registry.git(main, 'status', '--porcelain') == before
+    # START is also independent of a main checkout, using the fresh remote ref.
+    assert start_project.prepare(feature, 'demo', 'feat/another', tmp_path/'another', create=True)['action'] == 'STARTED'
+
+
+def append_trusted_unrelated_project(main):
+    data = json.loads((main/registry.REGISTRY_PATH).read_text())
+    added = registry.bootstrap_record('unrelated-project', data['protected_paths'])
+    added.pop('runtime_target')
+    data['projects'].append(added)
+    write_registry(main, data)
+    registry.git(main, 'add', registry.REGISTRY_PATH)
+    registry.git(main, 'commit', '-m', 'trusted unrelated registration')
+    registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+
+
+def test_business_resume_after_trusted_registry_addition(bootstrap_start_base, tmp_path, monkeypatch):
+    main = bootstrap_start_base
+    feature = tmp_path/'registry-drift'
+    start_project.prepare(main, 'demo', 'feat/drift', feature, create=True)
+    before = (feature/registry.REGISTRY_PATH).read_bytes()
+    append_trusted_unrelated_project(main)
+    (feature/'feature/code.py').write_text('# owned change\n')
+    result = start_project.prepare(feature, 'demo', 'feat/drift', feature)
+    assert result['action'] == 'RESUMED'
+    assert result['baseline_head'] != result['head']  # Development may lag; Admission cannot.
+    assert (feature/registry.REGISTRY_PATH).read_bytes() == before
+    monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
+    assert scope.main(['--project', 'demo']) == 0
+
+
+@pytest.mark.parametrize('committed', [False, True])
+def test_registry_drift_does_not_allow_candidate_expansion(bootstrap_start_base, tmp_path, monkeypatch, committed):
+    main = bootstrap_start_base
+    feature = tmp_path/'registry-attack'
+    start_project.prepare(main, 'demo', 'feat/attack', feature, create=True)
+    append_trusted_unrelated_project(main)
+    data = json.loads((feature/registry.REGISTRY_PATH).read_text())
+    data['projects'][0]['owned_paths'].append('tests')
+    write_registry(feature, data)
+    if committed:
+        registry.git(feature, 'add', registry.REGISTRY_PATH)
+        registry.git(feature, 'commit', '-m', 'candidate expansion')
+    with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
+        start_project.prepare(feature, 'demo', 'feat/attack', feature)
+    monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
+    assert scope.main(['--project', 'demo']) == 2
+
+
+@pytest.mark.parametrize('change', ['project', 'policy'])
+def test_registry_drift_requires_existing_trusted_policy_unchanged(bootstrap_start_base, tmp_path, change):
+    main = bootstrap_start_base
+    feature = tmp_path/'incompatible'
+    start_project.prepare(main, 'demo', 'feat/incompatible', feature, create=True)
+    append_trusted_unrelated_project(main)
+    data = json.loads((main/registry.REGISTRY_PATH).read_text())
+    if change == 'project':
+        data['projects'][0]['status'] = 'needs-boundary-review'
+    else:
+        data['protected_paths'].append('other')
+    write_registry(main, data)
+    registry.git(main, 'add', registry.REGISTRY_PATH)
+    registry.git(main, 'commit', '-m', 'trusted incompatible policy')
+    registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
+        start_project.prepare(feature, 'demo', 'feat/incompatible', feature)
+
+
+def test_shared_resume_and_scope_keep_main_mirror(bootstrap_start_base, tmp_path, monkeypatch):
+    main = bootstrap_start_base
+    data = json.loads((main/registry.REGISTRY_PATH).read_text())
+    data['projects'][0]['change_class'] = 'shared'
+    write_registry(main, data)
+    registry.git(main, 'add', registry.REGISTRY_PATH)
+    registry.git(main, 'commit', '-m', 'shared fixture')
+    registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    feature = tmp_path/'strict-shared'
+    start_project.prepare(main, 'demo', 'feat/strict', feature, change_class='shared', create=True)
+    (main/'unrelated.txt').write_text('dirty main')
+    with pytest.raises(ValueError, match='LOCAL_MAIN_NOT_CLEAN'):
+        start_project.prepare(feature, 'demo', 'feat/strict', feature, change_class='shared')
+    monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
+    assert scope.main(['--project', 'demo', '--change-class', 'shared']) == 2
+
+
+def test_none_business_needs_no_runtime_marker(bootstrap_start_base, tmp_path):
+    from quality import target_runtime_gate
+    main = bootstrap_start_base
+    data = json.loads((main/registry.REGISTRY_PATH).read_text())
+    data['schema_version'] = 'project-registry/4'
+    data['projects'][0]['runtime_target'] = 'none'
+    write_registry(main, data)
+    registry.git(main, 'add', registry.REGISTRY_PATH)
+    registry.git(main, 'commit', '-m', 'none runtime fixture')
+    registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+    feature = tmp_path/'no-runtime'
+    assert start_project.prepare(main, 'demo', 'feat/no-runtime', feature, create=True)['action'] == 'STARTED'
+    assert start_project.prepare(feature, 'demo', 'feat/no-runtime', feature)['action'] == 'RESUMED'
+    assert not list(feature.rglob('.market-data-runtime.json'))
+    assert target_runtime_gate.validate_target(feature, data['projects'][0]) == {'TARGET_RUNTIME_VALIDATION': 'NOT_REQUIRED'}
+    for target in ('windows_git_worktree', 'production_container'):
+        assert scope.requires_main_mirror(dict(data['projects'][0], runtime_target=target))
