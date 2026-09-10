@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:market-data:main-admission:1",
-  "title": "Shadow main admission evidence (not an authenticated approval)",
+  "title": "Required main admission evidence (publisher must be authenticated)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,14 +23,15 @@
     "test_identities",
     "test_result",
     "execution_environment",
-    "checks"
+    "checks",
+    "lane"
   ],
   "properties": {
     "schema_version": {
       "const": "main-admission/1"
     },
     "mode": {
-      "const": "shadow"
+      "const": "required"
     },
     "final_result": {
       "enum": [
@@ -211,7 +212,8 @@
         "required": [
           "path",
           "trusted_blob",
-          "sha256"
+          "sha256",
+          "candidate_blob"
         ],
         "additionalProperties": false,
         "properties": {
@@ -219,9 +221,15 @@
             "type": "string"
           },
           "trusted_blob": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "sha256": {
+            "type": "string"
+          },
+          "candidate_blob": {
             "type": "string"
           }
         }
@@ -326,6 +334,12 @@
     },
     "checks": {
       "type": "object"
+    },
+    "lane": {
+      "enum": [
+        "business",
+        "strict"
+      ]
     }
   },
   "allOf": [

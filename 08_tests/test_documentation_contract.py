@@ -77,7 +77,7 @@ def test_business_fast_lane_and_strict_lane_are_consistent_at_all_entrypoints():
         assert '不再是普通 Business 进入 main 的强制 Gate' in body
         assert '不得因未执行它们判定未完成' in body
         assert '任何新 commit 都必须重新获得 hosted PASS' in body.replace('\n', '')
-        assert '高风险 lane 仍必须通过 `complete_project.py` 和独立 integration 验收' in body
+        assert '高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查' in body
         for boundary in ('shared infrastructure', 'governance', 'protected paths', 'production-control-plane',
                          'FULL DAILY', 'Production Wrapper', 'Runtime', 'deployment', 'production data/write path'):
             assert boundary in body
@@ -95,8 +95,8 @@ def test_strict_completion_entrypoint_keeps_all_runtime_and_test_validation():
 
     assert 'optional for ordinary business' in complete_project.__doc__
     spec = read(SPEC)
-    assert '`complete_project.py --candidate-record <记录>` 的全部 required' in spec
-    assert 'tests 与签名容器门禁，并在独立 integration 中验收' in spec
+    assert '`complete_project.py --candidate-record <记录>`' in spec
+    assert '全部 required tests 与签名容器门禁' in spec
     assert '全部 required' in read(ROOT / 'AGENTS.md')
 
 
@@ -166,3 +166,21 @@ def test_archive_is_not_an_executable_dependency():
     archive=DOCS/'archive'
     for name in ('2026-09-04-AsyncContractRollout候选记录.md','2026-09-04-Missing非阻断候选记录.md'):
         assert 'ARCHIVED / NOT AUTHORITATIVE / DO NOT EXECUTE' in read(archive/name)
+
+
+def test_governance_v2_active_docs_and_update_entry():
+    assert 'PM 当前冻结' not in read(DOCS/'01_系统架构与项目边界.md')
+    assert 'PM 和旧 FULL DAILY 继续冻结' not in read(INDEX)
+    usda = read(ROOT/'11_独立应用/USDA平衡表/AGENTS.md')
+    assert '普通 business 无强制 integration' in usda
+    assert '独立 feature/integration worktree' not in usda
+    soybean = read(DOCS/'projects/进口商品利润研究框架契约.md')
+    assert '不构成每次 bug fix 的审批' in soybean
+    for p in (ROOT/'AGENTS.md', SPEC, MANUAL):
+        assert 'local Git metadata' in read(p) and '不是纯 read-only' in read(p)
+    daily = read(DOCS/'06_日常运行与数据更新手册.md')
+    assert 'run_production_data_delta_windows.py' in daily and '--domain akshare' in daily
+    assert 'Legacy/Recovery Only' in daily and '--publish' in daily
+    assert 'SHADOW ONLY' not in read(ROOT/'.github/workflows/trusted-main-admission.yml')
+    for marker in ('Approved', 'Commit/Tree', 'Image ID', 'rollback', 'Manifest', '生产单独授权'):
+        assert marker in read(SPEC)

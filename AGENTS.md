@@ -54,12 +54,14 @@
 
 接纳必须使用 successful `trusted-main-admission-v1` 对应的同一个 candidate Commit/Tree，来源固定 GitHub Actions `integration_id=15368`，并核对该 run 的 Admission artifact 与 fresh main 身份。Candidate 任何新 commit 都必须重新获得 hosted PASS，即使 Tree 相同也不得复用旧 PASS；人工批准后仅按精确 SHA 普通 fast-forward，Ruleset 保持 Active、无 bypass。具体 API 回查见规范第 6 节。
 
-Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 仍必须通过 `complete_project.py` 和独立 integration 验收，保留 Direct Tests → Project Scope Gate → Impact/必要 Full Tests → Completion → 独立 integration/release → 人工批准精确 fast-forward 的严格链路；候选和部署继续执行原生产规则。
+Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查；Completion 与独立 integration 可用于开发反馈或专项验收；main 链路为 trusted Scope → required/impact/必要 full tests → strict PASS → 人工批准精确 fast-forward；候选和部署继续执行原生产规则。
 
-`runtime_target=production_container` 必须在 code closure 前取得真实容器证据。其 Direct Tests 和 Project Scope 通过且候选验证获明确授权后，允许先创建独立 candidate snapshot commit 并推送获批候选 ref，供受保护 builder 获取同一 SHA 的 clean detached 独立源码。此快照不是完成提交，不得进入 main 或生产。全部 required tests、签名容器 Completion 和独立 integration 验收通过后，才可 fast-forward main，再按明确批准的生产 Commit/Tree 提升同一已验证 Image ID。候选 ref、正式 main 历史和固定 Approved Production SHA 分别核验，不能相互替代；详细顺序见发布规范的候选快照阶段。
+`runtime_target=production_container` 的真实容器证据属于独立 production/release gate。main-entry correctness 由 hosted strict lane 验证，不以生产环境访问或签名容器 Completion 作为 main 前置条件。生产候选仍须明确授权、绑定 clean Commit/Tree/Image，candidate 不写 production；正式发布核验 Approved Production SHA、数据 Manifest、同一已验证 Image ID 和 rollback。Completion 若调用仍执行全部 required tests 与签名容器门禁；main PASS 不授予生产权限。
+
+已授权普通 Business task 包含范围内 commit/push feature，无需重复阶段许可；main 仍等待用户对精确 Commit/Tree 批准。START / RESUME 包含 fetch 和 local Git metadata 写入，不是纯 read-only。
 
 - 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
-- 普通业务可运行 `04_scripts/quality/audit_changed_scope.py --project <project_id>` 获取本地反馈，正式 Scope 由 hosted Admission 执行；高风险 lane 在 Impact/完整回归、Completion 或 integration 前仍必须得到 `PROJECT_SCOPE=PASS`。Registry owned paths 不包含只读 shared dependencies；全局 protected 不可被 owned 覆盖。禁止业务用 `--owned`、`--known-existing`、旧 baseline 或修改 Registry 绕过门禁；低层 `--owned` 仅用于测试或获批 shared 任务。Scope Gate 不是权限沙箱，修改门禁本身必须独立治理审查。
+- 普通业务可运行 `04_scripts/quality/audit_changed_scope.py --project <project_id>` 获取本地反馈，正式 Scope 由 hosted Admission 执行；高风险 lane 在 Impact/完整回归、Completion 或 integration 前仍必须得到 `PROJECT_SCOPE=PASS`。Registry owned paths 不包含只读 shared dependencies；普通 business 的全局 protected 不可被 owned 覆盖；ready shared owner 的 main-entry 修改由 trusted strict lane 判断。禁止业务用 `--owned`、`--known-existing`、旧 baseline 或修改 Registry 绕过门禁；低层 `--owned` 仅用于测试或获批 shared 任务。Scope Gate 不是权限沙箱，修改门禁本身必须独立治理审查。
 - Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负责生产镜像构建，本地 Docker 构建不再是 commit、push 或部署的前置条件。
 - 不得再建议用户安装 Docker Desktop、Podman 或 WSL，也不得要求用户为本项目安装这些工具。Windows 本地只负责代码修改、Python 和前端测试、Streamlit 启动检查、Dockerfile 与 Compose 静态检查、构建上下文文件存在性检查，以及 Git 差异和工作区检查。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须在服务器隔离候选目录中重建对应镜像，不得在服务器正式仓库中直接构建。

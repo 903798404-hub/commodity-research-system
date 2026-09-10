@@ -1200,6 +1200,55 @@
       ],
       "runtime_target": "windows_git_worktree",
       "boundary_notes": "User explicitly authorized deployment-contract repair, a new validated image and migration of the affected legacy updates to Xiaoran. Only these exact infrastructure files are owned. Run unchanged business producers from an independent approved clean detached local checkout with explicitly hashed baseline replicas; never use canonical main, dev/Preview assets or old runtime worktrees. AkShare must publish the domestic-spread artifact through the existing public package contract while preserving every current public dataset; legacy root-file writes alone are not consumer activation. Crop and FAS use an independent strict delta contract, host policy, exact path allowlists, byte/schema validation, baseline drift checks and rollback; no server provider execution or Tailscale. Credentials remain local secret files and never enter manifests or transfers. New scheduling and old-cron replacement must bind approved code, allocation and rollback evidence under the explicit migration authorization. Do not change business formulas, CNF/manual-ui keys, FULL DAILY code or source approval, capture AM/PM, existing SEALED, notifications or USDA/Oil World services. Registration does not claim implementation, data validity, tested scheduling or deployment completion."
+    },
+    {
+      "project_id": "domestic-spread-status",
+      "change_class": "business",
+      "status": "ready",
+      "runtime_target": "none",
+      "owned_paths": [
+        "03_src/agri_research_agent/application/domestic_spreads.py",
+        "08_tests/application/test_domestic_spread_status.py"
+      ],
+      "shared_dependencies": [
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/shared"
+      ],
+      "forbidden_paths": [
+        "AGENTS.md",
+        "02_configs/project_registry.json",
+        "03_src/agri_research_agent/shared",
+        "03_src/agri_research_agent/market_data",
+        "03_src/agri_research_agent/automation",
+        "03_src/agri_research_agent/data_sources/tankan",
+        "03_src/agri_research_agent/data_sources/lutou",
+        "04_scripts/automation",
+        "04_scripts/quality",
+        "09_deploy",
+        "03_src/agri_research_agent/pipelines/lutou_weather.py",
+        "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+        "03_src/agri_research_agent/pipelines/public_data_daily.py",
+        "03_src/agri_research_agent/pipelines/public_data_refresh.py",
+        "03_src/agri_research_agent/pipelines/public_data_providers.py",
+        "03_src/agri_research_agent/pipelines/async_contract_rollout.py",
+        "04_scripts/refresh_public_data.py",
+        "03_src/agri_research_agent/research_data/catalog.py",
+        "03_src/agri_research_agent/research_data/identities.py",
+        "11_独立应用/USDA平衡表/AGENTS.md",
+        "05_apps/streamlit_app.py",
+        "04_scripts/server_update_spreads.py",
+        "04_scripts/spread_monthly_calculator.py",
+        "01_data",
+        "06_outputs",
+        "10_logs"
+      ],
+      "required_tests": [
+        "08_tests/application/test_domestic_spread_status.py"
+      ],
+      "capabilities": [
+        "Domestic Spread status view-model and regression tests"
+      ],
+      "boundary_notes": "Governance V2 one-time normalization of two existing unowned ordinary business files. Status/read-only presentation only; no shared producer, FULL DAILY, production data delivery, Runtime/deployment or production write authorization. No AUTO_ADOPT."
     }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"

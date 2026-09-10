@@ -2674,3 +2674,23 @@ def test_none_business_needs_no_runtime_marker(bootstrap_start_base, tmp_path):
     assert target_runtime_gate.validate_target(feature, data['projects'][0]) == {'TARGET_RUNTIME_VALIDATION': 'NOT_REQUIRED'}
     for target in ('windows_git_worktree', 'production_container'):
         assert scope.requires_main_mirror(dict(data['projects'][0], runtime_target=target))
+
+
+def test_domestic_spread_status_one_time_ownership_normalization():
+    import json
+    from pathlib import Path
+    from quality import main_admission
+    root = Path(__file__).resolve().parents[1]
+    data = json.loads((root/'02_configs/project_registry.json').read_text(encoding='utf-8'))
+    project = next(p for p in data['projects'] if p['project_id']=='domestic-spread-status')
+    assert project['change_class']=='business' and project['status']=='ready'
+    assert project['runtime_target']=='none'
+    assert set(project['owned_paths']) == {
+        '03_src/agri_research_agent/application/domestic_spreads.py',
+        '08_tests/application/test_domestic_spread_status.py'}
+    assert project['required_tests'] == ['08_tests/application/test_domestic_spread_status.py']
+    for path in ('05_apps/streamlit_app.py', '04_scripts/automation/full_daily_windows.py',
+                 '03_src/agri_research_agent/pipelines/public_data_refresh.py',
+                 '09_deploy/production_data_delivery/README.md', '04_scripts/runtime/validate_target_runtime.py'):
+        assert not main_admission.owns(project,path)
+    assert not project.get('reserved_paths') and not project.get('future_owned_paths')

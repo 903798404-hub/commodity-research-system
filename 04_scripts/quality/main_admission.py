@@ -1,8 +1,8 @@
-"""Shadow main admission. Invoke only from an independently selected trusted main.
+"""Required main admission (business and strict lanes). Invoke only from an independently selected trusted main.
 
 This is evidence, not a signature or a branch-protection service. The caller must
 authenticate repository/ref observations. V1 tests run on ephemeral GitHub hosted
-runners with a stripped environment. Bubblewrap is optional Shadow hardening,
+runners with a stripped environment. Bubblewrap is optional runner hardening,
 not a permanent admission prerequisite. Local tests use inert fixtures only.
 """
 from __future__ import annotations
@@ -173,6 +173,18 @@ def export(repo: Path, commit: str, destination: Path, *, trusted_tests=False) -
         target.chmod(0o755 if entry["mode"] == "100755" else 0o644)
 
 
+def export_git_identity(repo: Path, workspace: Path, base: str, candidate: str) -> None:
+    """Give repo-aware tests isolated Git objects, never caller config or credentials."""
+    git(workspace, "init", "-q")
+    git(workspace, "config", "core.autocrlf", "false")
+    git(workspace, "-c", "protocol.file.allow=always", "fetch", "--quiet", "--no-tags",
+        "--no-write-fetch-head", str(repo.resolve()), candidate)
+    git(workspace, "update-ref", "refs/heads/admission-candidate", candidate)
+    git(workspace, "symbolic-ref", "HEAD", "refs/heads/admission-candidate")
+    git(workspace, "update-ref", "refs/remotes/origin/main", base)
+    git(workspace, "read-tree", candidate)
+
+
 def sandbox_command(workspace: Path, evidence: Path, tests: list[str]) -> list[str]:
     if sys.platform != "linux" or not shutil.which("bwrap"):
         raise ValueError("SANDBOX_UNAVAILABLE")
@@ -254,8 +266,59 @@ def evidence_valid(receipt: dict, repo: Path, current_main: str, current_candida
         return False
 
 
+def test_path(path: str) -> bool:
+    return path.startswith("08_tests/") and path.endswith(".py") and Path(path).name.startswith("test_")
+
+
+def impact_plan(mapping: dict, paths: list[str], old: dict) -> tuple[list[str], list[str], bool]:
+    modules = mapping.get("modules", {})
+    selected = {name for name, module in modules.items()
+                if any(under(path, root) for path in paths for root in module.get("code_paths", []))}
+    pending = list(selected)
+    while pending:
+        for name in modules[pending.pop()].get("dependents", []):
+            if name not in modules:
+                raise ValueError("TRUSTED_IMPACT_MODULE_UNAVAILABLE: " + name)
+            if name not in selected:
+                selected.add(name)
+                pending.append(name)
+    full = any(modules[name].get("full_regression_when_changed", False) for name in selected)
+    tests = [t for name in sorted(selected) for key in ("direct_tests", "impact_tests")
+             for t in modules[name].get(key, [])]
+    if full:
+        tests += sorted(p for p in old if test_path(p))
+    return list(dict.fromkeys(tests)), sorted(selected), full
+
+
+def policy_reductions(repo, candidate, sources, registry, mapping, paths):
+    changed_paths = {p["path"] for p in paths}
+    try:
+        if REGISTRY in changed_paths:
+            proposed = json.loads(blob(repo, candidate, REGISTRY))
+            indexed = {p["project_id"]: p for p in proposed["projects"]}
+            for project in registry["projects"]:
+                after = indexed.get(project["project_id"], {})
+                before_tests = set(project["required_tests"] + project.get("future_required_tests", []))
+                after_tests = set(after.get("required_tests", []) + after.get("future_required_tests", []))
+                if not before_tests <= after_tests:
+                    return ["TEST_POLICY_REDUCTION"]
+        if MAP in changed_paths:
+            import yaml
+            proposed = yaml.safe_load(blob(repo, candidate, MAP))["modules"]
+            for name, module in mapping.get("modules", {}).items():
+                after = proposed.get(name, {})
+                if any(not set(module.get(key, [])) <= set(after.get(key, []))
+                       for key in ("code_paths", "direct_tests", "impact_tests", "dependents")):
+                    return ["TEST_POLICY_REDUCTION"]
+                if module.get("full_regression_when_changed") and not after.get("full_regression_when_changed"):
+                    return ["TEST_POLICY_REDUCTION"]
+    except (ValueError, KeyError, TypeError):
+        return ["INVALID_CANDIDATE_TEST_POLICY"]
+    return []
+
+
 def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests) -> dict:
-    receipt = {"schema_version": "main-admission/1", "mode": "shadow", "final_result": "FAIL",
+    receipt = {"schema_version": "main-admission/1", "mode": "required", "lane": "business", "final_result": "FAIL",
                "business_scope": "FAIL", "failure_codes": [], "trusted_main": None, "candidate": None,
                "merge_base": None, "ahead": None, "behind": None, "trusted_governance": {},
                "registry_blob_digest": None, "diff_digest": None, "changed_paths": [], "test_plan": [],
@@ -302,8 +365,13 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         paths = changed(repo, base, candidate, old, new)
         bootstrap = None
         bootstrap_tests = []
-        if any(p["path"] == REGISTRY for p in paths):
-            # Execute only the policy blob selected from trusted main, never candidate imports.
+        registry_changed = any(p["path"] == REGISTRY for p in paths)
+        # Registry edits by its trusted shared owner are governance changes. They
+        # NEVER grant this candidate new ownership or change its required plan.
+        registry_owner = next((p for p in registry["projects"]
+                               if owns(p, REGISTRY) and p["change_class"] == "shared"
+                               and p["status"] == "ready"), None)
+        if registry_changed:
             policy = {"__name__": "trusted_bootstrap_policy"}
             exec(compile(sources["04_scripts/quality/project_registry.py"],
                          "<trusted bootstrap policy>", "exec"), policy)
@@ -315,45 +383,73 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                     raise ValueError("ESCALATION_REQUIRED: bootstrap project mismatch")
             except (ValueError, KeyError, TypeError) as exc:
                 bootstrap = None
-                failures.extend(["ESCALATION_REQUIRED", str(exc)[:300]])
+                if not registry_owner:
+                    failures.extend(["ESCALATION_REQUIRED", str(exc)[:300]])
         if bootstrap:
-            project = bootstrap
+            projects = [bootstrap]
             receipt["checks"]["bootstrap"] = "EXACT_NEW_BUSINESS_PROJECT"
         elif project_id == "auto":
-            candidates = [p for p in registry["projects"] if p["change_class"] == "business"
-                          and p["status"] == "ready" and any(owns(p, i["path"]) for i in paths)]
-            if len(candidates) != 1:
-                failures.extend(["ESCALATION_REQUIRED", "AMBIGUOUS_OR_NONBUSINESS_PROJECT"])
-                project = dict(project_id="unresolved", change_class="shared", status="needs-boundary-review",
-                               owned_paths=[], shared_dependencies=[], forbidden_paths=[], required_tests=[])
-            else:
-                project = candidates[0]
+            projects = [p for p in registry["projects"] if any(owns(p, i["path"]) for i in paths)]
         else:
-            project = next(p for p in registry["projects"] if p["project_id"] == project_id)
+            projects = [p for p in registry["projects"] if p["project_id"] == project_id]
+        unresolved = dict(project_id="unresolved", change_class="shared", status="needs-boundary-review",
+                          owned_paths=[], shared_dependencies=[], forbidden_paths=[], required_tests=[])
+        project = projects[0] if projects else unresolved
+        strict = any(p["change_class"] == "shared" for p in projects)
+        receipt["lane"] = "strict" if strict else "business"
         receipt["checks"]["project_id"] = project["project_id"]
+        receipt["checks"]["project_ids"] = [p["project_id"] for p in projects]
+        if not projects or any(p["status"] != "ready" for p in projects) or (not strict and len(projects) != 1):
+            failures.append("ESCALATION_REQUIRED")
         for item in paths:
-            item["classifications"] = classify(item["path"], project, registry, patterns)
+            owners = [p for p in projects if owns(p, item["path"])]
+            owner = owners[0] if len(owners) == 1 else project
+            item["classifications"] = classify(item["path"], owner, registry, patterns)
+            categories = item["classifications"]
+            if bootstrap and item["path"] == REGISTRY:
+                continue
+            # A ready shared owner admits source changes, not production actions.
+            # Unowned control-plane paths and production payloads fail closed.
+            denied = (len(owners) != 1 or "forbidden" in categories or "other-project" in categories
+                      or any(under(item["path"], root) for root in ("01_data", "06_outputs", "10_logs"))
+                      or item["path"].startswith(".env")
+                      or (categories != ["owned"] and owner["change_class"] != "shared"))
+            if denied:
+                failures.append("ESCALATION_REQUIRED")
+                if "production-control-plane" in categories:
+                    failures.append("UNAUTHORIZED_PRODUCTION_CHANGE")
         receipt["changed_paths"] = paths
         receipt["diff_digest"] = digest(json.dumps(paths, sort_keys=True, ensure_ascii=False).encode("utf-8"))
-        if (project["change_class"] != "business" or project["status"] != "ready"
-                or not paths or any(p["classifications"] != ["owned"]
-                    and not (bootstrap and p["path"] == REGISTRY) for p in paths)):
+        if not paths:
             failures.append("ESCALATION_REQUIRED")
         if any(e["mode"] not in {"100644", "100755"} for e in list(old.values()) + list(new.values())):
             failures.extend(["UNSUPPORTED_GIT_MODE", "ESCALATION_REQUIRED"])
         receipt["business_scope"] = "FAIL" if "ESCALATION_REQUIRED" in failures else "PASS"
-        tests = bootstrap_tests if bootstrap else list(dict.fromkeys(project["required_tests"] + project.get("future_required_tests", [])))
-        test_commit = candidate if bootstrap else base
-        test_tree = new if bootstrap else old
+        tests = bootstrap_tests if bootstrap else [t for p in projects
+                 for t in p["required_tests"] + p.get("future_required_tests", [])]
+        if any(not p["required_tests"] and not p.get("future_required_tests") for p in projects) and not bootstrap:
+            failures.append("STRICT_REQUIREMENTS_MISSING" if strict else "TRUSTED_TEST_UNAVAILABLE")
+        if strict:
+            impact, modules, full = impact_plan(mapping, [p["path"] for p in paths], old)
+            tests += impact
+            receipt["checks"].update(impact_modules=modules, full_regression=full)
+        required = list(dict.fromkeys(tests))
+        tests += [i["path"] for i in paths if i["path"] in new and test_path(i["path"])
+                  and any(owns(p, i["path"]) for p in projects)]
+        tests = list(dict.fromkeys(tests))
         receipt["test_plan"] = tests
-        receipt["checks"]["test_policy"] = ("trusted bootstrap discovery; all candidate namespace tests" if bootstrap
-                                              else "trusted Registry; module map recorded, not automated")
-        receipt["checks"]["test_source_commit"] = test_commit
-        if not tests or any(p not in test_tree or not p.startswith("08_tests/") or not p.endswith(".py") for p in tests):
-            failures.extend(["TRUSTED_TEST_UNAVAILABLE", "ESCALATION_REQUIRED"])
-        else:
-            receipt["test_identities"] = [{"path": p, "trusted_blob": test_tree[p]["oid"],
-                                          "sha256": digest(blob(repo, test_commit, p))} for p in tests]
+        receipt["checks"]["trusted_required_tests"] = required
+        receipt["checks"]["test_policy"] = "trusted required/impact/full UNION candidate changed owned tests"
+        receipt["checks"]["test_source_commit"] = candidate
+        if any(p not in new for p in required):
+            failures.append("REQUIRED_TEST_REMOVED")
+        if not tests or any(p not in new or not test_path(p) for p in tests):
+            failures.append("TRUSTED_TEST_UNAVAILABLE")
+        receipt["test_identities"] = [{"path": p, "trusted_blob": old.get(p, {}).get("oid"),
+                                      "candidate_blob": new[p]["oid"],
+                                      "sha256": digest(blob(repo, candidate, p))} for p in tests if p in new]
+        # Policy edits may add coverage but cannot remove trusted obligations.
+        failures.extend(policy_reductions(repo, candidate, sources, registry, mapping, paths))
         try:
             git(repo, "diff", "--check", base, candidate, "--")
             receipt["checks"]["diff_check"] = "PASS"
@@ -365,32 +461,38 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
             receipt["checks"]["syntax"] = "PASS"
         except (SyntaxError, ValueError):
             failures.append("SYNTAX_FAILED")
-        # Scope denial never executes candidate. A deleted/modified ordinary test
-        # remains in the trusted overlay and therefore cannot reduce test count.
+        # Only the trusted plan/config judges the exact candidate test versions.
         if not failures:
             with tempfile.TemporaryDirectory(prefix="admission-") as directory:
                 workspace = Path(directory)
                 export(repo, candidate, workspace)
-                # Discard all candidate tests, then restore the entire trusted suite
-                # and fixtures, including deleted required tests and conftest files.
-                suite = workspace / "08_tests"
-                if suite.exists():
-                    shutil.rmtree(suite)
-                export(repo, base, workspace, trusted_tests=True)
-                if bootstrap:
-                    # Restore only this new project's candidate test namespace; base policy/config stays authoritative.
-                    for path in new:
-                        if under(path, bootstrap["reserved_paths"][1]):
-                            target = workspace / path
+                for path in set(old) | set(new):
+                    if Path(path).name in {"conftest.py", "pytest.ini", "setup.cfg", "pyproject.toml"}:
+                        target = workspace / path
+                        if path in old:
                             target.parent.mkdir(parents=True, exist_ok=True)
-                            target.write_bytes(blob(repo, candidate, path))
+                            target.write_bytes(blob(repo, base, path))
+                        elif target.exists():
+                            target.unlink()
+                export_git_identity(repo, workspace, base, candidate)
                 test_evidence = evidence / "tests"
                 test_evidence.mkdir()
+                materialized = {p.relative_to(workspace).as_posix(): digest(p.read_bytes())
+                                for p in workspace.rglob("*") if p.is_file()
+                                and ".git" not in p.relative_to(workspace).parts}
                 per_test = []
                 for index, test in enumerate(tests):
                     destination = test_evidence / f"test-{index:04d}"
                     destination.mkdir()
                     per_test.append({"path": test, **executor(workspace, destination, [test])})
+                    if any((workspace / p).is_symlink() or not (workspace / p).is_file()
+                           or digest((workspace / p).read_bytes()) != expected
+                           for p, expected in materialized.items()):
+                        failures.append("TESTED_TREE_CHANGED")
+                        break
+                    if text(workspace, "rev-parse", "HEAD") != candidate:
+                        failures.append("TESTED_TREE_CHANGED")
+                        break
                 receipt["test_result"] = {
                     "result": "PASS" if all(r.get("result") == "PASS" and r.get("test_count", 0) > 0 for r in per_test) else "FAIL",
                     "test_count": sum(r.get("test_count", 0) for r in per_test),
@@ -398,8 +500,6 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                     "per_test": per_test}
                 if receipt["test_result"].get("result") != "PASS":
                     failures.append("REQUIRED_TEST_FAILED")
-                if any(p not in new for p in tests):
-                    failures.append("TRUSTED_TEST_DELETED")
         receipt["failure_codes"] = sorted(set(failures))
         receipt["final_result"] = "PASS" if not failures else "FAIL"
         jsonschema.validate(receipt, schema)

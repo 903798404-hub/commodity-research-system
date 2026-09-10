@@ -134,24 +134,23 @@ def test_registry_cannot_expand_ownership(fixture_repo, tmp_path):
     assert "forbidden" in next(i for i in result["changed_paths"] if i["path"] == "secret.py")["classifications"]
 
 
-def test_weakening_tests_does_not_hide_failure(fixture_repo, tmp_path):
+def test_existing_project_executes_modified_candidate_test(fixture_repo, tmp_path):
     repo, _ = fixture_repo
-    write(repo, "03_src/alpha.py", "VALUE = 99\n")
-    write(repo, "08_tests/test_alpha.py", "def test_fake():\n    assert True\n")
+    write(repo, "03_src/alpha.py", "VALUE = 2\n")
+    write(repo, "08_tests/test_alpha.py", "def test_candidate_regression():\n    assert False, 'candidate executed'\n")
     result, _ = evaluate(fixture_repo, tmp_path)
     assert result["final_result"] == "FAIL"
     assert "REQUIRED_TEST_FAILED" in result["failure_codes"]
     assert result["test_result"]["test_count"] == 1
 
 
-def test_deleted_trusted_test_still_executes(fixture_repo, tmp_path):
+def test_deleted_required_test_fails_before_execution(fixture_repo, tmp_path):
     repo, _ = fixture_repo
     (repo / "08_tests/test_alpha.py").unlink()
     result, _ = evaluate(fixture_repo, tmp_path)
-    assert result["test_result"]["result"] == "PASS"
-    assert result["test_result"]["test_count"] == 1
-    assert result["final_result"] == "FAIL"  # old Completion also rejects deletion
-    assert "TRUSTED_TEST_DELETED" in result["failure_codes"]
+    assert result["test_result"]["result"] == "NOT_RUN"
+    assert result["final_result"] == "FAIL"
+    assert "REQUIRED_TEST_REMOVED" in result["failure_codes"]
 
 
 @pytest.mark.parametrize("mode", ["120000", "160000"])
@@ -231,9 +230,10 @@ def test_shared_project_cannot_use_business_fast_lane_for_owned_source(fixture_r
     base = commit(repo)
     git(repo, "update-ref", "refs/remotes/origin/main", base)
     write(repo, "03_src/alpha.py", "VALUE = 2\n")
-    result, _ = evaluate((repo, base), tmp_path, executor=lambda *a: pytest.fail("Shared candidate must not execute in Business lane"))
-    assert result["final_result"] == "FAIL"
-    assert "ESCALATION_REQUIRED" in result["failure_codes"]
+    result, head = evaluate((repo, base), tmp_path)
+    assert result["lane"] == "strict"
+    assert result["final_result"] == "PASS", result
+    assert admission.evidence_valid(result, repo, base, head)
 
 
 def test_candidate_cannot_supply_executor(fixture_repo, tmp_path):
@@ -309,7 +309,7 @@ def test_workflow_shadow_permissions_and_trust_source():
     raw = (ROOT / admission.WORKFLOW).read_text()
     assert '${{ secrets.' not in raw
     assert "environment:" not in raw
-    for step in jobs["shadow"]["steps"]:
+    for step in jobs["admission"]["steps"]:
         if "uses" in step:
             assert __import__('re').fullmatch(r"actions/[a-z-]+@[0-9a-f]{40}", step['uses'])
         if step.get('with', {}).get('path') in {'trusted','candidate'}:
@@ -540,3 +540,108 @@ def test_bootstrap_namespace_conflict_denied(fixture_repo, tmp_path):
     head = commit(repo)
     result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
     assert 'ESCALATION_REQUIRED' in result['failure_codes']
+
+
+@pytest.mark.parametrize("body,expected", [
+    ("def test_new_regression():\n    assert True\n", "PASS"),
+    ("def test_new_regression():\n    assert False, 'candidate new test executed'\n", "FAIL"),
+])
+def test_existing_ready_owned_namespace_new_test_runs(fixture_repo, tmp_path, body, expected):
+    repo, _ = fixture_repo
+    data = json.loads((repo / admission.REGISTRY).read_text())
+    data['projects'][0]['owned_paths'].append('08_tests/alpha')
+    write(repo, admission.REGISTRY, json.dumps(data))
+    base = commit(repo)
+    write(repo, '08_tests/alpha/test_regression.py', body)
+    result, head = evaluate((repo, base), tmp_path)
+    assert result['final_result'] == expected, result
+    assert result['test_result']['test_count'] == 2
+    assert result['checks']['test_source_commit'] == head
+    identity = next(t for t in result['test_identities'] if t['path'].endswith('test_regression.py'))
+    assert identity['trusted_blob'] is None
+    assert identity['candidate_blob'] == git(repo, 'rev-parse', head+':08_tests/alpha/test_regression.py')
+
+
+def test_candidate_can_legitimately_replace_old_test_blob(fixture_repo, tmp_path):
+    repo, base = fixture_repo
+    write(repo, '03_src/alpha.py', 'VALUE = 3\n')
+    write(repo, '08_tests/test_alpha.py', 'from alpha import VALUE\ndef test_new_contract():\n    assert VALUE == 3\n')
+    result, head = evaluate(fixture_repo, tmp_path)
+    assert result['final_result'] == 'PASS', result
+    assert result['test_identities'][0]['candidate_blob'] != result['test_identities'][0]['trusted_blob']
+    assert admission.evidence_valid(result, repo, base, head)
+
+
+@pytest.mark.parametrize('kind', ['shared', 'governance'])
+@pytest.mark.parametrize('satisfied', [False, True])
+def test_strict_lane_exact_identity_and_required_impact_tests(fixture_repo, tmp_path, kind, satisfied):
+    repo, _ = fixture_repo
+    data = json.loads((repo / admission.REGISTRY).read_text())
+    p = data['projects'][0]; p['change_class'] = 'shared'
+    path = admission.IMPLEMENTATION if kind == 'governance' else '03_src/shared.py'
+    p['owned_paths'].append(path)
+    p['shared_dependencies'] = []
+    write(repo, admission.REGISTRY, json.dumps(data))
+    write(repo, admission.MAP, yaml.safe_dump({'modules': {'changed': {
+        'code_paths': [path], 'direct_tests': [], 'impact_tests': ['08_tests/test_beta.py'],
+        'dependents': [], 'full_regression_when_changed': False}}}))
+    base = commit(repo)
+    write(repo, path, (repo/path).read_text(encoding='utf-8')+'\n# proposed source change\n')
+    if not satisfied:
+        write(repo, '03_src/alpha.py', 'VALUE = 99\n')
+    head = commit(repo)
+    result = admission.admit(repo, base, head, 'alpha', tmp_path/'evidence', executor=inert_executor)
+    assert result['lane'] == 'strict'
+    assert result['test_plan'] == ['08_tests/test_alpha.py', '08_tests/test_beta.py']
+    assert result['final_result'] == ('PASS' if satisfied else 'FAIL'), result
+    assert admission.evidence_valid(result, repo, base, head) == satisfied
+    assert result['candidate'] == {'commit':head, 'tree':git(repo, 'rev-parse', head+'^{tree}')}
+
+
+def test_strict_policy_cannot_reduce_its_required_tests(fixture_repo, tmp_path):
+    repo, _ = fixture_repo
+    data = json.loads((repo / admission.REGISTRY).read_text())
+    data['projects'][0]['change_class'] = 'shared'
+    data['projects'][0]['owned_paths'].append(admission.REGISTRY)
+    write(repo, admission.REGISTRY, json.dumps(data))
+    base = commit(repo)
+    data['projects'][0]['required_tests'] = []
+    write(repo, admission.REGISTRY, json.dumps(data))
+    result, _ = evaluate((repo, base), tmp_path)
+    assert result['final_result'] == 'FAIL'
+    assert 'TEST_POLICY_REDUCTION' in result['failure_codes']
+    assert result['test_plan'] == ['08_tests/test_alpha.py']
+
+
+def test_trusted_full_impact_plan_is_transitive():
+    mapping = {'modules': {'a': {'code_paths':['03_src/a.py'], 'dependents':['b']},
+                           'b': {'direct_tests':['08_tests/test_b.py'], 'full_regression_when_changed':True}}}
+    tests, modules, full = admission.impact_plan(mapping, ['03_src/a.py'],
+                                               {'08_tests/test_b.py':{}, '08_tests/test_c.py':{}})
+    assert full and modules == ['a','b']
+    assert tests == ['08_tests/test_b.py','08_tests/test_c.py']
+
+
+def test_candidate_mutation_cannot_receive_commit_tree_pass(fixture_repo, tmp_path):
+    repo, base = fixture_repo
+    write(repo, '03_src/alpha.py', 'VALUE = 2\n')
+    def mutate(workspace, evidence, tests):
+        write(workspace, '03_src/alpha.py', 'VALUE = 99\n')
+        return {'result':'PASS', 'test_count':1}
+    result, _ = evaluate(fixture_repo, tmp_path, executor=mutate)
+    assert result['final_result']=='FAIL'
+    assert 'TESTED_TREE_CHANGED' in result['failure_codes']
+
+
+def test_exported_git_metadata_is_exact_and_has_no_remote_credentials(fixture_repo, tmp_path):
+    repo, base = fixture_repo
+    write(repo, '03_src/alpha.py', 'VALUE = 2\n')
+    head = commit(repo)
+    workspace = tmp_path/'export'
+    admission.export(repo, head, workspace)
+    admission.export_git_identity(repo, workspace, base, head)
+    assert git(workspace,'rev-parse','HEAD') == head
+    assert git(workspace,'rev-parse','origin/main') == base
+    assert git(workspace,'remote') == ''
+    assert 'credential' not in (workspace/'.git/config').read_text()
+    assert not (workspace/'.git/objects/info/alternates').exists()
