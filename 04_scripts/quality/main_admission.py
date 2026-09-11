@@ -30,9 +30,10 @@ IMPLEMENTATION = "04_scripts/quality/main_admission.py"
 SCHEMA = "02_configs/main_admission_result.schema.json"
 WORKFLOW = ".github/workflows/trusted-main-admission.yml"
 MAP = "02_configs/module_test_map.yaml"
+TRANSITION = "04_scripts/quality/governance_transition.py"
 TRUST_FILES = (REGISTRY, SCOPE, IMPLEMENTATION, SCHEMA, MAP,
                "04_scripts/quality/project_registry.py", "pyproject.toml",
-               "requirements-dev.txt", WORKFLOW)
+               "requirements-dev.txt", WORKFLOW, TRANSITION)
 PRODUCTION = ("09_deploy", "04_scripts/automation", "04_scripts/runtime",
               "03_src/agri_research_agent/automation", "01_data", "06_outputs", "10_logs")
 
@@ -319,7 +320,31 @@ def policy_reductions(repo, candidate, sources, registry, mapping, paths):
     return []
 
 
-def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests) -> dict:
+def is_governance_transition(paths, registry):
+    governance = next((p for p in registry["projects"] if p["project_id"] == "dev-governance"), {})
+    required = governance.get("required_tests", []) + governance.get("future_required_tests", [])
+    return any(i["path"] in TRUST_FILES or i["path"] in required
+               or under(i["path"], "04_scripts/quality") or under(i["path"], ".github")
+               or Path(i["path"]).name in {"AGENTS.md", "conftest.py", "pytest.ini", "setup.cfg", "setup.py"}
+               or i["path"].startswith("requirements")
+               for i in paths)
+
+
+def workflow_execution_unchanged(before, after):
+    """No in-flight workflow can change the judge/issuer/aggregator that vets it.
+
+    A critical workflow migration first upgrades this trusted policy, with exact
+    external approval, then changes the workflow in a separately approved commit.
+    This prevents a workflow edit from skipping this candidate's trusted check.
+    """
+    import yaml
+    old, new = yaml.safe_load(before), yaml.safe_load(after)
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return False
+    return {k: v for k, v in old.items() if k != "name"} == {k: v for k, v in new.items() if k != "name"}
+
+
+def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests, approval_run_id=None, approval_get=None) -> dict:
     receipt = {"schema_version": "main-admission/1", "mode": "required", "lane": "business", "final_result": "FAIL",
                "business_scope": "FAIL", "failure_codes": [], "trusted_main": None, "candidate": None,
                "merge_base": None, "ahead": None, "behind": None, "trusted_governance": {},
@@ -398,7 +423,10 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                           owned_paths=[], shared_dependencies=[], forbidden_paths=[], required_tests=[])
         project = projects[0] if projects else unresolved
         strict = any(p["change_class"] == "shared" for p in projects)
-        receipt["lane"] = "strict" if strict else "business"
+        transition = not bootstrap and is_governance_transition(paths, registry)
+        receipt["lane"] = "governance_transition" if transition else "strict" if strict else "business"
+        receipt["checks"]["CHANGE_CLASS"] = ("GOVERNANCE_TRANSITION" if transition else "STRICT_SHARED" if strict else "BUSINESS")
+        receipt["checks"]["MAINTAINER_TRANSITION_APPROVAL"] = "MISSING" if transition else "NOT_REQUIRED"
         receipt["checks"]["project_id"] = project["project_id"]
         receipt["checks"]["project_ids"] = [p["project_id"] for p in projects]
         if not projects or any(p["status"] != "ready" for p in projects) or (not strict and len(projects) != 1):
@@ -431,7 +459,7 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                  for t in p["required_tests"] + p.get("future_required_tests", [])]
         if any(not p["required_tests"] and not p.get("future_required_tests") for p in projects) and not bootstrap:
             failures.append("STRICT_REQUIREMENTS_MISSING" if strict else "TRUSTED_TEST_UNAVAILABLE")
-        if strict:
+        if strict or transition:
             impact, modules, full = impact_plan(mapping, [p["path"] for p in paths], old)
             tests += impact
             receipt["checks"].update(impact_modules=modules, full_regression=full)
@@ -450,8 +478,21 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         receipt["test_identities"] = [{"path": p, "trusted_blob": old.get(p, {}).get("oid"),
                                       "candidate_blob": new[p]["oid"],
                                       "sha256": digest(blob(repo, candidate, p))} for p in tests if p in new]
+        for item in paths:
+            path = item["path"]
+            if Path(path).name in {"conftest.py", "pytest.ini", "setup.cfg"}:
+                failures.append("TRUSTED_TEST_CONFIG_CHANGED")
+            elif Path(path).name == "pyproject.toml":
+                import tomllib
+                before_config = tomllib.loads(blob(repo, base, path).decode()).get("tool", {}).get("pytest", {})
+                after_config = tomllib.loads(blob(repo, candidate, path).decode()).get("tool", {}).get("pytest", {})
+                if before_config != after_config:
+                    failures.append("TRUSTED_TEST_CONFIG_CHANGED")
         # Policy edits may add coverage but cannot remove trusted obligations.
         failures.extend(policy_reductions(repo, candidate, sources, registry, mapping, paths))
+        if WORKFLOW in {p["path"] for p in paths}:
+            if not workflow_execution_unchanged(sources[WORKFLOW], blob(repo, candidate, WORKFLOW)):
+                failures.append("TRUSTED_WORKFLOW_EXECUTION_CHANGED")
         try:
             git(repo, "diff", "--check", base, candidate, "--")
             receipt["checks"]["diff_check"] = "PASS"
@@ -502,6 +543,19 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                     "per_test": per_test}
                 if receipt["test_result"].get("result") != "PASS":
                     failures.append("REQUIRED_TEST_FAILED")
+        # Approval never waives tests, ownership, test removals or forbidden paths.
+        # Pending governance candidates still run every safe trusted-main check.
+        if transition and not failures:
+            authority = {"__name__": "trusted_transition_policy"}
+            exec(compile(sources[TRANSITION], "<trusted transition policy>", "exec"), authority)
+            try:
+                options = {"get": approval_get} if approval_get is not None else {}
+                proof = authority["validate_external_approval"](
+                    base, candidate, receipt["candidate"]["tree"], approval_run_id, **options)
+                receipt["checks"]["MAINTAINER_TRANSITION_APPROVAL"] = "PRESENT"
+                receipt["checks"]["transition_approval"] = proof
+            except Exception as exc:
+                failures.extend(["GOVERNANCE_TRANSITION_PENDING", str(exc)[:200]])
         receipt["failure_codes"] = sorted(set(failures))
         receipt["final_result"] = "PASS" if not failures else "FAIL"
         jsonschema.validate(receipt, schema)
@@ -520,7 +574,8 @@ def main(argv=None) -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args(argv)
-    result = admit(args.repo.resolve(), args.base, args.candidate, args.project, args.evidence.resolve())
+    result = admit(args.repo.resolve(), args.base, args.candidate, args.project, args.evidence.resolve(),
+                   approval_run_id=os.environ.get("GOVERNANCE_APPROVAL_RUN_ID"))
     print(json.dumps({"MAIN_ADMISSION": result["final_result"], "failure_codes": result["failure_codes"]}))
     return 0 if result["final_result"] == "PASS" else 1
 

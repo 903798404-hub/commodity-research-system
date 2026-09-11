@@ -1,4 +1,6 @@
 name: trusted-main-admission-v1
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.transition_intent == 'TRUSTED_GOVERNANCE_TRANSITION_APPROVED' && format('TRUSTED_GOVERNANCE_TRANSITION_APPROVED|{0}|{1}|{2}', inputs.base_main, inputs.candidate_commit, inputs.candidate_tree) || format('Admission {0}', github.sha) }}
 
 # Required check: main-trusted-admission-v1 Ruleset stays Active.
 # Authenticate the Actions publisher and exact run/artifact; candidate code is not policy.
@@ -9,9 +11,31 @@ on:
   push:
     branches: ['feat/**', 'fix/**']
   workflow_dispatch:
+    inputs:
+      transition_intent:
+        description: 'Leave empty for admission; explicit trusted-root approval only on main'
+        type: string
+        default: ''
+      base_main:
+        description: 'Approval: exact base main SHA'
+        type: string
+        default: ''
+      candidate_commit:
+        description: 'Approval: exact candidate commit SHA'
+        type: string
+        default: ''
+      candidate_tree:
+        description: 'Approval: exact candidate tree SHA'
+        type: string
+        default: ''
+      approval_run_id:
+        description: 'Admission: successful trusted-main approval run ID, governance only'
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: admission-${{ github.event.pull_request.number || github.ref }}
@@ -19,6 +43,7 @@ concurrency:
 
 jobs:
   admission:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.transition_intent == 'TRUSTED_GOVERNANCE_TRANSITION_APPROVED') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:
@@ -54,6 +79,8 @@ jobs:
         shell: bash
         env:
           EXPECTED_CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GOVERNANCE_APPROVAL_RUN_ID: ${{ inputs.approval_run_id }}
         run: |
           set -euo pipefail
           BASE=$(git -C trusted rev-parse HEAD)
@@ -127,7 +154,7 @@ jobs:
 
   final:
     name: trusted-main-admission-v1
-    if: always()
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.transition_intent == 'TRUSTED_GOVERNANCE_TRANSITION_APPROVED') }}
     needs: admission
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -140,6 +167,7 @@ jobs:
         run: test "$JOB_RESULT" = success && test "$ADMISSION_RESULT" = success
 
   candidate-regressions:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.transition_intent == 'TRUSTED_GOVERNANCE_TRANSITION_APPROVED') }}
     name: Candidate governance regression tests (not main admission)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -181,3 +209,29 @@ jobs:
           path: ${{ runner.temp }}/governance-regressions/
           if-no-files-found: error
           retention-days: 14
+
+  maintainer-transition-approval:
+    name: Maintainer trusted-root approval (no candidate execution)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.transition_intent == 'TRUSTED_GOVERNANCE_TRANSITION_APPROVED' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted main only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Validate external actor and exact transition tuple
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRANSITION_INTENT: ${{ inputs.transition_intent }}
+          TRANSITION_BASE: ${{ inputs.base_main }}
+          TRANSITION_CANDIDATE: ${{ inputs.candidate_commit }}
+          TRANSITION_TREE: ${{ inputs.candidate_tree }}
+        run: python -I -B trusted/04_scripts/quality/governance_transition.py --issue

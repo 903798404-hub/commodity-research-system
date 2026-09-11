@@ -50,15 +50,15 @@
 
 ## 测试与部署
 
-普通 Business Fast Lane：`START / RESUME → development → push feature → trusted-main-admission-v1 PASS → human approval → exact fast-forward main`，随后同步 clean local main。GitHub hosted Admission 是正式 required tests / Scope / identity evidence；本地 Direct / Impact tests 和 Scope 可用于快速反馈，`complete_project.py` 与独立 integration worktree 不再是普通 Business 进入 main 的强制 Gate，不得因未执行它们判定未完成。
+普通 Business Fast Lane：`START / RESUME → development → push feature → trusted-main-admission-v1 PASS → exact fast-forward main`，随后同步 clean local main。GitHub hosted Admission 是正式 required tests / Scope / identity evidence；本地 Direct / Impact tests 和 Scope 可用于快速反馈，`complete_project.py` 与独立 integration worktree 不再是普通 Business 进入 main 的强制 Gate，不得因未执行它们判定未完成。
 
-接纳必须使用 successful `trusted-main-admission-v1` 对应的同一个 candidate Commit/Tree，来源固定 GitHub Actions `integration_id=15368`，并核对该 run 的 Admission artifact 与 fresh main 身份。Candidate 任何新 commit 都必须重新获得 hosted PASS，即使 Tree 相同也不得复用旧 PASS；人工批准后仅按精确 SHA 普通 fast-forward，Ruleset 保持 Active、无 bypass。具体 API 回查见规范第 6 节。
+接纳必须使用 successful `trusted-main-admission-v1` 对应的同一个 candidate Commit/Tree，来源固定 GitHub Actions `integration_id=15368`，并核对该 run 的 Admission artifact 与 fresh main 身份。Candidate 任何新 commit 都必须重新获得 hosted PASS，即使 Tree 相同也不得复用旧 PASS；在任务已有 main 接纳授权内仅按精确 SHA 普通 fast-forward，Ruleset 保持 Active、无 bypass。具体 API 回查见规范第 6 节。
 
-Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查；Completion 与独立 integration 可用于开发反馈或专项验收；main 链路为 trusted Scope → required/impact/必要 full tests → strict PASS → 人工批准精确 fast-forward；候选和部署继续执行原生产规则。
+Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查；Completion 与独立 integration 可用于开发反馈或专项验收；main 链路为 trusted Scope → required/impact/必要 full tests → strict PASS → 精确 fast-forward（仅治理资产修改额外核验 trusted-root approval）；候选和部署继续执行原生产规则。
 
 `runtime_target=production_container` 的真实容器证据属于独立 production/release gate。main-entry correctness 由 hosted strict lane 验证，不以生产环境访问或签名容器 Completion 作为 main 前置条件。生产候选仍须明确授权、绑定 clean Commit/Tree/Image，candidate 不写 production；正式发布核验 Approved Production SHA、数据 Manifest、同一已验证 Image ID 和 rollback。Completion 若调用仍执行全部 required tests 与签名容器门禁；main PASS 不授予生产权限。
 
-已授权普通 Business task 包含范围内 commit/push feature，无需重复阶段许可；main 仍等待用户对精确 Commit/Tree 批准。START / RESUME 包含 fetch 和 local Git metadata 写入，不是纯 read-only。
+已授权普通 Business task 包含范围内 commit/push feature，无需重复阶段许可；main 按任务既有授权和精确 identity/check 执行。START / RESUME 包含 fetch 和 local Git metadata 写入，不是纯 read-only。
 
 - 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
 - 普通业务可运行 `04_scripts/quality/audit_changed_scope.py --project <project_id>` 获取本地反馈，正式 Scope 由 hosted Admission 执行；高风险 lane 在 Impact/完整回归、Completion 或 integration 前仍必须得到 `PROJECT_SCOPE=PASS`。Registry owned paths 不包含只读 shared dependencies；普通 business 的全局 protected 不可被 owned 覆盖；ready shared owner 的 main-entry 修改由 trusted strict lane 判断。禁止业务用 `--owned`、`--known-existing`、旧 baseline 或修改 Registry 绕过门禁；低层 `--owned` 仅用于测试或获批 shared 任务。Scope Gate 不是权限沙箱，修改门禁本身必须独立治理审查。
@@ -81,3 +81,12 @@ Business Fast Lane 不适用于 shared infrastructure、governance、protected p
 ## 任务汇报
 
 完成后必须说明：修改文件、修改原因、测试结果、是否修改数据、是否连接服务器、是否部署、是否执行 Git、是否存在未解决风险。
+
+
+Governance Transition：普通 Business 与 STRICT_SHARED 沿各自 trusted tests/Scope 的 required check 接纳，不新增人工项目或治理批准。只有修改 Admission、Registry/ownership/test policy、治理 workflow、bootstrap 核心或治理 required tests 等 trusted-root 资产时，分类为 `GOVERNANCE_TRANSITION`。所有安全检查继续执行；缺少外部 maintainer approval 时返回 `GOVERNANCE_TRANSITION_PENDING`，不自动 main-entry PASS。
+
+`PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO`；`GOVERNANCE_TRUST_ROOT_APPROVAL_REQUIRED = YES`（仅 trusted-root 修改）。已授权 Business 开发不重复申请 commit/push 或治理许可；普通 main 操作按任务现有授权执行，不附加本机制的人为审批。本轮任务若明确禁止 main 操作仍必须停止。
+
+审批使用 GitHub 原生 main 上的手动 workflow dispatch，绑定精确 base main SHA、candidate Commit 与 Tree，由 GitHub API 核验 maintainer/admin、可信 workflow 路径、运行身份与成功结论。candidate 文件、commit message、branch name、环境变量中的声明均不是审批；仅 run ID 是待核验的查询指针。批准不覆盖 Scope、减测、required 删除或未授权 production change，也不授权部署。
+
+详见 [Governance Transition 合同与首次启用限制](07_docs/templates/GovernanceTransition.md)。生产继续独立 release / Approved identity / Commit/Tree/Image / 数据 Manifest / rollback / 单独授权。当前部署状态不能从本候选文档推断。

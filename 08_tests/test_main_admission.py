@@ -299,13 +299,14 @@ def test_schema_rejects_pass_with_failure():
 def test_workflow_shadow_permissions_and_trust_source():
     workflow = yaml.safe_load((ROOT / admission.WORKFLOW).read_text())
     assert workflow["name"] == "trusted-main-admission-v1"
-    assert workflow["permissions"] == {"contents":"read"}
+    assert workflow["permissions"] == {"contents":"read", "actions":"read"}
     triggers = workflow.get("on", workflow.get(True))
     assert "pull_request_target" not in triggers
     assert set(triggers) == {"pull_request", "push", "workflow_dispatch"}
     jobs = workflow["jobs"]
     assert jobs["final"]["name"] == "trusted-main-admission-v1"
-    assert jobs["final"]["if"] == "always()"
+    assert "always()" in jobs["final"]["if"]
+    assert "refs/heads/main" in jobs["final"]["if"]
     raw = (ROOT / admission.WORKFLOW).read_text()
     assert '${{ secrets.' not in raw
     assert "environment:" not in raw
@@ -590,8 +591,9 @@ def test_strict_lane_exact_identity_and_required_impact_tests(fixture_repo, tmp_
     if not satisfied:
         write(repo, '03_src/alpha.py', 'VALUE = 99\n')
     head = commit(repo)
-    result = admission.admit(repo, base, head, 'alpha', tmp_path/'evidence', executor=inert_executor)
-    assert result['lane'] == 'strict'
+    result = admission.admit(repo, base, head, 'alpha', tmp_path/'evidence', executor=inert_executor,
+                             approval_run_id='123', approval_get=approval_api(base, head, git(repo,'rev-parse',head+'^{tree}')))
+    assert result['lane'] == ('governance_transition' if kind=='governance' else 'strict')
     assert result['test_plan'] == ['08_tests/test_alpha.py', '08_tests/test_beta.py']
     assert result['final_result'] == ('PASS' if satisfied else 'FAIL'), result
     assert admission.evidence_valid(result, repo, base, head) == satisfied
@@ -653,3 +655,153 @@ def test_unmapped_impact_consumer_requires_full_suite_instead_of_dropping_covera
     tests, modules, full = admission.impact_plan(mapping, ['03_src/library.py'],
                                                {'08_tests/test_consumer.py':{}})
     assert full and tests == ['08_tests/test_consumer.py']
+
+
+# GitHub GET fixtures model server-issued run metadata, never an approval file.
+def approval_api(base, candidate, tree, **mutations):
+    from quality import governance_transition as transition
+    actor = {'id': 7, 'login':'maintainer', 'type':'User'}
+    run = dict(id=123, repository={'full_name':transition.REPOSITORY}, event='workflow_dispatch',
+               head_branch='main', head_sha=base, path=transition.WORKFLOW, workflow_id=5,
+               display_title=transition.approval_title(base,candidate,tree), run_attempt=1,
+               status='completed', conclusion='success', actor=actor, triggering_actor=actor)
+    run.update(mutations)
+    responses = {'/actions/runs/123':run,
+        '/actions/workflows/5':{'path':transition.WORKFLOW,'state':'active'},
+        '/collaborators/maintainer/permission':{'permission':'admin','role_name':'admin','user':actor},
+        '/git/ref/heads/main':{'object':{'sha':base}},
+        '/git/commits/'+candidate:{'sha':candidate,'tree':{'sha':tree}}}
+    return lambda path: responses[path]
+
+
+def governance_fixture(fixture_repo):
+    repo, _ = fixture_repo
+    data=json.loads((repo/admission.REGISTRY).read_text())
+    project=data['projects'][0]
+    project['change_class']='shared'
+    project['owned_paths'] += [admission.IMPLEMENTATION, admission.REGISTRY, admission.WORKFLOW,
+                               'pyproject.toml', admission.TRANSITION]
+    write(repo, admission.REGISTRY, json.dumps(data))
+    base=commit(repo)
+    write(repo, admission.IMPLEMENTATION, (repo/admission.IMPLEMENTATION).read_text(encoding='utf-8')+'\n# proposed trusted-root upgrade\n')
+    return repo,base
+
+
+def test_transition_pending_runs_all_safe_trusted_checks(fixture_repo,tmp_path):
+    repo,base=governance_fixture(fixture_repo);head=commit(repo)
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor)
+    assert result['checks']['CHANGE_CLASS']=='GOVERNANCE_TRANSITION'
+    assert result['test_result']['result']=='PASS' and result['test_result']['test_count']==1
+    assert result['final_result']=='FAIL' and 'GOVERNANCE_TRANSITION_PENDING' in result['failure_codes']
+    assert result['checks']['MAINTAINER_TRANSITION_APPROVAL']=='MISSING'
+
+
+def test_external_maintainer_exact_transition_approval_passes(fixture_repo,tmp_path):
+    repo,base=governance_fixture(fixture_repo);head=commit(repo);tree=git(repo,'rev-parse',head+'^{tree}')
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor,
+                          approval_run_id='123',approval_get=approval_api(base,head,tree))
+    assert result['final_result']=='PASS',result
+    assert result['checks']['MAINTAINER_TRANSITION_APPROVAL']=='PRESENT'
+    assert admission.evidence_valid(result,repo,base,head)
+    assert result['checks']['transition_approval']['production_authorization'] is False
+
+
+@pytest.mark.parametrize('mutation', [
+    {'event':'push'}, {'head_branch':'feat/governance'}, {'head_sha':'f'*40},
+    {'conclusion':'failure'}, {'display_title':'approved=true'}, {'run_attempt':2},
+    {'repository':{'full_name':'attacker/fork'}}, {'path':'.github/workflows/fake.yml'},
+    {'actor':{'type':'Bot','id':7,'login':'maintainer'}},
+])
+def test_candidate_cannot_forge_approval_workflow_provenance(fixture_repo,tmp_path,mutation):
+    repo,base=governance_fixture(fixture_repo);head=commit(repo);tree=git(repo,'rev-parse',head+'^{tree}')
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor,
+                          approval_run_id='123',approval_get=approval_api(base,head,tree,**mutation))
+    assert result['final_result']=='FAIL'
+    assert result['checks']['MAINTAINER_TRANSITION_APPROVAL']=='MISSING'
+
+
+def test_new_commit_invalidates_external_approval_even_same_tree(fixture_repo,tmp_path):
+    repo,base=governance_fixture(fixture_repo);old=commit(repo);tree=git(repo,'rev-parse',old+'^{tree}')
+    git(repo,'commit','--allow-empty','-qm','new identity')
+    head=git(repo,'rev-parse','HEAD')
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor,
+                          approval_run_id='123',approval_get=approval_api(base,old,tree))
+    assert result['final_result']=='FAIL'
+
+
+@pytest.mark.parametrize('attack',['approval-file','admission','required-test','ownership','test-config','workflow','production'])
+def test_approval_never_waives_trusted_policy(fixture_repo,tmp_path,attack):
+    repo,base=governance_fixture(fixture_repo)
+    if attack=='approval-file':
+        write(repo,'03_src/extra.py','# governance-approved=true\n')
+    elif attack=='admission':
+        write(repo,admission.IMPLEMENTATION,'print("PASS")\n')
+    elif attack=='required-test':
+        (repo/'08_tests/test_alpha.py').unlink()
+    elif attack=='ownership':
+        data=json.loads((repo/admission.REGISTRY).read_text());data['projects'][0]['owned_paths'].append('secret.py')
+        data['projects'][0]['forbidden_paths']=[];write(repo,admission.REGISTRY,json.dumps(data));write(repo,'secret.py','VALUE=2\n')
+    elif attack=='test-config':
+        write(repo,'pyproject.toml','[tool.pytest.ini_options]\ntestpaths=[]\n')
+    elif attack=='workflow':
+        write(repo,admission.WORKFLOW,'name: trusted-main-admission-v1\njobs: {final: {runs-on: ubuntu-latest, steps: [{run: "true"}]}}\n')
+    else:
+        write(repo,'09_deploy/production_data_delivery/evil.py','VALUE=1\n')
+    head=commit(repo);tree=git(repo,'rev-parse',head+'^{tree}')
+    # Metadata and new judge code are not an approval; other attacks must fail
+    # even if a legitimate maintainer has separately approved this exact tuple.
+    kwargs={} if attack in ('approval-file','admission') else dict(approval_run_id='123',approval_get=approval_api(base,head,tree))
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor,**kwargs)
+    assert result['final_result']=='FAIL',result
+    if attack=='required-test':assert 'REQUIRED_TEST_REMOVED' in result['failure_codes']
+    if attack=='workflow':assert 'TRUSTED_WORKFLOW_EXECUTION_CHANGED' in result['failure_codes']
+
+
+@pytest.mark.parametrize('change_class', ['business', 'shared'])
+def test_business_and_shared_do_not_query_governance_approval(fixture_repo,tmp_path,change_class):
+    repo,base=fixture_repo
+    data=json.loads((repo/admission.REGISTRY).read_text())
+    data['projects'][0]['change_class']=change_class
+    if change_class=='shared':
+        write(repo,admission.REGISTRY,json.dumps(data));base=commit(repo)
+    write(repo,'03_src/alpha.py','VALUE=2\n');head=commit(repo)
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor,
+                          approval_get=lambda _:pytest.fail('ordinary Business does not query approvals'))
+    assert result['final_result']=='PASS'
+    assert result['checks']['MAINTAINER_TRANSITION_APPROVAL']=='NOT_REQUIRED'
+
+
+def test_approval_issuer_is_trusted_main_only_and_never_executes_candidate():
+    workflow=yaml.safe_load((ROOT/admission.WORKFLOW).read_text())
+    issuer=workflow['jobs']['maintainer-transition-approval']
+    assert 'refs/heads/main' in issuer['if'] and 'workflow_dispatch' in issuer['if']
+    assert issuer['steps'][0]['with']['ref']=='main'
+    assert all(step.get('with',{}).get('path')!='candidate' for step in issuer['steps'])
+    assert not any('pytest' in step.get('run','') for step in issuer['steps'])
+    for job in ('admission','candidate-regressions','final'):
+        assert 'refs/heads/main' in workflow['jobs'][job]['if']
+    assert all(value!='write' for value in workflow['permissions'].values())
+
+
+@pytest.mark.parametrize('attack', ['demoted', 'actor-id', 'base-moved', 'tree-mismatch', 'revoked'])
+def test_approval_rechecks_current_external_authority(attack):
+    from quality import governance_transition as transition
+    base,head,tree='a'*40,'b'*40,'c'*40
+    original=approval_api(base,head,tree)
+    def get(path):
+        result=original(path)
+        if attack=='revoked' and path.startswith('/actions/runs/'):
+            raise ValueError('APPROVAL_RUN_DELETED')
+        if path.endswith('/permission'):
+            if attack=='demoted':return dict(result,permission='write',role_name='write')
+            if attack=='actor-id':return dict(result,user={'id':999})
+        if attack=='base-moved' and path=='/git/ref/heads/main':return {'object':{'sha':'d'*40}}
+        if attack=='tree-mismatch' and path.startswith('/git/commits/'):return dict(result,tree={'sha':'e'*40})
+        return result
+    with pytest.raises(ValueError):transition.validate_external_approval(base,head,tree,'123',get=get)
+
+
+def test_workflow_top_level_execution_settings_cannot_bypass_guard():
+    before=b'name: admission\njobs: {}\n'
+    for added in (b'env: {BASH_ENV: attack.sh}\n', b'defaults: {run: {shell: python}}\n'):
+        assert not admission.workflow_execution_unchanged(before,before+added)

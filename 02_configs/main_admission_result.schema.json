@@ -338,7 +338,8 @@
     "lane": {
       "enum": [
         "business",
-        "strict"
+        "strict",
+        "governance_transition"
       ]
     }
   },

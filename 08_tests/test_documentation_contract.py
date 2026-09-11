@@ -73,7 +73,7 @@ def test_current_docs_preserve_release_safety_and_baseline_semantics() -> None:
 def test_business_fast_lane_and_strict_lane_are_consistent_at_all_entrypoints():
     for path in (ROOT / 'AGENTS.md', SPEC, MANUAL, FEATURE_TEMPLATE):
         body = read(path)
-        assert 'START / RESUME → development → push feature → trusted-main-admission-v1 PASS → human approval → exact fast-forward main' in body
+        assert 'START / RESUME → development → push feature → trusted-main-admission-v1 PASS → exact fast-forward main' in body
         assert '不再是普通 Business 进入 main 的强制 Gate' in body
         assert '不得因未执行它们判定未完成' in body
         assert '任何新 commit 都必须重新获得 hosted PASS' in body.replace('\n', '')
@@ -184,3 +184,12 @@ def test_governance_v2_active_docs_and_update_entry():
     assert 'SHADOW ONLY' not in read(ROOT/'.github/workflows/trusted-main-admission.yml')
     for marker in ('Approved', 'Commit/Tree', 'Image ID', 'rollback', 'Manifest', '生产单独授权'):
         assert marker in read(SPEC)
+
+
+def test_governance_transition_is_separate_from_business_and_release():
+    contract=read(DOCS/'templates/GovernanceTransition.md')
+    for marker in ('BUSINESS','STRICT_SHARED','GOVERNANCE_TRANSITION','PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO',
+                   'GOVERNANCE_TRUST_ROOT_APPROVAL_REQUIRED = YES','ONE_TIME_BOOTSTRAP_READY = NO',
+                   '7bb5d53d233fb354efaf9df7f598db3cba15206f','不能按 change class 或精确 SHA 限定'):
+        assert marker in contract
+    assert 'run-name' in contract and 'production' in contract
