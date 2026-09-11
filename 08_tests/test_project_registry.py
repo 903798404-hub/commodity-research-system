@@ -1397,7 +1397,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
