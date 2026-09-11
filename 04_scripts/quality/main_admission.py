@@ -275,14 +275,16 @@ def impact_plan(mapping: dict, paths: list[str], old: dict) -> tuple[list[str], 
     selected = {name for name, module in modules.items()
                 if any(under(path, root) for path in paths for root in module.get("code_paths", []))}
     pending = list(selected)
+    unresolved = False
     while pending:
         for name in modules[pending.pop()].get("dependents", []):
             if name not in modules:
-                raise ValueError("TRUSTED_IMPACT_MODULE_UNAVAILABLE: " + name)
+                unresolved = True
+                continue
             if name not in selected:
                 selected.add(name)
                 pending.append(name)
-    full = any(modules[name].get("full_regression_when_changed", False) for name in selected)
+    full = unresolved or any(modules[name].get("full_regression_when_changed", False) for name in selected)
     tests = [t for name in sorted(selected) for key in ("direct_tests", "impact_tests")
              for t in modules[name].get(key, [])]
     if full:

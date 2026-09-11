@@ -645,3 +645,11 @@ def test_exported_git_metadata_is_exact_and_has_no_remote_credentials(fixture_re
     assert git(workspace,'remote') == ''
     assert 'credential' not in (workspace/'.git/config').read_text()
     assert not (workspace/'.git/objects/info/alternates').exists()
+
+
+def test_unmapped_impact_consumer_requires_full_suite_instead_of_dropping_coverage():
+    mapping = {'modules': {'library': {'code_paths':['03_src/library.py'],
+                                      'dependents':['unmapped.consumer']}}}
+    tests, modules, full = admission.impact_plan(mapping, ['03_src/library.py'],
+                                               {'08_tests/test_consumer.py':{}})
+    assert full and tests == ['08_tests/test_consumer.py']
