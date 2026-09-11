@@ -200,7 +200,7 @@ def sandbox_command(workspace: Path, evidence: Path, tests: list[str]) -> list[s
                 "--setenv", "PYTHONDONTWRITEBYTECODE", "1", "--setenv", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1",
                 "--setenv", "LD_LIBRARY_PATH", str(Path(sys.base_prefix) / "lib"),
                 "--setenv", "PATH", str(Path(sys.executable).parent) + ":/usr/bin:/bin",
-                sys.executable, "-I", "-m", "pytest", "-q", "-o", "xfail_strict=true", "-p", "no:cacheprovider",
+                sys.executable, "-I", "-B", "-m", "pytest", "-q", "-o", "xfail_strict=true", "-p", "no:cacheprovider",
                 "--basetemp=/tmp/pytest", "--junitxml=/evidence/junit.xml", *tests]
     return command
 
@@ -217,7 +217,7 @@ def run_tests(workspace: Path, evidence: Path, tests: list[str]) -> dict:
         if hardening:
             command = sandbox_command(workspace, raw, tests)
         else:
-            command = [sys.executable, "-I", "-m", "pytest", "-q", "-o", "xfail_strict=true",
+            command = [sys.executable, "-I", "-B", "-m", "pytest", "-q", "-o", "xfail_strict=true",
                        "-p", "no:cacheprovider", "--basetemp=" + str(raw / "tmp"),
                        "--junitxml=" + str(raw / "junit.xml"), *tests]
         with tempfile.TemporaryFile() as log:

@@ -1237,10 +1237,7 @@
         "11_独立应用/USDA平衡表/AGENTS.md",
         "05_apps/streamlit_app.py",
         "04_scripts/server_update_spreads.py",
-        "04_scripts/spread_monthly_calculator.py",
-        "01_data",
-        "06_outputs",
-        "10_logs"
+        "04_scripts/calculate_historical_spreads.py"
       ],
       "required_tests": [
         "08_tests/application/test_domestic_spread_status.py"

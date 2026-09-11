@@ -70,7 +70,7 @@ def fixture_repo(tmp_path):
 def inert_executor(workspace, evidence, tests):
     # ONLY fixture source literals created above. The production CLI has no switch
     # for this executor and never executes arbitrary candidates on local Windows.
-    result = subprocess.run([sys.executable, "-I", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+    result = subprocess.run([sys.executable, "-I", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
                              "--junitxml=" + str(evidence / "junit.xml"), *tests],
                             cwd=workspace, capture_output=True, timeout=30,
                             env={"SYSTEMROOT": __import__('os').environ.get("SYSTEMROOT", ""),

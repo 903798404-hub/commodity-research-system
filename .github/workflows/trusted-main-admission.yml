@@ -169,7 +169,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/governance-regressions"
           git rev-parse HEAD 'HEAD^{tree}' > "$RUNNER_TEMP/governance-regressions/identity.txt"
-          python -I -m pytest -q -p no:cacheprovider \
+          python -I -B -m pytest -q -p no:cacheprovider \
             08_tests/test_main_admission.py 08_tests/test_quality_controls.py \
             08_tests/test_project_registry.py 08_tests/test_documentation_contract.py \
             --junitxml="$RUNNER_TEMP/governance-regressions/junit.xml"
