@@ -431,7 +431,7 @@ def test_assessment_cli_cannot_be_combined_with_start_options(tmp_path):
     with pytest.raises(SystemExit):
         runtime.main(["--classify-release", "a" * 40, "b" * 40, "example", "--production-policy", "policy"])
 
-@pytest.mark.parametrize("mutation,expected", [(None, "PASS"), ("migration", "FAIL"), ("irreversible", "FAIL"), ("candidate", "ERROR"), ("acceptance", "ERROR"), ("extra-field", "ERROR")])
+@pytest.mark.parametrize("mutation,expected", [(None, "PASS"), ("migration", "FAIL"), ("irreversible", "FAIL"), ("candidate", "ERROR"), ("acceptance", "ERROR"), ("extra-field", "ERROR"), ("target-output", "ERROR")])
 def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, tmp_path, mutation, expected):
     import copy
     repo, current, host, image = rollback_assets
@@ -472,7 +472,7 @@ def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, t
     # asset negative cases have dedicated real verifier tests above; here test
     # wiring/aggregation and source-bound candidate/state/acceptance checks.
     monkeypatch.setattr(runtime, "_write_new", lambda h, p, raw: p.write_bytes(raw))
-    output = tmp_path / "result"
+    output = repo / "result" if mutation == "target-output" else tmp_path / "result"
     if expected == "ERROR":
         with pytest.raises(runtime.PreReleaseError):
             runtime.assess_release(path, output)

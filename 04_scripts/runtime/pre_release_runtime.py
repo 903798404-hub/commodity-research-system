@@ -531,6 +531,8 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     target_source = Path(request["target_source_root"])
     if not target_source.is_absolute():
         raise PreReleaseError("target source must be absolute")
+    if destination == target_source or target_source in destination.parents:
+        raise PreReleaseError("release report must be outside target source")
     target_identity = require_source(host, engine, source_root=target_source)
     if target_identity[0] != request["target_commit"]:
         raise PreReleaseError("target source identity differs")
