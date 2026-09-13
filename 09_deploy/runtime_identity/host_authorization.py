@@ -682,6 +682,31 @@ def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path)
 def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
     """Bind an authenticated validation fact to this exact Approved source."""
     from types import SimpleNamespace
+    # Routine collector JSON is protected by the same administrator-owned file
+    # boundary, but does not need an additional evidence-signing hierarchy.
+    record_binding = policy["candidate_record"]
+    raw = _protected_path(Path(record_binding["path"]), private=True).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != record_binding["sha256"]:
+        raise HostAuthorizationError("candidate record content differs from approval")
+    record = _json(raw)
+    if record.get("schema_version") in {"routine-candidate-acceptance/1", "routine-rollback-assets/1"}:
+        routine = _contract_module(SOURCE_ROOT / "04_scripts/runtime/routine_release.py", "_host_routine_release")
+        entry = _contract_module(SOURCE_ROOT / "04_scripts/runtime/pre_release_runtime.py", "_host_routine_pre_release")
+        engine = _contract_module(SOURCE_ROOT / "04_scripts/runtime/validate_target_runtime.py", "_host_routine_engine")
+        source = _protected_path(Path(policy["approved_source_root"]), directory=True)
+        identity = entry.require_source(SimpleNamespace(_require_linux_root=_require_linux_root,
+            _protected_path=_protected_path), engine, source_root=source)
+        if identity != (policy["approved_commit"], policy["approved_tree"]):
+            raise HostAuthorizationError("Approved source Commit/Tree differs")
+        routine.verify_routine_record(record, policy, source)
+        project = engine._project(source, policy["project_id"])
+        _, manifest, binding = engine.source_contract(source, policy["project_id"], project["runtime_contract"])
+        if (manifest["schema_version"] != _manifest_version(policy["schema_version"])
+                or binding["source_sha256"][project["runtime_contract"]] != policy["runtime_manifest_sha256"]
+                or policy["runtime_manifest_path"] != policy["source_root"] + "/" + project["runtime_contract"]):
+            raise HostAuthorizationError("routine source contract differs from policy")
+        engine.validate_source_compose(source, manifest)
+        return record, manifest
     if policy["approved_source_root"] != str(SOURCE_ROOT):
         raise HostAuthorizationError("signer must run from the exact Approved source")
     for relative in ("04_scripts/runtime/pre_release_runtime.py", "04_scripts/runtime/validate_target_runtime.py",
@@ -718,10 +743,11 @@ def _production_compose_bridge(rendered: Mapping, policy: Mapping, manifest: Map
     name = rendered.get("name")
     if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
         raise HostAuthorizationError("actual Compose project name is invalid")
-    command = ["compose", "--project-name", name, "--project-directory", str(SOURCE_ROOT),
+    source_root = Path(policy.get("approved_source_root", SOURCE_ROOT))
+    command = ["compose", "--project-name", name, "--project-directory", str(source_root),
                "--env-file", policy["compose_environment_file"]]
     for relative in manifest["build"]["compose_sources"]:
-        command.extend(["-f", str(_protected_path(SOURCE_ROOT / relative))])
+        command.extend(["-f", str(_protected_path(source_root / relative))])
     desired = _json(_run_docker([*command, "config", "--format", "json"]))
     # A deployment may remove build metadata and add its host nonce. Every
     # other rendered field must equal the committed contract with the same env.
@@ -997,7 +1023,7 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
             "project_id": policy["project_id"], "approved_commit": policy["approved_commit"],
             "approved_tree": policy["approved_tree"], "image_id": policy["image_id"],
             "policy_sha256": _digest(policy), "candidate_record_sha256": policy["candidate_record"]["sha256"],
-            "candidate_rendered_compose_sha256": record["evidence"]["rendered_compose_sha256"],
+            "candidate_rendered_compose_sha256": record.get("rendered_compose_sha256") if record.get("schema_version", "").startswith("routine-") else record["evidence"]["rendered_compose_sha256"],
             "production_rendered_compose_sha256": rendered,
             "runtime_manifest_sha256": policy["runtime_manifest_sha256"], "release_sha256": observed["release_sha256"],
             "mount_contract_sha256": _digest(observed["mounts"]), "actual_config_sha256": observed["actual_config_sha256"],
