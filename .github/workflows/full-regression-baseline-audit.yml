@@ -1,0 +1,113 @@
+name: Full regression baseline comparison (diagnostic only)
+'on':
+  push:
+    branches:
+    - audit/full-regression-baseline-20260914
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+  PYTHONUTF8: '1'
+jobs:
+  compare:
+    name: Full regression ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - label: base
+          commit: 182a650520734a46aaa16b13491766c323ae7666
+        - label: candidate
+          commit: ff740b72a4a0b6cbbb59de70640968708fa98c5d
+    steps:
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ matrix.commit }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install development dependencies
+      run: python -I -m pip install -r candidate/requirements-dev.in
+    - name: Provision and verify supported Chinese fonts
+      working-directory: candidate
+      run: "sudo apt-get update\nsudo apt-get install -y --no-install-recommends fonts-noto-cjk\
+        \ fontconfig\nfc-cache -f\npython -I -B - <<'PY'\nimport json, os, platform,\
+        \ subprocess, sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path.cwd()\
+        \ / '03_src'))\nfrom agri_research_agent.utils.matplotlib_config import configure_matplotlib_chinese_fonts\n\
+        from matplotlib import font_manager\nselected = configure_matplotlib_chinese_fonts()[0]\n\
+        assert selected in {'Noto Sans CJK SC', 'Noto Sans CJK JP'}, selected\nsystem_family\
+        \ = subprocess.check_output(['fc-match', '-f', '%{family}', selected], text=True).strip()\n\
+        assert selected in system_family.split(','), system_family\nfont_path = font_manager.findfont(font_manager.FontProperties(family=[selected]),\
+        \ fallback_to_default=False)\nresolved = font_manager.FontProperties(fname=font_path).get_name()\n\
+        assert resolved == selected, (selected, resolved)\nevidence = dict(package='fonts-noto-cjk',\
+        \ package_version=subprocess.check_output(\n    ['dpkg-query', '-W', '-f=${Version}',\
+        \ 'fonts-noto-cjk'], text=True),\n    runner_os=os.environ['RUNNER_OS'], os_release=platform.freedesktop_os_release(),\n\
+        \    system_family=system_family, configured_family=selected, resolved_family=resolved,\n\
+        \    font_path=font_path, result='PASS')\noutput = Path(os.environ['RUNNER_TEMP'])\
+        \ / 'platform-results/linux/font-check.json'\noutput.parent.mkdir(parents=True,\
+        \ exist_ok=True)\noutput.write_text(json.dumps(evidence, indent=2) + '\\n',\
+        \ encoding='utf-8')\nprint(json.dumps(evidence, indent=2))\nPY\n"
+    - name: Record comparable environment
+      working-directory: candidate
+      run: 'mkdir -p "$RUNNER_TEMP/platform-results/linux"
+
+        python -VV > "$RUNNER_TEMP/platform-results/linux/python.txt"
+
+        python -I -m pip freeze > "$RUNNER_TEMP/platform-results/linux/pip-freeze.txt"
+
+        dpkg-query -W > "$RUNNER_TEMP/platform-results/linux/system-packages.txt"
+
+        printf ''%s\n'' "$ImageOS" "$ImageVersion" > "$RUNNER_TEMP/platform-results/linux/runner-image.txt"
+
+        git rev-parse HEAD ''HEAD^{tree}'' > "$RUNNER_TEMP/platform-results/linux/git-identity.txt"'
+    - name: Execute unchanged full regression executor
+      working-directory: candidate
+      run: 'python -I -B - <<''PY''
+
+        import os, sys
+
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path.cwd() / ''04_scripts/quality''))
+
+        import platform_ci as ci
+
+        repo = Path.cwd()
+
+        sha = ci.admission.text(repo, ''rev-parse'', ''HEAD'')
+
+        identity = dict(commit=sha, tree=ci.admission.text(repo, ''rev-parse'', ''HEAD^{tree}''))
+
+        entries = ci.admission.tree(repo, sha)
+
+        paths = sorted(p for p in entries if ci.admission.test_path(p))
+
+        sources = {p: ci.admission.blob(repo, sha, p) for p in paths}
+
+        full = ci.platforms.plan(paths, sources, sources, ci.read(ci.POLICY), base=identity,
+        candidate=identity)
+
+        plan_path = Path(os.environ[''RUNNER_TEMP'']) / ''platform-results/linux/full/plan.json''
+
+        ci.save(plan_path, full)
+
+        raise SystemExit(ci.execute(''linux'', plan_path, plan_path.parent))
+
+        PY'
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: baseline-${{ matrix.label }}
+        path: ${{ runner.temp }}/platform-results/linux
+        if-no-files-found: error
