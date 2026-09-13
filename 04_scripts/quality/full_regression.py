@@ -85,6 +85,9 @@ class Collection(ci.Collector):
 
     def pytest_collection_finish(self, session):
         self.nodes = [item.nodeid for item in session.items]
+        # Explicit file::function selection need not emit a parent collectreport.
+        # Its actually collected node is also proof that the parent was visited.
+        self.collected_files.update(n.split('::')[0] for n in self.nodes)
 
     def pytest_collectreport(self, report):
         path = report.nodeid.split('::')[0]

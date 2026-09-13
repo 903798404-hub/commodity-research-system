@@ -188,3 +188,11 @@ def test_import_time_failure_is_collection_failure_not_legacy_debt():
     plugin.pytest_collectreport(SimpleNamespace(nodeid='08_tests/test_import_checks.py', failed=True, skipped=False))
     assert plugin.collected_files == {'08_tests/test_import_checks.py'}
     assert plugin.collection_errors == ['08_tests/test_import_checks.py']
+
+
+def test_function_selector_nodes_prove_parent_collection_without_parent_report():
+    from types import SimpleNamespace
+    plugin = full.Collection()
+    plugin.pytest_collection_finish(SimpleNamespace(items=[SimpleNamespace(nodeid='08_tests/test_selected.py::test_case[1]')]))
+    assert plugin.collected_files == {'08_tests/test_selected.py'}
+    assert plugin.nodes == ['08_tests/test_selected.py::test_case[1]']
