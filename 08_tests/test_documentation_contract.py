@@ -187,9 +187,14 @@ def test_governance_v2_active_docs_and_update_entry():
 
 
 def test_governance_transition_is_separate_from_business_and_release():
+    for path in (ROOT/'AGENTS.md',SPEC,MANUAL,DOCS/'templates/新功能开发任务模板.md',DOCS/'templates/GovernanceTransition.md'):
+        body=read(path)
+        for marker in ('Repository Maintainer/Admin','GOVERNANCE_ROOT_APPROVAL_REQUIRED',
+                       'CANDIDATE_CONTROLLED_SELF_APPROVAL = NO','MAINTAINER_GOVERNANCE_ROOT_OVERRIDE = YES_BY_DESIGN',
+                       'PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO','ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO'):
+            assert marker in body,(path,marker)
+        for stale in ('GOVERNANCE_TRANSITION_PENDING','approval_run_id','run-name','CANDIDATE_SELF_APPROVAL_POSSIBLE'):
+            assert stale not in body,(path,stale)
     contract=read(DOCS/'templates/GovernanceTransition.md')
-    for marker in ('BUSINESS','STRICT_SHARED','GOVERNANCE_TRANSITION','PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO',
-                   'GOVERNANCE_TRUST_ROOT_APPROVAL_REQUIRED = YES','ONE_TIME_BOOTSTRAP_READY = NO',
-                   '7bb5d53d233fb354efaf9df7f598db3cba15206f','不能按 change class 或精确 SHA 限定'):
+    for marker in ('Always allow','bypass_actors=[]','灾难恢复','生产单独授权','立即删除','精确'):
         assert marker in contract
-    assert 'run-name' in contract and 'production' in contract

@@ -52,9 +52,9 @@
 
 普通 Business Fast Lane：`START / RESUME → development → push feature → trusted-main-admission-v1 PASS → exact fast-forward main`，随后同步 clean local main。GitHub hosted Admission 是正式 required tests / Scope / identity evidence；本地 Direct / Impact tests 和 Scope 可用于快速反馈，`complete_project.py` 与独立 integration worktree 不再是普通 Business 进入 main 的强制 Gate，不得因未执行它们判定未完成。
 
-接纳必须使用 successful `trusted-main-admission-v1` 对应的同一个 candidate Commit/Tree，来源固定 GitHub Actions `integration_id=15368`，并核对该 run 的 Admission artifact 与 fresh main 身份。Candidate 任何新 commit 都必须重新获得 hosted PASS，即使 Tree 相同也不得复用旧 PASS；在任务已有 main 接纳授权内仅按精确 SHA 普通 fast-forward，Ruleset 保持 Active、无 bypass。具体 API 回查见规范第 6 节。
+Business/Shared 接纳必须使用 successful `trusted-main-admission-v1` 对应的同一个 candidate Commit/Tree，来源固定 GitHub Actions `integration_id=15368`，并核对该 run 的 Admission artifact 与 fresh main 身份。Candidate 任何新 commit 都必须重新获得 hosted PASS，即使 Tree 相同也不得复用旧 PASS；在任务已有 main 接纳授权内仅按精确 SHA 普通 fast-forward，Ruleset 保持 Active、无 bypass。具体 API 回查见规范第 6 节。
 
-Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查；Completion 与独立 integration 可用于开发反馈或专项验收；main 链路为 trusted Scope → required/impact/必要 full tests → strict PASS → 精确 fast-forward（仅治理资产修改额外核验 trusted-root approval）；候选和部署继续执行原生产规则。
+Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查；Completion 与独立 integration 可用于开发反馈或专项验收；main 链路为 trusted Scope → required/impact/必要 full tests → strict PASS → 精确 fast-forward；Governance root 修改改走技术 PASS → GOVERNANCE_ROOT_APPROVAL_REQUIRED → Maintainer/Admin 精确接纳；候选和部署继续执行原生产规则。
 
 `runtime_target=production_container` 的真实容器证据属于独立 production/release gate。main-entry correctness 由 hosted strict lane 验证，不以生产环境访问或签名容器 Completion 作为 main 前置条件。生产候选仍须明确授权、绑定 clean Commit/Tree/Image，candidate 不写 production；正式发布核验 Approved Production SHA、数据 Manifest、同一已验证 Image ID 和 rollback。Completion 若调用仍执行全部 required tests 与签名容器门禁；main PASS 不授予生产权限。
 
@@ -83,10 +83,12 @@ Business Fast Lane 不适用于 shared infrastructure、governance、protected p
 完成后必须说明：修改文件、修改原因、测试结果、是否修改数据、是否连接服务器、是否部署、是否执行 Git、是否存在未解决风险。
 
 
-Governance Transition：普通 Business 与 STRICT_SHARED 沿各自 trusted tests/Scope 的 required check 接纳，不新增人工项目或治理批准。只有修改 Admission、Registry/ownership/test policy、治理 workflow、bootstrap 核心或治理 required tests 等 trusted-root 资产时，分类为 `GOVERNANCE_TRANSITION`。所有安全检查继续执行；缺少外部 maintainer approval 时返回 `GOVERNANCE_TRANSITION_PENDING`，不自动 main-entry PASS。
+Governance Root of Trust：Repository Maintainer/Admin 是治理信任根。Business 正常 branch/worktree → tests → trusted admission PASS → main；Shared/high-risk 使用 strict/impact/consumer tests，未修改治理根时不增加人工治理批准。
 
-`PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO`；`GOVERNANCE_TRUST_ROOT_APPROVAL_REQUIRED = YES`（仅 trusted-root 修改）。已授权 Business 开发不重复申请 commit/push 或治理许可；普通 main 操作按任务现有授权执行，不附加本机制的人为审批。本轮任务若明确禁止 main 操作仍必须停止。
+Governance root change 完成可信身份、Scope、ownership、required/owned tests、减测和 mutation 检查后，技术失败返回 FAIL；全部通过返回 `TECHNICAL_VALIDATION=PASS`、`MAIN_ENTRY=GOVERNANCE_ROOT_APPROVAL_REQUIRED`。这是正常的待治理根接纳状态，不是普通 PASS。没有 candidate-side approval API、token、文件或 workflow 可把它升级为 PASS。最终接纳由 Repository Maintainer/Admin 在自动化之外批准精确 base/Commit/Tree。
 
-审批使用 GitHub 原生 main 上的手动 workflow dispatch，绑定精确 base main SHA、candidate Commit 与 Tree，由 GitHub API 核验 maintainer/admin、可信 workflow 路径、运行身份与成功结论。candidate 文件、commit message、branch name、环境变量中的声明均不是审批；仅 run ID 是待核验的查询指针。批准不覆盖 Scope、减测、required 删除或未授权 production change，也不授权部署。
+`CANDIDATE_CONTROLLED_SELF_APPROVAL = NO`；`MAINTAINER_GOVERNANCE_ROOT_OVERRIDE = YES_BY_DESIGN`；`PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO`；`ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO`。前者约束可信 validator 的权限授予，不能把候选同名绿色 check 当成可信来源证明；Maintainer 需审查执行来源及精确证据。不声称平台能防止 Admin 覆盖自己管理的规则。
 
-详见 [Governance Transition 合同与首次启用限制](07_docs/templates/GovernanceTransition.md)。生产继续独立 release / Approved identity / Commit/Tree/Image / 数据 Manifest / rollback / 单独授权。当前部署状态不能从本候选文档推断。
+Admin 权限只用于 Governance trusted-root transition 或灾难恢复，不得绕过普通 Business check、普通测试失败、scope violation、production release 或数据质量 gate。治理根接纳不能把技术失败改成 PASS。日常保持 Ruleset Active、bypass_actors=[]；极少数治理接纳按 [Governance Transition 合同](07_docs/templates/GovernanceTransition.md) 的短时 Admin 操作完成并立即恢复，不能长期放宽普通开发。
+
+Production 独立 release：Approved identity、Commit/Tree/Image、Manifest、release gate、rollback、candidate 不写 production、生产单独授权全部保留。已授权普通业务不重复申请 commit/push 或项目存在许可；任何任务明确的 main/生产禁止仍优先遵守。

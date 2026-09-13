@@ -1,71 +1,57 @@
-# Governance Transition contract
+# Governance Root Transition
 
-状态：feature 实现与验证合同；尚未安装到 authoritative main，不代表已启用。生产发布规范不变。
+Repository Maintainer/Admin 是 Governance Root of Trust。自动化验证技术事实；极少数治理根升级由 Maintainer/Admin 决定。本文只定义合同，具体冻结 SHA、hosted run 和是否 ready 见每次候选报告。尚未接纳的 feature 文档不表示 main 已启用新政策。
 
-## 修改分类和正常入口
+## 四条路径
 
-| trusted main 对完整 diff 的分类 | main-entry 条件 |
+| 修改 | 正常路径 |
 | --- | --- |
-| BUSINESS | 已授权普通业务直接 branch/worktree → code → tests → 同一 required check PASS → 精确 fast-forward |
-| STRICT_SHARED | 当前可信 Scope、required/impact/必要 full tests PASS；不额外要求 Governance approval |
-| GOVERNANCE_TRANSITION | 所有可信检查通过，再核验精确 base/Commit/Tree 的外部 maintainer approval |
-| 未授权 production/data mutation | FAIL；治理批准不能覆盖 |
+| BUSINESS | main → feature/fix branch/worktree → tests → trusted admission PASS → main |
+| STRICT_SHARED | main → feature → strict/impact/consumer tests → trusted admission PASS → main |
+| GOVERNANCE_TRANSITION | main → governance feature → trusted technical validation + full governance regression → GOVERNANCE_ROOT_APPROVAL_REQUIRED → Maintainer/Admin 接纳精确对象 → main |
+| Production | main != production；独立 release |
 
-PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO
+`PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO`；`ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO`。Soybean、Domestic Spread、USDA、普通 UI 和 producer consumer business 修改，只要保持各自可信 ownership、未修改治理根，就不需要治理审批、Registry 改动、manual bootstrap 或 bypass。真正 shared producer 继续 strict，不改变类别绕过检查。
 
-GOVERNANCE_TRUST_ROOT_APPROVAL_REQUIRED = YES
+`CANDIDATE_CONTROLLED_SELF_APPROVAL = NO`；`MAINTAINER_GOVERNANCE_ROOT_OVERRIDE = YES_BY_DESIGN`。前者表示可信 validator 没有 candidate 可调用的审批接口；后者是 GitHub 管理权限，属于 Maintainer/Admin，不属于 candidate。这里不声称管理员无法覆盖自己的 Ruleset。现有 check context + App 不能单独证明 workflow 来源；治理根接纳必须核验执行来源、可信政策和精确 artifact，不能只看 candidate 同名绿色 check。
 
-普通 Soybean bug fix 不需要 maintainer governance approval、Registry 改动、Ruleset bypass 或项目存在批准。仍遵守任务明确的暂停、范围和 main 接纳限制。Shared 只有实际修改治理信任根才转 Governance。
+## 机器结果
 
-分类由 trusted main 的 `main_admission.py:is_governance_transition` 决定：TRUST_FILES 指定 Registry、Scope、Admission、schema、module test map、project_registry、pyproject、依赖与 workflow、transition verifier；另含 `04_scripts/quality/`、`.github/`、AGENTS/test configuration、requirements，以及 trusted dev-governance 的 required/future required tests。具体 ownership 必须来自可信 Registry；candidate Registry 不可自行获取其他路径。
+trusted main 决定 Registry、ownership、Scope、required tests、owned test namespaces、impact/consumer/full plan。正式执行 candidate 的 source/test 版本，计划仍为 trusted required UNION candidate changed/added owned tests。禁止 required 删除、policy/test config 减测、ownership 自扩、测试中修改对象、scope violation 和未授权 production mutation。
 
-## 审批协议
+治理根包括当前 Admission TRUST_FILES、04_scripts/quality、.github、AGENTS/test config、requirements、trusted dev-governance required/future required tests。按真实 diff 分类，candidate Registry 或 branch 名称不能改变判断。
 
-复用现有 `.github/workflows/trusted-main-admission.yml` 的 workflow_dispatch，不增加 App、服务器、数据库、审批文件或写权限 token。
+- 技术失败：final_result=FAIL，TECHNICAL_VALIDATION=FAIL，MAIN_ENTRY=FAIL，保留 failure_codes。
+- Business/Shared 全通过：final_result=PASS，TECHNICAL_VALIDATION=PASS，MAIN_ENTRY=PASS。
+- Governance 全通过：final_result=GOVERNANCE_ROOT_APPROVAL_REQUIRED，TECHNICAL_VALIDATION=PASS，MAIN_ENTRY=GOVERNANCE_ROOT_APPROVAL_REQUIRED，failure_codes 为空。
 
-仅 main 上的 maintainer/admin 手动运行可以签发信号。输入 `transition_intent=TRUSTED_GOVERNANCE_TRANSITION_APPROVED` 及完整 40 位 `base_main`、`candidate_commit`、`candidate_tree`。可信 workflow 的 run-name 将三者绑定，issuer 只检出 main、读取 candidate Git 对象并验证治理分类，不执行 candidate Python 或测试。
+最后一种是正常待接纳状态，CLI 仍非零、required check 不自动放行。candidate 的文件、代码、message、branch、Registry 字段或 workflow metadata 都不能把它变成 PASS。没有 approval API verifier、签发 job、审批 token 或审批文件。任何新 Commit/Tree/base 都需重新验证，不能复用旧对象批准。
 
-Admission 的 `approval_run_id` 只是查询指针，不是凭证。Verifier 从 GitHub API 重新读取：固定 repository；workflow_dispatch；main/head SHA；可信 workflow 路径与 active 状态；精确 run-name；首次 run_attempt；completed/success；actor 与 triggering_actor 都是当前 maintainer/admin 的真实 User，且 permission 返回的用户 ID 一致；fresh main 与 candidate tree。缺失、拒绝、删除、网络失败均 FAIL_CLOSED。actor、branch、commit message、candidate JSON 或环境变量自称 approved 无效。Issuer 尚在运行时只跳过 completed 条件；Admission 必须等待最终成功。
+执行中的关键 workflow 配置变更仍作技术风险拒绝，不能让同一 workflow 修改跳过自己的可信检查；此类迁移需先在独立治理任务中审查和升级当前可信验证规则，再验证后续精确对象。Admin 不得把实际失败伪称 PASS。
 
-任何新 candidate commit（即使 tree 相同）或 base main 变化都须重新验证、重新 dispatch。撤回可删除审批 run；rerun 不续签审批。完整原生 run 是审计记录，批准本身不是 main 合并或 production 授权。[GitHub workflow run API](https://docs.github.com/en/rest/actions/workflow-runs) 提供这些运行身份；当前角色从 [collaborator permission API](https://docs.github.com/en/rest/collaborators/collaborators) 核验。
+## Admin 接纳边界
 
-可信 tests 计划继续是 required tests UNION candidate changed/added owned tests；运行 candidate 版本，不强制被合法替换的旧 blob。required 删除、非空集合、policy 减测、测试中修改对象、Scope 和精确身份仍为硬失败。无审批时也先运行能安全执行的可信检查，随后输出 GOVERNANCE_TRANSITION_PENDING，不赋予 PASS。
+只允许 Governance trusted-root transition 或灾难恢复；不得用于普通 Business check 失败、普通测试失败、scope violation、production release 或数据质量 gate 绕过。灾难恢复也需明确范围、证据和独立授权，不能成为日常修复入口。
 
-执行中的 workflow 不得修改自己的执行配置或聚合逻辑；语义变化返回 TRUSTED_WORKFLOW_EXECUTION_CHANGED。关键 workflow 升级必须分阶段：先经外部批准升级可信验证政策，再另行批准后续 workflow 对象；不得让同一 candidate 用自身新政策放行自己。
+推荐长期保持 Ruleset Active、唯一 required check 不变、bypass_actors=[]。治理升级极少，临时添加/删除 Admin 会多两次操作，但常态权限更小，且能保持原 Commit。长期 Repository admins / For pull requests only 能减少设置操作并保留 PR 审计，但权限持续存在，不能机器限定治理类型，且 squash/rebase/merge 会产生不同对象；不适合当前要求 exact candidate SHA 的流程。
 
-## Phase A：一次性 bootstrap（本轮不执行）
+## FINAL_BOOTSTRAP_PLAN（仅计划）
 
-固定待接纳对象：
+每次冻结一个最终 candidate，直接从 fresh main 接纳这个完整对象，不要求先接纳旧 7bb 或上一轮 34bf。历史候选仅用于差异和回归对比。
 
-- Commit：`7bb5d53d233fb354efaf9df7f598db3cba15206f`
-- Tree：`d22e9e493dd941fef4d57c4684e7254f6bdd8ee5`
-- 本次审计 base：`c3cb97376574f9edd93ee4381f5c843ed198a634`；操作前必须重新 fetch/ls-remote/API 核对，不能沿用本文静态值。
+前置必须全部满足：fresh GitHub/origin/local main 一致；base Commit/Tree、candidate Commit/Tree 已冻结；base 是 candidate 祖先且 behind=0；exact SHA hosted governance 全回归 PASS；diff boundary PASS；无 production mutation；用户明确批准精确 SHA/Tree/base。旧 main policy 的已确认 ESCALATION_REQUIRED 与真正技术失败分别记录。Ready 只表示可以提交人工批准，不代表已经批准或执行。
 
-该对象仅有 Governance V2，不含本合同的新 verifier/workflow。它进入 main 不会自动启用 Phase B；本 feature 是后继对象，需要单独验证、批准和可信安装。不得声称把 7bb 接纳一次就完成本机制安装。
+1. Maintainer/Admin 审核精确证据并明确批准；暂停其他 main 写入。重新 fetch/API 比对冻结对象，任何变化立即停止并重验。
+2. GitHub 仓库 → Settings → Rules → Rulesets → main-trusted-admission-v1（ID 22616560）。保持 Enforcement=Active、required check trusted-main-admission-v1 / GitHub Actions 15368 及 force-push/deletion/linear-history 保护原配置。
+3. Bypass list → Add bypass → Repository admins → Add Selected → Always allow → Save changes。仅短时操作窗口；不要添加 write/maintain 广泛角色或 App。该模式技术上涵盖整套规则，约束依赖已明确授权的 Admin 操作，不声称 API 按 SHA 限权。
+4. 使用具有该 Admin 身份的 Git 凭据，在已验证 feature worktree 执行 `git push origin <exact_candidate_commit>:refs/heads/main`。不加 force/lease，不改 branch，不 squash/rebase，不生成新 commit。GitHub PR 页面合并不能保证原 Commit，因此不点击 Merge/Squash/Rebase 按钮。
+5. 立即核验远程 main Commit/Tree 等于批准对象。无论推送成功、失败、超时或后续核验异常，立即回同一 Ruleset 页面，移除本次 Repository admins bypass 并保存；核验失败时先恢复规则再调查，不保留开放窗口等待修复。
+6. API GET /rulesets/22616560 确认 bypass_actors=[]、enforcement=active、required check/integration 和其他 rules 与操作前相同；GET /git/ref/heads/main、GET /git/commits/<SHA> 核验 Commit/Tree，再同步 clean local main 镜像。保存前后快照、操作时间、批准身份、push 结果与 hosted evidence。
 
-bootstrap 前置顺序：重新核验 exact identities 和祖先关系 → 在 hosted runner 重跑该对象的 governance regression → 读取 Active Ruleset 与唯一 required check/integration → maintainer 明确批准上述三元组 → 仅在平台存在满足限制的 transition 能力时进行 exact fast-forward → 重新核对 main/Ruleset。任一步缺失停止。
+页面控件及两种 bypass 模式见 [GitHub 创建 Ruleset 文档](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)。Always allow 无精确对象过滤是 [GitHub API schema](https://docs.github.com/en/rest/repos/rules) 的限制；在本合同中由 Admin 作为最终信任根承担短时操作责任，不增加候选权限。
 
-本次 Ruleset `22616560` / main-trusted-admission-v1 为 Active，唯一 required check 是 trusted-main-admission-v1，GitHub Actions integration_id=15368，bypass_actors=[]，同时保护 non-fast-forward、deletion、linear history。
+BOOTSTRAP_EXECUTION = NOT_PERFORMED。本轮不得替用户修改 Ruleset、添加 bypass 或 push main。
 
-GitHub bypass API 不能按 change class 或精确 SHA 限定，只提供 actor 和 always/pull_request/exempt 模式；对 actor 授权适用于该 Ruleset，并非只豁免 admission。PR-only 不能保证原始 7bb Commit 成为 main（merge/squash/rebase 对象不同）；always 又扩大 actor 的非治理绕过能力及同一规则集的其他保护。文档约定不是机器边界。[原生 Ruleset schema](https://docs.github.com/en/rest/repos/rules) 未提供所需的对象条件。
+## Production
 
-ONE_TIME_BOOTSTRAP_READY = NO
-
-EXACT_MANUAL_ACTION_REQUIRED：当前没有满足全部限制的 GitHub 页面修改步骤。保持 Settings → Rules → Rulesets → main-trusted-admission-v1 的 Active、现有 required check 和空 bypass list；本轮不要点击增加 actor 或禁用。需要用户先决定是否调整约束/采用额外平台保护，才能制定可执行的最小变化；不得把这一决策冒充已批准操作。
-
-## Phase B：稳态操作（仅可信安装后）
-
-1. 从 fresh main 开发，按可信分类运行所有检查。Business/Shared 不调用审批 API。
-2. Governance 检查合格后，maintainer 在 Actions → trusted-main-admission-v1 → Run workflow，分支选择 main，填写审批 intent 与精确三元组。不要在 feature 上签发。
-3. 记录成功审批 run ID。在同一 workflow 再 Run workflow，选 candidate feature，intent 留空，填写 approval_run_id。分支只是定位入口；Admission 核验实际精确 commit/tree，变更即使同 tree 也失效。
-4. 核对 fresh main、同一对象、可信执行来源、artifact 和唯一 required check PASS 后，在任务接纳授权内 exact fast-forward。治理升级不需要永久改 Ruleset。用户明确要求等待 main 批准时必须停下。
-
-## 原生发布者保护的未闭合边界
-
-现有 Ruleset 只固定 check context + GitHub Actions App，不能固定 workflow 文件的可信版本。candidate 工作流也由同一个 App 发布；故仅看绿色同名 check 不足以证明可信 Admission 执行。新 verifier 拒绝伪造 approval，新 trusted validator 拒绝 workflow 聚合变更，但无法阻止恶意 candidate 完全不运行 validator 而发布同名 check。这是平台接纳边界限制，不是 regression PASS 可以代替的保护。[GitHub required checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets) 的 expected source 是 App。
-
-因此本 feature 不声明端到端 GOVERNANCE_TRANSITION_IMPLEMENTATION_READY=YES；完整接纳能力还需能强制可信 workflow 来源的平台保护及首次安装路径。当前个人私有仓库不得虚构具备组织级 required-workflow 能力，也不得创建新 App 或以永久 bypass 代替。验证合同内部 candidate 无法伪造 maintainer approval；当前平台整体 CANDIDATE_SELF_APPROVAL_POSSIBLE=YES（同名 check 的已有风险，未进行攻击发布）。
-
-## Production 独立边界
-
-main != production。Approved 身份、Commit/Tree/Image、candidate 不写 production、rollback、数据 Manifest 与生产单独授权全部保留。Transition receipt 明确 production_authorization=false；没有任何 issuer 或 Admission job 可以部署、刷新数据或修改 Ruleset。Public、Domestic Spread、Soybean 生产问题不在本轮修改范围。
+Approved identity、Commit/Tree/Image、Manifest、release gate、rollback、candidate 不写 production、生产单独授权全部保留。Governance/main transition 不部署、不连接生产服务器、不触发 FULL DAILY 或数据刷新。Public、Domestic Spread、Soybean 生产修复另行授权。

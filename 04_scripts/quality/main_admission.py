@@ -30,10 +30,10 @@ IMPLEMENTATION = "04_scripts/quality/main_admission.py"
 SCHEMA = "02_configs/main_admission_result.schema.json"
 WORKFLOW = ".github/workflows/trusted-main-admission.yml"
 MAP = "02_configs/module_test_map.yaml"
-TRANSITION = "04_scripts/quality/governance_transition.py"
+ROOT_APPROVAL = "GOVERNANCE_ROOT_APPROVAL_REQUIRED"
 TRUST_FILES = (REGISTRY, SCOPE, IMPLEMENTATION, SCHEMA, MAP,
                "04_scripts/quality/project_registry.py", "pyproject.toml",
-               "requirements-dev.txt", WORKFLOW, TRANSITION)
+               "requirements-dev.txt", WORKFLOW)
 PRODUCTION = ("09_deploy", "04_scripts/automation", "04_scripts/runtime",
               "03_src/agri_research_agent/automation", "01_data", "06_outputs", "10_logs")
 
@@ -301,6 +301,9 @@ def policy_reductions(repo, candidate, sources, registry, mapping, paths):
             indexed = {p["project_id"]: p for p in proposed["projects"]}
             for project in registry["projects"]:
                 after = indexed.get(project["project_id"], {})
+                for key in ("owned_paths", "reserved_paths", "future_owned_paths"):
+                    if not set(after.get(key, [])) <= set(project.get(key, [])):
+                        return ["OWNERSHIP_SELF_EXPANSION"]
                 before_tests = set(project["required_tests"] + project.get("future_required_tests", []))
                 after_tests = set(after.get("required_tests", []) + after.get("future_required_tests", []))
                 if not before_tests <= after_tests:
@@ -344,7 +347,7 @@ def workflow_execution_unchanged(before, after):
     return {k: v for k, v in old.items() if k != "name"} == {k: v for k, v in new.items() if k != "name"}
 
 
-def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests, approval_run_id=None, approval_get=None) -> dict:
+def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests) -> dict:
     receipt = {"schema_version": "main-admission/1", "mode": "required", "lane": "business", "final_result": "FAIL",
                "business_scope": "FAIL", "failure_codes": [], "trusted_main": None, "candidate": None,
                "merge_base": None, "ahead": None, "behind": None, "trusted_governance": {},
@@ -355,7 +358,7 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                    "dependencies": sorted(f"{d.metadata['Name']}=={d.version}" for d in importlib.metadata.distributions()),
                    "sandbox": ("bubblewrap" if os.environ.get("MAIN_ADMISSION_HARDENING") == "bubblewrap"
                                else "github-hosted-ephemeral") if executor is run_tests else "test-fixture-only",
-                   "production_access": False}, "checks": {}}
+                   "production_access": False}, "checks": {"TECHNICAL_VALIDATION": "FAIL", "MAIN_ENTRY": "FAIL"}}
     failures = receipt["failure_codes"]
     evidence.mkdir(parents=True, exist_ok=False)
     try:
@@ -426,7 +429,6 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         transition = not bootstrap and is_governance_transition(paths, registry)
         receipt["lane"] = "governance_transition" if transition else "strict" if strict else "business"
         receipt["checks"]["CHANGE_CLASS"] = ("GOVERNANCE_TRANSITION" if transition else "STRICT_SHARED" if strict else "BUSINESS")
-        receipt["checks"]["MAINTAINER_TRANSITION_APPROVAL"] = "MISSING" if transition else "NOT_REQUIRED"
         receipt["checks"]["project_id"] = project["project_id"]
         receipt["checks"]["project_ids"] = [p["project_id"] for p in projects]
         if not projects or any(p["status"] != "ready" for p in projects) or (not strict and len(projects) != 1):
@@ -543,24 +545,16 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                     "per_test": per_test}
                 if receipt["test_result"].get("result") != "PASS":
                     failures.append("REQUIRED_TEST_FAILED")
-        # Approval never waives tests, ownership, test removals or forbidden paths.
-        # Pending governance candidates still run every safe trusted-main check.
-        if transition and not failures:
-            authority = {"__name__": "trusted_transition_policy"}
-            exec(compile(sources[TRANSITION], "<trusted transition policy>", "exec"), authority)
-            try:
-                options = {"get": approval_get} if approval_get is not None else {}
-                proof = authority["validate_external_approval"](
-                    base, candidate, receipt["candidate"]["tree"], approval_run_id, **options)
-                receipt["checks"]["MAINTAINER_TRANSITION_APPROVAL"] = "PRESENT"
-                receipt["checks"]["transition_approval"] = proof
-            except Exception as exc:
-                failures.extend(["GOVERNANCE_TRANSITION_PENDING", str(exc)[:200]])
+        # The machine never grants Governance root authority. Admin acceptance
+        # happens outside this candidate, after technical evidence is reviewed.
         receipt["failure_codes"] = sorted(set(failures))
-        receipt["final_result"] = "PASS" if not failures else "FAIL"
+        receipt["checks"]["TECHNICAL_VALIDATION"] = "FAIL" if failures else "PASS"
+        receipt["final_result"] = "FAIL" if failures else ROOT_APPROVAL if transition else "PASS"
+        receipt["checks"]["MAIN_ENTRY"] = receipt["final_result"]
         jsonschema.validate(receipt, schema)
     except Exception as exc:
         receipt["final_result"] = "FAIL"
+        receipt["checks"].update(TECHNICAL_VALIDATION="FAIL", MAIN_ENTRY="FAIL")
         receipt["failure_codes"] = sorted(set(failures + ["ADMISSION_ERROR", str(exc)[:300]]))
     (evidence / "main-admission.json").write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return receipt
@@ -574,8 +568,7 @@ def main(argv=None) -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args(argv)
-    result = admit(args.repo.resolve(), args.base, args.candidate, args.project, args.evidence.resolve(),
-                   approval_run_id=os.environ.get("GOVERNANCE_APPROVAL_RUN_ID"))
+    result = admit(args.repo.resolve(), args.base, args.candidate, args.project, args.evidence.resolve())
     print(json.dumps({"MAIN_ADMISSION": result["final_result"], "failure_codes": result["failure_codes"]}))
     return 0 if result["final_result"] == "PASS" else 1
 
