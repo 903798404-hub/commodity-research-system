@@ -320,7 +320,12 @@ def test_workflow_shadow_permissions_and_trust_source():
             assert step['with']['persist-credentials'] is False
     assert "platform_ci.py plan" in raw
     assert jobs["windows"]["runs-on"] == "windows-2022"
-    assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows"}
+    assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows", "full"}
+    assert jobs['full']['strategy']['matrix']['side'] == ['base', 'candidate']
+    assert jobs['full']['strategy']['fail-fast'] is False
+    comparison = next(s for s in jobs['final']['steps'] if s.get('name') == 'Compare exact base and candidate full regression')
+    assert comparison['env']['FULL_JOB_RESULT'] == '${{ needs.full.result }}'
+    assert 'full_regression.py compare' in comparison['run']
     fresh_main = next(s for s in jobs['final']['steps'] if s.get('name') == 'Require plan and fresh main')
     assert fresh_main['env']['MAIN_READ_TOKEN'] == '${{ github.token }}'
     assert '/git/ref/heads/main' in fresh_main['run']
