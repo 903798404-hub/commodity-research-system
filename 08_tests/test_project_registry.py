@@ -431,6 +431,35 @@ XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION = {
     'boundary_notes': 'User explicitly authorized deployment-contract repair, a new validated image and migration of the affected legacy updates to Xiaoran. Only these exact infrastructure files are owned. Run unchanged business producers from an independent approved clean detached local checkout with explicitly hashed baseline replicas; never use canonical main, dev/Preview assets or old runtime worktrees. AkShare must publish the domestic-spread artifact through the existing public package contract while preserving every current public dataset; legacy root-file writes alone are not consumer activation. Crop and FAS use an independent strict delta contract, host policy, exact path allowlists, byte/schema validation, baseline drift checks and rollback; no server provider execution or Tailscale. Credentials remain local secret files and never enter manifests or transfers. New scheduling and old-cron replacement must bind approved code, allocation and rollback evidence under the explicit migration authorization. Do not change business formulas, CNF/manual-ui keys, FULL DAILY code or source approval, capture AM/PM, existing SEALED, notifications or USDA/Oil World services. Registration does not claim implementation, data validity, tested scheduling or deployment completion.'}
 
 
+WINDOWS_WRAPPER_PLATFORM_REGISTRATION = {'project_id': 'windows-wrapper-platform',
+ 'change_class': 'shared',
+ 'status': 'ready',
+ 'runtime_target': 'windows_git_worktree',
+ 'owned_paths': ['03_src/agri_research_agent/automation/full_daily_windows.py',
+                 '08_tests/pipelines/test_full_daily_windows_wrapper.py'],
+ 'shared_dependencies': ['04_scripts/automation/full_daily_windows_bootstrap.py',
+                         '04_scripts/automation/run_full_daily_windows.py',
+                         '04_scripts/automation/run_full_daily_windows.ps1',
+                         '04_scripts/quality/main_admission.py',
+                         '04_scripts/quality/platform_test_plan.py',
+                         '04_scripts/quality/test_platforms.json'],
+ 'forbidden_paths': ['02_configs/project_registry.json', '04_scripts/quality', '05_apps', '09_deploy'],
+ 'required_tests': ['08_tests/pipelines/test_full_daily_windows_wrapper.py',
+                    '08_tests/test_project_registry.py',
+                    '08_tests/test_quality_controls.py',
+                    '08_tests/test_documentation_contract.py'],
+ 'capabilities': ['Windows Wrapper source and platform-correct required test fixtures; no deployment or '
+                  'production update authorization'],
+ 'boundary_notes': 'Shared ownership registration only. The exact existing Wrapper source and test were '
+                   'previously unowned. Runtime target is Windows; registration does not execute FULL DAILY, '
+                   'install tools, change production identity, or authorize production writes. Hosted '
+                   'planner, workflow and test-platform policy remain with dev-governance. Test transport '
+                   'fixtures must isolate tool discovery; genuine Windows filesystem/path/lock tests remain '
+                   'required on official Windows hosted runners. No required test removal or '
+                   'skip-as-success. All data/output/log paths are outside these two exact owned files and '
+                   'remain unauthorized, including Git-ignored 01_data, 06_outputs and 10_logs; no runtime '
+                   'directories are created for registration.'}
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -532,6 +561,11 @@ def registration_baseline():
         target = next(p for p in expected['projects'] if p['project_id'] == 'dev-governance')
         target['future_owned_paths'] = ADMISSION_GOVERNANCE_FILES
         target['future_required_tests'] = ADMISSION_GOVERNANCE_TESTS
+        assert current == expected
+        baseline = expected
+    if not any(p['project_id'] == 'windows-wrapper-platform' for p in baseline['projects']):
+        expected = copy.deepcopy(baseline)
+        expected['projects'].append(WINDOWS_WRAPPER_PLATFORM_REGISTRATION)
         assert current == expected
         baseline = expected
     return baseline
@@ -1397,7 +1431,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -2694,3 +2728,22 @@ def test_domestic_spread_status_one_time_ownership_normalization():
                  '09_deploy/production_data_delivery/README.md', '04_scripts/runtime/validate_target_runtime.py'):
         assert not main_admission.owns(project,path)
     assert not project.get('reserved_paths') and not project.get('future_owned_paths')
+
+
+def test_windows_wrapper_platform_registration_is_exact_and_inert():
+    data, project = registry.select_project(ROOT, 'windows-wrapper-platform')
+    assert project == WINDOWS_WRAPPER_PLATFORM_REGISTRATION
+    assert project['change_class'] == 'shared'
+    assert project['owned_paths'] == [
+        '03_src/agri_research_agent/automation/full_daily_windows.py',
+        '08_tests/pipelines/test_full_daily_windows_wrapper.py']
+    assert project['owned_paths'][1] in project['required_tests']
+    for path in project['owned_paths']:
+        assert all(not registry.owns(other, path) for other in data['projects'] if other is not project)
+        assert not registry.owns(project, path + '.extra')
+    for path in project['shared_dependencies'] + project['forbidden_paths'] + [
+        '01_data/db.sqlite', '06_outputs/snapshot.json', '10_logs/production.log',
+        '03_src/agri_research_agent/automation/other.py',
+        '05_apps/import_profit_intraday_page.py',
+        '09_deploy/spread_release/release_contract.py']:
+        assert not registry.owns(project, path)

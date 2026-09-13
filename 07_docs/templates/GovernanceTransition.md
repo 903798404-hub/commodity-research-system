@@ -55,3 +55,19 @@ BOOTSTRAP_EXECUTION = NOT_PERFORMED。本轮不得替用户修改 Ruleset、添�
 ## Production
 
 Approved identity、Commit/Tree/Image、Manifest、release gate、rollback、candidate 不写 production、生产单独授权全部保留。Governance/main transition 不部署、不连接生产服务器、不触发 FULL DAILY 或数据刷新。Public、Domestic Spread、Soybean 生产修复另行授权。
+
+## Hosted required test platform migration（候选准备合同）
+
+本阶段只登记 `windows-wrapper-platform` 的两个精确历史未归属文件，并提供 `04_scripts/quality/platform_test_plan.py` 与 `test_platforms.json` 的规划/聚合原语及回归。它们尚未接入 active Admission；不能把原语的模拟 PASS 称为 Windows hosted PASS，也不能据此称 Linux 平台误报已经修复。Wrapper 源码、测试和当前 workflow 在本阶段不变。
+
+Wrapper 当前静态清单为 52 个函数、75 个参数化用例：46 个函数/68 个用例是跨平台纯逻辑或 mock 测试；6 个函数/7 个用例依赖真实 Windows 路径、NT 文件系统或锁。逐函数理由见 `test_platforms.json`。provider preflight 中工具发现造成的主机依赖属于 fixture 隔离缺口，不是把这些纯逻辑测试移出 Linux 的理由。
+
+接纳此 ownership 准备对象后，后续实现仍必须完成独立可信执行策略升级与 workflow 审查；本阶段没有解除 `TRUSTED_WORKFLOW_EXECUTION_CHANGED`，也没有预批准后续 workflow。正式切换前必须完成：
+
+1. 从独立取得的 trusted main Registry/Scope/required/future/impact plan 生成平台计划，执行 candidate 测试版本。候选平台 metadata 不得影响本轮路由。删除 required 文件、函数或减少参数用例失败；混合文件中新增未分类测试先要求两平台，不得静默漏测。
+2. Linux 使用 `ubuntu-24.04`；Windows required 使用官方 `windows-2022`。无 Windows obligation 的普通 Business 不启动 Windows suite。Windows job 的环境只开放执行所需的可信 Python/Git 路径和系统临时目录变量，不继承生产凭据；不得实际运行 FULL DAILY、Tailscale 网络更新或生产任务。
+3. 修正 Wrapper 纯逻辑测试的工具发现 fixture；保留 Linux 68 个用例。真实 Windows 的 7 个用例必须在 Windows 上收集、执行并通过，任何 skip 都失败。修改必须使用接纳后的 Wrapper owner，不借 dev-governance ownership。
+4. 接入真实 runner executor 和可信最终聚合 job：计划、测试文件哈希、base/candidate Commit/Tree、run ID/attempt、runner OS 必须绑定同一对象。job 状态从 GitHub needs/API 获取，不能信任 candidate 上传的自报成功。缺失、取消、失败、skip、空 collection、缺少 required case 或对象不一致均失败；最终对外仍是 `trusted-main-admission-v1`。
+5. 保存同一 exact candidate 的真实 Linux 和 Windows hosted 证据，以及故障注入回归。纯本地 receipt fixture 只能证明聚合逻辑，不能替代实际 hosted job 或来源校验。
+
+该准备不修改 Production release safety、不接纳 release-risk-model candidate、不修改 Soybean，不授予 main/部署/数据更新权限。

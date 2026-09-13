@@ -777,3 +777,95 @@ def test_workflow_top_level_execution_settings_cannot_bypass_guard():
     before=b'name: admission\njobs: {}\n'
     for added in (b'env: {BASH_ENV: attack.sh}\n', b'defaults: {run: {shell: python}}\n'):
         assert not admission.workflow_execution_unchanged(before,before+added)
+
+# Staged platform policy: no candidate-side main authorization.
+def _platform_fixture():
+    from quality import platform_test_plan as platforms
+    path = "08_tests/test_mixed.py"
+    source = b"def test_logic(): pass\ndef test_windows(): pass\n"
+    policy = {"schema_version": "required-test-platforms/1", "files": {path: {
+        "test_logic": {"kind": "CROSS_PLATFORM_TEST", "reason": "pure contract"},
+        "test_windows": {"kind": "WINDOWS_REQUIRED_TEST", "reason": "Windows OS lock"}}}}
+    identities = dict(base={"commit": "a"*40, "tree": "b"*40}, candidate={"commit": "c"*40, "tree": "d"*40})
+    result = platforms.plan([path], {path:source}, {path:source}, policy, **identities)
+    receipts = {platform:dict(schema_version="platform-test-result/1", **identities,
+                plan_sha256=result["plan_sha256"], platform=platform,
+                runner_os={"linux":"Linux", "windows":"Windows"}[platform], runner_environment="github-hosted",
+                workflow_run_id="123", workflow_run_attempt="1",
+                tests=[{"nodeid":row["selector"], "outcome":"passed"} for row in rows])
+                for platform,rows in result["lanes"].items()}
+    return platforms, path, source, policy, identities, result, receipts
+
+
+def test_platform_plan_partitions_without_skip_or_loss():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    assert [r["selector"] for r in p["lanes"]["linux"]] == [path+"::test_logic"]
+    assert [r["selector"] for r in p["lanes"]["windows"]] == [path+"::test_windows"]
+    assert platforms.aggregate(p,receipts,workflow_run_id="123",workflow_run_attempt="1",
+                               job_results={"linux":"success","windows":"success"})["result"] == "PASS"
+
+
+@pytest.mark.parametrize("mutation", ["missing-windows","windows-fail","windows-skip","linux-fail","wrong-os","wrong-tree",
+                                      "wrong-run","wrong-attempt","job-fail","empty","duplicate","unplanned","missing-case"])
+def test_platform_aggregate_fails_closed(mutation):
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    jobs={"linux":"success","windows":"success"}
+    if mutation=="missing-windows": receipts.pop("windows")
+    elif mutation=="windows-fail": receipts["windows"]["tests"][0]["outcome"]="failed"
+    elif mutation=="windows-skip": receipts["windows"]["tests"][0]["outcome"]="skipped"
+    elif mutation=="linux-fail": receipts["linux"]["tests"][0]["outcome"]="failed"
+    elif mutation=="wrong-os": receipts["windows"]["runner_os"]="Linux"
+    elif mutation=="wrong-tree": receipts["windows"]["candidate"]={"commit":"c"*40,"tree":"e"*40}
+    elif mutation=="wrong-run": receipts["windows"]["workflow_run_id"]="old"
+    elif mutation=="wrong-attempt": receipts["windows"]["workflow_run_attempt"]="0"
+    elif mutation=="job-fail": jobs["windows"]="failure"
+    elif mutation=="empty": receipts["windows"]["tests"]=[]
+    elif mutation=="duplicate": receipts["windows"]["tests"]*=2
+    elif mutation=="unplanned": receipts["linux"]["tests"].append(receipts["windows"]["tests"][0])
+    else:
+        p["lanes"]["windows"][0]["minimum_cases"]=2
+        p["plan_sha256"]=platforms.digest({k:v for k,v in p.items() if k!="plan_sha256"})
+        for r in receipts.values(): r["plan_sha256"]=p["plan_sha256"]
+    assert platforms.aggregate(p,receipts,workflow_run_id="123",workflow_run_attempt="1",job_results=jobs)["result"]=="FAIL"
+
+
+@pytest.mark.parametrize("candidate_source", [None, b"def test_logic(): pass\n"])
+def test_platform_required_windows_test_cannot_be_deleted(candidate_source):
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    with pytest.raises(ValueError, match="REQUIRED_TEST_REMOVED"):
+        platforms.plan([path],{path:source},{} if candidate_source is None else {path:candidate_source},policy,**identities)
+
+
+def test_platform_parameter_case_removal_rejected():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    source=b"import pytest\ndef test_logic(): pass\n@pytest.mark.parametrize('case',[1,2])\ndef test_windows(case): pass\n"
+    with pytest.raises(ValueError,match="REQUIRED_TEST_REMOVED"):
+        platforms.plan([path],{path:source},{path:source.replace(b'[1,2]',b'[1]')},policy,**identities)
+
+
+def test_platform_unknown_added_mixed_test_cannot_evade_windows():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    new=source+b"def test_added(): pass\n"
+    result=platforms.plan([path],{path:source},{path:new},policy,**identities)
+    assert all(path+"::test_added" in [r["selector"] for r in rows] for rows in result["lanes"].values())
+
+
+def test_platform_business_without_windows_dependency_needs_only_linux():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    p=platforms.plan(["08_tests/test_business.py"],{}, {"08_tests/test_business.py":b"def test_new(): pass"},policy,**identities)
+    assert p["lanes"]["windows"]==[]
+    receipts={"linux":dict(receipts["linux"],plan_sha256=p["plan_sha256"],tests=[{"nodeid":"08_tests/test_business.py::test_new","outcome":"passed"}])}
+    assert platforms.aggregate(p,receipts,workflow_run_id="123",workflow_run_attempt="1",job_results={"linux":"success"})["result"]=="PASS"
+
+
+def test_platform_wrapper_inventory_preserves_every_current_case():
+    from quality import platform_test_plan as platforms
+    policy=json.loads((ROOT/"04_scripts/quality/test_platforms.json").read_text(encoding="utf-8"))
+    path="08_tests/pipelines/test_full_daily_windows_wrapper.py"
+    source=(ROOT/path).read_bytes()
+    p=platforms.plan([path],{path:source},{path:source},policy,
+                    base={"commit":"a"*40,"tree":"b"*40},candidate={"commit":"c"*40,"tree":"d"*40})
+    assert sum(v["minimum_cases"] for values in p["lanes"].values() for v in values)==75
+    assert len(p["lanes"]["linux"])==46 and len(p["lanes"]["windows"])==6
+    assert any("test_provider_preflight_is_read_only" in v["selector"] for v in p["lanes"]["linux"])
+    assert any("test_os_releases_lock" in v["selector"] for v in p["lanes"]["windows"])
