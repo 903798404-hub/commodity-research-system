@@ -321,6 +321,11 @@ def test_workflow_shadow_permissions_and_trust_source():
     assert "platform_ci.py plan" in raw
     assert jobs["windows"]["runs-on"] == "windows-2022"
     assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows"}
+    fresh_main = next(s for s in jobs['final']['steps'] if s.get('name') == 'Require plan and fresh main')
+    assert fresh_main['env']['MAIN_READ_TOKEN'] == '${{ github.token }}'
+    assert '/git/ref/heads/main' in fresh_main['run']
+    for lane in ('linux', 'windows'):
+        assert 'MAIN_READ_TOKEN' not in str(jobs[lane])
 
 
 def test_exact_new_asset_registration():

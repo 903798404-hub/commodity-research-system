@@ -163,14 +163,18 @@ jobs:
     - name: Require plan and fresh main
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
+        MAIN_READ_TOKEN: ${{ github.token }}
       working-directory: candidate
       run: |-
         test "$PLAN_RESULT" = success
         python -I - <<'PY'
-        import json,os,subprocess
+        import json,os,subprocess,urllib.request
         from pathlib import Path
         p=json.loads((Path(os.environ['RUNNER_TEMP'])/'platform-plan/plan.json').read_text())
-        assert subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],text=True).split()[0] == p['base']['commit'], 'MAIN_MOVED'
+        request=urllib.request.Request(os.environ['GITHUB_API_URL']+'/repos/'+os.environ['GITHUB_REPOSITORY']+'/git/ref/heads/main',headers={'Authorization':'Bearer '+os.environ['MAIN_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+        with urllib.request.urlopen(request,timeout=30) as response:
+            current_main=json.load(response)['object']['sha']
+        assert current_main == p['base']['commit'], 'MAIN_MOVED'
         assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip() == p['candidate']['commit'], 'CANDIDATE_CHANGED'
         PY
     - name: Aggregate actual required platform jobs

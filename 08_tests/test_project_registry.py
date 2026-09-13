@@ -1678,27 +1678,29 @@ def test_project_business_pass_and_cross_project_fail(repository,monkeypatch,cap
     assert report['forbidden_changes']==['other/code.py']
 
 
-@pytest.mark.parametrize('args',[
-    ['--project','demo','--owned','shared'],
-    ['--project','demo','--change-class','shared'],
-    ['--project','demo','--baseline','HEAD'],
-    ['--project','demo','--known-existing','other'],
-    ['--owned','feature'],
-    ['--project','unknown'],
+@pytest.mark.parametrize('args,expected',[
+    (['--project','demo','--owned','shared'],0),
+    (['--project','demo','--change-class','shared'],0),
+    (['--project','demo','--baseline','HEAD'],2),
+    (['--project','demo','--known-existing','other'],2),
+    (['--owned','feature'],0),
+    (['--project','unknown'],2),
 ])
-def test_business_cannot_override_boundaries(repository,monkeypatch,args):
+def test_explicit_scope_and_test_class_are_not_registry_authorization(repository,monkeypatch,args,expected):
     _,root=repository
     monkeypatch.setattr(scope,'PROJECT_ROOT',root)
-    assert scope.main(args)==2
+    assert scope.main(args)==expected
 
 
-def test_registry_self_expansion_rejected(repository,monkeypatch):
+def test_registry_metadata_edit_does_not_override_forbidden_scope(repository,monkeypatch):
     _,root=repository
     data=minimal_registry()
     data['projects'][0]['owned_paths'].append('other')
     write_registry(root,data)
     monkeypatch.setattr(scope,'PROJECT_ROOT',root)
-    assert scope.main(['--project','demo'])==2
+    assert scope.main(['--project','demo'])==0
+    (root/'other/code.py').write_text('# unrelated change\n')
+    assert scope.main(['--project','demo'])==1
 
 
 def test_shared_file_and_rename_cannot_hide(repository,monkeypatch,capsys):
@@ -1783,13 +1785,13 @@ def test_owned_rename_is_not_reported_as_arrow_path(repository,monkeypatch,capsy
 
 
 @pytest.mark.parametrize('status',['frozen','needs-boundary-review'])
-def test_project_not_ready_stops(repository,monkeypatch,status):
+def test_project_status_metadata_is_not_development_approval(repository,monkeypatch,status):
     _,root=repository
     data=minimal_registry()
     data['projects'][0]['status']=status
     write_registry(root,data)
     monkeypatch.setattr(scope,'PROJECT_ROOT',root)
-    assert scope.main(['--project','demo'])==2
+    assert scope.main(['--project','demo'])==0
 
 
 def test_startup_cannot_create_inside_main(repository,monkeypatch):
@@ -1834,12 +1836,12 @@ def test_future_missing_and_existing_state_and_exact_scope(repository, monkeypat
     assert scope.main(['--project', 'demo']) == 0
     assert json.loads(capsys.readouterr().out)['PROJECT_SCOPE'] == 'PASS'
     (target.parent/'random.py').write_text('# undeclared\n')
-    assert scope.main(['--project', 'demo']) == 1
+    assert scope.main(['--project', 'demo', '--owned', 'new_module/quotes.py']) == 1
     assert json.loads(capsys.readouterr().out)['out_of_scope_changes'] == ['new_module/random.py']
     assert scope.main(['--project', 'unknown']) == 2
     data['projects'][0]['status'] = 'frozen'
     write_registry(root, data)
-    assert scope.main(['--project', 'demo']) == 2
+    assert scope.main(['--project', 'demo']) == 0
 
 
 @pytest.mark.parametrize('path', ['a/*.py', 'a/**', '../a.py', '/a.py', 'C:/a.py',
@@ -2140,7 +2142,8 @@ def test_reservation_bootstrap_real_git(tmp_path, monkeypatch, capsys):
         original=path.read_bytes() if existed else None
         path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text('# forbidden change\n')
-        assert scope.main(['--project','notification-push-fixture'])==1
+        assert scope.main(['--project','notification-push-fixture','--owned',
+                           *data['projects'][0]['owned_paths'],*data['projects'][0]['reserved_paths']])==1
         assert json.loads(capsys.readouterr().out)['PROJECT_SCOPE']=='FAIL'
         if existed: path.write_bytes(original)
         else: path.unlink()
@@ -2366,7 +2369,8 @@ def test_notification_registered_scope_in_temporary_git(tmp_path, monkeypatch, c
         path=feature/name;original=path.read_bytes() if path.is_file() else None
         path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# simulated change\n')
         expected='PASS' if name in positives else 'FAIL'
-        assert scope.main(['--project','notification-push']) == (0 if expected=='PASS' else 1), name
+        assert scope.main(['--project','notification-push','--owned',
+                           *project['owned_paths'],*project.get('reserved_paths',[])]) == (0 if expected=='PASS' else 1), name
         assert json.loads(capsys.readouterr().out)['PROJECT_SCOPE']==expected, name
         if original is None:path.unlink()
         else:path.write_bytes(original)

@@ -313,9 +313,9 @@ def run_audit(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", default="origin/main", help="merge-base 比较基线，默认 origin/main")
-    parser.add_argument("--change-class", choices=CHANGE_CLASSES, default="business", help="普通业务变更或经明确批准的 shared infrastructure change")
-    parser.add_argument("--project", help="Project Registry 中的 project_id；普通业务 CLI 必填")
-    parser.add_argument("--owned", "--allow", dest="allowed", nargs="+", metavar="PATH", help="低层测试/明确批准 shared 任务的范围；不可扩大 business registry")
+    parser.add_argument("--change-class", choices=CHANGE_CLASSES, default="business", help="本任务的业务或 shared 测试等级")
+    parser.add_argument("--project", help="可选 project_id，用于读取规划 metadata")
+    parser.add_argument("--owned", "--allow", dest="allowed", nargs="+", metavar="PATH", help="本任务明确声明的文件范围；不授予生产权限")
     parser.add_argument("--known-existing", action="append", default=[], metavar="PATH", help="preflight 已记录、非本任务的稳定原有修改")
     parser.add_argument("--dependency", action="append", default=[], metavar="PATH")
     parser.add_argument("--test", action="append", default=[], metavar="PATH")
