@@ -7,7 +7,7 @@ has no database or write-side pipeline dependencies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 import hashlib
 from html import escape
@@ -209,26 +209,9 @@ def _render_final_ui(
         am_captured_at = am_snapshot.captured_at
         pm_captured_at = None
     else:
-        available_releases = tuple(
-            item for item in (am_release, pm_release) if item is not None
-        )
-        latest_snapshots = tuple(
-            item
-            for item in (
-                _load_latest_snapshot(paths.snapshot_root, MarketSession.AM),
-                _load_latest_snapshot(paths.snapshot_root, MarketSession.PM),
-            )
-            if item is not None
-        )
-        if paths.business_date is not None:
-            business_date = paths.business_date
-        elif latest_snapshots or available_releases:
-            business_date = max(
-                item.business_date for item in (*available_releases, *latest_snapshots)
-            )
-        else:
-            st.error("AM/PM 已封存结果不可读取。")
-            return
+        business_date = paths.business_date or datetime.now(
+            ZoneInfo("Asia/Shanghai")
+        ).date()
         # Never mix yesterday's AM with today's PM (or vice versa). Explicit
         # runtime dates also let an unsaved future business day show its editor.
         am_release = _load_selected_release(paths, business_date, MarketSession.AM)
@@ -270,7 +253,8 @@ def _render_final_ui(
         )
     else:
         am_rows = _result_profit_rows(
-            am_release, origin=selected_origin, config=config
+            am_release, business_date=business_date, session=MarketSession.AM,
+            origin=selected_origin, config=config
         )
     _render_preview_session_table(
         "大豆早间榨利",
@@ -287,7 +271,8 @@ def _render_final_ui(
         )
     else:
         pm_rows = _result_profit_rows(
-            pm_release, origin=selected_origin, config=config
+            pm_release, business_date=business_date, session=MarketSession.PM,
+            origin=selected_origin, config=config
         )
     _render_preview_session_table(
         "大豆下午榨利",
@@ -771,19 +756,33 @@ def _preview_profit_rows(
 def _result_profit_rows(
     release: ResolvedIntradayProfitRelease | None,
     *,
+    business_date: date,
+    session: MarketSession,
     origin: str,
     config: SoybeanImportProfitConfig,
 ) -> list[dict[str, object]]:
-    """Adapt sealed result rows to the shared, presentation-only table model."""
+    """Left join one session's sealed results onto twelve calendar months.
 
-    if release is None:
-        return []
+    Month identity is independent of data availability. The existing rolling
+    shipment-year rule distinguishes this year's month from next year's month.
+    """
+
     params = config.resolve_parameters(origin)
+    by_period = {}
+    if (release is not None and release.business_date == business_date
+            and release.session == session):
+        by_period = {
+            (item.get("shipment_year"), item.get("shipment_month")): item
+            for item in release.rows
+            if item.get("business_date") == business_date.isoformat()
+            and item.get("origin") == origin
+            and item.get("commodity") == "soybean"
+            and item.get("session") == session.value
+        }
     rows = []
-    for row in sorted(
-        (item for item in release.rows if item.get("origin") == origin),
-        key=lambda item: str(item.get("shipment_period", "")),
-    ):
+    for month in range(1, 13):
+        year = shipment_year_for(business_date, month)
+        row = by_period.get((year, month), {})
         calculated = (
             row.get("availability_status") == "SUCCESS"
             and str(row.get("calculation_status", "")).lower() == "success"
@@ -791,7 +790,7 @@ def _result_profit_rows(
         )
         rows.append(
             {
-                "船期": row.get("shipment_period"),
+                "船期": f"{year:04d}-{month:02d}",
                 "状态": "可计算" if calculated else "合约暂不可用",
                 "CNF（美分/蒲）": row.get("cnf_cents_per_bushel"),
                 "美金成本（美元/吨）": row.get("usd_cost_per_tonne"),

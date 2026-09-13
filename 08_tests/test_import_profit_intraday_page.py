@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import json
+import re
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 
@@ -80,7 +82,7 @@ def test_future_day_strict_editor_is_editable_without_inheriting_yesterday(tmp_p
     script = script.replace('config=config,',
         'config=config, save_cnf_handler=lambda values: st.session_state.update(saved_payload=values),')
     script = 'import streamlit as st\nfrom datetime import date\n' + script
-    script = script.replace('None,\n    ),', 'None, business_date=date(2026, 9, 7),\n    ),')
+    script = script.replace('business_date=date(2026, 8, 28)', 'business_date=date(2026, 9, 7)')
     app = AppTest.from_string(script, default_timeout=20).run()
     assert not app.exception
     button = next(button for button in app.button if button.label == '保存今日 CNF')
@@ -166,6 +168,7 @@ def _app_script(
 ) -> str:
     return f"""
 from pathlib import Path
+from datetime import date
 from agri_research_agent.import_profit.config import load_soybean_config
 from import_profit_intraday_page import IntradayPageDataPaths, render_import_profit_intraday_page
 config = load_soybean_config({str(ROOT / '02_configs/import_profit_soybean.yaml')!r})
@@ -174,6 +177,7 @@ render_import_profit_intraday_page(
         Path({str(result_root)!r}),
         Path({str(cnf_path)!r}),
         {f'Path({str(snapshot_root)!r})' if snapshot_root is not None else 'None'},
+        business_date=date(2026, 8, 28),
     ),
     config=config,
 )
@@ -239,7 +243,7 @@ def test_page_module_has_no_database_or_producer_boundary() -> None:
 
 def test_page_renders_unavailable_row_and_history_ignores_it(tmp_path: Path) -> None:
     available_key = key(year=2026, month=12)
-    unavailable_key = key(year=2027, month=9)
+    unavailable_key = key(year=2027, month=8)
     cnf_path = tmp_path / "cnf.parquet"
     upsert_cnf_quotes(
         cnf_path,
@@ -295,8 +299,136 @@ def test_page_renders_unavailable_row_and_history_ignores_it(tmp_path: Path) -> 
     assert not app.exception
     html = "\n".join(item.proto.body for item in app.get("html"))
     assert html.count("2026-12") >= 2
-    assert html.count("2027-09") >= 2
-    assert html.count("M2801") >= 2
-    assert html.count("Y2801") >= 2
+    assert html.count("2027-08") >= 2
+    assert html.count("M2705") >= 2
+    assert html.count("Y2705") >= 2
     assert "margin-null" in html
     assert not app.selectbox
+
+
+def _profit_tables(app):
+    assert not app.exception
+    tables = [item.proto.body for item in app.get("html")
+              if 'soy-profit-table' in item.proto.body and '<tbody>' in item.proto.body]
+    assert len(tables) == 2
+    for table in tables:
+        body = table.split('<tbody>', 1)[1].split('</tbody>', 1)[0]
+        assert body.count('<tr>') == 12
+        periods = re.findall(r'class="group-key shipment"><span[^>]*>([^<]+)</span>', body)
+        assert [int(value[-2:]) for value in periods] == list(range(1, 13))
+    return tables
+
+
+@pytest.mark.parametrize('sessions', [(), (MarketSession.AM,), (MarketSession.PM,),
+                                     (MarketSession.AM, MarketSession.PM)])
+def test_fixed_month_tables_with_missing_and_partial_releases(tmp_path, sessions):
+    # Real sealed one-month releases exercise loading, view-model and HTML together.
+    cnf = tmp_path / 'cnf.parquet'
+    results = tmp_path / 'results'
+    for session in sessions:
+        result = calculated(session, key(year=2026, month=12))
+        seal_intraday_profit_batch(results, SoybeanIntradayResultBatch(
+            DAY, session, result.market_snapshot_release_id,
+            result.market_snapshot_sha256, result.market_captured_at,
+            result.cnf_identity, result.calculated_at, (result,)))
+    app = AppTest.from_string(_app_script(results, cnf), default_timeout=20).run()
+    tables = _profit_tables(app)
+    for session, table in zip(MarketSession, tables, strict=True):
+        assert table.count('margin-null') == (11 if session in sessions else 12)
+
+
+def _presentation_release(session=MarketSession.AM, **changes):
+    row = dict(business_date=DAY.isoformat(), session=session.value,
+               commodity='soybean', origin='brazil', shipment_year=2026,
+               shipment_month=12, shipment_period='2026-12',
+               cnf_cents_per_bushel=0.0, cbot_price_cents_per_bushel=1200.0,
+               soymeal_price_cny_per_tonne=3200.0, soyoil_price_cny_per_tonne=8000.0,
+               fx_value=7.2, net_crush_margin_cny_per_tonne=None,
+               availability_status='UNAVAILABLE', calculation_status='unavailable')
+    row.update(changes)
+    return SimpleNamespace(business_date=DAY, session=session, rows=(row,))
+
+
+@pytest.mark.parametrize('field,value', [
+    ('cnf_cents_per_bushel', None), ('cnf_cents_per_bushel', 0.0),
+    ('cbot_price_cents_per_bushel', None), ('soymeal_price_cny_per_tonne', None),
+    ('soyoil_price_cny_per_tonne', None), ('fx_value', None),
+    ('net_crush_margin_cny_per_tonne', None),
+])
+@pytest.mark.parametrize('session', list(MarketSession))
+def test_missing_business_values_never_remove_months(field, value, session):
+    from import_profit_intraday_page import _result_profit_rows
+    release = _presentation_release(session, **{field: value})
+    rows = _result_profit_rows(release, business_date=DAY, session=session,
+                               origin='brazil', config=CONFIG)
+    assert len(rows) == 12
+    assert [row['船期'] for row in rows] == [
+        *(f'2027-{month:02d}' for month in range(1, 9)),
+        *(f'2026-{month:02d}' for month in range(9, 13))]
+    display = {'cnf_cents_per_bushel': 'CNF（美分/蒲）',
+               'cbot_price_cents_per_bushel': 'CBOT价格',
+               'soymeal_price_cny_per_tonne': '豆粕盘面',
+               'soyoil_price_cny_per_tonne': '豆油盘面', 'fx_value': '汇率',
+               'net_crush_margin_cny_per_tonne': '盘面榨利（元/吨）'}
+    assert rows[11][display[field]] == value
+    assert all(row['盘面榨利（元/吨）'] is None for row in rows)
+    assert all(row['CNF（美分/蒲）'] is None for row in rows[:11])
+
+
+@pytest.mark.parametrize('changes', [
+    {'shipment_year': 2027, 'shipment_period': '2027-12'},
+    {'business_date': '2026-08-27'}, {'origin': 'argentina'},
+    {'session': 'PM'}, {'commodity': 'canola'},
+])
+def test_month_left_join_excludes_other_identities(changes):
+    from import_profit_intraday_page import _result_profit_rows
+    release = _presentation_release()
+    release.rows[0].update(changes)
+    rows = _result_profit_rows(release, business_date=DAY, session=MarketSession.AM,
+                               origin='brazil', config=CONFIG)
+    assert len(rows) == 12
+    assert all(row['CNF（美分/蒲）'] is None for row in rows)
+
+
+def test_origin_switch_and_other_session_cannot_borrow_results():
+    from import_profit_intraday_page import _result_profit_rows
+    release = _presentation_release()
+    for origin in CONFIG.origin_codes:
+        rows = _result_profit_rows(release, business_date=DAY, session=MarketSession.AM,
+                                   origin=origin, config=CONFIG)
+        assert len(rows) == 12
+        assert rows[11]['CNF（美分/蒲）'] == (0.0 if origin == 'brazil' else None)
+    for day, session in [(date(2026, 8, 31), MarketSession.AM), (DAY, MarketSession.PM)]:
+        rows = _result_profit_rows(release, business_date=day, session=session,
+                                   origin='brazil', config=CONFIG)
+        assert len(rows) == 12
+        assert all(row['CNF（美分/蒲）'] is None for row in rows)
+
+
+def test_empty_result_rows_and_december_rollover():
+    from import_profit_intraday_page import _result_profit_rows
+    release = _presentation_release()
+    release.rows = ()
+    assert len(_result_profit_rows(release, business_date=DAY, session=MarketSession.AM,
+                                  origin='brazil', config=CONFIG)) == 12
+    rows = _result_profit_rows(None, business_date=date(2026, 12, 31),
+                              session=MarketSession.PM, origin='brazil', config=CONFIG)
+    assert [row['船期'] for row in rows] == [f'2027-{month:02d}' for month in range(1, 13)]
+
+
+def test_current_date_does_not_fall_back_to_old_releases(tmp_path):
+    results, cnf = _assets(tmp_path)
+    script = _app_script(results, cnf)
+    script = script.replace('business_date=date(2026, 8, 28)', 'business_date=date(2027, 1, 5)')
+    app = AppTest.from_string(script, default_timeout=20).run()
+    for table in _profit_tables(app):
+        assert table.count('margin-null') == 12
+        assert '2026-12' not in table
+
+
+def test_no_date_and_no_assets_still_render_twelve_months(tmp_path):
+    script = _app_script(tmp_path / 'results', tmp_path / 'cnf.parquet')
+    script = script.replace('business_date=date(2026, 8, 28)', 'business_date=None')
+    app = AppTest.from_string(script, default_timeout=20).run()
+    for table in _profit_tables(app):
+        assert table.count('margin-null') == 12
