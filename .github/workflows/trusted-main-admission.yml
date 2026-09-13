@@ -81,9 +81,64 @@ jobs:
       with:
         name: platform-plan
         path: ${{ runner.temp }}/platform-plan
+    - name: Provision and verify supported Chinese fonts
+      working-directory: candidate
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig
+        fc-cache -f
+        python -I -B - <<'PY'
+        import json, os, platform, subprocess, sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path.cwd() / '03_src'))
+        from agri_research_agent.utils.matplotlib_config import configure_matplotlib_chinese_fonts
+        from matplotlib import font_manager
+        selected = configure_matplotlib_chinese_fonts()[0]
+        assert selected in {'Noto Sans CJK SC', 'Noto Sans CJK JP'}, selected
+        system_family = subprocess.check_output(['fc-match', '-f', '%{family}', selected], text=True).strip()
+        assert selected in system_family.split(','), system_family
+        font_path = font_manager.findfont(font_manager.FontProperties(family=[selected]), fallback_to_default=False)
+        resolved = font_manager.FontProperties(fname=font_path).get_name()
+        assert resolved == selected, (selected, resolved)
+        evidence = dict(package='fonts-noto-cjk', package_version=subprocess.check_output(
+            ['dpkg-query', '-W', '-f=${Version}', 'fonts-noto-cjk'], text=True),
+            runner_os=os.environ['RUNNER_OS'], os_release=platform.freedesktop_os_release(),
+            system_family=system_family, configured_family=selected, resolved_family=resolved,
+            font_path=font_path, result='PASS')
+        output = Path(os.environ['RUNNER_TEMP']) / 'platform-results/linux/font-check.json'
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')
+        print(json.dumps(evidence, indent=2))
+        PY
     - name: Execute required linux tests
       working-directory: candidate
       run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
+    - name: Preserve full Linux regression for routine release tooling
+      working-directory: candidate
+      run: |
+        python -I -B - <<'PY'
+        import json, os, sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path.cwd() / '04_scripts/quality'))
+        import platform_ci as ci
+        root = Path(os.environ['RUNNER_TEMP'])
+        required = ci.read(root / 'platform-plan/plan.json')
+        repo = Path.cwd()
+        base, candidate = required['base'], required['candidate']
+        changed = ci.admission.text(repo, 'diff', '--name-only', base['commit'], candidate['commit']).splitlines()
+        if '04_scripts/runtime/routine_release.py' not in changed:
+            raise SystemExit(0)
+        old = ci.admission.tree(repo, base['commit'])
+        new = ci.admission.tree(repo, candidate['commit'])
+        paths = sorted(p for p in set(old) | set(new) if ci.admission.test_path(p))
+        sources = {p: ci.admission.blob(repo, candidate['commit'], p) for p in paths}
+        trusted = {p: ci.admission.blob(repo, base['commit'], p) if p in old else sources[p] for p in paths}
+        full = ci.platforms.plan(paths, trusted, sources, ci.read(ci.POLICY), base=base, candidate=candidate)
+        assert full['lanes']['windows'] == required['lanes']['windows'], 'FULL_WINDOWS_COVERAGE_REQUIRED'
+        plan_path = root / 'platform-results/linux/full/plan.json'
+        ci.save(plan_path, full)
+        raise SystemExit(ci.execute('linux', plan_path, plan_path.parent))
+        PY
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
