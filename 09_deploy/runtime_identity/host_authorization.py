@@ -706,6 +706,11 @@ def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
         bundle = codec.verify_bundle(_protected_path(directory / "bundle.json", private=True).read_bytes(),
                                      payload, directory, protected=lambda p: _protected_path(p, private=True))
         cleanup = _json(_protected_path(directory / "cleanup.json", private=True).read_bytes())
+        result = _json(_protected_path(directory / "lifecycle-result.json", private=True).read_bytes())
+        if (set(result) != {"status", "identity", "sealed", "timestamp", "failure_type"}
+                or result["status"] != "PASS" or result["sealed"] is not True
+                or result["identity"] != bundle["identity"] or result["failure_type"] is not None):
+            raise HostAuthorizationError("candidate lifecycle did not complete successfully")
         if (set(cleanup) != {"status", "identity", "image_retained", "timestamp"} or cleanup["status"] != "PASS"
                 or cleanup["identity"] != bundle["identity"] or cleanup["image_retained"] is not True):
             raise HostAuthorizationError("candidate cleanup not complete")

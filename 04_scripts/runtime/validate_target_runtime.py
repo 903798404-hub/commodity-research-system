@@ -1165,24 +1165,27 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 if lifecycle is not None:
                     lifecycle.before_cleanup()
             finally:
-                if container_id:
-                    _docker("rm", "-f", container_id, check=False, timeout=120)
-                _docker("compose", "--project-name", project_name,
-                        "--project-directory", str(work), "--env-file", str(env_file),
-                        "-f", str(compose), "down", check=False, timeout=120)
-            if scope is not None:
-                shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
-                descriptor = Path(scope["candidate_scope"]["descriptor_path"])
-                for candidate in (descriptor.with_name(descriptor.name + ".consumed"), descriptor):
-                    try:
-                        candidate.unlink()
-                    except FileNotFoundError:
-                        pass
-            if lifecycle is not None:
-                # A daemon/query failure is not proof of absence.
-                remaining = _docker("ps", "-aq", "--filter", "label=com.docker.compose.project=" + project_name).stdout.strip()
-                retained = inspect_one("image", image_id).get("Id") == image_id
-                lifecycle.after_cleanup(not remaining and retained)
+                try:
+                    if container_id:
+                        _docker("rm", "-f", container_id, check=False, timeout=120)
+                    _docker("compose", "--project-name", project_name,
+                            "--project-directory", str(work), "--env-file", str(env_file),
+                            "-f", str(compose), "down", check=False, timeout=120)
+                finally:
+                    if scope is not None:
+                        shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
+                        descriptor = Path(scope["candidate_scope"]["descriptor_path"])
+                        for candidate in (descriptor.with_name(descriptor.name + ".consumed"), descriptor):
+                            try:
+                                candidate.unlink()
+                            except FileNotFoundError:
+                                pass
+                    if lifecycle is not None:
+                        # A daemon/query failure is not proof of absence.
+                        remaining = _docker("ps", "-aq", "--filter", "label=com.docker.compose.project=" + project_name).stdout.strip()
+                        retained = inspect_one("image", image_id).get("Id") == image_id
+                        removed = scope is None or not Path(scope["candidate_host_root"]).exists()
+                        lifecycle.after_cleanup(not remaining and retained and removed)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

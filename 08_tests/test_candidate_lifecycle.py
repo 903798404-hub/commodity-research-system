@@ -204,7 +204,7 @@ def test_endpoint_is_internal_loopback_only(tmp_path, monkeypatch):
     assert doc["services"]["demo"]["ports"][0]["host_ip"] == "127.0.0.1"
 
 
-@pytest.mark.parametrize("failure", [None, "runtime", "application", "seal"])
+@pytest.mark.parametrize("failure", [None, "runtime", "application", "seal", "failure-evidence"])
 @pytest.mark.parametrize("reuse", [False, True])
 def test_engine_full_lifecycle_build_count_and_cleanup(tmp_path, monkeypatch, failure, reuse):
     """Exercise the real engine ordering with an inert Docker/host boundary."""
@@ -287,7 +287,9 @@ def test_engine_full_lifecycle_build_count_and_cleanup(tmp_path, monkeypatch, fa
             if failure == "application": raise ValueError("application failed")
             events.append("seal")
             if failure == "seal": raise ValueError("seal failed")
-        def before_cleanup(self): events.append("result-saved")
+        def before_cleanup(self):
+            events.append("result-saved")
+            if failure == "failure-evidence": raise ValueError("cannot save result")
         def after_cleanup(self, removed): assert removed
     kwargs = dict(existing_image_id=image["Id"], release_id="demo-b01") if reuse else {}
     if failure:
