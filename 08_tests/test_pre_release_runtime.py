@@ -270,3 +270,265 @@ def test_candidate_validation_engine_and_record_fail_closed(monkeypatch, tmp_pat
         with pytest.raises(error):
             runtime.validate_candidate("demo", output, key_path, ttl_seconds=3600)
         assert not output.exists()
+
+# Production release planning regressions. All Docker/host facts are inert fixtures.
+def _risk_gate(**changes):
+    values = dict(assets_ready=True, candidate_validated=True, irreversible_state_change="NO",
+                  compatibility=True, acceptance_plan_ready=True, rehearsal_validated=False,
+                  old_grant_expired=True)
+    risk = changes.pop("risk", {"RELEASE_RISK_CLASS": "ROUTINE_STATELESS"})
+    values.update(changes)
+    return runtime.evaluate_release_gate(risk, **values)
+
+
+def test_routine_expired_grant_is_not_a_rollback_asset_failure():
+    result = _risk_gate()
+    assert result["PRODUCTION_RELEASE_PREFLIGHT"] == "PASS"
+    assert result["ROLLBACK_REHEARSAL_REQUIRED"] is False
+    assert result["production_authorized"] is False
+    assert result["EXECUTION_AUTHORIZATION"] == "REQUIRED_AT_FRESH_INSTANCE_START"
+    assert _risk_gate(old_grant_expired=False)["PRODUCTION_RELEASE_PREFLIGHT"] == "PASS"
+
+
+@pytest.mark.parametrize("field", ["assets_ready", "candidate_validated", "compatibility", "acceptance_plan_ready"])
+def test_routine_requires_all_release_evidence(field):
+    assert _risk_gate(**{field: False})["PRODUCTION_RELEASE_PREFLIGHT"] == "FAIL"
+
+
+@pytest.mark.parametrize("state", ["YES", "UNKNOWN"])
+def test_irreversible_or_unknown_state_cannot_be_low_risk(state):
+    result = _risk_gate(irreversible_state_change=state, rehearsal_validated=True)
+    assert result["RELEASE_RISK_CLASS"] == "STATEFUL_OR_INFRA"
+    assert result["ROLLBACK_REHEARSAL_REQUIRED"] is True
+    assert result["PRODUCTION_RELEASE_PREFLIGHT"] == "FAIL"
+
+
+def test_infrastructure_requires_recovery_and_cannot_use_expired_grant_as_rehearsal():
+    risk = {"RELEASE_RISK_CLASS": "STATEFUL_OR_INFRA"}
+    assert _risk_gate(risk=risk)["failure_codes"] == ["RECOVERY_REHEARSAL_REQUIRED"]
+    assert _risk_gate(risk=risk, rehearsal_validated=True)["PRODUCTION_RELEASE_PREFLIGHT"] == "PASS"
+
+
+@pytest.mark.parametrize("value", ["NO", 0, None])
+def test_release_gate_rejects_truthy_or_untyped_observations(value):
+    with pytest.raises(runtime.PreReleaseError):
+        _risk_gate(assets_ready=value)
+
+
+@pytest.fixture
+def risk_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+    git("init", "-q")
+    git("config", "user.name", "Risk Fixture")
+    git("config", "user.email", "fixture@example.invalid")
+    def put(path, value):
+        p = repo / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(value, encoding="utf-8")
+    put("02_configs/project_registry.json", json.dumps({"projects": [{"project_id": "example", "runtime_contract": "02_configs/runtime.json"}]}))
+    put("02_configs/runtime.json", json.dumps({"build": {"dockerfile": "Dockerfile", "compose_sources": ["compose.yml"]}}))
+    put("Dockerfile", 'FROM immutable\nCOPY ["05_apps/page.py", "/app/page.py"]\n')
+    put("compose.yml", "services: {}\n")
+    put("05_apps/page.py", "def present(x):\n    return x + 1\n")
+    git("add", "."); git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    return repo, git, put, base
+
+
+@pytest.mark.parametrize("path,content,expected", [
+    ("05_apps/page.py", "def present(x):\n    return x + 2\n", "ROUTINE_STATELESS"),
+    ("05_apps/page.py", "def present(x):\n    open('prod', 'w').write(x)\n", "STATEFUL_OR_INFRA"),
+    ("05_apps/page.py", "def present(x):\n    x[0] = 3\n    return x\n", "STATEFUL_OR_INFRA"),
+    ("migrations/001.sql", "ALTER TABLE production ADD value TEXT;", "STATEFUL_OR_INFRA"),
+    ("01_data/current.json", "{}", "STATEFUL_OR_INFRA"),
+    ("compose.yml", "services: {different: {}}", "STATEFUL_OR_INFRA"),
+    ("Dockerfile", "FROM changed\nCOPY . /app\n", "STATEFUL_OR_INFRA"),
+    ("09_deploy/off_image.py", "raise RuntimeError()", "ROUTINE_STATELESS"),
+])
+def test_classifier_uses_git_and_build_not_caller_low_risk(risk_repo, path, content, expected):
+    repo, git, put, base = risk_repo
+    put(path, content)
+    git("add", "."); git("commit", "-qm", "candidate")
+    target = git("rev-parse", "HEAD")
+    result = runtime.classify_release(repo, base, target, "example")
+    assert result["RELEASE_RISK_CLASS"] == expected
+    assert result["target"] == {"commit": target, "tree": git("rev-parse", "HEAD^{tree}")}
+    assert result["findings"][0]["path"] == path
+
+
+def test_classifier_tracks_deletions_and_unknown_builds(risk_repo):
+    repo, git, put, base = risk_repo
+    (repo / "05_apps/page.py").unlink()
+    git("add", "-A"); git("commit", "-qm", "delete")
+    assert runtime.classify_release(repo, base, git("rev-parse", "HEAD"), "example")["RELEASE_RISK_CLASS"] == "STATEFUL_OR_INFRA"
+    with pytest.raises(runtime.PreReleaseError):
+        runtime.classify_release(repo, "HEAD", base, "example")
+
+
+@pytest.fixture
+def rollback_assets(tmp_path, risk_repo):
+    repo, git, put, base = risk_repo
+    tree = git("rev-parse", "HEAD^{tree}")
+    image_id = "sha256:" + "1" * 64
+    artifact = dict(commit=base, tree=tree, image_id=image_id)
+    def sealed(name, payload):
+        path = tmp_path / name
+        raw = json.dumps(payload).encode()
+        path.write_bytes(raw)
+        return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
+    assets = dict(artifact, image_location="LOCAL_IMAGE_ONLY", registry_digest=None,
+                  release=sealed("release", dict(git_commit=base, git_tree=tree, image_id=image_id, release_id="fixture-release")),
+                  runtime_config=sealed("config", dict(artifact=artifact,
+                      namespace=dict(compose_project="old", container_name="old", host_ports=[8501]),
+                      compose=sealed("compose", {"services": {"old": {}}}), environment=sealed("env", {"MODE": "FORMAL"}))),
+                  data_schema=sealed("data", dict(schema_identity="no-migration/1", assets=[])),
+                  procedure=sealed("procedure", dict(artifact=artifact, fresh_instance_required=True,
+                      fresh_grant_required=True, steps=["create exact old image", "issue fresh grant", "start and accept"])))
+    image = {"Id": image_id, "Config": {"Labels": {"org.opencontainers.image.revision": base, "market-data.git.tree": tree}}, "RepoDigests": []}
+    host = SimpleNamespace(_json=json.loads, _run_docker=lambda args: json.dumps([image]).encode(), _protected_path=lambda p, **kw: p)
+    return repo, assets, host, image
+
+
+def test_rollback_assets_verify_exact_source_image_and_retained_config(rollback_assets):
+    repo, assets, host, image = rollback_assets
+    result = runtime.verify_rollback_assets(repo, assets, host)
+    assert result["ROLLBACK_ASSETS_READY"] is True
+    assert result["retention_risk"] == "HOST_LOSS_NOT_COVERED"
+    assert _risk_gate(assets_ready=result["ROLLBACK_ASSETS_READY"])["PRODUCTION_RELEASE_PREFLIGHT"] == "PASS"
+
+
+@pytest.mark.parametrize("failure", ["image", "tree", "release", "runtime_config", "data_schema", "procedure", "digest", "registry"])
+def test_rollback_assets_fail_closed_for_missing_or_mismatched_material(rollback_assets, failure):
+    repo, assets, host, image = rollback_assets
+    if failure == "image":
+        host._run_docker = lambda args: b"[]"
+    elif failure == "tree":
+        assets["tree"] = "0" * 40
+    elif failure in ("release", "runtime_config", "data_schema", "procedure"):
+        Path(assets[failure]["path"]).unlink()
+    elif failure == "digest":
+        Path(assets["runtime_config"]["path"]).write_text("changed")
+    else:
+        assets.update(image_location="REGISTRY_IMMUTABLE_IMAGE", registry_digest="registry.invalid/image@sha256:" + "a" * 64)
+    with pytest.raises((runtime.PreReleaseError, OSError)):
+        runtime.verify_rollback_assets(repo, assets, host)
+
+
+def test_registry_image_requires_observed_digest(rollback_assets):
+    repo, assets, host, image = rollback_assets
+    digest = "registry.invalid/image@sha256:" + "a" * 64
+    image["RepoDigests"] = [digest]
+    assets.update(image_location="REGISTRY_IMMUTABLE_IMAGE", registry_digest=digest)
+    assert runtime.verify_rollback_assets(repo, assets, host)["registry_digest"] == digest
+
+
+def test_assessment_cli_cannot_be_combined_with_start_options(tmp_path):
+    with pytest.raises(SystemExit):
+        runtime.main(["--release-request", str(tmp_path / "r"), "--container-id", "a" * 64])
+    with pytest.raises(SystemExit):
+        runtime.main(["--classify-release", "a" * 40, "b" * 40, "example", "--production-policy", "policy"])
+
+@pytest.mark.parametrize("mutation,expected", [(None, "PASS"), ("migration", "FAIL"), ("irreversible", "FAIL"), ("candidate", "ERROR"), ("acceptance", "ERROR"), ("extra-field", "ERROR")])
+def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, tmp_path, mutation, expected):
+    import copy
+    repo, current, host, image = rollback_assets
+    target = dict(commit=current["commit"], tree=current["tree"])
+    old = copy.deepcopy(current)
+    old["commit"] = "2" * 40
+    def ref(name, value):
+        raw = json.dumps(value).encode()
+        p = tmp_path / name
+        p.write_bytes(raw)
+        return dict(path=str(p), sha256=hashlib.sha256(raw).hexdigest())
+    # These are protected operator observations; signatures are exercised by the
+    # existing record tests. Actual artifact hashing remains active in this test.
+    state = dict(base=target, target=target, data_schema_sha256=current["data_schema"]["sha256"],
+                 irreversible="YES" if mutation == "irreversible" else "NO", compatible=True,
+                 database_migration=mutation == "migration", production_data_mutation=False, storage_format_change=False)
+    candidate = dict(binding=dict(target, project_id="example"), image_id=image["Id"])
+    if mutation == "candidate":
+        candidate["binding"]["tree"] = "9" * 40
+    request = dict(schema_version="production-release-request/1", project_id="example", current=current, previous=old,
+                   target_commit=target["commit"], target_source_root=str(repo), candidate_record=ref("candidate-record", candidate),
+                   state_plan=ref("state-plan", state), acceptance_plan=ref("acceptance-plan", dict(target=target,
+                   image_id="bad" if mutation == "acceptance" else image["Id"], checks=["actual consumer"])), recovery_evidence=None)
+    if mutation == "extra-field":
+        request["low_risk"] = True
+    path = tmp_path / "request"
+    path.write_text(json.dumps(request))
+    host.require_protected_authority_source = lambda: None
+    host._json = json.loads
+    engine = SimpleNamespace(_project=lambda *a: {"runtime_contract": "contract"}, source_contract=lambda *a: (None, {}, dict(target, project_id="example")))
+    records = SimpleNamespace(verify_record=lambda raw, trust: {"evidence": json.loads(raw)})
+    monkeypatch.setattr(runtime, "ROOT", repo)
+    (repo / runtime.TRUST).write_text("{}")
+    monkeypatch.setattr(runtime, "_load", lambda name, alias: {runtime.HOST: host, runtime.ENGINE: engine, runtime.RECORD: records}[name])
+    monkeypatch.setattr(runtime, "require_source", lambda *a, **kw: (target["commit"], target["tree"]))
+    monkeypatch.setattr(runtime, "classify_release", lambda *a: dict(schema_version=runtime.RISK_SCHEMA, base=target, target=target, RELEASE_RISK_CLASS="ROUTINE_STATELESS"))
+    monkeypatch.setattr(runtime, "verify_rollback_assets", lambda root, a, h: dict(commit=a["commit"], image_id=image["Id"], ROLLBACK_ASSETS_READY=True))
+    # asset negative cases have dedicated real verifier tests above; here test
+    # wiring/aggregation and source-bound candidate/state/acceptance checks.
+    monkeypatch.setattr(runtime, "_write_new", lambda h, p, raw: p.write_bytes(raw))
+    output = tmp_path / "result"
+    if expected == "ERROR":
+        with pytest.raises(runtime.PreReleaseError):
+            runtime.assess_release(path, output)
+        assert not output.exists()
+    else:
+        result = runtime.assess_release(path, output)
+        assert result["PRODUCTION_RELEASE_PREFLIGHT"] == expected
+        assert result["OLD_GRANT_EXPIRED"] == "NOT_READ_NOT_A_GATE"
+        assert result["production_authorized"] is False
+
+@pytest.mark.parametrize("mutation", [None, "expired-start", "wrong-instance", "failed-consumer", "wrong-probe-tree", "signature", "revoked"])
+def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, monkeypatch, mutation):
+    from datetime import timedelta
+    spec = importlib.util.spec_from_file_location("recovery_identity_fixture", ROOT / "08_tests/shared/test_production_identity.py")
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    request, payload, private, marker, runtime_root = fixture.oci_fixture(tmp_path / "fixture", monkeypatch)
+    source = request.release_path.parent
+    original_parser = runtime._load("03_src/agri_research_agent/shared/production_grant.py", "recovery_parser_test")
+    monkeypatch.setattr(runtime, "ROOT", source)
+    monkeypatch.setattr(runtime, "_load", lambda *args: original_parser)
+    issued = datetime.fromisoformat(payload["issued_at"])
+    expires = datetime.fromisoformat(payload["expires_at"])
+    started = expires + timedelta(seconds=1) if mutation == "expired-start" else issued + timedelta(seconds=1)
+    def ref(name, value):
+        raw = json.dumps(value).encode()
+        p = tmp_path / name
+        p.write_bytes(raw)
+        return dict(path=str(p), sha256=hashlib.sha256(raw).hexdigest())
+    grant = json.loads(request.grant_path.read_bytes())
+    if mutation == "signature":
+        grant["signature"] = base64.b64encode(b"0" * 64).decode()
+    if mutation == "revoked":
+        trust_path = source / runtime.TRUST
+        trust = json.loads(trust_path.read_bytes())
+        trust["revoked_grant_ids"] = [payload["grant_id"]]
+        trust_path.write_text(json.dumps(trust))
+    instance = dict(container_id=payload["container_id"], image_id=payload["image_id"], hostname=payload["hostname_nonce"],
+                    created_at=(issued-timedelta(seconds=1)).isoformat(), started_at=started.isoformat())
+    if mutation == "wrong-instance":
+        instance["container_id"] = "f" * 64
+    evidence = dict(instance=ref("instance", instance), grant=ref("grant", grant))
+    for name in ("preflight", "health", "consumer", "data_unchanged"):
+        probe = dict(container_id=payload["container_id"], commit=payload["approved_commit"], tree=payload["approved_tree"],
+                     image_id=payload["image_id"], exit_code=0, status="PASS", raw=ref(name+"-raw", {"actual": "fixture"}))
+        if name == "consumer" and mutation == "failed-consumer":
+            probe["exit_code"] = 1
+        if name == "preflight" and mutation == "wrong-probe-tree":
+            probe["tree"] = "e" * 40
+        evidence[name] = ref(name, probe)
+    recovery = dict(base=dict(commit=payload["approved_commit"], tree=payload["approved_tree"]), old_image_id=payload["image_id"],
+                    observed_at=(started+timedelta(seconds=1)).isoformat(), evidence=evidence)
+    host = SimpleNamespace(_json=json.loads, _protected_path=lambda p, **kw: p)
+    if mutation:
+        from cryptography.exceptions import InvalidSignature
+        with pytest.raises((runtime.PreReleaseError, InvalidSignature)):
+            runtime.verify_recovery_observation(recovery, host)
+    else:
+        runtime.verify_recovery_observation(recovery, host)
