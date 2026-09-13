@@ -181,6 +181,29 @@ def test_smoke_cannot_target_another_server():
     with pytest.raises(routine.RoutineError,match='ACTUAL_CONTAINER'):b.smoke()
 
 
+def test_smoke_contract_matches_current_soybean_rendered_html(monkeypatch):
+    import re,html
+    from datetime import date
+    monkeypatch.syspath_prepend(str(ROOT/'05_apps'))
+    import import_profit_intraday_page as page
+    from agri_research_agent.market_data.intraday import MarketSession
+    fragments=[]
+    monkeypatch.setattr(page.st,'html',fragments.append)
+    params=SimpleNamespace(tariff_rate=0.03,vat_rate=0.09)
+    config=SimpleNamespace(resolve_parameters=lambda origin:params)
+    for session,heading in [(MarketSession.AM,'大豆早间榨利'),(MarketSession.PM,'大豆下午榨利')]:
+        rows=page._result_profit_rows(None,business_date=date(2026,9,13),session=session,origin='brazil',config=config)
+        page._render_preview_session_table(heading,rows,short_meta=session.value+' · —')
+    tables=[]
+    for fragment in fragments:
+        meta=re.search(r'class="[^"]*profit-card-time[^"]*">([^<]*)',fragment)[1]
+        body=re.search(r'<tbody>(.*?)</tbody>',fragment)[1]
+        rows=[[html.unescape(re.sub('<[^>]+>','',c)) for c in re.findall(r'<td[^>]*>(.*?)</td>',r)]
+              for r in re.findall(r'<tr>(.*?)</tr>',body)]
+        tables.append(dict(heading=meta,rows=rows))
+    assert routine.check_dom_tables(tables,('AM','PM'))=='PASS'
+
+
 @pytest.mark.parametrize('risk_class',['ROUTINE_STATELESS','STATEFUL_OR_INFRA'])
 def test_host_consumes_plain_acceptance_only_for_machine_routine(tmp_path,monkeypatch,risk_class):
     import json,hashlib

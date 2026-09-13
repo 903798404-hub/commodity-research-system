@@ -209,7 +209,7 @@ def browser_smoke(url, empty_sessions, selectors=None):
                 return 'PASS'
             page.locator('.profit-card').nth(1).wait_for(timeout=60000)
             tables = page.locator('.profit-card').evaluate_all("""cards => cards.map(c => ({
-                heading: c.querySelector('h2')?.textContent || '',
+                heading: c.querySelector('.profit-card-time')?.textContent || '',
                 rows: Array.from(c.querySelectorAll('tbody tr'), r =>
                   Array.from(r.querySelectorAll('td'), td => td.textContent.trim()))
             }))""")
