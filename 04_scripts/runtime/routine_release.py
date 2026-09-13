@@ -191,13 +191,22 @@ def check_dom_tables(tables, empty_sessions=()):
     return 'PASS'
 
 
-def browser_smoke(url, empty_sessions):
+def browser_smoke(url, empty_sessions, selectors=None):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
             page = browser.new_page()
             page.goto(url, wait_until='domcontentloaded', timeout=60000)
+            if selectors is not None:
+                require(bool(selectors), 'DOM_ASSERTIONS_REQUIRED')
+                for selector, expected_count in selectors.items():
+                    require(isinstance(selector, str) and type(expected_count) is int and expected_count > 0,
+                            'INVALID_DOM_ASSERTION')
+                    page.locator(selector).first.wait_for(timeout=60000)
+                    require(page.locator(selector).count() == expected_count, 'DOM_ASSERTION_FAILED')
+                require(page.locator('[data-testid="stException"]').count() == 0, 'APPLICATION_EXCEPTION')
+                return 'PASS'
             page.locator('.profit-card').nth(1).wait_for(timeout=60000)
             tables = page.locator('.profit-card').evaluate_all("""cards => cards.map(c => ({
                 heading: c.querySelector('h2')?.textContent || '',
@@ -269,7 +278,8 @@ class DockerSession:
         self.assert_data_readonly()
 
     def _check_mounts(self, mounts):
-        writable = {r['container_path'] for r in self.contract['runtime_roots'] if r['access'] == 'rw'}
+        writable = {r['container_path'] for r in self.contract['runtime_roots']
+                    if r['access'] == 'rw' and r['role'] in {'outputs', 'logs', 'cache', 'temporary'}}
         for mount in mounts:
             require(mount.get('type') == 'bind', 'EXPLICIT_BIND_REQUIRED')
             target = mount.get('target')
@@ -348,7 +358,13 @@ class DockerSession:
         raise RoutineError('HEALTH_FAILED')
 
     def smoke(self):
-        return browser_smoke(self.url()+'?workspace_page=import_profit', self.request['empty_sessions'])
+        smoke = self.request['application_smoke']
+        path = smoke['path']
+        require(isinstance(path, str) and path.startswith(('/', '?')) and not path.startswith('//')
+                and '\\' not in path, 'SMOKE_MUST_USE_ACTUAL_CONTAINER_PORT')
+        require(smoke['kind'] in ('soybean-fixed-months', 'dom'), 'UNKNOWN_APPLICATION_SMOKE')
+        return browser_smoke(self.url()+path, self.request.get('empty_sessions', []),
+                             smoke['selectors'] if smoke['kind'] == 'dom' else None)
 
     def cleanup(self):
         if self.container_id:

@@ -168,6 +168,19 @@ def test_expired_old_grant_not_read_in_routine():
     assert routine.deploy_same_image(Backend(),IMAGE,acceptance(),previous,ci_run='123')['result']=='PASS'
 
 
+def test_even_declared_writable_business_root_is_not_routine_write_permission(tmp_path):
+    contract=dict(project_id='service',runtime_roots=[dict(role='data',access='rw',container_path='/data')])
+    b=routine.DockerSession({},None,None,{},contract)
+    b.spec={'writable_root':str(tmp_path)}
+    with pytest.raises(routine.RoutineError,match='DATA_WRITE'):
+        b._check_mounts([dict(type='bind',source=str(tmp_path/'data'),target='/data',read_only=False)])
+
+
+def test_smoke_cannot_target_another_server():
+    b=routine.DockerSession({'application_smoke':dict(kind='dom',path='//other-server',selectors={'h1':1})},None,None,{},dict(project_id='service'))
+    with pytest.raises(routine.RoutineError,match='ACTUAL_CONTAINER'):b.smoke()
+
+
 @pytest.mark.parametrize('risk_class',['ROUTINE_STATELESS','STATEFUL_OR_INFRA'])
 def test_host_consumes_plain_acceptance_only_for_machine_routine(tmp_path,monkeypatch,risk_class):
     import json,hashlib
