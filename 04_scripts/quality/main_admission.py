@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+import yaml
 
 REGISTRY = "02_configs/project_registry.json"
 SCOPE = "04_scripts/quality/audit_changed_scope.py"
@@ -36,6 +37,76 @@ TRUST_FILES = (REGISTRY, SCOPE, IMPLEMENTATION, SCHEMA, MAP,
                "requirements-dev.txt", WORKFLOW)
 PRODUCTION = ("09_deploy", "04_scripts/automation", "04_scripts/runtime",
               "03_src/agri_research_agent/automation", "01_data", "06_outputs", "10_logs")
+
+# Repository definitions are not observations of a live deployment. Keep this
+# small role vocabulary independent of project ownership and execution grants.
+_LIVE_DIRECTORIES = {'live', 'state', 'runtime', 'releases', 'evidence', 'credentials',
+                     'grants', 'secrets', 'candidate-data', '.ssh'}
+_LIVE_NAMES = {'release.json', 'release.manifest.json', 'deployment_result.json',
+               'deployment_plan.json', 'candidate_result.json', 'current.json',
+               'release_index.json', 'grant.json', 'production-policy.json'}
+_STATE_SCHEMAS = ('controlled-runtime-', 'candidate-validation-record/',
+                  'candidate-evidence-bundle/', 'host-runtime-policy/',
+                  'production-execution-grant/', 'execution-grant/',
+                  'production-release-request/', 'production-pre-release-validation/')
+_TOOLING_SUFFIXES = {'.py', '.sh', '.ps1', '.json', '.yaml', '.yml', '.toml', '.conf',
+                     '.ini', '.j2', '.jinja2', '.template', '.example'}
+
+
+def production_artifact_role(path: str, source: bytes | None = None) -> str | None:
+    """Classify Git artifacts, never authorize their execution on a server.
+
+    Generated state wins over a source-looking extension. Structured state is
+    inspected as data (never executed); schema definitions describe such state
+    but do not contain an instance-level schema_version/grant/signature.
+    Unknown deployment artifacts remain fail-closed. Python deployment commands
+    are reviewed source; actually invoking them is a separate release action.
+    """
+    name = path.casefold().rsplit('/', 1)[-1]
+    parts = path.casefold().split('/')
+    if any(under(path.casefold(), p) for p in ('01_data', '06_outputs', '10_logs')):
+        return 'PRODUCTION_MUTATION'
+    if name.startswith('.env') or name.endswith('.env'):
+        return 'PRODUCTION_MUTATION'
+    if not any(under(path.casefold(), p) for p in PRODUCTION[:4]):
+        return None
+    if source and re.search(rb'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----', source):
+        return 'PRODUCTION_MUTATION'
+    if name.endswith('.md'):
+        return 'DOCUMENTATION'
+    if (any(p in _LIVE_DIRECTORIES for p in parts[1:-1]) or name in _LIVE_NAMES
+            or name.endswith(('.pem', '.key', '.p12', '.pfx', '.db', '.sqlite', '.sqlite3', '.parquet'))):
+        # 04_scripts/runtime is the existing source package, not an allocated
+        # runtime directory. Other nested runtime/state directories stay denied.
+        if not (parts[:2] == ['04_scripts', 'runtime'] and
+                not any(p in _LIVE_DIRECTORIES for p in parts[2:-1]) and
+                name not in _LIVE_NAMES and Path(name).suffix in _TOOLING_SUFFIXES):
+            return 'PRODUCTION_MUTATION'
+    if source and name.endswith(('.json', '.yaml', '.yml', '.example', '.template')):
+        try:
+            value = json.loads(source) if name.endswith('.json') else yaml.safe_load(source)
+        except (ValueError, UnicodeError, yaml.YAMLError):
+            if name.endswith(('.json', '.yaml', '.yml')):
+                return 'PRODUCTION_MUTATION'  # Unknown structured artifact, not established source.
+            value = None  # Non-JSON environment/template syntax is legitimate.
+        def state_instance(item):
+            if isinstance(item, dict):
+                version = item.get('schema_version')
+                if isinstance(version, str) and version.startswith(_STATE_SCHEMAS):
+                    return True
+                if (isinstance(item.get('signature'), str) and 'payload' in item
+                        or isinstance(item.get('private_key'), str)):
+                    return True
+                if (all(isinstance(item.get(k), str) for k in ('container_id', 'image_id'))
+                        or all(isinstance(item.get(k), str) for k in ('release_id', 'generated_at'))):
+                    return True
+                return any(state_instance(v) for v in item.values())
+            return isinstance(item, list) and any(state_instance(v) for v in item)
+        if state_instance(value):
+            return 'PRODUCTION_MUTATION'
+    if Path(name).suffix in _TOOLING_SUFFIXES or name == 'dockerfile' or name.startswith('dockerfile.'):
+        return 'PRODUCTION_TOOLING_SOURCE_CHANGE'
+    return 'PRODUCTION_MUTATION'
 
 
 def digest(value: bytes) -> str:
@@ -355,7 +426,8 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                    "dependencies": sorted(f"{d.metadata['Name']}=={d.version}" for d in importlib.metadata.distributions()),
                    "sandbox": ("bubblewrap" if os.environ.get("MAIN_ADMISSION_HARDENING") == "bubblewrap"
                                else "github-hosted-ephemeral") if executor is run_tests else "test-fixture-only",
-                   "production_access": False}, "checks": {"TECHNICAL_VALIDATION": "FAIL", "MAIN_ENTRY": "FAIL"}}
+                   "production_access": False}, "checks": {"TECHNICAL_VALIDATION": "FAIL", "MAIN_ENTRY": "FAIL",
+                                                          "PRODUCTION_RELEASE_AUTHORIZED": False}}
     failures = receipt["failure_codes"]
     evidence.mkdir(parents=True, exist_ok=False)
     try:
@@ -421,6 +493,19 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
             receipt['checks']['bootstrap']='NEW_BUSINESS_METADATA'
 
         strict = transition or any(p['change_class'] == 'shared' for p in projects) or any('shared' in classify(i['path'],p,registry,patterns) for i in paths for p in projects if not (ordinary_registration and i['path']==REGISTRY))
+        artifact_roles = {}
+        for item in paths:
+            path = item['path']
+            # Inspect both sides: deletion/rename cannot conceal existing state.
+            roles = [production_artifact_role(path, blob(repo, revision, path))
+                     for revision, entries in ((base, old), (candidate, new)) if path in entries]
+            role = ('PRODUCTION_MUTATION' if 'PRODUCTION_MUTATION' in roles else
+                    'PRODUCTION_TOOLING_SOURCE_CHANGE' if 'PRODUCTION_TOOLING_SOURCE_CHANGE' in roles else
+                    next((r for r in roles if r is not None), None))
+            if role:
+                artifact_roles[path] = role
+        strict = strict or 'PRODUCTION_TOOLING_SOURCE_CHANGE' in artifact_roles.values()
+        receipt['checks']['production_artifact_roles'] = artifact_roles
         unowned = [i['path'] for i in paths if not any(owns(p, i['path']) for p in projects) and not (ordinary_registration and i['path']==REGISTRY)]
         if unowned:
             strict = strict or any(any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
@@ -446,9 +531,7 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
             # An explicitly scoped module cannot quietly modify another existing module.
             if explicit and project_id != 'dev-governance' and any(p['project_id'] != project_id for p in owners):
                 failures.append('SCOPE_VIOLATION')
-            if any(under(path, r) for r in ('01_data','06_outputs','10_logs')) or path.startswith('.env'):
-                failures.append('UNAUTHORIZED_PRODUCTION_CHANGE')
-            if under(path, '09_deploy') and not path.endswith('.md'):
+            if artifact_roles.get(path) == 'PRODUCTION_MUTATION':
                 failures.append('UNAUTHORIZED_PRODUCTION_CHANGE')
             if any(any(under(path, x) for x in p['forbidden_paths']) for p in ([explicit] if explicit else [])) and not transition:
                 failures.append('SCOPE_VIOLATION')

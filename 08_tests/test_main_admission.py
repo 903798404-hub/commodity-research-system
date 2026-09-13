@@ -117,7 +117,7 @@ def test_scope_and_self_judge_attacks(fixture_repo, tmp_path, path, category):
     repo, _ = fixture_repo
     write(repo, path, "# Maintainer-reviewed source proposal\n")
     result, _ = evaluate(fixture_repo, tmp_path)
-    allowed = path in {'03_src/shared.py','04_scripts/automation/evil.py',
+    allowed = path in {'03_src/shared.py','09_deploy/evil.py','04_scripts/automation/evil.py',
         '04_scripts/automation/full_daily_windows.py','04_scripts/runtime/probe.py',
         '03_src/agri_research_agent/automation/full_daily.py',admission.SCOPE,admission.IMPLEMENTATION}
     assert result['final_result'] == ('PASS' if allowed else 'FAIL'), result
@@ -521,7 +521,7 @@ def test_bootstrap_rejects_authority_changes(fixture_repo, tmp_path, attack):
     elif attack == 'no-tests': (repo/tests/'test_project.py').unlink()
     else:
         path = {'shared':'03_src/shared.py', 'protected':'protected.py',
-                'production':'09_deploy/evil.py', 'admission':admission.IMPLEMENTATION,
+                'production':'09_deploy/live/deployment_result.json', 'admission':admission.IMPLEMENTATION,
                 'scope':admission.SCOPE, 'registry-code':'04_scripts/quality/project_registry.py',
                 'pytest-policy':'pyproject.toml', 'conftest':tests+'/conftest.py',
                 'foreign-file':'03_src/beta.py'}[attack]
@@ -721,7 +721,7 @@ def test_governance_technical_failures_never_become_approval_states(fixture_repo
     elif attack=='test-config':write(repo,'pyproject.toml','[tool.pytest.ini_options]\ntestpaths=[]\n')
     elif attack=='workflow':write(repo,admission.WORKFLOW,'name: trusted-main-admission-v1\njobs: {final: {runs-on: ubuntu-latest, steps: [{run: "true"}]}}\n')
     elif attack=='scope':write(repo,'unknown.py','VALUE=2\n')
-    else:write(repo,'09_deploy/production_data_delivery/evil.py','VALUE=1\n')
+    else:write(repo,'09_deploy/live/deployment_result.json','{"container_id":"live","image_id":"live"}\n')
     head=commit(repo)
     result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor)
     expected = 'PASS' if attack=='ownership-metadata' else 'FAIL'
@@ -940,3 +940,94 @@ def test_platform_plan_only_is_not_required_check_success(fixture_repo,tmp_path)
     assert result['final_result']=='PLANNED',result
     assert result['checks']['TECHNICAL_VALIDATION']=='NOT_RUN'
     assert not admission.evidence_valid(result,repo,base,head)
+
+
+@pytest.mark.parametrize('path,content', [
+    ('09_deploy/runtime_identity/host_authorization.py', b'def issue_grant(): pass\n'),
+    ('09_deploy/runtime_identity/candidate_validation_record.py', b'VALUE = 1\n'),
+    ('09_deploy/runtime_identity/new_collector.py', b'VALUE = 1\n'),
+    ('04_scripts/runtime/validate_target_runtime.py', b'VALUE = 1\n'),
+    ('09_deploy/new_tool/grant.schema.json', b'{"type":"object","properties":{"schema_version":{"const":"production-execution-grant/3"},"private_key":{"type":"string"}}}'),
+    ('09_deploy/new_tool/settings.json', b'{"timeout_seconds":60}'),
+    ('09_deploy/new_tool/compose.production.yml', b'services: {app: {image: example}}'),
+    ('09_deploy/new_tool/Dockerfile.app', b'FROM example'),
+    ('09_deploy/new_tool/production.env.example', b'PUBLIC_URL=http://example.invalid'),
+    ('09_deploy/new_tool/runtime.yml.j2', b'{{ runtime_template }}'),
+    ('09_deploy/new_tool/deploy.sh', b'docker start "$1"\n'),
+])
+def test_production_tooling_definitions_are_source(path, content):
+    assert admission.production_artifact_role(path, content) == 'PRODUCTION_TOOLING_SOURCE_CHANGE'
+
+
+@pytest.mark.parametrize('path,content', [
+    ('01_data/current.json', b'{}'),
+    ('06_outputs/database.csv', b'data'),
+    ('10_logs/run.json', b'{}'),
+    ('09_deploy/live/probe.py', b'# still live state'),
+    ('09_deploy/releases/current.json', b'{}'),
+    ('09_deploy/runtime_identity/state/status.yaml', b'status: active'),
+    ('09_deploy/runtime_identity/grants/issuer.py', b'# not a source namespace'),
+    ('09_deploy/runtime_identity/evidence/observations.json', b'{}'),
+    ('09_deploy/tool/release.json', b'{}'),
+    ('09_deploy/tool/deployment_result.json', b'{}'),
+    ('09_deploy/tool/production.env', b'PASSWORD=secret'),
+    ('09_deploy/tool/.env.local', b'PASSWORD=secret'),
+    ('09_deploy/tool/private.pem', b'private'),
+    ('09_deploy/tool/database.sqlite', b'data'),
+    ('09_deploy/tool/unknown.bin', b'unknown'),
+    ('09_deploy/tool/config.json', b'not-json'),
+    ('09_deploy/tool/config.json', b'{"schema_version":"production-execution-grant/3"}'),
+    ('09_deploy/tool/config.yaml', b'schema_version: host-runtime-policy/5'),
+    ('09_deploy/tool/config.example', b'{"schema_version":"controlled-runtime-result/1"}'),
+    ('09_deploy/tool/config.json', b'{"signature":"signed","payload":{}}'),
+    ('09_deploy/tool/config.json', b'{"container_id":"live","image_id":"live"}'),
+    ('09_deploy/tool/config.json', b'{"release_id":"live","generated_at":"now"}'),
+    ('09_deploy/tool/config.json', b'{"private_key":"secret"}'),
+    ('09_deploy/tool/source.py', b'KEY="-----BEGIN OPENSSH PRIVATE KEY-----"'),
+])
+def test_live_state_credentials_and_unknown_artifacts_remain_blocked(path, content):
+    assert admission.production_artifact_role(path, content) == 'PRODUCTION_MUTATION'
+
+
+@pytest.mark.parametrize('passing', [True, False])
+def test_tooling_source_enters_strict_impact_tests_without_production_authority(fixture_repo, tmp_path, passing):
+    repo, base = fixture_repo
+    path = '09_deploy/runtime_identity/host_authorization.py'
+    mapping = {'modules': {'host': {'code_paths': [path], 'direct_tests': ['08_tests/test_alpha.py'],
+                                  'impact_tests': ['08_tests/test_beta.py'], 'dependents': [],
+                                  'full_regression_when_changed': False}}}
+    write(repo, admission.MAP, yaml.safe_dump(mapping))
+    base = commit(repo)
+    write(repo, path, 'def issue_grant(): pass\n')
+    if not passing: write(repo, '03_src/alpha.py', 'VALUE=99\n')
+    head = commit(repo)
+    result = admission.admit(repo, base, head, 'alpha', tmp_path/'evidence', executor=inert_executor)
+    assert result['lane'] == 'strict'
+    assert result['final_result'] == ('PASS' if passing else 'FAIL'), result
+    assert 'UNAUTHORIZED_PRODUCTION_CHANGE' not in result['failure_codes']
+    assert set(result['test_plan']) == {'08_tests/test_alpha.py', '08_tests/test_beta.py'}
+    assert result['checks']['production_artifact_roles'][path] == 'PRODUCTION_TOOLING_SOURCE_CHANGE'
+    assert result['checks']['PRODUCTION_RELEASE_AUTHORIZED'] is False
+    assert result['execution_environment']['production_access'] is False
+    assert result['candidate'] == {'commit': head, 'tree': git(repo, 'rev-parse', head+'^{tree}')}
+
+
+@pytest.mark.parametrize('operation', ['add', 'modify', 'delete', 'rename', 'disguise'])
+def test_admission_blocks_real_state_on_both_sides_of_diff(fixture_repo, tmp_path, operation):
+    repo, base = fixture_repo
+    state = '09_deploy/tool/config.json'
+    live = '{"schema_version":"controlled-runtime-result/1","container_id":"live","image_id":"live"}'
+    if operation != 'add':
+        write(repo, state, live)
+        base = commit(repo)
+    if operation == 'add': write(repo, state, live)
+    elif operation == 'modify': write(repo, state, live.replace('live', 'changed'))
+    elif operation == 'delete': (repo/state).unlink()
+    elif operation == 'rename': (repo/state).rename(repo/'09_deploy/tool/new-config.json')
+    else: write(repo, state, '{"timeout_seconds":60}')
+    head = commit(repo)
+    def forbidden(*args): pytest.fail('production mutation must not reach test execution')
+    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=forbidden)
+    assert result['final_result'] == 'FAIL'
+    assert 'UNAUTHORIZED_PRODUCTION_CHANGE' in result['failure_codes']
+    assert result['checks']['PRODUCTION_RELEASE_AUTHORIZED'] is False
