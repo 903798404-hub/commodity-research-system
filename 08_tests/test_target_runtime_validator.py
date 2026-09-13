@@ -201,7 +201,8 @@ def test_cli_exposes_only_gate_controlled_source_arguments(tmp_path):
     args = engine.parse_args(["--project", "demo", "--runtime-contract", "runtime.json",
                               "--evidence-output", str(tmp_path / "evidence.json")])
     assert vars(args) == {"project": "demo", "runtime_contract": "runtime.json",
-                          "evidence_output": tmp_path / "evidence.json"}
+                          "evidence_output": tmp_path / "evidence.json",
+                          "image": None, "release_id": None, "build_only": False}
     for forbidden in ("--image-id", "--evidence", "--ssh-host", "--docker-socket",
                       "--grant", "--production-volume"):
         with pytest.raises(SystemExit):

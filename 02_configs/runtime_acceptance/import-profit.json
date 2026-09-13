@@ -1,0 +1,10 @@
+{
+  "path": "/?workspace_page=import_profit",
+  "table_selector": ".soy-profit-table",
+  "headings": ["大豆早间榨利", "大豆下午榨利"],
+  "rows": 12,
+  "month_selector": "td.shipment",
+  "month_sequence": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"],
+  "empty_value_selectors": ["td.cnf", "td.group-foreign.number:nth-child(5)", "td.fx", "td.group-domestic.number:nth-child(8)", "td.group-domestic.number:nth-child(10)", "td.margin-cell"],
+  "empty_tokens": ["", "—", "--", "-", "暂无数据"]
+}

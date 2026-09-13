@@ -126,7 +126,7 @@ def _execute_validation(project: dict, output: Path) -> int:
 
 
 def validate_candidate(project_id: str, destination: Path, key_path: Path,
-                       *, ttl_seconds: int = 86400) -> dict:
+                       *, ttl_seconds: int = 86400, existing_image_id=None, release_id=None) -> dict:
     """Run the actual engine, verify its result, and exclusively seal a record."""
     if sys.platform != "linux" or not hasattr(os, "geteuid") or os.geteuid() != 0:
         raise ValidationBlocked("LINUX_BUILDER_UNAVAILABLE")
@@ -155,35 +155,46 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
     if (binding["commit"], binding["tree"]) != before:
         raise PreReleaseError("candidate identity changed before validation")
     record = _load(RECORD, "_pre_release_record")
-    # Root-private, uniquely allocated evidence location: the CLI never imports
-    # an externally supplied evidence file and does not expose this path as input.
-    with tempfile.TemporaryDirectory(prefix="candidate-validation-", dir=destination.parent) as folder:
-        output = Path(folder) / "evidence.json"
-        code = _execute_validation(project, output)
-        if code == 3:
-            raise ValidationBlocked("LINUX_BUILDER_UNAVAILABLE")
-        if code != 0 or not output.is_file() or output.is_symlink():
-            raise PreReleaseError("candidate engine did not complete successfully")
-        evidence = host._json(output.read_bytes())
-    if evidence.get("binding") != binding:
-        raise PreReleaseError("candidate evidence binding differs")
-    now = datetime.now(timezone.utc)
-    payload = {"record_id": os.urandom(16).hex(), "purpose": "target-runtime-validation",
-               "authorization_role": "candidate_validation", "issued_at": now.isoformat(),
-               "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
-               "evidence_sha256": hashlib.sha256(record.canonical(evidence)).hexdigest(),
-               "evidence": evidence}
-    record.validate_payload(payload)
-    envelope = {"schema_version": "candidate-validation-record/1", "algorithm": "ed25519",
-                "key_id": matches[0]["key_id"], "payload": payload}
-    envelope["signature"] = base64.b64encode(key.sign(record.canonical(envelope))).decode("ascii")
-    raw = record.canonical(envelope)
-    record.verify_record(raw, trust, now=now)
-    if require_source(host, engine) != before or (ROOT / TRUST).read_bytes() != trust_raw:
-        raise PreReleaseError("candidate source changed during validation")
-    if engine.source_contract(ROOT, project_id, project["runtime_contract"])[2] != binding:
-        raise PreReleaseError("candidate binding changed during validation")
-    _write_new(host, destination, raw)
+    # A signer-owned in-process callback seals while the exact instance lives.
+    # Neither raw evidence nor an alternate hook can be provided by the caller.
+    codec = _load("09_deploy/runtime_identity/candidate_evidence.py", "_candidate_evidence")
+    collector = _load("04_scripts/runtime/candidate_lifecycle.py", "_candidate_lifecycle")
+    payload = None
+    def seal(evidence, observed_release, bundle_sha256, directory):
+        nonlocal payload
+        if evidence.get("binding") != binding:
+            raise PreReleaseError("candidate evidence binding differs")
+        now = datetime.now(timezone.utc)
+        payload = {"record_id": os.urandom(16).hex(), "purpose": "target-runtime-validation",
+                   "authorization_role": "candidate_validation", "issued_at": now.isoformat(),
+                   "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
+                   "evidence_sha256": hashlib.sha256(record.canonical(evidence)).hexdigest(),
+                   "evidence": evidence, "release_id": observed_release,
+                   "validation_result": "PASS", "evidence_bundle_sha256": bundle_sha256}
+        version = "candidate-validation-record/2"
+        record.validate_payload(payload, version=version)
+        codec.verify_bundle((directory / "bundle.json").read_bytes(), payload, directory,
+                            protected=lambda p: host._protected_path(p, private=True))
+        envelope = {"schema_version": version, "algorithm": "ed25519", "key_id": matches[0]["key_id"], "payload": payload}
+        envelope["signature"] = base64.b64encode(key.sign(record.canonical(envelope))).decode("ascii")
+        raw = record.canonical(envelope)
+        record.verify_record(raw, trust, now=now)
+        if require_source(host, engine) != before or (ROOT / TRUST).read_bytes() != trust_raw:
+            raise PreReleaseError("candidate source changed during validation")
+        if engine.source_contract(ROOT, project_id, project["runtime_contract"])[2] != binding:
+            raise PreReleaseError("candidate binding changed during validation")
+        _write_new(host, destination, raw)
+        record.verify_record(destination.read_bytes(), trust, now=now)
+    try:
+        builder = engine.require_builder()
+    except engine.BuilderUnavailable as exc:
+        raise ValidationBlocked("LINUX_BUILDER_UNAVAILABLE") from exc
+    lifecycle = collector.Lifecycle(engine, ROOT, project, destination.with_name(destination.name + ".evidence"), seal)
+    _, contract, _ = engine.source_contract(ROOT, project_id, project["runtime_contract"])
+    engine.validate_linux(ROOT, project, contract, binding, builder, existing_image_id=existing_image_id,
+                          release_id=release_id, lifecycle=lifecycle)
+    if payload is None or not lifecycle.sealed:
+        raise PreReleaseError("candidate was not sealed")
     return payload
 
 
@@ -782,11 +793,16 @@ def main(argv=None) -> int:
     parser.add_argument("--classify-release", nargs=3, metavar=("BASE", "TARGET", "PROJECT"))
     parser.add_argument("--record-output", type=Path)
     parser.add_argument("--candidate-key", type=Path)
+    parser.add_argument("--image")
+    parser.add_argument("--release-id")
     parser.add_argument("--ttl-seconds", type=int, default=86400)
     parser.add_argument("--production-policy", type=Path)
     parser.add_argument("--container-id")
     parser.add_argument("--report-output", type=Path)
     args = parser.parse_args(argv)
+    if bool(args.image) != bool(args.release_id) or ((args.image or args.release_id) and
+            (args.production_policy or args.release_request or args.classify_release)):
+        parser.error("existing candidate image and release-id must be paired in candidate mode")
     try:
         if args.release_request is not None or args.classify_release is not None:
             if (args.production_policy is not None or args.project is not None or args.container_id is not None
@@ -816,7 +832,7 @@ def main(argv=None) -> int:
                     or args.container_id is not None or args.report_output is not None):
                 parser.error("candidate mode requires candidate options")
             result = validate_candidate(args.project, args.record_output, args.candidate_key,
-                                        ttl_seconds=args.ttl_seconds)
+                                        ttl_seconds=args.ttl_seconds, existing_image_id=args.image, release_id=args.release_id)
             print(json.dumps({"CANDIDATE_VALIDATION_RECORD": "PASS", "record_id": result["record_id"],
                               "image_id": result["evidence"]["image_id"]}))
         return 0

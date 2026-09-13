@@ -700,6 +700,18 @@ def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
         raise HostAuthorizationError("candidate record content differs from approval")
     parser = _contract_module(SOURCE_ROOT / "09_deploy/runtime_identity/candidate_validation_record.py", "_host_candidate_record")
     payload = parser.verify_record(raw, _json(TRUST_CONFIG_PATH.read_bytes()))
+    if "evidence_bundle_sha256" in payload:
+        codec = _contract_module(SOURCE_ROOT / "09_deploy/runtime_identity/candidate_evidence.py", "_host_candidate_bundle")
+        directory = Path(record_binding["path"]).with_name(Path(record_binding["path"]).name + ".evidence")
+        bundle = codec.verify_bundle(_protected_path(directory / "bundle.json", private=True).read_bytes(),
+                                     payload, directory, protected=lambda p: _protected_path(p, private=True))
+        cleanup = _json(_protected_path(directory / "cleanup.json", private=True).read_bytes())
+        if (set(cleanup) != {"status", "identity", "image_retained", "timestamp"} or cleanup["status"] != "PASS"
+                or cleanup["identity"] != bundle["identity"] or cleanup["image_retained"] is not True):
+            raise HostAuthorizationError("candidate cleanup not complete")
+        image = docker_image_inspect(payload["evidence"]["image_id"])
+        if image["Config"]["Labels"].get("market-data.release.id") != payload["release_id"]:
+            raise HostAuthorizationError("candidate release image differs")
     project = engine._project(SOURCE_ROOT, policy["project_id"])
     _, manifest, binding = engine.source_contract(SOURCE_ROOT, policy["project_id"], project["runtime_contract"])
     if manifest.get("schema_version") != _manifest_version(policy["schema_version"]):

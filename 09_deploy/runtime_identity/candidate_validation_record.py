@@ -142,10 +142,16 @@ def _validate_evidence(evidence: object) -> None:
         _fail("candidate probes are incomplete or failed")
 
 
-def validate_payload(payload: object) -> None:
+def validate_payload(payload: object, *, version="candidate-validation-record/1") -> None:
     """Validate the exact signed validation-fact payload without trusting it."""
-    if type(payload) is not dict or not _primitive(payload) or set(payload) != _PAYLOAD_FIELDS:
+    expected = _PAYLOAD_FIELDS | ({"release_id", "validation_result", "evidence_bundle_sha256"} if version == "candidate-validation-record/2" else set())
+    if type(payload) is not dict or not _primitive(payload) or set(payload) != expected:
         _fail("candidate validation record payload fields incomplete or unknown")
+    if version == "candidate-validation-record/2":
+        _string(payload["release_id"], "release identity", _KEY_ID)
+        _string(payload["evidence_bundle_sha256"], "bundle digest", _HEX64)
+        if payload["validation_result"] != "PASS":
+            _fail("full candidate validation failed")
     _string(payload["record_id"], "record id", _HEX32)
     if payload["purpose"] != "target-runtime-validation" or payload["authorization_role"] != "candidate_validation":
         _fail("candidate validation record purpose or role is invalid")
@@ -221,7 +227,7 @@ def verify_record(raw: bytes, trust: dict, *, now: datetime | None = None) -> di
         raise CandidateValidationRecordError("candidate validation record is not valid UTF-8 JSON") from exc
     if type(envelope) is not dict or not _primitive(envelope) or set(envelope) != _ENVELOPE_FIELDS:
         _fail("candidate validation record envelope fields incomplete or unknown")
-    if envelope["schema_version"] != "candidate-validation-record/1" or envelope["algorithm"] != "ed25519":
+    if envelope["schema_version"] not in {"candidate-validation-record/1", "candidate-validation-record/2"} or envelope["algorithm"] != "ed25519":
         _fail("unsupported candidate validation record envelope")
     key_id = _string(envelope["key_id"], "record key id", _KEY_ID)
     signature_text = _string(envelope["signature"], "record signature")
@@ -231,7 +237,7 @@ def verify_record(raw: bytes, trust: dict, *, now: datetime | None = None) -> di
         raise CandidateValidationRecordError("record signature is invalid") from exc
     if len(signature) != 64:
         _fail("record signature is invalid")
-    validate_payload(envelope["payload"])
+    validate_payload(envelope["payload"], version=envelope["schema_version"])
     payload = envelope["payload"]
     public = _key_for_record(trust, key_id, payload["record_id"])
     unsigned = {key: value for key, value in envelope.items() if key != "signature"}

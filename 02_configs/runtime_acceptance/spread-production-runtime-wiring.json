@@ -1,0 +1,10 @@
+{
+  "schema_version": "candidate-acceptance-plan/1",
+  "port": 18571,
+  "timeout_seconds": 600,
+  "hooks": [
+    {"category": "browser", "script": "04_scripts/runtime/acceptance_browser.py", "config": "02_configs/runtime_acceptance/import-profit.json"},
+    {"category": "fixture", "script": "04_scripts/runtime/acceptance_import_profit.py", "config": "02_configs/runtime_acceptance/import-profit.json"},
+    {"category": "consumer", "script": "04_scripts/runtime/acceptance_import_profit.py", "config": "02_configs/runtime_acceptance/import-profit.json"}
+  ]
+}

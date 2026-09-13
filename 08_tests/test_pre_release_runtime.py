@@ -235,12 +235,42 @@ def test_candidate_validation_engine_and_record_fail_closed(monkeypatch, tmp_pat
                            _json=lambda raw: json.loads(raw),
                            _fsync_directory=lambda path: None)
     engine = SimpleNamespace(_project=lambda root, project_id: project,
-                             source_contract=lambda *args: (project, {}, binding))
+                             source_contract=lambda *args: (project, {}, binding),
+                             BuilderUnavailable=runtime.ValidationBlocked)
+    def builder():
+        if failure == "blocked":
+            raise runtime.ValidationBlocked("LINUX_BUILDER_UNAVAILABLE")
+        return "linux-fixture"
+    engine.require_builder = builder
+    class Collector:
+        def __init__(self, engine, root, project, directory, seal):
+            self.seal = seal
+            self.sealed = False
+            self.directory = directory
+            directory.mkdir()
+            (directory / "bundle.json").write_text("{}")
+    def validate(*args, lifecycle, **kwargs):
+        if failure == "nonzero":
+            raise runtime.PreReleaseError("candidate engine failed")
+        if failure == "no-output":
+            return
+        selected = evidence
+        if failure == "binding":
+            selected = dict(evidence, binding=dict(binding, commit="f" * 40))
+        elif failure == "probe":
+            selected = dict(evidence, probes=dict(evidence["probes"], dependencies="FAIL"))
+        lifecycle.seal(selected, "demo-release", "a" * 64, lifecycle.directory)
+        lifecycle.sealed = True
+    engine.validate_linux = validate
     def load(path, name):
         if path == runtime.HOST:
             return host
         if path == runtime.ENGINE:
             return engine
+        if path.endswith("candidate_lifecycle.py"):
+            return SimpleNamespace(Lifecycle=Collector)
+        if path.endswith("candidate_evidence.py"):
+            return SimpleNamespace(verify_bundle=lambda *args, **kwargs: None)
         return record
     monkeypatch.setattr(runtime, "_load", load)
     source_results = iter([(binding["commit"], binding["tree"]), ("x" * 40, "y" * 40)])

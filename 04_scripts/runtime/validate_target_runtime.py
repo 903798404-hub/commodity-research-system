@@ -481,12 +481,17 @@ def _labels(image: Mapping[str, Any], binding: Mapping[str, Any], service: str) 
 
 def build_image(root: Path, context: Path, contract: Mapping[str, Any],
                 binding: Mapping[str, Any]) -> str:
+    existing = _docker("image", "ls", "--quiet", "--no-trunc", "--filter",
+                       "label=market-data.build.binding=" + _sha(_canonical(binding))).stdout.strip()
+    if existing:
+        raise ValidationError("TARGET_IMAGE_ALREADY_BUILT_USE_EXISTING_IMAGE")
     require_base_image(validate_dockerfile_inputs(context, contract, binding))
     tag = f"market-data-runtime-validation:{binding['commit'][:12]}-{os.getpid()}"
     build_time = datetime.now(timezone.utc).isoformat()
     release_id = (f"{contract['service_id']}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-"
                   f"{binding['commit'][:12]}-b01")
     args = ["build", "--no-cache", "--iidfile", str(context.parent / "image.id"),
+            "--label", "market-data.build.binding=" + _sha(_canonical(binding)),
             "-f", str(context / contract["build"]["dockerfile"]), "-t", tag,
             "--label", f"org.opencontainers.image.revision={binding['commit']}",
             "--label", f"market-data.git.tree={binding['tree']}",
@@ -519,6 +524,31 @@ def build_image(root: Path, context: Path, contract: Mapping[str, Any],
     _labels(image, binding, contract["service_id"])
     _numeric_user(image)
     return image_id
+
+
+def existing_image(image_id, contract, binding, release_id):
+    """An immutable ID is an input, not evidence: observe all build labels."""
+    if not isinstance(image_id, str) or not _IMAGE.fullmatch(image_id) or not release_id:
+        raise ValidationError("existing image requires immutable ID and release identity")
+    image = inspect_one("image", image_id)
+    _labels(image, binding, contract["service_id"])
+    if (image["Id"] != image_id or image["Config"]["Labels"].get("market-data.release.id") != release_id
+            or image["Config"]["Labels"].get("market-data.build.binding") != _sha(_canonical(binding))):
+        raise ValidationError("existing image release/build context differs")
+    _numeric_user(image)
+    return image_id
+
+
+def build_target(root, contract, binding):
+    with _protected_work() as work:
+        context = work / "context"
+        create_archive_context(root, context, binding)
+        _exclude_candidate_inputs(context, contract)
+        image_id = build_image(root, context, contract, binding)
+        image = inspect_one("image", image_id)
+        return dict(schema_version="candidate-build/1", binding=binding, image_id=image_id,
+                    release_id=image["Config"]["Labels"]["market-data.release.id"],
+                    build_context_sha256=_sha(_canonical(binding)), repo_digests=image.get("RepoDigests", []))
 
 
 def _copy_bytes(container_id: str, path: str) -> bytes:
@@ -968,7 +998,8 @@ def _protected_work() -> Iterator[Path]:
 
 
 def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, Any],
-                   binding: Mapping[str, Any], builder_id: str) -> dict[str, Any]:
+                   binding: Mapping[str, Any], builder_id: str, *, existing_image_id=None,
+                   release_id=None, lifecycle=None) -> dict[str, Any]:
     host = _load(root / "09_deploy/runtime_identity/host_authorization.py",
                  "_host_authorization_engine")
     parser = _load(root / "03_src/agri_research_agent/shared/runtime_manifest.py",
@@ -976,10 +1007,13 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
     container_id = None
     with _protected_work() as work:
         validate_source_compose(root, contract)
-        context = work / "context"
-        create_archive_context(root, context, binding)
-        _exclude_candidate_inputs(context, contract)
-        image_id = build_image(root, context, contract, binding)
+        if existing_image_id is None:
+            context = work / "context"
+            create_archive_context(root, context, binding)
+            _exclude_candidate_inputs(context, contract)
+            image_id = build_image(root, context, contract, binding)
+        else:
+            image_id = existing_image(existing_image_id, contract, binding, release_id)
         image = inspect_one("image", image_id)
         uid, gid = _numeric_user(image)
         contract["_numeric_uid"] = uid
@@ -992,7 +1026,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         contract["_grant_dir"] = grant_dir
         compose = work / "compose.json"
         env_file = work / "compose.env"
-        project_name = "market-data-runtime-validation"
+        project_name = "market-data-validation-" + work.name
         scope = None
         try:
             scope = host.create_candidate_scope(_runtime_bindings(contract, uid, gid))
@@ -1008,6 +1042,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             _seed_candidate_runtime_inputs(root, contract, binding, scope, host)
             hostname = os.urandom(16).hex()
             compose_doc = _compose_document(contract, image_id, scope["mounts"], grant_dir, hostname)
+            compose_doc["name"] = project_name
+            if lifecycle is not None:
+                lifecycle.configure(compose_doc)
             compose.write_bytes(_canonical(compose_doc) + b"\n")
             os.chmod(compose, 0o600)
             env_file.write_text("", encoding="utf-8")
@@ -1035,6 +1072,8 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             image_labels = image["Config"]["Labels"]
             _release_identity(release_raw, binding, contract["project_id"],
                               image_labels["market-data.release.id"], image_labels)
+            if lifecycle is not None:
+                lifecycle.created(container, image, _strict_json(release_raw, "RELEASE"), scope)
             marker_raw = marker_path.read_bytes()
             policy = _policy(contract, binding, image_id, image, container, scope, compose,
                              env_file, rendered_hash, _sha(manifest_raw), _sha(marker_raw),
@@ -1051,10 +1090,14 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             host.issue_execution_grant(container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
                                        grant_dir=grant_dir, role="candidate_validation", ttl_seconds=900)
+            if lifecycle is not None:
+                lifecycle.authorized((grant_dir / "grant.json").read_bytes())
             _docker("start", container_id, timeout=120)
             started = inspect_one("container", container_id)
             if started.get("State", {}).get("Running") is not True:
                 raise ValidationError("declared entrypoint did not remain running")
+            if lifecycle is not None:
+                lifecycle.started(started)
             _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw)), label="runtime_identity")
             probes["runtime_identity"] = "PASS"
             _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw), missing=True),
@@ -1099,7 +1142,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 final_container, image, _strict_json(release_raw, "RELEASE")), policy, container_id)
             if set(probes) != REQUIRED_PROBES or any(value != "PASS" for value in probes.values()):
                 raise ValidationError("required probe set was not actually completed")
-            return {
+            evidence = {
                 "schema_version": EVIDENCE_SCHEMA, "binding": binding,
                 "TARGET_RUNTIME_STATIC_VALIDATION": "PASS",
                 "TARGET_RUNTIME_CONTAINER_VALIDATION": "PASS", "image_id": image_id,
@@ -1112,12 +1155,21 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     "production_volumes_mounted": False},
                 "probes": probes,
             }
+            if lifecycle is not None:
+                lifecycle.finish(evidence)
+            return evidence
         finally:
-            if container_id:
-                _docker("rm", "-f", container_id, check=False, timeout=120)
-            _docker("compose", "--project-name", "market-data-runtime-validation",
-                    "--project-directory", str(work), "--env-file", str(env_file),
-                    "-f", str(compose), "down", "--remove-orphans", check=False, timeout=120)
+            # Failure evidence is attempted before cleanup; a sealing error must
+            # never prevent removal of our exact container. No image deletion.
+            try:
+                if lifecycle is not None:
+                    lifecycle.before_cleanup()
+            finally:
+                if container_id:
+                    _docker("rm", "-f", container_id, check=False, timeout=120)
+                _docker("compose", "--project-name", project_name,
+                        "--project-directory", str(work), "--env-file", str(env_file),
+                        "-f", str(compose), "down", check=False, timeout=120)
             if scope is not None:
                 shutil.rmtree(scope.get("candidate_host_root", ""), ignore_errors=True)
                 descriptor = Path(scope["candidate_scope"]["descriptor_path"])
@@ -1126,6 +1178,11 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                         candidate.unlink()
                     except FileNotFoundError:
                         pass
+            if lifecycle is not None:
+                # A daemon/query failure is not proof of absence.
+                remaining = _docker("ps", "-aq", "--filter", "label=com.docker.compose.project=" + project_name).stdout.strip()
+                retained = inspect_one("image", image_id).get("Id") == image_id
+                lifecycle.after_cleanup(not remaining and retained)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -1133,7 +1190,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", required=True)
     parser.add_argument("--runtime-contract", required=True)
     parser.add_argument("--evidence-output", required=True)
+    parser.add_argument("--image")
+    parser.add_argument("--release-id")
+    parser.add_argument("--build-only", action="store_true")
     args = parser.parse_args(argv)
+    if bool(args.image) != bool(args.release_id) or (args.build_only and args.image):
+        parser.error("existing image needs release-id; build-only cannot validate an image")
     if not _ID.fullmatch(args.project):
         parser.error("invalid project identity")
     output = Path(args.evidence_output)
@@ -1146,6 +1208,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        if args.evidence_output.exists() or args.evidence_output.is_symlink():
+            raise ValidationError("evidence output already exists")
         root = repository_root()
         project, contract, binding = source_contract(root, args.project, args.runtime_contract)
         try:
@@ -1153,7 +1217,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         except BuilderUnavailable:
             write_evidence(args.evidence_output, blocked_evidence(binding))
             return 3
-        evidence = validate_linux(root, project, contract, binding, builder_id)
+        if args.build_only:
+            evidence = build_target(root, contract, binding)
+        elif args.image:
+            evidence = validate_linux(root, project, contract, binding, builder_id,
+                                      existing_image_id=args.image, release_id=args.release_id)
+        else:
+            evidence = validate_linux(root, project, contract, binding, builder_id)
         write_evidence(args.evidence_output, evidence)
         return 0
     except (ValidationError, OSError, KeyError, TypeError, ValueError) as exc:
