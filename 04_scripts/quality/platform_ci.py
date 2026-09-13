@@ -24,6 +24,12 @@ else:
 POLICY = '04_scripts/quality/test_platforms.json'
 
 
+def requires_full(report):
+    if report['lane'] not in {'business', 'strict', 'governance'}:
+        raise ValueError('UNKNOWN_ADMISSION_LANE')
+    return report['lane'] in {'strict', 'governance'}
+
+
 def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
@@ -107,7 +113,7 @@ def finish(plan_path, receipts_root, output, jobs):
     result=platforms.aggregate(plan,receipts,workflow_run_id=os.environ['GITHUB_RUN_ID'],
                                workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],job_results=jobs)
     report=read(plan_path.parent/'admission/main-admission.json')
-    if report['lane'] == 'strict':
+    if requires_full(report):
         full = read(output.parent / 'full-regression.json')
         expected = dict(result='PASS', base=plan['base'], candidate=plan['candidate'],
                         workflow_run_id=os.environ['GITHUB_RUN_ID'], workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'])
@@ -146,7 +152,7 @@ def main():
             with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:
                 for lane,items in plan['lanes'].items(): f.write(lane+'='+str(bool(items)).lower()+'\n')
                 report=read(a.output/'admission/main-admission.json')
-                f.write('full='+str(report['lane']=='strict').lower()+'\n')
+                f.write('full='+str(requires_full(report)).lower()+'\n')
                 f.write('base_commit='+plan['base']['commit']+'\n')
         return 0
     if a.action=='run': return execute(a.platform,a.plan,a.output)

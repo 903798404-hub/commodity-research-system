@@ -153,3 +153,13 @@ def test_required_platform_failure_and_skip_still_fail():
             plan_sha256=plan['plan_sha256'], platform='linux', runner_os='Linux', runner_environment='github-hosted',
             workflow_run_id='123', workflow_run_attempt='1', tests=[dict(nodeid='08_tests/test_example.py::test_good', outcome=state)])
         assert platforms.aggregate(plan, {'linux': receipt}, workflow_run_id='123', workflow_run_attempt='1', job_results={'linux': 'success'})['result'] == 'FAIL'
+
+
+@pytest.mark.parametrize('lane,expected', [('business', False), ('strict', True), ('governance', True)])
+def test_governance_and_strict_both_require_full_comparison(lane, expected):
+    assert full.ci.requires_full({'lane': lane}) is expected
+
+
+def test_unknown_lane_cannot_silently_skip_full_comparison():
+    with pytest.raises(ValueError, match='UNKNOWN_ADMISSION_LANE'):
+        full.ci.requires_full({'lane': 'unknown'})
