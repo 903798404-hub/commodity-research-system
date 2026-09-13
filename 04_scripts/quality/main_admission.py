@@ -342,7 +342,7 @@ def test_path(path: str) -> bool:
     return path.startswith("08_tests/") and path.endswith(".py") and Path(path).name.startswith("test_")
 
 
-def impact_plan(mapping: dict, paths: list[str], old: dict) -> tuple[list[str], list[str], bool]:
+def impact_plan(mapping: dict, paths: list[str], old: dict, *, include_full=True) -> tuple[list[str], list[str], bool]:
     modules = mapping.get("modules", {})
     selected = {name for name, module in modules.items()
                 if any(under(path, root) for path in paths for root in module.get("code_paths", []))}
@@ -359,7 +359,7 @@ def impact_plan(mapping: dict, paths: list[str], old: dict) -> tuple[list[str], 
     full = unresolved or any(modules[name].get("full_regression_when_changed", False) for name in selected)
     tests = [t for name in sorted(selected) for key in ("direct_tests", "impact_tests")
              for t in modules[name].get(key, [])]
-    if full:
+    if full and include_full:
         tests += sorted(p for p in old if test_path(p))
     return list(dict.fromkeys(tests)), sorted(selected), full
 
@@ -415,7 +415,7 @@ def workflow_contract_valid(source):
     return all(not j.get('environment') and not j.get('services') for j in jobs.values())
 
 
-def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests, plan_only=False) -> dict:
+def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests, plan_only=False, separate_full=False) -> dict:
     receipt = {"schema_version": "main-admission/1", "mode": "required", "lane": "business", "final_result": "FAIL",
                "business_scope": "FAIL", "failure_codes": [], "trusted_main": None, "candidate": None,
                "merge_base": None, "ahead": None, "behind": None, "trusted_governance": {},
@@ -548,14 +548,15 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         tests = [t for p in projects for t in p['required_tests'] + p.get('future_required_tests', [])]
         if strict:
             for source_mapping in (mapping, yaml.safe_load(blob(repo,candidate,MAP))):
-                impact, modules, full = impact_plan(source_mapping, [p['path'] for p in paths], old)
+                impact, modules, full = impact_plan(source_mapping, [p['path'] for p in paths], old, include_full=not separate_full)
                 tests += impact
-                receipt['checks'].update(impact_modules=modules, full_regression=full)
+                receipt['checks'].update(impact_modules=modules, full_regression=full or receipt['checks'].get('full_regression', False))
             governance = next((p for p in registry['projects'] if p['project_id']=='dev-governance'), {})
             tests += governance.get('required_tests', []) + governance.get('future_required_tests', [])
             # An unmapped shared source requires broad consumer coverage, never an owner bootstrap failure.
             if unowned and not receipt['checks'].get('impact_modules'):
-                tests += [p for p in old if test_path(p)]
+                if not separate_full:
+                    tests += [p for p in old if test_path(p)]
                 receipt['checks']['full_regression'] = True
         required = list(dict.fromkeys(tests))
         tests += [i["path"] for i in paths if i["path"] in new and test_path(i["path"])

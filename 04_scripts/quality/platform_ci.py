@@ -34,7 +34,7 @@ def save(path, data):
 
 
 def make_plan(repo, base, candidate, output):
-    report = admission.admit(repo,base,candidate,'auto',output/'admission',plan_only=True)
+    report = admission.admit(repo,base,candidate,'auto',output/'admission',plan_only=True,separate_full=True)
     if report['final_result'] != 'PLANNED':
         raise ValueError(report['failure_codes'])
     old = admission.tree(repo,base)
@@ -107,6 +107,13 @@ def finish(plan_path, receipts_root, output, jobs):
     result=platforms.aggregate(plan,receipts,workflow_run_id=os.environ['GITHUB_RUN_ID'],
                                workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],job_results=jobs)
     report=read(plan_path.parent/'admission/main-admission.json')
+    if report['lane'] == 'strict':
+        full = read(output.parent / 'full-regression.json')
+        expected = dict(result='PASS', base=plan['base'], candidate=plan['candidate'],
+                        workflow_run_id=os.environ['GITHUB_RUN_ID'], workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'])
+        if any(full.get(k) != v for k, v in expected.items()):
+            raise ValueError('FULL_REGRESSION_REQUIRED')
+        report['checks']['full_regression_comparison'] = full
     report['final_result']=result['result']
     report['failure_codes']=result['failure_codes']
     report['checks'].update(TECHNICAL_VALIDATION=result['result'],MAIN_ENTRY=result['result'],
@@ -138,6 +145,9 @@ def main():
         if os.environ.get('GITHUB_OUTPUT'):
             with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:
                 for lane,items in plan['lanes'].items(): f.write(lane+'='+str(bool(items)).lower()+'\n')
+                report=read(a.output/'admission/main-admission.json')
+                f.write('full='+str(report['lane']=='strict').lower()+'\n')
+                f.write('base_commit='+plan['base']['commit']+'\n')
         return 0
     if a.action=='run': return execute(a.platform,a.plan,a.output)
     return finish(a.plan,a.receipts,a.output,json.loads(os.environ['PLATFORM_JOB_RESULTS']))

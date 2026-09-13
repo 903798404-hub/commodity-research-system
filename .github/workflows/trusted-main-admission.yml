@@ -1,4 +1,3 @@
-# Maintainer-reviewed candidate CI; production release remains separate.
 name: trusted-main-admission-v1
 'on':
   push:
@@ -28,6 +27,8 @@ jobs:
     outputs:
       linux: ${{ steps.plan.outputs.linux }}
       windows: ${{ steps.plan.outputs.windows }}
+      full: ${{ steps.plan.outputs.full }}
+      base_commit: ${{ steps.plan.outputs.base_commit }}
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false
@@ -50,7 +51,13 @@ jobs:
     - name: Plan exact candidate and baseline
       id: plan
       working-directory: candidate
-      run: python -I -B 04_scripts/quality/platform_ci.py plan --base "$(git -C ../base rev-parse HEAD)" --candidate "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/platform-plan"
+      run: python -I -B 04_scripts/quality/platform_ci.py plan --base "$(git -C ../base
+        rev-parse HEAD)" --candidate "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/platform-plan"
+    - name: Plan full repository comparison
+      if: steps.plan.outputs.full == 'true'
+      working-directory: candidate
+      run: python -I -B 04_scripts/quality/full_regression.py plan --plan "$RUNNER_TEMP/platform-plan/plan.json"
+        --output "$RUNNER_TEMP/platform-plan/full-plan.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
@@ -83,62 +90,27 @@ jobs:
         path: ${{ runner.temp }}/platform-plan
     - name: Provision and verify supported Chinese fonts
       working-directory: candidate
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig
-        fc-cache -f
-        python -I -B - <<'PY'
-        import json, os, platform, subprocess, sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path.cwd() / '03_src'))
-        from agri_research_agent.utils.matplotlib_config import configure_matplotlib_chinese_fonts
-        from matplotlib import font_manager
-        selected = configure_matplotlib_chinese_fonts()[0]
-        assert selected in {'Noto Sans CJK SC', 'Noto Sans CJK JP'}, selected
-        system_family = subprocess.check_output(['fc-match', '-f', '%{family}', selected], text=True).strip()
-        assert selected in system_family.split(','), system_family
-        font_path = font_manager.findfont(font_manager.FontProperties(family=[selected]), fallback_to_default=False)
-        resolved = font_manager.FontProperties(fname=font_path).get_name()
-        assert resolved == selected, (selected, resolved)
-        evidence = dict(package='fonts-noto-cjk', package_version=subprocess.check_output(
-            ['dpkg-query', '-W', '-f=${Version}', 'fonts-noto-cjk'], text=True),
-            runner_os=os.environ['RUNNER_OS'], os_release=platform.freedesktop_os_release(),
-            system_family=system_family, configured_family=selected, resolved_family=resolved,
-            font_path=font_path, result='PASS')
-        output = Path(os.environ['RUNNER_TEMP']) / 'platform-results/linux/font-check.json'
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')
-        print(json.dumps(evidence, indent=2))
-        PY
+      run: "sudo apt-get update\nsudo apt-get install -y --no-install-recommends fonts-noto-cjk\
+        \ fontconfig\nfc-cache -f\npython -I -B - <<'PY'\nimport json, os, platform,\
+        \ subprocess, sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path.cwd()\
+        \ / '03_src'))\nfrom agri_research_agent.utils.matplotlib_config import configure_matplotlib_chinese_fonts\n\
+        from matplotlib import font_manager\nselected = configure_matplotlib_chinese_fonts()[0]\n\
+        assert selected in {'Noto Sans CJK SC', 'Noto Sans CJK JP'}, selected\nsystem_family\
+        \ = subprocess.check_output(['fc-match', '-f', '%{family}', selected], text=True).strip()\n\
+        assert selected in system_family.split(','), system_family\nfont_path = font_manager.findfont(font_manager.FontProperties(family=[selected]),\
+        \ fallback_to_default=False)\nresolved = font_manager.FontProperties(fname=font_path).get_name()\n\
+        assert resolved == selected, (selected, resolved)\nevidence = dict(package='fonts-noto-cjk',\
+        \ package_version=subprocess.check_output(\n    ['dpkg-query', '-W', '-f=${Version}',\
+        \ 'fonts-noto-cjk'], text=True),\n    runner_os=os.environ['RUNNER_OS'], os_release=platform.freedesktop_os_release(),\n\
+        \    system_family=system_family, configured_family=selected, resolved_family=resolved,\n\
+        \    font_path=font_path, result='PASS')\noutput = Path(os.environ['RUNNER_TEMP'])\
+        \ / 'platform-results/linux/font-check.json'\noutput.parent.mkdir(parents=True,\
+        \ exist_ok=True)\noutput.write_text(json.dumps(evidence, indent=2) + '\\n',\
+        \ encoding='utf-8')\nprint(json.dumps(evidence, indent=2))\nPY\n"
     - name: Execute required linux tests
       working-directory: candidate
-      run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
-    - name: Preserve full Linux regression for routine release tooling
-      working-directory: candidate
-      run: |
-        python -I -B - <<'PY'
-        import json, os, sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path.cwd() / '04_scripts/quality'))
-        import platform_ci as ci
-        root = Path(os.environ['RUNNER_TEMP'])
-        required = ci.read(root / 'platform-plan/plan.json')
-        repo = Path.cwd()
-        base, candidate = required['base'], required['candidate']
-        changed = ci.admission.text(repo, 'diff', '--name-only', base['commit'], candidate['commit']).splitlines()
-        if '04_scripts/runtime/routine_release.py' not in changed:
-            raise SystemExit(0)
-        old = ci.admission.tree(repo, base['commit'])
-        new = ci.admission.tree(repo, candidate['commit'])
-        paths = sorted(p for p in set(old) | set(new) if ci.admission.test_path(p))
-        sources = {p: ci.admission.blob(repo, candidate['commit'], p) for p in paths}
-        trusted = {p: ci.admission.blob(repo, base['commit'], p) if p in old else sources[p] for p in paths}
-        full = ci.platforms.plan(paths, trusted, sources, ci.read(ci.POLICY), base=base, candidate=candidate)
-        assert full['lanes']['windows'] == required['lanes']['windows'], 'FULL_WINDOWS_COVERAGE_REQUIRED'
-        plan_path = root / 'platform-results/linux/full/plan.json'
-        ci.save(plan_path, full)
-        raise SystemExit(ci.execute('linux', plan_path, plan_path.parent))
-        PY
+      run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan
+        "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
@@ -171,7 +143,8 @@ jobs:
         path: ${{ runner.temp }}/platform-plan
     - name: Execute required windows tests
       working-directory: candidate
-      run: python -I -B 04_scripts/quality/platform_ci.py run --platform windows --plan "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/windows"
+      run: python -I -B 04_scripts/quality/platform_ci.py run --platform windows --plan
+        "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/windows"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
@@ -185,6 +158,7 @@ jobs:
     - plan
     - linux
     - windows
+    - full
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -220,27 +194,106 @@ jobs:
         PLAN_RESULT: ${{ needs.plan.result }}
         MAIN_READ_TOKEN: ${{ github.token }}
       working-directory: candidate
-      run: |-
-        test "$PLAN_RESULT" = success
-        python -I - <<'PY'
-        import json,os,subprocess,urllib.request
-        from pathlib import Path
-        p=json.loads((Path(os.environ['RUNNER_TEMP'])/'platform-plan/plan.json').read_text())
-        request=urllib.request.Request(os.environ['GITHUB_API_URL']+'/repos/'+os.environ['GITHUB_REPOSITORY']+'/git/ref/heads/main',headers={'Authorization':'Bearer '+os.environ['MAIN_READ_TOKEN'],'Accept':'application/vnd.github+json'})
-        with urllib.request.urlopen(request,timeout=30) as response:
-            current_main=json.load(response)['object']['sha']
-        assert current_main == p['base']['commit'], 'MAIN_MOVED'
-        assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip() == p['candidate']['commit'], 'CANDIDATE_CHANGED'
-        PY
+      run: "test \"$PLAN_RESULT\" = success\npython -I - <<'PY'\nimport json,os,subprocess,urllib.request\n\
+        from pathlib import Path\np=json.loads((Path(os.environ['RUNNER_TEMP'])/'platform-plan/plan.json').read_text())\n\
+        request=urllib.request.Request(os.environ['GITHUB_API_URL']+'/repos/'+os.environ['GITHUB_REPOSITORY']+'/git/ref/heads/main',headers={'Authorization':'Bearer\
+        \ '+os.environ['MAIN_READ_TOKEN'],'Accept':'application/vnd.github+json'})\n\
+        with urllib.request.urlopen(request,timeout=30) as response:\n    current_main=json.load(response)['object']['sha']\n\
+        assert current_main == p['base']['commit'], 'MAIN_MOVED'\nassert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()\
+        \ == p['candidate']['commit'], 'CANDIDATE_CHANGED'\nPY"
+    - uses: actions/download-artifact@v4
+      if: needs.plan.outputs.full == 'true'
+      with:
+        name: full-base
+        path: ${{ runner.temp }}/full-results/base
+    - uses: actions/download-artifact@v4
+      if: needs.plan.outputs.full == 'true'
+      with:
+        name: full-candidate
+        path: ${{ runner.temp }}/full-results/candidate
+    - name: Compare exact base and candidate full regression
+      if: needs.plan.outputs.full == 'true'
+      working-directory: candidate
+      env:
+        FULL_JOB_RESULT: ${{ needs.full.result }}
+      run: python -I -B 04_scripts/quality/full_regression.py compare --plan "$RUNNER_TEMP/platform-plan/full-plan.json"
+        --receipts "$RUNNER_TEMP/full-results" --output "$RUNNER_TEMP/final-admission/full-regression.json"
     - name: Aggregate actual required platform jobs
       working-directory: candidate
       env:
-        PLATFORM_JOB_RESULTS: '{"linux":"${{ needs.linux.result }}","windows":"${{ needs.windows.result }}"}'
-      run: python -I -B 04_scripts/quality/platform_ci.py aggregate --plan "$RUNNER_TEMP/platform-plan/plan.json" --receipts "$RUNNER_TEMP/platform-results" --output
-        "$RUNNER_TEMP/final-admission/main-admission.json"
+        PLATFORM_JOB_RESULTS: '{"linux":"${{ needs.linux.result }}","windows":"${{
+          needs.windows.result }}"}'
+      run: python -I -B 04_scripts/quality/platform_ci.py aggregate --plan "$RUNNER_TEMP/platform-plan/plan.json"
+        --receipts "$RUNNER_TEMP/platform-results" --output "$RUNNER_TEMP/final-admission/main-admission.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
         name: main-admission-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/final-admission
+        if-no-files-found: error
+  full:
+    name: full-regression-${{ matrix.side }}
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        side:
+        - base
+        - candidate
+    steps:
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ matrix.side == 'base' && needs.plan.outputs.base_commit || github.event.pull_request.head.sha
+          || github.sha }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: executor
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install development dependencies
+      run: python -I -m pip install -r candidate/requirements-dev.in
+    - uses: actions/download-artifact@v4
+      with:
+        name: platform-plan
+        path: ${{ runner.temp }}/platform-plan
+    - name: Provision and verify supported Chinese fonts
+      working-directory: candidate
+      run: "sudo apt-get update\nsudo apt-get install -y --no-install-recommends fonts-noto-cjk\
+        \ fontconfig\nfc-cache -f\npython -I -B - <<'PY'\nimport json, os, platform,\
+        \ subprocess, sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path.cwd()\
+        \ / '03_src'))\nfrom agri_research_agent.utils.matplotlib_config import configure_matplotlib_chinese_fonts\n\
+        from matplotlib import font_manager\nselected = configure_matplotlib_chinese_fonts()[0]\n\
+        assert selected in {'Noto Sans CJK SC', 'Noto Sans CJK JP'}, selected\nsystem_family\
+        \ = subprocess.check_output(['fc-match', '-f', '%{family}', selected], text=True).strip()\n\
+        assert selected in system_family.split(','), system_family\nfont_path = font_manager.findfont(font_manager.FontProperties(family=[selected]),\
+        \ fallback_to_default=False)\nresolved = font_manager.FontProperties(fname=font_path).get_name()\n\
+        assert resolved == selected, (selected, resolved)\nevidence = dict(package='fonts-noto-cjk',\
+        \ package_version=subprocess.check_output(\n    ['dpkg-query', '-W', '-f=${Version}',\
+        \ 'fonts-noto-cjk'], text=True),\n    runner_os=os.environ['RUNNER_OS'], os_release=platform.freedesktop_os_release(),\n\
+        \    system_family=system_family, configured_family=selected, resolved_family=resolved,\n\
+        \    font_path=font_path, result='PASS')\noutput = Path(os.environ['RUNNER_TEMP'])\
+        \ / 'platform-results/linux/font-check.json'\noutput.parent.mkdir(parents=True,\
+        \ exist_ok=True)\noutput.write_text(json.dumps(evidence, indent=2) + '\\n',\
+        \ encoding='utf-8')\nprint(json.dumps(evidence, indent=2))\nPY\n"
+    - name: Execute complete full regression
+      working-directory: candidate
+      run: python -I -B ../executor/04_scripts/quality/full_regression.py run --side
+        "${{ matrix.side }}" --plan "$RUNNER_TEMP/platform-plan/full-plan.json" --output
+        "$RUNNER_TEMP/full-results"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: full-${{ matrix.side }}
+        path: ${{ runner.temp }}/full-results
         if-no-files-found: error

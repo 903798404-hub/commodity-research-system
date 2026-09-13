@@ -56,6 +56,15 @@
 
 ## Mainstream Development Governance
 
+### Full Regression Policy
+
+过渡性 baseline-aware `NO_NEW_REGRESSION` 仅用于 full repository regression。Green base → candidate must remain green；legacy-debt base → candidate must introduce no new failures, no new skips and no test deletion。按完整 collected test node identity 动态对比同一次 hosted run 的 authoritative base 与 candidate；新增 tests 必须 PASS，允许既有 failure/skip 保持或修复，不维护固定 failure allowlist。既有节点与数量作为 `TECHNICAL_DEBT` 持续报告，长期目标仍是 authoritative main full suite green。
+
+trusted required、future-required、impact/consumer、platform-required 和 candidate changed/added tests 仍是绝对全绿硬 Gate，FAIL、SKIP、missing 均失败。上述“失败和 skip 不得记为 PASS”约束这些硬 Gate；full suite 的既有债务不标作测试 PASS，只能使 `NO_NEW_REGRESSION` 比较 PASS。full fallback 不得把明确 required/impact obligation 降为债务。
+
+base/candidate 必须绑定同一 runner image/version、Python、依赖、系统包、字体、环境变量、pytest 配置/命令及各自精确 Commit/Tree/test plan。同一次 run/attempt 的完整结果才可比较；collection error、环境准备失败、receipt/plan/身份不一致、运行未完成或 base node 消失直接 FAIL。main 变化后必须重新取得对应 base 的 baseline。Windows-required 保持 Windows hosted 硬 Gate；普通无 Windows 依赖 Business 不启动无关 Windows suite。main-entry PASS 不授予生产发布权限。
+
+
 统一流程：`main → feature/fix branch → implementation → automated tests → required CI → main`。
 Repository Maintainer/Admin 审查并接纳 Governance / CI candidate；review 是 integration decision，不是 CI failure。Worktree 仅用于并行开发；可用 START / RESUME 自动 fetch 并建立工作区，也可直接建立 feature/fix branch，不存在项目存在审批。
 

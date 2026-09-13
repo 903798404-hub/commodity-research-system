@@ -335,3 +335,14 @@ modules:
       - 08_tests/test_documentation_contract.py
     dependents: []
     full_regression_when_changed: false
+
+  ci.full_regression:
+    code_paths:
+      - 04_scripts/quality/full_regression.py
+      - 08_tests/test_full_regression.py
+    direct_tests:
+      - 08_tests/test_full_regression.py
+    impact_tests:
+      - 08_tests/test_main_admission.py
+    dependents: []
+    full_regression_when_changed: false
