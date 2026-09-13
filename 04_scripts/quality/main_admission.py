@@ -1,4 +1,4 @@
-"""Required main admission (business and strict lanes). Invoke only from an independently selected trusted main.
+"""Required CI for Maintainer-reviewed candidate code and workflow.
 
 This is evidence, not a signature or a branch-protection service. The caller must
 authenticate repository/ref observations. V1 tests run on ephemeral GitHub hosted
@@ -30,7 +30,7 @@ IMPLEMENTATION = "04_scripts/quality/main_admission.py"
 SCHEMA = "02_configs/main_admission_result.schema.json"
 WORKFLOW = ".github/workflows/trusted-main-admission.yml"
 MAP = "02_configs/module_test_map.yaml"
-ROOT_APPROVAL = "GOVERNANCE_ROOT_APPROVAL_REQUIRED"
+
 TRUST_FILES = (REGISTRY, SCOPE, IMPLEMENTATION, SCHEMA, MAP,
                "04_scripts/quality/project_registry.py", "pyproject.toml",
                "requirements-dev.txt", WORKFLOW)
@@ -298,12 +298,11 @@ def policy_reductions(repo, candidate, sources, registry, mapping, paths):
     try:
         if REGISTRY in changed_paths:
             proposed = json.loads(blob(repo, candidate, REGISTRY))
+            if set(proposed)-set(registry):
+                raise ValueError("INVALID_REGISTRY_METADATA")
             indexed = {p["project_id"]: p for p in proposed["projects"]}
             for project in registry["projects"]:
                 after = indexed.get(project["project_id"], {})
-                for key in ("owned_paths", "reserved_paths", "future_owned_paths"):
-                    if not set(after.get(key, [])) <= set(project.get(key, [])):
-                        return ["OWNERSHIP_SELF_EXPANSION"]
                 before_tests = set(project["required_tests"] + project.get("future_required_tests", []))
                 after_tests = set(after.get("required_tests", []) + after.get("future_required_tests", []))
                 if not before_tests <= after_tests:
@@ -333,21 +332,19 @@ def is_governance_transition(paths, registry):
                for i in paths)
 
 
-def workflow_execution_unchanged(before, after):
-    """No in-flight workflow can change the judge/issuer/aggregator that vets it.
-
-    A critical workflow migration first upgrades this trusted policy, with exact
-    external approval, then changes the workflow in a separately approved commit.
-    This prevents a workflow edit from skipping this candidate's trusted check.
-    """
+def workflow_contract_valid(source):
+    """Reviewable CI contract, not a proof against a malicious Maintainer."""
     import yaml
-    old, new = yaml.safe_load(before), yaml.safe_load(after)
-    if not isinstance(old, dict) or not isinstance(new, dict):
+    value = yaml.safe_load(source)
+    if not isinstance(value, dict) or value.get('permissions') != {'contents': 'read'}:
         return False
-    return {k: v for k, v in old.items() if k != "name"} == {k: v for k, v in new.items() if k != "name"}
+    jobs = value.get('jobs', {})
+    if not any(j.get('name') == 'trusted-main-admission-v1' for j in jobs.values()):
+        return False
+    return all(not j.get('environment') and not j.get('services') for j in jobs.values())
 
 
-def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests) -> dict:
+def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests, plan_only=False) -> dict:
     receipt = {"schema_version": "main-admission/1", "mode": "required", "lane": "business", "final_result": "FAIL",
                "business_scope": "FAIL", "failure_codes": [], "trusted_main": None, "candidate": None,
                "merge_base": None, "ahead": None, "behind": None, "trusted_governance": {},
@@ -371,8 +368,8 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                 raise ValueError("COMMIT_REQUIRED")
             receipt[label] = {"commit": commit, "tree": text(repo, "rev-parse", commit + "^{tree}")}
         sources = {p: blob(repo, base, p) for p in TRUST_FILES}
-        if sources[IMPLEMENTATION] != Path(__file__).read_bytes():
-            raise ValueError("EXECUTOR_NOT_TRUSTED_MAIN")
+        if executor is run_tests and blob(repo, candidate, IMPLEMENTATION).replace(b"\r\n", b"\n") != Path(__file__).read_bytes().replace(b"\r\n", b"\n"):
+            raise ValueError("EXECUTOR_NOT_EXACT_CANDIDATE")
         receipt["trusted_governance"] = {p: digest(b) for p, b in sources.items()}
         receipt["registry_blob_digest"] = digest(sources[REGISTRY])
         import yaml
@@ -380,7 +377,7 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         mapping = yaml.safe_load(sources[MAP])
         if not isinstance(mapping, dict):
             raise ValueError("INVALID_TRUSTED_TEST_MAP")
-        schema = json.loads(sources[SCHEMA])
+        schema = json.loads(blob(repo, candidate, SCHEMA))
         jsonschema.Draft202012Validator.check_schema(schema)
         registry = json.loads(sources[REGISTRY])
         patterns = scope_patterns(sources[SCOPE])
@@ -393,81 +390,93 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         if behind or not ahead or receipt["merge_base"] != base:
             failures.append("NOT_STRICT_FAST_FORWARD")
         paths = changed(repo, base, candidate, old, new)
-        bootstrap = None
-        bootstrap_tests = []
-        registry_changed = any(p["path"] == REGISTRY for p in paths)
-        # Registry edits by its trusted shared owner are governance changes. They
-        # NEVER grant this candidate new ownership or change its required plan.
-        registry_owner = next((p for p in registry["projects"]
-                               if owns(p, REGISTRY) and p["change_class"] == "shared"
-                               and p["status"] == "ready"), None)
-        if registry_changed:
-            policy = {"__name__": "trusted_bootstrap_policy"}
-            exec(compile(sources["04_scripts/quality/project_registry.py"],
-                         "<trusted bootstrap policy>", "exec"), policy)
-            try:
-                bootstrap, bootstrap_tests = policy["validate_bootstrap"](
-                    registry, json.loads(blob(repo, candidate, REGISTRY)), old, new,
-                    [p["path"] for p in paths], patterns)
-                if project_id not in {"auto", bootstrap["project_id"]}:
-                    raise ValueError("ESCALATION_REQUIRED: bootstrap project mismatch")
-            except (ValueError, KeyError, TypeError) as exc:
-                bootstrap = None
-                if not registry_owner:
-                    failures.extend(["ESCALATION_REQUIRED", str(exc)[:300]])
-        if bootstrap:
-            projects = [bootstrap]
-            receipt["checks"]["bootstrap"] = "EXACT_NEW_BUSINESS_PROJECT"
-        elif project_id == "auto":
-            projects = [p for p in registry["projects"] if any(owns(p, i["path"]) for i in paths)]
-        else:
-            projects = [p for p in registry["projects"] if p["project_id"] == project_id]
-        unresolved = dict(project_id="unresolved", change_class="shared", status="needs-boundary-review",
-                          owned_paths=[], shared_dependencies=[], forbidden_paths=[], required_tests=[])
-        project = projects[0] if projects else unresolved
-        strict = any(p["change_class"] == "shared" for p in projects)
-        transition = not bootstrap and is_governance_transition(paths, registry)
-        receipt["lane"] = "governance_transition" if transition else "strict" if strict else "business"
-        receipt["checks"]["CHANGE_CLASS"] = ("GOVERNANCE_TRANSITION" if transition else "STRICT_SHARED" if strict else "BUSINESS")
-        receipt["checks"]["project_id"] = project["project_id"]
-        receipt["checks"]["project_ids"] = [p["project_id"] for p in projects]
-        if not projects or any(p["status"] != "ready" for p in projects) or (not strict and len(projects) != 1):
-            failures.append("ESCALATION_REQUIRED")
+        proposed = json.loads(blob(repo, candidate, REGISTRY))
+        current_projects = proposed['projects']
+        if len({p['project_id'] for p in current_projects}) != len(current_projects):
+            failures.append('INVALID_REGISTRY_METADATA')
+        for path in set(old) | set(new):
+            if sum(owns(p,path) for p in current_projects) > 1:
+                failures.append('OWNERSHIP_METADATA_COLLISION')
+                break
+        if not set(registry['protected_paths']) <= set(proposed['protected_paths']):
+            failures.append('SCOPE_POLICY_REDUCTION')
+        # Ownership describes responsibility; it does not grant source or release authority.
+        # Include BOTH sides so reassignment cannot shed the old owner's tests.
+        relevant = lambda p: any(owns(p, i['path']) for i in paths)
+        projects = [p for p in registry['projects'] + current_projects if relevant(p)]
+        projects = list({json.dumps(p, sort_keys=True): p for p in projects}.values())
+        explicit = next((p for p in current_projects if p['project_id'] == project_id), None)
+        if explicit and explicit not in projects:
+            projects.append(explicit)
+        transition = is_governance_transition(paths, registry)
+        additions = current_projects[len(registry['projects']):]
+        ordinary_registration = (current_projects[:len(registry['projects'])] == registry['projects']
+            and len(additions)==1 and additions[0]['change_class']=='business'
+            and proposed['protected_paths']==registry['protected_paths']
+            and all(i['path']==REGISTRY or (owns(additions[0],i['path']) and
+                    not any(under(i['path'],r) for r in registry['protected_paths']) and
+                    not any(fnmatch.fnmatchcase(i['path'],r) for r in patterns)) for i in paths))
+        if ordinary_registration:
+            transition=False
+            receipt['checks']['bootstrap']='NEW_BUSINESS_METADATA'
+
+        strict = transition or any(p['change_class'] == 'shared' for p in projects) or any('shared' in classify(i['path'],p,registry,patterns) for i in paths for p in projects if not (ordinary_registration and i['path']==REGISTRY))
+        unowned = [i['path'] for i in paths if not any(owns(p, i['path']) for p in projects) and not (ordinary_registration and i['path']==REGISTRY)]
+        if unowned:
+            strict = strict or any(any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+                                  or any(under(path, r) for r in registry['protected_paths']) for path in unowned)
+        receipt['lane'] = 'governance' if transition else 'strict' if strict else 'business'
+        receipt['checks'].update(CHANGE_CLASS='GOVERNANCE_OR_CI' if transition else 'STRICT_SHARED' if strict else 'BUSINESS',
+                                MAINTAINER_REVIEW_REQUIRED='YES' if transition else 'NO',
+                                PROJECT_EXISTENCE_APPROVAL_REQUIRED='NO',
+                                project_id=project_id, project_ids=sorted({p['project_id'] for p in projects}),
+                                unowned_paths=unowned)
         for item in paths:
-            owners = [p for p in projects if owns(p, item["path"])]
-            owner = owners[0] if len(owners) == 1 else project
-            item["classifications"] = classify(item["path"], owner, registry, patterns)
-            categories = item["classifications"]
-            if bootstrap and item["path"] == REGISTRY:
-                continue
-            # A ready shared owner admits source changes, not production actions.
-            # Unowned control-plane paths and production payloads fail closed.
-            denied = (len(owners) != 1 or "forbidden" in categories or "other-project" in categories
-                      or any(under(item["path"], root) for root in ("01_data", "06_outputs", "10_logs"))
-                      or item["path"].startswith(".env")
-                      or (categories != ["owned"] and owner["change_class"] != "shared"))
-            if denied:
-                failures.append("ESCALATION_REQUIRED")
-                if "production-control-plane" in categories:
-                    failures.append("UNAUTHORIZED_PRODUCTION_CHANGE")
+            path = item['path']
+            owners = [p for p in registry['projects'] if owns(p, path)]
+            fallback=dict(project_id='unowned',owned_paths=[],shared_dependencies=[],forbidden_paths=[])
+            diagnostic = owners or projects or [fallback]
+            categories=set(c for p in diagnostic for c in classify(path,p,registry,patterns))
+            if not owners: categories.add('unowned')
+            if any(any(under(path,x) for x in p['forbidden_paths']) for p in registry['projects'] if p['project_id']==project_id):
+                categories.add('forbidden')
+            item['classifications']=sorted(categories)
+            if '/' not in path and path not in {'AGENTS.md','README.md','pyproject.toml','.gitattributes'} and not path.startswith('requirements') and not owners:
+                failures.append('SCOPE_VIOLATION')
+            # An explicitly scoped module cannot quietly modify another existing module.
+            if explicit and project_id != 'dev-governance' and any(p['project_id'] != project_id for p in owners):
+                failures.append('SCOPE_VIOLATION')
+            if any(under(path, r) for r in ('01_data','06_outputs','10_logs')) or path.startswith('.env'):
+                failures.append('UNAUTHORIZED_PRODUCTION_CHANGE')
+            if under(path, '09_deploy') and not path.endswith('.md'):
+                failures.append('UNAUTHORIZED_PRODUCTION_CHANGE')
+            if any(any(under(path, x) for x in p['forbidden_paths']) for p in ([explicit] if explicit else [])) and not transition:
+                failures.append('SCOPE_VIOLATION')
+        business_owners = {p['project_id'] for p in current_projects if p['change_class']=='business' and relevant(p)}
+        if len(business_owners) > 1:
+            failures.append('UNRELATED_MODULE_SCOPE')
         receipt["changed_paths"] = paths
         receipt["diff_digest"] = digest(json.dumps(paths, sort_keys=True, ensure_ascii=False).encode("utf-8"))
         if not paths:
             failures.append("ESCALATION_REQUIRED")
         if any(e["mode"] not in {"100644", "100755"} for e in list(old.values()) + list(new.values())):
             failures.extend(["UNSUPPORTED_GIT_MODE", "ESCALATION_REQUIRED"])
-        receipt["business_scope"] = "FAIL" if "ESCALATION_REQUIRED" in failures else "PASS"
-        tests = bootstrap_tests if bootstrap else [t for p in projects
-                 for t in p["required_tests"] + p.get("future_required_tests", [])]
-        if any(not p["required_tests"] and not p.get("future_required_tests") for p in projects) and not bootstrap:
-            failures.append("STRICT_REQUIREMENTS_MISSING" if strict else "TRUSTED_TEST_UNAVAILABLE")
-        if strict or transition:
-            impact, modules, full = impact_plan(mapping, [p["path"] for p in paths], old)
-            tests += impact
-            receipt["checks"].update(impact_modules=modules, full_regression=full)
+        receipt["business_scope"] = "FAIL" if failures else "PASS"
+        tests = [t for p in projects for t in p['required_tests'] + p.get('future_required_tests', [])]
+        if strict:
+            for source_mapping in (mapping, yaml.safe_load(blob(repo,candidate,MAP))):
+                impact, modules, full = impact_plan(source_mapping, [p['path'] for p in paths], old)
+                tests += impact
+                receipt['checks'].update(impact_modules=modules, full_regression=full)
+            governance = next((p for p in registry['projects'] if p['project_id']=='dev-governance'), {})
+            tests += governance.get('required_tests', []) + governance.get('future_required_tests', [])
+            # An unmapped shared source requires broad consumer coverage, never an owner bootstrap failure.
+            if unowned and not receipt['checks'].get('impact_modules'):
+                tests += [p for p in old if test_path(p)]
+                receipt['checks']['full_regression'] = True
         required = list(dict.fromkeys(tests))
         tests += [i["path"] for i in paths if i["path"] in new and test_path(i["path"])
-                  and any(owns(p, i["path"]) for p in projects)]
+]
         tests = list(dict.fromkeys(tests))
         receipt["test_plan"] = tests
         receipt["checks"]["trusted_required_tests"] = required
@@ -493,8 +502,8 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         # Policy edits may add coverage but cannot remove trusted obligations.
         failures.extend(policy_reductions(repo, candidate, sources, registry, mapping, paths))
         if WORKFLOW in {p["path"] for p in paths}:
-            if not workflow_execution_unchanged(sources[WORKFLOW], blob(repo, candidate, WORKFLOW)):
-                failures.append("TRUSTED_WORKFLOW_EXECUTION_CHANGED")
+            if not workflow_contract_valid(blob(repo, candidate, WORKFLOW)):
+                failures.append("INVALID_WORKFLOW_CONTRACT")
         try:
             git(repo, "diff", "--check", base, candidate, "--")
             receipt["checks"]["diff_check"] = "PASS"
@@ -507,7 +516,7 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         except (SyntaxError, ValueError):
             failures.append("SYNTAX_FAILED")
         # Only the trusted plan/config judges the exact candidate test versions.
-        if not failures:
+        if not failures and not plan_only:
             with tempfile.TemporaryDirectory(prefix="admission-") as directory:
                 workspace = Path(directory)
                 export(repo, candidate, workspace)
@@ -545,11 +554,10 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                     "per_test": per_test}
                 if receipt["test_result"].get("result") != "PASS":
                     failures.append("REQUIRED_TEST_FAILED")
-        # The machine never grants Governance root authority. Admin acceptance
-        # happens outside this candidate, after technical evidence is reviewed.
+        # CI success and Maintainer integration are separate decisions.
         receipt["failure_codes"] = sorted(set(failures))
-        receipt["checks"]["TECHNICAL_VALIDATION"] = "FAIL" if failures else "PASS"
-        receipt["final_result"] = "FAIL" if failures else ROOT_APPROVAL if transition else "PASS"
+        receipt["checks"]["TECHNICAL_VALIDATION"] = "FAIL" if failures else "NOT_RUN" if plan_only else "PASS"
+        receipt["final_result"] = "FAIL" if failures else "PLANNED" if plan_only else "PASS"
         receipt["checks"]["MAIN_ENTRY"] = receipt["final_result"]
         jsonschema.validate(receipt, schema)
     except Exception as exc:

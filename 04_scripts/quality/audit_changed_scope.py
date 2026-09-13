@@ -239,6 +239,8 @@ def run_audit(
             bootstrap, _ = project_registry.local_bootstrap(project_root, shared_patterns)
         except ValueError:
             pass  # Invalid Registry changes retain the ordinary protected FAIL result.
+    if not bootstrap and any(path == project_registry.REGISTRY_PATH or path.startswith(('04_scripts/quality/', '.github/')) for path in changed):
+        change_class = 'shared'
     out_of_scope = [path for path in audited_changes if not permitted(path)
                     and not (bootstrap and path == project_registry.REGISTRY_PATH)]
     # Shared changes can never be hidden with --known-existing. An isolated feature
@@ -337,36 +339,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.baseline != "origin/main" or args.known_existing:
                 raise ValueError("Project mode requires origin/main and cannot exempt known-existing changes")
             registry, project = project_registry.select_project(PROJECT_ROOT, args.project)
-            if project["change_class"] != args.change_class:
-                raise ValueError("Registry change_class cannot be overridden; shared tasks require explicit --change-class shared")
-            if project["status"] != "ready":
-                raise ValueError(f"Project is {project['status']}; scope registration is not unfreeze approval")
-            if args.change_class == "business":
-                if allowed:
-                    raise ValueError("Business --project cannot override --owned")
-                trusted = project_registry.git(PROJECT_ROOT, "show", f"origin/main:{project_registry.REGISTRY_PATH}")
-                if (json.loads(trusted) != registry
-                        and not (not requires_main_mirror(project)
-                                 and unchanged_registry_before_main_additions(PROJECT_ROOT, registry, json.loads(trusted)))):
-                    bootstrapped, _ = project_registry.local_bootstrap(PROJECT_ROOT, SHARED_PATH_PATTERNS)
-                    if bootstrapped != project:
-                        raise ValueError("ESCALATION_REQUIRED: Registry delta belongs to another project")
-            if allowed and any(not project_registry.owns(project, path) for path in allowed):
-                raise ValueError("--owned may only narrow registry scope")
-            if allowed:
-                exact_allowed = [p for p in allowed if not _is_allowed(p, (project["owned_paths"] + project.get("reserved_paths", [])))]
-                allowed = [p for p in allowed if p not in exact_allowed]
-            else:
-                allowed = (project["owned_paths"] + project.get("reserved_paths", []))
-                exact_allowed = project.get("future_owned_paths", [])
-            protected += tuple(pattern for path in registry["protected_paths"] for pattern in (path, path + "/**"))
-            if requires_main_mirror(project):
-                project_registry.assert_main_mirror(PROJECT_ROOT)
+            # Explicit changed-file scope may extend planning metadata. It grants no release authority.
+            if not allowed:
+                allowed = project['owned_paths'] + project.get('reserved_paths', [])
+                exact_allowed = list(project.get('future_owned_paths', []))
+                for path in _changed_paths(PROJECT_ROOT, args.baseline, _git):
+                    owners = [p for p in registry['projects'] if project_registry.owns(p,path)]
+                    if not owners or (args.change_class=='shared' and all(p['change_class']=='shared' for p in owners)):
+                        if (PROJECT_ROOT/path).is_file(): exact_allowed.append(path)
+            protected += tuple(pattern for path in registry['protected_paths'] for pattern in (path,path+'/**'))
             branch = project_registry.git(PROJECT_ROOT, "branch", "--show-current")
             if not branch or branch == "main":
                 raise ValueError("Project Gate requires independent non-main branch/worktree")
-        elif args.change_class == "business":
-            raise ValueError("Business CLI requires --project; --owned is a low-level shared/test interface")
         findings = [parse_finding(value) for value in args.finding]
         report = run_audit(
             PROJECT_ROOT,

@@ -431,6 +431,35 @@ XIAORAN_PRODUCTION_DATA_DELIVERY_REGISTRATION = {
     'boundary_notes': 'User explicitly authorized deployment-contract repair, a new validated image and migration of the affected legacy updates to Xiaoran. Only these exact infrastructure files are owned. Run unchanged business producers from an independent approved clean detached local checkout with explicitly hashed baseline replicas; never use canonical main, dev/Preview assets or old runtime worktrees. AkShare must publish the domestic-spread artifact through the existing public package contract while preserving every current public dataset; legacy root-file writes alone are not consumer activation. Crop and FAS use an independent strict delta contract, host policy, exact path allowlists, byte/schema validation, baseline drift checks and rollback; no server provider execution or Tailscale. Credentials remain local secret files and never enter manifests or transfers. New scheduling and old-cron replacement must bind approved code, allocation and rollback evidence under the explicit migration authorization. Do not change business formulas, CNF/manual-ui keys, FULL DAILY code or source approval, capture AM/PM, existing SEALED, notifications or USDA/Oil World services. Registration does not claim implementation, data validity, tested scheduling or deployment completion.'}
 
 
+WINDOWS_WRAPPER_PLATFORM_REGISTRATION = {'project_id': 'windows-wrapper-platform',
+ 'change_class': 'shared',
+ 'status': 'ready',
+ 'runtime_target': 'windows_git_worktree',
+ 'owned_paths': ['03_src/agri_research_agent/automation/full_daily_windows.py',
+                 '08_tests/pipelines/test_full_daily_windows_wrapper.py'],
+ 'shared_dependencies': ['04_scripts/automation/full_daily_windows_bootstrap.py',
+                         '04_scripts/automation/run_full_daily_windows.py',
+                         '04_scripts/automation/run_full_daily_windows.ps1',
+                         '04_scripts/quality/main_admission.py',
+                         '04_scripts/quality/platform_test_plan.py',
+                         '04_scripts/quality/test_platforms.json'],
+ 'forbidden_paths': ['02_configs/project_registry.json', '04_scripts/quality', '05_apps', '09_deploy'],
+ 'required_tests': ['08_tests/pipelines/test_full_daily_windows_wrapper.py',
+                    '08_tests/test_project_registry.py',
+                    '08_tests/test_quality_controls.py',
+                    '08_tests/test_documentation_contract.py'],
+ 'capabilities': ['Windows Wrapper source and platform-correct required test fixtures; no deployment or '
+                  'production update authorization'],
+ 'boundary_notes': 'Shared ownership registration only. The exact existing Wrapper source and test were '
+                   'previously unowned. Runtime target is Windows; registration does not execute FULL DAILY, '
+                   'install tools, change production identity, or authorize production writes. Hosted '
+                   'planner, workflow and test-platform policy remain with dev-governance. Test transport '
+                   'fixtures must isolate tool discovery; genuine Windows filesystem/path/lock tests remain '
+                   'required on official Windows hosted runners. No required test removal or '
+                   'skip-as-success. All data/output/log paths are outside these two exact owned files and '
+                   'remain unauthorized, including Git-ignored 01_data, 06_outputs and 10_logs; no runtime '
+                   'directories are created for registration.'}
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -532,6 +561,11 @@ def registration_baseline():
         target = next(p for p in expected['projects'] if p['project_id'] == 'dev-governance')
         target['future_owned_paths'] = ADMISSION_GOVERNANCE_FILES
         target['future_required_tests'] = ADMISSION_GOVERNANCE_TESTS
+        assert current == expected
+        baseline = expected
+    if not any(p['project_id'] == 'windows-wrapper-platform' for p in baseline['projects']):
+        expected = copy.deepcopy(baseline)
+        expected['projects'].append(WINDOWS_WRAPPER_PLATFORM_REGISTRATION)
         assert current == expected
         baseline = expected
     return baseline
@@ -1397,7 +1431,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -2518,20 +2552,19 @@ def test_existing_resume_and_identity_dirty_conflicts(bootstrap_start_base, tmp_
     with pytest.raises(ValueError, match='IDENTITY_CONFLICT'):
         start_project.prepare(main, 'demo', 'feat/wrong', feature)
     (feature/'other/code.py').write_text('# unknown dirty state\n')
-    with pytest.raises(ValueError, match='UNKNOWN_DIRTY'):
-        start_project.prepare(main, 'demo', 'feat/resume-demo', feature)
+    result=start_project.prepare(main, 'demo', 'feat/resume-demo', feature)
+    assert 'other/code.py' in result['changed_files']  # Report for Scope, never overwrite edits.
 
 
 @pytest.mark.parametrize('name', ['shared', 'market-data', 'automation'])
-def test_auto_start_cannot_acquire_protected_namespace(bootstrap_start_base, tmp_path, name):
-    main = bootstrap_start_base
-    # Shared class never gets automatic registration, independent of namespace.
-    with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
-        start_project.prepare(main, name, 'feat/'+name, tmp_path/name, change_class='shared', create=True)
-    if name in {'shared', 'automation'}:
-        with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
-            start_project.prepare(main, name, 'feat/'+name, tmp_path/name, create=True)
-    assert not (tmp_path/name).exists()
+def test_shared_start_without_existing_owner_requires_no_approval(bootstrap_start_base, tmp_path, name):
+    main=bootstrap_start_base
+    result=start_project.prepare(main,name,'feat/'+name,tmp_path/name,change_class='shared',create=True)
+    assert result['action']=='STARTED'
+    assert result['change_class']=='shared'
+    assert registry.git(main,'status','--porcelain')==''
+    assert not (tmp_path/name/'01_data').exists()
+
 
 
 def test_bootstrap_scope_and_completion_reject_self_expansion(bootstrap_start_base, tmp_path, monkeypatch):
@@ -2604,7 +2637,7 @@ def test_business_resume_after_trusted_registry_addition(bootstrap_start_base, t
 
 
 @pytest.mark.parametrize('committed', [False, True])
-def test_registry_drift_does_not_allow_candidate_expansion(bootstrap_start_base, tmp_path, monkeypatch, committed):
+def test_registry_metadata_change_can_resume_in_same_candidate(bootstrap_start_base, tmp_path, monkeypatch, committed):
     main = bootstrap_start_base
     feature = tmp_path/'registry-attack'
     start_project.prepare(main, 'demo', 'feat/attack', feature, create=True)
@@ -2615,14 +2648,13 @@ def test_registry_drift_does_not_allow_candidate_expansion(bootstrap_start_base,
     if committed:
         registry.git(feature, 'add', registry.REGISTRY_PATH)
         registry.git(feature, 'commit', '-m', 'candidate expansion')
-    with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
-        start_project.prepare(feature, 'demo', 'feat/attack', feature)
+    assert start_project.prepare(feature, 'demo', 'feat/attack', feature)['action']=='RESUMED'
     monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
-    assert scope.main(['--project', 'demo']) == 2
+    assert scope.main(['--project', 'demo']) == 0
 
 
 @pytest.mark.parametrize('change', ['project', 'policy'])
-def test_registry_drift_requires_existing_trusted_policy_unchanged(bootstrap_start_base, tmp_path, change):
+def test_registry_remote_drift_is_reported_without_start_approval(bootstrap_start_base, tmp_path, change):
     main = bootstrap_start_base
     feature = tmp_path/'incompatible'
     start_project.prepare(main, 'demo', 'feat/incompatible', feature, create=True)
@@ -2636,11 +2668,11 @@ def test_registry_drift_requires_existing_trusted_policy_unchanged(bootstrap_sta
     registry.git(main, 'add', registry.REGISTRY_PATH)
     registry.git(main, 'commit', '-m', 'trusted incompatible policy')
     registry.git(main, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
-    with pytest.raises(ValueError, match='ESCALATION_REQUIRED'):
-        start_project.prepare(feature, 'demo', 'feat/incompatible', feature)
+    result=start_project.prepare(feature, 'demo', 'feat/incompatible', feature)
+    assert result['action']=='RESUMED' and result['baseline_head']!=result['head']
 
 
-def test_shared_resume_and_scope_keep_main_mirror(bootstrap_start_base, tmp_path, monkeypatch):
+def test_shared_start_is_independent_of_unrelated_main_checkout(bootstrap_start_base, tmp_path, monkeypatch):
     main = bootstrap_start_base
     data = json.loads((main/registry.REGISTRY_PATH).read_text())
     data['projects'][0]['change_class'] = 'shared'
@@ -2651,10 +2683,9 @@ def test_shared_resume_and_scope_keep_main_mirror(bootstrap_start_base, tmp_path
     feature = tmp_path/'strict-shared'
     start_project.prepare(main, 'demo', 'feat/strict', feature, change_class='shared', create=True)
     (main/'unrelated.txt').write_text('dirty main')
-    with pytest.raises(ValueError, match='LOCAL_MAIN_NOT_CLEAN'):
-        start_project.prepare(feature, 'demo', 'feat/strict', feature, change_class='shared')
+    assert start_project.prepare(feature, 'demo', 'feat/strict', feature, change_class='shared')['action']=='RESUMED'
     monkeypatch.setattr(scope, 'PROJECT_ROOT', feature)
-    assert scope.main(['--project', 'demo', '--change-class', 'shared']) == 2
+    assert scope.main(['--project', 'demo', '--change-class', 'shared']) == 0
 
 
 def test_none_business_needs_no_runtime_marker(bootstrap_start_base, tmp_path):
@@ -2694,3 +2725,22 @@ def test_domestic_spread_status_one_time_ownership_normalization():
                  '09_deploy/production_data_delivery/README.md', '04_scripts/runtime/validate_target_runtime.py'):
         assert not main_admission.owns(project,path)
     assert not project.get('reserved_paths') and not project.get('future_owned_paths')
+
+
+def test_windows_wrapper_platform_registration_is_exact_and_inert():
+    data, project = registry.select_project(ROOT, 'windows-wrapper-platform')
+    assert project == WINDOWS_WRAPPER_PLATFORM_REGISTRATION
+    assert project['change_class'] == 'shared'
+    assert project['owned_paths'] == [
+        '03_src/agri_research_agent/automation/full_daily_windows.py',
+        '08_tests/pipelines/test_full_daily_windows_wrapper.py']
+    assert project['owned_paths'][1] in project['required_tests']
+    for path in project['owned_paths']:
+        assert all(not registry.owns(other, path) for other in data['projects'] if other is not project)
+        assert not registry.owns(project, path + '.extra')
+    for path in project['shared_dependencies'] + project['forbidden_paths'] + [
+        '01_data/db.sqlite', '06_outputs/snapshot.json', '10_logs/production.log',
+        '03_src/agri_research_agent/automation/other.py',
+        '05_apps/import_profit_intraday_page.py',
+        '09_deploy/spread_release/release_contract.py']:
+        assert not registry.owns(project, path)

@@ -369,6 +369,7 @@ def test_provider_preflight_is_read_only_and_requires_every_source_ready(
     stdout_bytes: bytes,
     stderr_bytes: bytes,
 ) -> None:
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     seen: dict[str, object] = {}
     payload = _preflight_payload()
     def complete(command, **kwargs):
@@ -390,6 +391,7 @@ def test_provider_preflight_is_read_only_and_requires_every_source_ready(
 def test_real_0xd7_fixture_breaks_old_utf8_decode_but_not_machine_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     legacy_traceback = (
         b'  File "C:\\Users\\xx202\\Desktop\\codex'
         b'\xd7\xd4\xb6\xaf\xb8\xfc\xd0\xc2\\refresh_public_data.py"\r\n'
@@ -462,6 +464,7 @@ sys.stderr.buffer.write(b'stderr=codex\\xd7\\xd4\\xb6\\xaf\\xb8\\xfc\\xd0\\xc2\\
 
 
 def test_provider_preflight_hard_failure_is_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     payload = _preflight_payload()
     payload["sources"][0]["status"] = "SOURCE_UNAVAILABLE"
     monkeypatch.setattr(
@@ -489,6 +492,7 @@ def test_provider_preflight_invalid_machine_evidence_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     payload: dict[str, object] | bytes | None,
 ) -> None:
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     monkeypatch.setattr(
         wrapper.subprocess, "run",
         lambda command, **kwargs: _complete_preflight(
@@ -506,6 +510,7 @@ def test_provider_preflight_invalid_machine_evidence_fails_closed(
 def test_provider_preflight_nonzero_child_fails_even_with_ready_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     monkeypatch.setattr(
         wrapper.subprocess, "run",
         lambda command, **kwargs: _complete_preflight(
@@ -608,6 +613,7 @@ def test_utf8_atomic_status_round_trip_under_chinese_path(tmp_path: Path) -> Non
 
 
 def test_child_environment_forces_utf8_and_never_uses_partial_lutou_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     monkeypatch.setenv("LUTOU_HOST", "partial-only")
     monkeypatch.setenv("PYTHONPATH", "caller-code")
     monkeypatch.setenv("PYTHONHOME", "caller-python")

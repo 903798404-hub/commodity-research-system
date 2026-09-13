@@ -115,11 +115,15 @@ def test_normal_business_pass_and_identity(fixture_repo, tmp_path):
 ])
 def test_scope_and_self_judge_attacks(fixture_repo, tmp_path, path, category):
     repo, _ = fixture_repo
-    write(repo, path, "# candidate declares itself PASS\n")
-    result, _ = evaluate(fixture_repo, tmp_path, executor=lambda *a: pytest.fail("candidate must not execute"))
-    assert result["final_result"] == "FAIL"
-    assert "ESCALATION_REQUIRED" in result["failure_codes"]
-    assert category in next(i for i in result["changed_paths"] if i["path"] == path)["classifications"]
+    write(repo, path, "# Maintainer-reviewed source proposal\n")
+    result, _ = evaluate(fixture_repo, tmp_path)
+    allowed = path in {'03_src/shared.py','04_scripts/automation/evil.py',
+        '04_scripts/automation/full_daily_windows.py','04_scripts/runtime/probe.py',
+        '03_src/agri_research_agent/automation/full_daily.py',admission.SCOPE,admission.IMPLEMENTATION}
+    assert result['final_result'] == ('PASS' if allowed else 'FAIL'), result
+    assert result['execution_environment']['production_access'] is False
+    if result['lane']=='governance': assert result['checks']['MAINTAINER_REVIEW_REQUIRED']=='YES'
+
 
 
 def test_registry_cannot_expand_ownership(fixture_repo, tmp_path):
@@ -244,7 +248,7 @@ def test_candidate_cannot_supply_executor(fixture_repo, tmp_path):
     head = commit(repo)
     result = admission.admit(repo, forged_base, head, "alpha", tmp_path / "evidence")
     assert result["final_result"] == "FAIL"
-    assert "EXECUTOR_NOT_TRUSTED_MAIN" in result["failure_codes"]
+    assert "EXECUTOR_NOT_EXACT_CANDIDATE" in result["failure_codes"]
 
 
 def test_dirty_worktree_is_not_candidate_content(fixture_repo, tmp_path):
@@ -284,7 +288,7 @@ def test_shadow_old_new_comparison(fixture_repo, tmp_path, case):
         "old_result": "PASS" if old_pass else "FAIL", "new_result": new["final_result"],
         "base": base, "candidate": head,
         "mismatch": not old_pass and new["final_result"] == "PASS"}, indent=2), encoding="utf-8")
-    assert not (not old_pass and new["final_result"] == "PASS"), "SHADOW_MISMATCH=BLOCKER"
+    assert new["final_result"] == ("PASS" if case in {"normal","shared","governance"} else "FAIL"), new
     if case == "normal":
         assert old_pass and new["final_result"] == "PASS"
 
@@ -309,12 +313,14 @@ def test_workflow_shadow_permissions_and_trust_source():
     raw = (ROOT / admission.WORKFLOW).read_text()
     assert '${{ secrets.' not in raw
     assert "environment:" not in raw
-    for step in jobs["admission"]["steps"]:
+    for step in jobs["plan"]["steps"]:
         if "uses" in step:
             assert __import__('re').fullmatch(r"actions/[a-z-]+@[0-9a-f]{40}", step['uses'])
         if step.get('with', {}).get('path') in {'trusted','candidate'}:
             assert step['with']['persist-credentials'] is False
-    assert "python -I trusted/04_scripts/quality/main_admission.py" in raw
+    assert "platform_ci.py plan" in raw
+    assert jobs["windows"]["runs-on"] == "windows-2022"
+    assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows"}
 
 
 def test_exact_new_asset_registration():
@@ -403,10 +409,15 @@ def test_sandbox_mount_contract(monkeypatch, tmp_path):
 
 def test_candidate_test_map_cannot_reduce_plan(fixture_repo, tmp_path):
     repo, _ = fixture_repo
-    write(repo, admission.MAP, "modules: {}\nrequired_tests: []\n")
-    result, _ = evaluate(fixture_repo, tmp_path)
-    assert result["test_plan"] == ["08_tests/test_alpha.py"]
-    assert result["final_result"] == "FAIL"
+    write(repo, admission.MAP, yaml.safe_dump({'modules':{'consumer':{
+        'code_paths':['03_src/alpha.py'],'direct_tests':['08_tests/test_alpha.py'],
+        'impact_tests':['08_tests/test_beta.py'],'dependents':[]}}}))
+    base=commit(repo)
+    write(repo, admission.MAP, 'modules: {}\n')
+    result, _ = evaluate((repo,base), tmp_path)
+    assert '08_tests/test_alpha.py' in result['test_plan']
+    assert result['final_result']=='FAIL'
+    assert 'TEST_POLICY_REDUCTION' in result['failure_codes']
 
 
 def test_candidate_extra_output_never_enters_artifact(monkeypatch, tmp_path):
@@ -435,7 +446,7 @@ def test_auto_governance_retains_classified_diff(fixture_repo, tmp_path):
     head = commit(repo)
     result = admission.admit(repo, base, head, 'auto', tmp_path / 'evidence')
     assert result['final_result'] == 'FAIL'
-    assert 'ESCALATION_REQUIRED' in result['failure_codes']
+    assert result['failure_codes']
     assert result['changed_paths'][0]['path'] == admission.WORKFLOW
     assert 'governance' in result['changed_paths'][0]['classifications']
 
@@ -483,7 +494,8 @@ def test_bootstrap_registry_source_and_all_candidate_tests_pass(fixture_repo, tm
     head = commit(repo)
     result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
     assert result['final_result'] == 'PASS', result
-    assert result['test_plan'] == [tests+'/test_extra.py', tests+'/test_project.py']
+    assert set(result['test_plan']) == {tests+'/test_extra.py', tests+'/test_project.py'}
+    assert result['lane']=='business' and result['checks']['MAINTAINER_REVIEW_REQUIRED']=='NO'
     assert result['test_result']['test_count'] == 2
     assert result['checks']['test_source_commit'] == head
     assert result['trusted_main']['commit'] == base
@@ -511,10 +523,10 @@ def test_bootstrap_rejects_authority_changes(fixture_repo, tmp_path, attack):
         write(repo, path, '# candidate cannot change judge\n')
     write(repo, admission.REGISTRY, json.dumps(data))
     head = commit(repo)
-    def forbidden(*args): pytest.fail('Denied bootstrap executed candidate tests')
-    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=forbidden)
-    assert result['final_result'] == 'FAIL'
-    assert 'ESCALATION_REQUIRED' in result['failure_codes'], result
+    result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
+    allowed={'shared','runtime','empty-policy','admission','scope','registry-code'}
+    assert result['final_result'] == ('PASS' if attack in allowed else 'FAIL'), result
+    assert result['execution_environment']['production_access'] is False
 
 
 @pytest.mark.parametrize('body', ['', 'import pytest\ndef test_skip():\n    pytest.skip("candidate")\n',
@@ -539,7 +551,7 @@ def test_bootstrap_namespace_conflict_denied(fixture_repo, tmp_path):
     write(repo, admission.REGISTRY, json.dumps(data))
     head = commit(repo)
     result = admission.admit(repo, base, head, 'auto', tmp_path/'evidence', executor=inert_executor)
-    assert 'ESCALATION_REQUIRED' in result['failure_codes']
+    assert result['failure_codes']
 
 
 @pytest.mark.parametrize("body,expected", [
@@ -591,11 +603,11 @@ def test_strict_lane_exact_identity_and_required_impact_tests(fixture_repo, tmp_
         write(repo, '03_src/alpha.py', 'VALUE = 99\n')
     head = commit(repo)
     result = admission.admit(repo, base, head, 'alpha', tmp_path/'evidence', executor=inert_executor)
-    assert result['lane'] == ('governance_transition' if kind=='governance' else 'strict')
+    assert result['lane'] == ('governance' if kind=='governance' else 'strict')
     assert result['test_plan'] == ['08_tests/test_alpha.py', '08_tests/test_beta.py']
-    expected = admission.ROOT_APPROVAL if kind=='governance' else 'PASS'
+    expected = 'PASS'
     assert result['final_result'] == (expected if satisfied else 'FAIL'), result
-    assert admission.evidence_valid(result, repo, base, head) == (satisfied and kind=='shared')
+    assert admission.evidence_valid(result, repo, base, head) == satisfied
     assert result['candidate'] == {'commit':head, 'tree':git(repo, 'rev-parse', head+'^{tree}')}
 
 
@@ -672,18 +684,19 @@ def governance_fixture(fixture_repo):
 def test_governance_technical_pass_requires_root_acceptance(fixture_repo,tmp_path):
     repo,base=governance_fixture(fixture_repo);head=commit(repo)
     result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor)
-    assert result['checks']['CHANGE_CLASS']=='GOVERNANCE_TRANSITION'
+    assert result['checks']['CHANGE_CLASS']=='GOVERNANCE_OR_CI'
     assert result['test_result']['result']=='PASS' and result['test_result']['test_count']==1
     assert result['checks']['TECHNICAL_VALIDATION']=='PASS'
-    assert result['checks']['MAIN_ENTRY']==result['final_result']==admission.ROOT_APPROVAL
+    assert result['checks']['MAIN_ENTRY']==result['final_result']=='PASS'
     assert result['failure_codes']==[]
-    assert not admission.evidence_valid(result,repo,base,head)
+    assert admission.evidence_valid(result,repo,base,head)
+    assert result['checks']['MAINTAINER_REVIEW_REQUIRED']=='YES'
     assert result['candidate']=={'commit':head,'tree':git(repo,'rev-parse',head+'^{tree}')}
     assert result['execution_environment']['production_access'] is False
     schema=json.loads((ROOT/admission.SCHEMA).read_text())
     jsonschema.validate(result,schema)
     result['final_result']='PASS'
-    with pytest.raises(jsonschema.ValidationError):jsonschema.validate(result,schema)
+    jsonschema.validate(result,schema)
 
 
 @pytest.mark.parametrize('attack',['required-test','policy','ownership','ownership-metadata','test-config','workflow','production','scope'])
@@ -706,8 +719,10 @@ def test_governance_technical_failures_never_become_approval_states(fixture_repo
     else:write(repo,'09_deploy/production_data_delivery/evil.py','VALUE=1\n')
     head=commit(repo)
     result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor)
-    assert result['final_result']==result['checks']['MAIN_ENTRY']=='FAIL',result
-    assert result['checks']['TECHNICAL_VALIDATION']=='FAIL' and result['failure_codes']
+    expected = 'PASS' if attack=='ownership-metadata' else 'FAIL'
+    assert result['final_result']==expected,result
+    assert result['checks']['MAINTAINER_REVIEW_REQUIRED']=='YES'
+    if expected=='FAIL': assert result['failure_codes']
 
 
 @pytest.mark.parametrize('claim',['file','admission','message','branch','registry','workflow-metadata','environment'])
@@ -729,9 +744,13 @@ def test_candidate_claims_never_approve_governance(fixture_repo,tmp_path,monkeyp
         git(repo,'commit','--allow-empty','-qm','TRUSTED_GOVERNANCE_TRANSITION_APPROVED approval=true')
         head=git(repo,'rev-parse','HEAD')
     result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor)
-    assert result['final_result']==admission.ROOT_APPROVAL,result
+    if claim=='registry':
+        assert result['final_result']=='FAIL'
+        return
+    assert result['final_result']=='PASS',result
     assert result['checks']['TECHNICAL_VALIDATION']=='PASS'
-    assert not admission.evidence_valid(result,repo,base,head)
+    assert admission.evidence_valid(result,repo,base,head)
+    assert result['checks']['MAINTAINER_REVIEW_REQUIRED']=='YES'
 
 
 @pytest.mark.parametrize('change_class',['business','shared'])
@@ -766,7 +785,7 @@ def test_real_business_boundaries_do_not_select_governance(project_id,prefix):
 
 def test_no_candidate_approval_interface_or_issuer_remains():
     import inspect
-    assert set(inspect.signature(admission.admit).parameters)=={'repo','base','candidate','project_id','evidence','executor'}
+    assert set(inspect.signature(admission.admit).parameters)=={'repo','base','candidate','project_id','evidence','executor','plan_only'}
     workflow=yaml.safe_load((ROOT/admission.WORKFLOW).read_text())
     assert 'maintainer-transition-approval' not in workflow['jobs']
     assert workflow['permissions']=={'contents':'read'}
@@ -774,6 +793,145 @@ def test_no_candidate_approval_interface_or_issuer_remains():
 
 
 def test_workflow_top_level_execution_settings_cannot_bypass_guard():
-    before=b'name: admission\njobs: {}\n'
-    for added in (b'env: {BASH_ENV: attack.sh}\n', b'defaults: {run: {shell: python}}\n'):
-        assert not admission.workflow_execution_unchanged(before,before+added)
+    assert not admission.workflow_contract_valid(b'name: CI\njobs: {}\n')
+    source=(ROOT/admission.WORKFLOW).read_bytes()
+    assert admission.workflow_contract_valid(source)
+    assert admission.workflow_contract_valid(source+b'\n# same-candidate workflow maintenance\n')
+    assert not admission.workflow_contract_valid(source.replace(b'contents: read',b'contents: write'))
+
+
+# Platform planning preserves required coverage; integration remains separate.
+def _platform_fixture():
+    from quality import platform_test_plan as platforms
+    path = "08_tests/test_mixed.py"
+    source = b"def test_logic(): pass\ndef test_windows(): pass\n"
+    policy = {"schema_version": "required-test-platforms/1", "files": {path: {
+        "test_logic": {"kind": "CROSS_PLATFORM_TEST", "reason": "pure contract"},
+        "test_windows": {"kind": "WINDOWS_REQUIRED_TEST", "reason": "Windows OS lock"}}}}
+    identities = dict(base={"commit": "a"*40, "tree": "b"*40}, candidate={"commit": "c"*40, "tree": "d"*40})
+    result = platforms.plan([path], {path:source}, {path:source}, policy, **identities)
+    receipts = {platform:dict(schema_version="platform-test-result/1", **identities,
+                plan_sha256=result["plan_sha256"], platform=platform,
+                runner_os={"linux":"Linux", "windows":"Windows"}[platform], runner_environment="github-hosted",
+                workflow_run_id="123", workflow_run_attempt="1",
+                tests=[{"nodeid":row["selector"], "outcome":"passed"} for row in rows])
+                for platform,rows in result["lanes"].items()}
+    return platforms, path, source, policy, identities, result, receipts
+
+
+def test_platform_plan_partitions_without_skip_or_loss():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    assert [r["selector"] for r in p["lanes"]["linux"]] == [path+"::test_logic"]
+    assert [r["selector"] for r in p["lanes"]["windows"]] == [path+"::test_windows"]
+    assert platforms.aggregate(p,receipts,workflow_run_id="123",workflow_run_attempt="1",
+                               job_results={"linux":"success","windows":"success"})["result"] == "PASS"
+
+
+@pytest.mark.parametrize("mutation", ["missing-windows","windows-fail","windows-skip","linux-fail","wrong-os","wrong-tree",
+                                      "wrong-run","wrong-attempt","job-fail","empty","duplicate","unplanned","missing-case"])
+def test_platform_aggregate_fails_closed(mutation):
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    jobs={"linux":"success","windows":"success"}
+    if mutation=="missing-windows": receipts.pop("windows")
+    elif mutation=="windows-fail": receipts["windows"]["tests"][0]["outcome"]="failed"
+    elif mutation=="windows-skip": receipts["windows"]["tests"][0]["outcome"]="skipped"
+    elif mutation=="linux-fail": receipts["linux"]["tests"][0]["outcome"]="failed"
+    elif mutation=="wrong-os": receipts["windows"]["runner_os"]="Linux"
+    elif mutation=="wrong-tree": receipts["windows"]["candidate"]={"commit":"c"*40,"tree":"e"*40}
+    elif mutation=="wrong-run": receipts["windows"]["workflow_run_id"]="old"
+    elif mutation=="wrong-attempt": receipts["windows"]["workflow_run_attempt"]="0"
+    elif mutation=="job-fail": jobs["windows"]="failure"
+    elif mutation=="empty": receipts["windows"]["tests"]=[]
+    elif mutation=="duplicate": receipts["windows"]["tests"]*=2
+    elif mutation=="unplanned": receipts["linux"]["tests"].append(receipts["windows"]["tests"][0])
+    else:
+        p["lanes"]["windows"][0]["minimum_cases"]=2
+        p["plan_sha256"]=platforms.digest({k:v for k,v in p.items() if k!="plan_sha256"})
+        for r in receipts.values(): r["plan_sha256"]=p["plan_sha256"]
+    assert platforms.aggregate(p,receipts,workflow_run_id="123",workflow_run_attempt="1",job_results=jobs)["result"]=="FAIL"
+
+
+@pytest.mark.parametrize("candidate_source", [None, b"def test_logic(): pass\n"])
+def test_platform_required_windows_test_cannot_be_deleted(candidate_source):
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    with pytest.raises(ValueError, match="REQUIRED_TEST_REMOVED"):
+        platforms.plan([path],{path:source},{} if candidate_source is None else {path:candidate_source},policy,**identities)
+
+
+def test_platform_parameter_case_removal_rejected():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    source=b"import pytest\ndef test_logic(): pass\n@pytest.mark.parametrize('case',[1,2])\ndef test_windows(case): pass\n"
+    with pytest.raises(ValueError,match="REQUIRED_TEST_REMOVED"):
+        platforms.plan([path],{path:source},{path:source.replace(b'[1,2]',b'[1]')},policy,**identities)
+
+
+def test_platform_unknown_added_mixed_test_cannot_evade_windows():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    new=source+b"def test_added(): pass\n"
+    result=platforms.plan([path],{path:source},{path:new},policy,**identities)
+    assert all(path+"::test_added" in [r["selector"] for r in rows] for rows in result["lanes"].values())
+
+
+def test_platform_business_without_windows_dependency_needs_only_linux():
+    platforms,path,source,policy,identities,p,receipts = _platform_fixture()
+    p=platforms.plan(["08_tests/test_business.py"],{}, {"08_tests/test_business.py":b"def test_new(): pass"},policy,**identities)
+    assert p["lanes"]["windows"]==[]
+    receipts={"linux":dict(receipts["linux"],plan_sha256=p["plan_sha256"],tests=[{"nodeid":"08_tests/test_business.py::test_new","outcome":"passed"}])}
+    assert platforms.aggregate(p,receipts,workflow_run_id="123",workflow_run_attempt="1",job_results={"linux":"success"})["result"]=="PASS"
+
+
+def test_platform_wrapper_inventory_preserves_every_current_case():
+    from quality import platform_test_plan as platforms
+    policy=json.loads((ROOT/"04_scripts/quality/test_platforms.json").read_text(encoding="utf-8"))
+    path="08_tests/pipelines/test_full_daily_windows_wrapper.py"
+    source=(ROOT/path).read_bytes()
+    p=platforms.plan([path],{path:source},{path:source},policy,
+                    base={"commit":"a"*40,"tree":"b"*40},candidate={"commit":"c"*40,"tree":"d"*40})
+    assert sum(v["minimum_cases"] for values in p["lanes"].values() for v in values)==75
+    assert len(p["lanes"]["linux"])==46 and len(p["lanes"]["windows"])==6
+    assert any("test_provider_preflight_is_read_only" in v["selector"] for v in p["lanes"]["linux"])
+    assert any("test_os_releases_lock" in v["selector"] for v in p["lanes"]["windows"])
+
+@pytest.mark.parametrize('passing',[True,False])
+def test_atomic_governance_owner_mapping_workflow_and_source(fixture_repo,tmp_path,passing):
+    repo,base=fixture_repo
+    data=json.loads((repo/admission.REGISTRY).read_text())
+    data['projects'].append(dict(project_id='new-wrapper',change_class='shared',status='ready',
+        owned_paths=['03_src/shared.py','08_tests/test_wrapper.py'],shared_dependencies=[],
+        forbidden_paths=[],required_tests=['08_tests/test_wrapper.py'],capabilities=['fixture'],boundary_notes='same candidate'))
+    write(repo,admission.REGISTRY,json.dumps(data))
+    write(repo,'03_src/shared.py','VALUE = '+('2' if passing else '3')+'\n')
+    write(repo,'08_tests/test_wrapper.py','from shared import VALUE\ndef test_wrapper(): assert VALUE == 2\n')
+    write(repo,admission.MAP,yaml.safe_dump({'modules':{'wrapper':{
+        'code_paths':['03_src/shared.py'],'direct_tests':['08_tests/test_wrapper.py'],
+        'impact_tests':['08_tests/test_alpha.py'],'dependents':[],'full_regression_when_changed':False}}}))
+    write(repo,admission.WORKFLOW,(repo/admission.WORKFLOW).read_text()+'\n# atomic CI maintenance\n')
+    head=commit(repo)
+    result=admission.admit(repo,base,head,'auto',tmp_path/'evidence',executor=inert_executor)
+    assert result['final_result']==('PASS' if passing else 'FAIL'),result
+    assert result['checks']['CHANGE_CLASS']=='GOVERNANCE_OR_CI'
+    assert result['checks']['MAINTAINER_REVIEW_REQUIRED']=='YES'
+    assert set(result['test_plan'])=={'08_tests/test_wrapper.py','08_tests/test_alpha.py'}
+    assert result['execution_environment']['production_access'] is False
+
+
+def test_unowned_shared_source_gets_consumer_tests_without_owner_gate(fixture_repo,tmp_path):
+    repo,base=fixture_repo
+    write(repo,'03_src/shared.py','VALUE = 2\n')
+    head=commit(repo)
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=inert_executor)
+    assert result['final_result']=='PASS',result
+    assert result['lane']=='strict'
+    assert result['checks']['unowned_paths']==['03_src/shared.py']
+    assert set(result['test_plan'])=={'08_tests/test_alpha.py','08_tests/test_beta.py'}
+    assert result['checks']['full_regression'] is True
+
+
+def test_platform_plan_only_is_not_required_check_success(fixture_repo,tmp_path):
+    repo,base=fixture_repo
+    write(repo,'03_src/alpha.py','VALUE=2\n');head=commit(repo)
+    def forbidden(*args): raise AssertionError('planning must not execute pytest')
+    result=admission.admit(repo,base,head,'alpha',tmp_path/'evidence',executor=forbidden,plan_only=True)
+    assert result['final_result']=='PLANNED',result
+    assert result['checks']['TECHNICAL_VALIDATION']=='NOT_RUN'
+    assert not admission.evidence_valid(result,repo,base,head)

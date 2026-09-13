@@ -9,25 +9,6 @@
 
 ## 代码基线
 
-- 整个 `market-data` 仓库是农产品研究系统唯一开发源、唯一 Git 根目录和唯一代码基线；服务器仅用于生产运行，不作为日常开发环境。
-- GitHub 仓库 `commodity-research-system` 的 `main` 是唯一远程可信主线；本地 `main` checkout 必须保持为 clean `origin/main` 镜像，只用于只读审计和同步，不得作为 feature 开发、临时 merge、集成验收或 release 工作区。所有 feature、integration 和 release 工作都必须使用自己的 branch/worktree；验收通过后从获批 branch 以普通 fast-forward 更新 `origin/main`，再同步本地 `main`。所有可部署代码都必须有明确的完整 Git SHA。
-- 新业务启动必须读取 [Project Registry](02_configs/project_registry.json)，确认 `project_id`、`change_class`、状态、owned/protected paths 和 required tests。执行 `git fetch origin` 与 `git ls-remote origin refs/heads/main`；聊天历史 SHA 不是执行权威。从 fresh `origin/main` 创建独立 feature branch/worktree，不修改 local main。机器入口为 `04_scripts/quality/start_project.py`（默认预检，`--create` 创建；身份一致的已有 branch/worktree 返回 `RESUMED`）。新普通 business project 由可信规则自动 bootstrap 最小 Registry 元数据和独立 source/test namespace，不再要求 Project Existence Approval。远程漂移、Registry 缺失、frozen、身份或 ownership 冲突、未知 dirty state 时停止。普通 Business START / RESUME 与本地 Scope 不依赖无关 local main checkout 是否 clean、mirror 或存在；高风险 lane 与实际 main 同步仍保留 main mirror 要求。HEAD/Tree、branch/worktree、baseline、owned paths 和 changed files 由工具生成，人工只填写业务目标、验收标准及特殊权限决定。
-- Registry 不授予业务解冻、shared、数据或部署权限。普通 business 仅可携带可信 bootstrap policy 验证的一个精确新增项目记录，不得修改现有 Registry project、扩大 owned paths 或改为 shared；shared infrastructure change 必须事先得到明确任务授权。首次 Registry candidate 未合入远程前，只可用获批 shared 低层 Scope Gate 验收，不能称项目启动器已主线生效。
-- 正式 FULL DAILY 只使用 Approved Production Commit 对应的 clean detached control-plane / tool-repo；开发 caller 不需要是 main，不提供业务源码。生产 Approved 不自动跟随远程 main；数据更新与镜像/代码发布独立。详见 [正式入口说明](04_scripts/automation/说明.md)。
-- USDA 子项目正式位置为 `11_独立应用/USDA平衡表/`，继续保持独立前端项目结构，但不得拥有嵌套 `.git`。
-- Oil World 子项目正式位置为 `11_独立应用/OilWorld平衡表/`，源码、配置和发布数据受主仓库管理，授权原始资料保存在 Git 仓库外。
-- 禁止重新创建与 `market-data` 同级的独立 USDA 开发目录；历史独立目录只能作为过渡备份保留，不得继续开发。
-- USDA 子目录中的 `AGENTS.md` 对该子项目继续生效；与根规则同时适用时，以更严格的数据和部署保护规则为准。
-- 所有代码、配置、测试和部署文件的功能或修复必须先在本地完成。除紧急线上故障外，不得直接修改服务器正式源码。
-- 服务器必须使用仓库专用只读 Deploy Key 和固定 SSH 包装脚本，在全新、独立、干净的浅克隆 `tool_repo_root` 中取得目标完整 SHA，保持 detached HEAD，并核验远程 SHA、本地 HEAD、Tree SHA、clean 状态和必要的 `git fsck`；不得使用 worktree 作为正式流程。
-- `/home/ubuntu/market-data` 是 `production_project_dir`，不得在其中为目标 Release 执行 checkout、依赖安装、测试、镜像构建或候选准备；不得依赖来源不明的目录、压缩包或整文件夹覆盖。
-- 紧急线上修复必须立即同步回本地，完成测试、commit、push，并重新按正式 Git 提交部署；在完成回流前不得开始下一轮开发或部署。
-- 禁止未经差异比较就以整个本地目录覆盖服务器，或以整个服务器目录覆盖本地。版本分叉时，先比较文件内容、Git diff 与哈希，再合并。
-- 服务器地址通过环境变量注入；不得将公网 IP 写入源码。本地只保留 `.env.example`，不得提交 `.env`。
-
-普通 Business 的 candidate Registry 未自行修改、最新可信 main 仅追加无关项目记录时，允许身份与 ownership 仍兼容的已有项目 RESUME；不得把这种可信漂移误判为自我扩权。candidate 修改 Registry 仍严格检查，最终接纳仍须取得针对最新可信 main 的 hosted PASS。
-`runtime_target=none` 的 ordinary Business 不要求 runtime root、marker 或 production evidence；只有实际使用 Runtime 的任务才核验相应 Runtime Mode/root/marker。
-
 ## 执行环境预检
 
 - 开始任何超过简单文本修改的任务前，必须先按[执行环境与跨环境传输规范](07_docs/05_执行环境与跨环境传输规范.md)完成预检并输出结果。
@@ -50,18 +31,8 @@
 
 ## 测试与部署
 
-普通 Business Fast Lane：`START / RESUME → development → push feature → trusted-main-admission-v1 PASS → exact fast-forward main`，随后同步 clean local main。GitHub hosted Admission 是正式 required tests / Scope / identity evidence；本地 Direct / Impact tests 和 Scope 可用于快速反馈，`complete_project.py` 与独立 integration worktree 不再是普通 Business 进入 main 的强制 Gate，不得因未执行它们判定未完成。
-
-Business/Shared 接纳必须使用 successful `trusted-main-admission-v1` 对应的同一个 candidate Commit/Tree，来源固定 GitHub Actions `integration_id=15368`，并核对该 run 的 Admission artifact 与 fresh main 身份。Candidate 任何新 commit 都必须重新获得 hosted PASS，即使 Tree 相同也不得复用旧 PASS；在任务已有 main 接纳授权内仅按精确 SHA 普通 fast-forward，Ruleset 保持 Active、无 bypass。具体 API 回查见规范第 6 节。
-
-Business Fast Lane 不适用于 shared infrastructure、governance、protected paths、production-control-plane、FULL DAILY、Production Wrapper、Runtime、deployment 或 production data/write path；不能仅凭 Registry 的 business 标签或绿色 check 将这些修改归为普通业务。高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查；Completion 与独立 integration 可用于开发反馈或专项验收；main 链路为 trusted Scope → required/impact/必要 full tests → strict PASS → 精确 fast-forward；Governance root 修改改走技术 PASS → GOVERNANCE_ROOT_APPROVAL_REQUIRED → Maintainer/Admin 精确接纳；候选和部署继续执行原生产规则。
-
 `runtime_target=production_container` 的真实容器证据属于独立 production/release gate。main-entry correctness 由 hosted strict lane 验证，不以生产环境访问或签名容器 Completion 作为 main 前置条件。生产候选仍须明确授权、绑定 clean Commit/Tree/Image，candidate 不写 production；正式发布核验 Approved Production SHA、数据 Manifest、同一已验证 Image ID 和 rollback。Completion 若调用仍执行全部 required tests 与签名容器门禁；main PASS 不授予生产权限。
 
-已授权普通 Business task 包含范围内 commit/push feature，无需重复阶段许可；main 按任务既有授权和精确 identity/check 执行。START / RESUME 包含 fetch 和 local Git metadata 写入，不是纯 read-only。
-
-- 日常修改先运行与变更直接相关的定向测试；部署、清理、固定基线、跨应用接口或高风险依赖变更等关键节点运行对应完整回归。
-- 普通业务可运行 `04_scripts/quality/audit_changed_scope.py --project <project_id>` 获取本地反馈，正式 Scope 由 hosted Admission 执行；高风险 lane 在 Impact/完整回归、Completion 或 integration 前仍必须得到 `PROJECT_SCOPE=PASS`。Registry owned paths 不包含只读 shared dependencies；普通 business 的全局 protected 不可被 owned 覆盖；ready shared owner 的 main-entry 修改由 trusted strict lane 判断。禁止业务用 `--owned`、`--known-existing`、旧 baseline 或修改 Registry 绕过门禁；低层 `--owned` 仅用于测试或获批 shared 任务。Scope Gate 不是权限沙箱，修改门禁本身必须独立治理审查。
 - Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负责生产镜像构建，本地 Docker 构建不再是 commit、push 或部署的前置条件。
 - 不得再建议用户安装 Docker Desktop、Podman 或 WSL，也不得要求用户为本项目安装这些工具。Windows 本地只负责代码修改、Python 和前端测试、Streamlit 启动检查、Dockerfile 与 Compose 静态检查、构建上下文文件存在性检查，以及 Git 差异和工作区检查。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须在服务器隔离候选目录中重建对应镜像，不得在服务器正式仓库中直接构建。
@@ -73,6 +44,7 @@ Business Fast Lane 不适用于 shared infrastructure、governance、protected p
 - `USDA_DASHBOARD_URL` 是正式环境变量；不要在页面代码中硬编码地址。
 - `09_deploy/spread_release/` 仍是候选实现：代码和模拟契约测试已完成，2026-07-19 指定测试为 154 passed、3 skipped，pyarrow 已不再是当前阻塞项；真实 Docker Compose 验证仍未完成，在该门槛通过前不得用于生产部署或称为正式生产工具。USDA 和 Oil World 的一条式工具仍待实现。
 
+
 ## 破坏性操作
 
 - 删除、覆盖、迁移、数据同步或容器替换前，必须先只读检查运行引用和恢复来源，并说明影响范围、备份位置、回滚方案和预计服务影响。
@@ -82,13 +54,25 @@ Business Fast Lane 不适用于 shared infrastructure、governance、protected p
 
 完成后必须说明：修改文件、修改原因、测试结果、是否修改数据、是否连接服务器、是否部署、是否执行 Git、是否存在未解决风险。
 
+## Mainstream Development Governance
 
-Governance Root of Trust：Repository Maintainer/Admin 是治理信任根。Business 正常 branch/worktree → tests → trusted admission PASS → main；Shared/high-risk 使用 strict/impact/consumer tests，未修改治理根时不增加人工治理批准。
+统一流程：`main → feature/fix branch → implementation → automated tests → required CI → main`。
+Repository Maintainer/Admin 审查并接纳 Governance / CI candidate；review 是 integration decision，不是 CI failure。Worktree 仅用于并行开发；可用 START / RESUME 自动 fetch 并建立工作区，也可直接建立 feature/fix branch，不存在项目存在审批。
 
-Governance root change 完成可信身份、Scope、ownership、required/owned tests、减测和 mutation 检查后，技术失败返回 FAIL；全部通过返回 `TECHNICAL_VALIDATION=PASS`、`MAIN_ENTRY=GOVERNANCE_ROOT_APPROVAL_REQUIRED`。这是正常的待治理根接纳状态，不是普通 PASS。没有 candidate-side approval API、token、文件或 workflow 可把它升级为 PASS。最终接纳由 Repository Maintainer/Admin 在自动化之外批准精确 base/Commit/Tree。
+Registry 是 project/module metadata、ownership documentation、test mapping、impact analysis、runtime target 和维护责任登记，不是普通源码修改的 hard authorization。无 owner 不阻止合法项目启动；同一个明确的 Governance / CI candidate 可以原子修改 Registry、owner、test mapping、Admission、workflow、相关实现、测试和文档。不得借 metadata 偷偷扩大无关模块 Scope、减少 required tests 或取得生产权限。
 
-`CANDIDATE_CONTROLLED_SELF_APPROVAL = NO`；`MAINTAINER_GOVERNANCE_ROOT_OVERRIDE = YES_BY_DESIGN`；`PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO`；`ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO`。前者约束可信 validator 的权限授予，不能把候选同名绿色 check 当成可信来源证明；Maintainer 需审查执行来源及精确证据。不声称平台能防止 Admin 覆盖自己管理的规则。
+Business 运行 scoped required tests；Shared / Infra 增加 impact/consumer tests，未映射 shared source 使用更广回归；Governance / CI 运行 governance regression 和相关平台 CI，并记录 `CHANGE_CLASS = GOVERNANCE_OR_CI`、`MAINTAINER_REVIEW_REQUIRED = YES`。技术验证 PASS 时 `trusted-main-admission-v1` PASS；failing tests、Scope violation、required test deletion、Registry 减测和未授权 production mutation 始终 FAIL，review 不能覆盖失败。
 
-Admin 权限只用于 Governance trusted-root transition 或灾难恢复，不得绕过普通 Business check、普通测试失败、scope violation、production release 或数据质量 gate。治理根接纳不能把技术失败改成 PASS。日常保持 Ruleset Active、bypass_actors=[]；极少数治理接纳按 [Governance Transition 合同](07_docs/templates/GovernanceTransition.md) 的短时 Admin 操作完成并立即恢复，不能长期放宽普通开发。
+required plan 保留 base required/future/impact obligations，并 UNION candidate 新增/修改测试及 candidate 新增 mapping。candidate tree 中的测试版本必须真正执行，collection 非空，失败和 skip 均不得记为 PASS。Windows-specific required tests 使用 `windows-2022`；跨平台测试使用 Linux。最终 required check 聚合同一 base / candidate Commit/Tree、plan 和 workflow run/attempt 的实际平台 job；缺少必需平台结果即 FAIL。没有 Windows dependency 的 Business 不启动 Windows suite。
 
-Production 独立 release：Approved identity、Commit/Tree/Image、Manifest、release gate、rollback、candidate 不写 production、生产单独授权全部保留。已授权普通业务不重复申请 commit/push 或项目存在许可；任何任务明确的 main/生产禁止仍优先遵守。
+候选 workflow 是 Maintainer review 的信任对象；不承诺防御恶意 Maintainer 修改自己的 CI。一个 candidate 完成相关实现和 CI，无须先安装 owner 或 executor、无须分阶段 main transition。没有 candidate approval server、审批 token 或额外 GitHub App。
+
+main Ruleset 保持 Active、required check `trusted-main-admission-v1`、non-fast-forward/deletion protection；不使用 bypass 作为正常开发路径，不修改 GitHub settings。提交前检查 diff/scope/tests；只显式 git add 文件。任何新 commit 都重新取得 exact hosted evidence。取得测试 PASS 后，main 接纳仍按任务授权，由 Maintainer 决定；本地 main 保持 clean 镜像，接纳只用普通 fast-forward，不 force、rebase、squash 或额外 merge commit。
+
+`PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO`；`ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO`；`REGISTRY_IS_HARD_AUTHORIZATION = NO`；`STAGED_GOVERNANCE_MIGRATION_REQUIRED = NO`。
+
+`main != production`。生产单独授权；Approved identity、Commit/Tree/Image、Manifest、release gate、rollback、candidate 不写 production 均保留。Registry ownership、CI PASS 和进入 main 不授予 server deployment、production data mutation、FULL DAILY 或 runtime grant 权限。Production Release 合同独立执行。
+
+START / RESUME 会 fetch 并写 local Git metadata，不是纯 read-only。开发启动不依赖无关 local main checkout 是否 clean、mirror；只有实际 main 同步才核验镜像。runtime_target=none 不要求 runtime root、marker 或 production evidence。可选工具入口 `start_project.py --project <id> --branch feat/<name> --worktree <path> --create`；直接创建 feature/fix branch 同样合法。普通已授权任务无需重复 commit/push 许可。
+
+执行 `git fetch origin`、`git ls-remote origin refs/heads/main` 核对 fresh main；聊天历史 SHA 不是执行权威。

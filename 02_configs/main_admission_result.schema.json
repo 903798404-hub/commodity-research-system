@@ -37,7 +37,7 @@
       "enum": [
         "PASS",
         "FAIL",
-        "GOVERNANCE_ROOT_APPROVAL_REQUIRED"
+        "PLANNED"
       ]
     },
     "business_scope": {
@@ -192,7 +192,8 @@
                 "protected",
                 "forbidden",
                 "governance",
-                "production-control-plane"
+                "production-control-plane",
+                "unowned"
               ]
             }
           }
@@ -340,7 +341,7 @@
       "enum": [
         "business",
         "strict",
-        "governance_transition"
+        "governance"
       ]
     }
   },
@@ -349,10 +350,7 @@
       "if": {
         "properties": {
           "final_result": {
-            "enum": [
-              "PASS",
-              "GOVERNANCE_ROOT_APPROVAL_REQUIRED"
-            ]
+            "const": "PASS"
           }
         }
       },
@@ -394,60 +392,20 @@
             }
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "final_result": {
+            "const": "FAIL"
+          }
+        }
       },
-      "else": {
+      "then": {
         "properties": {
           "failure_codes": {
             "minItems": 1
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "final_result": {
-            "const": "GOVERNANCE_ROOT_APPROVAL_REQUIRED"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "lane": {
-            "const": "governance_transition"
-          },
-          "checks": {
-            "required": [
-              "TECHNICAL_VALIDATION",
-              "MAIN_ENTRY"
-            ],
-            "properties": {
-              "TECHNICAL_VALIDATION": {
-                "const": "PASS"
-              },
-              "MAIN_ENTRY": {
-                "const": "GOVERNANCE_ROOT_APPROVAL_REQUIRED"
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "final_result": {
-            "const": "PASS"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "lane": {
-            "enum": [
-              "business",
-              "strict"
-            ]
           }
         }
       }

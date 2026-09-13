@@ -316,3 +316,22 @@ modules:
       - 08_tests/test_international_spread_page.py
     dependents: []
     full_regression_when_changed: false
+
+  windows_wrapper:
+    code_paths:
+      - 03_src/agri_research_agent/automation/full_daily_windows.py
+      - 08_tests/pipelines/test_full_daily_windows_wrapper.py
+      - 04_scripts/quality/platform_test_plan.py
+      - 04_scripts/quality/platform_ci.py
+      - 04_scripts/quality/main_admission.py
+      - 04_scripts/quality/test_platforms.json
+      - .github/workflows/trusted-main-admission.yml
+    direct_tests:
+      - 08_tests/pipelines/test_full_daily_windows_wrapper.py
+    impact_tests:
+      - 08_tests/test_main_admission.py
+      - 08_tests/test_project_registry.py
+      - 08_tests/test_quality_controls.py
+      - 08_tests/test_documentation_contract.py
+    dependents: []
+    full_regression_when_changed: false

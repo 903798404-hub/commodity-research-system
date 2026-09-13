@@ -1,183 +1,187 @@
+# Maintainer-reviewed candidate CI; production release remains separate.
 name: trusted-main-admission-v1
-
-# Required check: main-trusted-admission-v1 Ruleset stays Active.
-# Authenticate the Actions publisher and exact run/artifact; candidate code is not policy.
-# No pull_request_target, production environment, secrets, write token or deploy.
-on:
-  pull_request:
-    branches: [main]
+'on':
   push:
-    branches: ['feat/**', 'fix/**']
-  workflow_dispatch:
-
+    branches:
+    - feat/**
+    - fix/**
+  pull_request:
+    branches:
+    - main
+  workflow_dispatch: {}
 permissions:
   contents: read
-
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+  PYTHONUTF8: '1'
 concurrency:
   group: admission-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
-  admission:
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 10
     outputs:
-      result: ${{ steps.admission.outcome }}
+      linux: ${{ steps.plan.outputs.linux }}
+      windows: ${{ steps.plan.outputs.windows }}
     steps:
-      - name: Checkout independently selected main governance
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main
-          path: trusted
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Checkout exact candidate separately
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: candidate
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Python 3.12
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: '3.12'
-      - name: Trusted development dependencies
-        if: hashFiles('trusted/04_scripts/quality/main_admission.py') != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -I -m pip install -r trusted/requirements-dev.in
-      - name: Trusted admission (bootstrap absence fails closed)
-        id: admission
-        continue-on-error: true
-        shell: bash
-        env:
-          EXPECTED_CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-          BASE=$(git -C trusted rev-parse HEAD)
-          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_CANDIDATE"
-          test -z "$(git -C trusted status --porcelain)"
-          test -z "$(git -C candidate status --porcelain)"
-          if [ ! -f trusted/04_scripts/quality/main_admission.py ]; then
-            mkdir -p evidence
-            python -I - <<'PY'
-          import json, os, platform, subprocess
-          from pathlib import Path
-          def identity(root):
-              return {key: subprocess.check_output(['git','-C',root,'rev-parse',ref],text=True).strip()
-                      for key,ref in [('commit','HEAD'),('tree','HEAD^{tree}') ]}
-          record = dict(schema_version='main-admission/1', mode='required', lane='business', final_result='FAIL',
-              business_scope='FAIL', failure_codes=['TRUSTED_ADMISSION_NOT_BOOTSTRAPPED'],
-              trusted_main=identity('trusted'), candidate=identity('candidate'), merge_base=None,
-              ahead=None, behind=None, trusted_governance={}, registry_blob_digest=None,
-              diff_digest=None, changed_paths=[], test_plan=[], test_identities=[],
-              test_result={'result':'NOT_RUN'}, checks={}, execution_environment={
-              'python':platform.python_version(),'platform':platform.platform(),
-              'executable_sha256':__import__('hashlib').sha256(Path(__import__('sys').executable).read_bytes()).hexdigest(),
-              'sandbox':'github-hosted-ephemeral','production_access':False})
-          Path('evidence/main-admission.json').write_text(json.dumps(record,indent=2),encoding='utf-8')
-          PY
-            exit 1
-          fi
-          python -I trusted/04_scripts/quality/main_admission.py \
-            --repo candidate --base "$BASE" --candidate "$EXPECTED_CANDIDATE" \
-            --project auto --evidence evidence
-      - name: Reobserve main and candidate identities
-        if: always() && steps.admission.outcome == 'success'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          CANDIDATE_REF: ${{ github.ref }}
-        run: |
-          set -euo pipefail
-          python -I - <<'PY'
-          import hashlib, json, os, subprocess, urllib.request
-          from pathlib import Path
-          def get(path):
-              req=urllib.request.Request('https://api.github.com/repos/'+os.environ['REPOSITORY']+path,
-                  headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-              with urllib.request.urlopen(req,timeout=30) as response: return json.load(response)
-          p=Path('evidence/main-admission.json'); r=json.loads(p.read_text())
-          for name in ('requirements-dev.in', 'requirements.in'):
-              source=subprocess.check_output(['git','-C','trusted','show',r['trusted_main']['commit']+':'+name])
-              r['trusted_governance'][name]=hashlib.sha256(source).hexdigest()
-          r['final_result']='FAIL'; r['failure_codes'].append('FRESHNESS_NOT_CONFIRMED')
-          p.write_text(json.dumps(r,indent=2))
-          main=get('/git/ref/heads/main')['object']['sha']
-          number=os.environ['PR_NUMBER']
-          head=get('/pulls/'+number)['head']['sha'] if number else get('/git/ref/'+os.environ['CANDIDATE_REF'].removeprefix('refs/'))['object']['sha']
-          if main != r['trusted_main']['commit'] or head != r['candidate']['commit']:
-              r['final_result']='FAIL'; r['failure_codes'].append('IDENTITY_CHANGED')
-              p.write_text(json.dumps(r,indent=2)); raise SystemExit(1)
-          r['failure_codes'].remove('FRESHNESS_NOT_CONFIRMED'); r['final_result']='PASS'
-          p.write_text(json.dumps(r,indent=2))
-          PY
-      - name: Upload admission JSON and test evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: main-admission-${{ github.run_id }}-${{ github.run_attempt }}
-          path: evidence/
-          if-no-files-found: error
-          retention-days: 14
-
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install development dependencies
+      run: python -I -m pip install -r candidate/requirements-dev.in
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: main
+        path: base
+        persist-credentials: false
+    - name: Plan exact candidate and baseline
+      id: plan
+      working-directory: candidate
+      run: python -I -B 04_scripts/quality/platform_ci.py plan --base "$(git -C ../base rev-parse HEAD)" --candidate "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/platform-plan"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: platform-plan
+        path: ${{ runner.temp }}/platform-plan
+        if-no-files-found: error
+  linux:
+    name: trusted-main-admission-linux
+    needs: plan
+    if: needs.plan.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install development dependencies
+      run: python -I -m pip install -r candidate/requirements-dev.in
+    - uses: actions/download-artifact@v4
+      with:
+        name: platform-plan
+        path: ${{ runner.temp }}/platform-plan
+    - name: Execute required linux tests
+      working-directory: candidate
+      run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: platform-linux
+        path: ${{ runner.temp }}/platform-results/linux
+        if-no-files-found: error
+  windows:
+    name: trusted-main-admission-windows
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install development dependencies
+      run: python -I -m pip install -r candidate/requirements-dev.in
+    - uses: actions/download-artifact@v4
+      with:
+        name: platform-plan
+        path: ${{ runner.temp }}/platform-plan
+    - name: Execute required windows tests
+      working-directory: candidate
+      run: python -I -B 04_scripts/quality/platform_ci.py run --platform windows --plan "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/windows"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: platform-windows
+        path: ${{ runner.temp }}/platform-results/windows
+        if-no-files-found: error
   final:
     name: trusted-main-admission-v1
     if: always()
-    needs: admission
+    needs:
+    - plan
+    - linux
+    - windows
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    permissions: {}
+    timeout-minutes: 10
     steps:
-      - name: Aggregate exact required admission run
-        env:
-          JOB_RESULT: ${{ needs.admission.result }}
-          ADMISSION_RESULT: ${{ needs.admission.outputs.result }}
-        run: test "$JOB_RESULT" = success && test "$ADMISSION_RESULT" = success
-
-  candidate-regressions:
-    name: Candidate governance regression tests (not main admission)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Checkout exact proposal
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Checkout dependency authority
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: main
-          path: trusted-dependencies
-          persist-credentials: false
-      - name: Python 3.12
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - name: Install trusted dependencies
-        run: python -I -m pip install -r trusted-dependencies/requirements-dev.in
-      - name: Execute proposal regression fixtures
-        env:
-          PYTHONDONTWRITEBYTECODE: '1'
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-        run: |
-          mkdir -p "$RUNNER_TEMP/governance-regressions"
-          git rev-parse HEAD 'HEAD^{tree}' > "$RUNNER_TEMP/governance-regressions/identity.txt"
-          python -I -B -m pytest -q -p no:cacheprovider \
-            08_tests/test_main_admission.py 08_tests/test_quality_controls.py \
-            08_tests/test_project_registry.py 08_tests/test_documentation_contract.py \
-            --junitxml="$RUNNER_TEMP/governance-regressions/junit.xml"
-      - name: Upload proposal tests separately from admission
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: candidate-regressions-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/governance-regressions/
-          if-no-files-found: error
-          retention-days: 14
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install development dependencies
+      run: python -I -m pip install -r candidate/requirements-dev.in
+    - uses: actions/download-artifact@v4
+      with:
+        name: platform-plan
+        path: ${{ runner.temp }}/platform-plan
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: platform-linux
+        path: ${{ runner.temp }}/platform-results/linux
+        merge-multiple: true
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: platform-windows
+        path: ${{ runner.temp }}/platform-results/windows
+        merge-multiple: true
+    - name: Require plan and fresh main
+      env:
+        PLAN_RESULT: ${{ needs.plan.result }}
+      working-directory: candidate
+      run: |-
+        test "$PLAN_RESULT" = success
+        python -I - <<'PY'
+        import json,os,subprocess
+        from pathlib import Path
+        p=json.loads((Path(os.environ['RUNNER_TEMP'])/'platform-plan/plan.json').read_text())
+        assert subprocess.check_output(['git','ls-remote','origin','refs/heads/main'],text=True).split()[0] == p['base']['commit'], 'MAIN_MOVED'
+        assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip() == p['candidate']['commit'], 'CANDIDATE_CHANGED'
+        PY
+    - name: Aggregate actual required platform jobs
+      working-directory: candidate
+      env:
+        PLATFORM_JOB_RESULTS: '{"linux":"${{ needs.linux.result }}","windows":"${{ needs.windows.result }}"}'
+      run: python -I -B 04_scripts/quality/platform_ci.py aggregate --plan "$RUNNER_TEMP/platform-plan/plan.json" --receipts "$RUNNER_TEMP/platform-results" --output
+        "$RUNNER_TEMP/final-admission/main-admission.json"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: main-admission-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/final-admission
+        if-no-files-found: error

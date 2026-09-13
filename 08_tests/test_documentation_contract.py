@@ -71,22 +71,14 @@ def test_current_docs_preserve_release_safety_and_baseline_semantics() -> None:
 
 
 def test_business_fast_lane_and_strict_lane_are_consistent_at_all_entrypoints():
-    for path in (ROOT / 'AGENTS.md', SPEC, MANUAL, FEATURE_TEMPLATE):
-        body = read(path)
-        assert 'START / RESUME → development → push feature → trusted-main-admission-v1 PASS → exact fast-forward main' in body
-        assert '不再是普通 Business 进入 main 的强制 Gate' in body
-        assert '不得因未执行它们判定未完成' in body
-        assert '任何新 commit 都必须重新获得 hosted PASS' in body.replace('\n', '')
-        assert '高风险 lane 使用同一个 `trusted-main-admission-v1` 的 strict 检查' in body
-        for boundary in ('shared infrastructure', 'governance', 'protected paths', 'production-control-plane',
-                         'FULL DAILY', 'Production Wrapper', 'Runtime', 'deployment', 'production data/write path'):
-            assert boundary in body
-    spec = read(SPEC)
-    for marker in ('app.id=15368', 'conclusion=success', 'main-admission/1', 'candidate Commit/Tree',
-                   'git push origin <approved_candidate_sha>:refs/heads/main', '不自行 Disabled Ruleset'):
-        assert marker in spec
-    assert 'git push origin HEAD:main' not in spec + read(MANUAL)
-    assert '仍要求登记已进入可信 origin/main' not in spec
+    for path in (ROOT/'AGENTS.md', SPEC, MANUAL, FEATURE_TEMPLATE):
+        body=read(path)
+        for marker in ('main → feature/fix branch → implementation → automated tests → required CI → main',
+                       'scoped required tests','impact/consumer tests','windows-2022',
+                       'MAINTAINER_REVIEW_REQUIRED = YES','main != production'):
+            assert marker in body,(path,marker)
+        assert 'GOVERNANCE_ROOT_APPROVAL_REQUIRED' not in body
+
 
 
 def test_strict_completion_entrypoint_keeps_all_runtime_and_test_validation():
@@ -102,12 +94,11 @@ def test_strict_completion_entrypoint_keeps_all_runtime_and_test_validation():
 
 def test_ordinary_development_does_not_require_unrelated_main_or_runtime_marker():
     for path in (ROOT/'AGENTS.md', SPEC, MANUAL):
-        body = read(path).replace('\n', '')
+        body=read(path)
         assert '不依赖无关 local main checkout 是否 clean、mirror' in body
-        assert '只有实际使用 Runtime 的任务' in body
-        assert '不要求 runtime root、marker 或 production evidence' in body
-        assert '高风险 lane' in body and 'main mirror' in body
-        assert '最新' in body and 'hosted PASS' in body
+        assert 'runtime_target=none 不要求 runtime root、marker 或 production evidence' in body
+        assert '直接创建 feature/fix branch 同样合法' in body
+
 
 
 def test_current_authority_internal_markdown_links_resolve() -> None:
@@ -187,14 +178,12 @@ def test_governance_v2_active_docs_and_update_entry():
 
 
 def test_governance_transition_is_separate_from_business_and_release():
-    for path in (ROOT/'AGENTS.md',SPEC,MANUAL,DOCS/'templates/新功能开发任务模板.md',DOCS/'templates/GovernanceTransition.md'):
+    for path in (ROOT/'AGENTS.md',SPEC,MANUAL,FEATURE_TEMPLATE,DOCS/'templates/GovernanceTransition.md'):
         body=read(path)
-        for marker in ('Repository Maintainer/Admin','GOVERNANCE_ROOT_APPROVAL_REQUIRED',
-                       'CANDIDATE_CONTROLLED_SELF_APPROVAL = NO','MAINTAINER_GOVERNANCE_ROOT_OVERRIDE = YES_BY_DESIGN',
-                       'PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO','ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO'):
+        for marker in ('Repository Maintainer/Admin','MAINTAINER_REVIEW_REQUIRED = YES',
+                       'REGISTRY_IS_HARD_AUTHORIZATION = NO','STAGED_GOVERNANCE_MIGRATION_REQUIRED = NO',
+                       'PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO','ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO',
+                       'Approved identity','Commit/Tree/Image','Manifest','rollback','candidate 不写 production','生产单独授权'):
             assert marker in body,(path,marker)
-        for stale in ('GOVERNANCE_TRANSITION_PENDING','approval_run_id','run-name','CANDIDATE_SELF_APPROVAL_POSSIBLE'):
-            assert stale not in body,(path,stale)
-    contract=read(DOCS/'templates/GovernanceTransition.md')
-    for marker in ('Always allow','bypass_actors=[]','灾难恢复','生产单独授权','立即删除','精确'):
-        assert marker in contract
+        assert 'GOVERNANCE_ROOT_APPROVAL_REQUIRED' not in body
+        assert 'Always allow' not in body

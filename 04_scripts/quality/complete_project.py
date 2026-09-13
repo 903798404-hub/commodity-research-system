@@ -1,7 +1,7 @@
 """Strict Completion for shared/governance/production lanes; optional for ordinary business.
 
 Ordinary business main acceptance uses hosted trusted-main-admission-v1 PASS,
-human approval and exact candidate Commit/Tree fast-forward, without requiring
+task-authorized exact candidate Commit/Tree fast-forward, without requiring
 this command or an integration worktree. Calling this command still runs every
 declared test and all applicable runtime checks; it never imports claimed PASS.
 """
@@ -31,11 +31,17 @@ def complete(root: Path, project_id: str, *, candidate_record: Path | None = Non
         raise ValueError('Project is not ready')
     tests = project['required_tests'] + project.get('future_required_tests', [])
     trusted = json.loads(registry.git(root, 'show', f'origin/main:{registry.REGISTRY_PATH}'))
-    if data != trusted:
-        bootstrapped, discovered = registry.local_bootstrap(root, scope.SHARED_PATH_PATTERNS, require_tests=True)
-        if bootstrapped != project:
-            raise ValueError('ESCALATION_REQUIRED: existing Registry cannot change its own test policy')
-        tests = discovered
+    by_id = {p['project_id']:p for p in data['projects']}
+    for previous in trusted['projects']:
+        current = by_id.get(previous['project_id'], {})
+        obligations = previous['required_tests'] + previous.get('future_required_tests', [])
+        if not set(obligations) <= set(current.get('required_tests', []) + current.get('future_required_tests', [])):
+            raise ValueError('TEST_POLICY_REDUCTION')
+        if previous['project_id']==project_id: tests += obligations
+    tests += [p.relative_to(root).as_posix() for p in (root/'08_tests').rglob('test_*.py')
+              if registry.owns(project,p.relative_to(root).as_posix())]
+    tests = list(dict.fromkeys(tests))
+    if not tests: raise ValueError('EMPTY_TEST_PLAN')
     paths = []
     for name in tests:
         path = registry.future_file(root, name)

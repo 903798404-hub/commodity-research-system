@@ -1,0 +1,215 @@
+{
+  "schema_version": "required-test-platforms/1",
+  "files": {
+    "08_tests/pipelines/test_full_daily_windows_wrapper.py": {
+      "test_import_and_manifest_validation_without_local_app_data": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_production_runtime_still_fails_closed_without_local_app_data": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_default_automation_runtime_is_local_app_data": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Windows drive and LOCALAPPDATA path semantics"
+      },
+      "test_local_runtime_filesystem_passes_and_is_created": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Real Windows runtime directory and NT filesystem validation"
+      },
+      "test_cloud_files_reparse_runtime_fails_closed": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_runtime_inside_repository_is_rejected_without_deleting_history": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_valid_updated_and_no_change_are_success": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_source_unavailable_with_zero_exit_is_failed": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_nonzero_process_exit_always_fails_before_manifest": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_nonzero_process_exit_uses_manifest_for_precise_stage": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_missing_mismatched_or_invalid_manifest_fails": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_prewarm_nonpass_is_success_warning_after_data_contract_passes": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_failed_server_formal_read_cannot_be_hidden_by_prewarm": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_lock_conflict_skips_both_trigger_types_and_release_allows_later_run": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Real Windows file-lock acquisition and release"
+      },
+      "test_lock_conflict_run_writes_machine_readable_skip_without_workspace": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Windows lock conflict and runtime filesystem status"
+      },
+      "test_preflight_repository_hard_fail_never_calls_full_daily": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_baseline_download_is_strict_noninteractive_and_bounded": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_baseline_download_timeout_is_explicit": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_runtime_baseline_identity_mismatch_stops_refresh": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_provider_preflight_is_read_only_and_requires_every_source_ready": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_real_0xd7_fixture_breaks_old_utf8_decode_but_not_machine_evidence": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_real_child_process_keeps_cp936_logs_out_of_utf8_evidence": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_provider_preflight_hard_failure_is_explicit": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_provider_preflight_invalid_machine_evidence_fails_closed": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_provider_preflight_nonzero_child_fails_even_with_ready_evidence": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_manifest_failure_prefers_structured_weather_root_over_legacy_reason": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_manifest_failure_preserves_precise_weather_cleanup_stage": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_manifest_failure_reports_rollback_after_unmapped_root": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_manifest_failure_only_uses_provider_preflight_for_readiness_failure": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_legacy_manifest_weather_keyword_remains_compatible": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_os_releases_lock_when_owner_process_crashes": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Windows process crash must release OS lock"
+      },
+      "test_utf8_atomic_status_round_trip_under_chinese_path": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Real NT filesystem atomic replace under Unicode path"
+      },
+      "test_child_environment_forces_utf8_and_never_uses_partial_lutou_override": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_manual_and_scheduled_have_identical_business_command": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_current_main_equal_to_production_commit_is_allowed": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_main_can_advance_while_both_triggers_keep_approved_production": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_production_commit_must_be_full_lowercase_sha": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_nonexistent_production_commit_is_rejected": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_feature_only_and_unpushed_local_commit_are_rejected": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_dirty_caller_workspace_does_not_change_approved_identity": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_local_main_divergence_does_not_change_approved_identity": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_caller_checkout_identity_is_irrelevant": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_bootstrap_resolves_approved_remote_identity_independent_of_caller": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_bootstrap_rejects_unapproved_feature_commit": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_wrapper_uses_live_remote_identity_and_fails_closed_when_unavailable": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_approved_control_plane_ignores_caller_cwd_and_pythonpath": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_bootstrap_control_plane_requires_exact_detached_clean_checkout": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_approved_entry_revalidates_head_tree_detached_and_clean": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_powershell_launcher_materializes_bootstrap_from_approved_git_object": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_trusted_tool_repo_is_exact_head_tree_and_clean": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_trusted_tool_repo_enables_windows_long_paths": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      },
+      "test_run_id_is_sortable_unique_and_allows_same_day_multiple_runs": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
+      }
+    }
+  }
+}

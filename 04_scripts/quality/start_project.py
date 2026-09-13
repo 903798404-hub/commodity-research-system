@@ -20,9 +20,9 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
     live = registry.git(root, "ls-remote", "--exit-code", "origin", "refs/heads/main").split()[0]
     if registry.git(root, "rev-parse", "origin/main") != live:
         raise ValueError("REMOTE_MOVED_DURING_PREFLIGHT")
-    mirror = registry.assert_main_mirror(root) if change_class != "business" else {}
+    mirror = {}
     trusted = json.loads(registry.git(root, "show", f"origin/main:{registry.REGISTRY_PATH}"))
-    if not branch.startswith("feat/") or branch == "feat/":
+    if not branch.startswith(("feat/", "fix/")) or branch in {"feat/", "fix/"}:
         raise ValueError("New business development requires feat/<name>")
     registry.git(root, "check-ref-format", "--branch", branch)
     if not destination.is_absolute():
@@ -45,7 +45,8 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
             raise ValueError("WORKTREE_PROJECT_IDENTITY_CONFLICT")
         if registry.git(destination, "rev-parse", "--show-toplevel").replace("\\", "/").casefold() != destination.as_posix().casefold():
             raise ValueError("WORKTREE_IDENTITY_CONFLICT")
-        data, project = registry.select_project(destination, project_id)
+        data = json.loads((destination / registry.REGISTRY_PATH).read_text(encoding="utf-8"))
+        project = next((p for p in data["projects"] if p["project_id"] == project_id), None)
     else:
         if exists:
             raise ValueError("BRANCH_ALREADY_EXISTS: worktree identity conflict")
@@ -54,40 +55,21 @@ def prepare(root: Path, project_id: str, branch: str, destination: Path, *, chan
         data = trusted
         project = next((p for p in trusted["projects"] if p["project_id"] == project_id), None)
     bootstrap = project_id not in {p["project_id"] for p in trusted["projects"]}
-    if bootstrap:
-        if change_class != "business":
-            raise ValueError("ESCALATION_REQUIRED: bootstrap is ordinary business only")
-        if not resumed:
-            project = registry.bootstrap_record(project_id, trusted["protected_paths"])
-            if trusted['schema_version'] == 'project-registry/3':
-                project.pop('runtime_target')
-            data = dict(trusted, projects=trusted["projects"] + [project])
-        base_files = registry.git(root, "ls-tree", "-r", "--name-only", "-z", live).split("\0")
-        registry.validate_bootstrap(trusted, data, [p for p in base_files if p], [],
-                                    [registry.REGISTRY_PATH], scope.SHARED_PATH_PATTERNS, require_tests=False)
-    elif (data != trusted and not (resumed and change_class == "business"
-          and not scope.requires_main_mirror(project)
-          and scope.unchanged_registry_before_main_additions(destination, data, trusted))):
-        raise ValueError("ESCALATION_REQUIRED: existing Registry changed")
-    if project["change_class"] != change_class or project["status"] != "ready":
-        raise ValueError("PROJECT_CLASS_OR_READINESS_REQUIRES_SEPARATE_APPROVAL")
-    if scope.requires_main_mirror(project) and not mirror:
-        mirror = registry.assert_main_mirror(root)
+    if bootstrap and project is None:
+        # Optional namespace metadata is convenience, never project-existence approval.
+        project = registry.bootstrap_record(project_id, [])
+        project['change_class'] = change_class
+        if trusted['schema_version'] == 'project-registry/3':
+            project.pop('runtime_target',None)
+        data = dict(trusted, projects=trusted['projects']+[project])
     if resumed:
-        report = scope.run_audit(destination, "origin/main", project["owned_paths"] + project.get("reserved_paths", []),
-                                 exact_allowed=project.get("future_owned_paths", []), change_class=change_class,
-                                 shared_patterns=scope.SHARED_PATH_PATTERNS + tuple(
-                                     pattern for path in trusted["protected_paths"] for pattern in (path, path + "/**")))
-        if not report['allow_next_stage']:
-            raise ValueError("UNKNOWN_DIRTY_STATE_OR_OWNERSHIP_CONFLICT")
-        for name in report['changed_files']:
-            if (destination / name).exists():
-                registry.future_file(destination, name, exact_file=False)
+        # Preserve dirty edits; report them rather than treating metadata as authorization.
+        changes = scope._changed_paths(destination, 'origin/main', scope._git)
+        for name in changes:
+            if (destination/name).exists(): registry.future_file(destination,name,exact_file=False)
     if not resumed and create:
         if registry.git(root, "ls-remote", "--exit-code", "origin", "refs/heads/main").split()[0] != live:
             raise ValueError("REMOTE_MOVED_BEFORE_CREATE")
-        if scope.requires_main_mirror(project):
-            registry.assert_main_mirror(root)
         registry.git(root, "worktree", "add", "-b", branch, str(destination), live)
         if registry.git(destination, "rev-parse", "HEAD") != live or registry.git(destination, "status", "--porcelain=v1"):
             raise ValueError("NEW_WORKTREE_IDENTITY_FAILED; preserve worktree and stop")
