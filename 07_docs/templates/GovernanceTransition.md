@@ -45,7 +45,7 @@ trusted main 决定 Registry、ownership、Scope、required tests、owned test n
 2. GitHub 仓库 → Settings → Rules → Rulesets → main-trusted-admission-v1（ID 22616560）。保持 Enforcement=Active、required check trusted-main-admission-v1 / GitHub Actions 15368 及 force-push/deletion/linear-history 保护原配置。
 3. Bypass list → Add bypass → Repository admins → Add Selected → Always allow → Save changes。仅短时操作窗口；不要添加 write/maintain 广泛角色或 App。该模式技术上涵盖整套规则，约束依赖已明确授权的 Admin 操作，不声称 API 按 SHA 限权。
 4. 使用具有该 Admin 身份的 Git 凭据，在已验证 feature worktree 执行 `git push origin <exact_candidate_commit>:refs/heads/main`。不加 force/lease，不改 branch，不 squash/rebase，不生成新 commit。GitHub PR 页面合并不能保证原 Commit，因此不点击 Merge/Squash/Rebase 按钮。
-5. 立即核验远程 main Commit/Tree 等于批准对象。无论推送成功、失败、超时或后续核验异常，立即回同一 Ruleset 页面，移除本次 Repository admins bypass 并保存；核验失败时先恢复规则再调查，不保留开放窗口等待修复。
+5. 立即核验远程 main Commit/Tree 等于批准对象。无论推送成功、失败、超时或后续核验异常，立即删除本次临时 bypass：回同一 Ruleset 页面，移除本次 Repository admins bypass 并保存；核验失败时先恢复规则再调查，不保留开放窗口等待修复。
 6. API GET /rulesets/22616560 确认 bypass_actors=[]、enforcement=active、required check/integration 和其他 rules 与操作前相同；GET /git/ref/heads/main、GET /git/commits/<SHA> 核验 Commit/Tree，再同步 clean local main 镜像。保存前后快照、操作时间、批准身份、push 结果与 hosted evidence。
 
 页面控件及两种 bypass 模式见 [GitHub 创建 Ruleset 文档](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)。Always allow 无精确对象过滤是 [GitHub API schema](https://docs.github.com/en/rest/repos/rules) 的限制；在本合同中由 Admin 作为最终信任根承担短时操作责任，不增加候选权限。
