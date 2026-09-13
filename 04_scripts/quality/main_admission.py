@@ -416,6 +416,8 @@ def workflow_contract_valid(source):
 
 
 def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path, *, executor=run_tests, plan_only=False, separate_full=False) -> dict:
+    if separate_full and not plan_only:
+        raise ValueError('FULL_SEPARATION_REQUIRES_HOSTED_PLAN_ONLY')
     receipt = {"schema_version": "main-admission/1", "mode": "required", "lane": "business", "final_result": "FAIL",
                "business_scope": "FAIL", "failure_codes": [], "trusted_main": None, "candidate": None,
                "merge_base": None, "ahead": None, "behind": None, "trusted_governance": {},

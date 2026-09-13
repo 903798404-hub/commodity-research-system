@@ -795,7 +795,10 @@ def test_real_business_boundaries_do_not_select_governance(project_id,prefix):
 
 def test_no_candidate_approval_interface_or_issuer_remains():
     import inspect
-    assert set(inspect.signature(admission.admit).parameters)=={'repo','base','candidate','project_id','evidence','executor','plan_only'}
+    assert set(inspect.signature(admission.admit).parameters)=={'repo','base','candidate','project_id','evidence','executor','plan_only','separate_full'}
+    assert inspect.signature(admission.admit).parameters['separate_full'].default is False
+    with pytest.raises(ValueError, match='FULL_SEPARATION_REQUIRES_HOSTED_PLAN_ONLY'):
+        admission.admit(None, None, None, None, None, separate_full=True)
     workflow=yaml.safe_load((ROOT/admission.WORKFLOW).read_text())
     assert 'maintainer-transition-approval' not in workflow['jobs']
     assert workflow['permissions']=={'contents':'read'}
