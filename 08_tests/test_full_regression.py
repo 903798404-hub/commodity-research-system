@@ -21,7 +21,8 @@ def fixture(base=None, candidate=None):
         receipts[side] = full.seal(dict(schema_version='full-regression-result/1', side=side,
             identity=identities[side], plan_sha256=plan['sha256'], workflow_run_id='123', workflow_run_attempt='1',
             environment={'python': '3.12', 'font': 'Noto'}, exit_code=int('failed' in tests.values()),
-            session_finished=True, collection_errors=[], mutated=False, collected_nodes=sorted(tests), tests=tests))
+            session_finished=True, collection_errors=[], mutated=False, collected_nodes=sorted(tests),
+            collected_files=['08_tests/test_example.py'], tests=tests))
     return plan, receipts
 
 
@@ -163,3 +164,27 @@ def test_governance_and_strict_both_require_full_comparison(lane, expected):
 def test_unknown_lane_cannot_silently_skip_full_comparison():
     with pytest.raises(ValueError, match='UNKNOWN_ADMISSION_LANE'):
         full.ci.requires_full({'lane': 'unknown'})
+
+
+def test_full_import_time_assertion_file_must_be_collected_but_needs_no_fake_node():
+    p, r = fixture()
+    for s in ['base', 'candidate']:
+        p['plans'][s]['lanes']['linux'].append({'selector': '08_tests/test_import_checks.py', 'minimum_cases': 1})
+        r[s]['collected_files'].append('08_tests/test_import_checks.py')
+    p = full.seal({k: v for k, v in p.items() if k != 'sha256'})
+    for s in r:
+        r[s]['plan_sha256'] = p['sha256']
+        r[s] = full.seal({k: v for k, v in r[s].items() if k != 'sha256'})
+    assert compare(p, r)['result'] == 'PASS'
+    r['candidate']['collected_files'].remove('08_tests/test_import_checks.py')
+    r['candidate'] = full.seal({k: v for k, v in r['candidate'].items() if k != 'sha256'})
+    with pytest.raises(ValueError, match='FULL_REQUIRED_COLLECTION_MISSING'):
+        compare(p, r)
+
+
+def test_import_time_failure_is_collection_failure_not_legacy_debt():
+    from types import SimpleNamespace
+    plugin = full.Collection()
+    plugin.pytest_collectreport(SimpleNamespace(nodeid='08_tests/test_import_checks.py', failed=True, skipped=False))
+    assert plugin.collected_files == {'08_tests/test_import_checks.py'}
+    assert plugin.collection_errors == ['08_tests/test_import_checks.py']

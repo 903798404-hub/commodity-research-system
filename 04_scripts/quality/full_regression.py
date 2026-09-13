@@ -80,12 +80,16 @@ class Collection(ci.Collector):
         super().__init__()
         self.nodes = []
         self.collection_errors = []
+        self.collected_files = set()
         self.session_finished = False
 
     def pytest_collection_finish(self, session):
         self.nodes = [item.nodeid for item in session.items]
 
     def pytest_collectreport(self, report):
+        path = report.nodeid.split('::')[0]
+        if path.endswith('.py'):
+            self.collected_files.add(path)
         if report.failed or report.skipped:
             self.collection_errors.append(report.nodeid)
 
@@ -129,6 +133,7 @@ def execute(plan, side, output):
                       workflow_run_id=run_id, workflow_run_attempt=attempt,
                       environment=env, exit_code=code, session_finished=collector.session_finished,
                       collection_errors=collector.collection_errors, mutated=mutated,
+                      collected_files=sorted(collector.collected_files),
                       collected_nodes=sorted(collector.nodes), tests=collector.results))
     ci.save(output / 'result.json', value)
     # Test failures are compared later; infrastructure/collection failures never become debt.
@@ -163,9 +168,14 @@ def compare(plan, receipts, *, run_id, attempt, job_result):
                 raise ValueError('FULL_UNPLANNED_NODE')
         for obligation in plan['plans'][side]['lanes']['linux']:
             selector = obligation['selector']
+            if selector.split('::')[0] not in receipt['collected_files']:
+                raise ValueError('FULL_REQUIRED_COLLECTION_MISSING')
             count = sum(n == selector or n.startswith(selector + '::') or n.startswith(selector + '[')
                         for n in receipt['collected_nodes'])
-            if count < obligation.get('minimum_cases', 1):
+            # A full-suite file can contain only import-time assertions. Require
+            # its real collection, not a fabricated test node. Explicit platform
+            # function selectors still retain their required multiplicity.
+            if '::' in selector and count < obligation.get('minimum_cases', 1):
                 raise ValueError('FULL_REQUIRED_COLLECTION_MISSING')
     if receipts['base']['environment'] != receipts['candidate']['environment']:
         raise ValueError('FULL_ENVIRONMENT_MISMATCH')
