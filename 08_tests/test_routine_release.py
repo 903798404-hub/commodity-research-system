@@ -138,6 +138,93 @@ def test_concrete_docker_adapter_rejects_before_create(tmp_path,mutation):
     assert calls==[('config','--format','json')]
 
 
+@pytest.mark.parametrize('fault', [None, 'wrong-image', 'started', 'extra-service'])
+def test_compose_227_create_only_lifecycle(tmp_path, monkeypatch, fault):
+    """Exercise the real adapter with a stateful, inert Compose 2.27 transport.
+
+    No release candidate or dependency is created on the production server.
+    The CLI option set is checked against that server's actual up --help.
+    """
+    import json
+    events = []
+    containers = {'production': {'Image': PREVIOUS['image_id'], 'State': {'Status': 'running'}}}
+    production_before = copy.deepcopy(containers['production'])
+    service = dict(image=IMAGE['image_id'], entrypoint=['app'], read_only=True, volumes=[],
+                   restart='no', ports=[dict(host_ip='127.0.0.1')])
+    document = dict(name='routine-candidate-test', services={'service': service})
+    if fault == 'extra-service':
+        document['services']['dependency'] = {'image': 'dependency-image'}
+    # The transport knows a dependency; --no-deps must leave it absent.
+    def docker(*args):
+        if args[0] == 'compose':
+            command = args[args.index('-f') + 2:]
+            events.append(command)
+            if command[0] == 'config':
+                return SimpleNamespace(stdout=json.dumps(document).encode())
+            if command[0] == 'ps':
+                return SimpleNamespace(stdout=b'candidate' if 'candidate' in containers else b'')
+            assert command[0] == 'up', 'Compose create does not support --no-deps'
+            supported = {'--no-deps', '--no-start', '--no-build', '--pull', '--force-recreate'}
+            assert all(x in supported for x in command if x.startswith('--'))
+            assert command[-1] == 'service' and command[command.index('--pull') + 1] == 'never'
+            assert '--no-build' in command  # No build transport is allowed.
+            if '--no-deps' not in command:
+                containers['dependency'] = {'State': {'Status': 'running'}}
+            state = 'created' if '--no-start' in command else 'running'
+            containers['candidate'] = {'Image': 'wrong' if fault == 'wrong-image' else IMAGE['image_id'],
+                'State': {'Status': 'running' if fault == 'started' else state}}
+            return SimpleNamespace(stdout=b'')
+        assert args == ('start', 'candidate')
+        assert events[-1] == 'fresh-grant'
+        containers['candidate']['State']['Status'] = 'running'
+        events.append('start')
+    engine = SimpleNamespace(_docker=docker, inspect_one=lambda kind, identity: containers[identity])
+    host = SimpleNamespace(_protected_path=lambda p, **k: p, _json=json.loads)
+    spec = dict(project_directory=str(tmp_path), environment='env', compose='compose', policy_template='policy')
+    b = routine.DockerSession({'candidate': spec}, engine, host, {},
+        dict(project_id='service', service_id='service', entrypoint=['app']))
+    # Mount and image-metadata validation have independent regression coverage;
+    # retain the adapter's real observed container-image and created-state checks.
+    monkeypatch.setattr(routine, 'image_identity', lambda *a: copy.deepcopy(IMAGE))
+    monkeypatch.setattr(b, '_check_mounts', lambda mounts: None)
+    monkeypatch.setattr(b, 'assert_data_readonly', lambda: None)
+    if fault:
+        with pytest.raises(routine.RoutineError, match={
+            'wrong-image': 'CONTAINER_IMAGE_CHANGED', 'started': 'FRESH_INSTANCE_REQUIRED',
+            'extra-service': 'ONLY_TARGET_SERVICE_ALLOWED'}[fault]):
+            b.create(IMAGE, 'candidate_validation')
+    else:
+        b.create(IMAGE, 'candidate_validation')
+        assert containers['candidate']['State']['Status'] == 'created'
+        assert containers['candidate']['Image'] == IMAGE['image_id']
+        assert 'start' not in events and 'fresh-grant' not in events
+        policy = dict(approved_commit=IMAGE['commit'], approved_tree=IMAGE['tree'],
+                      image_id=IMAGE['image_id'], role='candidate_validation')
+        template = tmp_path/'policy.json'; template.write_text(json.dumps(policy))
+        spec.update(policy_template=str(template), policy_output=str(tmp_path/'issued.json'),
+                    grant_directory=str(tmp_path), key_path='inert-key')
+        engine.inspect_one = lambda kind, identity: {} if kind == 'image' else containers[identity]
+        engine._canonical = lambda obj: json.dumps(obj).encode()
+        engine._write_new = lambda path, raw: path.write_bytes(raw)
+        host.copy_container_json = lambda cid: {'release_id': IMAGE['release_id']}
+        host.normalize_observation = lambda *a: {'actual_config_sha256': '0'*64}
+        def issue(cid, **kwargs):
+            from datetime import datetime, timedelta, timezone
+            assert cid == 'candidate' and containers[cid]['State']['Status'] == 'created'
+            assert Path(spec['policy_output']).is_file()
+            events.append('fresh-grant')
+            kwargs['grant_path'].write_text('{}')
+            return {'payload': dict(container_id=cid, role='candidate_validation', image_id=IMAGE['image_id'],
+                issued_at=datetime.now(timezone.utc).isoformat(),
+                expires_at=(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat())}
+        host.issue_execution_grant = issue
+        b.grant_and_start(IMAGE, 'candidate_validation')
+        assert events[-2:] == ['fresh-grant', 'start']
+    assert 'dependency' not in containers
+    assert containers['production'] == production_before
+    assert not any(isinstance(c, tuple) and c[0] == 'build' for c in events)
+
+
 def test_cli_build_once_and_existing_image_no_rebuild(tmp_path,monkeypatch):
     import json
     request=dict(source_root=str(tmp_path),project_id='service',target_commit='a'*40,target_tree='b'*40,

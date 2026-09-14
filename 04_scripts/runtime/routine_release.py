@@ -373,7 +373,9 @@ class DockerSession:
         # Candidate namespaces must be unused: never recreate a running service.
         if role == 'candidate_validation':
             require(not self.compose(spec, 'ps', '-q', '--all', service_id).stdout.strip(), 'CANDIDATE_NAMESPACE_IN_USE')
-        self.compose(spec, 'create', '--no-build', '--pull', 'never', '--no-deps', '--force-recreate', service_id)
+        # Compose create has no --no-deps. Up's --no-start keeps the instance
+        # unstarted until the grant issuer binds its actual container identity.
+        self.compose(spec, 'up', '--no-deps', '--no-start', '--no-build', '--pull', 'never', '--force-recreate', service_id)
         ids = self.compose(spec, 'ps', '-q', '--all', service_id).stdout.decode().split()
         require(len(ids) == 1, 'EXACTLY_ONE_INSTANCE_REQUIRED')
         self.container_id = ids[0]
