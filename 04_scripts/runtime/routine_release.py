@@ -321,6 +321,40 @@ def browser_smoke(url, empty_sessions, selectors=None):
             browser.close()
 
 
+def candidate_compose_document(engine, contract, image_id, mounts, grant_dir,
+                               hostname, namespace, host_port, container_port):
+    """Routine HTTP candidate on its own bridge, published only to localhost.
+
+    The high-risk validator's network-disabled probe primitive is unchanged.
+    Persist and bind this document in the existing host policy before create.
+    """
+    require(isinstance(namespace, str) and re.fullmatch(r'routine-candidate-[a-z0-9-]+', namespace),
+            'CANDIDATE_NAMESPACE')
+    require(type(host_port) is int and 1 <= host_port <= 65535, 'CANDIDATE_HOST_PORT')
+    require(type(container_port) is int and 1 <= container_port <= 65535, 'CANDIDATE_CONTAINER_PORT')
+    document = engine._compose_document(contract, image_id, mounts, grant_dir, hostname)
+    document['name'] = namespace
+    document['networks'] = {'default': {'driver': 'bridge', 'internal': False}}
+    service = document['services'][contract['service_id']]
+    service.pop('network_mode', None)
+    service['container_name'] = namespace
+    service['ports'] = [dict(target=container_port, published=str(host_port), host_ip='127.0.0.1', protocol='tcp')]
+    return document
+
+
+def check_candidate_network(document, service):
+    network = document.get('networks', {}).get('default', {})
+    require(set(document.get('networks', {})) == {'default'}
+            and network.get('driver', 'bridge') == 'bridge'
+            and network.get('internal', False) is False
+            and network.get('external', False) is False
+            and network.get('name', document['name'] + '_default') == document['name'] + '_default'
+            and not network.get('driver_opts')
+            and not service.get('network_mode')
+            and set(service.get('networks', {'default': None})) == {'default'},
+            'CANDIDATE_REQUIRES_INDEPENDENT_NON_INTERNAL_BRIDGE')
+
+
 class DockerSession:
     """Concrete host adapter using prepared, approved Compose/env/policy inputs.
 
@@ -369,6 +403,7 @@ class DockerSession:
             require(service.get('restart', 'no') == 'no', 'CANDIDATE_RESTART_FORBIDDEN')
             require(str(rendered.get('name', '')).startswith('routine-candidate-'), 'CANDIDATE_NAMESPACE')
             require(all(p.get('host_ip') == '127.0.0.1' for p in service.get('ports', [])), 'CANDIDATE_PORT_EXPOSURE')
+            check_candidate_network(rendered, service)
         self._check_mounts(service.get('volumes', []))
         # Candidate namespaces must be unused: never recreate a running service.
         if role == 'candidate_validation':

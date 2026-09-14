@@ -151,7 +151,8 @@ def test_compose_227_create_only_lifecycle(tmp_path, monkeypatch, fault):
     production_before = copy.deepcopy(containers['production'])
     service = dict(image=IMAGE['image_id'], entrypoint=['app'], read_only=True, volumes=[],
                    restart='no', ports=[dict(host_ip='127.0.0.1')])
-    document = dict(name='routine-candidate-test', services={'service': service})
+    document = dict(name='routine-candidate-test', services={'service': service},
+                    networks={'default': {'driver': 'bridge', 'internal': False}})
     if fault == 'extra-service':
         document['services']['dependency'] = {'image': 'dependency-image'}
     # The transport knows a dependency; --no-deps must leave it absent.
@@ -223,6 +224,52 @@ def test_compose_227_create_only_lifecycle(tmp_path, monkeypatch, fault):
     assert 'dependency' not in containers
     assert containers['production'] == production_before
     assert not any(isinstance(c, tuple) and c[0] == 'build' for c in events)
+
+
+@pytest.mark.parametrize('fault', [None, 'internal', 'external', 'production-name', 'host-mode', 'extra-network', 'driver'])
+def test_routine_candidate_network_generation_and_isolation(tmp_path, fault):
+    engine = routine.load('04_scripts/runtime/validate_target_runtime.py', '_network_engine')
+    import json
+    contract = json.loads((ROOT/'02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
+    contract['_container_user'] = '10001:10001'
+    mounts = [dict(source=str(tmp_path/'isolated'), target='/runtime/capture-snapshots', read_only=False),
+              dict(source='/production/input', target='/runtime/import-profit/snapshots', read_only=True)]
+    original = copy.deepcopy(mounts)
+    doc = routine.candidate_compose_document(engine, contract, IMAGE['image_id'], mounts,
+        tmp_path/'grants', 'a'*32, 'routine-candidate-network-test', 18502, 8501)
+    service = doc['services']['spread-dashboard']; network = doc['networks']['default']
+    assert set(doc['services']) == {'spread-dashboard'}
+    assert service['image'] == IMAGE['image_id'] and 'build' not in service
+    assert service['ports'] == [dict(target=8501, published='18502', host_ip='127.0.0.1', protocol='tcp')]
+    assert service['entrypoint'] == contract['entrypoint'] and service['restart'] == 'no'
+    assert mounts == original
+    assert [(v['source'],v['target'],v['read_only']) for v in service['volumes'][:2]] == [(v['source'],v['target'],v['read_only']) for v in mounts]
+    if fault == 'internal': network['internal'] = True
+    elif fault == 'external': network['external'] = True
+    elif fault == 'production-name': network['name'] = 'production_default'
+    elif fault == 'host-mode': service['network_mode'] = 'host'
+    elif fault == 'extra-network': service['networks'] = {'default': None, 'production': None}
+    elif fault == 'driver': network['driver'] = 'macvlan'
+    if fault:
+        with pytest.raises(routine.RoutineError, match='INDEPENDENT_NON_INTERNAL_BRIDGE'):
+            routine.check_candidate_network(doc, service)
+    else:
+        routine.check_candidate_network(doc, service)
+    # The high-risk validator retains its original network-disabled primitive.
+    assert engine._compose_document(contract, IMAGE['image_id'], mounts, tmp_path/'grants', 'a'*32)['services']['spread-dashboard']['network_mode'] == 'none'
+
+
+@pytest.mark.parametrize('published', [False, True])
+def test_candidate_url_requires_observed_port_publication(published):
+    ports = {'8501/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '18502'}]} if published else {}
+    engine = SimpleNamespace(inspect_one=lambda kind, cid: {'NetworkSettings': {'Ports': ports}})
+    backend = routine.DockerSession({}, engine, None, {}, {'project_id': 'test'})
+    backend.container_id = 'exact-candidate'; backend.spec = {'container_port': 8501}
+    if published:
+        assert backend.url() == 'http://127.0.0.1:18502'
+    else:
+        with pytest.raises(routine.RoutineError, match='HTTP_PORT_NOT_BOUND'):
+            backend.url()
 
 
 def test_cli_build_once_and_existing_image_no_rebuild(tmp_path,monkeypatch):
