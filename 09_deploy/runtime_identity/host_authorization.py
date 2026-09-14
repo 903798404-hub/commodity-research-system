@@ -487,7 +487,32 @@ def _safe_scope_tree(root: Path) -> None:
                 raise HostAuthorizationError("candidate scope contains a hard-linked file")
 
 
-def _candidate_descriptor(policy: Mapping, *, consume: bool) -> dict:
+def _production_readonly_binding(binding: Mapping) -> tuple[dict, dict]:
+    """Resolve a read-only input through an existing protected production policy."""
+    if set(binding) != {"policy_path", "source", "target"}:
+        raise HostAuthorizationError("production readonly binding is invalid")
+    path = _protected_path(Path(_absolute(binding["policy_path"])), private=True)
+    raw = path.read_bytes()
+    production = _json(raw)
+    validate_policy(production, "production")
+    if production["schema_version"] not in _PRODUCTION_POLICIES:
+        raise HostAuthorizationError("approved production storage identity required")
+    source = Path(_absolute(binding["source"]))
+    if not source.exists() or source.is_symlink() or source.resolve(strict=True) != source:
+        raise HostAuthorizationError("production readonly source is missing or aliased")
+    storage = _protected_path(Path(production["production_storage_root"]), directory=True)
+    target = _absolute(binding["target"])
+    mount = {"source": str(source), "target": target, "read_only": True}
+    if not _within(str(source), str(storage)) or mount not in production["mounts"]:
+        raise HostAuthorizationError("source is not an approved production readonly mount")
+    state = source.stat()
+    if not (source.is_dir() or source.is_file()) or (source.is_file() and state.st_nlink != 1):
+        raise HostAuthorizationError("production readonly source identity is unsafe")
+    return {**binding, "policy_sha256": hashlib.sha256(raw).hexdigest(),
+            "device": state.st_dev, "inode": state.st_ino, "read_only": True}, production
+
+
+def _candidate_descriptor(policy: Mapping, *, consume: bool, check_expiry: bool = True) -> dict:
     binding = policy.get("candidate_scope")
     if policy.get("schema_version") not in _CANDIDATE_POLICIES or policy.get("role") != "candidate_validation" or not isinstance(binding, dict):
         raise HostAuthorizationError("candidate scope is unavailable")
@@ -497,16 +522,19 @@ def _candidate_descriptor(policy: Mapping, *, consume: bool) -> dict:
         raise HostAuthorizationError("candidate scope descriptor differs from policy")
     descriptor = _json(raw)
     expected = {"schema_version", "scope_id", "created_at", "expires_at", "root", "binds"}
-    if set(descriptor) != expected or descriptor.get("schema_version") != "candidate-scope/1" or descriptor.get("scope_id") != binding["scope_id"]:
+    if (set(descriptor) not in (expected, expected | {"production_readonly"})
+            or descriptor.get("schema_version") != "candidate-scope/1" or descriptor.get("scope_id") != binding["scope_id"]):
         raise HostAuthorizationError("candidate scope descriptor schema is invalid")
     created, expires = _rfc3339(descriptor["created_at"], "candidate scope creation time"), _rfc3339(descriptor["expires_at"], "candidate scope expiry")
     now = datetime.now(timezone.utc)
-    if created > now or expires <= now or expires - created > timedelta(hours=1):
+    if created > now or (expires <= now and (check_expiry or consume)) or expires <= created or expires - created > timedelta(hours=1):
         raise HostAuthorizationError("candidate scope is expired or exceeds its lifetime")
     root_record = descriptor.get("root")
     if not isinstance(root_record, dict) or set(root_record) != {"path", "device", "inode"}:
         raise HostAuthorizationError("candidate scope root identity is invalid")
     root = Path(_absolute(root_record["path"]))
+    if not _within(str(root), CANDIDATE_SCOPE_PARENT) or str(root) == CANDIDATE_SCOPE_PARENT:
+        raise HostAuthorizationError("candidate scope is outside the fixed temporary authority root")
     if str(root) != policy["candidate_host_root"]:
         raise HostAuthorizationError("candidate scope root differs from policy")
     _safe_scope_tree(root)
@@ -534,6 +562,22 @@ def _candidate_descriptor(policy: Mapping, *, consume: bool) -> dict:
         if source.is_file() and source_state.st_nlink != 1:
             raise HostAuthorizationError("candidate scope bind is hard-linked")
         actual.append({"source": str(source), "target": target, "read_only": item["read_only"]})
+    readonly = descriptor.get("production_readonly", [])
+    if not isinstance(readonly, list):
+        raise HostAuthorizationError("production readonly identities are invalid")
+    for item in readonly:
+        if not isinstance(item, dict) or set(item) != {"policy_path", "source", "target", "policy_sha256", "device", "inode", "read_only"}:
+            raise HostAuthorizationError("production readonly identity is invalid")
+        observed, production = _production_readonly_binding({k: item[k] for k in ("policy_path", "source", "target")})
+        if observed != item or any(production[k] != policy[k] for k in ("project_id", "module_id", "service_id")):
+            raise HostAuthorizationError("production readonly identity changed")
+        if item["target"] in targets:
+            raise HostAuthorizationError("duplicate candidate mount target")
+        sources = [production["production_storage_root"], *[m["source"] for m in production["mounts"]]]
+        if any(_within(str(root), s) or _within(s, str(root)) for s in sources):
+            raise HostAuthorizationError("candidate scope overlaps production storage")
+        targets.add(item["target"])
+        actual.append({k: item[k] for k in ("source", "target", "read_only")})
     expected_mounts = [m for m in policy["mounts"] if m["target"] != policy["grant_container_directory"]]
     if sorted(actual, key=lambda item: item["target"]) != sorted(expected_mounts, key=lambda item: item["target"]):
         raise HostAuthorizationError("candidate scope descriptor differs from mount policy")
@@ -551,7 +595,8 @@ def _candidate_descriptor(policy: Mapping, *, consume: bool) -> dict:
     return descriptor
 
 
-def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 3600) -> dict:
+def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 3600,
+                           production_readonly: Sequence[Mapping] = ()) -> dict:
     """Create the only supported candidate bind-source scope as Linux root.
 
     ``bindings`` names directories to create below the fresh scope.  The
@@ -576,6 +621,10 @@ def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 36
     records = []
     relative_names, targets = set(), set()
     try:
+        readonly_records = [_production_readonly_binding(item)[0] for item in production_readonly]
+        if len({item['target'] for item in readonly_records}) != len(readonly_records):
+            raise HostAuthorizationError("duplicate production readonly target")
+        targets.update(item['target'] for item in readonly_records)
         for binding in bindings:
             required = {"relative_path", "target", "read_only", "owner_uid", "owner_gid"}
             if not isinstance(binding, Mapping) or set(binding) != required or type(binding["read_only"]) is not bool:
@@ -618,6 +667,8 @@ def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 36
             "root": {"path": str(root), "device": root_state.st_dev, "inode": root_state.st_ino},
             "binds": records,
         }
+        if readonly_records:
+            descriptor["production_readonly"] = readonly_records
         raw = _canonical(descriptor)
         descriptor_path = descriptor_dir / f"{scope_id}.json"
         fd = os.open(descriptor_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -629,7 +680,7 @@ def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 36
         return {
             "candidate_host_root": str(root),
             "candidate_scope": {"descriptor_path": str(descriptor_path), "descriptor_sha256": hashlib.sha256(raw).hexdigest(), "scope_id": scope_id},
-            "mounts": [{"source": item["source"], "target": item["target"], "read_only": item["read_only"]} for item in records],
+            "mounts": [{"source": item["source"], "target": item["target"], "read_only": item["read_only"]} for item in [*records, *readonly_records]],
         }
     except Exception:
         # The parent is protected and freshly allocated, so recursive cleanup
@@ -655,7 +706,7 @@ def _load_private_key(path: str | Path):
     return key
 
 
-def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path) -> None:
+def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path, *, check_expiry: bool = True) -> None:
     grant_target = policy["grant_container_directory"]
     if {"source": str(grant_dir), "target": grant_target, "read_only": True} not in observed["mounts"]:
         raise HostAuthorizationError("protected grant directory is not injected read-only")
@@ -668,7 +719,13 @@ def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path)
                 raise HostAuthorizationError("grant source cannot be mounted under another role")
             continue
         if policy["role"] == "candidate_validation" and not _within(str(source), policy["candidate_host_root"]):
-            raise HostAuthorizationError("candidate mount source is outside protected temporary root")
+            if mount["read_only"] is not True:
+                raise HostAuthorizationError("production source RW is forbidden for candidate")
+            descriptor = _candidate_descriptor(policy, consume=False, check_expiry=check_expiry)
+            allowed = [{k: item[k] for k in ("source", "target", "read_only")}
+                       for item in descriptor.get("production_readonly", [])]
+            if mount not in allowed:
+                raise HostAuthorizationError("candidate source has no approved readonly identity")
         if policy["schema_version"] in _PRODUCTION_POLICIES:
             storage = _protected_path(Path(policy["production_storage_root"]), directory=True)
             if not mount["target"].startswith("/run/secrets/") and not _within(str(source), str(storage)):
@@ -677,6 +734,19 @@ def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path)
                 raise HostAuthorizationError("production cannot mount a development Git checkout")
         if source == Path("/") or any(_within(str(source), root) or _within(root, str(source)) for root in ("/var/run", "/run", "/var/lib/docker", "/proc", "/sys", "/dev", "/root")):
             raise HostAuthorizationError("control or host system directory mount rejected")
+
+
+def validate_candidate_mounts(manifest: Mapping, mounts: list[dict], policy: Mapping,
+                              grant_dir: Path, *, live: bool = False) -> None:
+    """The routine preflight and issuer share the existing host source identities."""
+    validate_policy(policy, "candidate_validation")
+    if any(manifest.get(key) != policy[key] for key in ('project_id', 'module_id', 'service_id')):
+        raise HostAuthorizationError("candidate manifest identity differs from policy")
+    _candidate_descriptor(policy, consume=False, check_expiry=not live)
+    if sorted(mounts, key=lambda m: m['target']) != sorted(policy['mounts'], key=lambda m: m['target']):
+        raise HostAuthorizationError("candidate mounts differ from protected policy")
+    _validate_runtime_mounts(manifest, mounts, policy)
+    _validate_mount_sources({'mounts': mounts}, policy, grant_dir, check_expiry=not live)
 
 
 def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
@@ -941,12 +1011,21 @@ def _validate_v3_runtime(manifest: Mapping, observed: Mapping, policy: Mapping, 
     if policy["role"] != "candidate_validation":
         return
     roots = {item["role"]: item for item in manifest["runtime_roots"]}
+    # Approved production-backed inputs are real readonly data, not CI seed
+    # fixtures. All other inputs retain their exact fixture-byte checks.
+    production_targets = set()
+    if any(m['target'] != policy['grant_container_directory'] and not _within(m['source'], policy['candidate_host_root'])
+           for m in observed['mounts']):
+        descriptor = _candidate_descriptor(policy, consume=False)
+        production_targets = {item['target'] for item in descriptor.get('production_readonly', [])}
     total = 0
     for item in manifest["candidate_runtime_inputs"]:
         target_root = roots[item["role"]]["container_path"]
         mounts = [mount for mount in observed["mounts"] if mount["target"] == target_root]
         if len(mounts) != 1 or mounts[0]["read_only"] is not True:
             raise HostAuthorizationError("candidate seed must have its exact readonly mount")
+        if target_root in production_targets:
+            continue
         mount_source = _protected_path(Path(mounts[0]["source"]), directory=True, temporary=True)
         source = _protected_path(mount_source / item["relative_path"], temporary=True)
         try:

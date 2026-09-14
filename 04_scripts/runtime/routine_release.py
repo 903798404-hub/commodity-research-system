@@ -334,6 +334,7 @@ class DockerSession:
         self.container_id = None
         self.current_policy = None
         self.spec = None
+        self.role = None
 
     def compose(self, spec, *args):
         return self.engine._docker('compose', '--project-directory', spec['project_directory'],
@@ -349,6 +350,7 @@ class DockerSession:
             require(self.engine.inspect_one('container', self.container_id)['Image'] == image['image_id'], 'CONTAINER_IMAGE_CHANGED')
 
     def create(self, image, role):
+        self.role = role
         self.spec = self.request['candidate' if role == 'candidate_validation' else 'production']
         spec = self.spec
         for key in ('compose', 'environment', 'policy_template'):
@@ -381,6 +383,13 @@ class DockerSession:
         self.assert_data_readonly()
 
     def _check_mounts(self, mounts):
+        if self.role == 'candidate_validation':
+            require(all(m.get('type') == 'bind' for m in mounts), 'EXPLICIT_BIND_REQUIRED')
+            policy = self.protected_json(self.spec['policy_template'])
+            normalized = [dict(source=m['source'], target=m['target'], read_only=m.get('read_only', False)) for m in mounts]
+            self.host.validate_candidate_mounts(self.contract, normalized, policy,
+                Path(self.spec['grant_directory']), live=bool(self.container_id))
+            return
         writable = {r['container_path'] for r in self.contract['runtime_roots']
                     if r['access'] == 'rw' and r['role'] in {'outputs', 'logs', 'cache', 'temporary'}}
         for mount in mounts:
@@ -496,6 +505,7 @@ class DockerSession:
         ids = self.compose(spec, 'ps', '-q', '--all', self.contract['service_id']).stdout.decode().split()
         require(ids == [instance['container_id']], 'WAITING_NAMESPACE_CHANGED')
         self.spec, self.container_id = spec, instance['container_id']
+        self.role = 'candidate_validation' if stage == 'candidate' else 'production'
         require(self.application_url() == instance['url'], 'WAITING_URL_CHANGED')
 
     def smoke(self):

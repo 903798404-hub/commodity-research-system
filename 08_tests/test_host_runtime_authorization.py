@@ -140,10 +140,11 @@ def test_v3_candidate_seed_requires_host_and_container_bytes_to_match(tmp_path, 
     monkeypatch.setattr(host, "_contract_module", lambda *args: SimpleNamespace(validate_runtime_environment=lambda *args, **kwargs: None))
     monkeypatch.setattr(host, "_protected_path", lambda path, **kwargs:path)
     monkeypatch.setattr(host, "copy_container_bytes", lambda *_args: b"fixture")
-    host._validate_v3_runtime(runtime, observed_value, v3_policy("candidate_validation"), CID)
+    expected = v3_policy("candidate_validation"); expected["candidate_host_root"] = str(source_root)
+    host._validate_v3_runtime(runtime, observed_value, expected, CID)
     monkeypatch.setattr(host, "copy_container_bytes", lambda *_args: b"changed")
     with pytest.raises(host.HostAuthorizationError, match="seed identity"):
-        host._validate_v3_runtime(runtime, observed_value, v3_policy("candidate_validation"), CID)
+        host._validate_v3_runtime(runtime, observed_value, expected, CID)
 
 
 @pytest.mark.parametrize("mutation", ["image","root","socket","namespace","mount"])
@@ -566,3 +567,136 @@ def test_native_non_linux_host_cannot_issue_grants(monkeypatch):
     monkeypatch.setattr(host,"sys",SimpleNamespace(platform="win32"))
     with pytest.raises(host.HostAuthorizationError,match="Linux root"):
         host._require_linux_root()
+
+
+def isolation_fixture(monkeypatch):
+    """Real validators over explicit POSIX inode/mount observations; no host IO."""
+    from pathlib import PurePosixPath
+    from datetime import datetime,timezone,timedelta
+    nodes={}
+    def add(path, *, file=None, mode=None):
+        for parent in reversed(PurePosixPath(path).parents):
+            nodes.setdefault(str(parent),dict(kind='dir',mode=0o755,ino=len(nodes)+1,raw=b''))
+        nodes[path]=dict(kind='file' if file is not None else 'dir',mode=mode or (0o600 if file is not None else 0o700),ino=len(nodes)+1,raw=file or b'')
+    class P(PurePosixPath):
+        def exists(self): return str(self) in nodes
+        def is_symlink(self): return nodes.get(str(self),{}).get('kind')=='symlink'
+        def is_dir(self): return nodes.get(str(self),{}).get('kind')=='dir'
+        def is_file(self): return nodes.get(str(self),{}).get('kind')=='file'
+        def resolve(self,strict=True):
+            if strict and not self.exists():raise FileNotFoundError(str(self))
+            for parent in (self,*self.parents):
+                if 'resolved' in nodes.get(str(parent),{}):return P(nodes[str(parent)]['resolved'])/self.relative_to(parent)
+            return self
+        def stat(self):
+            n=nodes[str(self)];return SimpleNamespace(st_uid=n.get('uid',0),st_gid=0,st_dev=1,st_ino=n['ino'],st_nlink=n.get('links',1),st_mode=n['mode']|(stat.S_IFREG if self.is_file() else stat.S_IFLNK if self.is_symlink() else stat.S_IFDIR),st_size=len(n['raw']))
+        lstat=stat
+        def read_bytes(self): return nodes[str(self)]['raw']
+    root='/tmp/market-data-candidate-scopes/candidate-test';grants='/var/lib/grants'
+    add(root);add(grants)
+    manifest=json.loads((Path(__file__).resolve().parents[1]/'02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
+    mounts=[];binds=[]
+    for m in manifest['required_mounts']:
+        source=root+'/'+m['role'];add(source);mount=dict(source=source,target=m['container_path'],read_only=m['read_only']);mounts.append(mount)
+        binds.append({**mount,'device':1,'inode':nodes[source]['ino']})
+    mounts.append(dict(source=grants,target='/run/market-data-grants',read_only=True))
+    production=v3_policy('production');production.update(project_id=manifest['project_id'],module_id=manifest['module_id'],service_id=manifest['service_id'])
+    prodroot=production['production_storage_root'];add(prodroot);add(prodroot+'/snapshots');add(prodroot+'/snapshots/child')
+    production['mounts']=[dict(source=prodroot+'/snapshots',target='/runtime/import-profit/snapshots',read_only=True),dict(source=prodroot+'/snapshots',target='/runtime/capture-snapshots',read_only=False)]
+    prodfile='/etc/market-data/production.json';add(prodfile,file=host._canonical(production))
+    now=datetime.now(timezone.utc)
+    descriptor=dict(schema_version='candidate-scope/1',scope_id='2'*32,created_at=now.isoformat(),expires_at=(now+timedelta(minutes=30)).isoformat(),root=dict(path=root,device=1,inode=nodes[root]['ino']),binds=binds)
+    descriptor_path='/tmp/market-data-candidate-scopes/.candidate-scope-descriptors/scope.json';add(descriptor_path,file=host._canonical(descriptor))
+    p=v3_policy('candidate_validation');p.update(project_id=manifest['project_id'],module_id=manifest['module_id'],service_id=manifest['service_id'],candidate_host_root=root,mounts=mounts)
+    p['candidate_scope']=dict(descriptor_path=descriptor_path,descriptor_sha256=hashlib.sha256(nodes[descriptor_path]['raw']).hexdigest(),scope_id='2'*32)
+    monkeypatch.setattr(host,'Path',P);monkeypatch.setattr(host,'_require_linux_root',lambda:None);monkeypatch.setattr(host,'_host_mount_points',lambda:())
+    # Simulate only OS enumeration, preserving the real ownership/alias checks.
+    def walk(path,**kwargs):
+        for name,n in list(nodes.items()):
+            if n['kind']=='dir' and (name==str(path) or name.startswith(str(path)+'/')):
+                children=[k for k in nodes if str(P(k).parent)==name and k!=name]
+                yield name,[P(k).name for k in children if nodes[k]['kind']=='dir'],[P(k).name for k in children if nodes[k]['kind']!='dir']
+    monkeypatch.setattr(host.os,'walk',walk)
+    def seal():
+        nodes[descriptor_path]['raw']=host._canonical(descriptor);p['candidate_scope']['descriptor_sha256']=hashlib.sha256(nodes[descriptor_path]['raw']).hexdigest()
+    return SimpleNamespace(nodes=nodes,P=P,root=root,grants=grants,manifest=manifest,policy=p,descriptor=descriptor,seal=seal,production=production,prodfile=prodfile,prodroot=prodroot)
+
+
+def test_soybean_isolated_required_rw_passes_routine_and_grant_dry_check(monkeypatch):
+    f=isolation_fixture(monkeypatch)
+    host.validate_candidate_mounts(f.manifest,f.policy['mounts'],f.policy,f.P(f.grants))
+    import importlib.util
+    path=Path(__file__).resolve().parents[1]/'04_scripts/runtime/routine_release.py'
+    spec=importlib.util.spec_from_file_location('_routine_isolation_dry',path);r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
+    monkeypatch.setattr(r,'Path',f.P)
+    b=r.DockerSession({},None,host,{},f.manifest);b.role='candidate_validation';b.spec={'policy_template':'policy','grant_directory':f.grants}
+    b.protected_json=lambda _:f.policy
+    b._check_mounts([dict(type='bind',**m) for m in f.policy['mounts']])
+
+
+@pytest.mark.parametrize('fault',['ro','missing','target','production','production-child','unknown','symlink','junction','parent-alias','inode','root-inode','root-owner','nested-bind','hardlink'])
+def test_candidate_mount_negative_source_and_manifest_matrix(monkeypatch,fault):
+    f=isolation_fixture(monkeypatch);mount=next(m for m in f.policy['mounts'] if m['target']=='/runtime/capture-snapshots');source=mount['source']
+    if fault=='ro':mount['read_only']=True;next(b for b in f.descriptor['binds'] if b['source']==source)['read_only']=True;f.seal()
+    elif fault=='missing':f.policy['mounts'].remove(mount)
+    elif fault=='target':mount['target']='/runtime/wrong'
+    elif fault in ['production','production-child','unknown']:mount['source']=f.prodroot+'/snapshots'+('/child' if fault=='production-child' else '') if fault!='unknown' else '/unknown'
+    elif fault in ['symlink','junction','parent-alias']:
+        n=f.nodes[source if fault!='parent-alias' else f.root];n['resolved']=f.prodroot+'/snapshots'
+        if fault=='symlink':n['kind']='symlink'
+    elif fault=='inode':f.nodes[source]['ino']+=100
+    elif fault=='root-inode':f.nodes[f.root]['ino']+=100
+    elif fault=='root-owner':f.nodes[f.root]['uid']=1000
+    elif fault=='nested-bind':monkeypatch.setattr(host,'_host_mount_points',lambda:(source,))
+    elif fault=='hardlink':f.nodes[source].update(kind='file',links=2)
+    with pytest.raises((host.HostAuthorizationError,FileNotFoundError)):
+        host.validate_candidate_mounts(f.manifest,f.policy['mounts'],f.policy,f.P(f.grants))
+
+
+def add_production_readonly(f):
+    target='/runtime/import-profit/snapshots'
+    f.descriptor['binds']=[b for b in f.descriptor['binds'] if b['target']!=target]
+    item,_=host._production_readonly_binding(dict(policy_path=f.prodfile,source=f.prodroot+'/snapshots',target=target))
+    f.descriptor['production_readonly']=[item]
+    next(m for m in f.policy['mounts'] if m['target']==target)['source']=item['source'];f.seal()
+
+
+@pytest.mark.parametrize('fault',['none','rw','inode','policy','overlap','ancestor-overlap','unapproved-target','readonly-alias'])
+def test_production_readonly_requires_approved_source_identity(monkeypatch,fault):
+    f=isolation_fixture(monkeypatch);add_production_readonly(f)
+    if fault=='rw':next(m for m in f.policy['mounts'] if m['target']=='/runtime/import-profit/snapshots')['read_only']=False
+    elif fault=='inode':f.nodes[f.prodroot+'/snapshots']['ino']+=1
+    elif fault=='policy':f.nodes[f.prodfile]['raw']+=b' '
+    elif fault in ['overlap','ancestor-overlap']:
+        f.production['mounts'].append(dict(source=f.root if fault=='overlap' else str(f.P(f.root).parent),target='/runtime/other',read_only=False))
+        f.nodes[f.prodfile]['raw']=host._canonical(f.production)
+        item=f.descriptor['production_readonly'][0];item['policy_sha256']=hashlib.sha256(f.nodes[f.prodfile]['raw']).hexdigest();f.seal()
+    elif fault=='unapproved-target':f.descriptor['production_readonly'][0]['target']='/unknown';f.seal()
+    elif fault=='readonly-alias':f.nodes[f.prodroot+'/snapshots']['resolved']='/other'
+    if fault=='none':host.validate_candidate_mounts(f.manifest,f.policy['mounts'],f.policy,f.P(f.grants))
+    else:
+        with pytest.raises(host.HostAuthorizationError):host.validate_candidate_mounts(f.manifest,f.policy['mounts'],f.policy,f.P(f.grants))
+
+
+def test_fresh_grant_rechecks_source_inode_before_any_docker_or_grant_write(monkeypatch):
+    f=isolation_fixture(monkeypatch)
+    f.nodes[f.root+'/capture-snapshots']['ino']+=1
+    monkeypatch.setattr(host,'require_protected_authority_source',lambda:None)
+    monkeypatch.setattr(host,'_load_policy',lambda _:f.policy)
+    monkeypatch.setattr(host,'require_protected_key_and_grant_dirs',lambda *a:None)
+    monkeypatch.setattr(host,'observe_and_validate',lambda *a,**k:pytest.fail('must reject before Docker'))
+    with pytest.raises(host.HostAuthorizationError,match='inode changed'):
+        host.issue_execution_grant(CID,expected_policy_path='/etc/policy',key_path='/etc/key',grant_path=f.grants+'/grant.json',grant_dir=f.grants,role='candidate_validation')
+    assert f.grants+'/grant.json' not in f.nodes
+
+
+def test_approved_production_readonly_does_not_require_fake_fixture_bytes(monkeypatch):
+    f=isolation_fixture(monkeypatch);add_production_readonly(f)
+    runtime=copy.deepcopy(f.manifest)
+    runtime['candidate_runtime_inputs']=[dict(role='snapshots',relative_path='absent-ci-seed.json',sha256='0'*64,source_path='08_tests/fixture.json')]
+    monkeypatch.setattr(host,'_contract_module',lambda *a:SimpleNamespace(validate_runtime_environment=lambda *a,**k:None))
+    monkeypatch.setattr(host,'copy_container_bytes',lambda *a:pytest.fail('production readonly input is not a CI fixture'))
+    host._validate_v3_runtime(runtime,{'config':{'Env':[]},'mounts':f.policy['mounts']},f.policy,CID)
+    f.nodes[f.prodroot+'/snapshots']['ino']+=1
+    with pytest.raises(host.HostAuthorizationError,match='identity changed'):
+        host._validate_v3_runtime(runtime,{'config':{'Env':[]},'mounts':f.policy['mounts']},f.policy,CID)
