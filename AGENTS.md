@@ -96,3 +96,5 @@ Commit/Tree、CI、risk、exact Image/OCI、fresh grant、runtime preflight、he
 Candidate PASS 后清理候选容器并部署同一镜像，新 production 实例仍需 fresh grant；未确认/拒绝/取消不得切换。
 Production 机器通过后再次等待人工 UI；人工 PASS 才完成 release，人工 FAIL 或机器失败按既有合同恢复上一精确镜像与 fresh grant。
 等待允许暂留 candidate；取消、失败或验收完成时清理其明确实例并保留普通诊断记录，不删除镜像或业务数据。
+
+Routine 人工验收是正常 release checkpoint，不是 Governance approval。如果自动化低风险 UI 验收显著增加基础设施复杂度而人工成本低，默认允许人工验收，不为自动化率强制新增基础设施。

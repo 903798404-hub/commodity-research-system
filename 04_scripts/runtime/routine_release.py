@@ -36,6 +36,14 @@ def check_browser(mode):
             require(Path(p.chromium.executable_path).is_file(), 'CHROMIUM_NOT_AVAILABLE')
 
 
+def diagnostics(backend):
+    try:
+        return backend.diagnostics()
+    except Exception:
+        # Logs are supplemental; never hide the machine failure or block cleanup.
+        return {'collection_status': 'unavailable'}
+
+
 class RoutineError(ValueError):
     pass
 
@@ -146,6 +154,8 @@ def candidate_acceptance(backend, image, *, base_commit, ci_run, mode='AUTOMATED
     except Exception as exc:
         result['failure'] = type(exc).__name__ + ': ' + str(exc)
     finally:
+        if mode == 'MANUAL':
+            result['diagnostics'] = diagnostics(backend)
         try:
             if result['result'] != WAITING:
                 backend.cleanup()
@@ -239,6 +249,7 @@ def finish_manual(backend, image, checkpoint, *, stage, decision, operator, ci_r
     except Exception as exc:
         result['failure'] = type(exc).__name__ + ': ' + str(exc)
     finally:
+        result['diagnostics'] = diagnostics(backend)
         if stage == 'candidate':
             try:
                 backend.cleanup()
@@ -467,6 +478,13 @@ class DockerSession:
         require(container['State']['Running'] is True, 'APPLICATION_NOT_RUNNING')
         return dict(container_id=self.container_id, started_at=container['State']['StartedAt'],
                     restart_count=container['RestartCount'], url=self.application_url(), spec=copy.deepcopy(self.spec))
+
+    def diagnostics(self):
+        require(bool(self.container_id), 'NO_DIAGNOSTIC_INSTANCE')
+        raw = self.engine._docker('logs', '--tail', '200', self.container_id)
+        summary = load('09_deploy/spread_release/wait_for_service_ready.py', '_routine_log_summary')
+        return summary.build_log_summary((raw.stdout + raw.stderr).decode('utf-8', errors='replace'),
+                                         collected_at_utc=now())
 
     def resume(self, instance, stage):
         spec = self.request['candidate' if stage == 'candidate' else 'production']

@@ -52,6 +52,13 @@ def make_plan(repo, base, candidate, output):
                 if rule['kind']=='WINDOWS_REQUIRED_TEST' and policy['files'].get(path,{}).get(name,{}).get('kind')!='WINDOWS_REQUIRED_TEST':
                     raise ValueError('REQUIRED_PLATFORM_POLICY_REDUCTION_OR_RECLASSIFICATION')
     required = report['test_plan']
+    if requires_full(report):
+        # Full comparison routes Windows-only cases to the hard platform job.
+        # Include them even when this diff has no direct Windows module impact.
+        required = sorted(set(required) | {path for path, rules in policy['files'].items()
+            if any(rule['kind'] == 'WINDOWS_REQUIRED_TEST' for rule in rules.values())})
+        report['test_plan'] = required
+        save(output/'admission/main-admission.json', report)
     sources = {p:admission.blob(repo,candidate,p) for p in required}
     trusted = {p:admission.blob(repo,base,p) if p in old else sources[p] for p in required}
     plan = platforms.plan(required,trusted,sources,policy,base=report['trusted_main'],candidate=report['candidate'])

@@ -392,3 +392,16 @@ def test_unproven_waiting_instance_saves_failure_without_touching_replacement():
     result=routine.finish_manual(b,IMAGE,waiting(),stage='candidate',decision='PASS',operator='admin',ci_run='123')
     assert result['result']=='FAIL' and result['recovery']=='STOP_INSTANCE_IDENTITY_UNPROVEN'
     assert b.calls==['resume']
+
+
+def test_manual_rejection_collects_bounded_redacted_logs_before_cleanup():
+    b=ManualBackend()
+    helper=routine.load('09_deploy/spread_release/wait_for_service_ready.py','_manual_log_test')
+    def collect():
+        b.hit('diagnostics')
+        return helper.build_log_summary('password=secret-value\n'+'warning safe\n'*220,collected_at_utc=routine.now())
+    b.diagnostics=collect
+    r=routine.finish_manual(b,IMAGE,waiting(),stage='candidate',decision='FAIL',operator='admin',ci_run='123')
+    assert r['diagnostics']['stored_bytes']<=65536 and r['diagnostics']['tail_line_count']<=200
+    assert 'secret-value' not in r['diagnostics']['tail_text']
+    assert b.calls.index('diagnostics')<b.calls.index('cleanup')

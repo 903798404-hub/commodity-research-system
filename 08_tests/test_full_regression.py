@@ -196,3 +196,16 @@ def test_function_selector_nodes_prove_parent_collection_without_parent_report()
     plugin.pytest_collection_finish(SimpleNamespace(items=[SimpleNamespace(nodeid='08_tests/test_selected.py::test_case[1]')]))
     assert plugin.collected_files == {'08_tests/test_selected.py'}
     assert plugin.nodes == ['08_tests/test_selected.py::test_case[1]']
+
+@pytest.mark.parametrize('lane',['business','strict','governance'])
+def test_full_lane_includes_windows_even_without_direct_windows_impact(tmp_path,monkeypatch,lane):
+    import json
+    ci=full.ci
+    policy={'files':{'08_tests/test_windows.py':{'test_windows':{'kind':'WINDOWS_REQUIRED_TEST'}}}}
+    report=dict(final_result='PLANNED',lane=lane,test_plan=['08_tests/test_logic.py'],trusted_main={},candidate={})
+    monkeypatch.setattr(ci.admission,'admit',lambda *a,**k:copy.deepcopy(report))
+    monkeypatch.setattr(ci.admission,'tree',lambda *a:{ci.POLICY:{},'08_tests/test_logic.py':{},'08_tests/test_windows.py':{}})
+    monkeypatch.setattr(ci.admission,'blob',lambda repo,commit,path:json.dumps(policy).encode() if path==ci.POLICY else b'def test_logic(): pass')
+    monkeypatch.setattr(ci.platforms,'plan',lambda required,*a,**k:{'selected':required})
+    result=ci.make_plan(tmp_path,'base','candidate',tmp_path/'out')
+    assert ('08_tests/test_windows.py' in result['selected']) == (lane!='business')
