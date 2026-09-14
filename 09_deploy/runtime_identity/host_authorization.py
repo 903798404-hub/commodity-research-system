@@ -1006,6 +1006,17 @@ def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapp
         actual = [m for m in mounts if m["target"] == target]
         if len(actual) != 1 or actual[0]["read_only"] != item["read_only"]:
             raise HostAuthorizationError("actual mount permission differs from runtime manifest")
+    # Operational business state must not alias sealed inputs or each other.
+    operational = {'manual-cnf', 'am-results'}
+    sources = {item['role']: Path(next(m['source'] for m in mounts
+               if m['target'] == item['container_path'])).resolve(strict=True)
+               for item in required} if any(item['role'] in operational for item in required) else {}
+    protected = {item['role'] for item in required if item['read_only'] and item['role'] != manifest.get('identity_root_role')}
+    for role in operational & sources.keys():
+        for other in ((protected | operational) & sources.keys()) - {role}:
+            a, b = str(sources[role]), str(sources[other])
+            if _within(a, b) or _within(b, a):
+                raise HostAuthorizationError('operational write source overlaps historical or other operational source')
     # For policy/3 the source/render bridge has already proved the exact secret
     # names, file sources and targets against the Approved manifest and inspect.
     secrets = [m for m in mounts if m["target"].startswith("/run/secrets/")] if policy["schema_version"] in _PRODUCTION_POLICIES else []

@@ -17,11 +17,18 @@ from agri_research_agent.import_profit.runtime_store import (
     RuntimeStoreError,
     resolve_current_runtime_release,
 )
+from agri_research_agent.import_profit.intraday_store import (
+    load_intraday_profit_batch, IntradayProfitStoreNotFoundError,
+)
+from agri_research_agent.market_data.intraday import MarketSession
 from agri_research_agent.pipelines.soybean_intraday import (
     save_manual_cnf_and_materialize_am,
 )
 from agri_research_agent.shared.runtime_context import (
-    RuntimeContext, RuntimeMode, assert_runtime_write, load_runtime_identity,
+    RuntimeContext, RuntimeMode,
+)
+from agri_research_agent.import_profit.operational_runtime import (
+    configured_operational_write, validate_operational_write,
 )
 from import_profit_intraday_page import (
     FinalUiPreviewPaths,
@@ -41,6 +48,7 @@ def render_import_profit_intraday_runtime_page(
     environment: str = "FORMAL",
     preview_historical_cnf_path: str | Path | None = None,
     intraday_cnf_store_path: str | Path | None = None,
+    operational_result_root: str | Path | None = None,
     allow_cnf_save: bool = False,
     business_date: date | None = None,
     write_context: RuntimeContext | None = None,
@@ -106,25 +114,34 @@ def render_import_profit_intraday_runtime_page(
                 str(resolved.manifest["date_range"][1])
             ),
         )
+    am_results = Path(operational_result_root) if operational_result_root else results
     save_handler = None
     if allow_cnf_save:
         if (
             mode is not IntradayPageMode.STRICT_RUNTIME
             or snapshots is None
             or write_context is None
-            or write_context.module_id != "soybean-pm"
-            or environment != ("FORMAL" if write_context.mode is RuntimeMode.PRODUCTION_WRITE
+            or write_context.module_id not in {"soybean-pm", "shared-intraday"}
+            or environment != ("FORMAL" if write_context.mode in {RuntimeMode.PRODUCTION_WRITE, RuntimeMode.CANDIDATE_VALIDATION}
                                else "TEST_ISOLATED_NON_PRODUCTION")
         ):
             st.error("manual_ui 保存环境未满足正式运行授权要求。")
             return
 
+        validate_operational_write(write_context, cnf_store, am_results)
+
         def save_handler(values):
-            assert_runtime_write(write_context, cnf_store)
-            assert_runtime_write(write_context, results)
+            validate_operational_write(write_context, cnf_store, am_results)
+            if results != am_results:
+                try:
+                    load_intraday_profit_batch(results, selected_date, MarketSession.AM)
+                except IntradayProfitStoreNotFoundError:
+                    pass
+                else:
+                    raise RuntimeError("AM result is already sealed in readonly history")
             return save_manual_cnf_and_materialize_am(
                 snapshot_root=snapshots,
-                result_root=results,
+                result_root=am_results,
                 cnf_store_path=cnf_store,
                 business_date=selected_date,
                 values=values,
@@ -139,6 +156,8 @@ def render_import_profit_intraday_runtime_page(
             preview,
             business_date=selected_date,
             environment=environment,
+            operational_result_root=Path(operational_result_root) if operational_result_root else None,
+            historical_cnf_store_path=resolved.manual_cnf_path,
         ),
         config=config,
         mode=mode,
@@ -156,18 +175,7 @@ def render_configured_intraday_runtime_page(runtime_root, *, config_path, allow_
         selected = setting("IMPORT_PROFIT_INTRADAY_BUSINESS_DATE")
         business_date = date.fromisoformat(selected) if selected else None
         if enabled:
-            root_text = setting("IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT")
-            if not root_text:
-                raise ValueError("explicit PM write runtime required")
-            root = Path(root_text)
-            mode = RuntimeMode(setting("IMPORT_PROFIT_INTRADAY_WRITE_MODE", "ISOLATED_DEV"))
-            formal = {}
-            if mode is RuntimeMode.PRODUCTION_WRITE:
-                identity = load_runtime_identity(root)
-                formal = dict(formal_identity=identity,
-                    expected_runtime_id=setting("IMPORT_PROFIT_INTRADAY_EXPECTED_RUNTIME_ID"),
-                    repository_root=Path(__file__).resolve().parents[1])
-            write_context = RuntimeContext(mode, "soybean-pm", root, **formal)
+            write_context = configured_operational_write()
     except (ValueError, OSError, RuntimeError):
         st.error("AM/PM 业务日期或写入运行身份校验失败。")
         return
@@ -179,6 +187,7 @@ def render_configured_intraday_runtime_page(runtime_root, *, config_path, allow_
         environment=setting("IMPORT_PROFIT_INTRADAY_ENVIRONMENT", "FORMAL"),
         preview_historical_cnf_path=setting("IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH") or None,
         intraday_cnf_store_path=setting("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH") or None,
+        operational_result_root=setting("IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT") or None,
         allow_cnf_save=enabled, business_date=business_date, write_context=write_context)
 
 

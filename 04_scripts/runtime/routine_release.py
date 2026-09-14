@@ -428,7 +428,7 @@ class DockerSession:
                 Path(self.spec['grant_directory']), live=bool(self.container_id), container_id=self.container_id)
             return
         writable = {r['container_path'] for r in self.contract['runtime_roots']
-                    if r['access'] == 'rw' and r['role'] in {'outputs', 'logs', 'cache', 'temporary'}}
+                    if r['access'] == 'rw' and r['role'] in {'outputs', 'logs', 'cache', 'temporary', 'manual-cnf', 'am-results'}}
         for mount in mounts:
             require(mount.get('type') == 'bind', 'EXPLICIT_BIND_REQUIRED')
             target = mount.get('target')

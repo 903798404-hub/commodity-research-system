@@ -97,6 +97,7 @@ RUN python -c 'import json,re,sys; commit,tree,release_id,build_time,source=sys.
     && ln -s /runtime/weather /app/runtime/weather
 
 ENV PYTHONPATH=/app/03_src
+COPY ["03_src/agri_research_agent/import_profit/operational_runtime.py", "/app/03_src/agri_research_agent/import_profit/"]
 USER 65532:65532
 EXPOSE 8501
 CMD ["streamlit", "run", "05_apps/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]

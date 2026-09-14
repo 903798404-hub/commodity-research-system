@@ -103,3 +103,22 @@ v3 的全部运行根必须位于单个只读身份根之下，且不得等于�
 后续独立阶段必须完成：治理侧版本分派及 source hash 绑定；host 侧按 identity role 验证真实挂载并证明候选临时存储隔离；Linux 引擎侧精确镜像构建、无 `.git` 的实际初始化与正反向验证；release 前再次核对同一 Image ID、Commit/Tree、实际 Compose、挂载和清单。
 
 本合同不修改 FULL DAILY/Wrapper，不接入业务 capture、调度或 Notification，不写旧 SEALED Snapshot，不变更 Approved identity，不部署。真实 AM/PM temporal acceptance 仍属于后续实际时点的独立证据。
+
+## Manual CNF 运行期写入
+
+历史 release、历史 CNF cache、snapshot 和原 intraday results 均保持 immutable / RO。
+当前 manual CNF 使用 `/runtime/import-profit/operational/cnf/manual_cnf_quotes.parquet`，
+保存产生的 AM result 使用 `/runtime/import-profit/operational/am-results`；只把这两个子目录声明为 scoped RW，
+不开放整个 import-profit 根。历史与当前 CNF 按完整 BusinessKey 组合，当前 AM 优先读取 operational store，
+缺少对应日期/session 时读取原只读结果；历史 PM 图保持原读取路径，不跨日期补值，不重写历史。
+
+正式 Compose 的 `SPREAD_MANUAL_CNF_ROOT`、`SPREAD_AM_RESULT_ROOT` 必须指向独立、已分配的运行目录，
+不可与历史来源重叠。`IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE=1` 仅配合完整 Manifest 和 fresh OCI grant 使用；
+缺目录、RO、路径别名或 grant 未授权均在 preflight 失败。关闭开关的只读配置不提供 save handler。
+Candidate 的两个 RW 来源只能位于既有验证的 isolated root，不能等于、包含、位于或链接到生产来源；
+宿主仍观察实际 mounts 并绑定实例 grant。测试保存只写隔离数据。
+
+人工保存沿用既有 CNF → 已有 SEALED AM → result 流程及 NULL/0、日期、产地、船期、AM/PM、12月合同。
+没有该日 AM snapshot 时仍按既有业务检查拒绝保存，不自动 capture。
+应用运行后的合法人工保存是业务操作；release/preflight 只配置和验证 capability，不自动写 CNF/result，
+不初始化历史数据到新 store，不部署时迁移历史。Runtime/mount 变化仍由现有 risk classifier 分类。

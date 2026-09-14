@@ -35,6 +35,7 @@ from agri_research_agent.import_profit.intraday_history import (
 from agri_research_agent.import_profit.models import BusinessKey
 from agri_research_agent.import_profit.intraday_store import (
     IntradayProfitStoreError,
+    IntradayProfitStoreNotFoundError,
     ResolvedIntradayProfitRelease,
     list_intraday_profit_batches,
     load_intraday_profit_batch,
@@ -92,6 +93,8 @@ class IntradayPageDataPaths:
     preview: FinalUiPreviewPaths | None = None
     business_date: date | None = None
     environment: str | None = None
+    operational_result_root: Path | None = None
+    historical_cnf_store_path: Path | None = None
 
 
 def render_import_profit_intraday_page(
@@ -233,6 +236,7 @@ def _render_final_ui(
     )
     edited = _render_preview_cnf_editor(
         paths.cnf_store_path,
+        historical_cnf_store_path=paths.historical_cnf_store_path,
         business_date=business_date,
         labels=labels,
         config=config,
@@ -284,6 +288,7 @@ def _render_final_ui(
         history,
         paths.cnf_store_path,
         allowed_origins=config.origin_codes,
+        historical_cnf_store_path=paths.historical_cnf_store_path,
     )
     _render_tankan_cnf_history(history, origin=selected_origin)
     if presentation is None:
@@ -589,20 +594,17 @@ def _render_preview_cnf_editor(
         [Mapping[tuple[str, int], float | None]], object
     ] | None,
     editable: bool,
+    historical_cnf_store_path: Path | None = None,
 ) -> pd.DataFrame:
-    formal = load_cnf_store(
-        cnf_store_path, allowed_origins=config.origin_codes
-    )
+    records = _manual_cnf_records(cnf_store_path, historical_cnf_store_path, config.origin_codes)
     values = {
         (record.business_key.origin, record.business_key.shipment_month):
         record.cnf_cents_per_bushel
-        for record in formal.records
+        for record in records
         if record.business_key.business_date == business_date
+        and record.business_key.shipment_year == shipment_year_for(business_date, record.business_key.shipment_month)
     }
-    cnf_saved = any(
-        record.business_key.business_date == business_date
-        for record in formal.records
-    )
+    cnf_saved = bool(values)
     seed = pd.DataFrame(
         [
             {
@@ -814,15 +816,26 @@ def _result_profit_rows(
     return rows
 
 
+def _manual_cnf_records(current, historical, allowed_origins):
+    """Operational records override only an identical complete historical key."""
+    records = {}
+    for path in (historical, current):
+        if path is not None:
+            for record in load_cnf_store(path, allowed_origins=allowed_origins).records:
+                records[record.key] = record
+    return tuple(records.values())
+
+
 def _merge_manual_cnf_history(
     history: pd.DataFrame,
     cnf_store_path: Path,
     *,
     allowed_origins: tuple[str, ...],
+    historical_cnf_store_path: Path | None = None,
 ) -> pd.DataFrame:
     """Overlay manual_ui for research display without altering either source."""
 
-    formal = load_cnf_store(cnf_store_path, allowed_origins=allowed_origins)
+    records = _manual_cnf_records(cnf_store_path, historical_cnf_store_path, allowed_origins)
     manual = pd.DataFrame(
         (
             {
@@ -832,7 +845,7 @@ def _merge_manual_cnf_history(
                 "cnf": record.cnf_cents_per_bushel,
                 "source_identity": record.source,
             }
-            for record in formal.records
+            for record in records
         ),
         columns=("trade_date", "origin", "month", "cnf", "source_identity"),
     )
@@ -1194,6 +1207,14 @@ def _load_latest(
 
 
 def _load_selected_release(paths, business_date, session):
+    if session is MarketSession.AM and paths.operational_result_root is not None:
+        try:
+            return load_intraday_profit_batch(paths.operational_result_root, business_date, session,
+                expected_environment=paths.environment, snapshot_root=paths.snapshot_root)
+        except IntradayProfitStoreNotFoundError:
+            pass
+        except (IntradayProfitStoreError, IntradaySnapshotError, OSError):
+            return None
     try:
         return load_intraday_profit_batch(paths.result_root, business_date, session,
             expected_environment=paths.environment, snapshot_root=paths.snapshot_root)

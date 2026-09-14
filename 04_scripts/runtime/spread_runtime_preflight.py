@@ -168,6 +168,8 @@ def load_formal_preflight_snapshot(snapshot_root: Path):
 def readonly_preflight(args) -> dict[str, object]:
     """Read actual mounted consumers without capture, writes, secrets or network."""
     context = initialize_preflight_identity(args)
+    from agri_research_agent.import_profit.operational_runtime import configured_operational_write
+    configured_operational_write()  # Verify capability without generating business data.
     snapshot_root = Path(args.snapshot_root).resolve(strict=True)
     if context.runtime_root not in snapshot_root.parents:
         raise ValueError("snapshot root escapes the identity runtime")

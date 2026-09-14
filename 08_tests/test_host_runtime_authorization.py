@@ -636,8 +636,9 @@ def test_soybean_isolated_required_rw_passes_routine_and_grant_dry_check(monkeyp
 
 
 @pytest.mark.parametrize('fault',['ro','missing','target','production','production-child','unknown','symlink','junction','parent-alias','inode','root-inode','root-owner','nested-bind','hardlink'])
-def test_candidate_mount_negative_source_and_manifest_matrix(monkeypatch,fault):
-    f=isolation_fixture(monkeypatch);mount=next(m for m in f.policy['mounts'] if m['target']=='/runtime/capture-snapshots');source=mount['source']
+@pytest.mark.parametrize('target',['/runtime/capture-snapshots','/runtime/import-profit/operational/cnf','/runtime/import-profit/operational/am-results'])
+def test_candidate_mount_negative_source_and_manifest_matrix(monkeypatch,fault,target):
+    f=isolation_fixture(monkeypatch);mount=next(m for m in f.policy['mounts'] if m['target']==target);source=mount['source']
     if fault=='ro':mount['read_only']=True;next(b for b in f.descriptor['binds'] if b['source']==source)['read_only']=True;f.seal()
     elif fault=='missing':f.policy['mounts'].remove(mount)
     elif fault=='target':mount['target']='/runtime/wrong'

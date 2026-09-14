@@ -31,6 +31,9 @@ services:
       IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH: /runtime/import-profit/cnf/historical_cnf_cache.parquet
       HOME: /runtime/06_outputs
       MPLCONFIGDIR: /runtime/10_logs/matplotlib
+      IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE: "1"
+      IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH: /runtime/import-profit/operational/cnf/manual_cnf_quotes.parquet
+      IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT: /runtime/import-profit/operational/am-results
       IMPORT_PROFIT_INTRADAY_PAGE_MODE: STRICT_RUNTIME
       IMPORT_PROFIT_INTRADAY_ENVIRONMENT: FORMAL
       IMPORT_PROFIT_CONFIG_PATH: /app/02_configs/import_profit_soybean.yaml
@@ -83,6 +86,18 @@ services:
       source: ${SPREAD_GRANT_ROOT:?SPREAD_GRANT_ROOT is required}
       target: /run/market-data-grants
       read_only: true
+    - type: bind
+      source: ${SPREAD_MANUAL_CNF_ROOT:?SPREAD_MANUAL_CNF_ROOT is required}
+      target: /runtime/import-profit/operational/cnf
+      read_only: false
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${SPREAD_AM_RESULT_ROOT:?SPREAD_AM_RESULT_ROOT is required}
+      target: /runtime/import-profit/operational/am-results
+      read_only: false
+      bind:
+        create_host_path: false
     secrets:
     - source: tankan-reader
       target: /run/secrets/tankan.env

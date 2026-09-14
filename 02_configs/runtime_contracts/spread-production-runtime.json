@@ -73,6 +73,16 @@
       "role": "capture-snapshots",
       "container_path": "/runtime/capture-snapshots",
       "access": "rw"
+    },
+    {
+      "role": "manual-cnf",
+      "container_path": "/runtime/import-profit/operational/cnf",
+      "access": "rw"
+    },
+    {
+      "role": "am-results",
+      "container_path": "/runtime/import-profit/operational/am-results",
+      "access": "rw"
     }
   ],
   "required_mounts": [
@@ -125,6 +135,16 @@
       "role": "capture-snapshots",
       "container_path": "/runtime/capture-snapshots",
       "read_only": false
+    },
+    {
+      "role": "manual-cnf",
+      "container_path": "/runtime/import-profit/operational/cnf",
+      "read_only": false
+    },
+    {
+      "role": "am-results",
+      "container_path": "/runtime/import-profit/operational/am-results",
+      "read_only": false
     }
   ],
   "required_environment": [
@@ -142,7 +162,10 @@
     "IMPORT_PROFIT_CONFIG_PATH",
     "USDA_DASHBOARD_URL",
     "OIL_WORLD_DASHBOARD_URL",
-    "TMPDIR"
+    "TMPDIR",
+    "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE",
+    "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
+    "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT"
   ],
   "secret_references": [
     "tankan-reader"
@@ -1480,6 +1503,10 @@
     {
       "path": "04_scripts/runtime/spread_runtime_preflight.py",
       "role": "initialization"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/operational_runtime.py",
+      "role": "initialization"
     }
   ],
   "environment_bindings": [
@@ -1567,15 +1594,30 @@
       "kind": "runtime_path",
       "role": "logs",
       "relative_path": ""
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE",
+      "kind": "literal",
+      "value": "1"
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
+      "kind": "runtime_path",
+      "role": "manual-cnf",
+      "relative_path": "manual_cnf_quotes.parquet"
+    },
+    {
+      "name": "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT",
+      "kind": "runtime_path",
+      "role": "am-results",
+      "relative_path": ""
     }
   ],
   "forbidden_environment": [
-    "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE",
     "IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT",
     "IMPORT_PROFIT_INTRADAY_WRITE_MODE",
     "IMPORT_PROFIT_INTRADAY_EXPECTED_RUNTIME_ID",
-    "IMPORT_PROFIT_INTRADAY_BUSINESS_DATE",
-    "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH"
+    "IMPORT_PROFIT_INTRADAY_BUSINESS_DATE"
   ],
   "candidate_runtime_inputs": [
     {

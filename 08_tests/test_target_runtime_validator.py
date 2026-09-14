@@ -31,8 +31,13 @@ def test_spread_source_contract_preserves_full_entrypoint_and_readonly_page_poli
     environment = engine._candidate_environment(contract)
     assert environment["IMPORT_PROFIT_INTRADAY_PAGE_MODE"] == "STRICT_RUNTIME"
     assert environment["IMPORT_PROFIT_INTRADAY_ENVIRONMENT"] == "FORMAL"
-    assert {"IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE", "IMPORT_PROFIT_INTRADAY_BUSINESS_DATE",
-            "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
+    assert environment["IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE"] == "1"
+    assert environment["IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH"] == "/runtime/import-profit/operational/cnf/manual_cnf_quotes.parquet"
+    assert environment["IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT"] == "/runtime/import-profit/operational/am-results"
+    roles = {item['role']: item['access'] for item in contract['runtime_roots']}
+    assert all(roles[role] == 'ro' for role in ('history','cnf','results','snapshots','data','weather'))
+    assert roles['manual-cnf'] == roles['am-results'] == 'rw'
+    assert {"IMPORT_PROFIT_INTRADAY_BUSINESS_DATE",
             "IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT", "IMPORT_PROFIT_INTRADAY_WRITE_MODE"
             } <= set(contract["forbidden_environment"])
     inputs = {item["path"] for item in contract["source_inputs"]}

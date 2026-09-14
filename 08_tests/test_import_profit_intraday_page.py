@@ -41,8 +41,10 @@ def test_strict_runtime_handler_binds_selected_business_date(tmp_path, monkeypat
     from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
     runtime = tmp_path / 'runtime'
     runtime.mkdir()
-    results = runtime / 'results'
-    results.mkdir()
+    results = runtime / 'import-profit/operational/am-results'
+    results.mkdir(parents=True)
+    operational_cnf = runtime / 'import-profit/operational/cnf/manual_cnf_quotes.parquet'
+    operational_cnf.parent.mkdir()
     marker = {'schema_version': 1, 'runtime_id': 'pm-page-fixture',
               'classification': 'fixture', 'module_id': 'soybean-pm',
               'created_at': '2026-09-07T00:00:00+00:00'}
@@ -64,7 +66,8 @@ def test_strict_runtime_handler_binds_selected_business_date(tmp_path, monkeypat
         config_path=ROOT / '02_configs/import_profit_soybean.yaml',
         environment='TEST_ISOLATED_NON_PRODUCTION',
         preview_historical_cnf_path=runtime / 'cnf-history.parquet',
-        allow_cnf_save=True, business_date=day, write_context=context)
+        allow_cnf_save=True, business_date=day, write_context=context,
+        intraday_cnf_store_path=operational_cnf, operational_result_root=results)
     assert seen['paths'].business_date == day
     assert seen['mode'].value == 'STRICT_RUNTIME'
     assert 'saved' not in seen  # Rendering never saves on behalf of the user.
