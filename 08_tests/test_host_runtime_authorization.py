@@ -636,8 +636,17 @@ def test_soybean_isolated_required_rw_passes_routine_and_grant_dry_check(monkeyp
 
 
 @pytest.mark.parametrize('fault',['ro','missing','target','production','production-child','unknown','symlink','junction','parent-alias','inode','root-inode','root-owner','nested-bind','hardlink'])
-@pytest.mark.parametrize('target',['/runtime/capture-snapshots','/runtime/import-profit/operational/cnf','/runtime/import-profit/operational/am-results'])
-def test_candidate_mount_negative_source_and_manifest_matrix(monkeypatch,fault,target):
+def test_candidate_mount_negative_source_and_manifest_matrix(monkeypatch,fault):
+    _check_candidate_mount_negative(monkeypatch, fault, '/runtime/capture-snapshots')
+
+
+@pytest.mark.parametrize('fault',['ro','missing','target','production','production-child','unknown','symlink','junction','parent-alias','inode','root-inode','root-owner','nested-bind','hardlink'])
+@pytest.mark.parametrize('target',['/runtime/import-profit/operational/cnf','/runtime/import-profit/operational/am-results'])
+def test_operational_candidate_mount_negative_source_and_manifest_matrix(monkeypatch,fault,target):
+    _check_candidate_mount_negative(monkeypatch, fault, target)
+
+
+def _check_candidate_mount_negative(monkeypatch,fault,target):
     f=isolation_fixture(monkeypatch);mount=next(m for m in f.policy['mounts'] if m['target']==target);source=mount['source']
     if fault=='ro':mount['read_only']=True;next(b for b in f.descriptor['binds'] if b['source']==source)['read_only']=True;f.seal()
     elif fault=='missing':f.policy['mounts'].remove(mount)
