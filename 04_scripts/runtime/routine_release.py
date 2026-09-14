@@ -388,7 +388,7 @@ class DockerSession:
             policy = self.protected_json(self.spec['policy_template'])
             normalized = [dict(source=m['source'], target=m['target'], read_only=m.get('read_only', False)) for m in mounts]
             self.host.validate_candidate_mounts(self.contract, normalized, policy,
-                Path(self.spec['grant_directory']), live=bool(self.container_id))
+                Path(self.spec['grant_directory']), live=bool(self.container_id), container_id=self.container_id)
             return
         writable = {r['container_path'] for r in self.contract['runtime_roots']
                     if r['access'] == 'rw' and r['role'] in {'outputs', 'logs', 'cache', 'temporary'}}

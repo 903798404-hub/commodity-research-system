@@ -706,6 +706,26 @@ def _load_private_key(path: str | Path):
     return key
 
 
+def _reject_other_writable_sources(root: str, own_container: str | None) -> None:
+    """Observe other containers, including stopped production recovery instances."""
+    ids = _run_docker(['ps', '-aq', '--no-trunc']).decode('ascii').split()
+    for cid in ids:
+        _container_id(cid)
+        if cid == own_container:
+            continue
+        container = docker_inspect(cid)
+        if not isinstance(container.get('Mounts'), list):
+            raise HostAuthorizationError('container mount observation is incomplete')
+        for mount in container['Mounts']:
+            if not isinstance(mount, dict) or type(mount.get('RW')) is not bool:
+                raise HostAuthorizationError('container mount mode is unknown')
+            if mount['RW'] is not True:
+                continue
+            source = Path(_absolute(mount.get('Source'))).resolve(strict=True)
+            if _within(str(source), root) or _within(root, str(source)):
+                raise HostAuthorizationError('candidate storage overlaps another container writable source')
+
+
 def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path, *, check_expiry: bool = True) -> None:
     grant_target = policy["grant_container_directory"]
     if {"source": str(grant_dir), "target": grant_target, "read_only": True} not in observed["mounts"]:
@@ -734,10 +754,12 @@ def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path,
                 raise HostAuthorizationError("production cannot mount a development Git checkout")
         if source == Path("/") or any(_within(str(source), root) or _within(root, str(source)) for root in ("/var/run", "/run", "/var/lib/docker", "/proc", "/sys", "/dev", "/root")):
             raise HostAuthorizationError("control or host system directory mount rejected")
+    if policy['role'] == 'candidate_validation' and policy['schema_version'] in _CANDIDATE_POLICIES:
+        _reject_other_writable_sources(policy['candidate_host_root'], observed.get('container_id'))
 
 
 def validate_candidate_mounts(manifest: Mapping, mounts: list[dict], policy: Mapping,
-                              grant_dir: Path, *, live: bool = False) -> None:
+                              grant_dir: Path, *, live: bool = False, container_id: str | None = None) -> None:
     """The routine preflight and issuer share the existing host source identities."""
     validate_policy(policy, "candidate_validation")
     if any(manifest.get(key) != policy[key] for key in ('project_id', 'module_id', 'service_id')):
@@ -746,7 +768,7 @@ def validate_candidate_mounts(manifest: Mapping, mounts: list[dict], policy: Map
     if sorted(mounts, key=lambda m: m['target']) != sorted(policy['mounts'], key=lambda m: m['target']):
         raise HostAuthorizationError("candidate mounts differ from protected policy")
     _validate_runtime_mounts(manifest, mounts, policy)
-    _validate_mount_sources({'mounts': mounts}, policy, grant_dir, check_expiry=not live)
+    _validate_mount_sources({'mounts': mounts, 'container_id': container_id}, policy, grant_dir, check_expiry=not live)
 
 
 def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:

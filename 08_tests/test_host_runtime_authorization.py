@@ -610,6 +610,7 @@ def isolation_fixture(monkeypatch):
     p=v3_policy('candidate_validation');p.update(project_id=manifest['project_id'],module_id=manifest['module_id'],service_id=manifest['service_id'],candidate_host_root=root,mounts=mounts)
     p['candidate_scope']=dict(descriptor_path=descriptor_path,descriptor_sha256=hashlib.sha256(nodes[descriptor_path]['raw']).hexdigest(),scope_id='2'*32)
     monkeypatch.setattr(host,'Path',P);monkeypatch.setattr(host,'_require_linux_root',lambda:None);monkeypatch.setattr(host,'_host_mount_points',lambda:())
+    monkeypatch.setattr(host,'_run_docker',lambda args: b'' if args==['ps','-aq','--no-trunc'] else pytest.fail('unexpected Docker observation'))
     # Simulate only OS enumeration, preserving the real ownership/alias checks.
     def walk(path,**kwargs):
         for name,n in list(nodes.items()):
@@ -700,3 +701,17 @@ def test_approved_production_readonly_does_not_require_fake_fixture_bytes(monkey
     f.nodes[f.prodroot+'/snapshots']['ino']+=1
     with pytest.raises(host.HostAuthorizationError,match='identity changed'):
         host._validate_v3_runtime(runtime,{'config':{'Env':[]},'mounts':f.policy['mounts']},f.policy,CID)
+
+
+@pytest.mark.parametrize('relation',['same','ancestor','child','disjoint','readonly','own'])
+def test_actual_other_container_writable_overlap(monkeypatch,relation):
+    f=isolation_fixture(monkeypatch)
+    source=f.root if relation in ('same','readonly','own') else str(f.P(f.root).parent) if relation=='ancestor' else f.root+'/capture-snapshots' if relation=='child' else f.prodroot+'/snapshots'
+    c=dict(Id=CID,Mounts=[dict(Source=source,RW=relation!='readonly',Type='bind')])
+    monkeypatch.setattr(host,'_run_docker',lambda args,**kwargs:(CID+'\n').encode() if args[0]=='ps' else json.dumps([c]).encode())
+    args=(f.manifest,f.policy['mounts'],f.policy,f.P(f.grants))
+    if relation in ('disjoint','readonly','own'):
+        host.validate_candidate_mounts(*args,container_id=CID if relation=='own' else None)
+    else:
+        with pytest.raises(host.HostAuthorizationError,match='overlaps another container'):
+            host.validate_candidate_mounts(*args)
