@@ -20,6 +20,20 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 ACCEPTANCE_SCHEMA = 'routine-candidate-acceptance/1'
+WAITING = 'WAITING_FOR_MAINTAINER_UI_ACCEPTANCE'
+
+
+def acceptance_mode(request):
+    mode = request.get('ui_acceptance_mode', 'AUTOMATED')
+    require(mode in ('MANUAL', 'AUTOMATED'), 'UNKNOWN_UI_ACCEPTANCE_MODE')
+    return mode
+
+
+def check_browser(mode):
+    if mode == 'AUTOMATED':
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            require(Path(p.chromium.executable_path).is_file(), 'CHROMIUM_NOT_AVAILABLE')
 
 
 class RoutineError(ValueError):
@@ -56,6 +70,9 @@ def validate_acceptance(record, *, commit, tree, image_id):
             and record.get('image_id') == image_id, 'ACCEPTANCE_IDENTITY_MISMATCH')
     require(record.get('result') == 'PASS' and all(record.get(k) == 'PASS' for k in
             ('runtime_preflight', 'health', 'application_smoke', 'candidate_cleanup')), 'CANDIDATE_NOT_ACCEPTED')
+    if acceptance_mode(record) == 'MANUAL':
+        require(record.get('http') == 'PASS' and record.get('manual_ui', {}).get('decision') == 'PASS'
+                and bool(record['manual_ui'].get('operator')), 'MANUAL_ACCEPTANCE_MISSING')
     require(isinstance(record.get('release_id'), str) and bool(record['release_id']), 'RELEASE_ID_MISSING')
     require(re.fullmatch(r'[0-9a-f]{40}', record.get('base_commit', '')) is not None, 'BASE_MISSING')
     stamp = datetime.fromisoformat(record['validated_at'])
@@ -102,28 +119,39 @@ def check_ci(ci, binding):
     return ci['checks']['workflow_run_id']
 
 
-def candidate_acceptance(backend, image, *, base_commit, ci_run):
+def candidate_acceptance(backend, image, *, base_commit, ci_run, mode='AUTOMATED'):
     """The backend performs fresh create/grant/start and actual application IO."""
     result = dict(schema_version=ACCEPTANCE_SCHEMA, **image, base_commit=base_commit,
                   project_id=backend.project_id, ci_run=ci_run, validated_at=now(),
                   runtime_preflight='NOT_RUN', health='NOT_RUN', application_smoke='NOT_RUN',
-                  candidate_cleanup='NOT_RUN', result='FAIL')
+                  candidate_cleanup='NOT_RUN', result='FAIL', ui_acceptance_mode=mode)
+    require(mode in ('MANUAL', 'AUTOMATED'), 'UNKNOWN_UI_ACCEPTANCE_MODE')
     try:
         backend.create(image, 'candidate_validation')
         backend.grant_and_start(image, 'candidate_validation')
         result['runtime_preflight'] = backend.preflight()
         result['health'] = backend.health()
-        result['application_smoke'] = backend.smoke()
-        require(all(result[k] == 'PASS' for k in ('runtime_preflight', 'health', 'application_smoke')), 'CANDIDATE_SMOKE_FAILED')
+        if mode == 'MANUAL':
+            result['http'] = backend.http()
+            require(result['runtime_preflight'] == result['health'] == result['http'] == 'PASS', 'CANDIDATE_SMOKE_FAILED')
+        else:
+            result['application_smoke'] = backend.smoke()
+            require(all(result[k] == 'PASS' for k in ('runtime_preflight', 'health', 'application_smoke')), 'CANDIDATE_SMOKE_FAILED')
         backend.assert_image(image)
         backend.assert_data_readonly()
-        result['result'] = 'PASS'
+        if mode == 'MANUAL':
+            result.update(instance=backend.checkpoint(), stage='candidate', result=WAITING)
+        else:
+            result['result'] = 'PASS'
     except Exception as exc:
         result['failure'] = type(exc).__name__ + ': ' + str(exc)
     finally:
         try:
-            backend.cleanup()
-            result['candidate_cleanup'] = 'PASS'
+            if result['result'] != WAITING:
+                backend.cleanup()
+                result['candidate_cleanup'] = 'PASS'
+            else:
+                result['candidate_cleanup'] = 'RETAINED_FOR_MANUAL_UI'
         except Exception as exc:
             result.update(result='FAIL', candidate_cleanup='FAIL', cleanup_failure=str(exc))
         result['validated_at'] = now()
@@ -136,7 +164,8 @@ def deploy_same_image(backend, image, acceptance, previous, *, ci_run):
     require(acceptance['ci_run'] == ci_run, 'CI_RUN_MISMATCH')
     require(acceptance['base_commit'] == previous['commit'], 'PRODUCTION_BASE_MOVED')
     # This function has no build operation. Docker create always uses --no-build.
-    result = dict(schema_version='routine-deployment-result/1', **image, ci_run=ci_run,
+    mode = acceptance_mode(acceptance)
+    result = dict(schema_version='routine-deployment-result/1', **image, ci_run=ci_run, ui_acceptance_mode=mode,
                   candidate_acceptance='PASS', deployed_at=now(), previous_release=previous,
                   production_health='NOT_RUN', production_smoke='NOT_RUN', result='FAIL', rollback='NOT_NEEDED')
     switched = False
@@ -146,13 +175,21 @@ def deploy_same_image(backend, image, acceptance, previous, *, ci_run):
         switched = True  # A failed create can already have stopped/replaced the old container.
         backend.create(image, 'production')
         backend.grant_and_start(image, 'production')
-        require(backend.preflight() == 'PASS', 'PRODUCTION_PREFLIGHT_FAILED')
+        result['runtime_preflight'] = backend.preflight()
+        require(result['runtime_preflight'] == 'PASS', 'PRODUCTION_PREFLIGHT_FAILED')
         result['production_health'] = backend.health()
-        result['production_smoke'] = backend.smoke()
-        require(result['production_health'] == result['production_smoke'] == 'PASS', 'PRODUCTION_SMOKE_FAILED')
+        if mode == 'MANUAL':
+            result['http'] = backend.http()
+            require(result['production_health'] == result['http'] == 'PASS', 'PRODUCTION_SMOKE_FAILED')
+        else:
+            result['production_smoke'] = backend.smoke()
+            require(result['production_health'] == result['production_smoke'] == 'PASS', 'PRODUCTION_SMOKE_FAILED')
         backend.assert_image(image)
         backend.assert_data_readonly()
-        result['result'] = 'PASS'
+        if mode == 'MANUAL':
+            result.update(instance=backend.checkpoint(), stage='production', result=WAITING)
+        else:
+            result['result'] = 'PASS'
     except Exception as exc:
         result['failure'] = type(exc).__name__ + ': ' + str(exc)
         if switched:
@@ -161,6 +198,61 @@ def deploy_same_image(backend, image, acceptance, previous, *, ci_run):
                 result['rollback'] = 'PASS'
             except Exception as rollback_error:
                 result.update(rollback='FAIL', rollback_failure=str(rollback_error))
+    return result
+
+
+def finish_manual(backend, image, checkpoint, *, stage, decision, operator, ci_run):
+    """Record an explicit maintainer decision; never manufacture a machine PASS.
+
+    Input/output are ordinary protected deployment records, not approval tokens.
+    A resumed process may only use the original, continuously running instance.
+    """
+    require(stage in ('candidate', 'production'), 'MANUAL_STAGE')
+    require(decision in ('PASS', 'FAIL', 'CANCEL') and isinstance(operator, str)
+            and bool(operator.strip()), 'EXPLICIT_MANUAL_DECISION_REQUIRED')
+    require(checkpoint.get('result') == WAITING and checkpoint.get('stage') == stage
+            and acceptance_mode(checkpoint) == 'MANUAL', 'NOT_WAITING_FOR_MANUAL_UI')
+    require(all(checkpoint.get(k) == image[k] for k in image)
+            and checkpoint.get('ci_run') == ci_run, 'CHECKPOINT_IDENTITY_MISMATCH')
+    expected_schema = ACCEPTANCE_SCHEMA if stage == 'candidate' else 'routine-deployment-result/1'
+    health_key = 'health' if stage == 'candidate' else 'production_health'
+    require(checkpoint.get('schema_version') == expected_schema and all(checkpoint.get(k) == 'PASS'
+            for k in ('runtime_preflight', health_key, 'http')), 'MACHINE_FAILURE_CANNOT_BE_OVERRIDDEN')
+    # Attach first. If the instance identity changed, do not delete a replacement.
+    result = copy.deepcopy(checkpoint)
+    result.update(result='FAIL', manual_ui=dict(decision=decision, operator=operator.strip(), recorded_at=now()))
+    try:
+        backend.resume(checkpoint['instance'], stage)
+    except Exception as exc:
+        result.update(failure=type(exc).__name__ + ': ' + str(exc),
+                      recovery='STOP_INSTANCE_IDENTITY_UNPROVEN', finalized_at=now())
+        return result
+    try:
+        backend.assert_image(image)
+        backend.assert_data_readonly()
+        result[health_key] = backend.health()
+        result['http'] = backend.http()
+        require(result[health_key] == result['http'] == 'PASS', 'MACHINE_FAILURE_CANNOT_BE_OVERRIDDEN')
+        require(decision == 'PASS', 'MANUAL_UI_' + decision)
+        result['application_smoke' if stage == 'candidate' else 'production_smoke'] = 'PASS'
+        result['result'] = 'PASS'
+    except Exception as exc:
+        result['failure'] = type(exc).__name__ + ': ' + str(exc)
+    finally:
+        if stage == 'candidate':
+            try:
+                backend.cleanup()
+                result['candidate_cleanup'] = 'PASS'
+            except Exception as exc:
+                result.update(result='FAIL', candidate_cleanup='FAIL', cleanup_failure=str(exc))
+            result['validated_at'] = now()
+        elif result['result'] != 'PASS':
+            try:
+                backend.rollback(result['previous_release'])
+                result['rollback'] = 'PASS'
+            except Exception as exc:
+                result.update(rollback='FAIL', rollback_failure=str(exc))
+    result['finalized_at'] = now()
     return result
 
 
@@ -357,6 +449,37 @@ class DockerSession:
             time.sleep(1)
         raise RoutineError('HEALTH_FAILED')
 
+    def application_url(self):
+        path = self.request['application_smoke']['path']
+        require(isinstance(path, str) and path.startswith(('/', '?')) and not path.startswith('//')
+                and '\\' not in path, 'SMOKE_MUST_USE_ACTUAL_CONTAINER_PORT')
+        return self.url() + path
+
+    def http(self):
+        url = self.application_url()
+        with urllib.request.urlopen(url, timeout=10) as response:
+            require(response.status == 200 and response.geturl() == url
+                    and bool(response.read(4096)), 'APPLICATION_HTTP_FAILED')
+        return 'PASS'
+
+    def checkpoint(self):
+        container = self.engine.inspect_one('container', self.container_id)
+        require(container['State']['Running'] is True, 'APPLICATION_NOT_RUNNING')
+        return dict(container_id=self.container_id, started_at=container['State']['StartedAt'],
+                    restart_count=container['RestartCount'], url=self.application_url(), spec=copy.deepcopy(self.spec))
+
+    def resume(self, instance, stage):
+        spec = self.request['candidate' if stage == 'candidate' else 'production']
+        require(spec == instance['spec'], 'INSTANCE_INPUTS_CHANGED')
+        container = self.engine.inspect_one('container', instance['container_id'])
+        require(container['Id'] == instance['container_id'] and container['State']['Running'] is True
+                and container['State']['StartedAt'] == instance['started_at']
+                and container['RestartCount'] == instance['restart_count'], 'WAITING_INSTANCE_CHANGED')
+        ids = self.compose(spec, 'ps', '-q', '--all', self.contract['service_id']).stdout.decode().split()
+        require(ids == [instance['container_id']], 'WAITING_NAMESPACE_CHANGED')
+        self.spec, self.container_id = spec, instance['container_id']
+        require(self.application_url() == instance['url'], 'WAITING_URL_CHANGED')
+
     def smoke(self):
         smoke = self.request['application_smoke']
         path = smoke['path']
@@ -411,6 +534,9 @@ class DockerSession:
         backend.create(image, 'production')
         backend.grant_and_start(image, 'production')
         require(backend.preflight() == backend.health() == 'PASS', 'ROLLBACK_HEALTH_FAILED')
+        require(backend.http() == 'PASS', 'ROLLBACK_HTTP_FAILED')
+        if acceptance_mode(self.request) == 'MANUAL':
+            return
         # Previous releases need their own consumer contract, not the new fix's
         # twelve-row invariant. Require the real previous page to load cleanly.
         from playwright.sync_api import sync_playwright
@@ -427,7 +553,7 @@ class DockerSession:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('phase', choices=['build', 'validate', 'deploy'])
+    parser.add_argument('phase', choices=['build', 'validate', 'deploy', 'candidate-ui', 'production-ui'])
     parser.add_argument('--request', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
@@ -464,19 +590,28 @@ def main(argv=None):
     else:
         # Browser installation is an execution-environment prerequisite. Never
         # install it implicitly during a production switch.
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            require(Path(p.chromium.executable_path).is_file(), 'CHROMIUM_NOT_AVAILABLE')
+        mode = acceptance_mode(request)
+        check_browser(mode)
         image = image_identity(engine, request['image_id'], binding, contract['service_id'])
         if args.phase == 'validate':
             require(request.get('candidate_authorized') is True, 'CANDIDATE_NOT_AUTHORIZED')
-            result = candidate_acceptance(backend, image, base_commit=request['base_commit'], ci_run=ci_run)
+            result = candidate_acceptance(backend, image, base_commit=request['base_commit'], ci_run=ci_run, mode=mode)
+        elif args.phase in ('candidate-ui', 'production-ui'):
+            stage = args.phase.split('-')[0]
+            require(mode == 'MANUAL', 'MANUAL_MODE_REQUIRED')
+            require(request.get('candidate_authorized' if stage == 'candidate' else 'production_authorized') is True,
+                    'MANUAL_STAGE_NOT_AUTHORIZED')
+            checkpoint = backend.protected_json(request['checkpoint_record'])
+            decision = request['manual_ui']
+            result = finish_manual(backend, image, checkpoint, stage=stage, decision=decision['decision'],
+                                   operator=decision['operator'], ci_run=ci_run)
         else:
             require(request.get('production_authorized') is True, 'PRODUCTION_NOT_AUTHORIZED')
             acceptance = backend.protected_json(request['acceptance_record'])
+            require(acceptance_mode(acceptance) == mode, 'ACCEPTANCE_MODE_CHANGED')
             result = deploy_same_image(backend, image, acceptance, request['previous_release'], ci_run=ci_run)
     engine._write_new(args.output, engine._canonical(result))
-    return 0 if result.get('result', 'PASS') == 'PASS' else 1
+    return 0 if result.get('result', 'PASS') == 'PASS' else 2 if result.get('result') == WAITING else 1
 
 
 if __name__ == '__main__':

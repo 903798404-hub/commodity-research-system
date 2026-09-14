@@ -37,7 +37,7 @@
 - 不得再建议用户安装 Docker Desktop、Podman 或 WSL，也不得要求用户为本项目安装这些工具。Windows 本地只负责代码修改、Python 和前端测试、Streamlit 启动检查、Dockerfile 与 Compose 静态检查、构建上下文文件存在性检查，以及 Git 差异和工作区检查。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须在服务器隔离候选目录中重建对应镜像，不得在服务器正式仓库中直接构建。
 - 服务器候选源码必须来自独立只读浅克隆的完整 SHA；候选镜像必须带不可变 SHA 标签和 `org.opencontainers.image.revision=<完整SHA>`。
-- 候选容器只是一次性测试容器，只能绑定服务器本机测试端口；成功或失败都必须先保存有限脱敏证据并密封候选结果，再删除候选容器并确认不存在，之后才可生成部署计划。服务器平时只保留 `spread-dashboard`、`usda-dashboard`、`oil-world-dashboard` 三个正式运行容器。
+- 候选容器只是一次性测试容器，只能绑定服务器本机测试端口；下述清理时点对 Routine MANUAL 等待采用后文例外；成功或失败都必须先保存有限脱敏证据并密封候选结果，再删除候选容器并确认不存在，之后才可生成部署计划。服务器平时只保留 `spread-dashboard`、`usda-dashboard`、`oil-world-dashboard` 三个正式运行容器。
 - 候选验证通过后保留候选镜像，正式部署直接使用同一个镜像 ID；该镜像必须已经通过验收，不得对同一个提交重新构建第二个正式镜像。
 - 候选容器如需正式数据，只允许只读挂载；缓存、日志和临时文件必须写入对应候选目录的 `runtime/`，不得修改正式业务数据。
 - 仅修改一个服务时，不得无必要重建或重启另一个服务。
@@ -85,3 +85,14 @@ main Ruleset 保持 Active、required check `trusted-main-admission-v1`、non-fa
 START / RESUME 会 fetch 并写 local Git metadata，不是纯 read-only。开发启动不依赖无关 local main checkout 是否 clean、mirror；只有实际 main 同步才核验镜像。runtime_target=none 不要求 runtime root、marker 或 production evidence。可选工具入口 `start_project.py --project <id> --branch feat/<name> --worktree <path> --create`；直接创建 feature/fix branch 同样合法。普通已授权任务无需重复 commit/push 许可。
 
 执行 `git fetch origin`、`git ls-remote origin refs/heads/main` 核对 fresh main；聊天历史 SHA 不是执行权威。
+
+## Routine Stateless UI Acceptance
+
+只有机器分类为 ROUTINE_STATELESS 才允许选择 MANUAL 或 AUTOMATED；高风险流程不变。
+MANUAL 不要求 Playwright/Chromium，AUTOMATED 保留真实浏览器依赖和 DOM 验证。低风险 UI 可选人工验收。
+Commit/Tree、CI、risk、exact Image/OCI、fresh grant、runtime preflight、health/HTTP、readonly data 均保持硬 Gate；人工不能覆盖机器失败。
+机器通过后 MANUAL 输出 WAITING_FOR_MAINTAINER_UI_ACCEPTANCE，保留隔离 candidate 和 URL/精确实例；这不是最终 PASS。
+用户明确验收后记录 operator、timestamp、Commit/Tree/Image/实例和人工结果，无签名审批或审批服务器。
+Candidate PASS 后清理候选容器并部署同一镜像，新 production 实例仍需 fresh grant；未确认/拒绝/取消不得切换。
+Production 机器通过后再次等待人工 UI；人工 PASS 才完成 release，人工 FAIL 或机器失败按既有合同恢复上一精确镜像与 fresh grant。
+等待允许暂留 candidate；取消、失败或验收完成时清理其明确实例并保留普通诊断记录，不删除镜像或业务数据。
