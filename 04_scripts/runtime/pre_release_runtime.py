@@ -517,12 +517,16 @@ def classify_release(repo: Path, base: str, target: str, project_id: str) -> dic
                          "runtime_effect": 'RUNTIME_ACTIVE_CHANGE' if path in active or path in infrastructure else
                          'PACKAGED_INACTIVE_CHANGE' if graph_complete and included(path) else 'UNPROVEN_OR_OUTSIDE_IMAGE'})
     high = unsupported or any(f["high_risk"] for f in findings)
+    reversibility = _load('04_scripts/runtime/release_reversibility.py', '_release_reversibility')
+    state = reversibility.classify(snapshots[base], snapshots[target], contract_path, findings, graphs) if high else {
+        'STATE_CHANGE_CLASS': 'NOT_APPLICABLE', 'REVERSIBILITY_EVIDENCE': {'analysis': 'stateless', 'failure_codes': []}}
+    risk_class = "STATEFUL_OR_INFRA" if high else "ROUTINE_STATELESS"
     return {"schema_version": RISK_SCHEMA, "base": before, "target": after, "project_id": project_id,
             "build_contract_sha256": hashlib.sha256(read(base, contract_path)).hexdigest(),
             "build_projection_complete": not unsupported, "findings": findings,
             "RUNTIME_EFFECTIVE_DELTA": {"analysis": "static-import-and-file-reference/1", "base": graphs[base], "target": graphs[target]},
-            "RELEASE_RISK_CLASS": "STATEFUL_OR_INFRA" if high else "ROUTINE_STATELESS",
-            "ROLLBACK_REHEARSAL_REQUIRED": high}
+            "RELEASE_RISK_CLASS": risk_class, **state,
+            **reversibility.requirements(risk_class, state['STATE_CHANGE_CLASS'])}
 
 
 def _risk_fields(value, fields, name):
@@ -602,29 +606,43 @@ def verify_rollback_assets(repo: Path, assets: dict, host) -> dict:
 def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated: bool,
                           irreversible_state_change: str, compatibility: bool,
                           acceptance_plan_ready: bool, rehearsal_validated: bool,
-                          old_grant_expired: bool) -> dict:
+                          old_grant_expired: bool, targeted_recovery_validated: bool = False) -> dict:
     """Pure aggregation of trusted observations, never an authorization API.
 
     Unknown state/compatibility fails closed. An expired historical grant is
     explicitly informational, not an asset readiness predicate.
     """
     flags = (assets_ready, candidate_validated, compatibility, acceptance_plan_ready,
-             rehearsal_validated, old_grant_expired)
+             rehearsal_validated, old_grant_expired, targeted_recovery_validated)
     if any(type(v) is not bool for v in flags) or irreversible_state_change not in ("YES", "NO", "UNKNOWN"):
         raise PreReleaseError("invalid release observations")
     if risk.get("RELEASE_RISK_CLASS") not in ("ROUTINE_STATELESS", "STATEFUL_OR_INFRA"):
         raise PreReleaseError("unknown release risk class")
     high = risk["RELEASE_RISK_CLASS"] == "STATEFUL_OR_INFRA" or irreversible_state_change != "NO"
+    state_class = risk.get('STATE_CHANGE_CLASS', 'UNKNOWN' if high else 'NOT_APPLICABLE')
+    if state_class not in ('NOT_APPLICABLE', 'ADDITIVE_REVERSIBLE', 'IRREVERSIBLE_OR_DESTRUCTIVE', 'UNKNOWN'):
+        raise PreReleaseError('unknown state change class')
+    if irreversible_state_change == 'YES':
+        state_class = 'IRREVERSIBLE_OR_DESTRUCTIVE'
+    elif irreversible_state_change == 'UNKNOWN' or high and state_class == 'NOT_APPLICABLE':
+        state_class = 'UNKNOWN'
+    full = high and state_class != 'ADDITIVE_REVERSIBLE'
     failures = []
     for ok, code in ((assets_ready, "ROLLBACK_ASSETS_INCOMPLETE"), (candidate_validated, "NEW_CANDIDATE_NOT_VALIDATED"),
                      (compatibility, "DATA_SCHEMA_COMPATIBILITY_UNPROVEN"), (acceptance_plan_ready, "ACCEPTANCE_PLAN_MISSING"),
                      (irreversible_state_change == "NO", "IRREVERSIBLE_STATE_REQUIRES_SEPARATE_MIGRATION_GATE"),
-                     (not high or rehearsal_validated, "RECOVERY_REHEARSAL_REQUIRED")):
+                     (state_class != 'IRREVERSIBLE_OR_DESTRUCTIVE', "DESTRUCTIVE_CHANGE_REQUIRES_SEPARATE_MIGRATION_GATE"),
+                     (state_class != 'UNKNOWN', "STATE_COMPATIBILITY_UNPROVEN"),
+                     (not full or rehearsal_validated, "RECOVERY_REHEARSAL_REQUIRED"),
+                     (not high or targeted_recovery_validated or full and rehearsal_validated,
+                      "TARGETED_RECOVERY_VALIDATION_REQUIRED")):
         if not ok:
             failures.append(code)
     return {"RELEASE_RISK_CLASS": "STATEFUL_OR_INFRA" if high else "ROUTINE_STATELESS",
             "ROLLBACK_ASSETS_READY": assets_ready, "IRREVERSIBLE_STATE_CHANGE": irreversible_state_change,
-            "ROLLBACK_REHEARSAL_REQUIRED": high, "OLD_GRANT_EXPIRED": old_grant_expired,
+            "STATE_CHANGE_CLASS": state_class,
+            "ROLLBACK_REHEARSAL_REQUIRED": full, "FULL_ROLLBACK_REHEARSAL_REQUIRED": full,
+            "TARGETED_RECOVERY_VALIDATION_REQUIRED": high, "OLD_GRANT_EXPIRED": old_grant_expired,
             "EXECUTION_AUTHORIZATION": "REQUIRED_AT_FRESH_INSTANCE_START",
             "PRODUCTION_RELEASE_PREFLIGHT": "FAIL" if failures else "PASS", "failure_codes": failures,
             "production_authorized": False}
@@ -632,7 +650,7 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
 
 
 
-def verify_recovery_observation(recovery: dict, host) -> None:
+def verify_recovery_observation(recovery: dict, host, *, targeted_roots: list | None = None) -> None:
     """Verify sealed runtime observations, including fresh grant at actual start.
 
     This is retrospective evidence verification, not permission to start now.
@@ -682,6 +700,74 @@ def verify_recovery_observation(recovery: dict, host) -> None:
                 or type(result["exit_code"]) is not int or result["exit_code"] != 0 or result["status"] != "PASS"
                 or not _risk_file(result["raw"], host).strip()):
             raise PreReleaseError("recovery probe failed or identity differs")
+    if targeted_roots is not None:
+        verify_targeted_preservation(observations, host, targeted_roots)
+
+
+def verify_targeted_preservation(observations: dict, host, roots: list) -> None:
+    """Reuse existing bound raw probe artifacts; no extra approval/protocol.
+
+    For targeted recovery, consumer is basic HTTP, not a full business replay.
+    The data probe enumerates retained history and the actual new bind sources
+    before/after recovery, plus old instance mounts. Collection is host-owned.
+    """
+    from pathlib import PurePosixPath
+    http = host._json(_risk_file(observations['consumer']['raw'], host))
+    _risk_fields(http, ('url', 'status_code'), 'recovery HTTP')
+    if (not isinstance(http['url'], str) or not re.fullmatch(r'http://127\.0\.0\.1:[0-9]+(?:/[^\s]*)?', http['url'])
+            or type(http['status_code']) is not int or http['status_code'] != 200):
+        raise PreReleaseError('targeted recovery HTTP failed')
+    data = host._json(_risk_file(observations['data_unchanged']['raw'], host))
+    _risk_fields(data, ('historical_before', 'historical_after', 'operational_before',
+                       'operational_after', 'old_mounts'), 'targeted preservation')
+    if (not data['historical_before'] or data['historical_before'] != data['historical_after']
+            or data['operational_before'] != data['operational_after']):
+        raise PreReleaseError('recovery changed persistent data')
+    def absolute(value):
+        if not isinstance(value, str) or not value.startswith('/') or '..' in value.split('/') or '\\' in value:
+            raise PreReleaseError('invalid preservation path')
+        return PurePosixPath(value)
+    def hashes(files, relative=False):
+        if type(files) is not dict:
+            raise PreReleaseError('invalid preservation file listing')
+        for name, digest in files.items():
+            if relative:
+                if not isinstance(name, str) or not name or name.startswith('/') or '..' in name.split('/') or '\\' in name:
+                    raise PreReleaseError('invalid relative preservation path')
+            else:
+                absolute(name)
+            if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
+                raise PreReleaseError('invalid preserved content identity')
+    hashes(data['historical_before'])
+    expected = {r['container_path'] for r in roots}
+    if not expected or len(expected) != len(roots):
+        raise PreReleaseError('targeted recovery roots missing or duplicated')
+    stores = data['operational_before']
+    if type(stores) is not list or len(stores) != len(expected) or {s['container_path'] for s in stores} != expected:
+        raise PreReleaseError('targeted recovery omits new state surface')
+    sources = []
+    for store in stores:
+        _risk_fields(store, ('container_path', 'source', 'device', 'inode', 'files'), 'preserved store')
+        source = absolute(store['source'])
+        if type(store['device']) is not int or type(store['inode']) is not int or store['inode'] <= 0:
+            raise PreReleaseError('new store identity missing')
+        hashes(store['files'], relative=True)
+        if any(source == absolute(p) or source in absolute(p).parents or absolute(p) in source.parents
+               for p in data['historical_before']):
+            raise PreReleaseError('new operational source overlaps historical data')
+        if any(source == p or source in p.parents or p in source.parents for p in sources):
+            raise PreReleaseError('new stores overlap')
+        sources.append(source)
+    if type(data['old_mounts']) is not list or not data['old_mounts']:
+        raise PreReleaseError('old instance mounts missing')
+    for mount in data['old_mounts']:
+        _risk_fields(mount, ('source', 'target', 'read_only'), 'recovery mount')
+        source = absolute(mount['source'])
+        absolute(mount['target'])
+        if type(mount['read_only']) is not bool:
+            raise PreReleaseError('untyped mount permission')
+        if not mount['read_only'] and any(source == p or source in p.parents or p in source.parents for p in sources):
+            raise PreReleaseError('old runtime can write new operational state')
 
 
 def assess_release(request_path: Path, destination: Path) -> dict:
@@ -732,12 +818,16 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     if any(type(state[k]) is not bool for k in ("compatible", "database_migration", "production_data_mutation", "storage_format_change")):
         raise PreReleaseError("state plan requires boolean facts")
     if any(state[k] for k in ("database_migration", "production_data_mutation", "storage_format_change")):
-        risk.update(RELEASE_RISK_CLASS="STATEFUL_OR_INFRA", ROLLBACK_REHEARSAL_REQUIRED=True)
+        risk.update(RELEASE_RISK_CLASS="STATEFUL_OR_INFRA", STATE_CHANGE_CLASS="IRREVERSIBLE_OR_DESTRUCTIVE",
+                    ROLLBACK_REHEARSAL_REQUIRED=True, FULL_ROLLBACK_REHEARSAL_REQUIRED=True,
+                    TARGETED_RECOVERY_VALIDATION_REQUIRED=True)
     acceptance = host._json(_risk_file(request["acceptance_plan"], host))
     _risk_fields(acceptance, ("target", "image_id", "checks"), "acceptance plan")
     if acceptance["target"] != risk["target"] or acceptance["image_id"] != candidate["image_id"] or type(acceptance["checks"]) is not list or not acceptance["checks"] or any(not isinstance(c, str) or not c.strip() for c in acceptance["checks"]):
         raise PreReleaseError("acceptance plan identity/checks missing")
     rehearsal = False
+    targeted = False
+    targeted_roots = None
     if request["recovery_evidence"] is not None:
         recovery = host._json(_risk_file(request["recovery_evidence"], host))
         _risk_fields(recovery, ("schema_version", "base", "target", "old_image_id", "runtime_config_sha256",
@@ -746,17 +836,23 @@ def assess_release(request_path: Path, destination: Path) -> dict:
                 or recovery["target"] != risk["target"] or recovery["old_image_id"] != retained[0]["image_id"]
                 or recovery["runtime_config_sha256"] != request["current"]["runtime_config"]["sha256"]
                 or recovery["data_schema_sha256"] != request["current"]["data_schema"]["sha256"]
-                or recovery["method"] not in ("fresh-recovery", "blue-green", "canary")):
+                or recovery["method"] not in ("fresh-recovery", "blue-green", "canary", "targeted-recovery")):
             raise PreReleaseError("recovery observation identity differs")
         observed = datetime.fromisoformat(recovery["observed_at"].replace("Z", "+00:00"))
         if observed.tzinfo is None or not timedelta(0) <= datetime.now(timezone.utc) - observed <= timedelta(hours=24):
             raise PreReleaseError("recovery observation expired")
         _risk_fields(recovery["evidence"], ("instance", "grant", "preflight", "health", "consumer", "data_unchanged"), "recovery evidence")
-        verify_recovery_observation(recovery, host)
-        rehearsal = recovery["result"] == "PASS"
+        if recovery['method'] == 'targeted-recovery':
+            if risk.get('STATE_CHANGE_CLASS') != 'ADDITIVE_REVERSIBLE':
+                raise PreReleaseError('targeted-only evidence requires machine-proven additive state')
+            targeted_roots = risk['REVERSIBILITY_EVIDENCE']['new_roots']
+        verify_recovery_observation(recovery, host, targeted_roots=targeted_roots)
+        targeted = recovery['result'] == 'PASS' and targeted_roots is not None
+        rehearsal = recovery['result'] == 'PASS' and targeted_roots is None
     result = {**risk, **evaluate_release_gate(risk, assets_ready=True, candidate_validated=True,
               irreversible_state_change=state["irreversible"], compatibility=state["compatible"],
-              acceptance_plan_ready=True, rehearsal_validated=rehearsal, old_grant_expired=False),
+              acceptance_plan_ready=True, rehearsal_validated=rehearsal, old_grant_expired=False,
+              targeted_recovery_validated=targeted),
               "OLD_GRANT_EXPIRED": "NOT_READ_NOT_A_GATE", "retained_assets": retained,
               "request_sha256": hashlib.sha256(request_raw).hexdigest(), "candidate_image_id": candidate["image_id"],
               "governance_identity": {"commit": source_identity[0], "tree": source_identity[1]}}
@@ -770,7 +866,7 @@ def assess_release(request_path: Path, destination: Path) -> dict:
         _risk_file(request[name], host)
     if request["recovery_evidence"] is not None:
         _risk_file(request["recovery_evidence"], host)
-        verify_recovery_observation(recovery, host)
+        verify_recovery_observation(recovery, host, targeted_roots=targeted_roots)
     _write_new(host, destination, json.dumps(result, sort_keys=True).encode())
     return result
 

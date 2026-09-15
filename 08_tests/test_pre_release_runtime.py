@@ -305,8 +305,10 @@ def test_irreversible_or_unknown_state_cannot_be_low_risk(state):
 
 def test_infrastructure_requires_recovery_and_cannot_use_expired_grant_as_rehearsal():
     risk = {"RELEASE_RISK_CLASS": "STATEFUL_OR_INFRA"}
-    assert _risk_gate(risk=risk)["failure_codes"] == ["RECOVERY_REHEARSAL_REQUIRED"]
-    assert _risk_gate(risk=risk, rehearsal_validated=True)["PRODUCTION_RELEASE_PREFLIGHT"] == "PASS"
+    result = _risk_gate(risk=risk)
+    assert 'RECOVERY_REHEARSAL_REQUIRED' in result['failure_codes']
+    assert 'STATE_COMPATIBILITY_UNPROVEN' in result['failure_codes']
+    assert _risk_gate(risk=risk, rehearsal_validated=True)["PRODUCTION_RELEASE_PREFLIGHT"] == "FAIL"
 
 
 @pytest.mark.parametrize("value", ["NO", 0, None])
@@ -606,3 +608,135 @@ def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, mo
             runtime.verify_recovery_observation(recovery, host)
     else:
         runtime.verify_recovery_observation(recovery, host)
+
+# Reversibility classification uses real temporary Git trees, not caller labels.
+@pytest.fixture
+def additive_repo(risk_repo):
+    import yaml
+    repo, git, put, _ = risk_repo
+    contract = dict(service_id='app', identity_root_role='identity', entrypoint=['python','05_apps/page.py'],
+        build=dict(dockerfile='Dockerfile',compose_sources=['compose.yml']),
+        runtime_roots=[dict(role='history',container_path='/history',access='ro')],
+        required_mounts=[dict(role='history',container_path='/history',read_only=True)],
+        required_environment=[],environment_bindings=[],forbidden_environment=[],source_inputs=[])
+    compose = dict(services=dict(app=dict(image='immutable',volumes=[dict(type='bind',source='${HISTORY:?required}',
+        target='/history',read_only=True)], environment={})))
+    put('02_configs/runtime.json',json.dumps(contract))
+    put('compose.yml',yaml.safe_dump(compose))
+    put('05_apps/page.py','from pathlib import Path\ndef history():\n    return Path("/history/old.txt").read_text()\n')
+    git('add','.');git('commit','-qm','unchanged runtime')
+    base=git('rev-parse','HEAD')
+    contract['runtime_roots'].append(dict(role='entries',container_path='/operational/entries',access='rw'))
+    contract['required_mounts'].append(dict(role='entries',container_path='/operational/entries',read_only=False))
+    compose['services']['app']['volumes'].append(dict(type='bind',source='${ENTRIES:?required}',
+        target='/operational/entries',read_only=False,bind=dict(create_host_path=False)))
+    put('02_configs/runtime.json',json.dumps(contract))
+    put('compose.yml',yaml.safe_dump(compose))
+    code=(repo/'05_apps/page.py').read_text()+('def save(value):\n    p=Path("/operational/entries/new.txt")\n    p.write_text(value)\n'
+        'def read_new():\n    p=Path("/operational/entries/new.txt")\n    return p.read_text()\n')
+    put('05_apps/page.py',code)
+    return repo,git,put,base,contract,compose,code
+
+
+def additive_report(fixture):
+    repo,git,put,base,*_=fixture
+    git('add','.');git('commit','-qm','state delta')
+    return runtime.classify_release(repo,base,git('rev-parse','HEAD'),'example')
+
+
+def test_independent_added_store_requires_targeted_only(additive_repo):
+    r=additive_report(additive_repo)
+    assert r['RELEASE_RISK_CLASS']=='STATEFUL_OR_INFRA'
+    assert r['STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE', r
+    assert r['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+    assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is True
+    assert _risk_gate(risk=r)['failure_codes']==['TARGETED_RECOVERY_VALIDATION_REQUIRED']
+    assert _risk_gate(risk=r,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+    assert _risk_gate(risk=r,rehearsal_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+
+
+@pytest.mark.parametrize('fault', ['db-migration','history-rewrite','format-conversion','old-delete',
+    'mount-replaced','mount-overlap','ephemeral','autocreate','old-source','unproven-write',
+    'missing-reader','old-reader-change','authorization','lifecycle','env-claim','path-shadow'])
+def test_additive_proof_rejects_unsafe_or_unknown_delta(additive_repo,fault):
+    import yaml
+    repo,git,put,base,contract,compose,code=additive_repo
+    if fault=='db-migration':put('migrations/01.sql','ALTER TABLE state ADD x TEXT;')
+    elif fault=='history-rewrite':put('01_data/history.parquet','rewritten')
+    elif fault=='format-conversion':put('storage/convert.py','def convert():\n    pass\n')
+    elif fault=='old-delete':(repo/'05_apps/page.py').unlink()
+    elif fault=='mount-replaced':compose['services']['app']['volumes'][0]['read_only']=False
+    elif fault=='mount-overlap':contract['runtime_roots'][-1]['container_path']='/history/entries'
+    elif fault=='ephemeral':compose['services']['app']['volumes'][-1]['type']='volume'
+    elif fault=='autocreate':compose['services']['app']['volumes'][-1]['bind']['create_host_path']=True
+    elif fault=='old-source':compose['services']['app']['volumes'][-1]['source']='${HISTORY:?required}'
+    elif fault=='unproven-write':put('05_apps/page.py',code+'def other():\n    external_database.migrate()\n')
+    elif fault=='missing-reader':put('05_apps/page.py',code[:code.index('def read_new')])
+    elif fault=='old-reader-change':put('05_apps/page.py',code.replace('Path("/history/old.txt").read_text()', 'Path("/operational/entries/new.txt").write_text("overwrite")'))
+    elif fault=='authorization':contract['identity_kind']='new-grant-system'
+    elif fault=='lifecycle':compose['services']['app']['command']='migrate-and-start'
+    elif fault=='env-claim':contract['STATE_CHANGE_CLASS']='ADDITIVE_REVERSIBLE'
+    elif fault=='path-shadow':put('05_apps/page.py',code+'Path=unsafe_writer\n')
+    put('02_configs/runtime.json',json.dumps(contract));put('compose.yml',yaml.safe_dump(compose))
+    r=additive_report(additive_repo)
+    assert r['STATE_CHANGE_CLASS'] in ('UNKNOWN','IRREVERSIBLE_OR_DESTRUCTIVE'),r
+    assert r['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
+    assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is True
+    assert _risk_gate(risk=r,rehearsal_validated=True,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+
+
+def test_stateless_recovery_requirements_unchanged(risk_repo):
+    repo,git,put,base=risk_repo
+    put('05_apps/page.py','def present(x):\n    return x+3\n')
+    git('add','.');git('commit','-qm','presentation')
+    r=runtime.classify_release(repo,base,git('rev-parse','HEAD'),'example')
+    assert not r['FULL_ROLLBACK_REHEARSAL_REQUIRED'] and not r['TARGETED_RECOVERY_VALIDATION_REQUIRED']
+    assert _risk_gate(risk=r)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+
+
+def test_destructive_operator_facts_cannot_be_overridden_by_additive_label():
+    r=dict(RELEASE_RISK_CLASS='STATEFUL_OR_INFRA',STATE_CHANGE_CLASS='ADDITIVE_REVERSIBLE')
+    result=_risk_gate(risk=r,irreversible_state_change='YES',rehearsal_validated=True,targeted_recovery_validated=True)
+    assert result['STATE_CHANGE_CLASS']=='IRREVERSIBLE_OR_DESTRUCTIVE'
+    assert result['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
+    assert result['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+
+
+@pytest.mark.parametrize('fault',[None,'http','history','new-data','removed-directory','wrong-source',
+    'old-writer','missing-surface','missing-mounts','invalid-hash','empty-history'])
+def test_targeted_recovery_retains_history_and_new_bind_sources(tmp_path,fault):
+    import copy
+    def ref(name,value):
+        p=tmp_path/name;raw=json.dumps(value).encode();p.write_bytes(raw)
+        return dict(path=str(p),sha256=hashlib.sha256(raw).hexdigest())
+    store=dict(container_path='/operational/entries',source='/srv/new-entries',device=1,inode=44,files={'entry':'a'*64})
+    data=dict(historical_before={'/srv/history/file':'b'*64},historical_after={'/srv/history/file':'b'*64},
+        operational_before=[store],operational_after=[copy.deepcopy(store)],
+        old_mounts=[dict(source='/srv/history',target='/history',read_only=True)])
+    if fault=='history':data['historical_after']['/srv/history/file']='c'*64
+    if fault=='new-data':data['operational_after'][0]['files']['entry']='c'*64
+    if fault=='removed-directory':data['operational_after']=[]
+    if fault=='wrong-source':data['operational_after'][0]['source']='/srv/replaced'
+    if fault=='old-writer':data['old_mounts'].append(dict(source='/srv',target='/all',read_only=False))
+    if fault=='missing-surface':data['operational_before']=data['operational_after']=[]
+    if fault=='missing-mounts':data['old_mounts']=[]
+    if fault=='invalid-hash':data['historical_before']=data['historical_after']={'/srv/history/file':'bad'}
+    if fault=='empty-history':data['historical_before']=data['historical_after']={}
+    observations=dict(consumer=dict(raw=ref('http',dict(url='http://127.0.0.1:18502/',status_code=503 if fault=='http' else 200))),
+        data_unchanged=dict(raw=ref('data',data)))
+    host=SimpleNamespace(_json=json.loads,_protected_path=lambda p,**kw:p)
+    roots=[dict(container_path='/operational/entries')]
+    if fault:
+        with pytest.raises(runtime.PreReleaseError):runtime.verify_targeted_preservation(observations,host,roots)
+    else:runtime.verify_targeted_preservation(observations,host,roots)
+
+@pytest.mark.parametrize('body',[
+    'def hidden(Path):\n    p=Path("/operational/entries/new.txt")\n    return p.read_text()\n',
+    'def hidden(x: destroy()):\n    return x\n',
+    'def hidden():\n    global Path\n    Path=destroy\n',
+    'def hidden():\n    p=Path("/history/old.txt")\n    p.write_text("lost")\n',
+])
+def test_additive_proof_rejects_shadowed_or_side_effecting_python(additive_repo,body):
+    repo,git,put,base,contract,compose,code=additive_repo
+    put('05_apps/page.py',code+body)
+    assert additive_report(additive_repo)['STATE_CHANGE_CLASS']=='UNKNOWN'
