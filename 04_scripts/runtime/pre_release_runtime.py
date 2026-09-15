@@ -258,6 +258,33 @@ def _risk_identity(repo: Path, commit: str) -> dict:
     return {"commit": commit, "tree": _risk_git(repo, "rev-parse", commit + "^{tree}").decode().strip()}
 
 
+def current_main_identity(repo: Path) -> dict:
+    """Read fresh origin; a moved/missing object requires refreshing the review."""
+    rows = _risk_git(repo, 'ls-remote', 'origin', 'refs/heads/main').decode().splitlines()
+    if len(rows) != 1 or rows[0].split()[1:] != ['refs/heads/main']:
+        raise PreReleaseError('authoritative main identity unavailable')
+    return _risk_identity(repo, rows[0].split()[0])
+
+
+def apply_maintainer_review(risk: dict, review: dict, main_identity: dict) -> dict:
+    try:
+        return _load('04_scripts/runtime/release_reversibility.py', '_risk_review').apply_review(
+            risk, review, main_identity)
+    except ValueError as exc:
+        raise PreReleaseError(str(exc)) from exc
+
+
+def read_maintainer_review(raw: bytes) -> dict:
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise PreReleaseError('duplicate risk review field')
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=pairs)
+
+
 def _runtime_graph(sources: dict[str, bytes], contract: dict) -> dict:
     """Conservative local import/file-reference closure, never execute imports.
 
@@ -519,7 +546,9 @@ def classify_release(repo: Path, base: str, target: str, project_id: str) -> dic
     high = unsupported or any(f["high_risk"] for f in findings)
     reversibility = _load('04_scripts/runtime/release_reversibility.py', '_release_reversibility')
     state = reversibility.classify(snapshots[base], snapshots[target], contract_path, findings, graphs) if high else {
-        'STATE_CHANGE_CLASS': 'NOT_APPLICABLE', 'REVERSIBILITY_EVIDENCE': {'analysis': 'stateless', 'failure_codes': []}}
+        'STATE_CHANGE_CLASS': 'NOT_APPLICABLE', 'MACHINE_STATE_CHANGE_CLASS': 'NOT_APPLICABLE',
+        'MACHINE_DESTRUCTIVE_EVIDENCE': False, 'DESTRUCTIVE_FINDINGS': [],
+        'REVERSIBILITY_EVIDENCE': {'analysis': 'stateless', 'failure_codes': []}}
     risk_class = "STATEFUL_OR_INFRA" if high else "ROUTINE_STATELESS"
     return {"schema_version": RISK_SCHEMA, "base": before, "target": after, "project_id": project_id,
             "build_contract_sha256": hashlib.sha256(read(base, contract_path)).hexdigest(),
@@ -619,10 +648,15 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
     if risk.get("RELEASE_RISK_CLASS") not in ("ROUTINE_STATELESS", "STATEFUL_OR_INFRA"):
         raise PreReleaseError("unknown release risk class")
     high = risk["RELEASE_RISK_CLASS"] == "STATEFUL_OR_INFRA" or irreversible_state_change != "NO"
+    destructive = risk.get('MACHINE_DESTRUCTIVE_EVIDENCE', False)
+    if type(destructive) is not bool:
+        raise PreReleaseError('untyped destructive evidence')
+    high = high or destructive
     state_class = risk.get('STATE_CHANGE_CLASS', 'UNKNOWN' if high else 'NOT_APPLICABLE')
-    if state_class not in ('NOT_APPLICABLE', 'ADDITIVE_REVERSIBLE', 'IRREVERSIBLE_OR_DESTRUCTIVE', 'UNKNOWN'):
+    if state_class not in ('NOT_APPLICABLE', 'ADDITIVE_REVERSIBLE', 'IRREVERSIBLE_OR_DESTRUCTIVE',
+                           'UNKNOWN', 'NEEDS_MAINTAINER_RISK_REVIEW', 'HIGH_RISK'):
         raise PreReleaseError('unknown state change class')
-    if irreversible_state_change == 'YES':
+    if irreversible_state_change == 'YES' or destructive:
         state_class = 'IRREVERSIBLE_OR_DESTRUCTIVE'
     elif irreversible_state_change == 'UNKNOWN' or high and state_class == 'NOT_APPLICABLE':
         state_class = 'UNKNOWN'
@@ -633,6 +667,7 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
                      (irreversible_state_change == "NO", "IRREVERSIBLE_STATE_REQUIRES_SEPARATE_MIGRATION_GATE"),
                      (state_class != 'IRREVERSIBLE_OR_DESTRUCTIVE', "DESTRUCTIVE_CHANGE_REQUIRES_SEPARATE_MIGRATION_GATE"),
                      (state_class != 'UNKNOWN', "STATE_COMPATIBILITY_UNPROVEN"),
+                     (state_class != 'NEEDS_MAINTAINER_RISK_REVIEW', 'MAINTAINER_RISK_REVIEW_REQUIRED'),
                      (not full or rehearsal_validated, "RECOVERY_REHEARSAL_REQUIRED"),
                      (not high or targeted_recovery_validated or full and rehearsal_validated,
                       "TARGETED_RECOVERY_VALIDATION_REQUIRED")):
@@ -784,8 +819,9 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     source_identity = require_source(host, engine)
     request_raw = host._protected_path(request_path, private=True).read_bytes()
     request = host._json(request_raw)
-    _risk_fields(request, ("schema_version", "project_id", "current", "previous", "target_commit",
-                           "candidate_record", "state_plan", "acceptance_plan", "recovery_evidence", "target_source_root"), "release request")
+    fields = {"schema_version", "project_id", "current", "previous", "target_commit",
+              "candidate_record", "state_plan", "acceptance_plan", "recovery_evidence", "target_source_root"}
+    _risk_fields(request, fields | ({'maintainer_risk_review'} if 'maintainer_risk_review' in request else set()), "release request")
     if request["schema_version"] != "production-release-request/1":
         raise PreReleaseError("release request schema differs")
     target_source = Path(request["target_source_root"])
@@ -817,10 +853,16 @@ def assess_release(request_path: Path, destination: Path) -> dict:
         raise PreReleaseError("state plan identity differs")
     if any(type(state[k]) is not bool for k in ("compatible", "database_migration", "production_data_mutation", "storage_format_change")):
         raise PreReleaseError("state plan requires boolean facts")
-    if any(state[k] for k in ("database_migration", "production_data_mutation", "storage_format_change")):
+    if state['irreversible'] == 'YES' or any(state[k] for k in ("database_migration", "production_data_mutation", "storage_format_change")):
         risk.update(RELEASE_RISK_CLASS="STATEFUL_OR_INFRA", STATE_CHANGE_CLASS="IRREVERSIBLE_OR_DESTRUCTIVE",
+                    MACHINE_DESTRUCTIVE_EVIDENCE=True, MACHINE_STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE',
                     ROLLBACK_REHEARSAL_REQUIRED=True, FULL_ROLLBACK_REHEARSAL_REQUIRED=True,
                     TARGETED_RECOVERY_VALIDATION_REQUIRED=True)
+    review = request.get('maintainer_risk_review')
+    reviewed_main = None
+    if review is not None:
+        reviewed_main = current_main_identity(ROOT)
+        risk = apply_maintainer_review(risk, review, reviewed_main)
     acceptance = host._json(_risk_file(request["acceptance_plan"], host))
     _risk_fields(acceptance, ("target", "image_id", "checks"), "acceptance plan")
     if acceptance["target"] != risk["target"] or acceptance["image_id"] != candidate["image_id"] or type(acceptance["checks"]) is not list or not acceptance["checks"] or any(not isinstance(c, str) or not c.strip() for c in acceptance["checks"]):
@@ -844,7 +886,7 @@ def assess_release(request_path: Path, destination: Path) -> dict:
         _risk_fields(recovery["evidence"], ("instance", "grant", "preflight", "health", "consumer", "data_unchanged"), "recovery evidence")
         if recovery['method'] == 'targeted-recovery':
             if risk.get('STATE_CHANGE_CLASS') != 'ADDITIVE_REVERSIBLE':
-                raise PreReleaseError('targeted-only evidence requires machine-proven additive state')
+                raise PreReleaseError('targeted-only evidence requires accepted additive state')
             targeted_roots = risk['REVERSIBILITY_EVIDENCE']['new_roots']
         verify_recovery_observation(recovery, host, targeted_roots=targeted_roots)
         targeted = recovery['result'] == 'PASS' and targeted_roots is not None
@@ -860,6 +902,8 @@ def assess_release(request_path: Path, destination: Path) -> dict:
             or require_source(host, engine) != source_identity
             or require_source(host, engine, source_root=target_source) != target_identity):
         raise PreReleaseError("release assessment inputs changed")
+    if reviewed_main is not None and current_main_identity(ROOT) != reviewed_main:
+        raise PreReleaseError('authoritative main changed during risk review assessment')
     for name in ("current", "previous"):
         verify_rollback_assets(ROOT, request[name], host)
     for name in ("candidate_record", "state_plan", "acceptance_plan"):
@@ -876,6 +920,8 @@ def main(argv=None) -> int:
     parser.add_argument("--project")
     parser.add_argument("--release-request", type=Path)
     parser.add_argument("--classify-release", nargs=3, metavar=("BASE", "TARGET", "PROJECT"))
+    parser.add_argument('--maintainer-risk-review', type=Path,
+                        help='ordinary exact-identity Maintainer review JSON; classification only')
     parser.add_argument("--record-output", type=Path)
     parser.add_argument("--candidate-key", type=Path)
     parser.add_argument("--ttl-seconds", type=int, default=86400)
@@ -883,6 +929,8 @@ def main(argv=None) -> int:
     parser.add_argument("--container-id")
     parser.add_argument("--report-output", type=Path)
     args = parser.parse_args(argv)
+    if args.maintainer_risk_review is not None and args.classify_release is None:
+        parser.error('risk review option requires --classify-release; release requests embed their review')
     try:
         if args.release_request is not None or args.classify_release is not None:
             if (args.production_policy is not None or args.project is not None or args.container_id is not None
@@ -893,6 +941,13 @@ def main(argv=None) -> int:
                 if args.report_output is not None:
                     parser.error("classification prints non-authorizing evidence only")
                 result = classify_release(ROOT, *args.classify_release)
+                if args.maintainer_risk_review is not None:
+                    main_identity = current_main_identity(ROOT)
+                    review_raw = args.maintainer_risk_review.read_bytes()
+                    result = apply_maintainer_review(result, read_maintainer_review(review_raw), main_identity)
+                    if (args.maintainer_risk_review.read_bytes() != review_raw or
+                            current_main_identity(ROOT) != main_identity):
+                        raise PreReleaseError('risk review inputs changed')
             else:
                 if args.report_output is None:
                     parser.error("release request requires a new protected report output")

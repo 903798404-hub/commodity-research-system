@@ -679,7 +679,7 @@ def test_additive_proof_rejects_unsafe_or_unknown_delta(additive_repo,fault):
     elif fault=='path-shadow':put('05_apps/page.py',code+'Path=unsafe_writer\n')
     put('02_configs/runtime.json',json.dumps(contract));put('compose.yml',yaml.safe_dump(compose))
     r=additive_report(additive_repo)
-    assert r['STATE_CHANGE_CLASS'] in ('UNKNOWN','IRREVERSIBLE_OR_DESTRUCTIVE'),r
+    assert r['STATE_CHANGE_CLASS'] in ('NEEDS_MAINTAINER_RISK_REVIEW','IRREVERSIBLE_OR_DESTRUCTIVE'),r
     assert r['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
     assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is True
     assert _risk_gate(risk=r,rehearsal_validated=True,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
@@ -739,4 +739,169 @@ def test_targeted_recovery_retains_history_and_new_bind_sources(tmp_path,fault):
 def test_additive_proof_rejects_shadowed_or_side_effecting_python(additive_repo,body):
     repo,git,put,base,contract,compose,code=additive_repo
     put('05_apps/page.py',code+body)
-    assert additive_report(additive_repo)['STATE_CHANGE_CLASS']=='UNKNOWN'
+    assert additive_report(additive_repo)['STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
+
+
+def review_for(risk, decision='ADDITIVE_REVERSIBLE'):
+    module=runtime._load('04_scripts/runtime/release_reversibility.py','_review_test')
+    return dict(reviewer='fixture Maintainer',timestamp=datetime.now(timezone.utc).isoformat(),
+        base=risk['base'],target=risk['target'],authoritative_main=risk['base'],
+        machine_findings=module.machine_findings(risk),maintainer_classification=decision,
+        reason='Reviewed code, tests, independent storage paths, no migration, retained new data and old configuration rollback.')
+
+
+def test_unsupported_business_semantics_allows_bound_maintainer_review(additive_repo):
+    repo,git,put,base,contract,compose,code=additive_repo
+    put('05_apps/page.py',code+'def custom():\n    custom_read_only_adapter()\n')
+    r=additive_report(additive_repo)
+    assert r['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
+    assert r['MACHINE_STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
+    assert 'MAINTAINER_RISK_REVIEW_REQUIRED' in _risk_gate(risk=r)['failure_codes']
+    review=review_for(r)
+    accepted=runtime.apply_maintainer_review(r,review,r['base'])
+    assert accepted['MACHINE_STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
+    assert accepted['STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE'
+    assert accepted['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+    assert accepted['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is True
+    assert _risk_gate(risk=accepted)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+    assert _risk_gate(risk=accepted,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+    assert accepted['maintainer_risk_review']==review
+
+
+@pytest.mark.parametrize('mutation',['base-commit','base-tree','target-commit','target-tree','main-commit',
+    'main-tree','findings','reviewer','reason','future','unknown-field'])
+def test_maintainer_risk_review_invalidated_by_identity_or_findings_change(additive_repo,mutation):
+    import copy
+    r=additive_report(additive_repo);review=copy.deepcopy(review_for(r));main=copy.deepcopy(r['base'])
+    if mutation.startswith('main-'):main[mutation.split('-')[1]]='d'*40
+    elif mutation.startswith(('base-','target-')):
+        key,field=mutation.split('-');review[key][field]='d'*40
+    elif mutation=='findings':review['machine_findings']['findings']=[]
+    elif mutation in ('reviewer','reason'):review[mutation]=' '
+    elif mutation=='future':review['timestamp']='2999-01-01T00:00:00+00:00'
+    else:review['low_risk']=True
+    with pytest.raises(ValueError):runtime.apply_maintainer_review(r,review,main)
+
+
+@pytest.mark.parametrize('operation',['schema-migration','delete-history','rewrite-history','one-way-conversion','direct-delete','direct-rewrite'])
+def test_machine_destructive_evidence_cannot_be_reviewed_away(risk_repo,operation):
+    repo,git,put,_=risk_repo
+    # Existing persistent bytes, not a new file mislabelled as a rewrite.
+    put('01_data/history.parquet','old history')
+    contract=dict(service_id='app',entrypoint=['python','05_apps/page.py'],
+        runtime_roots=[dict(role='history',container_path='/history',access='ro')],
+        build=dict(dockerfile='Dockerfile',compose_sources=['compose.yml']))
+    put('02_configs/runtime.json',json.dumps(contract));git('add','.');git('commit','-qm','old history')
+    base=git('rev-parse','HEAD')
+    if operation=='schema-migration':put('migrations/001.sql','ALTER TABLE quotes ADD value TEXT;')
+    elif operation=='delete-history':(repo/'01_data/history.parquet').unlink()
+    elif operation=='rewrite-history':put('01_data/history.parquet','overwritten')
+    elif operation=='one-way-conversion':put('migrations/002.sql','ALTER TABLE quotes ALTER COLUMN value TYPE INTEGER;')
+    else:
+        call='unlink()' if operation=='direct-delete' else 'write_text("replacement")'
+        put('05_apps/page.py','from pathlib import Path\ndef mutate():\n    Path("/history/old.txt").'+call+'\n')
+    git('add','-A');git('commit','-qm','destructive')
+    r=runtime.classify_release(repo,base,git('rev-parse','HEAD'),'example')
+    assert r['MACHINE_DESTRUCTIVE_EVIDENCE'] is True,r
+    assert r['DESTRUCTIVE_FINDINGS']
+    with pytest.raises(ValueError,match='CANNOT_BE_DOWNGRADED'):
+        runtime.apply_maintainer_review(r,review_for(r),r['base'])
+    accepted=runtime.apply_maintainer_review(r,review_for(r,'HIGH_RISK'),r['base'])
+    assert accepted['STATE_CHANGE_CLASS']=='IRREVERSIBLE_OR_DESTRUCTIVE'
+    assert accepted['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
+    # Even a malformed trusted aggregation input cannot suppress machine findings.
+    accepted['STATE_CHANGE_CLASS']='ADDITIVE_REVERSIBLE'
+    result=_risk_gate(risk=accepted,rehearsal_validated=True,targeted_recovery_validated=True)
+    assert result['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+
+
+def test_maintainer_high_risk_retains_full_recovery(additive_repo):
+    r=additive_report(additive_repo)
+    reviewed=runtime.apply_maintainer_review(r,review_for(r,'HIGH_RISK'),r['base'])
+    assert reviewed['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
+    assert _risk_gate(risk=reviewed,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+    assert _risk_gate(risk=reviewed,rehearsal_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+
+
+def test_routine_requires_no_maintainer_risk_review(risk_repo):
+    repo,git,put,base=risk_repo
+    r=runtime.classify_release(repo,base,base,'example')
+    assert runtime.apply_maintainer_review(r,None,r['base'])==r
+    assert r['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
+    assert not r['FULL_ROLLBACK_REHEARSAL_REQUIRED']
+    assert not r['TARGETED_RECOVERY_VALIDATION_REQUIRED']
+
+
+def test_review_cli_is_not_an_execution_override(tmp_path):
+    with pytest.raises(SystemExit):runtime.main(['--maintainer-risk-review',str(tmp_path/'review')])
+    with pytest.raises(SystemExit):runtime.main(['--project','example','--maintainer-risk-review',str(tmp_path/'review')])
+
+@pytest.mark.parametrize('fault',[None,'main-moved','target-mismatch','destructive','no-review'])
+def test_release_assessment_consumes_plain_review_and_targeted_evidence(rollback_assets,monkeypatch,tmp_path,fault):
+    import copy
+    repo,current,host,image=rollback_assets
+    identity=dict(commit=current['commit'],tree=current['tree'])
+    module=runtime._load('04_scripts/runtime/release_reversibility.py','_assessment_review')
+    risk=dict(base=identity,target=identity,RELEASE_RISK_CLASS='STATEFUL_OR_INFRA',
+        STATE_CHANGE_CLASS='NEEDS_MAINTAINER_RISK_REVIEW',MACHINE_STATE_CHANGE_CLASS='NEEDS_MAINTAINER_RISK_REVIEW',
+        MACHINE_DESTRUCTIVE_EVIDENCE=False,DESTRUCTIVE_FINDINGS=[],findings=[dict(path='example.py',reason='unsupported')],
+        REVERSIBILITY_EVIDENCE=dict(new_roots=[dict(container_path='/operational/new')],failure_codes=['UNSUPPORTED']))
+    review=copy.deepcopy(review_for(risk))
+    if fault=='target-mismatch':review['target']['commit']='d'*40
+    if fault=='destructive':risk.update(MACHINE_DESTRUCTIVE_EVIDENCE=True,MACHINE_STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE',STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE')
+    def ref(name,value):
+        raw=json.dumps(value).encode();p=tmp_path/name;p.write_bytes(raw)
+        return dict(path=str(p),sha256=hashlib.sha256(raw).hexdigest())
+    state=dict(base=identity,target=identity,data_schema_sha256=current['data_schema']['sha256'],
+        irreversible='NO',compatible=True,database_migration=False,production_data_mutation=False,storage_format_change=False)
+    binding=dict(identity,project_id='example')
+    candidate=dict(binding=binding,image_id=image['Id'])
+    recovery=dict(schema_version='production-recovery-observation/1',base=identity,target=identity,old_image_id=image['Id'],
+        runtime_config_sha256=current['runtime_config']['sha256'],data_schema_sha256=current['data_schema']['sha256'],
+        method='targeted-recovery',observed_at=datetime.now(timezone.utc).isoformat(),result='PASS',
+        evidence={k:ref(k,{}) for k in ('instance','grant','preflight','health','consumer','data_unchanged')})
+    request=dict(schema_version='production-release-request/1',project_id='example',current=current,previous=current,
+        target_commit=identity['commit'],target_source_root=str(repo),candidate_record=ref('candidate',candidate),
+        state_plan=ref('state',state),acceptance_plan=ref('acceptance',dict(target=identity,image_id=image['Id'],checks=['manual UI'])),
+        recovery_evidence=ref('recovery',recovery),maintainer_risk_review=review)
+    if fault=='no-review':request.pop('maintainer_risk_review');request['recovery_evidence']=None
+    p=tmp_path/'request.json';p.write_text(json.dumps(request))
+    host.require_protected_authority_source=lambda:None
+    engine=SimpleNamespace(_project=lambda *a:{'runtime_contract':'contract'},source_contract=lambda *a:(None,{},binding))
+    records=SimpleNamespace(verify_record=lambda raw,trust:{'evidence':json.loads(raw)})
+    monkeypatch.setattr(runtime,'ROOT',repo);(repo/runtime.TRUST).write_text('{}')
+    monkeypatch.setattr(runtime,'_load',lambda path,name:{runtime.HOST:host,runtime.ENGINE:engine,runtime.RECORD:records,
+        '04_scripts/runtime/release_reversibility.py':module}[path])
+    monkeypatch.setattr(runtime,'require_source',lambda *a,**k:(identity['commit'],identity['tree']))
+    monkeypatch.setattr(runtime,'classify_release',lambda *a:copy.deepcopy(risk))
+    calls=[]
+    def main(_):
+        calls.append(True)
+        return dict(identity,commit='e'*40) if fault=='main-moved' and len(calls)>1 else identity
+    monkeypatch.setattr(runtime,'current_main_identity',main)
+    observed=[]
+    def verify(recovery,host,*,targeted_roots=None):
+        observed.append(targeted_roots)
+        assert targeted_roots==[dict(container_path='/operational/new')]
+    monkeypatch.setattr(runtime,'verify_recovery_observation',verify)
+    monkeypatch.setattr(runtime,'_write_new',lambda h,p,raw:p.write_bytes(raw))
+    output=tmp_path/'assessment.json'
+    if fault in ('main-moved','target-mismatch','destructive'):
+        with pytest.raises(runtime.PreReleaseError):runtime.assess_release(p,output)
+        assert not output.exists()
+    else:
+        r=runtime.assess_release(p,output)
+        assert r['PRODUCTION_RELEASE_PREFLIGHT']==('FAIL' if fault=='no-review' else 'PASS')
+        assert r['production_authorized'] is False
+        if fault is None:
+            assert len(observed)==2
+            assert r['MAINTAINER_STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE'
+            assert r['MACHINE_STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
+            assert not r['FULL_ROLLBACK_REHEARSAL_REQUIRED']
+            assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED']
+        else:assert not calls and not observed
+
+
+def test_risk_review_json_rejects_duplicate_decisions():
+    with pytest.raises(runtime.PreReleaseError,match='duplicate'):
+        runtime.read_maintainer_review(b'{"maintainer_classification":"HIGH_RISK","maintainer_classification":"ADDITIVE_REVERSIBLE"}')

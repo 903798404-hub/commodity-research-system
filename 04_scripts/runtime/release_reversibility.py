@@ -2,13 +2,14 @@
 
 This intentionally does not prove arbitrary Python. Supported additions use literal
 Path roots, direct file I/O and unchanged existing readers. Opaque storage adapters,
-authorization/lifecycle changes and unanalysed effects return UNKNOWN. Runtime
+authorization/lifecycle changes and unanalysed effects need Maintainer review. Runtime
 source separation and preservation still require targeted recovery observations.
 """
 from __future__ import annotations
 
 import ast
 import copy
+from datetime import datetime, timezone
 import json
 from pathlib import PurePosixPath
 import re
@@ -43,6 +44,84 @@ def requirements(risk_class, state_class):
                 TARGETED_RECOVERY_VALIDATION_REQUIRED=not routine,
                 # Legacy name continues to mean full rehearsal, not targeted.
                 ROLLBACK_REHEARSAL_REQUIRED=full)
+
+
+def machine_findings(risk):
+    """Review binds the full machine observations, not just a PASS label."""
+    return {k: copy.deepcopy(risk[k]) for k in ('MACHINE_DESTRUCTIVE_EVIDENCE',
+            'MACHINE_STATE_CHANGE_CLASS', 'DESTRUCTIVE_FINDINGS', 'findings', 'REVERSIBILITY_EVIDENCE')}
+
+
+def apply_review(risk, review, authoritative_main, *, now=None):
+    """An ordinary Maintainer assessment, not an execution grant or CI bypass.
+
+    The release operator supplies this record via the existing protected request.
+    There is deliberately no signature, token, service, or new approver identity.
+    """
+    if risk['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS':
+        require(review is None, 'ROUTINE_DOES_NOT_REQUIRE_RISK_REVIEW')
+        return dict(risk)
+    require(type(review) is dict and set(review) == {'reviewer', 'timestamp', 'base', 'target',
+            'authoritative_main', 'machine_findings', 'maintainer_classification', 'reason'}, 'INVALID_RISK_REVIEW_FIELDS')
+    for key in ('reviewer', 'reason'):
+        require(isinstance(review[key], str) and bool(review[key].strip()), 'RISK_REVIEW_IDENTITY_OR_REASON_MISSING')
+    require(review['base'] == risk['base'] and review['target'] == risk['target'] and
+            review['authoritative_main'] == authoritative_main, 'RISK_REVIEW_IDENTITY_CHANGED')
+    require(review['machine_findings'] == machine_findings(risk), 'RISK_REVIEW_MACHINE_FINDINGS_CHANGED')
+    require(isinstance(review['timestamp'], str), 'INVALID_RISK_REVIEW_TIME')
+    observed = datetime.fromisoformat(review['timestamp'].replace('Z', '+00:00'))
+    require(observed.tzinfo is not None and observed <= (now or datetime.now(timezone.utc)), 'INVALID_RISK_REVIEW_TIME')
+    decision = review['maintainer_classification']
+    require(decision in ('ADDITIVE_REVERSIBLE', 'HIGH_RISK'), 'INVALID_MAINTAINER_CLASSIFICATION')
+    require(not risk['MACHINE_DESTRUCTIVE_EVIDENCE'] or decision == 'HIGH_RISK', 'MACHINE_DESTRUCTIVE_EVIDENCE_CANNOT_BE_DOWNGRADED')
+    effective = 'IRREVERSIBLE_OR_DESTRUCTIVE' if risk['MACHINE_DESTRUCTIVE_EVIDENCE'] else decision
+    return {**risk, 'STATE_CHANGE_CLASS': effective, 'MAINTAINER_STATE_CHANGE_CLASS': decision,
+            'maintainer_risk_review': copy.deepcopy(review),
+            **requirements(risk['RELEASE_RISK_CLASS'], effective)}
+
+
+def destructive_findings(before, after, contract_path, findings):
+    """Collect positive evidence separately from unsupported semantics.
+
+    This is not a complete absence-of-destruction proof. Unknown custom calls
+    are reviewed; explicit changed persistent assets, migration SQL and direct
+    destructive calls against old literal state paths cannot be reviewed away.
+    """
+    result = []
+    old = json.loads(before[contract_path])
+    roots = [r['container_path'] for r in old.get('runtime_roots', [])
+             if r['role'] != old.get('identity_root_role')]
+    sql = re.compile(r'\b(?:ALTER\s+TABLE|DROP\s+(?:TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b', re.I)
+    for finding in findings:
+        name = finding['path']
+        if name.startswith(('07_docs/', '08_tests/')) or name.endswith('.md'):
+            continue
+        prior, current = before.get(name), after.get(name)
+        persistent = name.startswith(('01_data/', '06_outputs/', '10_logs/')) or name.endswith(('.db', '.sqlite', '.parquet'))
+        if persistent and prior is not None and prior != current:
+            result.append(dict(path=name, reason='EXISTING_PERSISTENT_ASSET_CHANGED_OR_DELETED'))
+        if name.endswith('.sql'):
+            matches = set(sql.findall((current or b'').decode('utf-8'))) - set(sql.findall((prior or b'').decode('utf-8')))
+            if matches:
+                result.append(dict(path=name, reason='EXPLICIT_SCHEMA_OR_DATA_MIGRATION', operations=sorted(matches)))
+        if not name.endswith('.py') or not finding['high_risk'] or current is None:
+            continue
+        try:
+            old_calls = {ast.dump(n) for n in ast.walk(ast.parse(prior or b'')) if isinstance(n, ast.Call)}
+            for node in ast.walk(ast.parse(current)):
+                if not isinstance(node, ast.Call) or ast.dump(node) in old_calls:
+                    continue
+                literals = [v.value for v in ast.walk(node) if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+                operation = ast.unparse(node.func)
+                if operation.rsplit('.', 1)[-1] in {'execute', 'executemany', 'executescript'} and any(sql.search(v) for v in literals):
+                    result.append(dict(path=name, reason='EXPLICIT_SCHEMA_OR_DATA_MIGRATION', operation=operation))
+                elif operation.rsplit('.', 1)[-1] in {'unlink','remove','rmtree','replace','rename','write_text','write_bytes','to_parquet','to_csv'}:
+                    touched = [v for v in literals if v.startswith('/') and any(overlap(v, r) for r in roots)]
+                    if touched:
+                        result.append(dict(path=name, reason='DIRECT_OLD_STATE_MUTATION', operation=operation, paths=touched))
+        except SyntaxError:
+            pass  # Unsupported code is not fabricated destructive evidence.
+    return result
 
 
 def _mount_delta(old, new):
@@ -206,13 +285,15 @@ def _python_additions(old, new, roots):
 
 def classify(before, after, contract_path, findings, graphs):
     """Evidence is generated from exact archived trees, never request metadata."""
-    state = 'UNKNOWN'
+    state = 'NEEDS_MAINTAINER_RISK_REVIEW'
     evidence = dict(analysis='bounded-additive-store/1', facts=[], new_roots=[], failure_codes=[])
     changes = {f['path']: f for f in findings}
-    destructive = [p for p, f in changes.items() if f['reason'] == 'STATE_OR_STORAGE_CHANGE']
+    destructive = destructive_findings(before, after, contract_path, findings)
     if destructive:
         return dict(STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE',
-                    REVERSIBILITY_EVIDENCE=dict(evidence, failure_codes=['STATE_OR_STORAGE_CHANGE:' + p for p in destructive]))
+                    MACHINE_STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE',
+                    MACHINE_DESTRUCTIVE_EVIDENCE=True, DESTRUCTIVE_FINDINGS=destructive,
+                    REVERSIBILITY_EVIDENCE=evidence)
     try:
         require(all(g['complete'] for g in graphs.values()), 'RUNTIME_EFFECT_CLOSURE_INCOMPLETE')
         old, new = json.loads(before[contract_path]), json.loads(after[contract_path])
@@ -252,4 +333,5 @@ def classify(before, after, contract_path, findings, graphs):
         state = 'ADDITIVE_REVERSIBLE'
     except (Unproven, KeyError, TypeError, ValueError, SyntaxError, yaml.YAMLError) as exc:
         evidence['failure_codes'].append(str(exc))
-    return dict(STATE_CHANGE_CLASS=state, REVERSIBILITY_EVIDENCE=evidence)
+    return dict(STATE_CHANGE_CLASS=state, MACHINE_STATE_CHANGE_CLASS=state,
+                MACHINE_DESTRUCTIVE_EVIDENCE=False, DESTRUCTIVE_FINDINGS=[], REVERSIBILITY_EVIDENCE=evidence)
