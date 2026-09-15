@@ -725,3 +725,194 @@ def test_actual_other_container_writable_overlap(monkeypatch,relation):
     else:
         with pytest.raises(host.HostAuthorizationError,match='overlaps another container'):
             host.validate_candidate_mounts(*args)
+
+
+# Recovery uses the existing production signing domain; only protected host
+# policy opts into namespace projection. These fixtures simulate Docker I/O.
+def recovery_policy():
+    p = v3_policy('production')
+    n = '7' * 32
+    p['recovery'] = dict(purpose='recovery-validation', baseline_policy=dict(path='/etc/recovery/old.json',sha256='a'*64),
+        production_container_id='b'*64, production_observation_sha256='c'*64, nonce=n,
+        project='spread-recovery-'+n, container=p['service_id']+'-recovery-'+n,
+        host_port=18509, network='spread-recovery-'+n+'-net',
+        preserved_store_sources=['/var/lib/operational/cnf','/var/lib/operational/am'])
+    return p
+
+
+def recovery_module():
+    return host._contract_module(host.SOURCE_ROOT/'09_deploy/runtime_identity/recovery_namespace.py','_recovery_test')
+
+
+@pytest.mark.parametrize('fault',[None,'role','purpose','name','port','extra','unprotected-flag'])
+def test_recovery_projection_requires_explicit_protected_policy(fault):
+    p=recovery_policy()
+    if fault=='role':p['role']='candidate_validation'
+    elif fault=='purpose':p['recovery']['purpose']='production'
+    elif fault=='name':p['recovery']['container']=p['service_id']
+    elif fault=='port':p['recovery']['host_port']=8501
+    elif fault=='extra':p['recovery']['safe']=True
+    elif fault=='unprotected-flag':p['safe_projection']=p.pop('recovery')
+    if fault:
+        with pytest.raises(host.HostAuthorizationError):host.validate_policy(p,p['role'])
+    else:host.validate_policy(p,'production')
+
+
+@pytest.fixture
+def recovery_compose(tmp_path,monkeypatch):
+    m=recovery_module();p=recovery_policy();r=p['recovery'];sid=p['service_id']
+    baseline=dict(name='production',services={sid:dict(image=IMAGE,container_name=sid,
+        entrypoint=['streamlit','run','page.py'],environment={'BUSINESS':'unchanged'},
+        ports=[dict(target=8501,published='8501',protocol='tcp',mode='ingress')],
+        networks={'default':None},volumes=[dict(type='bind',source='/old/history',target='/history',read_only=True),
+            dict(type='bind',source='/old/grants',target=p['grant_container_directory'],read_only=True)])},
+        networks={'default':dict(name='production_default')})
+    old=copy.deepcopy(p);old.pop('recovery');old['rendered_compose_sha256']=digest(baseline)
+    f=tmp_path/'old-compose.json';f.write_bytes(host._canonical(baseline));old['compose_sources']=[dict(path=str(f),sha256=hashlib.sha256(f.read_bytes()).hexdigest())]
+    p['mounts']=[dict(source='/new/grants',target=p['grant_container_directory'],read_only=True)]
+    production=dict(Id='b'*64,NetworkSettings={'Networks':{'production_default':{'NetworkID':'d'*64}}})
+    monkeypatch.setattr(m,'retained',lambda h,policy:(old,production))
+    monkeypatch.setattr(host,'_protected_path',lambda path,**kw:path)
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical(baseline))
+    desired=copy.deepcopy(baseline);desired['name']=r['project'];desired['networks']['default']['name']=r['project']+'_default'
+    desired['services'][sid]['volumes'][1]['source']='/new/grants'
+    return m,p,desired,old,production
+
+
+@pytest.mark.parametrize('fault',[None,'image','env','command','history-source','history-rw','extra'])
+def test_recovery_only_projects_namespace_from_exact_old_configuration(recovery_compose,fault):
+    m,p,d,old,prod=recovery_compose;s=d['services'][p['service_id']]
+    if fault=='image':s['image']='sha256:'+'d'*64
+    elif fault=='env':s['environment']['BUSINESS']='different'
+    elif fault=='command':s['entrypoint']=['shell']
+    elif fault=='history-source':s['volumes'][0]['source']='/other/history'
+    elif fault=='history-rw':s['volumes'][0]['read_only']=False
+    elif fault=='extra':s['privileged']=True
+    if fault:
+        with pytest.raises(host.HostAuthorizationError):m.project_compose(host,d,p)
+    else:
+        before=copy.deepcopy(prod);actual=m.project_compose(host,d,p);s=actual['services'][p['service_id']]
+        assert s['container_name']==p['recovery']['container']
+        assert s['ports'][0]['host_ip']=='127.0.0.1' and s['ports'][0]['published']=='18509'
+        assert actual['name']==p['recovery']['project']
+        assert actual['networks']['default']==dict(name=p['recovery']['network'],driver='bridge',internal=False)
+        assert s['volumes']==d['services'][p['service_id']]['volumes'] and prod==before
+
+
+@pytest.mark.parametrize('fault',[None,'production-network','public-bind','wrong-name','wrong-nonce','other-endpoint','internal','network-id','wrong-port'])
+def test_recovery_actual_docker_namespace_isolated_with_production_still_present(monkeypatch,fault):
+    m=recovery_module();p=recovery_policy();r=p['recovery']
+    prod=dict(Id='b'*64,NetworkSettings={'Networks':{'production_default':{'NetworkID':'d'*64}}})
+    c=dict(Id=CID,Name='/'+r['container'],Config=dict(Hostname=r['nonce'],Labels={'com.docker.compose.project':r['project']}),
+        HostConfig=dict(PortBindings={'8501/tcp':[dict(HostIp='127.0.0.1',HostPort='18509')]},NetworkMode=r['network']),
+        NetworkSettings={'Networks':{r['network']:{'NetworkID':'e'*64}}})
+    net=dict(Id='e'*64,Name=r['network'],Driver='bridge',Internal=False,EnableIPv6=False,
+        Labels={'com.docker.compose.project':r['project']},Containers={CID:{}})
+    if fault=='production-network':c['NetworkSettings']['Networks']['production_default']={}
+    elif fault=='public-bind':c['HostConfig']['PortBindings']['8501/tcp'][0]['HostIp']='0.0.0.0'
+    elif fault=='wrong-name':c['Name']='/'+p['service_id']
+    elif fault=='wrong-nonce':c['Config']['Hostname']='f'*32
+    elif fault=='other-endpoint':net['Containers']['b'*64]={}
+    elif fault=='internal':net['Internal']=True
+    elif fault=='network-id':net['Id']='d'*64
+    elif fault=='wrong-port':c['HostConfig']['PortBindings']['8501/tcp'][0]['HostPort']='8501'
+    monkeypatch.setattr(m,'retained',lambda *args:({},prod));monkeypatch.setattr(m,'preserved',lambda *args:[])
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical([net]))
+    if fault:
+        with pytest.raises(host.HostAuthorizationError):m.validate_instance(host,c,p)
+    else:m.validate_instance(host,c,p)
+
+
+@pytest.mark.parametrize('fault',[None,'commit','tree','image','mount','reuse-grant','production-changed'])
+def test_recovery_retained_policy_and_live_artifact_remain_exact(tmp_path,monkeypatch,fault):
+    m=recovery_module();p=recovery_policy();old=copy.deepcopy(p);old.pop('recovery')
+    value=observed(old)
+    c=dict(Id='b'*64,Name='/'+old['service_id'],Image=IMAGE,Config=value['config'],HostConfig=value['host_config'],
+        Mounts=[dict(Type='bind',Source=x['source'],Destination=x['target'],RW=not x['read_only']) for x in old['mounts']],
+        State=dict(Running=True,StartedAt='2026-09-01T00:00:00Z'),NetworkSettings={'Networks':{}},Created='old',RestartCount=0)
+    p['actual_config_sha256']=old['actual_config_sha256']
+    p['mounts'][0]['source']='/var/lib/market-data/production-runtime/project/recovery-grants'
+    f=tmp_path/'old.json';f.write_bytes(host._canonical(old));p['recovery']['baseline_policy']['sha256']=hashlib.sha256(f.read_bytes()).hexdigest()
+    p['recovery']['production_observation_sha256']=m.production_identity(host,c)
+    image=dict(Id=IMAGE,Config={'Labels':value['image_labels']})
+    monkeypatch.setattr(host,'_protected_path',lambda *a,**kw:f)
+    monkeypatch.setattr(host,'docker_inspect',lambda cid:c);monkeypatch.setattr(host,'docker_image_inspect',lambda image_id:image)
+    monkeypatch.setattr(host,'copy_container_json',lambda *a:value['release_manifest'])
+    if fault in ('commit','tree'):p['approved_'+fault]='e'*40
+    elif fault=='image':p['image_id']='sha256:'+'d'*64
+    elif fault=='mount':p['mounts'][1]['source']='/different'
+    elif fault=='reuse-grant':p['mounts']=copy.deepcopy(old['mounts'])
+    elif fault=='production-changed':c['RestartCount']=1
+    if fault:
+        with pytest.raises(host.HostAuthorizationError):m.retained(host,p)
+    else:assert m.retained(host,p)[0]==old
+
+
+@pytest.mark.parametrize('mount_mode',[None,True,False])
+def test_recovery_never_mounts_operational_stores_and_preserves_bytes(tmp_path,mount_mode):
+    m=recovery_module();cnf=tmp_path/'cnf';am=tmp_path/'am'
+    cnf.mkdir();am.mkdir();(cnf/'quotes').write_bytes(b'retained');(am/'result').write_bytes(b'retained AM')
+    p=dict(recovery=dict(preserved_store_sources=[str(cnf),str(am)]),mounts=[])
+    if mount_mode is not None:p['mounts']=[dict(source=str(cnf),target='/new',read_only=mount_mode)]
+    if mount_mode is not None:
+        with pytest.raises(host.HostAuthorizationError):m.preserved(host,p)
+    else:
+        before=m.preserved(host,p);assert before==m.preserved(host,p)
+        (cnf/'quotes').write_bytes(b'changed');assert before!=m.preserved(host,p)
+
+
+def test_recovery_fresh_grant_preserves_old_image_protocol_and_instance_binding(tmp_path,monkeypatch):
+    p,c,image,rendered,file,key,grants,manifest,marker,release,identity=signing_fixture(tmp_path,monkeypatch,'production',2)
+    p['recovery']=recovery_policy()['recovery'];p['recovery']['container']=p['service_id']+'-recovery-'+p['recovery']['nonce']
+    # Namespace transport is covered independently above. Keep the real signer,
+    # grant schema and old image verifier, including nonce and actual instance.
+    original=host._recovery_call
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:original(name,*args) if name=='validate' else None)
+    file.write_bytes(host._canonical(p))
+    envelope=host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,grant_path=grants/'grant.json',grant_dir=grants,role='production')
+    assert envelope['schema_version']=='production-execution-grant/2'
+    assert envelope['payload']['container_id']==CID and envelope['payload']['image_id']==IMAGE
+    assert envelope['payload']['role']=='production'
+    request=identity.OCIExecutionRequest(grants/'grant.json',release,manifest,marker.parent,marker)
+    identity.verify_execution(request,expected_role='production',module_id='shared-runtime',runtime_id='runtime',runtime_root=marker.parent,marker_sha256=p['runtime_marker_sha256'])
+    monkeypatch.setattr(identity.socket,'gethostname',lambda:'f'*32)
+    with pytest.raises(identity.ProductionIdentityError):
+        identity.verify_execution(request,expected_role='production',module_id='shared-runtime',runtime_id='runtime',runtime_root=marker.parent,marker_sha256=p['runtime_marker_sha256'])
+    with pytest.raises(host.HostAuthorizationError,match='new'):
+        host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,grant_path=grants/'grant.json',grant_dir=grants,role='production')
+
+
+def test_recovery_projection_is_used_by_production_compose_bridge(recovery_compose,monkeypatch):
+    m,p,desired,old,prod=recovery_compose
+    # Exact source Compose render and retained render come from separate calls.
+    source=copy.deepcopy(desired)
+    source['services'][p['service_id']]['working_dir']='/app'
+    # Add matching working dir to the retained fixture through its transport.
+    raw=host._run_docker([]);baseline=json.loads(raw)
+    baseline['services'][p['service_id']]['working_dir']='/app'
+    old['rendered_compose_sha256']=digest(baseline)
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical(source if '--project-name' in args else baseline))
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:getattr(m,name)(host,*args))
+    actual=m.project_compose(host,source,p)
+    actual['services'][p['service_id']]['hostname']=p['recovery']['nonce']
+    manifest=dict(build={'compose_sources':['compose.yml']},entrypoint=['streamlit','run','page.py'],working_directory='/app',required_environment=['BUSINESS'],secret_references=[])
+    assert host._production_compose_bridge(actual,p,manifest)==[]
+    actual['services'][p['service_id']]['environment']['BUSINESS']='override'
+    with pytest.raises(host.HostAuthorizationError):host._production_compose_bridge(actual,p,manifest)
+
+
+def test_recovery_changed_preservation_or_production_observation_prevents_sealing(tmp_path,monkeypatch):
+    p,c,image,rendered,file,key,grants,manifest,marker,release,identity=signing_fixture(tmp_path,monkeypatch,'production',2)
+    p['recovery']=recovery_policy()['recovery'];p['recovery']['container']=p['service_id']+'-recovery-'+p['recovery']['nonce']
+    original=host._recovery_call
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:original(name,*args) if name=='validate' else None)
+    calls=[]
+    manifest_data=json.loads(manifest.read_bytes())
+    def baseline(policy):
+        calls.append(True)
+        return ({'preserved_stores':'before' if len(calls)==1 else 'changed'},manifest_data)
+    monkeypatch.setattr(host,'_validated_candidate_record',baseline)
+    file.write_bytes(host._canonical(p))
+    with pytest.raises(host.HostAuthorizationError,match='record changed'):
+        host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,grant_path=grants/'grant.json',grant_dir=grants,role='production')
+    assert not (grants/'grant.json').exists()

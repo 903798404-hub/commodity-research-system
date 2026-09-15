@@ -250,6 +250,12 @@ def _contract_module(path: Path, name: str):
         raise HostAuthorizationError("source contract cannot be loaded") from exc
 
 
+def _recovery_call(name, *args):
+    from types import SimpleNamespace
+    module = _contract_module(SOURCE_ROOT / '09_deploy/runtime_identity/recovery_namespace.py', '_recovery_namespace')
+    return getattr(module, name)(SimpleNamespace(**globals()), *args)
+
+
 def validate_policy(policy: Mapping, role: str) -> None:
     version = policy.get("schema_version")
     expected_fields = {"host-runtime-policy/1": _POLICY_V1_FIELDS,
@@ -257,6 +263,11 @@ def validate_policy(policy: Mapping, role: str) -> None:
                        "host-runtime-policy/3": _POLICY_V3_FIELDS,
                        "host-runtime-policy/4": _POLICY_V2_FIELDS,
                        "host-runtime-policy/5": _POLICY_V3_FIELDS}.get(version, set())
+    if 'recovery' in policy:
+        if version not in _PRODUCTION_POLICIES or role != 'production':
+            raise HostAuthorizationError('recovery requires the existing production role')
+        expected_fields = expected_fields | {'recovery'}
+        _recovery_call('validate', policy)
     if set(policy) != expected_fields or policy.get("role") != role:
         raise HostAuthorizationError("protected policy schema or role mismatch")
     if role not in {"production", "candidate_validation"}:
@@ -424,7 +435,8 @@ def require_protected_key_and_grant_dirs(key_path: str | Path, grant_dir: str | 
 
 def require_protected_authority_source() -> None:
     """Require the root-run signer and source contracts to be immutable to non-root users."""
-    for path in (Path(__file__).resolve(strict=True), GRANT_CONTRACT_PATH, MANIFEST_CONTRACT_PATH, TRUST_CONFIG_PATH):
+    for path in (Path(__file__).resolve(strict=True), GRANT_CONTRACT_PATH, MANIFEST_CONTRACT_PATH, TRUST_CONFIG_PATH,
+                 SOURCE_ROOT / "09_deploy/runtime_identity/recovery_namespace.py"):
         _protected_path(path)
 
 
@@ -776,6 +788,8 @@ def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
     from types import SimpleNamespace
     # Routine collector JSON is protected by the same administrator-owned file
     # boundary, but does not need an additional evidence-signing hierarchy.
+    if 'recovery' in policy:
+        return _recovery_call('baseline', policy)
     record_binding = policy["candidate_record"]
     raw = _protected_path(Path(record_binding["path"]), private=True).read_bytes()
     if hashlib.sha256(raw).hexdigest() != record_binding["sha256"]:
@@ -841,6 +855,8 @@ def _production_compose_bridge(rendered: Mapping, policy: Mapping, manifest: Map
     for relative in manifest["build"]["compose_sources"]:
         command.extend(["-f", str(_protected_path(source_root / relative))])
     desired = _json(_run_docker([*command, "config", "--format", "json"]))
+    if 'recovery' in policy:
+        desired = _recovery_call('project_compose', desired, policy)
     # A deployment may remove build metadata and add its host nonce. Every
     # other rendered field must equal the committed contract with the same env.
     actual = _json(_canonical(rendered))
@@ -957,6 +973,8 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) 
         expected_mounts = sorted([*expected_mounts, *_production_compose_bridge(rendered, policy, manifest)], key=lambda m: m["target"])
     if expected_mounts != _mounts(container):
         raise HostAuthorizationError("rendered mounts differ from actual container")
+    if 'recovery' in policy:
+        _recovery_call('validate_instance', container, policy)
     return digest
 
 
@@ -1135,7 +1153,7 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
             "project_id": policy["project_id"], "approved_commit": policy["approved_commit"],
             "approved_tree": policy["approved_tree"], "image_id": policy["image_id"],
             "policy_sha256": _digest(policy), "candidate_record_sha256": policy["candidate_record"]["sha256"],
-            "candidate_rendered_compose_sha256": record.get("rendered_compose_sha256") if record.get("schema_version", "").startswith("routine-") else record["evidence"]["rendered_compose_sha256"],
+            "candidate_rendered_compose_sha256": record.get("rendered_compose_sha256") if "recovery" in policy or record.get("schema_version", "").startswith("routine-") else record["evidence"]["rendered_compose_sha256"],
             "production_rendered_compose_sha256": rendered,
             "runtime_manifest_sha256": policy["runtime_manifest_sha256"], "release_sha256": observed["release_sha256"],
             "mount_contract_sha256": _digest(observed["mounts"]), "actual_config_sha256": observed["actual_config_sha256"],
