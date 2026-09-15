@@ -104,8 +104,9 @@ def retained(h, policy):
     image = h.docker_image_inspect(old['image_id'])
     release = h.copy_container_json(c['Id'], old['source_root'] + '/RELEASE.json')
     observed = h.normalize_observation(c, image, release)
-    require(h, observed['image_id'] == old['image_id'] and observed['actual_config_sha256'] ==
-        old['actual_config_sha256'] and observed['mounts'] == old['mounts'], 'old artifact/config/mount identity differs')
+    require(h, observed['image_id'] == old['image_id'] and observed['mounts'] == old['mounts'],
+        'old artifact/config/mount identity differs')
+    h.compare_observed_config(observed, old['actual_config_sha256'])
     require(h, release['git_commit'] == old['approved_commit'] and release['git_tree'] == old['approved_tree']
         and release['application'] == old['release_application'], 'old release identity differs')
     require(h, image['Config']['Labels'].get('org.opencontainers.image.revision') == old['approved_commit']
@@ -128,7 +129,10 @@ def baseline(h, policy):
         old['runtime_manifest_sha256'], 'old Manifest differs')
     engine.validate_source_compose(source, manifest)
     # Internal observed result, not a new signed record or authority protocol.
+    observation = h.normalize_observation(c, h.docker_image_inspect(old['image_id']),
+        h.copy_container_json(c['Id'], old['source_root'] + '/RELEASE.json'))
     return dict(rendered_compose_sha256=old['rendered_compose_sha256'],
+        config_comparison=h.compare_observed_config(observation, old['actual_config_sha256']),
         production_identity=production_identity(h, c), preserved_stores=preserved(h, policy)), manifest
 
 

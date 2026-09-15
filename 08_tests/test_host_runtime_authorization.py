@@ -19,8 +19,110 @@ from runtime_identity import host_authorization as host
 
 
 CID = "a" * 64
+SEMANTIC_PLATFORM = dict(ServerVersion='26.1.3', CgroupVersion='2', CgroupDriver='systemd')
 IMAGE = "sha256:" + "b" * 64
 COMMIT, TREE = "c" * 40, "d" * 40
+
+
+def real_config_payloads():
+    actual = json.loads((Path(__file__).parent / 'fixtures/runtime_config/production-e42-running.json').read_bytes())
+    sealed = copy.deepcopy(actual)
+    sealed['host_config']['OomKillDisable'] = False
+    return sealed, actual
+
+
+def test_real_recovery_payload_replay_preserves_both_historical_raw_hashes(monkeypatch):
+    sealed, actual = real_config_payloads()
+    old_hash = '6fdd5f00fb76b6ffa5112f9ecd2b5e525886484022570b44109a2bac7eb9fe88'
+    new_hash = 'fd0dd335dce809264b779b2af915e4305aabd3e9f9922b56b94ad70c64ed2d85'
+    assert host._digest(sealed) == old_hash
+    assert host._digest(actual) == new_hash
+    monkeypatch.setattr(host, '_run_docker', lambda args: host._canonical(SEMANTIC_PLATFORM))
+    result = host.compare_observed_config(dict(actual, actual_config_sha256=new_hash), old_hash)
+    assert result == dict(policy_raw_sha256=old_hash, actual_raw_sha256=new_hash,
+                         raw_hash_match=False, semantic_config_match=True,
+                         compatibility_rule='OOM_KILL_DISABLE_FALSE_NULL_EQUIVALENCE', platform=SEMANTIC_PLATFORM)
+    assert actual['host_config']['OomKillDisable'] is None
+    assert sealed['host_config']['OomKillDisable'] is False
+
+
+@pytest.mark.parametrize('left,right,passes',[(False,False,True),(None,None,True),(False,None,True),
+    (None,False,True),(True,None,False),(True,False,False),(None,True,False),(False,True,False),
+    (0,None,False),('',False,False)])
+def test_config_default_equivalence_is_typed_and_bounded(left,right,passes):
+    sealed,actual=real_config_payloads()
+    sealed['host_config']['OomKillDisable']=left;actual['host_config']['OomKillDisable']=right
+    call=lambda:host.compare_config_payloads(sealed,actual,policy_raw_sha256=host._digest(sealed),
+        actual_raw_sha256=host._digest(actual),platform=SEMANTIC_PLATFORM)
+    if passes:assert call()['semantic_config_match']
+    else:
+        with pytest.raises(host.HostAuthorizationError):call()
+
+
+@pytest.mark.parametrize('field,value',[
+    ('Image','sha256:'+'f'*64),('Entrypoint',['different']),('Cmd',['different']),('Env',['BUSINESS=changed']),
+    ('User','0:0'),('WorkingDir','/other'),('Hostname','f'*32),('Labels',{'com.docker.compose.project':'other'})])
+def test_semantic_rule_rejects_every_other_config_difference(monkeypatch,field,value):
+    sealed,actual=real_config_payloads();actual['config'][field]=value
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical(SEMANTIC_PLATFORM))
+    with pytest.raises(host.HostAuthorizationError):
+        host.compare_observed_config(dict(actual,actual_config_sha256=host._digest(actual)),host._digest(sealed))
+
+
+@pytest.mark.parametrize('field',['Source','Target','ReadOnly'])
+def test_semantic_rule_keeps_mount_identity_strict(field):
+    sealed,actual=real_config_payloads();actual['host_config']['Mounts'][0][field]=False if field=='ReadOnly' else '/changed'
+    with pytest.raises(host.HostAuthorizationError):
+        host.compare_config_payloads(sealed,actual,policy_raw_sha256=host._digest(sealed),
+            actual_raw_sha256=host._digest(actual),platform=SEMANTIC_PLATFORM)
+
+
+@pytest.mark.parametrize('field',['NetworkMode','PortBindings','ReadonlyRootfs','SecurityOpt','CapAdd','CapDrop',
+    'RestartPolicy','Memory','Privileged','Dns','ExtraHosts','PidsLimit'])
+def test_semantic_rule_keeps_other_host_fields_strict(field):
+    sealed,actual=real_config_payloads();actual['host_config'][field]='changed'
+    with pytest.raises(host.HostAuthorizationError):
+        host.compare_config_payloads(sealed,actual,policy_raw_sha256=host._digest(sealed),
+            actual_raw_sha256=host._digest(actual),platform=SEMANTIC_PLATFORM)
+
+
+@pytest.mark.parametrize('side',['policy','actual'])
+def test_semantic_rule_rejects_forged_raw_binding(side):
+    sealed,actual=real_config_payloads()
+    with pytest.raises(host.HostAuthorizationError,match='raw hash'):
+        host.compare_config_payloads(sealed,actual,
+            policy_raw_sha256='0'*64 if side=='policy' else host._digest(sealed),
+            actual_raw_sha256='0'*64 if side=='actual' else host._digest(actual),platform=SEMANTIC_PLATFORM)
+
+
+@pytest.mark.parametrize('platform',[None,{},dict(ServerVersion='26.1.3',CgroupVersion='1'),
+    dict(ServerVersion='27.0.0',CgroupVersion='2')])
+def test_semantic_rule_requires_verified_platform(platform):
+    sealed,actual=real_config_payloads()
+    with pytest.raises(host.HostAuthorizationError,match='Docker/cgroup'):
+        host.compare_config_payloads(sealed,actual,policy_raw_sha256=host._digest(sealed),
+            actual_raw_sha256=host._digest(actual),platform=platform)
+
+
+def test_raw_equal_needs_no_platform_and_bad_reconstruction_never_queries_docker(monkeypatch):
+    sealed,actual=real_config_payloads()
+    monkeypatch.setattr(host,'_run_docker',lambda args:pytest.fail('unexpected Docker query'))
+    assert host.compare_observed_config(dict(actual,actual_config_sha256=host._digest(actual)),host._digest(actual))['raw_hash_match']
+    with pytest.raises(host.HostAuthorizationError,match='sealed raw hash'):
+        host.compare_observed_config(dict(actual,actual_config_sha256=host._digest(actual)),'0'*64)
+
+
+def test_same_instance_create_to_start_default_transition_preserves_raw_evidence(monkeypatch):
+    sealed,actual=real_config_payloads()
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical(SEMANTIC_PLATFORM))
+    image={'Config':{}};release={}
+    def observe(payload,state):
+        return host.normalize_observation(dict(Id=CID,Image=IMAGE,Config=payload['config'],HostConfig=payload['host_config'],
+            Path=payload['path'],Args=payload['args'],Mounts=[],State=state),image,release)
+    created=observe(sealed,dict(Status='created',Running=False));running=observe(actual,dict(Status='running',Running=True))
+    assert created['container_id']==running['container_id']
+    assert not host.compare_observed_config(running,created['actual_config_sha256'])['raw_hash_match']
+    assert running['actual_config_sha256']==host._digest(actual)
 
 
 def digest(value: object) -> str:
@@ -823,10 +925,13 @@ def test_recovery_actual_docker_namespace_isolated_with_production_still_present
     else:m.validate_instance(host,c,p)
 
 
-@pytest.mark.parametrize('fault',[None,'commit','tree','image','mount','reuse-grant','production-changed'])
+@pytest.mark.parametrize('fault',[None,'commit','tree','image','mount','reuse-grant','production-changed','oom-default'])
 def test_recovery_retained_policy_and_live_artifact_remain_exact(tmp_path,monkeypatch,fault):
     m=recovery_module();p=recovery_policy();old=copy.deepcopy(p);old.pop('recovery')
     value=observed(old)
+    if fault == 'oom-default':
+        value['host_config']['OomKillDisable'] = False
+        old['actual_config_sha256'] = host._digest(dict(config=value['config'],host_config=value['host_config'],path=None,args=None))
     c=dict(Id='b'*64,Name='/'+old['service_id'],Image=IMAGE,Config=value['config'],HostConfig=value['host_config'],
         Mounts=[dict(Type='bind',Source=x['source'],Destination=x['target'],RW=not x['read_only']) for x in old['mounts']],
         State=dict(Running=True,StartedAt='2026-09-01T00:00:00Z'),NetworkSettings={'Networks':{}},Created='old',RestartCount=0)
@@ -838,12 +943,16 @@ def test_recovery_retained_policy_and_live_artifact_remain_exact(tmp_path,monkey
     monkeypatch.setattr(host,'_protected_path',lambda *a,**kw:f)
     monkeypatch.setattr(host,'docker_inspect',lambda cid:c);monkeypatch.setattr(host,'docker_image_inspect',lambda image_id:image)
     monkeypatch.setattr(host,'copy_container_json',lambda *a:value['release_manifest'])
+    if fault == 'oom-default':
+        c['HostConfig']['OomKillDisable'] = None
+        p['recovery']['production_observation_sha256'] = m.production_identity(host,c)
+        monkeypatch.setattr(host, '_run_docker', lambda args: host._canonical(SEMANTIC_PLATFORM))
     if fault in ('commit','tree'):p['approved_'+fault]='e'*40
     elif fault=='image':p['image_id']='sha256:'+'d'*64
     elif fault=='mount':p['mounts'][1]['source']='/different'
     elif fault=='reuse-grant':p['mounts']=copy.deepcopy(old['mounts'])
     elif fault=='production-changed':c['RestartCount']=1
-    if fault:
+    if fault and fault != 'oom-default':
         with pytest.raises(host.HostAuthorizationError):m.retained(host,p)
     else:assert m.retained(host,p)[0]==old
 

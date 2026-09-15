@@ -201,8 +201,56 @@ def normalize_observation(container: Mapping, image: Mapping, release: Mapping) 
         "config": config, "host_config": host, "image_config": image.get("Config", {}),
         "image_labels": labels, "release_manifest": release,
         "mounts": _mounts(container), "state": container.get("State", {}),
+        "path": container.get("Path"), "args": container.get("Args"),
         "actual_config_sha256": _digest({"config": config, "host_config": host, "path": container.get("Path"), "args": container.get("Args")}),
     }
+
+
+def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
+                            policy_raw_sha256: str, actual_raw_sha256: str,
+                            platform: Mapping | None = None) -> dict:
+    """Keep raw evidence; only one proven Docker default has semantic equivalence."""
+    if _digest(policy_payload) != policy_raw_sha256 or _digest(actual_payload) != actual_raw_sha256:
+        raise HostAuthorizationError("config payload does not reproduce raw hash")
+    evidence = dict(policy_raw_sha256=policy_raw_sha256, actual_raw_sha256=actual_raw_sha256,
+                    raw_hash_match=policy_raw_sha256 == actual_raw_sha256,
+                    semantic_config_match=True, compatibility_rule=None, platform=dict(platform or {}))
+    if evidence["raw_hash_match"]:
+        return evidence
+    if not platform or platform.get("ServerVersion") != "26.1.3" or platform.get("CgroupVersion") != "2":
+        raise HostAuthorizationError("config mismatch: unsupported Docker/cgroup compatibility evidence")
+    left, right = _json(_canonical(policy_payload)), _json(_canonical(actual_payload))
+    for payload in (left, right):
+        host = payload.get("host_config", {})
+        if "OomKillDisable" not in host or not (host["OomKillDisable"] is False or host["OomKillDisable"] is None):
+            raise HostAuthorizationError("config mismatch: OomKillDisable is not false/null")
+        host["OomKillDisable"] = False
+    if _canonical(left) != _canonical(right):
+        raise HostAuthorizationError("config mismatch outside OomKillDisable false/null")
+    evidence["compatibility_rule"] = "OOM_KILL_DISABLE_FALSE_NULL_EQUIVALENCE"
+    return evidence
+
+
+def compare_observed_config(observed: Mapping, policy_raw_sha256: str) -> dict:
+    """Reconstruct only the opposite default; the sealed raw digest proves every byte."""
+    actual = {k: observed.get(k) for k in ("config", "host_config", "path", "args")}
+    actual_hash = observed["actual_config_sha256"]
+    if _digest(actual) != actual_hash:
+        raise HostAuthorizationError("actual config payload does not reproduce raw hash")
+    if actual_hash == policy_raw_sha256:
+        return compare_config_payloads(actual, actual, policy_raw_sha256=policy_raw_sha256,
+                                       actual_raw_sha256=actual_hash)
+    reconstructed = _json(_canonical(actual))
+    host = reconstructed["host_config"]
+    if "OomKillDisable" not in host or not (host["OomKillDisable"] is False or host["OomKillDisable"] is None):
+        raise HostAuthorizationError("actual container config differs from approval")
+    host["OomKillDisable"] = None if host["OomKillDisable"] is False else False
+    if _digest(reconstructed) != policy_raw_sha256:
+        raise HostAuthorizationError("reconstructed config does not reproduce sealed raw hash")
+    info = _json(_run_docker(["info", "--format", "json"]))
+    platform = {key: info.get(key) for key in ("ServerVersion", "CgroupVersion", "CgroupDriver")}
+    return compare_config_payloads(reconstructed, actual, policy_raw_sha256=policy_raw_sha256,
+                                   actual_raw_sha256=actual_hash, platform=platform)
 
 
 _POLICY_V1_FIELDS = {
@@ -358,8 +406,7 @@ def validate_observation(observed: Mapping, expected: Mapping, *, role: str) -> 
     config, host = observed["config"], observed["host_config"]
     if observed["image_id"] != expected["image_id"] or not _HEX64.fullmatch(str(observed["container_id"])):
         raise HostAuthorizationError("actual container/image identity mismatch")
-    if observed["actual_config_sha256"] != expected["actual_config_sha256"]:
-        raise HostAuthorizationError("actual configuration differs from approved deployment")
+    comparison = compare_observed_config(observed, expected["actual_config_sha256"])
     if observed["state"].get("Status") != "created" or observed["state"].get("Running") is not False:
         raise HostAuthorizationError("grant requires a fresh, unstarted container")
     if not re.fullmatch(r"[1-9][0-9]*(?::[1-9][0-9]*)?", str(config.get("User", ""))):
@@ -400,7 +447,10 @@ def validate_observation(observed: Mapping, expected: Mapping, *, role: str) -> 
         target = mount["target"]
         if target == "/" or target == source or any(_within(target, path) or _within(path, target) for path in immutable):
             raise HostAuthorizationError("mount shadows immutable source identity")
-    return dict(observed)
+    result = dict(observed)
+    if not comparison["raw_hash_match"]:
+        result["config_comparison"] = comparison
+    return result
 
 
 def _require_linux_root() -> None:
@@ -1157,7 +1207,9 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
             "production_rendered_compose_sha256": rendered,
             "runtime_manifest_sha256": policy["runtime_manifest_sha256"], "release_sha256": observed["release_sha256"],
             "mount_contract_sha256": _digest(observed["mounts"]), "actual_config_sha256": observed["actual_config_sha256"],
-            "secret_file_identity_sha256": _digest(secrets)}
+            "secret_file_identity_sha256": _digest(secrets),
+            **({"recovery_config_comparison": record["config_comparison"]} if "config_comparison" in record else {}),
+            **({"config_comparison": observed["config_comparison"]} if "config_comparison" in observed else {})}
 
 
 def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900) -> dict:
