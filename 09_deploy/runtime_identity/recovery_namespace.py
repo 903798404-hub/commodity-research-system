@@ -137,16 +137,17 @@ def baseline(h, policy):
 
 
 def semantic_network(h, raw):
-    """Normalize only Compose's empty optional custom-IPAM block."""
+    """Compare effective bridge defaults and optional custom IPAM, not JSON spelling."""
     require(h, type(raw) is dict and set(raw) <= {'name', 'driver', 'internal', 'ipam'}
         and isinstance(raw.get('name'), str) and bool(raw['name'])
         and isinstance(raw.get('driver', 'bridge'), str)
         and type(raw.get('internal', False)) is bool, 'unsupported old network semantics')
-    result = copy.deepcopy(raw)
+    result = dict(name=raw['name'], driver=raw.get('driver', 'bridge'),
+        internal=raw.get('internal', False))
     if 'ipam' in raw:
         require(h, type(raw['ipam']) is dict, 'invalid custom IPAM')
-        if not raw['ipam']:
-            result.pop('ipam')
+        if raw['ipam']:
+            result['ipam'] = copy.deepcopy(raw['ipam'])
     return result
 
 
@@ -208,6 +209,30 @@ def project_compose(h, desired, policy):
     result['networks']['default'] = dict(name=r['network'], driver='bridge', internal=False)
     require(h, r['network'] not in production['NetworkSettings']['Networks'], 'production network joined')
     return result
+
+
+def validate_projected_network(h, projected, rendered, policy):
+    """Own the recovery network subtree before the host compares all other Compose fields."""
+    r = policy['recovery']
+    _, production = retained(h, policy)
+    require(h, r['network'] not in production['NetworkSettings']['Networks'], 'production network joined')
+    for document in (projected, rendered):
+        require(h, type(document) is dict and type(document.get('networks')) is dict and
+            set(document['networks']) == {'default'} and
+            type(document.get('services')) is dict and set(document['services']) == {policy['service_id']} and
+            document['services'][policy['service_id']].get('networks') == {'default': None},
+            'recovery must use only its isolated default network')
+        ports = document['services'][policy['service_id']].get('ports')
+        require(h, type(ports) is list and len(ports) == 1 and type(ports[0]) is dict and
+            ports[0].get('host_ip') == '127.0.0.1' and
+            ports[0].get('published') == str(r['host_port']) and
+            ports[0].get('target') == 8501 and ports[0].get('protocol', 'tcp') == 'tcp',
+            'recovery port must bind only localhost')
+    expected = dict(name=r['network'], driver='bridge', internal=False)
+    require(h, semantic_network(h, projected['networks']['default']) == expected and
+        semantic_network(h, rendered['networks']['default']) == expected,
+        'recovery network semantics differ')
+    return True
 
 
 def validate_instance(h, container, policy):

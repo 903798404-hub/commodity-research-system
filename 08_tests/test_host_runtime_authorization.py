@@ -852,15 +852,16 @@ def test_real_old_compose_empty_ipam_replays_as_no_custom_ipam():
     old={'default':{'name':'spread-e42a61e-20260908-b01_default','ipam':{}}}
     same_without_ipam={'name':old['default']['name']}
     assert m.semantic_network(host,old['default'])==m.semantic_network(host,same_without_ipam)
-    assert m.semantic_network(host,old['default'])==same_without_ipam
+    assert m.semantic_network(host,old['default'])==dict(
+        name=old['default']['name'],driver='bridge',internal=False)
     assert 'ipam' not in m.semantic_network(host,old['default'])
 
 
 @pytest.mark.parametrize('left,right,equal',[
     ({}, {}, True), ({}, {'ipam':{}}, True), ({'ipam':{}}, {}, True),
     ({'ipam':{}}, {'ipam':{}}, True),
-    ({}, {'driver':'bridge'}, False),
-    ({}, {'internal':False}, False),
+    ({}, {'driver':'bridge'}, True),
+    ({}, {'internal':False}, True),
     ({}, {'ipam':{'config':[{'subnet':'172.20.0.0/16'}]}}, False),
     ({'ipam':{}}, {'ipam':{'config':[{'subnet':'172.20.0.0/16'}]}}, False),
     ({'ipam':{}}, {'ipam':{'driver':'default'}}, False),
@@ -1065,7 +1066,8 @@ def test_recovery_fresh_grant_preserves_old_image_protocol_and_instance_binding(
         host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,grant_path=grants/'grant.json',grant_dir=grants,role='production')
 
 
-def test_recovery_projection_is_used_by_production_compose_bridge(recovery_compose,monkeypatch):
+@pytest.fixture
+def recovery_bridge(recovery_compose,monkeypatch):
     m,p,desired,old,prod=recovery_compose
     # Exact source Compose render and retained render come from separate calls.
     source=copy.deepcopy(desired)
@@ -1079,9 +1081,89 @@ def test_recovery_projection_is_used_by_production_compose_bridge(recovery_compo
     actual=m.project_compose(host,source,p)
     actual['services'][p['service_id']]['hostname']=p['recovery']['nonce']
     manifest=dict(build={'compose_sources':['compose.yml']},entrypoint=['streamlit','run','page.py'],working_directory='/app',required_environment=['BUSINESS'],secret_references=[])
+    return m,p,actual,manifest
+
+
+def test_recovery_projection_is_used_by_production_compose_bridge(recovery_bridge):
+    _,p,actual,manifest=recovery_bridge
     assert host._production_compose_bridge(actual,p,manifest)==[]
     actual['services'][p['service_id']]['environment']['BUSINESS']='override'
     with pytest.raises(host.HostAuthorizationError):host._production_compose_bridge(actual,p,manifest)
+
+
+@pytest.mark.parametrize('mutation',['internal-absent','ipam-empty','both'])
+def test_recovery_final_compose_delegates_effective_network_defaults(recovery_bridge,mutation):
+    _,p,actual,manifest=recovery_bridge
+    network=actual['networks']['default']
+    if mutation in ('internal-absent','both'):network.pop('internal')
+    if mutation in ('ipam-empty','both'):network['ipam']={}
+    assert host._production_compose_bridge(actual,p,manifest)==[]
+
+
+@pytest.mark.parametrize('mutation',[
+    'custom-subnet','custom-ipam-options','internal-true','custom-driver',
+    'production-network-name','production-network-join','extra-network',
+    'public-bind','environment','command','mount-source','mount-rw','security-option',
+])
+def test_recovery_final_compose_rejects_semantic_or_nonnetwork_change(recovery_bridge,mutation):
+    _,p,actual,manifest=recovery_bridge
+    network=actual['networks']['default'];service=actual['services'][p['service_id']]
+    if mutation=='custom-subnet':network['ipam']={'config':[{'subnet':'172.20.0.0/16'}]}
+    elif mutation=='custom-ipam-options':network['ipam']={'options':{'custom':'yes'}}
+    elif mutation=='internal-true':network['internal']=True
+    elif mutation=='custom-driver':network['driver']='overlay'
+    elif mutation=='production-network-name':network['name']='production_default'
+    elif mutation=='production-network-join':service['networks']['production_default']=None
+    elif mutation=='extra-network':actual['networks']['other']={'name':'other'}
+    elif mutation=='public-bind':service['ports'][0]['host_ip']='0.0.0.0'
+    elif mutation=='environment':service['environment']['BUSINESS']='different'
+    elif mutation=='command':service['command']=['shell']
+    elif mutation=='mount-source':service['volumes'][0]['source']='/other/history'
+    elif mutation=='mount-rw':service['volumes'][0]['read_only']=False
+    elif mutation=='security-option':service['security_opt']=['no-new-privileges:false']
+    with pytest.raises(host.HostAuthorizationError):host._production_compose_bridge(actual,p,manifest)
+
+
+@pytest.mark.parametrize('validator_result',[None,False])
+def test_recovery_final_compose_requires_explicit_network_validator_pass(
+        recovery_bridge,monkeypatch,validator_result):
+    _,p,actual,manifest=recovery_bridge
+    original=host._recovery_call
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:
+        validator_result if name=='validate_projected_network' else original(name,*args))
+    with pytest.raises(host.HostAuthorizationError,match='network semantic validation did not pass'):
+        host._production_compose_bridge(actual,p,manifest)
+
+
+def test_real_recovery_compose_network_representation_replay(recovery_compose,monkeypatch):
+    m,p,desired,old,_=recovery_compose
+    old_network_name='spread-e42a61e-20260908-b01_default'
+    baseline=json.loads(host._run_docker([]))
+    baseline['name']='spread-e42a61e-20260908-b01'
+    baseline['networks']['default']={'name':old_network_name,'ipam':{}}
+    baseline['services'][p['service_id']]['working_dir']='/app'
+    old['rendered_compose_sha256']=digest(baseline)
+    source=copy.deepcopy(desired)
+    source['networks']['default']['ipam']={}
+    source['services'][p['service_id']]['working_dir']='/app'
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical(source if '--project-name' in args else baseline))
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:getattr(m,name)(host,*args))
+    actual=m.project_compose(host,source,p)
+    assert m.semantic_network(host,actual['networks']['default'])==dict(
+        name=p['recovery']['network'],driver='bridge',internal=False)
+    actual['networks']['default'].pop('internal')
+    actual['networks']['default']['ipam']={}
+    actual['services'][p['service_id']]['hostname']=p['recovery']['nonce']
+    manifest=dict(build={'compose_sources':['compose.yml']},
+        entrypoint=['streamlit','run','page.py'],working_directory='/app',
+        required_environment=['BUSINESS'],secret_references=[])
+    non_network_expected=m.project_compose(host,source,p)
+    non_network_actual=copy.deepcopy(actual)
+    for document in (non_network_expected,non_network_actual):
+        document.pop('networks')
+        document['services'][p['service_id']].pop('hostname',None)
+    assert non_network_expected==non_network_actual  # zero non-network differences
+    assert host._production_compose_bridge(actual,p,manifest)==[]
 
 
 def test_recovery_changed_preservation_or_production_observation_prevents_sealing(tmp_path,monkeypatch):

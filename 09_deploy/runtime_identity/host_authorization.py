@@ -925,6 +925,13 @@ def _production_compose_bridge(rendered: Mapping, policy: Mapping, manifest: Map
     for service in (wanted_service, actual_service):
         service.pop("build", None)
         service.pop("hostname", None)
+    if 'recovery' in policy:
+        if _recovery_call('validate_projected_network', desired, actual, policy) is not True:
+            raise HostAuthorizationError("recovery network semantic validation did not pass")
+        # Recovery network identity is owned by the semantic validator above.
+        # The rest of the Compose document remains an exact structural match.
+        desired.pop('networks')
+        actual.pop('networks')
     if desired != actual:
         raise HostAuthorizationError("production Compose contains undeclared source-contract differences")
     if (actual_service.get("entrypoint") != manifest["entrypoint"]
