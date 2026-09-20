@@ -860,8 +860,9 @@ def test_real_old_compose_empty_ipam_replays_as_no_custom_ipam():
 @pytest.mark.parametrize('left,right,equal',[
     ({}, {}, True), ({}, {'ipam':{}}, True), ({'ipam':{}}, {}, True),
     ({'ipam':{}}, {'ipam':{}}, True),
-    ({}, {'driver':'bridge'}, True),
-    ({}, {'internal':False}, True),
+    # Keep the baseline node identities while updating their effective-default contract.
+    pytest.param({}, {'driver':'bridge'}, True, id='left4-right4-False'),
+    pytest.param({}, {'internal':False}, True, id='left5-right5-False'),
     ({}, {'ipam':{'config':[{'subnet':'172.20.0.0/16'}]}}, False),
     ({'ipam':{}}, {'ipam':{'config':[{'subnet':'172.20.0.0/16'}]}}, False),
     ({'ipam':{}}, {'ipam':{'driver':'default'}}, False),
