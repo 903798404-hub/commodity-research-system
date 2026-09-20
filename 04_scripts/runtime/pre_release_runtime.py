@@ -669,7 +669,7 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
                      (state_class != 'UNKNOWN', "STATE_COMPATIBILITY_UNPROVEN"),
                      (state_class != 'NEEDS_MAINTAINER_RISK_REVIEW', 'MAINTAINER_RISK_REVIEW_REQUIRED'),
                      (not full or rehearsal_validated, "RECOVERY_REHEARSAL_REQUIRED"),
-                     (not high or targeted_recovery_validated or full and rehearsal_validated,
+                     (not full or targeted_recovery_validated or rehearsal_validated,
                       "TARGETED_RECOVERY_VALIDATION_REQUIRED")):
         if not ok:
             failures.append(code)
@@ -677,7 +677,7 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
             "ROLLBACK_ASSETS_READY": assets_ready, "IRREVERSIBLE_STATE_CHANGE": irreversible_state_change,
             "STATE_CHANGE_CLASS": state_class,
             "ROLLBACK_REHEARSAL_REQUIRED": full, "FULL_ROLLBACK_REHEARSAL_REQUIRED": full,
-            "TARGETED_RECOVERY_VALIDATION_REQUIRED": high, "OLD_GRANT_EXPIRED": old_grant_expired,
+            "TARGETED_RECOVERY_VALIDATION_REQUIRED": full, "OLD_GRANT_EXPIRED": old_grant_expired,
             "EXECUTION_AUTHORIZATION": "REQUIRED_AT_FRESH_INSTANCE_START",
             "PRODUCTION_RELEASE_PREFLIGHT": "FAIL" if failures else "PASS", "failure_codes": failures,
             "production_authorized": False}

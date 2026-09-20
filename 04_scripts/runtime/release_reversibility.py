@@ -2,8 +2,8 @@
 
 This intentionally does not prove arbitrary Python. Supported additions use literal
 Path roots, direct file I/O and unchanged existing readers. Opaque storage adapters,
-authorization/lifecycle changes and unanalysed effects need Maintainer review. Runtime
-source separation and preservation still require targeted recovery observations.
+authorization/lifecycle changes and unanalysed effects need Maintainer review.
+Optional recovery observations do not gate a proven additive reversible release.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def requirements(risk_class, state_class):
     routine = risk_class == 'ROUTINE_STATELESS'
     full = not routine and state_class != 'ADDITIVE_REVERSIBLE'
     return dict(FULL_ROLLBACK_REHEARSAL_REQUIRED=full,
-                TARGETED_RECOVERY_VALIDATION_REQUIRED=not routine,
+                TARGETED_RECOVERY_VALIDATION_REQUIRED=full,
                 # Legacy name continues to mean full rehearsal, not targeted.
                 ROLLBACK_REHEARSAL_REQUIRED=full)
 

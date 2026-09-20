@@ -70,6 +70,25 @@ def test_current_docs_preserve_release_safety_and_baseline_semantics() -> None:
     assert "oil_world/RELEASE.json" not in "\n".join((read(INDEX), spec, manual))
 
 
+def test_release_treatments_and_runtime_details_have_one_policy_source() -> None:
+    root = read(ROOT / "AGENTS.md")
+    spec = read(SPEC)
+    manual = read(MANUAL)
+    runtime = read(ROOT / "09_deploy/runtime_identity/说明.md")
+    tooling = read(ROOT / "04_scripts/runtime/说明.md")
+
+    assert len(root.splitlines()) < 80
+    assert "| STATEFUL_OR_INFRA + ADDITIVE_REVERSIBLE | NO | NO |" in spec
+    assert "| STATEFUL_OR_INFRA + IRREVERSIBLE_OR_DESTRUCTIVE | YES | YES |" in spec
+    assert "NEEDS_MAINTAINER_RISK_REVIEW" in spec and "不自动 PASS" in spec
+    assert "真实 targeted recovery 是可选诊断" in spec
+    assert "无 targeted recovery 或 full rollback" in manual
+    assert "Recovery Runtime Lifecycle Hardening 技术债" in runtime
+    assert "## Routine Stateless 工具入口" in tooling
+    assert "production-release-request/1" in runtime
+    assert "production-release-request/1" not in spec
+
+
 def test_business_fast_lane_and_strict_lane_are_consistent_at_all_entrypoints():
     for path in (ROOT/'AGENTS.md', SPEC, MANUAL, FEATURE_TEMPLATE):
         body=read(path)

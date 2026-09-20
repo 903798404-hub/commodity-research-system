@@ -290,6 +290,24 @@ def test_routine_expired_grant_is_not_a_rollback_asset_failure():
     assert _risk_gate(old_grant_expired=False)["PRODUCTION_RELEASE_PREFLIGHT"] == "PASS"
 
 
+@pytest.mark.parametrize('state,destructive,expected', [
+    ('ADDITIVE_REVERSIBLE', False, 'PASS'),
+    ('HIGH_RISK', False, 'FAIL'),
+    ('NEEDS_MAINTAINER_RISK_REVIEW', False, 'FAIL'),
+    ('UNKNOWN', False, 'FAIL'),
+    ('ADDITIVE_REVERSIBLE', True, 'FAIL'),
+])
+def test_stateful_release_treatment_never_uses_additive_to_downgrade_risk(state, destructive, expected):
+    risk = dict(RELEASE_RISK_CLASS='STATEFUL_OR_INFRA', STATE_CHANGE_CLASS=state,
+                MACHINE_DESTRUCTIVE_EVIDENCE=destructive)
+    result = _risk_gate(risk=risk)
+    assert result['PRODUCTION_RELEASE_PREFLIGHT'] == expected
+    assert result['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is (state != 'ADDITIVE_REVERSIBLE' or destructive)
+    if expected == 'PASS':
+        assert result['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+        assert result['production_authorized'] is False
+
+
 @pytest.mark.parametrize("field", ["assets_ready", "candidate_validated", "compatibility", "acceptance_plan_ready"])
 def test_routine_requires_all_release_evidence(field):
     assert _risk_gate(**{field: False})["PRODUCTION_RELEASE_PREFLIGHT"] == "FAIL"
@@ -644,15 +662,14 @@ def additive_report(fixture):
     return runtime.classify_release(repo,base,git('rev-parse','HEAD'),'example')
 
 
-def test_independent_added_store_requires_targeted_only(additive_repo):
+def test_independent_added_store_can_build_without_recovery_rehearsal(additive_repo):
     r=additive_report(additive_repo)
     assert r['RELEASE_RISK_CLASS']=='STATEFUL_OR_INFRA'
     assert r['STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE', r
     assert r['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
-    assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is True
-    assert _risk_gate(risk=r)['failure_codes']==['TARGETED_RECOVERY_VALIDATION_REQUIRED']
-    assert _risk_gate(risk=r,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
-    assert _risk_gate(risk=r,rehearsal_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
+    assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is False
+    assert _risk_gate(risk=r)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+    assert _risk_gate(risk=r)['production_authorized'] is False
 
 
 @pytest.mark.parametrize('fault', ['db-migration','history-rewrite','format-conversion','old-delete',
@@ -762,9 +779,8 @@ def test_unsupported_business_semantics_allows_bound_maintainer_review(additive_
     assert accepted['MACHINE_STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
     assert accepted['STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE'
     assert accepted['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
-    assert accepted['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is True
-    assert _risk_gate(risk=accepted)['PRODUCTION_RELEASE_PREFLIGHT']=='FAIL'
-    assert _risk_gate(risk=accepted,targeted_recovery_validated=True)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+    assert accepted['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is False
+    assert _risk_gate(risk=accepted)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
     assert accepted['maintainer_risk_review']==review
 
 
@@ -836,7 +852,7 @@ def test_review_cli_is_not_an_execution_override(tmp_path):
     with pytest.raises(SystemExit):runtime.main(['--maintainer-risk-review',str(tmp_path/'review')])
     with pytest.raises(SystemExit):runtime.main(['--project','example','--maintainer-risk-review',str(tmp_path/'review')])
 
-@pytest.mark.parametrize('fault',[None,'main-moved','target-mismatch','destructive','no-review'])
+@pytest.mark.parametrize('fault',[None,'main-moved','target-mismatch','destructive','no-review','no-recovery'])
 def test_release_assessment_consumes_plain_review_and_targeted_evidence(rollback_assets,monkeypatch,tmp_path,fault):
     import copy
     repo,current,host,image=rollback_assets
@@ -865,6 +881,7 @@ def test_release_assessment_consumes_plain_review_and_targeted_evidence(rollback
         state_plan=ref('state',state),acceptance_plan=ref('acceptance',dict(target=identity,image_id=image['Id'],checks=['manual UI'])),
         recovery_evidence=ref('recovery',recovery),maintainer_risk_review=review)
     if fault=='no-review':request.pop('maintainer_risk_review');request['recovery_evidence']=None
+    if fault=='no-recovery':request['recovery_evidence']=None
     p=tmp_path/'request.json';p.write_text(json.dumps(request))
     host.require_protected_authority_source=lambda:None
     engine=SimpleNamespace(_project=lambda *a:{'runtime_contract':'contract'},source_contract=lambda *a:(None,{},binding))
@@ -893,12 +910,12 @@ def test_release_assessment_consumes_plain_review_and_targeted_evidence(rollback
         r=runtime.assess_release(p,output)
         assert r['PRODUCTION_RELEASE_PREFLIGHT']==('FAIL' if fault=='no-review' else 'PASS')
         assert r['production_authorized'] is False
-        if fault is None:
-            assert len(observed)==2
+        if fault in (None,'no-recovery'):
+            assert len(observed)==(0 if fault=='no-recovery' else 2)
             assert r['MAINTAINER_STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE'
             assert r['MACHINE_STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
             assert not r['FULL_ROLLBACK_REHEARSAL_REQUIRED']
-            assert r['TARGETED_RECOVERY_VALIDATION_REQUIRED']
+            assert not r['TARGETED_RECOVERY_VALIDATION_REQUIRED']
         else:assert not calls and not observed
 
 
