@@ -417,6 +417,8 @@ def test_manual_cnf_to_sealed_am_closure_preserves_snapshot(tmp_path: Path) -> N
         saved_at=datetime(2026, 8, 28, 1, 31, tzinfo=timezone.utc),
     )
     assert receipt.snapshot_immutability_pass
+    assert receipt.am_materialization_status == "MATERIALIZED"
+    assert receipt.materialize is not None
     assert receipt.snapshot_content_sha256_before == snapshot.content_sha256
     assert receipt.snapshot_content_sha256_after == snapshot.content_sha256
     assert receipt.am_record_count == 48
@@ -424,7 +426,7 @@ def test_manual_cnf_to_sealed_am_closure_preserves_snapshot(tmp_path: Path) -> N
     assert len(receipt.unavailable_periods) == 47
 
 
-def test_am_preflight_failure_does_not_partially_write_formal_cnf(
+def test_downstream_am_failure_keeps_persisted_cnf(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -441,23 +443,104 @@ def test_am_preflight_failure_does_not_partially_write_formal_cnf(
         for month in range(1, 13)
     }
 
-    def fail_preflight(**_kwargs):
+    def fail_materialization(**_kwargs):
         raise NameError("fixture materialize failure")
 
     monkeypatch.setattr(
         intraday_pipeline,
         "materialize_soybean_intraday_profit",
-        fail_preflight,
+        fail_materialization,
     )
-    with pytest.raises(NameError, match="fixture materialize failure"):
+    receipt = save_manual_cnf_and_materialize_am(
+        snapshot_root=snapshot_root,
+        result_root=tmp_path / "results",
+        cnf_store_path=cnf_path,
+        business_date=DAY,
+        values=values,
+        config=CONFIG,
+        saved_at=datetime(2026, 8, 28, 1, 31, tzinfo=timezone.utc),
+    )
+    assert receipt.am_materialization_status == "FAILED"
+    assert "NameError" in receipt.am_diagnostic
+    assert cnf_path.exists()
+    saved = load_cnf_store(cnf_path, allowed_origins=CONFIG.origin_codes)
+    assert saved.records[0].cnf_cents_per_bushel == 150
+    assert not (tmp_path / "results").exists()
+
+
+def test_cnf_persists_without_am_snapshot_and_reloads_exact_value(tmp_path: Path) -> None:
+    cnf_path = tmp_path / "operational" / "cnf.parquet"
+    results = tmp_path / "am-results"
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    values["brazil", 1] = 0.0
+    receipt = save_manual_cnf_and_materialize_am(
+        snapshot_root=tmp_path / "missing-am-snapshot",
+        result_root=results,
+        cnf_store_path=cnf_path,
+        business_date=DAY,
+        values=values,
+        config=CONFIG,
+        saved_at=datetime(2026, 8, 28, 1, 31, tzinfo=timezone.utc),
+    )
+    assert receipt.am_materialization_status == "INPUT_INCOMPLETE"
+    assert receipt.materialize is None and receipt.am_record_count == 0
+    assert receipt.cnf.cnf_sha256 and cnf_path.is_file()
+    saved = load_cnf_store(cnf_path, allowed_origins=CONFIG.origin_codes)
+    assert saved.store_sha256 == receipt.cnf.cnf_sha256
+    assert len(saved.records) == 1
+    assert saved.records[0].business_key.shipment_month == 1
+    assert saved.records[0].cnf_cents_per_bushel == 0.0
+    assert not results.exists()
+
+
+def test_missing_fx_keeps_cnf_without_fake_profit(tmp_path: Path) -> None:
+    snapshot = public_snapshot(MarketSession.AM, key())
+    snapshot = replace(snapshot, quotes=tuple(
+        quote for quote in snapshot.quotes if not quote.instrument_id.startswith("FX:")
+    ))
+    snapshots = tmp_path / "snapshots"
+    seal_fixture_snapshot(snapshots, snapshot)
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    values["brazil", 12] = 150.0
+    cnf_path = tmp_path / "operational" / "cnf.parquet"
+    results = tmp_path / "am-results"
+    receipt = save_manual_cnf_and_materialize_am(
+        snapshot_root=snapshots, result_root=results, cnf_store_path=cnf_path,
+        business_date=DAY, values=values, config=CONFIG,
+    )
+    assert receipt.am_materialization_status == "INPUT_INCOMPLETE"
+    assert receipt.snapshot_immutability_pass is True
+    assert cnf_path.is_file()
+    assert not results.exists()
+
+
+@pytest.mark.parametrize("invalid_values", ["missing-key", "nan"])
+def test_invalid_cnf_does_not_claim_persistence(tmp_path: Path, invalid_values: str) -> None:
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    if invalid_values == "missing-key":
+        values.pop(("brazil", 1))
+    else:
+        values["brazil", 1] = float("nan")
+    cnf_path = tmp_path / "operational" / "cnf.parquet"
+    with pytest.raises(ValueError):
         save_manual_cnf_and_materialize_am(
-            snapshot_root=snapshot_root,
-            result_root=tmp_path / "results",
-            cnf_store_path=cnf_path,
-            business_date=DAY,
-            values=values,
-            config=CONFIG,
-            saved_at=datetime(2026, 8, 28, 1, 31, tzinfo=timezone.utc),
+            snapshot_root=tmp_path / "snapshots", result_root=tmp_path / "results",
+            cnf_store_path=cnf_path, business_date=DAY, values=values, config=CONFIG,
+        )
+    assert not cnf_path.exists()
+
+
+def test_cnf_write_error_does_not_claim_persistence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    values["brazil", 1] = 150.0
+    cnf_path = tmp_path / "operational" / "cnf.parquet"
+    def fail_write(*_args, **_kwargs):
+        raise OSError("CNF operational write failed")
+    monkeypatch.setattr(intraday_pipeline, "upsert_cnf_quotes", fail_write)
+    with pytest.raises(OSError, match="CNF operational write failed"):
+        save_manual_cnf_and_materialize_am(
+            snapshot_root=tmp_path / "snapshots", result_root=tmp_path / "results",
+            cnf_store_path=cnf_path, business_date=DAY, values=values, config=CONFIG,
         )
     assert not cnf_path.exists()
 

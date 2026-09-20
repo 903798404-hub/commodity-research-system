@@ -167,6 +167,81 @@ def test_history_merge_uses_complete_keys_and_keeps_zero(operational,tmp_path):
     assert historical.read_bytes()==before
 
 
+def test_historical_cache_cannot_fake_operational_save(operational, tmp_path):
+    from datetime import datetime, timezone
+    from agri_research_agent.import_profit.cnf_store import CnfQuoteUpdate, upsert_cnf_quotes
+    from agri_research_agent.pipelines.soybean_intraday import save_manual_cnf_and_materialize_am
+    _, cnf, _ = operational
+    historical = tmp_path / 'historical-cnf.parquet'
+    upsert_cnf_quotes(
+        historical, [CnfQuoteUpdate(key(), 175.0, 'manual_ui',
+                                    datetime(2026, 8, 28, 1, 0, tzinfo=timezone.utc), 'historical')],
+        allowed_origins=CONFIG.origin_codes, expected_store_sha256=None,
+    )
+    historical_bytes = historical.read_bytes()
+    script = f'''import streamlit as st
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
+from agri_research_agent.import_profit.config import load_soybean_config
+from import_profit_intraday_page import _render_preview_cnf_editor
+config=load_soybean_config({str(Path(__file__).parents[1]/'02_configs/import_profit_soybean.yaml')!r})
+_render_preview_cnf_editor(Path({str(cnf)!r}),
+    historical_cnf_store_path=Path({str(historical)!r}),
+    business_date=date(2026,8,28),labels={{o.code:o.label for o in config.origins}},
+    config=config,save_cnf_handler=lambda values: SimpleNamespace(am_materialization_status='INPUT_INCOMPLETE'),
+    editable=True)
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+    button = next(item for item in app.button if item.label == '保存今日 CNF')
+    assert not button.disabled
+    button.click().run()
+    assert not app.exception
+    assert any('已正式保存' in item.value for item in app.success)
+    assert any('待计算' in item.value for item in app.info)
+
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    values['brazil', 12] = 0.0
+    receipt = save_manual_cnf_and_materialize_am(
+        snapshot_root=tmp_path / 'missing-am', result_root=tmp_path / 'results',
+        cnf_store_path=cnf, business_date=DAY, values=values, config=CONFIG,
+    )
+    assert receipt.am_materialization_status == 'INPUT_INCOMPLETE'
+    operational = load_cnf_store(cnf, allowed_origins=CONFIG.origin_codes)
+    assert len(operational.records) == 1
+    assert operational.records[0].cnf_cents_per_bushel == 0.0
+    rows = page._manual_cnf_records(cnf, historical, CONFIG.origin_codes)
+    current = next(row for row in rows if row.key == operational.records[0].key)
+    assert current.cnf_cents_per_bushel == 0.0
+    assert historical.read_bytes() == historical_bytes
+    reloaded = AppTest.from_string(script).run()
+    assert not reloaded.exception
+    assert not next(item for item in reloaded.button if item.label == '重试上午盘面榨利').disabled
+
+
+def test_editor_reports_storage_failure_without_saved_message(operational):
+    _, cnf, _ = operational
+    script = f'''import streamlit as st
+from datetime import date
+from pathlib import Path
+from agri_research_agent.import_profit.config import load_soybean_config
+from import_profit_intraday_page import _render_preview_cnf_editor
+config=load_soybean_config({str(Path(__file__).parents[1]/'02_configs/import_profit_soybean.yaml')!r})
+_render_preview_cnf_editor(Path({str(cnf)!r}),
+    business_date=date(2026,8,28),labels={{o.code:o.label for o in config.origins}},
+    config=config,save_cnf_handler=lambda _: (_ for _ in ()).throw(OSError('storage denied')),
+    editable=True)
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+    next(item for item in app.button if item.label == '保存今日 CNF').click().run()
+    assert not app.exception
+    assert any('保存失败' in item.value for item in app.error)
+    assert not app.success
+    assert not cnf.exists()
+
+
 def test_enabled_missing_environment_paths_fail_before_render(operational,monkeypatch):
     context,_,_=operational
     monkeypatch.setattr(op,'operational_write_context',lambda:context)

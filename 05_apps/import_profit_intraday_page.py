@@ -242,6 +242,11 @@ def _render_final_ui(
         config=config,
         save_cnf_handler=save_cnf_handler,
         editable=(mode is IntradayPageMode.FINAL_UI_PREVIEW or save_cnf_handler is not None),
+        am_result_available=(
+            am_release is not None
+            and am_release.business_date == business_date
+            and am_release.session is MarketSession.AM
+        ),
     )
     cnf_by_month = {
         month: _number(edited.loc[selected_origin, f"{month}月船期"])
@@ -595,8 +600,12 @@ def _render_preview_cnf_editor(
     ] | None,
     editable: bool,
     historical_cnf_store_path: Path | None = None,
+    am_result_available: bool = False,
 ) -> pd.DataFrame:
     records = _manual_cnf_records(cnf_store_path, historical_cnf_store_path, config.origin_codes)
+    operational_records = load_cnf_store(
+        cnf_store_path, allowed_origins=config.origin_codes
+    ).records
     values = {
         (record.business_key.origin, record.business_key.shipment_month):
         record.cnf_cents_per_bushel
@@ -604,7 +613,14 @@ def _render_preview_cnf_editor(
         if record.business_key.business_date == business_date
         and record.business_key.shipment_year == shipment_year_for(business_date, record.business_key.shipment_month)
     }
-    cnf_saved = bool(values)
+    cnf_saved = any(
+        record.business_key.business_date == business_date
+        and record.business_key.shipment_year == shipment_year_for(
+            business_date, record.business_key.shipment_month
+        )
+        and record.source == "manual_ui"
+        for record in operational_records
+    )
     seed = pd.DataFrame(
         [
             {
@@ -648,13 +664,16 @@ def _render_preview_cnf_editor(
             },
         )
         actions = st.columns([8.3, 1.7])
+        if cnf_saved:
+            st.caption("今日 CNF 已保存在 operational store。")
         with actions[1]:
             preview_saved = st.button(
-                "今日 CNF 已保存" if cnf_saved else "保存今日 CNF",
+                ("今日 CNF 已保存" if am_result_available else "重试上午盘面榨利")
+                if cnf_saved else "保存今日 CNF",
                 type="primary",
                 width="stretch",
                 key="soybean_intraday_preview:save_cnf",
-                disabled=cnf_saved or not editable,
+                disabled=(cnf_saved and am_result_available) or not editable,
             )
         if preview_saved:
             if save_cnf_handler is None:
@@ -675,7 +694,20 @@ def _render_preview_cnf_editor(
                     st.session_state[
                         "soybean_intraday:am_closure_receipt"
                     ] = receipt
-                    st.success("今日 CNF 已正式保存，上午盘面榨利已生成。")
+                    status = getattr(receipt, "am_materialization_status", None)
+                    if status == "MATERIALIZED":
+                        st.success("今日 CNF 已正式保存，上午盘面榨利结果已生成。")
+                        if getattr(receipt, "unavailable_periods", ()):
+                            st.info("部分船期输入不完整，相关榨利字段保持空值。")
+                    elif status == "INPUT_INCOMPLETE":
+                        st.success("今日 CNF 已正式保存。")
+                        st.info("当前缺少 AM Snapshot 或必要行情输入，盘面榨利待计算。")
+                    else:
+                        st.success("今日 CNF 已正式保存。")
+                        st.warning(
+                            "上午盘面榨利未能生成："
+                            + str(getattr(receipt, "am_diagnostic", None) or "请检查计算输入与运行日志。")
+                        )
     edited.index = seed.index
     return edited
 

@@ -8,8 +8,6 @@ import json
 from math import isfinite
 from numbers import Real
 from pathlib import Path
-import shutil
-from tempfile import TemporaryDirectory
 from typing import Mapping
 import uuid
 
@@ -23,6 +21,7 @@ from agri_research_agent.import_profit.config import SoybeanImportProfitConfig
 from agri_research_agent.import_profit.daily_increment import generate_daily_business_keys
 from agri_research_agent.import_profit.intraday import (
     SoybeanIntradayCnfError,
+    SoybeanIntradaySnapshotMissingError,
     calculate_soybean_intraday_profit,
     load_soybean_intraday_market_inputs,
 )
@@ -38,6 +37,7 @@ from agri_research_agent.import_profit.historical_cnf_adapter import (
 )
 from agri_research_agent.import_profit.models import BusinessKey
 from agri_research_agent.market_data.intraday import (
+    IntradaySnapshotNotFoundError,
     MarketSession,
     load_intraday_snapshot,
 )
@@ -55,17 +55,19 @@ class SoybeanIntradayCnfSaveReceipt:
 @dataclass(frozen=True, slots=True)
 class SoybeanAmClosureReceipt:
     cnf: SoybeanIntradayCnfSaveReceipt
-    materialize: IntradayProfitSealResult
+    materialize: IntradayProfitSealResult | None
     am_record_count: int
     calculable_periods: tuple[str, ...]
     unavailable_periods: tuple[tuple[str, str], ...]
-    snapshot_release_id: str
-    snapshot_captured_at: datetime
-    snapshot_content_sha256_before: str
-    snapshot_content_sha256_after: str
-    snapshot_quotes_sha256_before: str
-    snapshot_quotes_sha256_after: str
-    snapshot_immutability_pass: bool
+    snapshot_release_id: str | None
+    snapshot_captured_at: datetime | None
+    snapshot_content_sha256_before: str | None
+    snapshot_content_sha256_after: str | None
+    snapshot_quotes_sha256_before: str | None
+    snapshot_quotes_sha256_after: str | None
+    snapshot_immutability_pass: bool | None
+    am_materialization_status: str
+    am_diagnostic: str | None
 
 
 def save_soybean_intraday_manual_cnf(
@@ -169,6 +171,24 @@ def save_soybean_intraday_manual_cnf(
         )
     if saved.store_sha256 is None:
         raise RuntimeError("manual CNF store identity is missing after save")
+    if saved.store_sha256 != write_result.new_sha256:
+        raise RuntimeError("manual CNF store identity changed during save verification")
+    saved_by_key = {item.key: item for item in saved.records}
+    for (origin, month), value in normalized.items():
+        key = BusinessKey(
+            business_date=business_date,
+            commodity=config.commodity,
+            origin=origin,
+            shipment_year=shipment_year_for(business_date, month),
+            shipment_month=month,
+            allowed_origins=config.origin_codes,
+            expected_commodity=config.commodity,
+        )
+        record = saved_by_key.get((key.business_date, key.commodity, key.origin,
+                                   key.shipment_year, key.shipment_month))
+        if value is not None or record is not None:
+            if record is None or record.source != "manual_ui" or record.cnf_cents_per_bushel != value:
+                raise RuntimeError("manual CNF reload did not match the saved business key")
     coverage = {
         origin: tuple(
             sorted(
@@ -200,7 +220,7 @@ def save_manual_cnf_and_materialize_am(
     config: SoybeanImportProfitConfig,
     saved_at: datetime | None = None,
 ) -> SoybeanAmClosureReceipt:
-    """Save manual CNF, consume the existing SEALED AM, and prove immutability."""
+    """Persist CNF first; report AM derivation separately without undoing input."""
 
     at = saved_at or datetime.now(timezone.utc)
     try:
@@ -213,34 +233,6 @@ def save_manual_cnf_and_materialize_am(
         raise RuntimeError(
             "AM result is already sealed; manual CNF cannot be changed"
         )
-    before = _snapshot_identity(snapshot_root, business_date)
-
-    # Exercise the complete CNF -> AM calculation path before touching the
-    # formal CNF store.  This catches code/validation failures (including a
-    # missing enum import) without leaving a formal partial write behind.
-    formal_cnf_path = Path(cnf_store_path)
-    with TemporaryDirectory(prefix="soybean-am-preflight-") as directory:
-        preflight_root = Path(directory)
-        preflight_cnf = preflight_root / "manual_cnf_quotes.parquet"
-        if formal_cnf_path.is_file():
-            shutil.copy2(formal_cnf_path, preflight_cnf)
-        save_soybean_intraday_manual_cnf(
-            cnf_store_path=preflight_cnf,
-            business_date=business_date,
-            values=values,
-            config=config,
-            updated_at=at,
-        )
-        materialize_soybean_intraday_profit(
-            snapshot_root=str(snapshot_root),
-            result_root=str(preflight_root / "results"),
-            cnf_store_path=str(preflight_cnf),
-            business_date=business_date,
-            session=MarketSession.AM,
-            config=config,
-            calculated_at=at,
-        )
-
     cnf = save_soybean_intraday_manual_cnf(
         cnf_store_path=cnf_store_path,
         business_date=business_date,
@@ -248,22 +240,44 @@ def save_manual_cnf_and_materialize_am(
         config=config,
         updated_at=at,
     )
-    materialized = materialize_soybean_intraday_profit(
-        snapshot_root=str(snapshot_root),
-        result_root=str(result_root),
-        cnf_store_path=str(cnf_store_path),
-        business_date=business_date,
-        session=MarketSession.AM,
-        config=config,
-        calculated_at=at,
-    )
-    after = _snapshot_identity(snapshot_root, business_date)
-    resolved = load_intraday_profit_batch(
-        result_root, business_date, MarketSession.AM
-    )
+    before = None
+    after = None
+    materialized = None
+    resolved = None
+    status = "MATERIALIZED"
+    diagnostic = None
+    try:
+        before = _snapshot_identity(snapshot_root, business_date)
+        materialized = materialize_soybean_intraday_profit(
+            snapshot_root=str(snapshot_root),
+            result_root=str(result_root),
+            cnf_store_path=str(cnf_store_path),
+            business_date=business_date,
+            session=MarketSession.AM,
+            config=config,
+            calculated_at=at,
+        )
+        resolved = load_intraday_profit_batch(
+            result_root, business_date, MarketSession.AM
+        )
+    except (IntradaySnapshotNotFoundError, SoybeanIntradaySnapshotMissingError) as exc:
+        status = "INPUT_INCOMPLETE"
+        diagnostic = f"{type(exc).__name__}: {exc}"
+    except Exception as exc:
+        status = "FAILED"
+        diagnostic = f"{type(exc).__name__}: {exc}"
+    if before is not None:
+        try:
+            after = _snapshot_identity(snapshot_root, business_date)
+            if before != after:
+                status = "FAILED"
+                diagnostic = "SEALED AM snapshot identity changed during CNF materialization"
+        except Exception as exc:
+            status = "FAILED"
+            diagnostic = f"snapshot identity verification failed: {type(exc).__name__}: {exc}"
     calculable = []
     unavailable = []
-    for row in resolved.rows:
+    for row in () if resolved is None else resolved.rows:
         period = f"{int(row['shipment_year']):04d}-{int(row['shipment_month']):02d}"
         if row.get("availability_status") == "SUCCESS" and row.get(
             "calculation_status"
@@ -274,22 +288,21 @@ def save_manual_cnf_and_materialize_am(
                 row.get("availability_status", "UNAVAILABLE")
             ]
             unavailable.append((period, ",".join(map(str, reasons))))
-    immutable = before == after
-    if not immutable:
-        raise RuntimeError("SEALED AM snapshot identity changed during CNF materialization")
     return SoybeanAmClosureReceipt(
         cnf=cnf,
         materialize=materialized,
-        am_record_count=len(resolved.rows),
+        am_record_count=0 if resolved is None else len(resolved.rows),
         calculable_periods=tuple(calculable),
         unavailable_periods=tuple(unavailable),
-        snapshot_release_id=before[0],
-        snapshot_captured_at=before[1],
-        snapshot_content_sha256_before=before[2],
-        snapshot_content_sha256_after=after[2],
-        snapshot_quotes_sha256_before=before[3],
-        snapshot_quotes_sha256_after=after[3],
-        snapshot_immutability_pass=True,
+        snapshot_release_id=None if before is None else before[0],
+        snapshot_captured_at=None if before is None else before[1],
+        snapshot_content_sha256_before=None if before is None else before[2],
+        snapshot_content_sha256_after=None if after is None else after[2],
+        snapshot_quotes_sha256_before=None if before is None else before[3],
+        snapshot_quotes_sha256_after=None if after is None else after[3],
+        snapshot_immutability_pass=None if before is None else before == after,
+        am_materialization_status=status,
+        am_diagnostic=diagnostic,
     )
 
 
