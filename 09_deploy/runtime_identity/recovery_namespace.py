@@ -136,6 +136,20 @@ def baseline(h, policy):
         production_identity=production_identity(h, c), preserved_stores=preserved(h, policy)), manifest
 
 
+def semantic_network(h, raw):
+    """Normalize only Compose's empty optional custom-IPAM block."""
+    require(h, type(raw) is dict and set(raw) <= {'name', 'driver', 'internal', 'ipam'}
+        and isinstance(raw.get('name'), str) and bool(raw['name'])
+        and isinstance(raw.get('driver', 'bridge'), str)
+        and type(raw.get('internal', False)) is bool, 'unsupported old network semantics')
+    result = copy.deepcopy(raw)
+    if 'ipam' in raw:
+        require(h, type(raw['ipam']) is dict, 'invalid custom IPAM')
+        if not raw['ipam']:
+            result.pop('ipam')
+    return result
+
+
 def project_compose(h, desired, policy):
     """Return the sole allowed projection; issuer compares every other field."""
     old, production = retained(h, policy)
@@ -158,13 +172,21 @@ def project_compose(h, desired, policy):
         len(service.get('ports', [])) == 1 and service['ports'][0].get('target') == 8501
         and service['ports'][0].get('protocol', 'tcp') == 'tcp', 'unsupported old port contract')
     require(h, set(projected.get('networks', {})) == {'default'} and
-        set(projected['networks']['default']) <= {'name', 'driver', 'internal'} and
-        projected['networks']['default'].get('driver', 'bridge') == 'bridge' and
-        projected['networks']['default'].get('internal', False) is False and
+        set(desired.get('networks', {})) == {'default'} and
         service.get('networks') == {'default': None}, 'unsupported old network semantics')
+    original_network = semantic_network(h, projected['networks']['default'])
+    desired_network = semantic_network(h, desired['networks']['default'])
+    require(h, original_network['name'] == projected['name'] + '_default' and
+        desired_network['name'] == r['project'] + '_default' and
+        original_network.get('driver', 'bridge') == desired_network.get('driver', 'bridge') == 'bridge' and
+        original_network.get('internal', False) is desired_network.get('internal', False) is False and
+        'ipam' not in original_network and 'ipam' not in desired_network and
+        {k: v for k, v in original_network.items() if k != 'name'} ==
+        {k: v for k, v in desired_network.items() if k != 'name'},
+        'unsupported old network semantics')
     old_name = projected['name']
     projected['name'] = r['project']
-    projected['networks']['default']['name'] = r['project'] + '_default'
+    projected['networks']['default'] = dict(original_network, name=r['project'] + '_default')
     for definition in projected.get('secrets', {}).values():
         if 'name' in definition:
             require(h, definition['name'].startswith(old_name + '_'), 'non-project secret identity')
@@ -174,6 +196,7 @@ def project_compose(h, desired, policy):
         if mount['target'] == policy['grant_container_directory']:
             mount['source'] = grant_source
     expected = copy.deepcopy(desired)
+    expected['networks']['default'] = desired_network
     for doc in (expected, projected):
         doc['services'][service_id].pop('build', None)
         doc['services'][service_id].pop('hostname', None)

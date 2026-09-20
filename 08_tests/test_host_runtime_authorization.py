@@ -846,6 +846,44 @@ def recovery_module():
     return host._contract_module(host.SOURCE_ROOT/'09_deploy/runtime_identity/recovery_namespace.py','_recovery_test')
 
 
+def test_real_old_compose_empty_ipam_replays_as_no_custom_ipam():
+    m=recovery_module()
+    # Exact network portion observed from the old production Compose resolution.
+    old={'default':{'name':'spread-e42a61e-20260908-b01_default','ipam':{}}}
+    same_without_ipam={'name':old['default']['name']}
+    assert m.semantic_network(host,old['default'])==m.semantic_network(host,same_without_ipam)
+    assert m.semantic_network(host,old['default'])==same_without_ipam
+    assert 'ipam' not in m.semantic_network(host,old['default'])
+
+
+@pytest.mark.parametrize('left,right,equal',[
+    ({}, {}, True), ({}, {'ipam':{}}, True), ({'ipam':{}}, {}, True),
+    ({'ipam':{}}, {'ipam':{}}, True),
+    ({}, {'driver':'bridge'}, False),
+    ({}, {'internal':False}, False),
+    ({}, {'ipam':{'config':[{'subnet':'172.20.0.0/16'}]}}, False),
+    ({'ipam':{}}, {'ipam':{'config':[{'subnet':'172.20.0.0/16'}]}}, False),
+    ({'ipam':{}}, {'ipam':{'driver':'default'}}, False),
+    ({'ipam':{}}, {'ipam':{'options':{'custom':'yes'}}}, False),
+])
+def test_only_empty_network_ipam_is_semantically_absent(left,right,equal):
+    m=recovery_module();base={'name':'isolated_default'}
+    actual=m.semantic_network(host,base|left)==m.semantic_network(host,base|right)
+    assert actual is equal
+
+
+@pytest.mark.parametrize('field,value',[
+    ('ipam',None),('ipam',[]),('options',{}),('attachable',False),('enable_ipv6',False),
+    ('driver','overlay'),('internal',True)])
+def test_network_semantic_normalization_does_not_ignore_other_fields(field,value):
+    m=recovery_module();network={'name':'isolated_default','ipam':{}}
+    network[field]=value
+    if field in ('driver','internal'):
+        assert m.semantic_network(host,network)!=m.semantic_network(host,{'name':'isolated_default'})
+    else:
+        with pytest.raises(host.HostAuthorizationError):m.semantic_network(host,network)
+
+
 @pytest.mark.parametrize('fault',[None,'role','purpose','name','port','extra','unprotected-flag'])
 def test_recovery_projection_requires_explicit_protected_policy(fault):
     p=recovery_policy()
@@ -899,6 +937,42 @@ def test_recovery_only_projects_namespace_from_exact_old_configuration(recovery_
         assert actual['name']==p['recovery']['project']
         assert actual['networks']['default']==dict(name=p['recovery']['network'],driver='bridge',internal=False)
         assert s['volumes']==d['services'][p['service_id']]['volumes'] and prod==before
+
+
+@pytest.mark.parametrize('old_ipam,desired_ipam,old_change,desired_change,passes',[
+    ({},None,None,None,True),
+    ({},{},None,None,True),
+    (None,{},None,None,True),
+    ({'config':[{'subnet':'172.20.0.0/16'}]},None,None,None,False),
+    ({},{'config':[{'subnet':'172.20.0.0/16'}]},None,None,False),
+    ({'driver':'default'},None,None,None,False),
+    ({},{'options':{'custom':'yes'}},None,None,False),
+    ({},None,('internal',True),None,False),
+    ({},None,None,('internal',True),False),
+    ({},None,('driver','overlay'),None,False),
+    ({},None,None,('driver','overlay'),False),
+    ({},None,('options',{}),None,False),
+    ({},None,None,('attachable',False),False),
+])
+def test_recovery_project_compose_preserves_network_behavior_and_projects_name(
+        recovery_compose,monkeypatch,old_ipam,desired_ipam,old_change,desired_change,passes):
+    m,p,desired,old,production=recovery_compose
+    baseline=host._json(host._run_docker(['compose','config','--format','json']))
+    old_network=baseline['networks']['default'];new_network=desired['networks']['default']
+    if old_ipam is not None:old_network['ipam']=old_ipam
+    if desired_ipam is not None:new_network['ipam']=desired_ipam
+    if old_change:old_network[old_change[0]]=old_change[1]
+    if desired_change:new_network[desired_change[0]]=desired_change[1]
+    old['rendered_compose_sha256']=host._digest(baseline)
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical(baseline))
+    if passes:
+        result=m.project_compose(host,desired,p)
+        assert result['networks']['default']==dict(name=p['recovery']['network'],driver='bridge',internal=False)
+        assert result['services'][p['service_id']]['ports'][0]['host_ip']=='127.0.0.1'
+        assert result['services'][p['service_id']]['container_name']==p['recovery']['container']
+        assert p['recovery']['network'] not in production['NetworkSettings']['Networks']
+    else:
+        with pytest.raises(host.HostAuthorizationError):m.project_compose(host,desired,p)
 
 
 @pytest.mark.parametrize('fault',[None,'production-network','public-bind','wrong-name','wrong-nonce','other-endpoint','internal','network-id','wrong-port'])
