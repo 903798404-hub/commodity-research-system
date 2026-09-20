@@ -662,7 +662,9 @@ def additive_report(fixture):
     return runtime.classify_release(repo,base,git('rev-parse','HEAD'),'example')
 
 
-def test_independent_added_store_can_build_without_recovery_rehearsal(additive_repo):
+def test_independent_added_store_requires_targeted_only(additive_repo):
+    # Keep the historical node identity for the baseline ratchet. The policy
+    # changed: proven additive state now requires neither recovery rehearsal.
     r=additive_report(additive_repo)
     assert r['RELEASE_RISK_CLASS']=='STATEFUL_OR_INFRA'
     assert r['STATE_CHANGE_CLASS']=='ADDITIVE_REVERSIBLE', r
