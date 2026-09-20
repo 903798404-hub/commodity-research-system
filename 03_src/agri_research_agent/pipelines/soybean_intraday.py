@@ -8,7 +8,7 @@ import json
 from math import isfinite
 from numbers import Real
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 import uuid
 
 from agri_research_agent.import_profit.cnf_store import (
@@ -219,6 +219,7 @@ def save_manual_cnf_and_materialize_am(
     values: Mapping[tuple[str, int], float | None],
     config: SoybeanImportProfitConfig,
     saved_at: datetime | None = None,
+    authorize_materialization: Callable[[], None] | None = None,
 ) -> SoybeanAmClosureReceipt:
     """Persist CNF first; report AM derivation separately without undoing input."""
 
@@ -256,6 +257,7 @@ def save_manual_cnf_and_materialize_am(
             session=MarketSession.AM,
             config=config,
             calculated_at=at,
+            authorize_write=authorize_materialization,
         )
         resolved = load_intraday_profit_batch(
             result_root, business_date, MarketSession.AM
@@ -337,6 +339,7 @@ def materialize_soybean_intraday_profit(
     session: MarketSession,
     config: SoybeanImportProfitConfig,
     calculated_at: datetime,
+    authorize_write: Callable[[], None] | None = None,
 ) -> IntradayProfitSealResult:
     """Pure local consumer pipeline; it never opens a database connection."""
 
@@ -373,6 +376,8 @@ def materialize_soybean_intraday_profit(
         calculated_at=calculated_at,
         results=tuple(results),
     )
+    if authorize_write is not None:
+        authorize_write()
     return seal_intraday_profit_batch(result_root, batch)
 
 

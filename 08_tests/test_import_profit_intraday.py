@@ -489,6 +489,40 @@ def test_downstream_am_failure_keeps_persisted_cnf(
     assert not (tmp_path / "results").exists()
 
 
+def test_expired_grant_blocks_am_seal_after_cnf_persistence(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.historical_cnf_adapter import shipment_year_for
+
+    snapshots = tmp_path / 'snapshots'
+    quotes = {}
+    for month in range(1, 13):
+        snapshot = public_snapshot(
+            MarketSession.AM,
+            key(year=shipment_year_for(DAY, month), month=month),
+        )
+        quotes.update({quote.instrument_id: quote for quote in snapshot.quotes})
+    seal_fixture_snapshot(snapshots, replace(snapshot, quotes=tuple(quotes.values())))
+    cnf = tmp_path / 'operational' / 'manual_cnf_quotes.parquet'
+    results = tmp_path / 'am-results'
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    values['brazil', 12] = 150.0
+    checks = []
+
+    def expired_before_seal():
+        checks.append('checked')
+        raise RuntimeError('execution grant is not currently valid')
+
+    receipt = save_manual_cnf_and_materialize_am(
+        snapshot_root=snapshots, result_root=results, cnf_store_path=cnf,
+        business_date=DAY, values=values, config=CONFIG,
+        authorize_materialization=expired_before_seal,
+    )
+    assert checks == ['checked']
+    assert receipt.am_materialization_status == 'FAILED'
+    assert 'execution grant is not currently valid' in receipt.am_diagnostic
+    assert load_cnf_store(cnf, allowed_origins=CONFIG.origin_codes).records[0].cnf_cents_per_bushel == 150.0
+    assert not results.exists()
+
+
 def test_cnf_persists_without_am_snapshot_and_reloads_exact_value(tmp_path: Path) -> None:
     cnf_path = tmp_path / "operational" / "cnf.parquet"
     results = tmp_path / "am-results"

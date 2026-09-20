@@ -109,16 +109,113 @@ def test_existing_pm_entry_dispatches_without_shared_router_changes(monkeypatch)
     assert seen == {'root': 'explicit-runtime', 'config_path': 'config.yaml', 'allow_save': True}
 
 
-def test_missing_write_runtime_cannot_enable_formal_cnf_save(tmp_path, monkeypatch):
+def test_missing_write_runtime_keeps_page_readonly(tmp_path, monkeypatch):
     import import_profit_intraday_runtime_page as entry
-    errors = []
+    seen = {}
     monkeypatch.setenv('IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE', '1')
     monkeypatch.delenv('IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT', raising=False)
-    monkeypatch.setattr(entry.st, 'error', errors.append)
+    monkeypatch.setattr(entry, 'configured_operational_write',
+                        lambda: (_ for _ in ()).throw(RuntimeError('grant missing')))
     monkeypatch.setattr(entry, 'render_import_profit_intraday_runtime_page',
-                        lambda *args, **kwargs: pytest.fail('unauthorized route must stop'))
+                        lambda *args, **kwargs: seen.update(kwargs))
     entry.render_configured_intraday_runtime_page(tmp_path, config_path='config.yaml')
-    assert errors
+    assert seen['allow_cnf_save'] is False
+    assert seen['write_context'] is None
+    assert seen['write_unavailable'] is True
+
+
+def _configured_page_fixture(tmp_path, monkeypatch):
+    import shutil
+    import import_profit_intraday_runtime_page as entry
+    from import_profit_intraday_page import TANKAN_CNF_SOURCE
+    from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
+
+    result_root, source_cnf = _assets(tmp_path)
+    runtime = tmp_path / 'runtime'
+    cnf = runtime / 'import-profit/operational/cnf/manual_cnf_quotes.parquet'
+    cnf.parent.mkdir(parents=True)
+    shutil.copyfile(source_cnf, cnf)
+    am_results = runtime / 'import-profit/operational/am-results'
+    am_results.mkdir(parents=True)
+    (runtime / '.market-data-runtime.json').write_text(json.dumps({
+        'schema_version': 1, 'runtime_id': 'read-write-page-fixture',
+        'classification': 'fixture', 'module_id': 'soybean-pm',
+        'created_at': '2026-08-28T00:00:00+00:00',
+    }), encoding='utf-8')
+    context = RuntimeContext(RuntimeMode.FIXTURE, 'soybean-pm', runtime)
+    history = tmp_path / 'history'
+    history.mkdir()
+    cache = tmp_path / 'historical-cache.parquet'
+    pd.DataFrame([{
+        'trade_date': date(2026, 8, 27), 'origin': 'brazil', 'month': 12,
+        'cnf': 125.0, 'source_identity': TANKAN_CNF_SOURCE,
+    }]).to_parquet(cache)
+    resolved = SimpleNamespace(
+        manual_cnf_path=history / 'historical-cnf.parquet',
+        business_keys_path=history / 'keys.parquet',
+        snapshots_path=history / 'snapshots.parquet',
+        results_path=history / 'profit.parquet',
+        manifest={'output_files': {'profit.parquet': {'sha256': 'a' * 64}},
+                  'date_range': ['2020-01-01', '2026-08-27']},
+    )
+    monkeypatch.setattr(entry, 'resolve_current_runtime_release', lambda _: resolved)
+    settings = {
+        'IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE': '1',
+        'IMPORT_PROFIT_INTRADAY_BUSINESS_DATE': DAY.isoformat(),
+        'IMPORT_PROFIT_INTRADAY_RESULT_ROOT': str(result_root),
+        'IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT': str(tmp_path / 'snapshots'),
+        'IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH': str(cnf),
+        'IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT': str(am_results),
+        'IMPORT_PROFIT_INTRADAY_ENVIRONMENT': 'TEST_ISOLATED_NON_PRODUCTION',
+        'IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH': str(cache),
+    }
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    script = (
+        'from import_profit_intraday_runtime_page import render_configured_intraday_runtime_page\n'
+        f'render_configured_intraday_runtime_page({str(history)!r}, '
+        f'config_path={str(ROOT / "02_configs/import_profit_soybean.yaml")!r})\n'
+    )
+    return entry, context, script
+
+
+@pytest.mark.parametrize('write_state', ['valid', 'expired', 'missing', 'expires_during_render'])
+def test_configured_page_renders_data_independent_of_write_grant(
+    tmp_path, monkeypatch, write_state,
+):
+    entry, context, script = _configured_page_fixture(tmp_path, monkeypatch)
+    if write_state in {'valid', 'expires_during_render'}:
+        monkeypatch.setattr(entry, 'configured_operational_write', lambda: context)
+        if write_state == 'expires_during_render':
+            monkeypatch.setattr(entry, 'validate_operational_write',
+                lambda *_args: (_ for _ in ()).throw(RuntimeError('grant expired')))
+    else:
+        monkeypatch.setattr(entry, 'configured_operational_write',
+            lambda: (_ for _ in ()).throw(RuntimeError(f'grant {write_state}')))
+    app = AppTest.from_string(script, default_timeout=20).run(timeout=20)
+    assert not app.exception and not app.error
+    html = '\n'.join(item.proto.body for item in app.get('html'))
+    assert '大豆早间榨利' in html and '大豆下午榨利' in html
+    assert html.count('2026-12') >= 2
+    assert '150.0' in str(app.dataframe[0].value)
+    button = next(item for item in app.button if item.label == '重试上午盘面榨利')
+    assert button.disabled is (write_state != 'valid')
+    assert bool(app.info) is (write_state != 'valid')
+
+
+def test_invalid_read_identity_still_blocks_page(tmp_path, monkeypatch):
+    import import_profit_intraday_runtime_page as entry
+    from agri_research_agent.import_profit.runtime_store import RuntimeStoreError
+
+    entry, _, script = _configured_page_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(entry, 'configured_operational_write',
+        lambda: (_ for _ in ()).throw(RuntimeError('grant expired')))
+    monkeypatch.setattr(entry, 'resolve_current_runtime_release',
+        lambda _: (_ for _ in ()).throw(RuntimeStoreError('history invalid')))
+    app = AppTest.from_string(script, default_timeout=20).run(timeout=20)
+    assert not app.exception
+    assert any('本地资产校验失败' in item.value for item in app.error)
+    assert '大豆早间榨利' not in '\n'.join(item.proto.body for item in app.get('html'))
 
 
 def _assets(tmp_path: Path) -> tuple[Path, Path]:

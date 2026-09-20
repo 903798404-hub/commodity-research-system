@@ -130,6 +130,52 @@ def test_fresh_oci_context_uses_service_identity_and_scoped_roots(operational,mo
     assert op.configured_operational_write() is None
 
 
+def test_save_rechecks_grant_after_page_was_rendered(operational, tmp_path, monkeypatch):
+    _, cnf, results = operational
+    root = cnf.parents[3]
+    marker = root / '.market-data-runtime.json'
+    raw = json.loads(marker.read_text(encoding='utf-8'))
+    raw.update(classification='formal', module_id='shared-intraday')
+    marker.write_text(json.dumps(raw), encoding='utf-8')
+    allowed = {'value': True}
+
+    def verify(*_args, **_kwargs):
+        if not allowed['value']:
+            raise runtime_context.ProductionIdentityError('execution grant is not currently valid')
+        return SimpleNamespace(writable_roots=(cnf.parent, results))
+
+    monkeypatch.setattr(runtime_context, 'verify_execution', verify)
+    monkeypatch.setattr(op, 'ROOT', root)
+    context = op.operational_write_context()
+    historical = tmp_path / 'history'
+    historical.mkdir()
+    resolved = SimpleNamespace(
+        manual_cnf_path=historical / 'cnf.parquet',
+        business_keys_path=historical / 'keys.parquet',
+        snapshots_path=historical / 'snapshots.parquet',
+        results_path=historical / 'profit.parquet',
+        manifest={'output_files': {'profit.parquet': {'sha256': 'a' * 64}},
+                  'date_range': ['2020-01-01', '2026-08-27']},
+    )
+    monkeypatch.setattr(entry, 'resolve_current_runtime_release', lambda _: resolved)
+    seen = {}
+    monkeypatch.setattr(entry, 'render_import_profit_intraday_page',
+                        lambda paths, **kwargs: seen.update(kwargs))
+    entry.render_import_profit_intraday_runtime_page(
+        historical, result_root=historical / 'results',
+        snapshot_root=tmp_path / 'snapshots',
+        config_path=Path(__file__).parents[1] / '02_configs/import_profit_soybean.yaml',
+        preview_historical_cnf_path=historical / 'cache.parquet',
+        intraday_cnf_store_path=cnf, operational_result_root=results,
+        allow_cnf_save=True, business_date=DAY, write_context=context,
+    )
+    assert callable(seen['save_cnf_handler'])
+    allowed['value'] = False  # The page was left open until its grant expired.
+    with pytest.raises(runtime_context.RuntimeAuthorizationError, match='not currently valid'):
+        seen['save_cnf_handler']({})
+    assert not cnf.exists() and not list(results.iterdir())
+
+
 @pytest.mark.parametrize('enabled',[True,False])
 def test_editor_capability_and_zero_payload(operational, enabled):
     _,cnf,_=operational

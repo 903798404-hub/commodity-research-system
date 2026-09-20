@@ -52,6 +52,7 @@ def render_import_profit_intraday_runtime_page(
     allow_cnf_save: bool = False,
     business_date: date | None = None,
     write_context: RuntimeContext | None = None,
+    write_unavailable: bool = False,
 ) -> None:
     """Resolve CNF identity locally and render without loading legacy results."""
 
@@ -117,36 +118,43 @@ def render_import_profit_intraday_runtime_page(
     am_results = Path(operational_result_root) if operational_result_root else results
     save_handler = None
     if allow_cnf_save:
-        if (
-            mode is not IntradayPageMode.STRICT_RUNTIME
-            or snapshots is None
-            or write_context is None
-            or write_context.module_id not in {"soybean-pm", "shared-intraday"}
-            or environment != ("FORMAL" if write_context.mode in {RuntimeMode.PRODUCTION_WRITE, RuntimeMode.CANDIDATE_VALIDATION}
-                               else "TEST_ISOLATED_NON_PRODUCTION")
-        ):
-            st.error("manual_ui 保存环境未满足正式运行授权要求。")
-            return
-
-        validate_operational_write(write_context, cnf_store, am_results)
-
-        def save_handler(values):
+        try:
+            if (
+                mode is not IntradayPageMode.STRICT_RUNTIME
+                or snapshots is None
+                or write_context is None
+                or write_context.module_id not in {"soybean-pm", "shared-intraday"}
+                or environment != ("FORMAL" if write_context.mode in {RuntimeMode.PRODUCTION_WRITE, RuntimeMode.CANDIDATE_VALIDATION}
+                                   else "TEST_ISOLATED_NON_PRODUCTION")
+            ):
+                raise ValueError("manual_ui write environment is not authorized")
             validate_operational_write(write_context, cnf_store, am_results)
-            if results != am_results:
-                try:
-                    load_intraday_profit_batch(results, selected_date, MarketSession.AM)
-                except IntradayProfitStoreNotFoundError:
-                    pass
-                else:
-                    raise RuntimeError("AM result is already sealed in readonly history")
-            return save_manual_cnf_and_materialize_am(
-                snapshot_root=snapshots,
-                result_root=am_results,
-                cnf_store_path=cnf_store,
-                business_date=selected_date,
-                values=values,
-                config=config,
-            )
+        except (ValueError, OSError, RuntimeError):
+            write_unavailable = True
+        else:
+            def save_handler(values):
+                validate_operational_write(write_context, cnf_store, am_results)
+                if results != am_results:
+                    try:
+                        load_intraday_profit_batch(results, selected_date, MarketSession.AM)
+                    except IntradayProfitStoreNotFoundError:
+                        pass
+                    else:
+                        raise RuntimeError("AM result is already sealed in readonly history")
+                return save_manual_cnf_and_materialize_am(
+                    snapshot_root=snapshots,
+                    result_root=am_results,
+                    cnf_store_path=cnf_store,
+                    business_date=selected_date,
+                    values=values,
+                    config=config,
+                    authorize_materialization=lambda: validate_operational_write(
+                        write_context, cnf_store, am_results
+                    ),
+                )
+
+    if write_unavailable:
+        st.info("当前写入授权无效或已过期，页面为只读模式。")
 
     render_import_profit_intraday_page(
         IntradayPageDataPaths(
@@ -174,11 +182,15 @@ def render_configured_intraday_runtime_page(runtime_root, *, config_path, allow_
     try:
         selected = setting("IMPORT_PROFIT_INTRADAY_BUSINESS_DATE")
         business_date = date.fromisoformat(selected) if selected else None
-        if enabled:
-            write_context = configured_operational_write()
-    except (ValueError, OSError, RuntimeError):
-        st.error("AM/PM 业务日期或写入运行身份校验失败。")
+    except ValueError:
+        st.error("AM/PM 业务日期无效。")
         return
+    write_unavailable = False
+    if enabled:
+        try:
+            write_context = configured_operational_write()
+        except (ValueError, OSError, RuntimeError):
+            write_unavailable = True
     render_import_profit_intraday_runtime_page(runtime_root,
         result_root=setting("IMPORT_PROFIT_INTRADAY_RESULT_ROOT") or None,
         snapshot_root=setting("IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT") or None,
@@ -188,7 +200,9 @@ def render_configured_intraday_runtime_page(runtime_root, *, config_path, allow_
         preview_historical_cnf_path=setting("IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH") or None,
         intraday_cnf_store_path=setting("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH") or None,
         operational_result_root=setting("IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT") or None,
-        allow_cnf_save=enabled, business_date=business_date, write_context=write_context)
+        allow_cnf_save=enabled and write_context is not None,
+        business_date=business_date, write_context=write_context,
+        write_unavailable=write_unavailable)
 
 
 __all__ = ["render_import_profit_intraday_runtime_page", "render_configured_intraday_runtime_page"]
