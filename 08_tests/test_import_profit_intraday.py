@@ -426,6 +426,27 @@ def test_manual_cnf_to_sealed_am_closure_preserves_snapshot(tmp_path: Path) -> N
     assert len(receipt.unavailable_periods) == 47
 
 
+def test_am_preflight_failure_does_not_partially_write_formal_cnf(tmp_path: Path) -> None:
+    """Keep the baseline node: invalid input never partially rewrites an existing CNF store."""
+    cnf_path = tmp_path / "formal" / "manual_cnf_quotes.parquet"
+    values = {(origin, month): None for origin in CONFIG.origin_codes for month in range(1, 13)}
+    values["brazil", 1] = 150.0
+    save_soybean_intraday_manual_cnf(
+        cnf_store_path=cnf_path, business_date=DAY, values=values,
+        config=CONFIG, updated_at=datetime(2026, 8, 28, 1, 30, tzinfo=timezone.utc),
+    )
+    before = cnf_path.read_bytes()
+    invalid = dict(values)
+    invalid["brazil", 1] = float("nan")
+    with pytest.raises(ValueError, match="finite numbers"):
+        save_manual_cnf_and_materialize_am(
+            snapshot_root=tmp_path / "snapshots", result_root=tmp_path / "results",
+            cnf_store_path=cnf_path, business_date=DAY, values=invalid, config=CONFIG,
+        )
+    assert cnf_path.read_bytes() == before
+    assert not (tmp_path / "results").exists()
+
+
 def test_downstream_am_failure_keeps_persisted_cnf(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
