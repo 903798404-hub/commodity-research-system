@@ -16,14 +16,21 @@ def require(h, value, message):
 
 def validate(h, policy):
     r = policy['recovery']
-    require(h, type(r) is dict and set(r) == {'purpose', 'baseline_policy', 'production_container_id',
+    fields = {'purpose', 'baseline_policy', 'production_container_id',
         'production_observation_sha256', 'nonce', 'project', 'container', 'host_port', 'network',
-        'preserved_store_sources'}, 'invalid protected projection fields')
+        'preserved_store_sources'}
+    # The network object does not exist while the Compose projection is prepared.
+    # It must be pinned in the protected policy after create and before any grant.
+    require(h, type(r) is dict and set(r) in (fields, fields | {'expected_network_id'}),
+        'invalid protected projection fields')
     require(h, r['purpose'] == 'recovery-validation', 'not a recovery validation policy')
     require(h, isinstance(r['nonce'], str) and re.fullmatch('[0-9a-f]{32}', r['nonce']), 'invalid nonce')
     require(h, r['project'] == 'spread-recovery-' + r['nonce'] and
         r['container'] == policy['service_id'] + '-recovery-' + r['nonce'] and
         r['network'] == r['project'] + '-net', 'namespace is not isolated')
+    if 'expected_network_id' in r:
+        require(h, isinstance(r['expected_network_id'], str) and
+            h._HEX64.fullmatch(r['expected_network_id']), 'invalid expected recovery network object ID')
     require(h, type(r['host_port']) is int and 1024 <= r['host_port'] <= 65535 and
         r['host_port'] != 8501, 'host port must be a distinct unprivileged slot')
     h._container_id(r['production_container_id'])
@@ -235,10 +242,22 @@ def validate_projected_network(h, projected, rendered, policy):
     return True
 
 
-def validate_instance(h, container, policy):
-    """Actual Docker metadata is checked before signing, again before sealing."""
+def validate_instance(h, container, policy, phase):
+    """Validate declared attachment before start or materialized endpoint after start."""
     old, production = retained(h, policy)
     r = policy['recovery']
+    expected_id = r.get('expected_network_id')
+    require(h, isinstance(expected_id, str) and h._HEX64.fullmatch(expected_id),
+        'expected recovery network object ID must be pinned before grant')
+    state = container.get('State', {})
+    if phase == 'pre_start':
+        require(h, state.get('Status') == 'created' and state.get('Running') is False,
+            'pre-start network validation requires a created container')
+    elif phase == 'post_start':
+        require(h, state.get('Status') == 'running' and state.get('Running') is True,
+            'post-start network validation requires a running container')
+    else:
+        require(h, False, 'unknown recovery network lifecycle phase')
     require(h, container['Id'] != production['Id'] and container.get('Name') == '/' + r['container'], 'wrong recovery instance')
     labels = container['Config'].get('Labels', {})
     require(h, labels.get('com.docker.compose.project') == r['project'] and
@@ -255,8 +274,42 @@ def validate_instance(h, container, policy):
         networks.get('Internal') is False and not networks.get('EnableIPv6') and
         networks.get('Labels', {}).get('com.docker.compose.project') == r['project'] and
         not networks.get('Options') and not networks.get('Attachable') and not networks.get('Ingress') and
-        container['NetworkSettings']['Networks'][r['network']].get('NetworkID') == networks.get('Id') and
         set(networks.get('Containers', {})) <= {container['Id']}, 'network is shared or not an isolated bridge')
-    require(h, networks.get('Id') not in {v.get('NetworkID') for v in production['NetworkSettings']['Networks'].values()},
+    require(h, networks.get('Id') == expected_id, 'expected recovery network object changed')
+    require(h, expected_id not in {v.get('NetworkID') for v in production['NetworkSettings']['Networks'].values()},
         'production network identity reused')
+    endpoint = container['NetworkSettings']['Networks'][r['network']]
+    actual_id = endpoint.get('NetworkID')
+    if phase == 'pre_start':
+        require(h, type(actual_id) is str and actual_id in ('', expected_id),
+            'created container has a wrong materialized network ID')
+        assertion = 'DEFERRED_UNTIL_POST_START' if actual_id == '' else 'PASS'
+    else:
+        require(h, actual_id == expected_id and
+            isinstance(endpoint.get('EndpointID'), str) and h._HEX64.fullmatch(endpoint['EndpointID']) and
+            set(networks.get('Containers', {})) == {container['Id']},
+            'post-start recovery endpoint identity is not materialized or differs')
+        assertion = 'PASS'
     preserved(h, policy)
+    return {'RUNTIME_NETWORK_IDENTITY_ASSERTION': assertion,
+        'expected_network_id': expected_id, 'network': r['network'], 'container_id': container['Id']}
+
+
+def grant_id(h, policy, container_id):
+    """Commit the expected network object to the existing signed grant ID field.
+
+    The retained image accepts only the existing grant/2 schema, so the host
+    cannot append a payload field. The fresh namespace nonce keeps this ID
+    unique while the signed value binds the protected network object identity.
+    """
+    validate(h, policy)
+    r = policy['recovery']
+    require(h, isinstance(r.get('expected_network_id'), str) and
+        h._HEX64.fullmatch(r['expected_network_id']),
+        'fresh recovery grant requires the expected network object ID')
+    h._container_id(container_id)
+    return h._digest(dict(domain='recovery-network-grant-id/1',
+        nonce=r['nonce'], container_id=container_id, network=r['network'],
+        network_id=r['expected_network_id'], host_port=r['host_port'],
+        image_id=policy['image_id'], approved_commit=policy['approved_commit'],
+        approved_tree=policy['approved_tree']))[:32]

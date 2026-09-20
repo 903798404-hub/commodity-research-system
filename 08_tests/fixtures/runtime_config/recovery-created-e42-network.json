@@ -1,0 +1,14 @@
+{
+  "source": "2026-09-20 targeted-recovery-9c106cc-20260920-b01/created.json",
+  "container_id": "dd924f886d3b98ea695e915506bea5298ad08b771980cefbf5efa10a09f61440",
+  "nonce": "2e7dc367a0eb4102dc62ab07b22a9504",
+  "project": "spread-recovery-2e7dc367a0eb4102dc62ab07b22a9504",
+  "container": "spread-dashboard-recovery-2e7dc367a0eb4102dc62ab07b22a9504",
+  "network": "spread-recovery-2e7dc367a0eb4102dc62ab07b22a9504-net",
+  "host_port": 57363,
+  "state": "created",
+  "running": false,
+  "declared_network_id": "",
+  "declared_endpoint_id": "",
+  "network_object_id_in_original_evidence": null
+}

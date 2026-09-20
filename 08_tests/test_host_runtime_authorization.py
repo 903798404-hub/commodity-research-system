@@ -837,7 +837,7 @@ def recovery_policy():
     p['recovery'] = dict(purpose='recovery-validation', baseline_policy=dict(path='/etc/recovery/old.json',sha256='a'*64),
         production_container_id='b'*64, production_observation_sha256='c'*64, nonce=n,
         project='spread-recovery-'+n, container=p['service_id']+'-recovery-'+n,
-        host_port=18509, network='spread-recovery-'+n+'-net',
+        host_port=18509, network='spread-recovery-'+n+'-net', expected_network_id='e'*64,
         preserved_store_sources=['/var/lib/operational/cnf','/var/lib/operational/am'])
     return p
 
@@ -982,8 +982,9 @@ def test_recovery_actual_docker_namespace_isolated_with_production_still_present
     m=recovery_module();p=recovery_policy();r=p['recovery']
     prod=dict(Id='b'*64,NetworkSettings={'Networks':{'production_default':{'NetworkID':'d'*64}}})
     c=dict(Id=CID,Name='/'+r['container'],Config=dict(Hostname=r['nonce'],Labels={'com.docker.compose.project':r['project']}),
+        State=dict(Status='created',Running=False),
         HostConfig=dict(PortBindings={'8501/tcp':[dict(HostIp='127.0.0.1',HostPort='18509')]},NetworkMode=r['network']),
-        NetworkSettings={'Networks':{r['network']:{'NetworkID':'e'*64}}})
+        NetworkSettings={'Networks':{r['network']:{'NetworkID':''}}})
     net=dict(Id='e'*64,Name=r['network'],Driver='bridge',Internal=False,EnableIPv6=False,
         Labels={'com.docker.compose.project':r['project']},Containers={CID:{}})
     if fault=='production-network':c['NetworkSettings']['Networks']['production_default']={}
@@ -997,8 +998,98 @@ def test_recovery_actual_docker_namespace_isolated_with_production_still_present
     monkeypatch.setattr(m,'retained',lambda *args:({},prod));monkeypatch.setattr(m,'preserved',lambda *args:[])
     monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical([net]))
     if fault:
-        with pytest.raises(host.HostAuthorizationError):m.validate_instance(host,c,p)
-    else:m.validate_instance(host,c,p)
+        with pytest.raises(host.HostAuthorizationError):m.validate_instance(host,c,p,'pre_start')
+    else:assert m.validate_instance(host,c,p,'pre_start')['RUNTIME_NETWORK_IDENTITY_ASSERTION']=='DEFERRED_UNTIL_POST_START'
+
+
+@pytest.fixture
+def recovery_network_lifecycle(monkeypatch):
+    m=recovery_module();p=recovery_policy();r=p['recovery']
+    evidence=json.loads((Path(__file__).resolve().parent/'fixtures/runtime_config/recovery-created-e42-network.json').read_text(encoding='utf-8'))
+    p['service_id']='spread-dashboard'
+    r.update(nonce=evidence['nonce'],project=evidence['project'],container=evidence['container'],
+        network=evidence['network'],host_port=evidence['host_port'])
+    assert evidence['network_object_id_in_original_evidence'] is None
+    assert evidence['declared_network_id']==evidence['declared_endpoint_id']==''
+    # The real created inspect was retained, but network inspect was not. Its
+    # object ID and simulated post-start endpoint are synthetic, never evidence.
+    c=dict(Id=evidence['container_id'],Name='/'+r['container'],
+        State=dict(Status=evidence['state'],Running=evidence['running']),
+        Config=dict(Hostname=r['nonce'],Labels={'com.docker.compose.project':r['project']}),
+        HostConfig=dict(PortBindings={'8501/tcp':[dict(HostIp='127.0.0.1',
+            HostPort=str(r['host_port']))]},NetworkMode=r['network']),
+        NetworkSettings={'Networks':{r['network']:{'NetworkID':evidence['declared_network_id'],
+            'EndpointID':evidence['declared_endpoint_id']}}})
+    net=dict(Id=r['expected_network_id'],Name=r['network'],Driver='bridge',Internal=False,
+        EnableIPv6=False,Labels={'com.docker.compose.project':r['project']},Containers={})
+    prod=dict(Id='b'*64,NetworkSettings={'Networks':{'production_default':{'NetworkID':'d'*64}}})
+    monkeypatch.setattr(m,'retained',lambda *args:({},prod))
+    monkeypatch.setattr(m,'preserved',lambda *args:[])
+    monkeypatch.setattr(host,'_run_docker',lambda args:host._canonical([net]))
+    return m,p,c,net
+
+
+@pytest.mark.parametrize('network_id,passes,deferred',[
+    ('',True,True),('expected',True,False),('wrong',False,False),
+])
+def test_created_network_identity_is_strict_but_runtime_endpoint_can_be_deferred(
+        recovery_network_lifecycle,network_id,passes,deferred):
+    m,p,c,net=recovery_network_lifecycle
+    endpoint=c['NetworkSettings']['Networks'][p['recovery']['network']]
+    endpoint['NetworkID']=net['Id'] if network_id=='expected' else 'f'*64 if network_id=='wrong' else ''
+    if not passes:
+        with pytest.raises(host.HostAuthorizationError):m.validate_instance(host,c,p,'pre_start')
+    else:
+        result=m.validate_instance(host,c,p,'pre_start')
+        assert result['expected_network_id']==net['Id']
+        assert result['RUNTIME_NETWORK_IDENTITY_ASSERTION']==(
+            'DEFERRED_UNTIL_POST_START' if deferred else 'PASS')
+
+
+@pytest.mark.parametrize('fault',[None,'empty-id','wrong-id','empty-endpoint',
+    'production-network','extra-network','public-bind','not-running','other-endpoint',
+    'wrong-network-object'])
+def test_post_start_network_identity_requires_materialized_exact_isolated_endpoint(
+        recovery_network_lifecycle,fault):
+    m,p,c,net=recovery_network_lifecycle
+    r=p['recovery'];c['State']=dict(Status='running',Running=True)
+    endpoint=c['NetworkSettings']['Networks'][r['network']]
+    endpoint.update(NetworkID=net['Id'],EndpointID='a'*64)
+    net['Containers'][c['Id']]={}
+    if fault=='empty-id':endpoint['NetworkID']=''
+    elif fault=='wrong-id':endpoint['NetworkID']='f'*64
+    elif fault=='empty-endpoint':endpoint['EndpointID']=''
+    elif fault=='production-network':c['NetworkSettings']['Networks']['production_default']={'NetworkID':'d'*64}
+    elif fault=='extra-network':c['NetworkSettings']['Networks']['other']={'NetworkID':'f'*64}
+    elif fault=='public-bind':c['HostConfig']['PortBindings']['8501/tcp'][0]['HostIp']='0.0.0.0'
+    elif fault=='not-running':c['State']=dict(Status='created',Running=False)
+    elif fault=='other-endpoint':net['Containers']['f'*64]={}
+    elif fault=='wrong-network-object':net['Id']='f'*64
+    if fault:
+        with pytest.raises(host.HostAuthorizationError):m.validate_instance(host,c,p,'post_start')
+    else:
+        assert m.validate_instance(host,c,p,'post_start')['RUNTIME_NETWORK_IDENTITY_ASSERTION']=='PASS'
+
+
+@pytest.mark.parametrize('fault',['production-network','extra-network','running','wrong-object'])
+def test_pre_start_deferred_endpoint_never_weakens_declared_network(recovery_network_lifecycle,fault):
+    m,p,c,net=recovery_network_lifecycle
+    if fault=='production-network':c['NetworkSettings']['Networks']['production_default']={}
+    elif fault=='extra-network':c['NetworkSettings']['Networks']['other']={}
+    elif fault=='running':c['State']=dict(Status='running',Running=True)
+    elif fault=='wrong-object':net['Id']='f'*64
+    with pytest.raises(host.HostAuthorizationError):m.validate_instance(host,c,p,'pre_start')
+
+
+def test_recovery_grant_id_commits_to_exact_protected_network_object(recovery_network_lifecycle):
+    m,p,c,_=recovery_network_lifecycle
+    original=m.grant_id(host,p,c['Id'])
+    assert len(original)==32
+    p['recovery']['expected_network_id']='f'*64
+    assert m.grant_id(host,p,c['Id'])!=original
+    p['recovery'].pop('expected_network_id')
+    with pytest.raises(host.HostAuthorizationError,match='requires the expected network object ID'):
+        m.grant_id(host,p,c['Id'])
 
 
 @pytest.mark.parametrize('fault',[None,'commit','tree','image','mount','reuse-grant','production-changed','oom-default'])
@@ -1052,12 +1143,13 @@ def test_recovery_fresh_grant_preserves_old_image_protocol_and_instance_binding(
     # Namespace transport is covered independently above. Keep the real signer,
     # grant schema and old image verifier, including nonce and actual instance.
     original=host._recovery_call
-    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:original(name,*args) if name=='validate' else None)
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:original(name,*args) if name in ('validate','grant_id') else None)
     file.write_bytes(host._canonical(p))
     envelope=host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,grant_path=grants/'grant.json',grant_dir=grants,role='production')
     assert envelope['schema_version']=='production-execution-grant/2'
     assert envelope['payload']['container_id']==CID and envelope['payload']['image_id']==IMAGE
     assert envelope['payload']['role']=='production'
+    assert envelope['payload']['grant_id']==original('grant_id',p,CID)
     request=identity.OCIExecutionRequest(grants/'grant.json',release,manifest,marker.parent,marker)
     identity.verify_execution(request,expected_role='production',module_id='shared-runtime',runtime_id='runtime',runtime_root=marker.parent,marker_sha256=p['runtime_marker_sha256'])
     monkeypatch.setattr(identity.socket,'gethostname',lambda:'f'*32)
@@ -1065,6 +1157,74 @@ def test_recovery_fresh_grant_preserves_old_image_protocol_and_instance_binding(
         identity.verify_execution(request,expected_role='production',module_id='shared-runtime',runtime_id='runtime',runtime_root=marker.parent,marker_sha256=p['runtime_marker_sha256'])
     with pytest.raises(host.HostAuthorizationError,match='new'):
         host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,grant_path=grants/'grant.json',grant_dir=grants,role='production')
+    p['recovery'].pop('expected_network_id')
+    file.write_bytes(host._canonical(p))
+    with pytest.raises(host.HostAuthorizationError,match='expected network object ID'):
+        host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,
+            grant_path=grants/'missing-network.json',grant_dir=grants,role='production')
+
+
+@pytest.mark.parametrize('fault',[None,'network-policy-changed','grant-tampered','not-running'])
+def test_recovery_post_start_requires_signed_grant_network_commitment(tmp_path,monkeypatch,fault):
+    p,c,image,rendered,file,key,grants,manifest,marker,release,identity=signing_fixture(
+        tmp_path,monkeypatch,'production',2)
+    p['recovery']=recovery_policy()['recovery']
+    p['recovery']['container']=p['service_id']+'-recovery-'+p['recovery']['nonce']
+    c['Config']['Hostname']=p['recovery']['nonce']
+    rendered['services'][p['service_id']]['hostname']=p['recovery']['nonce']
+    p['rendered_compose_sha256']=digest(rendered)
+    p['actual_config_sha256']=host.normalize_observation(c,image,json.loads(release.read_bytes()))['actual_config_sha256']
+    original=host._recovery_call
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:
+        original(name,*args) if name in ('validate','grant_id') else None)
+    file.write_bytes(host._canonical(p))
+    grant_file=grants/'grant.json'
+    envelope=host.issue_execution_grant(CID,expected_policy_path=file,key_path=key,
+        grant_path=grant_file,grant_dir=grants,role='production')
+    assert envelope['payload']['grant_id']==original('grant_id',p,CID)
+    grant_source=next(m['source'] for m in p['mounts'] if m['target']==p['grant_container_directory'])
+    previous_path=host.Path
+    monkeypatch.setattr(host,'Path',lambda value:grants if str(value)==grant_source else previous_path(value))
+    c['State']=dict(Status='running',Running=True)
+    def network(name,*args):
+        if name in ('validate','grant_id'):return original(name,*args)
+        if name=='validate_instance':
+            if fault=='not-running':raise host.HostAuthorizationError('post-start requires running')
+            return dict(RUNTIME_NETWORK_IDENTITY_ASSERTION='PASS',
+                expected_network_id=p['recovery']['expected_network_id'],network=p['recovery']['network'],
+                container_id=CID)
+        return None
+    monkeypatch.setattr(host,'_recovery_call',network)
+    monkeypatch.setattr(host,'_render_actual_compose',lambda *args,**kwargs:p['rendered_compose_sha256'])
+    if fault=='network-policy-changed':
+        p['recovery']['expected_network_id']='f'*64
+        file.write_bytes(host._canonical(p))
+    elif fault=='grant-tampered':
+        broken=json.loads(grant_file.read_bytes());broken['payload']['grant_id']='f'*32
+        grant_file.chmod(0o600)
+        grant_file.write_bytes(host._canonical(broken))
+    if fault:
+        with pytest.raises(host.HostAuthorizationError):
+            host.validate_recovery_post_start(CID,expected_policy_path=file,grant_path=grant_file,key_path=key)
+    else:
+        result=host.validate_recovery_post_start(CID,expected_policy_path=file,
+            grant_path=grant_file,key_path=key)
+        assert result['POST_START_NETWORK_IDENTITY_VALIDATION']=='PASS'
+        assert result['expected_network_id']==p['recovery']['expected_network_id']
+
+
+def test_post_start_cli_validates_existing_grant_without_issuing_another(monkeypatch,capsys):
+    calls=[]
+    monkeypatch.setattr(host,'validate_recovery_post_start',lambda cid,**kwargs:
+        calls.append((cid,kwargs)) or {'POST_START_NETWORK_IDENTITY_VALIDATION':'PASS'})
+    monkeypatch.setattr(host,'issue_execution_grant',lambda *args,**kwargs:
+        pytest.fail('post-start validation must not issue a new grant'))
+    code=host.main(['--validate-recovery-post-start','--container-id',CID,'--policy','/policy.json',
+        '--key','/key','--grant-directory','/grants','--grant','/grants/grant.json',
+        '--role','production'])
+    assert code==0 and calls==[(CID,dict(expected_policy_path='/policy.json',
+        grant_path='/grants/grant.json',key_path='/key'))]
+    assert json.loads(capsys.readouterr().out)['POST_START_NETWORK_IDENTITY_VALIDATION']=='PASS'
 
 
 @pytest.fixture
@@ -1171,7 +1331,7 @@ def test_recovery_changed_preservation_or_production_observation_prevents_sealin
     p,c,image,rendered,file,key,grants,manifest,marker,release,identity=signing_fixture(tmp_path,monkeypatch,'production',2)
     p['recovery']=recovery_policy()['recovery'];p['recovery']['container']=p['service_id']+'-recovery-'+p['recovery']['nonce']
     original=host._recovery_call
-    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:original(name,*args) if name=='validate' else None)
+    monkeypatch.setattr(host,'_recovery_call',lambda name,*args:original(name,*args) if name in ('validate','grant_id') else None)
     calls=[]
     manifest_data=json.loads(manifest.read_bytes())
     def baseline(policy):

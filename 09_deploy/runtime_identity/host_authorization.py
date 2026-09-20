@@ -986,7 +986,8 @@ def _secret_state(observed: Mapping) -> dict:
             for mount in observed["mounts"] if mount["target"].startswith("/run/secrets/")}
 
 
-def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) -> str:
+def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping,
+                           *, recovery_phase: str = 'pre_start') -> str:
     labels = container["Config"].get("Labels") or {}
     paths = labels.get("com.docker.compose.project.config_files", "").split(",")
     if paths != [item["path"] for item in policy["compose_sources"]] or labels.get("com.docker.compose.project.working_dir") != policy["compose_project_directory"] or labels.get("com.docker.compose.service") != policy["service_id"]:
@@ -1031,7 +1032,7 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping) 
     if expected_mounts != _mounts(container):
         raise HostAuthorizationError("rendered mounts differ from actual container")
     if 'recovery' in policy:
-        _recovery_call('validate_instance', container, policy)
+        _recovery_call('validate_instance', container, policy, recovery_phase)
     return digest
 
 
@@ -1167,6 +1168,8 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
     container = docker_inspect(container_id)
     image = docker_image_inspect(policy["image_id"])
     rendered = _render_actual_compose(container, policy, image)
+    recovery_network = (_recovery_call('validate_instance', container, policy, 'pre_start')
+                        if 'recovery' in policy else None)
     manifest_raw = copy_container_bytes(container_id, policy["runtime_manifest_path"])
     manifest = _json(manifest_raw)
     marker_path = policy["runtime_root"] + "/.market-data-runtime.json"
@@ -1215,6 +1218,10 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
             "runtime_manifest_sha256": policy["runtime_manifest_sha256"], "release_sha256": observed["release_sha256"],
             "mount_contract_sha256": _digest(observed["mounts"]), "actual_config_sha256": observed["actual_config_sha256"],
             "secret_file_identity_sha256": _digest(secrets),
+            **({"RUNTIME_NETWORK_IDENTITY_ASSERTION":
+                recovery_network['RUNTIME_NETWORK_IDENTITY_ASSERTION'],
+                "expected_recovery_network_id": recovery_network['expected_network_id']}
+                if recovery_network is not None else {}),
             **({"recovery_config_comparison": record["config_comparison"]} if "config_comparison" in record else {}),
             **({"config_comparison": observed["config_comparison"]} if "config_comparison" in observed else {})}
 
@@ -1302,7 +1309,9 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
         raise HostAuthorizationError("host signing key is not pinned for this authorization role")
     now = datetime.now(timezone.utc)
     payload = {key: policy[key] for key in ("project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "image_id", "runtime_root", "runtime_manifest_sha256", "runtime_marker_sha256")}
-    payload.update(grant_id=os.urandom(16).hex(), issued_at=now.isoformat(), expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(), identity_kind="oci_container", authorization_mode=role, role=role, artifact_origin=observed["image_labels"]["market-data.artifact.origin"], release_commit=policy["approved_commit"], release_tree=policy["approved_tree"], release_sha256=observed["release_sha256"], rendered_compose_sha256=rendered_digest, mount_contract_sha256=_digest(mounts), actual_config_sha256=observed["actual_config_sha256"], container_id=container_id, hostname_nonce=observed["config"]["Hostname"], writable_roots=writable, protected_mounts=protected)
+    grant_id = (_recovery_call('grant_id', policy, container_id)
+                if 'recovery' in policy else os.urandom(16).hex())
+    payload.update(grant_id=grant_id, issued_at=now.isoformat(), expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(), identity_kind="oci_container", authorization_mode=role, role=role, artifact_origin=observed["image_labels"]["market-data.artifact.origin"], release_commit=policy["approved_commit"], release_tree=policy["approved_tree"], release_sha256=observed["release_sha256"], rendered_compose_sha256=rendered_digest, mount_contract_sha256=_digest(mounts), actual_config_sha256=observed["actual_config_sha256"], container_id=container_id, hostname_nonce=observed["config"]["Hostname"], writable_roots=writable, protected_mounts=protected)
     grant_version = ("production-execution-grant/3" if policy_version in _V3_POLICIES else
                      "production-execution-grant/1" if policy_version == "host-runtime-policy/1" else "production-execution-grant/2")
     if grant_version in {"production-execution-grant/2", "production-execution-grant/3"}:
@@ -1352,6 +1361,73 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     return envelope
 
 
+def validate_recovery_post_start(container_id: str, *, expected_policy_path: str | Path,
+                                 grant_path: str | Path, key_path: str | Path) -> dict:
+    """Check the signed grant and materialized endpoint before health or HTTP."""
+    _require_linux_root()
+    require_protected_authority_source()
+    policy = _load_policy(expected_policy_path)
+    validate_policy(policy, 'production')
+    if 'recovery' not in policy:
+        raise HostAuthorizationError('post-start network validation requires recovery policy')
+    grant_source = next(m['source'] for m in policy['mounts']
+                        if m['target'] == policy['grant_container_directory'])
+    path = Path(grant_path)
+    if path.parent != Path(grant_source):
+        raise HostAuthorizationError('post-start grant is outside the fresh grant directory')
+    raw = _protected_path(path).read_bytes()
+    envelope = _json(raw)
+    from cryptography.exceptions import InvalidSignature
+    try:
+        contract = _contract_module(GRANT_CONTRACT_PATH, '_recovery_post_start_grant')
+        contract.validate_execution_grant_envelope(envelope)
+        key = _load_private_key(key_path)
+        trust = _json(TRUST_CONFIG_PATH.read_bytes())
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        public = base64.b64encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode('ascii')
+        matches = [item for item in trust.get('keys', [])
+                   if item.get('key_id') == policy['key_id'] and item.get('domain') == 'production'
+                   and item.get('algorithm') == 'ed25519' and item.get('public_key_base64') == public]
+        if (len(matches) != 1 or envelope['key_id'] != policy['key_id']
+                or policy['key_id'] in trust.get('revoked_key_ids', [])
+                or envelope['payload']['grant_id'] in trust.get('revoked_grant_ids', [])):
+            raise HostAuthorizationError('post-start grant signing authority differs')
+        key.public_key().verify(base64.b64decode(envelope['signature'], validate=True),
+                                _canonical(envelope['payload']))
+    except (AttributeError, TypeError, ValueError, KeyError, InvalidSignature) as exc:
+        raise HostAuthorizationError('post-start recovery grant is invalid') from exc
+    container = docker_inspect(container_id)
+    image = docker_image_inspect(policy['image_id'])
+    if container.get('Image') != policy['image_id'] or image.get('Id') != policy['image_id']:
+        raise HostAuthorizationError('post-start recovery image differs')
+    rendered = _render_actual_compose(container, policy, image, recovery_phase='post_start')
+    network = _recovery_call('validate_instance', container, policy, 'post_start')
+    release_raw = copy_container_bytes(container_id, policy['source_root'] + '/RELEASE.json')
+    observed = normalize_observation(container, image, _json(release_raw))
+    payload = envelope['payload']
+    expected_grant_id = _recovery_call('grant_id', policy, container_id)
+    now = datetime.now(timezone.utc)
+    if (payload['grant_id'] != expected_grant_id or payload['role'] != 'production'
+            or payload['container_id'] != container_id or payload['image_id'] != policy['image_id']
+            or payload['approved_commit'] != policy['approved_commit']
+            or payload['approved_tree'] != policy['approved_tree']
+            or payload['hostname_nonce'] != policy['recovery']['nonce']
+            or payload['rendered_compose_sha256'] != rendered
+            or payload['mount_contract_sha256'] != _digest(observed['mounts'])
+            or payload['release_sha256'] != hashlib.sha256(release_raw).hexdigest()
+            or payload['release_sha256'] != policy['release_sha256']
+            or payload['actual_config_sha256'] != observed['actual_config_sha256']
+            or payload['actual_config_sha256'] != policy['actual_config_sha256']
+            or not datetime.fromisoformat(payload['issued_at']) <= now <
+                   datetime.fromisoformat(payload['expires_at'])):
+        raise HostAuthorizationError('post-start grant does not bind the actual recovery instance')
+    if (_load_policy(expected_policy_path) != policy or _protected_path(path).read_bytes() != raw
+            or _recovery_call('validate_instance', docker_inspect(container_id), policy, 'post_start') != network):
+        raise HostAuthorizationError('recovery identity changed during post-start validation')
+    return {'POST_START_NETWORK_IDENTITY_VALIDATION': 'PASS', **network,
+            'grant_id': payload['grant_id']}
+
+
 def main(argv=None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1361,8 +1437,16 @@ def main(argv=None) -> int:
     parser.add_argument("--grant-directory", required=True)
     parser.add_argument("--grant", required=True)
     parser.add_argument("--role", choices=("production", "candidate_validation"), required=True)
+    parser.add_argument("--validate-recovery-post-start", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.validate_recovery_post_start:
+            if args.role != "production":
+                raise HostAuthorizationError("post-start recovery validation requires production role")
+            result = validate_recovery_post_start(args.container_id, expected_policy_path=args.policy,
+                                                  grant_path=args.grant, key_path=args.key)
+            print(json.dumps(result))
+            return 0
         result = issue_execution_grant(args.container_id, expected_policy_path=args.policy, key_path=args.key, grant_path=args.grant, grant_dir=args.grant_directory, role=args.role)
         print(json.dumps({"HOST_AUTHORIZATION": "PASS", "grant_id": result["payload"]["grant_id"], "container_id": args.container_id}))
         return 0
