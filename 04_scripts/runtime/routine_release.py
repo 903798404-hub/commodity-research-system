@@ -449,20 +449,19 @@ class DockerSession:
         self.assert_data_readonly()
 
     def _check_mounts(self, mounts):
+        require(all(m.get('type') == 'bind' for m in mounts), 'EXPLICIT_BIND_REQUIRED')
+        policy = self.protected_json(self.spec['policy_template'])
+        normalized = [dict(source=m['source'], target=m['target'], read_only=m.get('read_only', False)) for m in mounts]
         if self.role == 'candidate_validation':
-            require(all(m.get('type') == 'bind' for m in mounts), 'EXPLICIT_BIND_REQUIRED')
-            policy = self.protected_json(self.spec['policy_template'])
-            normalized = [dict(source=m['source'], target=m['target'], read_only=m.get('read_only', False)) for m in mounts]
             self.host.validate_candidate_mounts(self.contract, normalized, policy,
                 Path(self.spec['grant_directory']), live=bool(self.container_id), container_id=self.container_id)
             return
-        writable = {r['container_path'] for r in self.contract['runtime_roots']
-                    if r['access'] == 'rw' and r['role'] in {'outputs', 'logs', 'cache', 'temporary', 'manual-cnf', 'am-results'}}
-        for mount in mounts:
-            require(mount.get('type') == 'bind', 'EXPLICIT_BIND_REQUIRED')
-            target = mount.get('target')
-            if not mount.get('read_only', False):
-                require(target in writable, 'PRODUCTION_DATA_WRITE_FORBIDDEN')
+        # The signed runtime manifest owns target/mode permissions. The
+        # protected policy binds each approved target to its exact host source.
+        self.host._validate_runtime_mounts(self.contract, normalized, policy)
+        for mount in normalized:
+            require(mount in policy['mounts'], 'PRODUCTION_MOUNT_POLICY_MISMATCH')
+            if not mount['read_only']:
                 source = Path(mount['source']).resolve()
                 root = Path(self.spec['writable_root']).resolve()
                 require(source != root and source.is_relative_to(root), 'WRITE_OUTSIDE_INSTANCE_RUNTIME')

@@ -128,9 +128,12 @@ def test_concrete_docker_adapter_rejects_before_create(tmp_path,mutation):
     elif mutation=='build':service['build']={'context':'.'}
     elif mutation=='hook':service['post_start']=[{'command':'refresh'}]
     else:service['volumes']=[dict(type='bind',source=str(tmp_path),target='/app/data',read_only=False)]
-    host=SimpleNamespace(_protected_path=lambda p,**k:p,_json=lambda raw:raw)
+    host=SimpleNamespace(_protected_path=lambda p,**k:p,_json=lambda raw:raw,
+                         _validate_runtime_mounts=lambda *a: (_ for _ in ()).throw(
+                             routine.RoutineError('UNDECLARED_RUNTIME_MOUNT')))
     request={'production':dict(compose='compose',environment='env',policy_template='policy',project_directory=str(tmp_path),writable_root=str(tmp_path))}
     b=routine.DockerSession(request,None,host,{},dict(project_id='service',service_id='service',entrypoint=['app'],runtime_roots=[]))
+    b.protected_json=lambda _:dict(mounts=[])
     calls=[]
     def compose(spec,*args):calls.append(args);return SimpleNamespace(stdout={'services':{'service':service}})
     b.compose=compose
@@ -365,12 +368,57 @@ def test_expired_old_grant_not_read_in_routine():
     assert routine.deploy_same_image(Backend(),IMAGE,acceptance(),previous,ci_run='123')['result']=='PASS'
 
 
-def test_even_declared_writable_business_root_is_not_routine_write_permission(tmp_path):
-    contract=dict(project_id='service',runtime_roots=[dict(role='data',access='rw',container_path='/data')])
-    b=routine.DockerSession({},None,None,{},contract)
-    b.spec={'writable_root':str(tmp_path)}
-    with pytest.raises(routine.RoutineError,match='DATA_WRITE'):
-        b._check_mounts([dict(type='bind',source=str(tmp_path/'data'),target='/data',read_only=False)])
+def production_mount_fixture(tmp_path):
+    import json
+    host=routine.load('09_deploy/runtime_identity/host_authorization.py','_routine_mount_host_test')
+    contract=json.loads((ROOT/'02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
+    writable_root=tmp_path/'instance';writable_root.mkdir()
+    readonly_root=tmp_path/'sealed';readonly_root.mkdir()
+    mounts=[]
+    for item in contract['required_mounts']:
+        role=item['role']
+        # Reproduce the failed release: the RO consumer and RW capture alias
+        # point at one approved production snapshot directory.
+        source=(writable_root/'snapshots' if role in ('snapshots','capture-snapshots')
+                else (readonly_root if item['read_only'] else writable_root)/role)
+        source.mkdir(exist_ok=True)
+        mounts.append(dict(source=str(source),target=item['container_path'],read_only=item['read_only']))
+    policy=dict(schema_version='host-runtime-policy/5',grant_container_directory='/run/market-data-grants',mounts=copy.deepcopy(mounts))
+    session=routine.DockerSession({},None,host,{},contract)
+    session.role='production'
+    session.spec={'writable_root':str(writable_root),'policy_template':'protected-policy'}
+    session.protected_json=lambda _:policy
+    return session,mounts,policy
+
+
+def test_declared_capture_write_uses_same_manifest_contract_for_deploy_and_rollback(tmp_path):
+    session,mounts,policy=production_mount_fixture(tmp_path)
+    assert next(m for m in mounts if m['target']=='/runtime/capture-snapshots')['read_only'] is False
+    session._check_mounts([dict(type='bind',**m) for m in mounts])
+    # Rollback creates a new DockerSession, but calls this same mount validator.
+    rollback=routine.DockerSession({},None,session.host,{},session.contract)
+    rollback.role='production';rollback.spec=session.spec;rollback.protected_json=lambda _:policy
+    rollback._check_mounts([dict(type='bind',**m) for m in mounts])
+
+
+@pytest.mark.parametrize('fault',['unknown-rw','history-rw','data-rw','wrong-source','wrong-mode','outside-instance'])
+def test_production_mount_contract_remains_strict(tmp_path,fault):
+    session,mounts,_=production_mount_fixture(tmp_path)
+    if fault=='unknown-rw':
+        source=tmp_path/'instance'/'unknown';source.mkdir()
+        mounts.append(dict(source=str(source),target='/runtime/unknown',read_only=False))
+    else:
+        target={'history-rw':'/runtime/import-profit/history','data-rw':'/runtime/01_data'}.get(
+            fault,'/runtime/capture-snapshots')
+        mount=next(m for m in mounts if m['target']==target)
+        if fault in ('history-rw','data-rw','wrong-mode'):
+            mount['read_only']=not mount['read_only']
+        else:
+            source=(tmp_path/'instance'/'other') if fault=='wrong-source' else (tmp_path/'outside')
+            source.mkdir()
+            mount['source']=str(source)
+    with pytest.raises((routine.RoutineError,session.host.HostAuthorizationError)):
+        session._check_mounts([dict(type='bind',**m) for m in mounts])
 
 
 def test_smoke_cannot_target_another_server():
