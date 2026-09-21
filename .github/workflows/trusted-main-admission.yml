@@ -70,6 +70,9 @@ jobs:
     if: needs.plan.outputs.linux == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    env:
+      SPREAD_REFERENCE_DATA_ROOT: ${{ runner.temp }}/required-fixtures/spread-reference
+      PUBLIC_MARKET_DATA_RUNTIME_ROOT: ${{ runner.temp }}/required-fixtures/public-runtime
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false
@@ -107,6 +110,10 @@ jobs:
         \ / 'platform-results/linux/font-check.json'\noutput.parent.mkdir(parents=True,\
         \ exist_ok=True)\noutput.write_text(json.dumps(evidence, indent=2) + '\\n',\
         \ encoding='utf-8')\nprint(json.dumps(evidence, indent=2))\nPY\n"
+    - name: Prepare deterministic required fixtures
+      working-directory: candidate
+      run: python -I -B 04_scripts/quality/required_lane_fixtures.py --source-root .
+        --output "$RUNNER_TEMP/required-fixtures"
     - name: Execute required linux tests
       working-directory: candidate
       run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan
@@ -237,6 +244,9 @@ jobs:
     if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    env:
+      SPREAD_REFERENCE_DATA_ROOT: ${{ runner.temp }}/required-fixtures/spread-reference
+      PUBLIC_MARKET_DATA_RUNTIME_ROOT: ${{ runner.temp }}/required-fixtures/public-runtime
     strategy:
       fail-fast: false
       matrix:
@@ -286,6 +296,10 @@ jobs:
         \ / 'platform-results/linux/font-check.json'\noutput.parent.mkdir(parents=True,\
         \ exist_ok=True)\noutput.write_text(json.dumps(evidence, indent=2) + '\\n',\
         \ encoding='utf-8')\nprint(json.dumps(evidence, indent=2))\nPY\n"
+    - name: Prepare deterministic required fixtures
+      working-directory: candidate
+      run: python -I -B ../executor/04_scripts/quality/required_lane_fixtures.py --source-root .
+        --output "$RUNNER_TEMP/required-fixtures"
     - name: Execute complete full regression
       working-directory: candidate
       run: python -I -B ../executor/04_scripts/quality/full_regression.py run --side

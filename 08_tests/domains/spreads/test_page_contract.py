@@ -27,6 +27,7 @@ spec = importlib.util.spec_from_file_location("spread_page_contract_app", featur
 assert spec is not None and spec.loader is not None
 page = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(page)
+page.DATA_DIR = reference_root / "01_data"
 page.DATABASE_PARQUET_FILE = reference_root / "01_data" / "historical_spread_database.parquet"
 page.DATABASE_XLSX_FILE = reference_root / "01_data" / "historical_spread_database.xlsx"
 page.SPREAD_CONFIG_FILE = reference_root / "02_configs" / "historical_spread_config.xlsx"
