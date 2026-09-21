@@ -94,11 +94,25 @@ def semantic_http_port(network_ports, service_ports, container_port, role):
     return published
 
 
-def require_routine(repo, base, target, project):
-    risk = load('04_scripts/runtime/pre_release_runtime.py', '_routine_risk').classify_release(
-        Path(repo), base, target, project)
-    require(risk['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS', 'HIGH_RISK_REQUIRES_EXISTING_RELEASE_PATH')
-    return risk
+def require_routine(repo, base, target, project, review=None):
+    risk_policy = load('04_scripts/runtime/pre_release_runtime.py', '_routine_risk')
+    risk = risk_policy.classify_release(Path(repo), base, target, project)
+    if risk['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS':
+        require(review is None, 'ROUTINE_DOES_NOT_REQUIRE_RISK_REVIEW')
+        resolved = {**risk, 'MACHINE_CLASSIFICATION': 'ROUTINE_STATELESS',
+                    'MAINTAINER_RELEASE_TREATMENT': None,
+                    'FINAL_RELEASE_TREATMENT': 'ROUTINE_STATELESS',
+                    'ROUTINE_RELEASE_ELIGIBLE': True}
+    else:
+        require(type(review) is dict, 'HIGH_RISK_REQUIRES_EXISTING_RELEASE_PATH:MAINTAINER_RISK_REVIEW_REQUIRED')
+        main_identity = risk_policy.current_main_identity(Path(repo))
+        resolved = risk_policy.apply_maintainer_review(risk, review, main_identity)
+        require(risk_policy.current_main_identity(Path(repo)) == main_identity,
+                'AUTHORITATIVE_MAIN_CHANGED_DURING_REVIEW')
+    require(resolved.get('FINAL_RELEASE_TREATMENT') == 'ROUTINE_STATELESS'
+            and resolved.get('ROUTINE_RELEASE_ELIGIBLE') is True,
+            'HIGH_RISK_REQUIRES_EXISTING_RELEASE_PATH')
+    return resolved
 
 
 def validate_acceptance(record, *, commit, tree, image_id):
@@ -127,11 +141,13 @@ def verify_routine_record(record, policy, source_root):
         require(record.get('commit') == policy['approved_commit'] and record.get('tree') == policy['approved_tree']
                 and record.get('image_id') == policy['image_id'] and record.get('health') == 'PASS'
                 and record.get('project_id') == policy['project_id'], 'ROLLBACK_ASSETS_MISMATCH')
-        require_routine(source_root, record['commit'], record['forward_target'], policy['project_id'])
+        require_routine(source_root, record['commit'], record['forward_target'], policy['project_id'],
+                        record.get('maintainer_risk_review'))
         return record
     validate_acceptance(record, commit=policy['approved_commit'], tree=policy['approved_tree'],
                         image_id=policy['image_id'])
-    require_routine(source_root, record['base_commit'], record['commit'], policy['project_id'])
+    require_routine(source_root, record['base_commit'], record['commit'], policy['project_id'],
+                    record.get('maintainer_risk_review'))
     require(record['project_id'] == policy['project_id'], 'ACCEPTANCE_PROJECT_MISMATCH')
     return record
 
@@ -156,12 +172,23 @@ def check_ci(ci, binding):
     return ci['checks']['workflow_run_id']
 
 
-def candidate_acceptance(backend, image, *, base_commit, ci_run, mode='AUTOMATED'):
+def candidate_acceptance(backend, image, *, base_commit, ci_run, mode='AUTOMATED',
+                         risk_resolution=None, maintainer_risk_review=None):
     """The backend performs fresh create/grant/start and actual application IO."""
     result = dict(schema_version=ACCEPTANCE_SCHEMA, **image, base_commit=base_commit,
                   project_id=backend.project_id, ci_run=ci_run, validated_at=now(),
                   runtime_preflight='NOT_RUN', health='NOT_RUN', application_smoke='NOT_RUN',
                   candidate_cleanup='NOT_RUN', result='FAIL', ui_acceptance_mode=mode)
+    if maintainer_risk_review is not None:
+        require(risk_resolution is not None
+                and risk_resolution.get('FINAL_RELEASE_TREATMENT') == 'ROUTINE_STATELESS',
+                'UNRESOLVED_MAINTAINER_RISK_REVIEW')
+        result['maintainer_risk_review'] = copy.deepcopy(maintainer_risk_review)
+        result['risk_resolution'] = {
+            key: risk_resolution[key] for key in (
+                'MACHINE_CLASSIFICATION', 'MAINTAINER_RELEASE_TREATMENT',
+                'FINAL_RELEASE_TREATMENT', 'ROUTINE_RELEASE_ELIGIBLE')
+        }
     require(mode in ('MANUAL', 'AUTOMATED'), 'UNKNOWN_UI_ACCEPTANCE_MODE')
     try:
         backend.create(image, 'candidate_validation')
@@ -613,6 +640,8 @@ class DockerSession:
             self.container_id, self.spec, self.role = saved_id, saved_spec, saved_role
         assets = dict(schema_version='routine-rollback-assets/1', **previous, project_id=self.project_id,
                       forward_target=self.binding['commit'], health='PASS', observed_at=now())
+        if self.request.get('maintainer_risk_review') is not None:
+            assets['maintainer_risk_review'] = copy.deepcopy(self.request['maintainer_risk_review'])
         self.engine._write_new(Path(self.request['rollback']['assets_output']), self.engine._canonical(assets))
 
     def rollback(self, previous):
@@ -662,7 +691,8 @@ def main(argv=None):
     project = engine._project(source, request['project_id'])
     _, contract, binding = engine.source_contract(source, project['project_id'], project['runtime_contract'])
     require(binding['commit'] == request['target_commit'] and binding['tree'] == request['target_tree'], 'TARGET_SOURCE_MISMATCH')
-    require_routine(source, request['base_commit'], binding['commit'], project['project_id'])
+    risk_resolution = require_routine(source, request['base_commit'], binding['commit'], project['project_id'],
+                                      request.get('maintainer_risk_review'))
     ci = host._json(host._protected_path(Path(request['ci_record']), private=True).read_bytes())
     ci_run = check_ci(ci, binding)
     require(request.get('production_data_mutation') is False, 'PRODUCTION_DATA_WRITE_FORBIDDEN')
@@ -690,7 +720,9 @@ def main(argv=None):
         image = image_identity(engine, request['image_id'], binding, contract['service_id'])
         if args.phase == 'validate':
             require(request.get('candidate_authorized') is True, 'CANDIDATE_NOT_AUTHORIZED')
-            result = candidate_acceptance(backend, image, base_commit=request['base_commit'], ci_run=ci_run, mode=mode)
+            result = candidate_acceptance(backend, image, base_commit=request['base_commit'], ci_run=ci_run, mode=mode,
+                                          risk_resolution=risk_resolution,
+                                          maintainer_risk_review=request.get('maintainer_risk_review'))
         elif args.phase in ('candidate-ui', 'production-ui'):
             stage = args.phase.split('-')[0]
             require(mode == 'MANUAL', 'MANUAL_MODE_REQUIRED')

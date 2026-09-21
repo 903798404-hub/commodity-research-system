@@ -731,7 +731,11 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
         raise PreReleaseError("invalid release observations")
     if risk.get("RELEASE_RISK_CLASS") not in ("ROUTINE_STATELESS", "STATEFUL_OR_INFRA"):
         raise PreReleaseError("unknown release risk class")
-    high = risk["RELEASE_RISK_CLASS"] == "STATEFUL_OR_INFRA" or irreversible_state_change != "NO"
+    final_treatment = risk.get('FINAL_RELEASE_TREATMENT', risk['RELEASE_RISK_CLASS'])
+    if final_treatment not in ('ROUTINE_STATELESS', 'ADDITIVE_REVERSIBLE', 'HIGH_RISK',
+                               'STATEFUL_OR_INFRA'):
+        raise PreReleaseError('unknown final release treatment')
+    high = final_treatment != "ROUTINE_STATELESS" or irreversible_state_change != "NO"
     destructive = risk.get('MACHINE_DESTRUCTIVE_EVIDENCE', False)
     if type(destructive) is not bool:
         raise PreReleaseError('untyped destructive evidence')
@@ -758,6 +762,8 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
         if not ok:
             failures.append(code)
     return {"RELEASE_RISK_CLASS": "STATEFUL_OR_INFRA" if high else "ROUTINE_STATELESS",
+            "FINAL_RELEASE_TREATMENT": final_treatment,
+            "ROUTINE_RELEASE_ELIGIBLE": final_treatment == 'ROUTINE_STATELESS',
             "ROLLBACK_ASSETS_READY": assets_ready, "IRREVERSIBLE_STATE_CHANGE": irreversible_state_change,
             "STATE_CHANGE_CLASS": state_class,
             "ROLLBACK_REHEARSAL_REQUIRED": full, "FULL_ROLLBACK_REHEARSAL_REQUIRED": full,

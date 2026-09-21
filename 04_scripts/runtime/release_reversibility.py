@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import ast
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import PurePosixPath
 import re
@@ -37,19 +38,74 @@ def path(value):
     return value
 
 
-def requirements(risk_class, state_class):
-    routine = risk_class == 'ROUTINE_STATELESS'
+def requirements(risk_class, state_class, final_treatment=None):
+    routine = (final_treatment or risk_class) == 'ROUTINE_STATELESS'
     full = not routine and state_class != 'ADDITIVE_REVERSIBLE'
     return dict(FULL_ROLLBACK_REHEARSAL_REQUIRED=full,
                 TARGETED_RECOVERY_VALIDATION_REQUIRED=full,
                 # Legacy name continues to mean full rehearsal, not targeted.
-                ROLLBACK_REHEARSAL_REQUIRED=full)
+                ROLLBACK_REHEARSAL_REQUIRED=full,
+                ROUTINE_RELEASE_ELIGIBLE=routine)
 
 
 def machine_findings(risk):
     """Review binds the full machine observations, not just a PASS label."""
     return {k: copy.deepcopy(risk[k]) for k in ('MACHINE_DESTRUCTIVE_EVIDENCE',
             'MACHINE_STATE_CHANGE_CLASS', 'DESTRUCTIVE_FINDINGS', 'findings', 'REVERSIBILITY_EVIDENCE')}
+
+
+ROUTINE_SEMANTIC_FACTS = (
+    'PERSISTENT_STATE_DELTA', 'WRITE_PATH_DELTA', 'STORAGE_CONTRACT_DELTA',
+    'SCHEMA_MIGRATION', 'DATA_MIGRATION', 'MOUNT_DELTA',
+    'DEPLOYMENT_INFRA_DELTA', 'NETWORK_INFRA_DELTA',
+    'DESTRUCTIVE_WRITE_SEMANTICS', 'REVERSE_MIGRATION_REQUIRED',
+    'UNRESOLVED_STATEFUL_BEHAVIOR',
+)
+
+
+def reviewed_diff_identity(risk):
+    """Bind a review to the exact Git identities and machine observations."""
+    payload = {
+        'base': risk['base'], 'target': risk['target'],
+        'project_id': risk.get('project_id'),
+        'build_contract_sha256': risk.get('build_contract_sha256'),
+        'machine_findings': machine_findings(risk),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def machine_classification(risk):
+    if risk['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS':
+        return 'ROUTINE_STATELESS'
+    return risk['MACHINE_STATE_CHANGE_CLASS']
+
+
+def _require_routine_resolution(risk, review):
+    require(risk['MACHINE_DESTRUCTIVE_EVIDENCE'] is False and not risk['DESTRUCTIVE_FINDINGS'],
+            'MACHINE_DESTRUCTIVE_EVIDENCE_CANNOT_BE_DOWNGRADED')
+    require(risk['MACHINE_STATE_CHANGE_CLASS'] == 'NEEDS_MAINTAINER_RISK_REVIEW',
+            'MACHINE_CLASSIFICATION_NOT_REVIEWABLE_AS_ROUTINE')
+    require(risk.get('build_projection_complete') is True,
+            'RUNTIME_EFFECT_CLOSURE_INCOMPLETE')
+    require(not risk['REVERSIBILITY_EVIDENCE'].get('new_roots'),
+            'PERSISTENT_STATE_DELTA_CANNOT_BE_ROUTINE')
+    blocked_reasons = {
+        'STATE_OR_STORAGE_CHANGE', 'DEPLOYED_INFRASTRUCTURE_CHANGE',
+        'RUNTIME_ACTIVE_INFRASTRUCTURE_CHANGE',
+    }
+    require(not any(f.get('high_risk') and f.get('reason') in blocked_reasons
+                    for f in risk['findings']), 'STATEFUL_OR_INFRA_DELTA_CANNOT_BE_ROUTINE')
+    require(review.get('machine_classification') == machine_classification(risk)
+            and review.get('machine_destructive_evidence') is False,
+            'RISK_REVIEW_MACHINE_CLASSIFICATION_CHANGED')
+    require(review.get('reviewed_diff_identity') == reviewed_diff_identity(risk),
+            'RISK_REVIEW_DIFF_IDENTITY_CHANGED')
+    facts = review.get('semantic_delta')
+    require(type(facts) is dict and set(facts) == set(ROUTINE_SEMANTIC_FACTS),
+            'ROUTINE_SEMANTIC_FACTS_INCOMPLETE')
+    require(all(facts[name] == 'NO' for name in ROUTINE_SEMANTIC_FACTS),
+            'STATEFUL_DELTA_CANNOT_BE_DOWNGRADED_TO_ROUTINE')
 
 
 def apply_review(risk, review, authoritative_main, *, now=None):
@@ -60,9 +116,16 @@ def apply_review(risk, review, authoritative_main, *, now=None):
     """
     if risk['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS':
         require(review is None, 'ROUTINE_DOES_NOT_REQUIRE_RISK_REVIEW')
-        return dict(risk)
-    require(type(review) is dict and set(review) == {'reviewer', 'timestamp', 'base', 'target',
-            'authoritative_main', 'machine_findings', 'maintainer_classification', 'reason'}, 'INVALID_RISK_REVIEW_FIELDS')
+        return {**risk, 'MACHINE_CLASSIFICATION': 'ROUTINE_STATELESS',
+                'MAINTAINER_RELEASE_TREATMENT': None,
+                'FINAL_RELEASE_TREATMENT': 'ROUTINE_STATELESS',
+                **requirements(risk['RELEASE_RISK_CLASS'], risk['STATE_CHANGE_CLASS'], 'ROUTINE_STATELESS')}
+    legacy_fields = {'reviewer', 'timestamp', 'base', 'target', 'authoritative_main',
+                     'machine_findings', 'maintainer_classification', 'reason'}
+    routine_fields = legacy_fields | {'machine_classification', 'machine_destructive_evidence',
+                                      'reviewed_diff_identity', 'semantic_delta'}
+    require(type(review) is dict and set(review) in (legacy_fields, routine_fields),
+            'INVALID_RISK_REVIEW_FIELDS')
     for key in ('reviewer', 'reason'):
         require(isinstance(review[key], str) and bool(review[key].strip()), 'RISK_REVIEW_IDENTITY_OR_REASON_MISSING')
     require(review['base'] == risk['base'] and review['target'] == risk['target'] and
@@ -70,14 +133,24 @@ def apply_review(risk, review, authoritative_main, *, now=None):
     require(review['machine_findings'] == machine_findings(risk), 'RISK_REVIEW_MACHINE_FINDINGS_CHANGED')
     require(isinstance(review['timestamp'], str), 'INVALID_RISK_REVIEW_TIME')
     observed = datetime.fromisoformat(review['timestamp'].replace('Z', '+00:00'))
-    require(observed.tzinfo is not None and observed <= (now or datetime.now(timezone.utc)), 'INVALID_RISK_REVIEW_TIME')
+    current = now or datetime.now(timezone.utc)
+    require(observed.tzinfo is not None and current - timedelta(hours=24) <= observed <= current,
+            'INVALID_RISK_REVIEW_TIME')
     decision = review['maintainer_classification']
-    require(decision in ('ADDITIVE_REVERSIBLE', 'HIGH_RISK'), 'INVALID_MAINTAINER_CLASSIFICATION')
+    require(decision in ('ROUTINE_STATELESS', 'ADDITIVE_REVERSIBLE', 'HIGH_RISK'),
+            'INVALID_MAINTAINER_CLASSIFICATION')
+    if decision == 'ROUTINE_STATELESS':
+        require(set(review) == routine_fields, 'ROUTINE_REVIEW_REQUIRES_SEMANTIC_FACTS')
+        _require_routine_resolution(risk, review)
     require(not risk['MACHINE_DESTRUCTIVE_EVIDENCE'] or decision == 'HIGH_RISK', 'MACHINE_DESTRUCTIVE_EVIDENCE_CANNOT_BE_DOWNGRADED')
-    effective = 'IRREVERSIBLE_OR_DESTRUCTIVE' if risk['MACHINE_DESTRUCTIVE_EVIDENCE'] else decision
+    effective = ('IRREVERSIBLE_OR_DESTRUCTIVE' if risk['MACHINE_DESTRUCTIVE_EVIDENCE'] else
+                 'NOT_APPLICABLE' if decision == 'ROUTINE_STATELESS' else decision)
     return {**risk, 'STATE_CHANGE_CLASS': effective, 'MAINTAINER_STATE_CHANGE_CLASS': decision,
+            'MACHINE_CLASSIFICATION': machine_classification(risk),
+            'MAINTAINER_RELEASE_TREATMENT': decision,
+            'FINAL_RELEASE_TREATMENT': decision,
             'maintainer_risk_review': copy.deepcopy(review),
-            **requirements(risk['RELEASE_RISK_CLASS'], effective)}
+            **requirements(risk['RELEASE_RISK_CLASS'], effective, decision)}
 
 
 def destructive_findings(before, after, contract_path, findings):

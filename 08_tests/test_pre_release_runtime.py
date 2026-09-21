@@ -867,6 +867,84 @@ def review_for(risk, decision='ADDITIVE_REVERSIBLE'):
         reason='Reviewed code, tests, independent storage paths, no migration, retained new data and old configuration rollback.')
 
 
+def routine_review_for(risk, **fact_overrides):
+    module=runtime._load('04_scripts/runtime/release_reversibility.py','_routine_review_test')
+    review=review_for(risk,'ROUTINE_STATELESS')
+    facts={name:'NO' for name in module.ROUTINE_SEMANTIC_FACTS}
+    facts.update(fact_overrides)
+    review.update(authoritative_main=risk['target'],
+        machine_classification=module.machine_classification(risk),
+        machine_destructive_evidence=risk['MACHINE_DESTRUCTIVE_EVIDENCE'],
+        reviewed_diff_identity=module.reviewed_diff_identity(risk),semantic_delta=facts,
+        reason='Exact delta review found no persistent state, write, storage, schema, data, mount, deployment, network, destructive, reverse-migration, or unresolved stateful effect.')
+    return review
+
+
+def unknown_stateless_risk(risk_repo):
+    repo,git,put,base=risk_repo
+    put('05_apps/page.py','def present(x):\n    return custom_read_only_view(x)\n')
+    git('add','.');git('commit','-qm','opaque read-only presentation')
+    risk=runtime.classify_release(repo,base,git('rev-parse','HEAD'),'example')
+    assert risk['RELEASE_RISK_CLASS']=='STATEFUL_OR_INFRA'
+    assert risk['MACHINE_STATE_CHANGE_CLASS']=='NEEDS_MAINTAINER_RISK_REVIEW'
+    assert risk['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
+    assert not risk['REVERSIBILITY_EVIDENCE']['new_roots']
+    return risk
+
+
+def test_exact_semantic_review_can_resolve_unknown_stateless_delta(risk_repo):
+    risk=unknown_stateless_risk(risk_repo)
+    review=routine_review_for(risk)
+    resolved=runtime.apply_maintainer_review(risk,review,risk['target'])
+    assert resolved['MACHINE_CLASSIFICATION']=='NEEDS_MAINTAINER_RISK_REVIEW'
+    assert resolved['MAINTAINER_RELEASE_TREATMENT']=='ROUTINE_STATELESS'
+    assert resolved['FINAL_RELEASE_TREATMENT']=='ROUTINE_STATELESS'
+    assert resolved['STATE_CHANGE_CLASS']=='NOT_APPLICABLE'
+    assert resolved['ROUTINE_RELEASE_ELIGIBLE'] is True
+    assert resolved['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+    assert resolved['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is False
+    assert _risk_gate(risk=resolved)['PRODUCTION_RELEASE_PREFLIGHT']=='PASS'
+
+
+@pytest.mark.parametrize('fact',[*[
+    'PERSISTENT_STATE_DELTA','WRITE_PATH_DELTA','STORAGE_CONTRACT_DELTA',
+    'SCHEMA_MIGRATION','DATA_MIGRATION','MOUNT_DELTA','DEPLOYMENT_INFRA_DELTA',
+    'NETWORK_INFRA_DELTA','DESTRUCTIVE_WRITE_SEMANTICS','REVERSE_MIGRATION_REQUIRED',
+    'UNRESOLVED_STATEFUL_BEHAVIOR']])
+def test_stateful_or_unresolved_semantic_fact_cannot_be_routine(risk_repo,fact):
+    risk=unknown_stateless_risk(risk_repo)
+    with pytest.raises(ValueError,match='STATEFUL_DELTA'):
+        runtime.apply_maintainer_review(risk,routine_review_for(risk,**{fact:'YES'}),risk['target'])
+
+
+def test_routine_review_missing_or_stale_identity_is_blocked(risk_repo):
+    import copy
+    risk=unknown_stateless_risk(risk_repo)
+    with pytest.raises((TypeError,ValueError)):
+        runtime.apply_maintainer_review(risk,None,risk['target'])
+    for mutation in ('base','target','main','diff','expired'):
+        review=copy.deepcopy(routine_review_for(risk));main=copy.deepcopy(risk['target'])
+        if mutation in ('base','target'):
+            review[mutation]['commit']='d'*40
+        elif mutation=='main':
+            main['commit']='d'*40
+        elif mutation=='diff':
+            review['reviewed_diff_identity']='d'*64
+        else:
+            review['timestamp']='2000-01-01T00:00:00+00:00'
+        with pytest.raises(ValueError):runtime.apply_maintainer_review(risk,review,main)
+
+
+def test_machine_state_or_infrastructure_finding_cannot_be_reviewed_as_routine(risk_repo):
+    import copy
+    risk=unknown_stateless_risk(risk_repo)
+    risk=copy.deepcopy(risk)
+    risk['findings'][0]['reason']='STATE_OR_STORAGE_CHANGE'
+    review=routine_review_for(risk)
+    with pytest.raises(ValueError,match='STATEFUL_OR_INFRA'):
+        runtime.apply_maintainer_review(risk,review,risk['target'])
+
+
 def test_unsupported_business_semantics_allows_bound_maintainer_review(additive_repo):
     repo,git,put,base,contract,compose,code=additive_repo
     put('05_apps/page.py',code+'def custom():\n    custom_read_only_adapter()\n')
@@ -922,6 +1000,8 @@ def test_machine_destructive_evidence_cannot_be_reviewed_away(risk_repo,operatio
     assert r['DESTRUCTIVE_FINDINGS']
     with pytest.raises(ValueError,match='CANNOT_BE_DOWNGRADED'):
         runtime.apply_maintainer_review(r,review_for(r),r['base'])
+    with pytest.raises(ValueError,match='CANNOT_BE_DOWNGRADED'):
+        runtime.apply_maintainer_review(r,routine_review_for(r),r['target'])
     accepted=runtime.apply_maintainer_review(r,review_for(r,'HIGH_RISK'),r['base'])
     assert accepted['STATE_CHANGE_CLASS']=='IRREVERSIBLE_OR_DESTRUCTIVE'
     assert accepted['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
@@ -942,7 +1022,11 @@ def test_maintainer_high_risk_retains_full_recovery(additive_repo):
 def test_routine_requires_no_maintainer_risk_review(risk_repo):
     repo,git,put,base=risk_repo
     r=runtime.classify_release(repo,base,base,'example')
-    assert runtime.apply_maintainer_review(r,None,r['base'])==r
+    resolved=runtime.apply_maintainer_review(r,None,r['base'])
+    assert all(resolved[k]==v for k,v in r.items())
+    assert resolved['MACHINE_CLASSIFICATION']=='ROUTINE_STATELESS'
+    assert resolved['FINAL_RELEASE_TREATMENT']=='ROUTINE_STATELESS'
+    assert resolved['ROUTINE_RELEASE_ELIGIBLE'] is True
     assert r['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
     assert not r['FULL_ROLLBACK_REHEARSAL_REQUIRED']
     assert not r['TARGETED_RECOVERY_VALIDATION_REQUIRED']

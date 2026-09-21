@@ -81,6 +81,53 @@ def test_high_risk_cannot_use_unsigned_routine_record(monkeypatch):
             image_id=IMAGE['image_id'],project_id='service'),ROOT)
 
 
+def reviewed_policy(final='ROUTINE_STATELESS'):
+    main={'commit':'1'*40,'tree':'2'*40}
+    risk={'RELEASE_RISK_CLASS':'STATEFUL_OR_INFRA'}
+    calls=[]
+    def apply(observed,review,identity):
+        calls.append((review,identity))
+        assert observed is risk and identity==main
+        return {**observed,'FINAL_RELEASE_TREATMENT':final,
+                'ROUTINE_RELEASE_ELIGIBLE':final=='ROUTINE_STATELESS'}
+    return SimpleNamespace(classify_release=lambda *a:risk,current_main_identity=lambda *a:main,
+                           apply_maintainer_review=apply),calls
+
+
+def test_routine_eligibility_consumes_final_review_treatment(monkeypatch):
+    policy,calls=reviewed_policy();review={'exact':'review'}
+    monkeypatch.setattr(routine,'load',lambda *a:policy)
+    result=routine.require_routine(ROOT,PREVIOUS['commit'],IMAGE['commit'],'service',review)
+    assert result['FINAL_RELEASE_TREATMENT']=='ROUTINE_STATELESS'
+    assert result['ROUTINE_RELEASE_ELIGIBLE'] is True
+    assert calls==[(review,{'commit':'1'*40,'tree':'2'*40})]
+
+
+def test_missing_review_or_nonroutine_final_treatment_remains_blocked(monkeypatch):
+    policy,_=reviewed_policy();monkeypatch.setattr(routine,'load',lambda *a:policy)
+    with pytest.raises(routine.RoutineError,match='MAINTAINER_RISK_REVIEW_REQUIRED'):
+        routine.require_routine(ROOT,PREVIOUS['commit'],IMAGE['commit'],'service')
+    policy,_=reviewed_policy('ADDITIVE_REVERSIBLE');monkeypatch.setattr(routine,'load',lambda *a:policy)
+    with pytest.raises(routine.RoutineError,match='HIGH_RISK'):
+        routine.require_routine(ROOT,PREVIOUS['commit'],IMAGE['commit'],'service',{'exact':'review'})
+
+
+def test_reviewed_routine_acceptance_binds_review_for_grant_revalidation(monkeypatch):
+    policy,calls=reviewed_policy();review={'exact':'review'}
+    monkeypatch.setattr(routine,'load',lambda *a:policy)
+    resolution={'MACHINE_CLASSIFICATION':'NEEDS_MAINTAINER_RISK_REVIEW',
+                'MAINTAINER_RELEASE_TREATMENT':'ROUTINE_STATELESS',
+                'FINAL_RELEASE_TREATMENT':'ROUTINE_STATELESS','ROUTINE_RELEASE_ELIGIBLE':True}
+    record=routine.candidate_acceptance(Backend(),IMAGE,base_commit=PREVIOUS['commit'],ci_run='123',
+        risk_resolution=resolution,maintainer_risk_review=review)
+    policy_record=dict(approved_commit=IMAGE['commit'],approved_tree=IMAGE['tree'],
+        image_id=IMAGE['image_id'],project_id='service')
+    assert routine.verify_routine_record(record,policy_record,ROOT) is record
+    assert record['maintainer_risk_review']==review
+    assert record['risk_resolution']['FINAL_RELEASE_TREATMENT']=='ROUTINE_STATELESS'
+    assert calls==[(review,{'commit':'1'*40,'tree':'2'*40})]
+
+
 def tables():
     return [dict(heading=s+' 盘面榨利', rows=[[f'2026-{m:02d}']+['—']*13 for m in range(1,13)]) for s in ('AM','PM')]
 
