@@ -401,6 +401,17 @@ def test_declared_capture_write_uses_same_manifest_contract_for_deploy_and_rollb
     rollback._check_mounts([dict(type='bind',**m) for m in mounts])
 
 
+def test_even_declared_writable_business_root_is_not_routine_write_permission(tmp_path):
+    session,mounts,_=production_mount_fixture(tmp_path)
+    # Changing a business root to RW in a proposed manifest cannot override
+    # the sealed policy for the running release.
+    next(r for r in session.contract['runtime_roots'] if r['role']=='data')['access']='rw'
+    next(r for r in session.contract['required_mounts'] if r['role']=='data')['read_only']=False
+    next(m for m in mounts if m['target']=='/runtime/01_data')['read_only']=False
+    with pytest.raises(routine.RoutineError,match='PRODUCTION_MOUNT_POLICY_MISMATCH'):
+        session._check_mounts([dict(type='bind',**m) for m in mounts])
+
+
 @pytest.mark.parametrize('fault',['unknown-rw','history-rw','data-rw','wrong-source','wrong-mode','outside-instance'])
 def test_production_mount_contract_remains_strict(tmp_path,fault):
     session,mounts,_=production_mount_fixture(tmp_path)
