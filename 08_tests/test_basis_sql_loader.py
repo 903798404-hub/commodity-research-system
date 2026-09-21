@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -148,9 +149,9 @@ def test_streams_filters_maps_selects_near_contract_and_medians(tmp_path: Path) 
         data.groupby(PAGE_KEY, dropna=False)["futures_contract"].nunique() <= 1
     ).all()
     assert pd.Timestamp(data["date"].max()) == pd.Timestamp("2026-08-04")
-    assert pq.read_schema(output).field("date").type == pq.read_schema(
-        Path(__file__).parents[1] / "01_data/database/basis/basis_quotes.parquet"
-    ).field("date").type
+    # The loader owns this schema contract.  A production/runtime parquet is
+    # deliberately not tracked in Git and must not be a required-test oracle.
+    assert pq.read_schema(output).field("date").type == pa.timestamp("us")
 
 
 def test_original_delivery_months_merge_before_near_contract_selection(

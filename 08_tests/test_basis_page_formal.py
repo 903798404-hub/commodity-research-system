@@ -1,26 +1,53 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
+import pandas as pd
+import pytest
 from streamlit.testing.v1 import AppTest
-
-from agri_research_agent.market_data.public_basis_current import (
-    resolve_public_basis_current_identity,
-)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FORMAL_ENTRY = PROJECT_ROOT / "05_apps" / "streamlit_app.py"
-PUBLIC_CURRENT_ROOT = (
-    PROJECT_ROOT.parents[1]
-    / "market-data-worktree-runtime"
-    / "international-spread"
-    / "public-market-data"
-    / "lutou-domestic-basis"
-)
 
 
-def test_basis_page_uses_formal_database_and_renders_modules() -> None:
+def _formal_public_current_rows() -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for offset, commodity in enumerate(("一豆", "24度", "三菜", "豆粕", "菜粕")):
+        for day, basis in ((18, 100 + offset), (19, 110 + offset)):
+            rows.append({
+                "date": pd.Timestamp(2026, 8, day),
+                "commodity": commodity,
+                "region": "华东",
+                "quote_type": "基差报价",
+                "delivery_month": "现货",
+                "futures_contract": "2609",
+                "cash_price": 8000 + offset,
+                "futures_price": 7900 + offset,
+                "basis": basis,
+                "source_sheet": f"basis_price:{commodity}",
+            })
+    return pd.DataFrame(rows)
+
+
+def test_basis_page_uses_formal_database_and_renders_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    apps_dir = str(PROJECT_ROOT / "05_apps")
+    if apps_dir not in sys.path:
+        sys.path.insert(0, apps_dir)
+    basis_page = __import__("basis_page")
+    rows = _formal_public_current_rows()
+    monkeypatch.setattr(
+        basis_page,
+        "load_basis_page_data",
+        lambda _root: (
+            rows.copy(),
+            {"release_id": "required-test-current", "manifest_sha256": "a" * 64},
+        ),
+    )
+
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=40).run()
     app.session_state["selected_workspace_page"] = "基差/一口价"
     app.run(timeout=40)
@@ -61,9 +88,7 @@ def test_basis_page_uses_formal_database_and_renders_modules() -> None:
         and "数据更新至" in item.value
         for item in app.caption
     )
-    expected_latest = resolve_public_basis_current_identity(
-        PUBLIC_CURRENT_ROOT
-    ).max_date.isoformat()
+    expected_latest = rows["date"].max().date().isoformat()
     assert any(expected_latest in item.value for item in app.caption)
     assert not any("本地回退文件可用" in item.value for item in (*app.success, *app.info, *app.caption))
     assert not any("本地回退数据" in item.value for item in (*app.success, *app.info, *app.caption))

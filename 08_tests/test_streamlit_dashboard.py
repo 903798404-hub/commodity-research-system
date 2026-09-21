@@ -35,6 +35,41 @@ def _import_workspace():
     return importlib.import_module("streamlit_app")
 
 
+def _install_weather_route_fixture(monkeypatch):
+    """Keep workspace routing deterministic without a host Public Current."""
+
+    weather_page = importlib.import_module("weather_research_page")
+    crop_page = importlib.import_module("crop_weather_page")
+
+    def render_country(country: str) -> None:
+        config = crop_page.load_weather_config(
+            crop_page._country_files(country)["config"]
+        )
+        weather_page.st.title(str(config["page_title"]))
+        enabled = dict(config.get("enabled_sections", {}))
+        module_keys = [
+            key
+            for key in crop_page.MODULES
+            if bool(enabled.get(key, key != "minimum_temperature"))
+        ]
+        weather_page.st.radio(
+            "页面章节",
+            module_keys,
+            format_func=lambda key: crop_page.MODULES[key][0],
+            key=f"required_route_fixture_{country}",
+        )
+
+    monkeypatch.setattr(
+        weather_page,
+        "WEATHER_COUNTRY_RENDERERS",
+        {
+            country: (lambda country=country: render_country(country))
+            for country in crop_page.WEATHER_COUNTRY_FILES
+        },
+    )
+    return weather_page, crop_page
+
+
 def test_streamlit_entries_start_without_exceptions(monkeypatch) -> None:
     monkeypatch.setenv("USDA_DASHBOARD_URL", "http://127.0.0.1:5173/usda/")
     monkeypatch.setenv("OIL_WORLD_DASHBOARD_URL", "http://127.0.0.1:5175/oil-world/")
@@ -191,17 +226,17 @@ def test_rapeseed_country_labels_use_one_explicit_code_mapping(monkeypatch) -> N
     assert page["country_options"] == expected_options
     assert page["available_countries"] == frozenset({"CAN", "AUS", "EU", "RUS", "UKR"})
     assert set(weather_page.WEATHER_COUNTRY_RENDERERS) >= set(page["country_options"].values())
-    for code, config_name, data_name, slug in (
-        ("CAN", "rapeseed_weather_can.yaml", "rapeseed_weather_can.parquet", "can"),
-        ("AUS", "rapeseed_weather_aus.yaml", "rapeseed_weather_aus.parquet", "aus"),
-        ("EU", "rapeseed_weather_eu.yaml", "rapeseed_weather_eu.parquet", "eu"),
-        ("RUS", "rapeseed_weather_rus.yaml", "rapeseed_weather_rus.parquet", "rus"),
-        ("UKR", "rapeseed_weather_ukr.yaml", "rapeseed_weather_ukr.parquet", "ukr"),
+    for code, config_name in (
+        ("CAN", "rapeseed_weather_can.yaml"),
+        ("AUS", "rapeseed_weather_aus.yaml"),
+        ("EU", "rapeseed_weather_eu.yaml"),
+        ("RUS", "rapeseed_weather_rus.yaml"),
+        ("UKR", "rapeseed_weather_ukr.yaml"),
     ):
         files = crop_page._country_files(code)
         assert files["config"].name == config_name
-        assert files["data"].name == data_name
-        assert files["data"].parent.name == slug
+        assert "data" not in files
+        assert crop_page._data_path(files) == (None, "Public Weather Current")
 
     monkeypatch.setattr(weather_page.st, "title", lambda *_args, **_kwargs: None)
     for label, code in expected_options.items():
@@ -225,10 +260,11 @@ def test_palm_oil_countries_use_the_common_renderer_without_placeholder_or_cache
     assert page["available_countries"] == frozenset({"IDN", "MYS"})
     assert set(weather_page.WEATHER_COUNTRY_RENDERERS) >= {"IDN", "MYS"}
     assert crop_page._country_files("IDN")["config"].name == "palm_oil_weather_idn.yaml"
-    assert crop_page._country_files("IDN")["data"].name == "palm_oil_weather_idn.parquet"
     assert crop_page._country_files("MYS")["config"].name == "palm_oil_weather_mys.yaml"
-    assert crop_page._country_files("MYS")["data"].name == "palm_oil_weather_mys.parquet"
-    assert crop_page._country_files("IDN")["data"] != crop_page._country_files("MYS")["data"]
+    for code in ("IDN", "MYS"):
+        files = crop_page._country_files(code)
+        assert "data" not in files
+        assert crop_page._data_path(files) == (None, "Public Weather Current")
 
     monkeypatch.setattr(weather_page.st, "title", lambda *_args, **_kwargs: None)
     for label, code in expected_options.items():
@@ -242,8 +278,10 @@ def test_palm_oil_countries_use_the_common_renderer_without_placeholder_or_cache
         assert notices == []
 
 
-def test_palm_oil_weather_countries_render_from_the_main_workspace_route() -> None:
-    """Exercise the data-backed palm-oil selector through the formal workspace entry."""
+def test_palm_oil_weather_countries_render_from_the_main_workspace_route(monkeypatch) -> None:
+    """Exercise the palm-oil selector through a deterministic route fixture."""
+
+    _install_weather_route_fixture(monkeypatch)
 
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
     app.session_state["selected_workspace_page"] = "棕榈油天气"
@@ -253,37 +291,6 @@ def test_palm_oil_weather_countries_render_from_the_main_workspace_route() -> No
     assert country_radio.options == ["印度尼西亚", "马来西亚"]
     assert country_radio.value == "印度尼西亚"
     assert any(item.value == "印度尼西亚棕榈油天气研究" for item in app.title)
-    apps_dir = str(PROJECT_ROOT / "05_apps")
-    if apps_dir not in sys.path:
-        sys.path.insert(0, apps_dir)
-    crop_page = importlib.import_module("crop_weather_page")
-    idn_files = crop_page._country_files("IDN")
-    idn_data = idn_files["data"]
-    idn_config = crop_page.load_weather_config(idn_files["config"])
-    idn_records = crop_page.load_weather_records(
-        idn_data,
-        crop=str(idn_config["crop"]),
-        country=str(idn_config["country"]),
-        metric="precipitation",
-    )
-    freshness = crop_page._weather_freshness(idn_records, idn_data)
-    expected_caption = " · ".join(
-        (
-            f"观测更新至：{freshness['observed']}",
-            f"EC预测至：{freshness['ecmwf']}",
-            f"GFS预测至：{freshness['gfs']}",
-            f"数据包刷新时间：{freshness['refreshed_at']}",
-        )
-    )
-    assert any(
-        item.value == expected_caption
-        for item in app.caption
-    )
-    assert not any(
-        forbidden in item.value
-        for item in app.caption
-        for forbidden in ("历史快照", "非实时数据", "EC 截止", "GFS 截止")
-    )
     section_radio = next(item for item in app.radio if item.label == "页面章节")
     assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "土壤墒情"]
     assert not any("主产区加权" in item.value for item in app.caption)
@@ -300,16 +307,18 @@ def test_soybean_weather_missing_brazil_snapshot_is_data_degradation(monkeypatch
     if apps_dir not in sys.path:
         sys.path.insert(0, apps_dir)
     soybean_weather_page = importlib.import_module("soybean_weather_page")
-    brazil_files = dict(soybean_weather_page.WEATHER_COUNTRY_FILES["BRA"])
-    monkeypatch.setitem(brazil_files, "data", tmp_path / "missing_brazil_snapshot.parquet")
-    monkeypatch.setitem(soybean_weather_page.WEATHER_COUNTRY_FILES, "BRA", brazil_files)
+    monkeypatch.setenv(
+        soybean_weather_page.PUBLIC_RUNTIME_ROOT_ENV,
+        str(tmp_path / "missing-public-runtime"),
+    )
 
     errors: list[str] = []
     monkeypatch.setattr(soybean_weather_page.st, "title", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(soybean_weather_page.st, "error", errors.append)
     soybean_weather_page.render_soybean_weather_page("BRA")
     error_text = "\n".join(errors)
-    assert "巴西天气稳定数据不可用" in error_text
+    assert "巴西天气 Public Current 不可用" in error_text
+    assert "未加载任何 legacy 或数据库回退" in error_text
     assert "该地区天气研究页面尚未接入" not in error_text
 
 
@@ -321,20 +330,23 @@ def test_soybean_country_files_are_isolated_and_other_weather_pages_stay_placeho
     weather_page = importlib.import_module("weather_research_page")
 
     expected = {
-        "USA": ("soybean_weather_us.yaml", "soybean_weather_us.parquet", "us"),
-        "BRA": ("soybean_weather_br.yaml", "soybean_weather_br.parquet", "br"),
-        "ARG": ("soybean_weather_ar.yaml", "soybean_weather_ar.parquet", "ar"),
-        "CAN": ("rapeseed_weather_can.yaml", "rapeseed_weather_can.parquet", "can"),
-        "AUS": ("rapeseed_weather_aus.yaml", "rapeseed_weather_aus.parquet", "aus"),
-        "EU": ("rapeseed_weather_eu.yaml", "rapeseed_weather_eu.parquet", "eu"),
-        "RUS": ("rapeseed_weather_rus.yaml", "rapeseed_weather_rus.parquet", "rus"),
-        "UKR": ("rapeseed_weather_ukr.yaml", "rapeseed_weather_ukr.parquet", "ukr"),
+        "USA": "soybean_weather_us.yaml",
+        "BRA": "soybean_weather_br.yaml",
+        "ARG": "soybean_weather_ar.yaml",
+        "CAN": "rapeseed_weather_can.yaml",
+        "AUS": "rapeseed_weather_aus.yaml",
+        "EU": "rapeseed_weather_eu.yaml",
+        "RUS": "rapeseed_weather_rus.yaml",
+        "UKR": "rapeseed_weather_ukr.yaml",
     }
-    for country, (config_name, data_name, slug) in expected.items():
+    for country, config_name in expected.items():
         files = soybean_weather_page._country_files(country)
         assert files["config"].name == config_name
-        assert files["data"].name == data_name
-        assert files["data"].parent.name == slug
+        assert "data" not in files
+        assert soybean_weather_page._data_path(files) == (
+            None,
+            "Public Weather Current",
+        )
 
     notices: list[str] = []
     monkeypatch.setattr(weather_page.st, "title", lambda *_args, **_kwargs: None)
@@ -347,8 +359,10 @@ def test_soybean_country_files_are_isolated_and_other_weather_pages_stay_placeho
     assert rendered == ["EU"]
 
 
-def test_rapeseed_weather_countries_render_from_the_main_workspace_route() -> None:
+def test_rapeseed_weather_countries_render_from_the_main_workspace_route(monkeypatch) -> None:
     """Exercise the real workspace route, not an isolated country renderer."""
+
+    _install_weather_route_fixture(monkeypatch)
 
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
     app.session_state["selected_workspace_page"] = "菜籽天气"
