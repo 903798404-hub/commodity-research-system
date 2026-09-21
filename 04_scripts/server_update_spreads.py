@@ -14,6 +14,20 @@ import pandas as pd
 from filelock import FileLock, Timeout
 
 
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "03_src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
+    HistoricalMutationPolicy,
+    HistoricalPublicationBlocked,
+    HistoricalPublicationMode,
+    parse_allowed_key,
+    validate_historical_publication,
+)
+
+
 DATABASE_NAME = "historical_spread_database.xlsx"
 PARQUET_NAME = "historical_spread_database.parquet"
 PRICE_LONG_NAME = "historical_price_long.xlsx"
@@ -77,6 +91,9 @@ def initial_status(run_mode: str) -> dict[str, object]:
         "error_message": "",
         "run_mode": run_mode,
         "source": source,
+        "historical_diff_guard": "NOT_RUN",
+        "historical_changed_keys": [],
+        "historical_blocked_keys": [],
     }
 
 
@@ -188,6 +205,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--end-date", type=dt.date.fromisoformat, default=dt.date.today())
     parser.add_argument(
+        "--refresh-start-date",
+        type=dt.date.fromisoformat,
+        help="Explicit first business date allowed to change in this refresh",
+    )
+    parser.add_argument(
+        "--historical-publication-mode",
+        choices=("normal", "historical-reconciliation"),
+        default="normal",
+    )
+    parser.add_argument(
+        "--historical-allowed-key",
+        action="append",
+        default=[],
+        metavar="DATE|SPREAD_NAME|SEASON",
+        help="Exact out-of-range key allowed only in historical-reconciliation mode",
+    )
+    parser.add_argument(
         "--tankan-secret-file",
         type=Path,
         default=Path.home() / ".market-data-secrets" / "tankan.env",
@@ -204,7 +238,39 @@ def parse_args() -> argparse.Namespace:
     )
     if selected > 1:
         parser.error("update and recalculation modes are mutually exclusive")
+    if args.historical_publication_mode == "normal" and args.historical_allowed_key:
+        parser.error("normal refresh cannot declare historical allowed keys")
+    if (
+        args.historical_publication_mode == "historical-reconciliation"
+        and not args.historical_allowed_key
+    ):
+        parser.error("historical reconciliation requires exact allowed keys")
     return args
+
+
+def publication_policy(
+    args: argparse.Namespace,
+    *,
+    price_file: Path,
+) -> HistoricalMutationPolicy:
+    start = getattr(args, "refresh_start_date", None)
+    if start is None:
+        prices = pd.read_excel(price_file, sheet_name="price_long", usecols=["date"])
+        latest = pd.to_datetime(prices["date"], errors="coerce").max()
+        if pd.isna(latest):
+            raise ValueError("Domestic Spread refresh boundary cannot be derived")
+        start = pd.Timestamp(latest).date() + dt.timedelta(days=1)
+    mode = (
+        HistoricalPublicationMode.HISTORICAL_RECONCILIATION
+        if getattr(args, "historical_publication_mode", "normal")
+        == "historical-reconciliation"
+        else HistoricalPublicationMode.NORMAL
+    )
+    keys = frozenset(
+        parse_allowed_key(value)
+        for value in getattr(args, "historical_allowed_key", [])
+    )
+    return HistoricalMutationPolicy(mode, start, args.end_date, keys)
 
 
 def run_mode_for_args(args: argparse.Namespace) -> str:
@@ -262,6 +328,7 @@ def main() -> int:
     excel_backup: Path | None = None
     parquet_backup: Path | None = None
     before_summary: dict[str, object] = {}
+    mutation_policy: HistoricalMutationPolicy | None = None
 
     try:
         atomic_write_json(status_file, status)
@@ -278,6 +345,16 @@ def main() -> int:
         before_summary = read_database_summary(database_file)
         status["latest_date"] = before_summary["latest_date"]
         logger.info("before_rows=%s before_latest_date=%s", before_summary["rows"], before_summary["latest_date"])
+
+        if not args.dry_run and run_mode != "safety_check":
+            mutation_policy = publication_policy(args, price_file=price_file)
+            logger.info(
+                "historical_publication_mode=%s mutation_boundary=%s..%s allowed_keys=%s",
+                mutation_policy.mode.value,
+                mutation_policy.start_date,
+                mutation_policy.end_date,
+                len(mutation_policy.allowed_keys),
+            )
 
         if not args.dry_run:
             price_backup = backup_file(price_file, backups_dir, timestamp)
@@ -354,6 +431,25 @@ def main() -> int:
             status["excel_latest_date"] = summaries["excel"]["latest_date"]
             status["parquet_latest_date"] = summaries["parquet"]["latest_date"]
             status["latest_date"] = summaries["excel"]["latest_date"]
+            if parquet_backup is None or mutation_policy is None:
+                raise RuntimeError("historical publication guard baseline is unavailable")
+            try:
+                diff_report = validate_historical_publication(
+                    parquet_backup, parquet_file, mutation_policy
+                )
+            except HistoricalPublicationBlocked as blocked:
+                status["historical_diff_guard"] = "FAIL"
+                status["historical_changed_keys"] = [
+                    "|".join(key) for key in blocked.report.changed_keys
+                ]
+                status["historical_blocked_keys"] = [
+                    "|".join(key) for key in blocked.report.blocked_keys
+                ]
+                raise
+            status["historical_diff_guard"] = "PASS"
+            status["historical_changed_keys"] = [
+                "|".join(key) for key in diff_report.changed_keys
+            ]
         else:
             status["excel_latest_date"] = before_summary.get("latest_date", "")
             status["parquet_latest_date"] = (

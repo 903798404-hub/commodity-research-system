@@ -62,6 +62,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--weather-baseline-root", type=Path)
     parser.add_argument("--end-date", type=date.fromisoformat, default=date.today())
+    parser.add_argument(
+        "--domestic-spread-publication-mode",
+        choices=("normal", "historical-reconciliation"),
+        default="normal",
+    )
+    parser.add_argument(
+        "--domestic-spread-allowed-key",
+        action="append",
+        default=[],
+        metavar="DATE|SPREAD_NAME|SEASON",
+    )
     parser.add_argument("--run-id")
     parser.add_argument(
         "--packages-root",
@@ -131,6 +142,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--initial-seed requires a remote transport or --sync-target-root")
     if args.initial_seed and set(args.sources or ("tankan", "lutou")) != {"tankan", "lutou"}:
         parser.error("--initial-seed requires the complete tankan and lutou source set")
+    if (
+        args.domestic_spread_publication_mode == "normal"
+        and args.domestic_spread_allowed_key
+    ):
+        parser.error("normal refresh cannot declare historical allowed keys")
+    if (
+        args.domestic_spread_publication_mode == "historical-reconciliation"
+        and not args.domestic_spread_allowed_key
+    ):
+        parser.error("historical reconciliation requires exact allowed keys")
     return args
 
 
@@ -237,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
                 lambda: _refresh_domestic_spread_artifact(
                     tankan_secret_file=args.tankan_secret_file,
                     end_date=args.end_date,
+                    publication_mode=args.domestic_spread_publication_mode,
+                    allowed_keys=args.domestic_spread_allowed_key,
                 )
             )
             if "tankan" in sources
@@ -355,6 +378,8 @@ def _refresh_domestic_spread_artifact(
     *,
     tankan_secret_file: Path,
     end_date: date,
+    publication_mode: str = "normal",
+    allowed_keys: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Path]:
     """Run the formal Domestic Spread producer and return its sealed input."""
 
@@ -366,7 +391,11 @@ def _refresh_domestic_spread_artifact(
         str(tankan_secret_file),
         "--end-date",
         end_date.isoformat(),
+        "--historical-publication-mode",
+        publication_mode,
     ]
+    for key in allowed_keys:
+        command.extend(["--historical-allowed-key", key])
     completed = subprocess.run(
         command, cwd=ROOT, text=True, capture_output=True, check=False
     )

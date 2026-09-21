@@ -49,6 +49,19 @@ def _current_artifact_rows() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _rows_for_date(value: str, *, omit: tuple[str, int] | None = None) -> pd.DataFrame:
+    data = _current_artifact_rows().iloc[:-1].copy()
+    data["date"] = pd.Timestamp(value)
+    if omit is not None:
+        data = data.loc[
+            ~(
+                data["leg1_instrument"].eq(omit[0])
+                & data["leg1_month"].eq(omit[1])
+            )
+        ]
+    return data
+
+
 def test_status_uses_current_artifact_latest_and_tankan_completeness(
     tmp_path: Path,
 ) -> None:
@@ -100,3 +113,23 @@ def test_legacy_akshare_status_cannot_override_formal_page_status(
     assert "开始：" not in messages[0]
     assert "结束：" not in messages[0]
     pd.testing.assert_frame_equal(payload, before, check_exact=True)
+
+
+def test_september_status_excludes_contracts_after_their_seasonal_window() -> None:
+    status = load_domestic_spread_status(_rows_for_date("2026-09-08", omit=("M", 9)))
+
+    assert status.latest_business_date == "2026-09-08"
+    assert (status.success_contracts, status.required_contracts) == (10, 10)
+    assert status.failure_contracts == 0
+    assert status.status == "success"
+
+
+def test_window_end_still_requires_month_nine_and_active_missing_series_fails() -> None:
+    complete = load_domestic_spread_status(_rows_for_date("2026-08-31"))
+    missing = load_domestic_spread_status(_rows_for_date("2026-08-31", omit=("M", 9)))
+
+    assert (complete.success_contracts, complete.required_contracts) == (15, 15)
+    assert complete.status == "success"
+    assert (missing.success_contracts, missing.required_contracts) == (14, 15)
+    assert missing.failure_contracts == 1
+    assert missing.status == "failed"

@@ -3,10 +3,21 @@
 import datetime as dt
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "03_src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
+    select_canonical_historical_prices,
+)
 
 
 SPREAD_COLUMNS = [
@@ -80,9 +91,10 @@ def season_for_date(
 
 
 def prepare_leg(price_long: pd.DataFrame, instrument: str, month: int, prefix: str) -> pd.DataFrame:
-    leg = price_long[
-        (price_long["instrument"] == instrument)
-        & (pd.to_numeric(price_long["delivery_month"], errors="coerce") == int(month))
+    canonical = select_canonical_historical_prices(price_long)
+    leg = canonical[
+        (canonical["instrument"] == instrument)
+        & (pd.to_numeric(canonical["delivery_month"], errors="coerce") == int(month))
     ].copy()
     keep = ["date", "price", "status", "error"]
     leg = leg.loc[:, keep].rename(
