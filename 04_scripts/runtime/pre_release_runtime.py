@@ -376,11 +376,14 @@ def _runtime_graph(sources: dict[str, bytes], contract: dict) -> dict:
                 complete=bool(starts) and not uncertain, unresolved=sorted(set(uncertain)))
 
 
-def _stateless_presentation_change(old: bytes, new: bytes, sources: dict[str, bytes]) -> bool:
+def _stateless_presentation_change(
+    old: bytes, new: bytes, sources: dict[str, bytes], *, application_controls: bool = False
+) -> bool:
     """Review effect *delta*, retaining unchanged operations, not a purity theorem.
 
-    Allows local month/list/dict shaping and clock reads. New opaque calls,
-    import-side effects, argument/global mutation and writes remain high risk.
+    Allows local month/list/dict shaping and clock reads. The application
+    variant also accepts guard callbacks and display-only UI calls, but never
+    new storage effects, changed storage paths or opaque external calls.
     """
     import ast
     before, after = ast.parse(old), ast.parse(new)
@@ -392,7 +395,10 @@ def _stateless_presentation_change(old: bytes, new: bytes, sources: dict[str, by
     old_imports = {dump(n) for n in before.body if isinstance(n, (ast.Import, ast.ImportFrom))}
     for n in after.body:
         if isinstance(n, (ast.Import, ast.ImportFrom)) and dump(n) not in old_imports:
-            if not isinstance(n, ast.ImportFrom) or n.module not in ('datetime', 'zoneinfo') or any(a.asname for a in n.names):
+            allowed_imports = {'datetime', 'zoneinfo'}
+            if application_controls:
+                allowed_imports.add('typing')
+            if not isinstance(n, ast.ImportFrom) or n.module not in allowed_imports or any(a.asname for a in n.names):
                 return False
     nondefs = lambda tree: [dump(n) for n in tree.body if not isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom))]
     if nondefs(before) != nondefs(after):
@@ -416,6 +422,73 @@ def _stateless_presentation_change(old: bytes, new: bytes, sources: dict[str, by
         try:
             previous_calls = {dump(n) for n in ast.walk(prior) if isinstance(n, ast.Call)} if prior else set()
             previous_nodes = {dump(n) for n in ast.walk(prior)} if prior else set()
+            old_calls = [n for n in ast.walk(prior) if isinstance(n, ast.Call)] if prior else []
+            parameters = {a.arg: a for a in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
+            def guard_parameter(name):
+                arg = parameters.get(name)
+                return (application_controls and arg is not None and name.startswith(('authorize_', 'validate_'))
+                        and arg.annotation is not None and 'Callable' in ast.unparse(arg.annotation))
+            def safe_guard(value):
+                if isinstance(value, ast.Name):
+                    return guard_parameter(value.id)
+                return (isinstance(value, ast.Lambda) and isinstance(value.body, ast.Call)
+                        and isinstance(value.body.func, ast.Name)
+                        and value.body.func.id.startswith(('validate_', 'assert_', 'require_'))
+                        and dump(value.body) in previous_calls)
+            def guard_only_extension(call):
+                if not application_controls:
+                    return False
+                for old_call in old_calls:
+                    if dump(call.func) != dump(old_call.func) or [dump(a) for a in call.args] != [dump(a) for a in old_call.args]:
+                        continue
+                    old_kw = {k.arg: dump(k.value) for k in old_call.keywords}
+                    new_kw = {k.arg: k.value for k in call.keywords}
+                    if None in old_kw or None in new_kw or any(k not in new_kw or dump(new_kw[k]) != v
+                                                             for k, v in old_kw.items()):
+                        continue
+                    added = set(new_kw) - set(old_kw)
+                    if added and all(k.startswith(('authorize_', 'validate_')) and safe_guard(new_kw[k])
+                                     for k in added):
+                        return True
+                return False
+            if application_controls and prior is not None:
+                # Reaching an existing writer more often is a state change even
+                # when the call expression itself is byte-for-byte identical.
+                def writers(node):
+                    return [ast.unparse(n.func) for n in ast.walk(node) if isinstance(n, ast.Call)
+                            and not ast.unparse(n.func).startswith(('st.', 'validate_', 'authorize_'))
+                            and re.search(r'(^|[._])(save|write|seal|persist|delete|remove|unlink|truncate|execute|commit|migrate|open|upsert|insert|replace|rename|to_parquet|to_csv|to_json)([_.]|$)',
+                                          ast.unparse(n.func), re.I)]
+                from collections import Counter
+                before_writers, after_writers = Counter(writers(prior)), Counter(writers(fn))
+                if any(after_writers[name] > count for name, count in before_writers.items()) or any(
+                    name not in before_writers for name in after_writers
+                ):
+                    return False
+                def storage_assignments(node):
+                    return [(target.id, dump(n.value) if n.value is not None else None)
+                            for n in ast.walk(node) if isinstance(n, (ast.Assign, ast.AnnAssign))
+                            for target in (n.targets if isinstance(n, ast.Assign) else [n.target])
+                            if isinstance(target, ast.Name) and re.search(r'(^|_)(store|storage|schema|root|path|directory|dir|mount|database|db)(_|$)', target.id)]
+                if storage_assignments(fn) != storage_assignments(prior):
+                    return False
+                old_literals = {n.value for n in ast.walk(prior) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+                parents = {child: parent for parent in ast.walk(fn) for child in ast.iter_child_nodes(parent)}
+                non_path_calls = {'st.info', 'st.warning', 'st.error', 'st.caption', 'st.markdown', 'st.write', 'ZoneInfo'}
+                def non_path_literal(node):
+                    while node in parents:
+                        node = parents[node]
+                        if isinstance(node, ast.Call):
+                            return ast.unparse(node.func) in non_path_calls
+                    return False
+                for n in ast.walk(fn):
+                    if not isinstance(n, ast.Constant) or not isinstance(n.value, str) or n.value in old_literals:
+                        continue
+                    if non_path_literal(n):
+                        continue
+                    if re.search(r'[/\\]|\b(?:CREATE|ALTER|DROP|DELETE|TRUNCATE)\s+(?:TABLE|FROM|DATABASE)\b|\.(?:db|sqlite|parquet|jsonl?)$',
+                                 n.value, re.I):
+                        return False
             for expression in [*fn.decorator_list, *fn.args.defaults, *(x for x in fn.args.kw_defaults if x)]:
                 if any(isinstance(n, ast.Call) for n in ast.walk(expression)):
                     return False
@@ -433,6 +506,8 @@ def _stateless_presentation_change(old: bytes, new: bytes, sources: dict[str, by
                 if not isinstance(n, ast.Call) or dump(n) in previous_calls:
                     continue
                 name = ast.unparse(n.func)
+                if guard_only_extension(n):
+                    continue
                 if isinstance(n.func, ast.Name):
                     if name in ('str','int','float','bool','len','range','sorted','min','max','tuple','list','dict','set','isinstance','type','enumerate','zip','abs','round','ZoneInfo'):
                         continue
@@ -442,8 +517,12 @@ def _stateless_presentation_change(old: bytes, new: bytes, sources: dict[str, by
                     if name.endswith('Error') and isinstance(n, ast.Call):
                         # Exception construction itself does not mutate persistent state.
                         continue
+                    if guard_parameter(name):
+                        continue
                     return False
                 if isinstance(n.func, ast.Attribute):
+                    if application_controls and name in ('st.info', 'st.warning', 'st.error', 'st.caption'):
+                        continue
                     if n.func.attr in ('get','isoformat','lower','upper','date'):
                         continue
                     if name == 'datetime.now':
@@ -536,8 +615,13 @@ def classify_release(repo: Path, base: str, target: str, project_id: str) -> dic
                 new_ast = ast.dump(ast.parse(read(target, path)), include_attributes=False)
                 if old_ast == new_ast:
                     reason, risk = "NO_EXECUTABLE_AST_CHANGE", False
-                elif _stateless_presentation_change(read(base, path), read(target, path), snapshots[target]):
-                    reason, risk = "STATELESS_PRESENTATION_EFFECT_DELTA", False
+                elif graph_complete and _stateless_presentation_change(
+                    read(base, path), read(target, path), snapshots[target], application_controls=True
+                ):
+                    reason = ("STATELESS_PRESENTATION_EFFECT_DELTA"
+                              if _stateless_presentation_change(read(base, path), read(target, path), snapshots[target])
+                              else "STATELESS_APPLICATION_EXECUTABLE_DELTA")
+                    risk = False
             except (SyntaxError, KeyError, subprocess.SubprocessError):
                 pass
         findings.append({"path": path, "reason": reason, "high_risk": risk, "image_input": included(path),

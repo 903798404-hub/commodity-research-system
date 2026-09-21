@@ -437,6 +437,104 @@ def test_presentation_effect_delta_retains_month_shaping_but_rejects_writes(risk
     assert result['RELEASE_RISK_CLASS'] == expected
 
 
+def test_application_authorization_guard_is_not_a_state_contract_change(risk_repo):
+    repo, git, put, _ = risk_repo
+    put('05_apps/page.py', 'def save(x):\n    return x\n\ndef present(x):\n    return save(x)\n')
+    git('add', '.'); git('commit', '-qm', 'guard baseline')
+    base = git('rev-parse', 'HEAD')
+    put('05_apps/page.py', '''from typing import Callable
+
+def save(x, authorize_write: Callable[[], None] | None = None):
+    if authorize_write is not None:
+        authorize_write()
+    return x
+
+def present(x, authorize_write: Callable[[], None] | None = None):
+    return save(x, authorize_write=authorize_write)
+''')
+    git('add', '.'); git('commit', '-qm', 'revalidate authorization')
+    result = runtime.classify_release(repo, base, git('rev-parse', 'HEAD'), 'example')
+    assert result['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS'
+    assert result['findings'][0]['reason'] == 'STATELESS_APPLICATION_EXECUTABLE_DELTA'
+    assert result['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
+
+
+@pytest.mark.parametrize('change', [
+    'persistent-path', 'schema-migration', 'compose-mount', 'destructive-write',
+    'changed-storage-root', 'unknown-provider',
+])
+def test_application_executable_delta_does_not_hide_state_or_unknown_risk(risk_repo, change):
+    repo, git, put, base = risk_repo
+    put('05_apps/page.py', 'def present(x):\n    return x + 2\n')
+    if change == 'persistent-path':
+        put('05_apps/page.py', 'def present(x):\n    return open("/new/operational-store.json", "w").write(str(x))\n')
+    elif change == 'schema-migration':
+        put('migrations/001.sql', 'ALTER TABLE production ADD value TEXT;\n')
+    elif change == 'compose-mount':
+        put('compose.yml', 'services:\n  app:\n    volumes: ["/new/data:/runtime/data:rw"]\n')
+    elif change == 'destructive-write':
+        put('05_apps/page.py', 'def present(x):\n    open("history", "w").write(str(x))\n    return x\n')
+    elif change == 'changed-storage-root':
+        put('05_apps/page.py', 'def present(x):\n    result_root = "/new/operational-store"\n    return x + 2\n')
+    else:
+        put('05_apps/page.py', 'def present(x):\n    return unknown_provider(x)\n')
+    git('add', '.'); git('commit', '-qm', 'state or unknown change')
+    result = runtime.classify_release(repo, base, git('rev-parse', 'HEAD'), 'example')
+    assert result['RELEASE_RISK_CLASS'] == 'STATEFUL_OR_INFRA'
+    assert result['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is True
+    if change in ('schema-migration', 'compose-mount'):
+        assert any(f['high_risk'] for f in result['findings'] if f['path'] != '05_apps/page.py')
+    else:
+        assert result['findings'][0]['reason'] == 'UNKNOWN_EXECUTABLE_CHANGE'
+
+
+def test_application_business_calculation_and_docs_only_keep_routine_class(risk_repo):
+    repo, git, put, base = risk_repo
+    put('05_apps/page.py', 'def present(x):\n    return max(0, x * 2)\n')
+    put('07_docs/contract.md', 'Calculation display contract.\n')
+    put('08_tests/test_page.py', 'def test_example(): assert True\n')
+    git('add', '.'); git('commit', '-qm', 'calculation and contract')
+    result = runtime.classify_release(repo, base, git('rev-parse', 'HEAD'), 'example')
+    assert result['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS'
+    assert result['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
+    assert all(not finding['high_risk'] for finding in result['findings'])
+
+
+def test_opaque_runtime_graph_blocks_application_routine_proof(risk_repo):
+    repo, git, put, _ = risk_repo
+    put('05_apps/page.py', 'import importlib\nimportlib.import_module(runtime_plugin)\ndef present(x):\n    return x + 1\n')
+    git('add', '.'); git('commit', '-qm', 'dynamic baseline')
+    base = git('rev-parse', 'HEAD')
+    put('05_apps/page.py', 'import importlib\nimportlib.import_module(runtime_plugin)\ndef present(x):\n    return x + 2\n')
+    git('add', '.'); git('commit', '-qm', 'dynamic application change')
+    result = runtime.classify_release(repo, base, git('rev-parse', 'HEAD'), 'example')
+    assert result['RUNTIME_EFFECTIVE_DELTA']['target']['complete'] is False
+    assert result['RELEASE_RISK_CLASS'] == 'STATEFUL_OR_INFRA'
+    assert result['findings'][0]['reason'] == 'UNKNOWN_EXECUTABLE_CHANGE'
+
+
+def test_exact_soybean_read_write_delta_is_routine_without_state_footprint():
+    base = 'b12e878e33d16dcfa7a43f86ee8357b542cd41cf'
+    target = '7845c31610ffa74cc52dc699dc9ece9910fe330f'
+    result = runtime.classify_release(ROOT, base, target, 'spread-production-runtime-wiring')
+    assert result['base']['commit'] == base
+    assert result['target'] == {'commit': target, 'tree': '2ff9da714e81799a293ee601715a1fa47c7003ac'}
+    assert result['RELEASE_RISK_CLASS'] == 'ROUTINE_STATELESS'
+    assert result['MACHINE_DESTRUCTIVE_EVIDENCE'] is False
+    assert result['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is False
+    assert result['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+    assert result['build_projection_complete'] is True
+    assert result['RUNTIME_EFFECTIVE_DELTA']['base']['complete'] is True
+    assert result['RUNTIME_EFFECTIVE_DELTA']['target']['complete'] is True
+    findings = {finding['path']: finding for finding in result['findings']}
+    assert {path for path, finding in findings.items() if finding['runtime_effect'] == 'RUNTIME_ACTIVE_CHANGE'} == {
+        '03_src/agri_research_agent/pipelines/soybean_intraday.py',
+        '05_apps/import_profit_intraday_runtime_page.py',
+    }
+    assert all(finding['reason'] == 'STATELESS_APPLICATION_EXECUTABLE_DELTA'
+               for finding in findings.values() if finding['runtime_effect'] == 'RUNTIME_ACTIVE_CHANGE')
+
+
 def test_new_runtime_import_is_not_packaged_inactive(risk_repo):
     repo, git, put, _ = risk_repo
     put('Dockerfile', 'FROM immutable\nCOPY . /app\n')
