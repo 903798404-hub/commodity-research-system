@@ -17,6 +17,8 @@ if str(SRC) not in sys.path:
 
 from agri_research_agent.data_sources.tankan.domestic_spread import (  # noqa: E402
     contract_code_from_source_column,
+    full_contract_code,
+    normalize_full_contract_code,
     resolve_contract_season,
 )
 from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
@@ -111,6 +113,49 @@ def prepare_leg(price_long: pd.DataFrame, instrument: str, month: int, prefix: s
     return leg
 
 
+def add_canonical_contract_identities(spread_long: pd.DataFrame) -> pd.DataFrame:
+    """Add missing full-contract identities without changing existing business fields.
+
+    Explicit producer identities remain authoritative.  Legacy rows that predate
+    those identity columns are completed from the producer's already-resolved
+    season and configured leg identity, using the same canonical resolver as the
+    live Tankan source.
+    """
+
+    required = {
+        "season",
+        "leg1_instrument",
+        "leg1_month",
+        "leg2_instrument",
+        "leg2_month",
+    }
+    missing = sorted(required - set(spread_long.columns))
+    if missing:
+        raise ValueError(f"Domestic Spread identity source columns missing: {missing}")
+
+    result = spread_long.copy()
+    for prefix in ("leg1", "leg2"):
+        contract_column = f"{prefix}_contract"
+        instrument_column = f"{prefix}_instrument"
+        month_column = f"{prefix}_month"
+        if contract_column not in result.columns:
+            result[contract_column] = None
+
+        completed: list[str] = []
+        for row in result[
+            [contract_column, instrument_column, month_column, "season"]
+        ].itertuples(index=False, name=None):
+            existing, instrument, month, season = row
+            if pd.notna(existing) and str(existing).strip():
+                completed.append(normalize_full_contract_code(existing))
+            else:
+                completed.append(
+                    full_contract_code(str(instrument), str(season), int(month))
+                )
+        result[contract_column] = completed
+    return result
+
+
 def calculate_one_spread(config: pd.Series, price_long: pd.DataFrame, updated_at: str) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     spread_name = str(config["spread_name"])
     leg1_instrument = str(config["leg1_instrument"])
@@ -197,7 +242,7 @@ def calculate_one_spread(config: pd.Series, price_long: pd.DataFrame, updated_at
     merged["leg2_month"] = leg2_month
     merged["updated_at"] = updated_at
 
-    return merged.loc[:, SPREAD_COLUMNS], None
+    return add_canonical_contract_identities(merged).loc[:, SPREAD_COLUMNS], None
 
 
 def main() -> int:

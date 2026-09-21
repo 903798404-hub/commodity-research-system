@@ -137,6 +137,69 @@ def test_spread_formula_is_unchanged_for_tankan_prices() -> None:
     assert result.iloc[0]["leg2_contract"] == "RM2609"
 
 
+def test_legacy_month_only_source_uses_resolved_season_contract_identity() -> None:
+    calculator = load_script(
+        "04_scripts/calculate_historical_spreads.py", "legacy_spread_calculator"
+    )
+    prices = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-09-21"), "instrument": "M", "delivery_month": 1, "price": 3100.0, "source_column": "期货收盘价(1月交割连续):豆粕", "source_file": "historical_price_base.xlsx", "status": "success", "error": ""},
+            {"date": pd.Timestamp("2026-09-21"), "instrument": "M", "delivery_month": 5, "price": 2800.0, "source_column": "期货收盘价(5月交割连续):豆粕", "source_file": "historical_price_base.xlsx", "status": "success", "error": ""},
+        ]
+    )
+    config = pd.Series(
+        {
+            "spread_name": "M 1-5", "spread_group": "M",
+            "leg1_instrument": "M", "leg1_month": 1,
+            "leg2_instrument": "M", "leg2_month": 5,
+            "formula": "leg1-leg2", "window_start_month": 6,
+            "window_start_day": 1, "window_end_month": 1, "window_end_day": 10,
+        }
+    )
+    result, failure = calculator.calculate_one_spread(config, prices, "ignored")
+    assert failure is None
+    assert result.iloc[0]["season"] == "2026/2027"
+    assert result.iloc[0]["leg1_contract"] == "M2701"
+    assert result.iloc[0]["leg2_contract"] == "M2705"
+
+
+def test_explicit_old_year_contract_is_preserved_and_cannot_false_pass() -> None:
+    calculator = load_script(
+        "04_scripts/calculate_historical_spreads.py", "old_year_spread_calculator"
+    )
+    frame = pd.DataFrame(
+        {
+            "season": ["2026/2027"],
+            "leg1_instrument": ["M"], "leg1_month": [1],
+            "leg1_contract": ["M2601"],
+            "leg2_instrument": ["M"], "leg2_month": [5],
+            "leg2_contract": [None],
+        }
+    )
+    result = calculator.add_canonical_contract_identities(frame)
+    assert result.iloc[0]["leg1_contract"] == "M2601"
+    assert result.iloc[0]["leg2_contract"] == "M2705"
+
+
+def test_contract_identity_backfill_is_additive_only() -> None:
+    calculator = load_script(
+        "04_scripts/calculate_historical_spreads.py", "identity_backfill_calculator"
+    )
+    original = pd.DataFrame(
+        {
+            "date": [pd.Timestamp("2026-09-21")],
+            "spread_name": ["M 1-5"], "season": ["2026/2027"],
+            "leg1_instrument": ["M"], "leg1_month": [1], "leg1_price": [3100.0],
+            "leg2_instrument": ["M"], "leg2_month": [5], "leg2_price": [2800.0],
+            "spread_value": [300.0], "status": ["success"],
+        }
+    )
+    result = calculator.add_canonical_contract_identities(original)
+    pd.testing.assert_frame_equal(result[original.columns], original)
+    assert result.iloc[0]["leg1_contract"] == "M2701"
+    assert result.iloc[0]["leg2_contract"] == "M2705"
+
+
 def test_unified_producer_invokes_tankan_not_akshare(monkeypatch, tmp_path: Path) -> None:
     refresh = load_script("04_scripts/refresh_public_data.py", "refresh_public_data_e2")
     seen: list[str] = []
