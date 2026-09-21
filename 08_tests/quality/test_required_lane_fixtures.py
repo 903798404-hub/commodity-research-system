@@ -53,8 +53,15 @@ def test_workflow_provisions_fixtures_before_required_and_full_tests() -> None:
     )
 
     assert workflow.count("Prepare deterministic required fixtures") == 2
-    assert "SPREAD_REFERENCE_DATA_ROOT: ${{ runner.temp }}/required-fixtures/spread-reference" in workflow
-    assert "PUBLIC_MARKET_DATA_RUNTIME_ROOT: ${{ runner.temp }}/required-fixtures/public-runtime" in workflow
+    assert (
+        "SPREAD_REFERENCE_DATA_ROOT=$RUNNER_TEMP/required-fixtures/spread-reference"
+        in workflow
+    )
+    assert (
+        "PUBLIC_MARKET_DATA_RUNTIME_ROOT=$RUNNER_TEMP/required-fixtures/public-runtime"
+        in workflow
+    )
+    assert workflow.count('>> "$GITHUB_ENV"') == 4
     assert workflow.index("Prepare deterministic required fixtures") < workflow.index(
         "Execute required linux tests"
     )
