@@ -123,19 +123,44 @@ def load_spread_config(config_path: Path, mtime: float) -> pd.DataFrame:
 
 def render_update_status(data: pd.DataFrame) -> None:
     status = load_domestic_spread_status(data)
+    presentation_status, presentation_label = domestic_spread_status_presentation(
+        status.success_contracts,
+        status.required_contracts,
+    )
+    contract_summary = (
+        f"{status.success_contracts}/{status.required_contracts} 成功，"
+        f"{status.failure_contracts} 项缺失"
+        if status.required_contracts > 0
+        else "暂无应更新合约"
+    )
     message = (
-        f"更新状态：{status.status} | "
+        f"更新状态：{presentation_label} | "
         f"最新交易日：{status.latest_business_date or '-'} | "
-        f"合约：{status.success_contracts}/{status.required_contracts} 成功，"
-        f"{status.failure_contracts} 失败 | "
+        f"合约：{contract_summary} | "
         f"来源：{status.source}"
     )
-    if status.status == "success":
+    if presentation_status == "SUCCESS":
         st.success(message)
-    elif status.status == "failed":
+    elif presentation_status == "PARTIAL":
         st.warning(message)
+    elif presentation_status == "FAILED":
+        st.error(message)
     else:
         st.info(message)
+
+
+def domestic_spread_status_presentation(
+    success_contracts: int,
+    required_contracts: int,
+) -> tuple[str, str]:
+    """Map authoritative completeness counts to their page-only presentation."""
+    if required_contracts <= 0:
+        return "NOT_APPLICABLE", "暂无应更新合约"
+    if success_contracts == required_contracts:
+        return "SUCCESS", "更新成功"
+    if success_contracts > 0:
+        return "PARTIAL", "部分更新"
+    return "FAILED", "更新失败"
 
 
 def format_market_number(value: object) -> str:
@@ -215,8 +240,8 @@ def build_figure(
         height=350,
         hovermode="x unified",
         legend_title_text="年度",
-        legend={"orientation": "v", "x": 0.99, "xanchor": "right", "y": 1, "yanchor": "top", "font": {"size": 10}},
-        margin={"l": 54, "r": 12, "t": 54, "b": 62},
+        legend={"orientation": "h", "x": 0, "xanchor": "left", "y": 1.02, "yanchor": "bottom", "font": {"size": 10}},
+        margin={"l": 54, "r": 12, "t": 105, "b": 62},
         xaxis_title={"text": "日期", "font": {"size": 13}},
         yaxis_title={"text": data["value_label"].iloc[0] if not data.empty else "价差（元/吨）", "font": {"size": 13}},
     )

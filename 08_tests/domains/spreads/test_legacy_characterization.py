@@ -142,6 +142,12 @@ def test_legacy_figure_freezes_seasons_latest_trace_and_centered_rolling_mean() 
     )
     assert figure.layout.title.text == "<b>豆粕 09-01｜最新 68元/吨</b>"
     assert figure.layout.legend.title.text == "年度"
+    assert figure.layout.legend.orientation == "h"
+    assert figure.layout.legend.x == 0
+    assert figure.layout.legend.xanchor == "left"
+    assert figure.layout.legend.y > 1
+    assert figure.layout.legend.yanchor == "bottom"
+    assert figure.layout.margin.t >= 90
     assert figure.layout.yaxis.title.text == "绝对价差 A-B"
 
 
