@@ -4,8 +4,10 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from agri_research_agent.application.domestic_spreads import (
     DEFAULT_SPREAD_CONFIG,
@@ -108,12 +110,105 @@ def test_legacy_akshare_status_cannot_override_formal_page_status(
 
     assert len(messages) == 1
     assert "最新交易日：2026-08-24" in messages[0]
-    assert "合约：15/15 成功，0 失败" in messages[0]
+    assert "更新状态：更新成功" in messages[0]
+    assert "合约：15/15 成功，0 项缺失" in messages[0]
     assert "Goal E / Tankan Domestic Spread" in messages[0]
     assert "2026-08-14" not in messages[0]
     assert "开始：" not in messages[0]
     assert "结束：" not in messages[0]
     pd.testing.assert_frame_equal(payload, before, check_exact=True)
+
+
+@pytest.mark.parametrize(
+    ("success", "required", "expected_status", "expected_label"),
+    [
+        (10, 10, "SUCCESS", "更新成功"),
+        (2, 10, "PARTIAL", "部分更新"),
+        (9, 10, "PARTIAL", "部分更新"),
+        (0, 10, "FAILED", "更新失败"),
+        (0, 0, "NOT_APPLICABLE", "暂无应更新合约"),
+    ],
+)
+def test_page_status_presentation_uses_authoritative_counts(
+    success: int,
+    required: int,
+    expected_status: str,
+    expected_label: str,
+) -> None:
+    page = importlib.import_module("streamlit_app")
+
+    assert page.domestic_spread_status_presentation(success, required) == (
+        expected_status,
+        expected_label,
+    )
+
+
+def test_page_renders_september_partial_status_without_fixed_fifteen(
+    monkeypatch,
+) -> None:
+    page = importlib.import_module("streamlit_app")
+    payload = _rows_for_date("2026-09-21")
+    payload = payload[payload["leg1_instrument"].eq("M")].copy()
+    messages: list[tuple[str, str]] = []
+    for method in ("success", "warning", "error", "info"):
+        monkeypatch.setattr(
+            page.st,
+            method,
+            lambda message, method=method: messages.append((method, message)),
+        )
+
+    page.render_update_status(payload)
+
+    assert messages == [
+        (
+            "warning",
+            "更新状态：部分更新 | 最新交易日：2026-09-21 | "
+            "合约：2/10 成功，8 项缺失 | 来源：Goal E / Tankan Domestic Spread",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("success", "required", "streamlit_method", "contract_summary"),
+    [
+        (10, 10, "success", "合约：10/10 成功，0 项缺失"),
+        (2, 10, "warning", "合约：2/10 成功，8 项缺失"),
+        (0, 10, "error", "合约：0/10 成功，10 项缺失"),
+        (0, 0, "info", "合约：暂无应更新合约"),
+    ],
+)
+def test_page_status_uses_expected_message_style(
+    monkeypatch,
+    success: int,
+    required: int,
+    streamlit_method: str,
+    contract_summary: str,
+) -> None:
+    page = importlib.import_module("streamlit_app")
+    emitted: list[tuple[str, str]] = []
+    for method in ("success", "warning", "error", "info"):
+        monkeypatch.setattr(
+            page.st,
+            method,
+            lambda message, method=method: emitted.append((method, message)),
+        )
+    monkeypatch.setattr(
+        page,
+        "load_domestic_spread_status",
+        lambda _data: SimpleNamespace(
+            success_contracts=success,
+            required_contracts=required,
+            failure_contracts=max(required - success, 0),
+            latest_business_date="2026-09-21",
+            source="fixture",
+        ),
+    )
+
+    page.render_update_status(pd.DataFrame())
+
+    assert len(emitted) == 1
+    assert emitted[0][0] == streamlit_method
+    assert contract_summary in emitted[0][1]
 
 
 def test_september_status_excludes_contracts_after_their_seasonal_window() -> None:
