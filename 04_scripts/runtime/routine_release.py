@@ -65,6 +65,35 @@ def require(condition, message):
         raise RoutineError(message)
 
 
+def semantic_http_port(network_ports, service_ports, container_port, role):
+    """Validate one approved TCP exposure, including Docker's dual-stack form."""
+    error = 'HTTP_PORT_NOT_BOUND'
+    require(role in ('candidate_validation', 'production') and isinstance(service_ports, list)
+            and len(service_ports) == 1, error)
+    exposure = service_ports[0]
+    require(isinstance(exposure, dict) and exposure.get('target') == container_port
+            and exposure.get('protocol', 'tcp') == 'tcp', error)
+    published = str(exposure.get('published', ''))
+    require(published.isdecimal() and 1 <= int(published) <= 65535, error)
+    ipv4, ipv6 = (('127.0.0.1', '::1') if role == 'candidate_validation'
+                  else ('0.0.0.0', '::'))
+    configured_ip = exposure.get('host_ip')
+    allowed_config_ips = (ipv4,) if role == 'candidate_validation' else (None, '', ipv4)
+    require(configured_ip in allowed_config_ips, error)
+    key = f'{container_port}/tcp'
+    require(isinstance(network_ports, dict) and all(
+        other == key or not bindings for other, bindings in network_ports.items()), error)
+    bindings = network_ports.get(key)
+    require(isinstance(bindings, list) and len(bindings) in (1, 2), error)
+    addresses = []
+    for binding in bindings:
+        require(isinstance(binding, dict) and binding.get('HostPort') == published
+                and binding.get('HostIp') in (ipv4, ipv6), error)
+        addresses.append(binding['HostIp'])
+    require(addresses == [ipv4] or len(addresses) == 2 and set(addresses) == {ipv4, ipv6}, error)
+    return published
+
+
 def require_routine(repo, base, target, project):
     risk = load('04_scripts/runtime/pre_release_runtime.py', '_routine_risk').classify_release(
         Path(repo), base, target, project)
@@ -489,9 +518,11 @@ class DockerSession:
     def url(self):
         container = self.engine.inspect_one('container', self.container_id)
         port = self.spec['container_port']
-        ports = container['NetworkSettings']['Ports'].get(str(port)+'/tcp') or []
-        require(len(ports) == 1 and ports[0]['HostIp'] in ('127.0.0.1', '0.0.0.0'), 'HTTP_PORT_NOT_BOUND')
-        return 'http://127.0.0.1:' + ports[0]['HostPort']
+        rendered = json.loads(self.compose(self.spec, 'config', '--format', 'json').stdout)
+        service = rendered.get('services', {}).get(self.contract['service_id'], {})
+        host_port = semantic_http_port(container.get('NetworkSettings', {}).get('Ports'),
+                                       service.get('ports'), port, self.role)
+        return 'http://127.0.0.1:' + host_port
 
     def health(self):
         deadline = time.monotonic() + 60
@@ -575,12 +606,12 @@ class DockerSession:
         require(self.engine._git(source, 'rev-parse', 'HEAD') == previous['commit']
                 and self.engine._git(source, 'rev-parse', 'HEAD^{tree}') == previous['tree'], 'ROLLBACK_SOURCE_MISMATCH')
         # Observe the old application now. Historical execution grant is not read.
-        saved_id, saved_spec = self.container_id, self.spec
-        self.container_id, self.spec = previous['container_id'], self.request['rollback']
+        saved_id, saved_spec, saved_role = self.container_id, self.spec, self.role
+        self.container_id, self.spec, self.role = previous['container_id'], self.request['rollback'], 'production'
         try:
             require(self.health() == 'PASS', 'PREVIOUS_RELEASE_UNHEALTHY')
         finally:
-            self.container_id, self.spec = saved_id, saved_spec
+            self.container_id, self.spec, self.role = saved_id, saved_spec, saved_role
         assets = dict(schema_version='routine-rollback-assets/1', **previous, project_id=self.project_id,
                       forward_target=self.binding['commit'], health='PASS', observed_at=now())
         self.engine._write_new(Path(self.request['rollback']['assets_output']), self.engine._canonical(assets))

@@ -263,13 +263,76 @@ def test_routine_candidate_network_generation_and_isolation(tmp_path, fault):
 def test_candidate_url_requires_observed_port_publication(published):
     ports = {'8501/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '18502'}]} if published else {}
     engine = SimpleNamespace(inspect_one=lambda kind, cid: {'NetworkSettings': {'Ports': ports}})
-    backend = routine.DockerSession({}, engine, None, {}, {'project_id': 'test'})
+    backend = routine.DockerSession({}, engine, None, {}, {'project_id': 'test', 'service_id': 'service'})
     backend.container_id = 'exact-candidate'; backend.spec = {'container_port': 8501}
+    backend.role = 'candidate_validation'
+    backend.compose = lambda *args: SimpleNamespace(stdout=b'{"services":{"service":{"ports":[{"target":8501,"published":"18502","host_ip":"127.0.0.1","protocol":"tcp"}]}}}')
     if published:
         assert backend.url() == 'http://127.0.0.1:18502'
     else:
         with pytest.raises(routine.RoutineError, match='HTTP_PORT_NOT_BOUND'):
             backend.url()
+
+
+def test_real_production_dual_stack_port_fixture_replay():
+    # Read-only fixture from the healthy previous Production instance.
+    raw = {'8501/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '8501'},
+                        {'HostIp': '::', 'HostPort': '8501'}]}
+    configured = [dict(target=8501, published='8501', protocol='tcp')]
+    assert len(raw['8501/tcp']) == 2
+    assert routine.semantic_http_port(raw, configured, 8501, 'production') == '8501'
+    assert len({(8501, item['HostPort']) for item in raw['8501/tcp']}) == 1
+    engine = SimpleNamespace(inspect_one=lambda kind, cid: {'NetworkSettings': {'Ports': raw}})
+    backend = routine.DockerSession({}, engine, None, {}, {'project_id': 'test', 'service_id': 'service'})
+    backend.container_id = 'previous-production'
+    backend.spec = {'container_port': 8501}
+    backend.role = 'production'
+    backend.compose = lambda *args: SimpleNamespace(stdout=b'{"services":{"service":{"ports":[{"target":8501,"published":"8501","protocol":"tcp"}]}}}')
+    assert backend.url() == 'http://127.0.0.1:8501'
+
+
+@pytest.mark.parametrize(('role', 'host_ip', 'bindings', 'valid'), [
+    ('candidate_validation', '127.0.0.1', [('127.0.0.1', '18502')], True),
+    ('candidate_validation', '127.0.0.1', [('127.0.0.1', '18502'), ('::1', '18502')], True),
+    ('candidate_validation', '127.0.0.1', [('0.0.0.0', '18502')], False),
+    ('candidate_validation', '127.0.0.1', [('127.0.0.1', '18502'), ('::', '18502')], False),
+    ('production', None, [('0.0.0.0', '18502')], True),
+    ('production', None, [('0.0.0.0', '18502'), ('::', '18502')], True),
+    ('production', None, [('127.0.0.1', '18502')], False),
+    ('production', None, [('0.0.0.0', '18502'), ('::', '18503')], False),
+    ('production', None, [('0.0.0.0', '18502'), ('0.0.0.0', '18502')], False),
+    ('production', None, [('0.0.0.0', '18502'), ('::', '18502'), ('::1', '18502')], False),
+    ('production', None, [], False),
+    ('production', None, [('0.0.0.0', '')], False),
+    ('production', None, [('unapproved', '18502')], False),
+])
+def test_semantic_port_exposure_policy(role, host_ip, bindings, valid):
+    raw = {'8501/tcp': [dict(HostIp=ip, HostPort=port) for ip, port in bindings]}
+    configured = [dict(target=8501, published='18502', protocol='tcp', host_ip=host_ip)]
+    if valid:
+        assert routine.semantic_http_port(raw, configured, 8501, role) == '18502'
+    else:
+        with pytest.raises(routine.RoutineError, match='HTTP_PORT_NOT_BOUND'):
+            routine.semantic_http_port(raw, configured, 8501, role)
+
+
+@pytest.mark.parametrize('mutation', ['different-container-port', 'extra-published-port',
+                                      'extra-compose-port', 'wrong-policy-host', 'malformed'])
+def test_semantic_port_rejects_extra_or_malformed_exposure(mutation):
+    raw = {'8501/tcp': [dict(HostIp='0.0.0.0', HostPort='8501')]}
+    configured = [dict(target=8501, published='8501', protocol='tcp')]
+    if mutation == 'different-container-port':
+        configured[0]['target'] = 8502
+    elif mutation == 'extra-published-port':
+        raw['8502/tcp'] = [dict(HostIp='0.0.0.0', HostPort='8502')]
+    elif mutation == 'extra-compose-port':
+        configured.append(dict(target=8502, published='8502', protocol='tcp'))
+    elif mutation == 'wrong-policy-host':
+        configured[0]['host_ip'] = '192.0.2.10'
+    else:
+        raw['8501/tcp'] = [{'HostIp': '0.0.0.0'}]
+    with pytest.raises(routine.RoutineError, match='HTTP_PORT_NOT_BOUND'):
+        routine.semantic_http_port(raw, configured, 8501, 'production')
 
 
 def test_cli_build_once_and_existing_image_no_rebuild(tmp_path,monkeypatch):
@@ -481,8 +544,13 @@ def test_resume_requires_same_continuously_running_container(mutation):
     state={'Running':True,'StartedAt':'start'}
     container={'Id':'id','State':state,'RestartCount':0,'NetworkSettings':{'Ports':{'8501/tcp':[{'HostIp':'127.0.0.1','HostPort':'1234'}]}}}
     b=routine.DockerSession({'candidate':spec,'application_smoke':{'path':'?page=profit'}},SimpleNamespace(inspect_one=lambda *a:container),None,{},dict(project_id='p',service_id='s'))
-    b.spec=spec;b.container_id='id'; checkpoint=b.checkpoint();b.container_id=None
-    b.compose=lambda *a:SimpleNamespace(stdout=b'id\n' if mutation!='namespace' else b'other\n')
+    b.spec=spec;b.container_id='id';b.role='candidate_validation'
+    def compose(_spec, *args):
+        if args[0] == 'config':
+            return SimpleNamespace(stdout=b'{"services":{"s":{"ports":[{"target":8501,"published":"1234","host_ip":"127.0.0.1","protocol":"tcp"}]}}}')
+        return SimpleNamespace(stdout=b'id\n' if mutation!='namespace' else b'other\n')
+    b.compose=compose
+    checkpoint=b.checkpoint();b.container_id=None
     if mutation=='restart':container['RestartCount']=1
     if mutation=='started':state['StartedAt']='later'
     if mutation=='url':checkpoint['url']='http://127.0.0.1:9999'
