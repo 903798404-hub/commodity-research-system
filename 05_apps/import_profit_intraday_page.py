@@ -192,8 +192,6 @@ def _render_final_ui(
             return
 
     labels = {origin.code: origin.label for origin in config.origins}
-    am_release = _load_latest(paths.result_root, MarketSession.AM)
-    pm_release = _load_latest(paths.result_root, MarketSession.PM)
     am_snapshot = None
     if mode is IntradayPageMode.FINAL_UI_PREVIEW:
         if presentation is None or paths.snapshot_root is None:
@@ -215,10 +213,11 @@ def _render_final_ui(
         business_date = paths.business_date or datetime.now(
             ZoneInfo("Asia/Shanghai")
         ).date()
-        # Never mix yesterday's AM with today's PM (or vice versa). Explicit
-        # runtime dates also let an unsaved future business day show its editor.
-        am_release = _load_selected_release(paths, business_date, MarketSession.AM)
-        pm_release = _load_selected_release(paths, business_date, MarketSession.PM)
+    # Never mix yesterday's AM with today's PM (or vice versa). Header status,
+    # tables, and the editor all share these exact business-date/session releases.
+    am_release = _load_selected_release(paths, business_date, MarketSession.AM)
+    pm_release = _load_selected_release(paths, business_date, MarketSession.PM)
+    if mode is not IntradayPageMode.FINAL_UI_PREVIEW:
         am_captured_at = (
             None if am_release is None else am_release.market_captured_at
         )
@@ -232,7 +231,8 @@ def _render_final_ui(
         business_date=business_date,
         am_display_time=am_display_time,
         pm_display_time=pm_display_time,
-        preview=mode is IntradayPageMode.FINAL_UI_PREVIEW,
+        am_release=am_release,
+        pm_release=pm_release,
     )
     edited = _render_preview_cnf_editor(
         paths.cnf_store_path,
@@ -542,10 +542,25 @@ def _render_preview_header(
     business_date: date,
     am_display_time: str,
     pm_display_time: str,
-    preview: bool,
+    am_release: ResolvedIntradayProfitRelease | None,
+    pm_release: ResolvedIntradayProfitRelease | None,
 ) -> str:
     requested = str(st.query_params.get("soybean_origin", "brazil"))
     selected = requested if requested in labels else next(iter(labels))
+    am_status = _release_status(
+        am_release,
+        business_date=business_date,
+        session=MarketSession.AM,
+        compact=True,
+    )
+    pm_status = _release_status(
+        pm_release,
+        business_date=business_date,
+        session=MarketSession.PM,
+        compact=True,
+    )
+    am_class = ' class="sealed"' if am_status == "已封存" else ""
+    pm_class = ' class="sealed"' if pm_status == "已封存" else ""
     links = []
     for code, label in labels.items():
         query = urlencode({"workspace_page": "import_profit", "soybean_origin": code})
@@ -562,13 +577,9 @@ def _render_preview_header(
         + "".join(links)
         + '</nav></div><div class="soy-statusbar">'
         f'<span>{business_date.isoformat()}</span><span class="divider">|</span>'
-        f'<span class="sealed">AM {escape(am_display_time)} 已封存</span>'
+        f'<span{am_class}>AM {escape(am_display_time)} {escape(am_status)}</span>'
         '<span class="divider">|</span>'
-        + (
-            '<span>PM 待收盘</span>'
-            if preview
-            else f'<span class="sealed">PM {escape(pm_display_time)} 已封存</span>'
-        )
+        f'<span{pm_class}>PM {escape(pm_display_time)} {escape(pm_status)}</span>'
         + '</div></header>'
     )
     return selected
@@ -892,9 +903,19 @@ def _display_time(value: object) -> str:
 
 def _release_status(
     release: ResolvedIntradayProfitRelease | None,
+    *,
+    business_date: date | None = None,
+    session: MarketSession | None = None,
+    compact: bool = False,
 ) -> str:
-    if release is None:
+    if (
+        release is None
+        or (business_date is not None and release.business_date != business_date)
+        or (session is not None and release.session is not session)
+    ):
         return "尚未封存"
+    if compact:
+        return "已封存"
     return (
         f"真实 SEALED `{release.release_id}`；"
         f"captured_at `{release.market_captured_at.isoformat()}`"

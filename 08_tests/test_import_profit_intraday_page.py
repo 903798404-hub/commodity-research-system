@@ -196,6 +196,8 @@ def test_configured_page_renders_data_independent_of_write_grant(
     assert not app.exception and not app.error
     html = '\n'.join(item.proto.body for item in app.get('html'))
     assert '大豆早间榨利' in html and '大豆下午榨利' in html
+    assert '<span>AM — 尚未封存</span>' in html
+    assert '<span>PM — 尚未封存</span>' in html
     assert html.count('2026-12') >= 2
     assert '150.0' in str(app.dataframe[0].value)
     button = next(item for item in app.button if item.label == '重试上午盘面榨利')
@@ -304,6 +306,9 @@ def test_page_distinguishes_sealed_am_waiting_for_cnf_from_missing_pm(
     status = "\n".join(item.value for item in app.markdown)
     assert "AM：尚未封存" in status
     assert "PM：尚未封存" in status
+    html = "\n".join(item.proto.body for item in app.get("html"))
+    assert "<span>AM — 尚未封存</span>" in html
+    assert "<span>PM — 尚未封存</span>" in html
 
 
 def test_page_has_only_required_am_pm_cnf_and_profit_chart(tmp_path: Path) -> None:
@@ -433,8 +438,15 @@ def test_fixed_month_tables_with_missing_and_partial_releases(tmp_path, sessions
             result.cnf_identity, result.calculated_at, (result,)))
     app = AppTest.from_string(_app_script(results, cnf), default_timeout=20).run()
     tables = _profit_tables(app)
+    html = '\n'.join(item.proto.body for item in app.get('html'))
     for session, table in zip(MarketSession, tables, strict=True):
         assert table.count('margin-null') == (11 if session in sessions else 12)
+        if session in sessions:
+            assert re.search(
+                fr'<span class="sealed">{session.value} [^<]+ 已封存</span>', html
+            )
+        else:
+            assert f'<span>{session.value} — 尚未封存</span>' in html
 
 
 def _presentation_release(session=MarketSession.AM, **changes):
@@ -521,6 +533,9 @@ def test_current_date_does_not_fall_back_to_old_releases(tmp_path):
     script = _app_script(results, cnf)
     script = script.replace('business_date=date(2026, 8, 28)', 'business_date=date(2027, 1, 5)')
     app = AppTest.from_string(script, default_timeout=20).run()
+    html = '\n'.join(item.proto.body for item in app.get('html'))
+    assert '<span>AM — 尚未封存</span>' in html
+    assert '<span>PM — 尚未封存</span>' in html
     for table in _profit_tables(app):
         assert table.count('margin-null') == 12
         assert '2026-12' not in table
@@ -532,3 +547,23 @@ def test_no_date_and_no_assets_still_render_twelve_months(tmp_path):
     app = AppTest.from_string(script, default_timeout=20).run()
     for table in _profit_tables(app):
         assert table.count('margin-null') == 12
+
+
+@pytest.mark.parametrize('session', list(MarketSession))
+def test_compact_release_status_requires_exact_business_date_and_session(session):
+    from import_profit_intraday_page import _release_status
+
+    release = _presentation_release(session)
+    assert _release_status(
+        release, business_date=DAY, session=session, compact=True
+    ) == '已封存'
+    assert _release_status(
+        None, business_date=DAY, session=session, compact=True
+    ) == '尚未封存'
+    assert _release_status(
+        release, business_date=date(2026, 8, 29), session=session, compact=True
+    ) == '尚未封存'
+    other = MarketSession.PM if session is MarketSession.AM else MarketSession.AM
+    assert _release_status(
+        release, business_date=DAY, session=other, compact=True
+    ) == '尚未封存'
