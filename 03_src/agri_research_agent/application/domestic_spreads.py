@@ -8,6 +8,12 @@ from typing import Any
 
 import pandas as pd
 
+from agri_research_agent.data_sources.tankan.domestic_spread import (
+    full_contract_code,
+    normalize_full_contract_code,
+    resolve_contract_season,
+)
+
 
 TANKAN_DOMESTIC_SPREAD_INSTRUMENTS = ("M", "RM", "Y", "OI", "P")
 TANKAN_DOMESTIC_SPREAD_MONTHS = (1, 5, 9)
@@ -43,6 +49,9 @@ def load_domestic_spread_database(database_path: str | Path) -> pd.DataFrame:
     data["spread_value"] = pd.to_numeric(data["spread_value"], errors="coerce")
     data["leg1_price"] = pd.to_numeric(data["leg1_price"], errors="coerce")
     data["leg2_price"] = pd.to_numeric(data["leg2_price"], errors="coerce")
+    for column in ("leg1_contract", "leg2_contract"):
+        if column not in data.columns:
+            data[column] = None
     data = data.dropna(subset=["date", "calendar_offset", "season"])
     data["season"] = data["season"].astype(str)
     data["spread_name"] = data["spread_name"].astype(str)
@@ -86,13 +95,16 @@ def load_domestic_spread_status(
             "failed", pd.Timestamp(latest).date().isoformat(), 0, 0, 0
         )
     latest_rows = successful.loc[dates.eq(latest)]
-    actual: set[tuple[str, int]] = set()
+    actual: set[str] = set()
     for prefix in ("leg1", "leg2"):
-        instruments = latest_rows[f"{prefix}_instrument"]
-        months = pd.to_numeric(latest_rows[f"{prefix}_month"], errors="coerce")
-        for instrument, month in zip(instruments, months, strict=True):
-            if pd.notna(instrument) and pd.notna(month):
-                actual.add((str(instrument), int(month)))
+        column = f"{prefix}_contract"
+        if column not in latest_rows.columns:
+            continue
+        for value in latest_rows[column]:
+            try:
+                actual.add(normalize_full_contract_code(value))
+            except ValueError:
+                continue
 
     success_count = len(required & actual)
     failure_count = required_count - success_count
@@ -108,7 +120,7 @@ def load_domestic_spread_status(
 def _active_required_identities(
     business_date: pd.Timestamp,
     config: pd.DataFrame | str | Path,
-) -> set[tuple[str, int]]:
+) -> set[str]:
     if isinstance(config, pd.DataFrame):
         rules = config.copy()
     else:
@@ -122,32 +134,28 @@ def _active_required_identities(
         return set()
     if "enabled" in rules.columns:
         rules = rules.loc[rules["enabled"].map(_is_enabled)].copy()
-    active: set[tuple[str, int]] = set()
+    active: set[str] = set()
     for row in rules.itertuples(index=False):
-        if not _date_in_window(
+        season = resolve_contract_season(
             business_date,
-            int(row.window_start_month),
-            int(row.window_start_day),
-            int(row.window_end_month),
-            int(row.window_end_day),
-        ):
+            window_start_month=int(row.window_start_month),
+            window_start_day=int(row.window_start_day),
+            window_end_month=int(row.window_end_month),
+            window_end_day=int(row.window_end_day),
+        )
+        if season is None:
             continue
-        active.add((str(row.leg1_instrument), int(row.leg1_month)))
-        active.add((str(row.leg2_instrument), int(row.leg2_month)))
+        active.add(
+            full_contract_code(
+                str(row.leg1_instrument), season.label, int(row.leg1_month)
+            )
+        )
+        active.add(
+            full_contract_code(
+                str(row.leg2_instrument), season.label, int(row.leg2_month)
+            )
+        )
     return active
-
-
-def _date_in_window(
-    value: pd.Timestamp,
-    start_month: int,
-    start_day: int,
-    end_month: int,
-    end_day: int,
-) -> bool:
-    current = (int(value.month), int(value.day))
-    start = (start_month, start_day)
-    end = (end_month, end_day)
-    return current >= start or current <= end if start > end else start <= current <= end
 
 
 def _is_enabled(value: object) -> bool:

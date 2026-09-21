@@ -117,8 +117,8 @@ def test_spread_formula_is_unchanged_for_tankan_prices() -> None:
     calculator = load_script("04_scripts/calculate_historical_spreads.py", "spread_calculator")
     prices = pd.DataFrame(
         [
-            {"date": pd.Timestamp("2026-08-21"), "instrument": "M", "delivery_month": 9, "price": 3100.0, "status": "success", "error": ""},
-            {"date": pd.Timestamp("2026-08-21"), "instrument": "RM", "delivery_month": 9, "price": 2600.0, "status": "success", "error": ""},
+            {"date": pd.Timestamp("2026-08-21"), "instrument": "M", "delivery_month": 9, "price": 3100.0, "source_column": "M2609:close_price", "source_file": "tankan.market.futures_spread", "status": "success", "error": ""},
+            {"date": pd.Timestamp("2026-08-21"), "instrument": "RM", "delivery_month": 9, "price": 2600.0, "source_column": "RM2609:close_price", "source_file": "tankan.market.futures_spread", "status": "success", "error": ""},
         ]
     )
     config = pd.Series(
@@ -133,6 +133,8 @@ def test_spread_formula_is_unchanged_for_tankan_prices() -> None:
     result, failure = calculator.calculate_one_spread(config, prices, "ignored")
     assert failure is None
     assert result.iloc[0]["leg1_price"] - result.iloc[0]["leg2_price"] == result.iloc[0]["spread_value"] == 500.0
+    assert result.iloc[0]["leg1_contract"] == "M2609"
+    assert result.iloc[0]["leg2_contract"] == "RM2609"
 
 
 def test_unified_producer_invokes_tankan_not_akshare(monkeypatch, tmp_path: Path) -> None:

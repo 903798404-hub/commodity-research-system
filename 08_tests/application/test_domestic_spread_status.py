@@ -8,11 +8,14 @@ from pathlib import Path
 import pandas as pd
 
 from agri_research_agent.application.domestic_spreads import (
+    DEFAULT_SPREAD_CONFIG,
     TANKAN_DOMESTIC_SPREAD_INSTRUMENTS,
     TANKAN_DOMESTIC_SPREAD_MONTHS,
+    _active_required_identities,
     load_domestic_spread_database,
     load_domestic_spread_status,
 )
+from agri_research_agent.data_sources.tankan.domestic_spread import full_contract_code
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -21,45 +24,43 @@ if str(APPS_DIR) not in sys.path:
     sys.path.insert(0, str(APPS_DIR))
 
 
-def _current_artifact_rows() -> pd.DataFrame:
+def _rows_for_date(value: str, *, omit: tuple[str, int] | None = None) -> pd.DataFrame:
+    business_date = pd.Timestamp(value)
+    season = f"{business_date.year}/{business_date.year + 1}"
     pairs = [
         (instrument, month)
         for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
         for month in TANKAN_DOMESTIC_SPREAD_MONTHS
+        if (instrument, month) != omit
     ]
     rows = []
     for index, (instrument, month) in enumerate(pairs):
+        contract = full_contract_code(instrument, season, month)
         rows.append(
             {
-                "date": pd.Timestamp("2026-08-24"),
+                "date": business_date,
                 "status": "success",
                 "leg1_instrument": instrument,
                 "leg1_month": month,
-                "leg2_instrument": "M",
-                "leg2_month": 1,
+                "leg1_contract": contract,
+                "leg2_instrument": instrument,
+                "leg2_month": month,
+                "leg2_contract": contract,
                 "spread_name": f"fixture-{index}",
                 "calendar_offset": index,
-                "season": "2025/2026",
+                "season": season,
                 "spread_value": float(index),
                 "leg1_price": float(100 + index),
                 "leg2_price": 100.0,
             }
         )
-    rows.append({**rows[0], "date": pd.Timestamp("2026-08-14")})
     return pd.DataFrame(rows)
 
 
-def _rows_for_date(value: str, *, omit: tuple[str, int] | None = None) -> pd.DataFrame:
-    data = _current_artifact_rows().iloc[:-1].copy()
-    data["date"] = pd.Timestamp(value)
-    if omit is not None:
-        data = data.loc[
-            ~(
-                data["leg1_instrument"].eq(omit[0])
-                & data["leg1_month"].eq(omit[1])
-            )
-        ]
-    return data
+def _current_artifact_rows() -> pd.DataFrame:
+    current = _rows_for_date("2026-08-24")
+    previous = _rows_for_date("2026-08-14").iloc[[0]]
+    return pd.concat([current, previous], ignore_index=True)
 
 
 def test_status_uses_current_artifact_latest_and_tankan_completeness(
@@ -124,6 +125,80 @@ def test_september_status_excludes_contracts_after_their_seasonal_window() -> No
     assert status.status == "success"
 
 
+def test_september_required_identities_roll_to_full_next_year_contracts() -> None:
+    required = _active_required_identities(
+        pd.Timestamp("2026-09-21"), DEFAULT_SPREAD_CONFIG
+    )
+
+    assert required == {
+        f"{instrument}27{month:02d}"
+        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for month in (1, 5)
+    }
+    assert not any(code.endswith("09") for code in required)
+
+
+def test_old_year_contract_cannot_satisfy_current_full_identity() -> None:
+    data = _rows_for_date("2026-09-21")
+    old_year = data["leg1_instrument"].eq("M") & data["leg1_month"].eq(1)
+    data.loc[old_year, ["leg1_contract", "leg2_contract"]] = "M2601"
+
+    status = load_domestic_spread_status(data)
+
+    assert (status.success_contracts, status.required_contracts) == (9, 10)
+    assert status.failure_contracts == 1
+    assert status.status == "failed"
+
+
+def test_current_full_identity_is_recognized_and_month_only_payload_fails_closed() -> None:
+    data = _rows_for_date("2026-09-21")
+
+    current = load_domestic_spread_status(data)
+    month_only = load_domestic_spread_status(
+        data.drop(columns=["leg1_contract", "leg2_contract"])
+    )
+
+    assert (current.success_contracts, current.required_contracts) == (10, 10)
+    assert current.status == "success"
+    assert (month_only.success_contracts, month_only.required_contracts) == (0, 10)
+    assert month_only.status == "failed"
+
+
+def test_rollover_continues_without_a_fixed_2027_year() -> None:
+    status = load_domestic_spread_status(_rows_for_date("2027-09-21"))
+    required = _active_required_identities(
+        pd.Timestamp("2027-09-21"), DEFAULT_SPREAD_CONFIG
+    )
+
+    assert required == {
+        f"{instrument}28{month:02d}"
+        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for month in (1, 5)
+    }
+    assert (status.success_contracts, status.required_contracts) == (10, 10)
+    assert status.status == "success"
+
+
+def test_cross_year_window_keeps_the_same_season_then_rolls_forward() -> None:
+    january_2027 = _active_required_identities(
+        pd.Timestamp("2027-01-05"), DEFAULT_SPREAD_CONFIG
+    )
+    january_2028 = _active_required_identities(
+        pd.Timestamp("2028-01-05"), DEFAULT_SPREAD_CONFIG
+    )
+
+    assert january_2027 == {
+        f"{instrument}{year_month}"
+        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for year_month in ("2609", "2701", "2705")
+    }
+    assert january_2028 == {
+        f"{instrument}{year_month}"
+        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for year_month in ("2709", "2801", "2805")
+    }
+
+
 def test_window_end_still_requires_month_nine_and_active_missing_series_fails() -> None:
     complete = load_domestic_spread_status(_rows_for_date("2026-08-31"))
     missing = load_domestic_spread_status(_rows_for_date("2026-08-31", omit=("M", 9)))
@@ -133,3 +208,7 @@ def test_window_end_still_requires_month_nine_and_active_missing_series_fails() 
     assert (missing.success_contracts, missing.required_contracts) == (14, 15)
     assert missing.failure_contracts == 1
     assert missing.status == "failed"
+    required = _active_required_identities(
+        pd.Timestamp("2026-08-31"), DEFAULT_SPREAD_CONFIG
+    )
+    assert {f"{instrument}2609" for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS} <= required

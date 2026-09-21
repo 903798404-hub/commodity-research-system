@@ -151,6 +151,8 @@ def test_historical_calculator_uses_daily_close_not_same_day_spot() -> None:
     assert failure is None
     assert result.iloc[0]["leg1_price"] == 3137.0
     assert result.iloc[0]["leg2_price"] == 2835.0
+    assert result.iloc[0]["leg1_contract"] == "M2701"
+    assert result.iloc[0]["leg2_contract"] == "M2705"
     assert result.iloc[0]["spread_value"] == 302.0
 
 

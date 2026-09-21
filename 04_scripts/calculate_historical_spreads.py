@@ -15,6 +15,10 @@ SRC = ROOT / "03_src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from agri_research_agent.data_sources.tankan.domestic_spread import (  # noqa: E402
+    contract_code_from_source_column,
+    resolve_contract_season,
+)
 from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
     select_canonical_historical_prices,
 )
@@ -26,9 +30,11 @@ SPREAD_COLUMNS = [
     "spread_name",
     "leg1_instrument",
     "leg1_month",
+    "leg1_contract",
     "leg1_price",
     "leg2_instrument",
     "leg2_month",
+    "leg2_contract",
     "leg2_price",
     "spread_value",
     "season",
@@ -64,30 +70,20 @@ def season_for_date(
     window_end_month: int,
     window_end_day: int,
 ) -> tuple[str, pd.Timestamp, pd.Timestamp] | None:
-    date_tuple = (int(date_value.month), int(date_value.day))
-    start_tuple = (window_start_month, window_start_day)
-    end_tuple = (window_end_month, window_end_day)
-    crosses_year = start_tuple > end_tuple
-
-    if crosses_year:
-        if date_tuple >= start_tuple:
-            start_year = int(date_value.year)
-        elif date_tuple <= end_tuple:
-            start_year = int(date_value.year) - 1
-        else:
-            return None
-        start_date = pd.Timestamp(year=start_year, month=window_start_month, day=window_start_day)
-        end_date = pd.Timestamp(year=start_year + 1, month=window_end_month, day=window_end_day)
-    else:
-        if not (start_tuple <= date_tuple <= end_tuple):
-            return None
-        start_year = int(date_value.year)
-        start_date = pd.Timestamp(year=start_year, month=window_start_month, day=window_start_day)
-        end_date = pd.Timestamp(year=start_year, month=window_end_month, day=window_end_day)
-
-    if not (start_date <= date_value <= end_date):
+    resolved = resolve_contract_season(
+        date_value,
+        window_start_month=window_start_month,
+        window_start_day=window_start_day,
+        window_end_month=window_end_month,
+        window_end_day=window_end_day,
+    )
+    if resolved is None:
         return None
-    return f"{start_year}/{start_year + 1}", start_date, end_date
+    return (
+        resolved.label,
+        pd.Timestamp(resolved.start_date),
+        pd.Timestamp(resolved.end_date),
+    )
 
 
 def prepare_leg(price_long: pd.DataFrame, instrument: str, month: int, prefix: str) -> pd.DataFrame:
@@ -96,7 +92,15 @@ def prepare_leg(price_long: pd.DataFrame, instrument: str, month: int, prefix: s
         (canonical["instrument"] == instrument)
         & (pd.to_numeric(canonical["delivery_month"], errors="coerce") == int(month))
     ].copy()
-    keep = ["date", "price", "status", "error"]
+    if "source_column" in leg.columns:
+        leg[f"{prefix}_contract"] = leg["source_column"].map(
+            lambda value: contract_code_from_source_column(
+                value, instrument=instrument, delivery_month=month
+            )
+        )
+    else:
+        leg[f"{prefix}_contract"] = None
+    keep = ["date", "price", "status", "error", f"{prefix}_contract"]
     leg = leg.loc[:, keep].rename(
         columns={
             "price": f"{prefix}_price",
