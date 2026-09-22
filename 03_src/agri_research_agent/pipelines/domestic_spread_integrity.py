@@ -10,9 +10,18 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from agri_research_agent.data_sources.tankan.domestic_spread import (
+    contract_code_from_source_column,
+    full_contract_code,
+    normalize_full_contract_code,
+    resolve_contract_season,
+)
+
 
 HISTORICAL_KEY_COLUMNS = ("date", "spread_name", "season")
 HISTORICAL_METADATA_COLUMNS = frozenset({"updated_at"})
+UnderlyingPriceKey = tuple[str, str]
+HistoricalSpreadKey = tuple[str, str, str]
 
 
 class PriceSemantic(StrEnum):
@@ -41,6 +50,7 @@ class HistoricalMutationPolicy:
     start_date: date
     end_date: date
     allowed_keys: frozenset[tuple[str, str, str]] = frozenset()
+    exact_keys: frozenset[HistoricalSpreadKey] | None = None
 
     def __post_init__(self) -> None:
         if self.mode is HistoricalPublicationMode.NORMAL and self.allowed_keys:
@@ -66,6 +76,18 @@ class HistoricalDiffReport:
         payload = asdict(self)
         payload["publication_allowed"] = self.publication_allowed
         return payload
+
+
+@dataclass(frozen=True, slots=True)
+class IncrementalMaterializationReport:
+    underlying_keys: tuple[UnderlyingPriceKey, ...]
+    affected_keys: tuple[HistoricalSpreadKey, ...]
+    replaced_keys: tuple[HistoricalSpreadKey, ...]
+    appended_keys: tuple[HistoricalSpreadKey, ...]
+    unrelated_rewritten_keys: tuple[HistoricalSpreadKey, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def infer_price_semantic(source_file: object, source_column: object) -> PriceSemantic:
@@ -123,6 +145,175 @@ def select_canonical_historical_prices(price_long: pd.DataFrame) -> pd.DataFrame
     return frame.drop_duplicates(keys, keep="last").reset_index(drop=True)
 
 
+def changed_daily_close_keys(
+    current: pd.DataFrame | str | Path,
+    candidate: pd.DataFrame | str | Path,
+) -> frozenset[UnderlyingPriceKey]:
+    """Return exact changed ``(full_contract, trade_date)`` daily-close keys.
+
+    Rows without an exact full-contract identity remain supported as immutable
+    legacy history. If any such row changes, the incremental boundary cannot
+    be proven and the operation fails closed.
+    """
+
+    before_exact, before_legacy = _daily_close_rows(_read_prices(current))
+    after_exact, after_legacy = _daily_close_rows(_read_prices(candidate))
+    if before_legacy != after_legacy:
+        raise ValueError(
+            "Domestic Spread changed daily-close row lacks full contract identity"
+        )
+    return frozenset(
+        key
+        for key in set(before_exact) | set(after_exact)
+        if before_exact.get(key) != after_exact.get(key)
+    )
+
+
+def derive_affected_spread_keys(
+    config: pd.DataFrame,
+    underlying_keys: Iterable[UnderlyingPriceKey],
+) -> frozenset[HistoricalSpreadKey]:
+    """Resolve the config-driven spread dependency closure for exact inputs."""
+
+    required = {
+        "spread_name",
+        "leg1_instrument",
+        "leg1_month",
+        "leg2_instrument",
+        "leg2_month",
+        "window_start_month",
+        "window_start_day",
+        "window_end_month",
+        "window_end_day",
+    }
+    missing = sorted(required - set(config.columns))
+    if missing:
+        raise ValueError(
+            f"Domestic Spread dependency config is missing: {','.join(missing)}"
+        )
+    active = config.copy()
+    if "enabled" in active.columns:
+        active = active.loc[active["enabled"].map(_is_enabled)].copy()
+
+    affected: set[HistoricalSpreadKey] = set()
+    for raw_contract, raw_date in underlying_keys:
+        contract = normalize_full_contract_code(raw_contract)
+        business_date = date.fromisoformat(str(raw_date))
+        for row in active.to_dict("records"):
+            season = resolve_contract_season(
+                business_date,
+                window_start_month=int(row["window_start_month"]),
+                window_start_day=int(row["window_start_day"]),
+                window_end_month=int(row["window_end_month"]),
+                window_end_day=int(row["window_end_day"]),
+            )
+            if season is None:
+                continue
+            dependencies = {
+                full_contract_code(
+                    str(row["leg1_instrument"]),
+                    season.label,
+                    int(row["leg1_month"]),
+                ),
+                full_contract_code(
+                    str(row["leg2_instrument"]),
+                    season.label,
+                    int(row["leg2_month"]),
+                ),
+            }
+            if contract in dependencies:
+                affected.add(
+                    (business_date.isoformat(), str(row["spread_name"]), season.label)
+                )
+    return frozenset(affected)
+
+
+def materialize_affected_spreads(
+    current: pd.DataFrame | str | Path,
+    full_recalculation: pd.DataFrame | str | Path,
+    *,
+    underlying_keys: Iterable[UnderlyingPriceKey],
+    affected_keys: Iterable[HistoricalSpreadKey],
+) -> tuple[pd.DataFrame, IncrementalMaterializationReport]:
+    """Upsert only the declared dependency closure into pinned Current."""
+
+    before = _read_spreads(current)
+    calculated = _read_spreads(full_recalculation)
+    if set(before.columns) != set(calculated.columns):
+        raise ValueError("Domestic Spread incremental schemas do not match")
+    calculated = calculated.loc[:, before.columns]
+    before_rows = _business_rows(before)
+    calculated_rows = _business_rows(calculated)
+    affected = frozenset(_normalize_spread_key(key) for key in affected_keys)
+    missing = sorted(affected - set(calculated_rows))
+    if missing:
+        encoded = ",".join("|".join(key) for key in missing)
+        raise ValueError(
+            f"Domestic Spread calculator omitted affected key(s): {encoded}"
+        )
+
+    before_keys = _frame_spread_keys(before)
+    calculated_keys = _frame_spread_keys(calculated)
+    calculated_by_key = {
+        key: record
+        for key, record in zip(
+            calculated_keys, calculated.to_dict("records"), strict=True
+        )
+        if key in affected
+    }
+    output_records: list[dict[str, Any]] = []
+    consumed: set[HistoricalSpreadKey] = set()
+    for key, record in zip(before_keys, before.to_dict("records"), strict=True):
+        if key in affected:
+            output_records.append(calculated_by_key[key])
+            consumed.add(key)
+        else:
+            output_records.append(record)
+    for key in sorted(affected - consumed):
+        output_records.append(calculated_by_key[key])
+    result = pd.DataFrame.from_records(output_records, columns=before.columns)
+    if not result.empty:
+        result["date"] = pd.to_datetime(result["date"], errors="raise")
+
+    after_rows = _business_rows(result)
+    unrelated_rewritten = tuple(
+        sorted(
+            key
+            for key in (set(before_rows) | set(after_rows)) - affected
+            if before_rows.get(key) != after_rows.get(key)
+        )
+    )
+    if unrelated_rewritten:
+        raise ValueError("Domestic Spread incremental merge rewrote unrelated rows")
+    replaced = tuple(sorted(affected & set(before_rows)))
+    appended = tuple(sorted(affected - set(before_rows)))
+    report = IncrementalMaterializationReport(
+        tuple(sorted(_normalize_underlying_key(key) for key in underlying_keys)),
+        tuple(sorted(affected)),
+        replaced,
+        appended,
+        unrelated_rewritten,
+    )
+    return result, report
+
+
+def historical_changed_keys(
+    current: pd.DataFrame | str | Path,
+    candidate: pd.DataFrame | str | Path,
+) -> tuple[HistoricalSpreadKey, ...]:
+    """Return business-key changes without granting publication permission."""
+
+    before_rows = _business_rows(_read_spreads(current))
+    after_rows = _business_rows(_read_spreads(candidate))
+    return tuple(
+        sorted(
+            key
+            for key in set(before_rows) | set(after_rows)
+            if before_rows.get(key) != after_rows.get(key)
+        )
+    )
+
+
 def validate_historical_publication(
     current: pd.DataFrame | str | Path,
     candidate: pd.DataFrame | str | Path,
@@ -142,10 +333,16 @@ def validate_historical_publication(
         changed.append(key)
         business_date = date.fromisoformat(key[0])
         in_requested_range = policy.start_date <= business_date <= policy.end_date
-        allowed = in_requested_range or (
-            policy.mode is HistoricalPublicationMode.HISTORICAL_RECONCILIATION
-            and key in policy.allowed_keys
-        )
+        if policy.exact_keys is not None:
+            allowed = key in policy.exact_keys or (
+                policy.mode is HistoricalPublicationMode.HISTORICAL_RECONCILIATION
+                and key in policy.allowed_keys
+            )
+        else:
+            allowed = in_requested_range or (
+                policy.mode is HistoricalPublicationMode.HISTORICAL_RECONCILIATION
+                and key in policy.allowed_keys
+            )
         if not allowed:
             blocked.append(key)
     report = HistoricalDiffReport(
@@ -171,6 +368,119 @@ def _read_spreads(value: pd.DataFrame | str | Path) -> pd.DataFrame:
     if path.suffix.lower() == ".parquet":
         return pd.read_parquet(path)
     return pd.read_excel(path, sheet_name="spread_long")
+
+
+def _read_prices(value: pd.DataFrame | str | Path) -> pd.DataFrame:
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    return pd.read_excel(Path(value), sheet_name="price_long")
+
+
+def _daily_close_rows(
+    frame: pd.DataFrame,
+) -> tuple[
+    dict[UnderlyingPriceKey, tuple[Any, ...]],
+    dict[tuple[str, ...], tuple[Any, ...]],
+]:
+    required = {
+        "date",
+        "instrument",
+        "delivery_month",
+        "price",
+        "source_file",
+        "source_column",
+    }
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(
+            f"Domestic Spread price diff schema is missing: {','.join(missing)}"
+        )
+    exact: dict[UnderlyingPriceKey, tuple[Any, ...]] = {}
+    legacy: dict[tuple[str, ...], tuple[Any, ...]] = {}
+    for row in frame.to_dict("records"):
+        if infer_price_semantic(
+            row.get("source_file"), row.get("source_column")
+        ) is not PriceSemantic.DAILY_CLOSE:
+            continue
+        raw_date = pd.to_datetime(row.get("date"), errors="coerce")
+        if pd.isna(raw_date):
+            raise ValueError("Domestic Spread price diff contains an invalid date")
+        date_text = pd.Timestamp(raw_date).date().isoformat()
+        instrument = str(row.get("instrument", "")).strip().upper()
+        month = int(row.get("delivery_month"))
+        contract = contract_code_from_source_column(
+            row.get("source_column"),
+            instrument=instrument,
+            delivery_month=month,
+        )
+        value = (
+            _stable_value(row.get("price")),
+            str(row.get("status", "")),
+            str(row.get("error", "")),
+            str(row.get("source_file", "")),
+            str(row.get("source_column", "")),
+        )
+        if contract is not None:
+            key = (contract, date_text)
+            if key in exact:
+                raise ValueError(
+                    f"Domestic Spread daily-close diff contains duplicate key: {contract}|{date_text}"
+                )
+            exact[key] = value
+        else:
+            key = (
+                date_text,
+                instrument,
+                str(month),
+                str(row.get("source_file", "")),
+                str(row.get("source_column", "")),
+            )
+            if key in legacy:
+                raise ValueError(
+                    "Domestic Spread legacy daily-close diff contains duplicate key"
+                )
+            legacy[key] = value
+    return exact, legacy
+
+
+def _frame_spread_keys(frame: pd.DataFrame) -> list[HistoricalSpreadKey]:
+    normalized = frame.copy()
+    normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+    if normalized["date"].isna().any():
+        raise ValueError("Domestic Spread diff contains an invalid date")
+    return [
+        (
+            pd.Timestamp(row.date).date().isoformat(),
+            str(row.spread_name),
+            str(row.season),
+        )
+        for row in normalized[["date", "spread_name", "season"]].itertuples(
+            index=False
+        )
+    ]
+
+
+def _normalize_underlying_key(value: UnderlyingPriceKey) -> UnderlyingPriceKey:
+    contract, business_date = value
+    return (
+        normalize_full_contract_code(contract),
+        date.fromisoformat(str(business_date)).isoformat(),
+    )
+
+
+def _normalize_spread_key(value: HistoricalSpreadKey) -> HistoricalSpreadKey:
+    business_date, spread_name, season = value
+    return (
+        date.fromisoformat(str(business_date)).isoformat(),
+        str(spread_name),
+        str(season),
+    )
+
+
+def _is_enabled(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y", "是", "启用"}
 
 
 def _business_rows(frame: pd.DataFrame) -> dict[tuple[str, str, str], tuple[Any, ...]]:
@@ -215,6 +525,9 @@ def _stable_value(value: object) -> object:
 __all__ = [
     "HistoricalDiffReport", "HistoricalMutationPolicy",
     "HistoricalPublicationBlocked", "HistoricalPublicationMode",
-    "PriceSemantic", "infer_price_semantic", "parse_allowed_key",
+    "HistoricalSpreadKey", "IncrementalMaterializationReport",
+    "PriceSemantic", "UnderlyingPriceKey", "changed_daily_close_keys",
+    "derive_affected_spread_keys", "historical_changed_keys",
+    "infer_price_semantic", "materialize_affected_spreads", "parse_allowed_key",
     "select_canonical_historical_prices", "validate_historical_publication",
 ]

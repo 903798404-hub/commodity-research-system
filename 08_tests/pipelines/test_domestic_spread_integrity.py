@@ -263,7 +263,7 @@ def test_incident_replay_blocks_all_18_rows_and_retains_15_daily_closes() -> Non
     }
 
 
-def test_server_transaction_restores_candidate_when_guard_blocks(
+def test_server_transaction_excludes_unrelated_full_recalculation_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server = _load_script(
@@ -278,14 +278,32 @@ def test_server_transaction_restores_candidate_when_guard_blocks(
     parquet = data / "historical_spread_database.parquet"
     baseline = pd.DataFrame([_spread(302.0, business_date="2026-07-16")])
     with pd.ExcelWriter(price, engine="openpyxl") as writer:
-        pd.DataFrame({"date": [pd.Timestamp("2026-08-14")]}).to_excel(
-            writer, sheet_name="price_long", index=False
-        )
+        pd.DataFrame(
+            [
+                {
+                    "date": pd.Timestamp("2026-08-14"),
+                    "instrument": "M",
+                    "delivery_month": 1,
+                    "price": 3000.0,
+                    "source_file": "akshare_futures_zh_daily_sina",
+                    "source_column": "M2701:close",
+                    "status": "success",
+                    "error": "",
+                    "updated_at": "fixture",
+                }
+            ]
+        ).to_excel(writer, sheet_name="price_long", index=False)
     with pd.ExcelWriter(excel, engine="openpyxl") as writer:
         baseline.to_excel(writer, sheet_name="spread_long", index=False)
     baseline.to_parquet(parquet, index=False)
-    (config_dir / "historical_spread_config.xlsx").write_bytes(b"fixture")
-    originals = {path: path.read_bytes() for path in (price, excel, parquet)}
+    config = pd.read_excel(
+        ROOT / "02_configs" / "historical_spread_config.xlsx",
+        sheet_name="spread_config",
+    )
+    with pd.ExcelWriter(
+        config_dir / "historical_spread_config.xlsx", engine="openpyxl"
+    ) as writer:
+        config.to_excel(writer, sheet_name="spread_config", index=False)
     args = argparse.Namespace(
         update_from_akshare=False,
         update_from_tankan=True,
@@ -312,7 +330,7 @@ def test_server_transaction_restores_candidate_when_guard_blocks(
                         "required_contracts": 15,
                         "failed_contracts": [],
                         "latest_date": "2026-09-08",
-                        "price_long_written": True,
+                        "price_long_written": False,
                     }
                 ),
                 encoding="utf-8",
@@ -325,10 +343,17 @@ def test_server_transaction_restores_candidate_when_guard_blocks(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(server, "run_script_args", run)
-    assert server.main() == 1
-    assert {path: path.read_bytes() for path in originals} == originals
+    assert server.main() == 0
+    pd.testing.assert_frame_equal(pd.read_parquet(parquet), baseline)
+    pd.testing.assert_frame_equal(
+        pd.read_excel(excel, sheet_name="spread_long").fillna(""),
+        baseline.fillna(""),
+        check_dtype=False,
+    )
     status = json.loads((data / "update_status.json").read_text(encoding="utf-8"))
-    assert status["historical_diff_guard"] == "FAIL"
-    assert status["historical_blocked_keys"] == [
-        "2026-07-16|M 1-5|2026/2027"
-    ]
+    assert status["historical_diff_guard"] == "PASS"
+    assert status["historical_changed_keys"] == []
+    assert status["incremental_affected_keys"] == []
+    assert status["incremental_unrelated_rewritten_keys"] == []
+    assert status["full_recompute_drift_count"] == 1
+    assert status["full_recompute_drift_date_count"] == 1

@@ -24,6 +24,10 @@ from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E
     HistoricalMutationPolicy,
     HistoricalPublicationBlocked,
     HistoricalPublicationMode,
+    changed_daily_close_keys,
+    derive_affected_spread_keys,
+    historical_changed_keys,
+    materialize_affected_spreads,
     parse_allowed_key,
     validate_historical_publication,
 )
@@ -121,6 +125,13 @@ def initial_status(
         "historical_diff_guard": "NOT_RUN",
         "historical_changed_keys": [],
         "historical_blocked_keys": [],
+        "incremental_underlying_keys": [],
+        "incremental_affected_keys": [],
+        "incremental_unrelated_rewritten_keys": [],
+        "full_recompute_business_diff_count": 0,
+        "full_recompute_drift_count": 0,
+        "full_recompute_drift_date_count": 0,
+        "full_recompute_drift_backlog": "",
     }
 
 
@@ -202,6 +213,99 @@ def validate_database_outputs(database_file: Path, parquet_file: Path, logger: l
         "excel": excel_summary,
         "parquet": parquet_summary,
     }
+
+
+def write_incremental_spread_outputs(
+    database_file: Path,
+    parquet_file: Path,
+    spread_long: pd.DataFrame,
+) -> None:
+    """Replace the calculated relation while preserving workbook evidence."""
+
+    sheets = pd.read_excel(database_file, sheet_name=None)
+    if "spread_long" not in sheets:
+        raise ValueError("Domestic Spread workbook is missing spread_long")
+    sheets["spread_long"] = spread_long
+    if "summary" in sheets and {"metric", "value"} <= set(sheets["summary"].columns):
+        status_counts = spread_long["status"].value_counts(dropna=False).to_dict()
+        summary_values = {
+            "spread_long_rows": len(spread_long),
+            "success_rows": int(status_counts.get("success", 0)),
+            "missing_price_rows": int(status_counts.get("missing_price", 0)),
+            "suspicious_zero_rows": int(status_counts.get("suspicious_zero", 0)),
+        }
+        for metric, value in summary_values.items():
+            mask = sheets["summary"]["metric"].eq(metric)
+            sheets["summary"].loc[mask, "value"] = value
+
+    tmp_excel = database_file.with_name(f"{database_file.stem}.incremental.tmp.xlsx")
+    tmp_parquet = parquet_file.with_name(f"{parquet_file.stem}.incremental.tmp.parquet")
+    for temporary in (tmp_excel, tmp_parquet):
+        if temporary.exists():
+            temporary.unlink()
+    try:
+        with pd.ExcelWriter(tmp_excel, engine="openpyxl") as writer:
+            for sheet_name, frame in sheets.items():
+                frame.to_excel(writer, sheet_name=sheet_name, index=False)
+        spread_long.to_parquet(tmp_parquet, index=False)
+        os.replace(tmp_excel, database_file)
+        os.replace(tmp_parquet, parquet_file)
+    finally:
+        for temporary in (tmp_excel, tmp_parquet):
+            if temporary.exists():
+                temporary.unlink()
+
+
+def apply_bounded_incremental_materialization(
+    *,
+    price_baseline: Path,
+    price_candidate: Path,
+    spread_baseline: Path,
+    spread_full_recalculation: Path,
+    spread_workbook: Path,
+    config_file: Path,
+) -> tuple[
+    dict[str, object],
+    tuple[tuple[str, str, str], ...],
+    frozenset[tuple[str, str, str]],
+]:
+    """Project exact source changes onto Current through the config closure."""
+
+    underlying = changed_daily_close_keys(price_baseline, price_candidate)
+    config = pd.read_excel(config_file, sheet_name="spread_config")
+    affected = derive_affected_spread_keys(config, underlying)
+    full_drift = historical_changed_keys(spread_baseline, spread_full_recalculation)
+    materialized, report = materialize_affected_spreads(
+        spread_baseline,
+        spread_full_recalculation,
+        underlying_keys=underlying,
+        affected_keys=affected,
+    )
+    write_incremental_spread_outputs(
+        spread_workbook, spread_full_recalculation, materialized
+    )
+    unrelated_full_drift = tuple(key for key in full_drift if key not in affected)
+    payload = {
+        "incremental_underlying_keys": [
+            f"{contract}|{business_date}"
+            for contract, business_date in report.underlying_keys
+        ],
+        "incremental_affected_keys": [
+            "|".join(key) for key in report.affected_keys
+        ],
+        "incremental_unrelated_rewritten_keys": [
+            "|".join(key) for key in report.unrelated_rewritten_keys
+        ],
+        "full_recompute_business_diff_count": len(full_drift),
+        "full_recompute_drift_count": len(unrelated_full_drift),
+        "full_recompute_drift_date_count": len(
+            {key[0] for key in unrelated_full_drift}
+        ),
+        "full_recompute_drift_backlog": (
+            "DOMESTIC_SPREAD_FULL_HISTORY_RECOMPUTE_DRIFT_AUDIT"
+        ),
+    }
+    return payload, unrelated_full_drift, affected
 
 
 def read_json(path: Path) -> dict[str, object]:
@@ -508,6 +612,46 @@ def main() -> int:
                 result = run_script_args(["calculate_historical_spreads.py"], root, logger)
                 if result.returncode != 0:
                     raise RuntimeError(f"calculate_historical_spreads.py failed with code {result.returncode}")
+                if price_backup is None or parquet_backup is None:
+                    raise RuntimeError(
+                        "bounded materialization baseline is unavailable"
+                    )
+                (
+                    incremental_status,
+                    unrelated_full_drift,
+                    approved_incremental_keys,
+                ) = apply_bounded_incremental_materialization(
+                    price_baseline=price_backup,
+                    price_candidate=price_file,
+                    spread_baseline=parquet_backup,
+                    spread_full_recalculation=parquet_file,
+                    spread_workbook=database_file,
+                    config_file=config_file,
+                )
+                status.update(incremental_status)
+                if mutation_policy is None:
+                    raise RuntimeError(
+                        "historical publication policy is unavailable"
+                    )
+                mutation_policy = HistoricalMutationPolicy(
+                    mutation_policy.mode,
+                    mutation_policy.start_date,
+                    mutation_policy.end_date,
+                    mutation_policy.allowed_keys,
+                    approved_incremental_keys,
+                )
+                logger.info(
+                    "bounded_materialization underlying=%s affected=%s unrelated=%s",
+                    len(status["incremental_underlying_keys"]),
+                    len(status["incremental_affected_keys"]),
+                    len(status["incremental_unrelated_rewritten_keys"]),
+                )
+                logger.info(
+                    "full_recompute_drift count=%s dates=%s backlog=%s",
+                    len(unrelated_full_drift),
+                    status["full_recompute_drift_date_count"],
+                    status["full_recompute_drift_backlog"],
+                )
         elif args.recalculate_from_existing_price_long:
             logger.info("spread_recalculation_started=true")
             result = run_script_args(["calculate_historical_spreads.py"], root, logger)
