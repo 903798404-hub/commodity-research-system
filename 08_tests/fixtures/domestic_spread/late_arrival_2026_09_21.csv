@@ -1,0 +1,11 @@
+symbol,date,close,source_function
+M2701,2026-09-21,3386,akshare_futures_zh_daily_sina
+M2705,2026-09-21,3013,akshare_futures_zh_daily_sina
+RM2701,2026-09-21,2341,akshare_futures_zh_daily_sina
+RM2705,2026-09-21,2355,akshare_futures_zh_daily_sina
+Y2701,2026-09-21,8895,akshare_futures_zh_daily_sina
+Y2705,2026-09-21,8731,akshare_futures_zh_daily_sina
+OI2701,2026-09-21,10205,akshare_futures_zh_daily_sina
+OI2705,2026-09-21,9954,akshare_futures_zh_daily_sina
+P2701,2026-09-21,9816,akshare_futures_zh_daily_sina
+P2705,2026-09-21,10257,akshare_futures_zh_daily_sina

@@ -4,13 +4,31 @@ import argparse
 import datetime as dt
 import json
 import logging
+import math
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
 import akshare as ak
 import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "03_src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from agri_research_agent.data_sources.tankan.domestic_spread import (  # noqa: E402
+    contract_code_from_source_column,
+    full_contract_code,
+    resolve_contract_season,
+)
+from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
+    PriceSemantic,
+    infer_price_semantic,
+)
 
 
 DEFAULT_INSTRUMENTS = ["M", "RM", "Y", "OI", "P"]
@@ -26,10 +44,16 @@ PRICE_FIELD_PRIORITY = ["current_price", "last_close", "last_settle_price", "avg
 PRICE_LONG_SHEET = "price_long"
 CONFIG_SHEET = "spread_config"
 SPREAD_LONG_SHEET = "spread_long"
+LATE_ARRIVAL_LOOKBACK_DAYS = 2
+NEW_CONTRACT_LOOKBACK_DAYS = 7
+
+
+class HistoricalDailyCloseConflict(RuntimeError):
+    """Provider close conflicts with an existing canonical daily close."""
 
 
 def project_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return ROOT
 
 
 def setup_logger(log_file: Path) -> logging.Logger:
@@ -134,6 +158,146 @@ def build_candidates(config_file: Path, database_file: Path) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows).drop_duplicates(subset=["instrument", "delivery_month", "symbol"])
+
+
+def build_active_candidates(config_file: Path, target_date: dt.date) -> pd.DataFrame:
+    """Resolve the exact contracts required on ``target_date`` from config windows."""
+
+    config = pd.read_excel(config_file, sheet_name=CONFIG_SHEET)
+    if "enabled" in config.columns:
+        config = config[config["enabled"].map(is_enabled)].copy()
+    required_columns = {
+        "leg1_instrument", "leg1_month", "leg2_instrument", "leg2_month",
+        "window_start_month", "window_start_day", "window_end_month",
+        "window_end_day",
+    }
+    missing = sorted(required_columns - set(config.columns))
+    if missing:
+        raise ValueError(f"spread config is missing active-contract columns: {missing}")
+
+    rows: list[dict[str, object]] = []
+    for rule in config.itertuples(index=False):
+        season = resolve_contract_season(
+            target_date,
+            window_start_month=int(rule.window_start_month),
+            window_start_day=int(rule.window_start_day),
+            window_end_month=int(rule.window_end_month),
+            window_end_day=int(rule.window_end_day),
+        )
+        if season is None:
+            continue
+        for prefix in ("leg1", "leg2"):
+            instrument = str(getattr(rule, f"{prefix}_instrument")).strip().upper()
+            month = int(getattr(rule, f"{prefix}_month"))
+            symbol = full_contract_code(instrument, season.label, month)
+            rows.append(
+                {
+                    "instrument": instrument,
+                    "delivery_month": month,
+                    "season": season.label,
+                    "symbol": symbol,
+                    "akshare_display_symbol": akshare_display_symbol(
+                        instrument, month, season.label
+                    ),
+                    "candidate_source": "active_config_window",
+                }
+            )
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "instrument", "delivery_month", "season", "symbol",
+                "akshare_display_symbol", "candidate_source",
+            ]
+        )
+    return (
+        pd.DataFrame(rows)
+        .drop_duplicates(subset=["symbol"])
+        .sort_values(["instrument", "delivery_month"])
+        .reset_index(drop=True)
+    )
+
+
+def _exact_daily_close_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return DAILY_CLOSE rows carrying a valid full-contract identity."""
+
+    required = {"date", "instrument", "delivery_month", "source_file", "source_column"}
+    if frame.empty or not required <= set(frame.columns):
+        return pd.DataFrame(columns=[*frame.columns, "contract"])
+    rows = frame.copy()
+    rows["date"] = pd.to_datetime(rows["date"], errors="coerce").dt.normalize()
+    rows["contract"] = [
+        contract_code_from_source_column(
+            source_column,
+            instrument=str(instrument),
+            delivery_month=int(month),
+        )
+        if pd.notna(month)
+        else None
+        for source_column, instrument, month in zip(
+            rows["source_column"],
+            rows["instrument"],
+            pd.to_numeric(rows["delivery_month"], errors="coerce"),
+            strict=True,
+        )
+    ]
+    rows["price_semantic"] = [
+        infer_price_semantic(source, column).value
+        for source, column in zip(
+            rows["source_file"], rows["source_column"], strict=True
+        )
+    ]
+    return rows.loc[
+        rows["date"].notna()
+        & rows["contract"].notna()
+        & rows["price_semantic"].eq(PriceSemantic.DAILY_CLOSE.value)
+    ].copy()
+
+
+def per_contract_watermarks(
+    existing: pd.DataFrame, candidates: pd.DataFrame
+) -> dict[str, dt.date | None]:
+    """Read independent exact-contract DAILY_CLOSE watermarks."""
+
+    exact = _exact_daily_close_rows(existing)
+    watermarks: dict[str, dt.date | None] = {}
+    for symbol in candidates.get("symbol", pd.Series(dtype=str)).astype(str):
+        matching = exact.loc[exact["contract"].eq(symbol), "date"]
+        latest = matching.max() if not matching.empty else pd.NaT
+        watermarks[symbol] = None if pd.isna(latest) else pd.Timestamp(latest).date()
+    return watermarks
+
+
+def plan_contract_refreshes(
+    candidates: pd.DataFrame,
+    watermarks: dict[str, dt.date | None],
+    *,
+    target_date: dt.date,
+) -> pd.DataFrame:
+    """Plan only contracts missing the target date, with a bounded overlap."""
+
+    planned: list[dict[str, object]] = []
+    lower_bound = target_date - dt.timedelta(days=NEW_CONTRACT_LOOKBACK_DAYS)
+    for record in candidates.to_dict("records"):
+        symbol = str(record["symbol"])
+        watermark = watermarks.get(symbol)
+        if watermark is not None and watermark >= target_date:
+            continue
+        gap_start = lower_bound if watermark is None else watermark + dt.timedelta(days=1)
+        overlap_start = (
+            lower_bound
+            if watermark is None
+            else watermark - dt.timedelta(days=LATE_ARRIVAL_LOOKBACK_DAYS)
+        )
+        record.update(
+            {
+                "watermark": watermark,
+                "missing_gap_start": max(gap_start, lower_bound),
+                "refresh_start": max(overlap_start, lower_bound),
+                "target_date": target_date,
+            }
+        )
+        planned.append(record)
+    return pd.DataFrame(planned, columns=[*candidates.columns, "watermark", "missing_gap_start", "refresh_start", "target_date"])
 
 
 def normalize_spot(raw: pd.DataFrame) -> pd.DataFrame:
@@ -271,22 +435,36 @@ def fetch_spot(candidates: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd
 
 
 def fetch_daily_history(
-    candidates: pd.DataFrame, *, start_date: dt.date
+    planned: pd.DataFrame,
+    *,
+    target_date: dt.date | None = None,
+    start_date: dt.date | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Fetch exchange-dated closes for every configured contract.
 
     The spot endpoint does not expose a quote business date.  Stamping its last
     price with the server date can therefore invent weekend or holiday rows and
     cannot repair a missed run.  The daily endpoint supplies the exchange date
-    and lets one run backfill every real trading day after ``start_date``.
+    and lets each contract use its own bounded refresh window.  Contracts that
+    already contain ``target_date`` are absent from ``planned`` and are not
+    queried.
     """
+
+    if start_date is not None:
+        if "refresh_start" in planned.columns:
+            raise ValueError("start_date cannot override a per-contract refresh plan")
+        planned = planned.copy()
+        planned["refresh_start"] = start_date
+    if target_date is None and start_date is None:
+        raise ValueError("target_date or legacy start_date is required")
 
     observations: list[pd.DataFrame] = []
     raw_frames: list[pd.DataFrame] = []
     failures: list[dict[str, Any]] = []
-    first_date = pd.Timestamp(start_date)
-    for row in candidates.itertuples(index=False):
+    last_date = pd.Timestamp.max.normalize() if target_date is None else pd.Timestamp(target_date)
+    for row in planned.itertuples(index=False):
         symbol = str(row.symbol)
+        first_date = pd.Timestamp(row.refresh_start)
         try:
             raw = ak.futures_zh_daily_sina(symbol=symbol)
             if not isinstance(raw, pd.DataFrame) or raw.empty:
@@ -301,6 +479,7 @@ def fetch_daily_history(
             raw_frames.append(normalized)
             selected = normalized[
                 normalized["date"].ge(first_date)
+                & normalized["date"].le(last_date)
                 & normalized["date"].notna()
                 & normalized["close"].gt(0)
             ].copy()
@@ -326,6 +505,89 @@ def fetch_daily_history(
     success = pd.concat(observations, ignore_index=True) if observations else pd.DataFrame()
     raw_history = pd.concat(raw_frames, ignore_index=True) if raw_frames else pd.DataFrame()
     return success, pd.DataFrame(failures), raw_history
+
+
+def upsert_daily_closes(
+    existing: pd.DataFrame,
+    incoming: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, int]:
+    """Insert missing exact DAILY_CLOSE keys without overwriting history."""
+
+    if incoming.empty:
+        return existing.copy(), incoming.copy(), 0
+    current = _exact_daily_close_rows(existing)
+    incoming_exact = _exact_daily_close_rows(incoming)
+    if len(incoming_exact) != len(incoming):
+        raise ValueError("incoming AkShare rows are not exact DAILY_CLOSE observations")
+
+    existing_prices: dict[tuple[pd.Timestamp, str], list[float]] = {}
+    for row in current.itertuples(index=False):
+        key = (pd.Timestamp(row.date).normalize(), str(row.contract))
+        value = pd.to_numeric(row.price, errors="coerce")
+        if pd.notna(value):
+            existing_prices.setdefault(key, []).append(float(value))
+
+    insert_indices: list[int] = []
+    no_change = 0
+    seen_incoming: dict[tuple[pd.Timestamp, str], float] = {}
+    for index, row in incoming_exact.iterrows():
+        key = (pd.Timestamp(row["date"]).normalize(), str(row["contract"]))
+        value = pd.to_numeric(row["price"], errors="coerce")
+        if pd.isna(value):
+            raise ValueError(f"incoming daily close is invalid: {key}")
+        price = float(value)
+        prior_incoming = seen_incoming.get(key)
+        if prior_incoming is not None and not math.isclose(
+            prior_incoming, price, rel_tol=0.0, abs_tol=1e-9
+        ):
+            raise HistoricalDailyCloseConflict(
+                f"provider returned conflicting daily closes for {key[1]} on {key[0].date()}"
+            )
+        seen_incoming[key] = price
+        existing_values = existing_prices.get(key, [])
+        if existing_values:
+            if all(
+                math.isclose(previous, price, rel_tol=0.0, abs_tol=1e-9)
+                for previous in existing_values
+            ):
+                no_change += 1
+                continue
+            raise HistoricalDailyCloseConflict(
+                f"historical daily close conflict for {key[1]} on {key[0].date()}"
+            )
+        insert_indices.append(index)
+        existing_prices[key] = [price]
+
+    to_insert = incoming.loc[insert_indices].copy()
+    if to_insert.empty:
+        return existing.copy(), to_insert, no_change
+    combined = pd.concat([existing, to_insert], ignore_index=True)
+    sort_columns = [
+        column
+        for column in ("date", "instrument", "delivery_month", "source_column")
+        if column in combined.columns
+    ]
+    combined["date"] = pd.to_datetime(combined["date"], errors="coerce")
+    combined = combined.sort_values(sort_columns).reset_index(drop=True)
+    return combined, to_insert, no_change
+
+
+def target_date_completeness(
+    candidate: pd.DataFrame,
+    required_symbols: set[str],
+    *,
+    target_date: dt.date,
+) -> tuple[set[str], set[str]]:
+    """Measure target-date coverage from exact DAILY_CLOSE keys only."""
+
+    exact = _exact_daily_close_rows(candidate)
+    present = set(
+        exact.loc[
+            exact["date"].eq(pd.Timestamp(target_date)), "contract"
+        ].astype(str)
+    )
+    successful = required_symbols & present
+    return successful, required_symbols - present
 
 
 def build_price_long_rows(success: pd.DataFrame, existing_columns: list[str]) -> pd.DataFrame:
@@ -391,6 +653,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-backup", action="store_true", help="Skip local price_long backup when the parent transaction already backed it up.")
     parser.add_argument("--result-json", type=Path, help="Write a machine-readable update result to this path.")
+    parser.add_argument(
+        "--target-business-date",
+        type=dt.date.fromisoformat,
+        default=dt.date.today(),
+        help="Exact business date whose active DAILY_CLOSE contract set must be complete.",
+    )
     return parser.parse_args()
 
 
@@ -417,7 +685,18 @@ def main() -> int:
         "success_contracts": 0,
         "failure_contracts": 0,
         "failed_contracts": [],
+        "job_execution_status": "FAILED",
+        "endpoint_requested_contracts": 0,
+        "endpoint_success_contracts": 0,
+        "endpoint_failure_contracts": 0,
+        "endpoint_skipped_current_contracts": 0,
+        "target_business_date": args.target_business_date.isoformat(),
+        "target_date_data_completeness": "MISSING",
+        "target_required_contract_keys": [],
+        "target_present_contract_keys": [],
+        "target_missing_contract_keys": [],
         "to_append_rows": 0,
+        "idempotent_no_change_rows": 0,
         "overwritten_rows": 0,
         "price_long_written": False,
         "latest_date": "",
@@ -436,28 +715,44 @@ def main() -> int:
 
         existing = pd.read_excel(price_file, sheet_name=PRICE_LONG_SHEET)
         existing["date"] = pd.to_datetime(existing["date"], errors="coerce")
-        candidates = build_candidates(config_file, database_file)
-        latest_existing = existing["date"].max()
-        start_date = (
-            dt.date.today()
-            if pd.isna(latest_existing)
-            else (pd.Timestamp(latest_existing) + pd.Timedelta(days=1)).date()
+        candidates = build_active_candidates(config_file, args.target_business_date)
+        if candidates.empty:
+            raise ValueError(
+                f"no active Domestic Spread contracts for {args.target_business_date}"
+            )
+        watermarks = per_contract_watermarks(existing, candidates)
+        planned = plan_contract_refreshes(
+            candidates, watermarks, target_date=args.target_business_date
         )
         success, failures, raw_spot = fetch_daily_history(
-            candidates, start_date=start_date
+            planned, target_date=args.target_business_date
         )
-        required_contracts = int(len(candidates))
-        failed_symbols = set(failures["symbol"].astype(str)) if not failures.empty else set()
-        success_contracts = required_contracts - len(failed_symbols)
-        failed_contracts = failures["symbol"].astype(str).tolist() if not failures.empty else []
-        failure_contracts = int(len(failed_contracts))
+        endpoint_failed = (
+            set(failures["symbol"].astype(str)) if not failures.empty else set()
+        )
+        endpoint_requested = set(planned.get("symbol", pd.Series(dtype=str)).astype(str))
+        endpoint_success = endpoint_requested - endpoint_failed
+        job_execution_status = "SUCCESS" if not endpoint_failed else "FAILED"
+        incoming = (
+            build_price_long_rows(success, list(existing.columns))
+            if not success.empty
+            else pd.DataFrame(columns=existing.columns)
+        )
+        combined, to_append, no_change_rows = upsert_daily_closes(existing, incoming)
+        required_symbols = set(candidates["symbol"].astype(str))
+        present_symbols, missing_symbols = target_date_completeness(
+            combined,
+            required_symbols,
+            target_date=args.target_business_date,
+        )
+        required_contracts = len(required_symbols)
+        success_contracts = len(present_symbols)
+        failed_contracts = sorted(missing_symbols)
+        failure_contracts = len(missing_symbols)
         success_ratio = success_contracts / required_contracts if required_contracts else 0.0
-        to_append = build_price_long_rows(success, list(existing.columns)) if not success.empty else pd.DataFrame(columns=existing.columns)
-        unique_cols = ["date", "instrument", "delivery_month"]
+        data_completeness = "COMPLETE" if not missing_symbols else "PARTIAL"
         existing_today_rows = existing[
-            existing["date"].isin(to_append["date"] if not to_append.empty else [])
-            & existing["instrument"].isin(to_append["instrument"] if not to_append.empty else [])
-            & existing["delivery_month"].isin(to_append["delivery_month"] if not to_append.empty else [])
+            existing["date"].eq(pd.Timestamp(args.target_business_date))
         ].copy()
         write_report(
             report_file,
@@ -472,6 +767,7 @@ def main() -> int:
         backup_file = ""
         integrity_ok = (
             required_contracts > 0
+            and job_execution_status == "SUCCESS"
             and success_ratio >= args.min_success_ratio
             and (args.min_success_ratio < 1.0 or failure_contracts == 0)
         )
@@ -479,23 +775,13 @@ def main() -> int:
             raise RuntimeError(
                 "contract completeness check failed: "
                 f"success={success_contracts}, required={required_contracts}, "
-                f"failures={failure_contracts}, min_success_ratio={args.min_success_ratio}"
+                f"failures={failure_contracts}, job_execution={job_execution_status}, "
+                f"min_success_ratio={args.min_success_ratio}"
             )
 
         if not args.dry_run and not to_append.empty:
             if not args.skip_backup:
                 backup_file = str(backup_price_long(price_file, backups_dir, timestamp))
-            existing_keyed = existing.set_index(unique_cols, drop=False)
-            append_keyed = to_append.set_index(unique_cols, drop=False)
-            overwritten_rows = int(existing_keyed.index.isin(append_keyed.index).sum())
-            combined = pd.concat(
-                [
-                    existing_keyed[~existing_keyed.index.isin(append_keyed.index)].reset_index(drop=True),
-                    to_append,
-                ],
-                ignore_index=True,
-            )
-            combined = combined.sort_values(["date", "instrument", "delivery_month"]).reset_index(drop=True)
             tmp_price_file = price_file.with_name("historical_price_long.tmp.xlsx")
             if tmp_price_file.exists():
                 tmp_price_file.unlink()
@@ -503,11 +789,13 @@ def main() -> int:
                 combined.to_excel(writer, sheet_name=PRICE_LONG_SHEET, index=False)
             os.replace(tmp_price_file, price_file)
 
-        resulting_latest = pd.concat(
-            [existing["date"], to_append["date"] if not to_append.empty else pd.Series(dtype="datetime64[ns]")],
-            ignore_index=True,
-        ).max()
+        resulting_latest = pd.to_datetime(combined["date"], errors="coerce").max()
         latest_date = "" if pd.isna(resulting_latest) else pd.Timestamp(resulting_latest).strftime("%Y-%m-%d")
+        earliest_inserted = (
+            ""
+            if to_append.empty
+            else pd.to_datetime(to_append["date"], errors="coerce").min().strftime("%Y-%m-%d")
+        )
         result_payload.update(
             {
                 "status": "success",
@@ -515,10 +803,21 @@ def main() -> int:
                 "success_contracts": success_contracts,
                 "failure_contracts": failure_contracts,
                 "failed_contracts": failed_contracts,
+                "job_execution_status": job_execution_status,
+                "endpoint_requested_contracts": len(endpoint_requested),
+                "endpoint_success_contracts": len(endpoint_success),
+                "endpoint_failure_contracts": len(endpoint_failed),
+                "endpoint_skipped_current_contracts": required_contracts - len(endpoint_requested),
+                "target_date_data_completeness": data_completeness,
+                "target_required_contract_keys": sorted(required_symbols),
+                "target_present_contract_keys": sorted(present_symbols),
+                "target_missing_contract_keys": failed_contracts,
                 "to_append_rows": int(len(to_append)),
+                "idempotent_no_change_rows": int(no_change_rows),
                 "overwritten_rows": overwritten_rows,
                 "price_long_written": bool(not args.dry_run and not to_append.empty),
                 "latest_date": latest_date,
+                "earliest_inserted_date": earliest_inserted,
                 "backup_file": backup_file,
             }
         )
@@ -528,18 +827,28 @@ def main() -> int:
         logger.info("success_contracts=%s", success_contracts)
         logger.info("failure_contracts=%s", failure_contracts)
         logger.info("failed_contracts=%s", failed_contracts)
-        logger.info("backfill_start_date=%s", start_date.isoformat())
+        logger.info("job_execution_status=%s", job_execution_status)
+        logger.info("target_business_date=%s", args.target_business_date)
+        logger.info("target_date_data_completeness=%s", data_completeness)
+        logger.info("per_contract_watermarks=%s", watermarks)
+        logger.info(
+            "contract_refresh_plan=%s",
+            planned[["symbol", "watermark", "missing_gap_start", "refresh_start"]].to_dict("records"),
+        )
         logger.info("to_append_rows=%s", len(to_append))
+        logger.info("idempotent_no_change_rows=%s", no_change_rows)
         logger.info("overwritten_rows=%s", overwritten_rows)
         logger.info("price_long_written=%s", result_payload["price_long_written"])
         logger.info("latest_date=%s", latest_date)
         logger.info("report_file=%s", report_file)
         logger.info("backup_file=%s", backup_file)
-        logger.info("unique_key=date+instrument+delivery_month")
+        logger.info("unique_key=full_contract_identity+date+DAILY_CLOSE")
 
         print(f"candidate_contracts: {required_contracts}")
         print(f"success_contracts: {success_contracts}")
         print(f"failure_contracts: {failure_contracts}")
+        print(f"job_execution_status: {job_execution_status}")
+        print(f"target_date_data_completeness: {data_completeness}")
         if not failures.empty:
             print("failed_symbols: " + ", ".join(failures["symbol"].astype(str).tolist()))
         print(f"to_append_rows: {len(to_append)}")
@@ -558,12 +867,29 @@ def main() -> int:
         result_payload["error_message"] = f"{type(exc).__name__}: {exc}"
         if "candidates" in locals():
             result_payload["required_contracts"] = int(len(candidates))
-        if "success" in locals():
-            result_payload["success_contracts"] = int(len(success))
+            result_payload["target_required_contract_keys"] = sorted(
+                candidates["symbol"].astype(str).tolist()
+            )
+        if "present_symbols" in locals():
+            result_payload["success_contracts"] = int(len(present_symbols))
+            result_payload["target_present_contract_keys"] = sorted(present_symbols)
+        if "missing_symbols" in locals():
+            result_payload["failure_contracts"] = int(len(missing_symbols))
+            result_payload["failed_contracts"] = sorted(missing_symbols)
+            result_payload["target_missing_contract_keys"] = sorted(missing_symbols)
+            result_payload["target_date_data_completeness"] = (
+                "COMPLETE" if not missing_symbols else "PARTIAL"
+            )
         if "failures" in locals():
-            failed_contracts = failures["symbol"].astype(str).tolist() if not failures.empty else []
-            result_payload["failure_contracts"] = int(len(failed_contracts))
-            result_payload["failed_contracts"] = failed_contracts
+            endpoint_failed = (
+                failures["symbol"].astype(str).tolist() if not failures.empty else []
+            )
+            result_payload["endpoint_failure_contracts"] = len(endpoint_failed)
+            result_payload["job_execution_status"] = (
+                "SUCCESS" if not endpoint_failed else "FAILED"
+            )
+        if "planned" in locals():
+            result_payload["endpoint_requested_contracts"] = int(len(planned))
         if "to_append" in locals():
             result_payload["to_append_rows"] = int(len(to_append))
         logger.exception("update_price_long_from_akshare failed: %s", exc)

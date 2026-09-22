@@ -81,6 +81,12 @@ def initial_status(run_mode: str) -> dict[str, object]:
         "failure_contracts": 0,
         "required_contracts": 0,
         "failed_contracts": [],
+        "job_execution_status": "NOT_RUN",
+        "target_business_date": "",
+        "target_date_data_completeness": "NOT_RUN",
+        "target_required_contract_keys": [],
+        "target_present_contract_keys": [],
+        "target_missing_contract_keys": [],
         "price_long_backup": "",
         "spread_database_backup": "",
         "parquet_backup": "",
@@ -346,7 +352,15 @@ def main() -> int:
         status["latest_date"] = before_summary["latest_date"]
         logger.info("before_rows=%s before_latest_date=%s", before_summary["rows"], before_summary["latest_date"])
 
-        if not args.dry_run and run_mode != "safety_check":
+        defer_akshare_boundary = (
+            args.update_from_akshare
+            and getattr(args, "refresh_start_date", None) is None
+        )
+        if (
+            not args.dry_run
+            and run_mode != "safety_check"
+            and not defer_akshare_boundary
+        ):
             mutation_policy = publication_policy(args, price_file=price_file)
             logger.info(
                 "historical_publication_mode=%s mutation_boundary=%s..%s allowed_keys=%s",
@@ -378,7 +392,11 @@ def main() -> int:
                 ]
                 source_label = "Tankan"
             else:
-                update_args = ["update_price_long_from_akshare.py"]
+                update_args = [
+                    "update_price_long_from_akshare.py",
+                    "--target-business-date",
+                    args.end_date.isoformat(),
+                ]
                 source_label = "AkShare"
             update_args.extend([
                 "--result-json",
@@ -396,6 +414,12 @@ def main() -> int:
                     "required_contracts",
                     "failed_contracts",
                     "latest_date",
+                    "job_execution_status",
+                    "target_business_date",
+                    "target_date_data_completeness",
+                    "target_required_contract_keys",
+                    "target_present_contract_keys",
+                    "target_missing_contract_keys",
                 ]:
                     status[field] = update_result.get(field, status[field])
                 logger.info(
@@ -406,10 +430,36 @@ def main() -> int:
                     status["failed_contracts"],
                 )
                 logger.info("price_long_written=%s", update_result.get("price_long_written"))
+                logger.info(
+                    "producer_health job_execution=%s target_date=%s data_completeness=%s",
+                    status["job_execution_status"],
+                    status["target_business_date"],
+                    status["target_date_data_completeness"],
+                )
+                if defer_akshare_boundary and not args.dry_run:
+                    inserted = str(update_result.get("earliest_inserted_date", "")).strip()
+                    boundary_start = (
+                        dt.date.fromisoformat(inserted) if inserted else args.end_date
+                    )
+                    mutation_policy = HistoricalMutationPolicy(
+                        HistoricalPublicationMode.NORMAL,
+                        boundary_start,
+                        args.end_date,
+                    )
+                    logger.info(
+                        "historical_publication_mode=%s mutation_boundary=%s..%s allowed_keys=0",
+                        mutation_policy.mode.value,
+                        mutation_policy.start_date,
+                        mutation_policy.end_date,
+                    )
             if result.returncode != 0:
                 error_detail = update_result.get("error_message", "") if "update_result" in locals() else ""
                 raise RuntimeError(f"{source_label} price update failed with code {result.returncode}: {error_detail}")
-            if status["required_contracts"] != status["success_contracts"] or int(status["failure_contracts"]) != 0:
+            if (
+                status["required_contracts"] != status["success_contracts"]
+                or int(status["failure_contracts"]) != 0
+                or status.get("target_date_data_completeness") == "PARTIAL"
+            ):
                 raise RuntimeError("contract completeness gate rejected the update")
             if args.dry_run:
                 logger.info("dry_run_completed=true spread_recalculation_started=false")
