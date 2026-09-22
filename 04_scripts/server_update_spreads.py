@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -66,7 +67,23 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     os.replace(tmp_path, path)
 
 
-def initial_status(run_mode: str) -> dict[str, object]:
+def parse_business_end_date(value: str) -> dt.date:
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is None:
+        raise argparse.ArgumentTypeError("business end date must use YYYY-MM-DD")
+    try:
+        selected = dt.date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("business end date is invalid") from None
+    if selected > dt.date.today():
+        raise argparse.ArgumentTypeError("future business end date is forbidden")
+    return selected
+
+
+def initial_status(
+    run_mode: str,
+    *,
+    end_date: dt.date | None = None,
+) -> dict[str, object]:
     source = {
         "update_from_akshare": "akshare_futures_zh_daily_sina",
         "update_from_tankan": "tankan.market.futures_spread",
@@ -83,6 +100,10 @@ def initial_status(run_mode: str) -> dict[str, object]:
         "failed_contracts": [],
         "job_execution_status": "NOT_RUN",
         "target_business_date": "",
+        "requested_end_date": (
+            end_date.isoformat() if run_mode == "update_from_akshare" and end_date else ""
+        ),
+        "effective_end_date": "",
         "target_date_data_completeness": "NOT_RUN",
         "target_required_contract_keys": [],
         "target_present_contract_keys": [],
@@ -209,7 +230,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Preview the selected source update without writing or recalculating.",
     )
-    parser.add_argument("--end-date", type=dt.date.fromisoformat, default=dt.date.today())
+    parser.add_argument(
+        "--end-date",
+        type=parse_business_end_date,
+        default=dt.date.today(),
+        help="Business end date in strict YYYY-MM-DD form; future dates are forbidden",
+    )
     parser.add_argument(
         "--refresh-start-date",
         type=dt.date.fromisoformat,
@@ -308,7 +334,9 @@ def main() -> int:
     logs_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logger(log_file)
-    status = initial_status(run_mode)
+    if args.end_date > dt.date.today():
+        raise ValueError("future business end date is forbidden")
+    status = initial_status(run_mode, end_date=args.end_date)
     lock = FileLock(str(lock_file))
 
     try:
@@ -416,12 +444,24 @@ def main() -> int:
                     "latest_date",
                     "job_execution_status",
                     "target_business_date",
+                    "requested_end_date",
+                    "effective_end_date",
                     "target_date_data_completeness",
                     "target_required_contract_keys",
                     "target_present_contract_keys",
                     "target_missing_contract_keys",
                 ]:
                     status[field] = update_result.get(field, status[field])
+                if args.update_from_akshare:
+                    requested = args.end_date.isoformat()
+                    if (
+                        status["requested_end_date"] != requested
+                        or status["effective_end_date"] != requested
+                        or status["target_business_date"] != requested
+                    ):
+                        raise RuntimeError(
+                            "AkShare requested/effective business end date mismatch"
+                        )
                 logger.info(
                     "contract_summary required=%s success=%s failures=%s failed_contracts=%s",
                     status["required_contracts"],

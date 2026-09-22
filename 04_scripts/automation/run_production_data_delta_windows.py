@@ -63,6 +63,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--domain", choices=("akshare", "soybean_crop_progress", "soybean_export_sales"), required=True)
+    parser.add_argument(
+        "--end-date",
+        help="AkShare business end date in strict YYYY-MM-DD form; defaults to today",
+    )
     parser.add_argument("--run-root", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--candidate-only", action="store_true", help="Produce locally; no SSH, publication or continuation activation (default)")
@@ -82,8 +86,21 @@ def main(argv=None) -> int:
         module = load_module()
         module.validate_config(config)
         module.verify_clean_detached_clone(ROOT, config)
+        if args.domain != "akshare" and args.end_date is not None:
+            raise ValueError("--end-date is only valid with --domain akshare")
+        end_date = (
+            module.resolve_business_end_date(args.end_date)
+            if args.domain == "akshare"
+            else None
+        )
         sys.path.insert(0, str(ROOT / "03_src"))
-        result = module.run_domain(config, args.domain, run_root=args.run_root, publish=args.publish)
+        result = module.run_domain(
+            config,
+            args.domain,
+            run_root=args.run_root,
+            publish=args.publish,
+            end_date=end_date,
+        )
         if args.config.read_bytes() != raw:
             raise ValueError("configuration changed during run")
         print(json.dumps({"PRODUCTION_DATA_DELTA": result["status"], **result}, sort_keys=True))

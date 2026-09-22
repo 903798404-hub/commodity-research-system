@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from contextlib import nullcontext
+from datetime import date
 from pathlib import Path
 import subprocess
 import sys
@@ -92,13 +93,112 @@ def test_cli_default_candidate_only_never_requests_publish_and_does_not_echo_cre
     fake = type("Fake", (), {
         "validate_config": staticmethod(lambda _config: None),
         "verify_clean_detached_clone": staticmethod(lambda *_args, **_kwargs: None),
+        "resolve_business_end_date": staticmethod(
+            lambda value: date.today() if value is None else date.fromisoformat(value)
+        ),
         "run_domain": staticmethod(lambda _config, domain, **kwargs: seen.update(domain=domain, **kwargs) or {"status": "CANDIDATE", "published": False}),
     })
     monkeypatch.setattr(cli, "_bootstrap", lambda _config: None)
     monkeypatch.setattr(cli, "load_module", lambda: fake)
     assert cli.main(["--config", str(config_path), "--domain", "akshare"]) == 0
-    assert seen == {"domain": "akshare", "run_root": None, "publish": False}
+    assert seen == {
+        "domain": "akshare",
+        "run_root": None,
+        "publish": False,
+        "end_date": date.today(),
+    }
     assert "fixture-only" not in capsys.readouterr().out
+
+
+def test_cli_explicit_end_date_reaches_formal_runner_unchanged(
+    monkeypatch, tmp_path: Path, capsys
+):
+    cli_path = ROOT / "04_scripts/automation/run_production_data_delta_windows.py"
+    spec = importlib.util.spec_from_file_location(
+        "production_data_delta_cli_end_date_under_test", cli_path
+    )
+    assert spec and spec.loader
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"approved_commit": COMMIT}), encoding="utf-8")
+    seen = {}
+    fake = type("Fake", (), {
+        "validate_config": staticmethod(lambda _config: None),
+        "verify_clean_detached_clone": staticmethod(lambda *_args, **_kwargs: None),
+        "resolve_business_end_date": staticmethod(
+            lambda value: date.fromisoformat(value)
+        ),
+        "run_domain": staticmethod(
+            lambda _config, domain, **kwargs:
+            seen.update(domain=domain, **kwargs)
+            or {
+                "status": "CANDIDATE",
+                "published": False,
+                "requested_end_date": "2026-09-21",
+                "effective_end_date": "2026-09-21",
+            }
+        ),
+    })
+    monkeypatch.setattr(cli, "_bootstrap", lambda _config: None)
+    monkeypatch.setattr(cli, "load_module", lambda: fake)
+
+    assert cli.main([
+        "--config", str(config_path), "--domain", "akshare",
+        "--end-date", "2026-09-21",
+    ]) == 0
+    assert seen["end_date"] == date(2026, 9, 21)
+    output = json.loads(capsys.readouterr().out)
+    assert output["requested_end_date"] == "2026-09-21"
+    assert output["effective_end_date"] == "2026-09-21"
+
+
+def test_business_end_date_is_strict_bounded_and_separate_from_wall_clock():
+    module = load_module()
+    wall_clock = date(2026, 9, 22)
+    assert module.resolve_business_end_date(
+        "2026-09-21", wall_clock_date=wall_clock
+    ) == date(2026, 9, 21)
+    assert module.resolve_business_end_date(
+        None, wall_clock_date=wall_clock
+    ) == wall_clock
+    for value in ("", "20260921", "2026-09-31"):
+        with pytest.raises(module.ProductionDataError):
+            module.resolve_business_end_date(value, wall_clock_date=wall_clock)
+    with pytest.raises(module.ProductionDataError, match="future"):
+        module.resolve_business_end_date("2026-09-23", wall_clock_date=wall_clock)
+
+
+def test_akshare_provider_flags_forward_exact_business_end_date(tmp_path: Path):
+    module = load_module()
+    assert module._provider_flags(
+        "akshare", tmp_path, end_date=date(2026, 9, 21)
+    ) == ["--update-from-akshare", "--end-date", "2026-09-21"]
+    with pytest.raises(module.ProductionDataError):
+        module._provider_flags("akshare", tmp_path)
+
+
+def test_akshare_date_evidence_rejects_requested_effective_mismatch(tmp_path: Path):
+    module = load_module()
+    data = tmp_path / "01_data"
+    data.mkdir()
+    status = {
+        "status": "success",
+        "run_mode": "update_from_akshare",
+        "requested_end_date": "2026-09-21",
+        "effective_end_date": "2026-09-21",
+        "target_business_date": "2026-09-21",
+    }
+    path = data / "update_status.json"
+    path.write_bytes(module.canonical_json_bytes(status))
+    assert module._akshare_end_date_evidence(data, date(2026, 9, 21)) == {
+        "requested_end_date": "2026-09-21",
+        "effective_end_date": "2026-09-21",
+    }
+
+    status["effective_end_date"] = "2026-09-22"
+    path.write_bytes(module.canonical_json_bytes(status))
+    with pytest.raises(module.ProductionDataError, match="effective"):
+        module._akshare_end_date_evidence(data, date(2026, 9, 21))
 
 
 def test_crop_out_of_season_is_an_explicit_non_delivery(monkeypatch, tmp_path: Path):

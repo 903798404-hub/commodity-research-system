@@ -22,6 +22,12 @@ Windows 正式入口为 `04_scripts/automation/run_production_data_delta_windows
 <approved-python> -I -B <approved-control-clone>/04_scripts/automation/run_production_data_delta_windows.py --config <private-config.json> --domain <domain> --publish
 ```
 
+AkShare 的普通日更不提供 `--end-date`，由入口在运行开始时固定当天为业务截止日。经批准的
+补录或重放可显式追加严格的 `--end-date YYYY-MM-DD`；该值逐层传递到 Domestic Spread
+producer 和目标日期完整性门禁。未来日期、非法格式、requested/effective 不一致均 fail
+closed。正式 `result.json` 和机器输出同时记录 `requested_end_date` 与
+`effective_end_date`。其他 domain 不接受该参数。
+
 默认只创建候选；`--publish` 是显式交付选择，不能由候选生成成功隐式推导。
 这些命令必须使用已批准的独立 control clone，不能从 feature worktree、local main 或
 Preview 目录正式运行。每次执行创建唯一运行目录和源副本，核对真实 Git 对象与文件字节，

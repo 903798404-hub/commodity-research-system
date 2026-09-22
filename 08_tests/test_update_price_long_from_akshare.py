@@ -277,6 +277,30 @@ def test_incident_replay_selects_four_late_arrivals_and_restores_status(
     assert status.status == "success"
 
 
+def test_business_end_date_parser_is_strict_and_rejects_future(updater) -> None:
+    assert updater.parse_business_end_date("2026-09-21") == date(2026, 9, 21)
+    for value in ("", "20260921", "2026-09-31"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            updater.parse_business_end_date(value)
+    future = date.today() + date.resolution
+    with pytest.raises(argparse.ArgumentTypeError, match="future"):
+        updater.parse_business_end_date(future.isoformat())
+
+
+def test_server_business_end_date_parser_is_strict_and_rejects_future() -> None:
+    server = _load(
+        "04_scripts/server_update_spreads.py",
+        "server_business_end_date_parser",
+    )
+    assert server.parse_business_end_date("2026-09-21") == date(2026, 9, 21)
+    for value in ("", "20260921", "2026-09-31"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            server.parse_business_end_date(value)
+    future = date.today() + date.resolution
+    with pytest.raises(argparse.ArgumentTypeError, match="future"):
+        server.parse_business_end_date(future.isoformat())
+
+
 def test_server_rejects_partial_target_data_even_when_endpoint_job_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -327,6 +351,8 @@ def test_server_rejects_partial_target_data_even_when_endpoint_job_succeeds(
                     "status": "failed",
                     "job_execution_status": "SUCCESS",
                     "target_business_date": "2026-09-21",
+                    "requested_end_date": "2026-09-21",
+                    "effective_end_date": "2026-09-21",
                     "target_date_data_completeness": "PARTIAL",
                     "required_contracts": 10,
                     "success_contracts": 6,
@@ -351,3 +377,5 @@ def test_server_rejects_partial_target_data_even_when_endpoint_job_succeeds(
     assert status["target_date_data_completeness"] == "PARTIAL"
     assert status["success_contracts"] == 6
     assert status["required_contracts"] == 10
+    assert status["requested_end_date"] == "2026-09-21"
+    assert status["effective_end_date"] == "2026-09-21"

@@ -33,6 +33,7 @@ DOMAINS = frozenset(SOURCES)
 ROOT = Path(__file__).resolve().parents[3]
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 REMOTE = re.compile(r"/[A-Za-z0-9_./-]+\Z")
 SSH_TARGET = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}\Z")
 SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
@@ -352,9 +353,39 @@ def _candidate_path(source: Path, value: str, domain: str) -> Path:
     return path
 
 
-def _provider_flags(domain: str, source: Path) -> list[str]:
+def resolve_business_end_date(
+    value: str | date | None,
+    *,
+    wall_clock_date: date | None = None,
+) -> date:
+    """Resolve one bounded business end date without silently following the clock."""
+    today = wall_clock_date or date.today()
+    require(type(today) is date, "wall-clock date is invalid")
+    if value is None:
+        selected = today
+    elif type(value) is date:
+        selected = value
+    else:
+        require(isinstance(value, str) and ISO_DATE.fullmatch(value),
+                "business end date must use YYYY-MM-DD")
+        try:
+            selected = date.fromisoformat(value)
+        except ValueError:
+            raise ProductionDataError("business end date is invalid") from None
+    require(selected <= today, "future business end date is forbidden")
+    return selected
+
+
+def _provider_flags(
+    domain: str,
+    source: Path,
+    *,
+    end_date: date | None = None,
+) -> list[str]:
     if domain == "akshare":
-        return ["--update-from-akshare"]
+        require(type(end_date) is date, "AkShare business end date is required")
+        return ["--update-from-akshare", "--end-date", end_date.isoformat()]
+    require(end_date is None, "business end date is only valid for AkShare")
     if domain == "soybean_crop_progress":
         return ["--dry-run"]
     require(domain == "soybean_export_sales", "unapproved producer domain")
@@ -488,6 +519,26 @@ def _public_pointer(config: dict) -> dict:
 
 def _check_public_pointer(pointer: dict, manifest: dict) -> None:
     require(all(pointer[k] == manifest[k] for k in ("package_id", "current_identity_sha256", "delivery_identity_sha256", "bundle_sha256")), "remote public baseline drifted")
+
+
+def _akshare_end_date_evidence(data: Path, requested: date) -> dict[str, str]:
+    """Bind formal delivery to the producer's observed target-date evidence."""
+    status = strict_json((data / "update_status.json").read_bytes())
+    expected = requested.isoformat()
+    observed_requested = status.get("requested_end_date")
+    observed_effective = status.get("effective_end_date")
+    require(status.get("status") == "success" and
+            status.get("run_mode") == "update_from_akshare",
+            "AkShare producer status is not successful")
+    require(observed_requested == expected,
+            "AkShare requested business end date differs from formal request")
+    require(observed_effective == expected and
+            status.get("target_business_date") == expected,
+            "AkShare effective business end date differs from formal request")
+    return {
+        "requested_end_date": observed_requested,
+        "effective_end_date": observed_effective,
+    }
 
 
 def _public_baseline(config: dict, *, remote: bool) -> Path:
@@ -635,9 +686,15 @@ def _save_continuation(config: dict, domain: str, baseline: Path, work: Path, so
 
 
 def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
-               publish: bool = False, control_root: Path | None = None) -> dict:
+               publish: bool = False, control_root: Path | None = None,
+               end_date: date | None = None) -> dict:
     validate_config(config)
     require(domain in DOMAINS, "unapproved producer domain")
+    requested_end_date = (
+        resolve_business_end_date(end_date) if domain == "akshare" else None
+    )
+    require(domain == "akshare" or end_date is None,
+            "business end date is only valid for AkShare")
     require(sys.flags.isolated and sys.dont_write_bytecode, "formal entrypoint requires Python -I -B")
     require(Path(sys.executable).resolve() == Path(config["python"]).resolve(), "running Python differs from approval")
     control = (control_root or ROOT).resolve()
@@ -683,7 +740,7 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
         # git rev-parse; setting the container marker would also require the
         # matching immutable /app/RELEASE.json and must therefore be avoided.
         env = safe_child_environment(credentials)
-        flags = _provider_flags(domain, source)
+        flags = _provider_flags(domain, source, end_date=requested_end_date)
         try:
             _run([config["python"], "-I", "-B", "-X", "utf8",
                   str(source / SOURCES[domain]), *flags], cwd=source, env=env)
@@ -697,9 +754,15 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
         for relative, identity in baseline.items():
             if relative not in mutable:
                 require(_identity(data / relative) == identity, "provider modified unrelated baseline bytes")
+        date_evidence = (
+            _akshare_end_date_evidence(data, requested_end_date)
+            if domain == "akshare" and requested_end_date is not None
+            else {}
+        )
         result = {"run_id": run_id, "domain": domain, "producer": producer, "published": False,
                   "baseline_manifest_sha256": baseline_sha, "source": str(source),
-                  "source_mode": "approved-control-file-transport-independent-shallow-clone"}
+                  "source_mode": "approved-control-file-transport-independent-shallow-clone",
+                  **date_evidence}
         if domain == "akshare":
             package = _build_public_package(source, public, work / "packages")
             previous = strict_json((public / "manifest.json").read_bytes())

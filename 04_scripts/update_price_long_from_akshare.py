@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -642,6 +643,18 @@ def write_report(
         existing_today_rows.to_excel(writer, sheet_name="existing_today_rows", index=False)
 
 
+def parse_business_end_date(value: str) -> dt.date:
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is None:
+        raise argparse.ArgumentTypeError("business end date must use YYYY-MM-DD")
+    try:
+        selected = dt.date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("business end date is invalid") from None
+    if selected > dt.date.today():
+        raise argparse.ArgumentTypeError("future business end date is forbidden")
+    return selected
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backfill missing exchange-dated AkShare futures closes.")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and report only; do not write historical_price_long.xlsx.")
@@ -655,7 +668,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--result-json", type=Path, help="Write a machine-readable update result to this path.")
     parser.add_argument(
         "--target-business-date",
-        type=dt.date.fromisoformat,
+        type=parse_business_end_date,
         default=dt.date.today(),
         help="Exact business date whose active DAILY_CLOSE contract set must be complete.",
     )
@@ -691,6 +704,8 @@ def main() -> int:
         "endpoint_failure_contracts": 0,
         "endpoint_skipped_current_contracts": 0,
         "target_business_date": args.target_business_date.isoformat(),
+        "requested_end_date": args.target_business_date.isoformat(),
+        "effective_end_date": args.target_business_date.isoformat(),
         "target_date_data_completeness": "MISSING",
         "target_required_contract_keys": [],
         "target_present_contract_keys": [],
