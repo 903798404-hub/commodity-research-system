@@ -77,7 +77,9 @@ def test_final_aggregation_uses_only_its_runtime_dependency() -> None:
     )
     final_job = workflow.split("  final:\n", 1)[1].split("  full:\n", 1)[0]
 
-    assert "python -I -m pip install PyYAML==6.0.3" in final_job
+    assert (
+        "python -I -m pip install PyYAML==6.0.3 jsonschema==4.26.0" in final_job
+    )
     assert "requirements-dev.in" not in final_job
     assert "Compare exact base and candidate full regression" in final_job
     assert "Aggregate actual required platform jobs" in final_job

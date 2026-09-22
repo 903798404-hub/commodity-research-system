@@ -180,7 +180,7 @@ jobs:
       with:
         python-version: '3.12'
     - name: Install aggregation dependency
-      run: python -I -m pip install PyYAML==6.0.3
+      run: python -I -m pip install PyYAML==6.0.3 jsonschema==4.26.0
     - uses: actions/download-artifact@v4
       with:
         name: platform-plan
