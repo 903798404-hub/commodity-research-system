@@ -97,6 +97,7 @@ def main(argv=None) -> int:
         module = load_module()
         module.validate_config(config)
         module.verify_clean_detached_clone(ROOT, config)
+        sys.path.insert(0, str(ROOT / "03_src"))
         if args.domain != "akshare" and args.end_date is not None:
             raise ValueError("--end-date is only valid with --domain akshare")
         if args.historical_reconciliation_manifest is not None and (
@@ -132,7 +133,6 @@ def main(argv=None) -> int:
             if args.domain == "akshare" and args.historical_reconciliation_manifest is None
             else None
         )
-        sys.path.insert(0, str(ROOT / "03_src"))
         kwargs = {"run_root": args.run_root, "publish": args.publish, "end_date": end_date}
         if args.historical_reconciliation_manifest is not None:
             kwargs["reconciliation_manifest"] = args.historical_reconciliation_manifest
