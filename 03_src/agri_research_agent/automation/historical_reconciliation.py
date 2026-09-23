@@ -271,17 +271,16 @@ def stage_and_calculate(source: Path, manifest: dict, validated: dict, *, python
                      "price": float(value), "source_column": contract + ":close",
                      "source_file": SOURCE_FILE, "updated_at": stamp,
                      "status": "success", "error": ""})
-    existing = set()
+    holiday = next(iter(validated["missing"]))[0]
     for row in price_before.to_dict("records"):
         if infer_price_semantic(row.get("source_file"), row.get("source_column")) is PriceSemantic.DAILY_CLOSE:
             day = pd.Timestamp(row["date"]).date().isoformat()
+            if day == holiday:
+                raise ValueError("non-trading day already has DAILY_CLOSE")
             column = str(row["source_column"])
             key = (day, column.split(":", 1)[0])
-            if key in validated["missing"]:
-                raise ValueError("non-trading day already has DAILY_CLOSE")
             if key in validated["approved"]:
                 raise ValueError("approved DAILY_CLOSE already exists in baseline")
-            existing.add(key)
     candidate = pd.concat([price_before, pd.DataFrame(rows, columns=price_before.columns)], ignore_index=True)
     _require(len(candidate) == len(price_before) + len(rows), "price staging row count differs")
     sheets = pd.read_excel(price_path, sheet_name=None)

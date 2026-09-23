@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from agri_research_agent.automation import historical_reconciliation as history
+from agri_research_agent.pipelines.domestic_spread_integrity import derive_affected_spread_keys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -229,3 +230,28 @@ def test_reconciliation_reuses_bounded_business_logic_and_removes_only_holiday_r
     assert all(key[0] == "2026-09-21" for key in changed)
     prices = pd.read_excel(data / "historical_price_long.xlsx", sheet_name="price_long")
     assert len(prices) == len(base_prices) + 4
+
+
+def test_nontrading_day_existing_daily_close_fails_before_calculation(tmp_path: Path):
+    source = tmp_path / "source"
+    data = source / "01_data"; data.mkdir(parents=True)
+    scripts = source / "04_scripts"; scripts.mkdir()
+    configs = source / "02_configs"; configs.mkdir()
+    shutil.copy2(ROOT / "04_scripts/server_update_spreads.py", scripts)
+    shutil.copy2(ROOT / "02_configs/historical_spread_config.xlsx", configs)
+    row = {"date": pd.Timestamp("2026-06-19"), "instrument": "M", "instrument_cn": "fixture",
+           "delivery_month": 9, "price": 2942, "source_column": "M2609:close",
+           "source_file": history.SOURCE_FILE, "updated_at": "2026-09-22 00:00:00",
+           "status": "success", "error": ""}
+    with pd.ExcelWriter(data / "historical_price_long.xlsx", engine="openpyxl") as writer:
+        pd.DataFrame([row]).to_excel(writer, sheet_name="price_long", index=False)
+    (data / "historical_spread_database.parquet").write_bytes(b"fixture")
+    (data / "historical_spread_database.xlsx").write_bytes(b"fixture")
+    missing = {("2026-06-19", contract) for contract in CONTRACTS}
+    config = pd.read_excel(configs / "historical_spread_config.xlsx", sheet_name="spread_config")
+    deletion = derive_affected_spread_keys(config, ((contract, day) for day, contract in missing))
+    with pytest.raises(ValueError, match="non-trading day already has DAILY_CLOSE"):
+        history.stage_and_calculate(source, {},
+                                    {"approved": {("2026-06-18", "M2609"): history._price("2945")},
+                                     "missing": missing, "delete": deletion},
+                                    python=__import__("sys").executable, env={})
