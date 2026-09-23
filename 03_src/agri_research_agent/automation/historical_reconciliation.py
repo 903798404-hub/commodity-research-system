@@ -257,7 +257,12 @@ def stage_and_calculate(source: Path, manifest: dict, validated: dict, *, python
     rows = []
     # Preserve the baseline's timestamp timezone convention. Pandas rejects a
     # mixed aware/naive or mixed-offset column before the business calculator runs.
-    marker = next((value for value in price_before["updated_at"] if pd.notna(value)), None)
+    daily_timestamps = (
+        row.get("updated_at") for row in price_before.to_dict("records")
+        if infer_price_semantic(row.get("source_file"), row.get("source_column"))
+        is PriceSemantic.DAILY_CLOSE
+    )
+    marker = next((value for value in daily_timestamps if pd.notna(value)), None)
     parsed_marker = pd.Timestamp(marker) if marker is not None else None
     stamp = (pd.Timestamp.now(tz=parsed_marker.tzinfo).isoformat(timespec="seconds")
              if parsed_marker is not None and parsed_marker.tzinfo is not None

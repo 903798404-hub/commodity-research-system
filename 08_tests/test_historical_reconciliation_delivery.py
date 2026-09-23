@@ -189,6 +189,14 @@ def test_reconciliation_reuses_bounded_business_logic_and_removes_only_holiday_r
     spec = importlib.util.spec_from_file_location("domestic_incremental_fixture", fixture_path)
     fixture = importlib.util.module_from_spec(spec); spec.loader.exec_module(fixture)
     base_prices, baseline, _full, _ = fixture._incident_replay()
+    # Spot provenance may use a different timestamp offset; the new DAILY_CLOSE
+    # rows must follow canonical daily-close timestamps, not that spot row.
+    base_prices["updated_at"] = "2026-09-22 00:00:00"
+    spot = base_prices.iloc[[0]].copy()
+    spot["source_file"] = "akshare_futures_zh_spot"
+    spot["source_column"] = "M2701:current_price"
+    spot["updated_at"] = "2026-09-22T00:00:00+08:00"
+    base_prices = pd.concat([spot, base_prices], ignore_index=True)
     source = tmp_path / "source"
     data = source / "01_data"; data.mkdir(parents=True)
     scripts = source / "04_scripts"; scripts.mkdir()
