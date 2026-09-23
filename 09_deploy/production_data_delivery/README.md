@@ -28,6 +28,33 @@ producer 和目标日期完整性门禁。未来日期、非法格式、requeste
 closed。正式 `result.json` 和机器输出同时记录 `requested_end_date` 与
 `effective_end_date`。其他 domain 不接受该参数。
 
+### Domestic Spread 历史语义修订
+
+历史修订仍使用上述同一 Windows 正式入口，仅追加
+`--domain akshare --historical-reconciliation-manifest <absolute-manifest.json>`；默认只生成
+candidate，正式交付仍须独立授权并显式使用 `--publish`。此模式不接受 `--end-date`，也不
+从网络重新抓取或 forward-fill 价格。普通日更不带 manifest 时的入口与门禁保持不变。
+
+Manifest 使用 `domestic-spread-historical-reconciliation/1` 的封闭 JSON 字段：
+`schema_version`、`operation_type=HISTORICAL_RECONCILIATION`、
+`dataset=domestic-spread`、`incident_id`、`reason`、`expected_current`（`id`、
+`artifact_sha256`、`manifest_sha256`）、`source_evidence` 和 `audit_evidence`
+（各含绝对 `path` 与 `sha256`）、`daily_close`（逐项 `trade_date`、完整
+`full_contract`、十进制字符串 `value`）、`non_trading`（逐项 `trade_date`、
+`full_contract`）、`derived_scope`（固定 `closure=CONFIG_DERIVED_EXACT` 与精确
+`non_trading_derived_keys`）、`counts`（三类精确计数）。Source CSV 逐项核对完整
+合约、日期、AkShare 日线 `close`、原始 scoped SHA、唯一来源行和值；spot/current_price
+不得冒充收盘价。重复键、通配范围、未知字段、缺失或变更的证据均拒绝。
+
+正式入口在建立 candidate 前读取真实 Public Current 并验证批准的 ID、Domestic Spread
+artifact SHA 与 Current manifest SHA；发布前再次核对 Current、manifest 和证据。
+独立 producer clone 只追加批准的 DAILY_CLOSE 来源行，保留既有 spot 原始行；原有
+calculator、配置驱动依赖闭包、有界物化和 historical publication guard 决定可发布的
+精确 derived key。声明为非交易日的来源没有 DAILY_CLOSE，其批准的旧 derived 行必须
+精确删除；未列入范围的历史变化仍失败。`result.json` 记录 manifest SHA、预期和实测
+Current、批准键数、source/audit SHA，以及发布前 Current ID/SHA。Manifest 是一次
+受审输入，不是持久的全历史写权限；main CI PASS 也不授予数据发布权限。
+
 默认只创建候选；`--publish` 是显式交付选择，不能由候选生成成功隐式推导。
 这些命令必须使用已批准的独立 control clone，不能从 feature worktree、local main 或
 Preview 目录正式运行。每次执行创建唯一运行目录和源副本，核对真实 Git 对象与文件字节，

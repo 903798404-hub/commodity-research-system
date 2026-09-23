@@ -68,6 +68,10 @@ def main(argv=None) -> int:
         help="AkShare business end date in strict YYYY-MM-DD form; defaults to today",
     )
     parser.add_argument("--run-root", type=Path)
+    parser.add_argument(
+        "--historical-reconciliation-manifest", type=Path,
+        help="Exact evidence-bound Domestic Spread reconciliation manifest (AkShare only)",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--candidate-only", action="store_true", help="Produce locally; no SSH, publication or continuation activation (default)")
     mode.add_argument("--publish", action="store_true", help="Produce, transfer, validate, publish and persist verified continuation")
@@ -88,19 +92,20 @@ def main(argv=None) -> int:
         module.verify_clean_detached_clone(ROOT, config)
         if args.domain != "akshare" and args.end_date is not None:
             raise ValueError("--end-date is only valid with --domain akshare")
+        if args.historical_reconciliation_manifest is not None and (
+            args.domain != "akshare" or args.end_date is not None
+        ):
+            raise ValueError("historical reconciliation requires AkShare and its manifest-only scope")
         end_date = (
             module.resolve_business_end_date(args.end_date)
-            if args.domain == "akshare"
+            if args.domain == "akshare" and args.historical_reconciliation_manifest is None
             else None
         )
         sys.path.insert(0, str(ROOT / "03_src"))
-        result = module.run_domain(
-            config,
-            args.domain,
-            run_root=args.run_root,
-            publish=args.publish,
-            end_date=end_date,
-        )
+        kwargs = {"run_root": args.run_root, "publish": args.publish, "end_date": end_date}
+        if args.historical_reconciliation_manifest is not None:
+            kwargs["reconciliation_manifest"] = args.historical_reconciliation_manifest
+        result = module.run_domain(config, args.domain, **kwargs)
         if args.config.read_bytes() != raw:
             raise ValueError("configuration changed during run")
         print(json.dumps({"PRODUCTION_DATA_DELTA": result["status"], **result}, sort_keys=True))

@@ -687,11 +687,15 @@ def _save_continuation(config: dict, domain: str, baseline: Path, work: Path, so
 
 def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
                publish: bool = False, control_root: Path | None = None,
-               end_date: date | None = None) -> dict:
+               end_date: date | None = None,
+               reconciliation_manifest: Path | None = None) -> dict:
     validate_config(config)
     require(domain in DOMAINS, "unapproved producer domain")
+    reconciliation = reconciliation_manifest is not None
+    require(not reconciliation or (domain == "akshare" and end_date is None),
+            "reconciliation requires AkShare and manifest-only exact scope")
     requested_end_date = (
-        resolve_business_end_date(end_date) if domain == "akshare" else None
+        resolve_business_end_date(end_date) if domain == "akshare" and not reconciliation else None
     )
     require(domain == "akshare" or end_date is None,
             "business end date is only valid for AkShare")
@@ -700,6 +704,13 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
     control = (control_root or ROOT).resolve()
     require(control == ROOT, "caller supplied control source is forbidden")
     verify_clean_detached_clone(control, config)
+    if reconciliation:
+        # Import only after the entire control clone has passed its exact Git
+        # archive check. A manifest is data, never an executable source path.
+        from agri_research_agent.automation import historical_reconciliation as historical
+        approved, checked = historical.load_manifest(reconciliation_manifest)
+    else:
+        approved = checked = None
     runtime = Path(config["runtime_root"]).resolve()
     require(run_root is None or Path(run_root).resolve() == runtime, "run root differs from configuration")
     require(not runtime.is_relative_to(control) and not control.is_relative_to(runtime), "runtime must be outside control clone")
@@ -709,7 +720,8 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
         if domain == "akshare":
             stack.enter_context(_domain_lock(Path(config["full_daily_lock_path"])))
         baseline_root, baseline_sha, baseline = _selected_baseline(config, domain)
-        public = _public_baseline(config, remote=publish) if domain == "akshare" else None
+        public = _public_baseline(config, remote=publish or reconciliation) if domain == "akshare" else None
+        start_current = historical.check_current(approved, public) if reconciliation else None
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ").lower() + "-" + uuid.uuid4().hex[:12]
         work = runtime / "runs" / run_id
         work.mkdir(parents=True, exist_ok=False)
@@ -740,10 +752,14 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
         # git rev-parse; setting the container marker would also require the
         # matching immutable /app/RELEASE.json and must therefore be avoided.
         env = safe_child_environment(credentials)
-        flags = _provider_flags(domain, source, end_date=requested_end_date)
+        flags = _provider_flags(domain, source, end_date=requested_end_date) if not reconciliation else None
         try:
-            _run([config["python"], "-I", "-B", "-X", "utf8",
-                  str(source / SOURCES[domain]), *flags], cwd=source, env=env)
+            if reconciliation:
+                historical_result = historical.stage_and_calculate(
+                    source, approved, checked, python=config["python"], env=env)
+            else:
+                _run([config["python"], "-I", "-B", "-X", "utf8",
+                      str(source / SOURCES[domain]), *flags], cwd=source, env=env)
         finally:
             credentials.clear()
             env.clear()
@@ -756,14 +772,32 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
                 require(_identity(data / relative) == identity, "provider modified unrelated baseline bytes")
         date_evidence = (
             _akshare_end_date_evidence(data, requested_end_date)
-            if domain == "akshare" and requested_end_date is not None
+            if domain == "akshare" and requested_end_date is not None and not reconciliation
             else {}
         )
         result = {"run_id": run_id, "domain": domain, "producer": producer, "published": False,
                   "baseline_manifest_sha256": baseline_sha, "source": str(source),
                   "source_mode": "approved-control-file-transport-independent-shallow-clone",
                   **date_evidence}
+        if reconciliation:
+            result.update({
+                "reconciliation_mode": "HISTORICAL_RECONCILIATION",
+                "reconciliation_manifest_sha256": checked["manifest_sha256"],
+                "expected_current_id": approved["expected_current"]["id"],
+                "expected_current_artifact_sha256": approved["expected_current"]["artifact_sha256"],
+                "expected_current_manifest_sha256": approved["expected_current"]["manifest_sha256"],
+                "actual_start_current_id": start_current["id"],
+                "source_evidence_sha256": approved["source_evidence"]["sha256"],
+                "audit_evidence_sha256": approved["audit_evidence"]["sha256"],
+                **historical_result,
+            })
         if domain == "akshare":
+            if reconciliation:
+                # Detect changed approval/evidence before candidate construction.
+                refreshed, rechecked = historical.load_manifest(reconciliation_manifest)
+                require(refreshed == approved and rechecked["manifest_sha256"] == checked["manifest_sha256"],
+                        "reconciliation approval changed during run")
+                historical.check_current(approved, public)
             package = _build_public_package(source, public, work / "packages")
             previous = strict_json((public / "manifest.json").read_bytes())
             changed = package.manifest["delivery_identity_sha256"] != previous["delivery_identity_sha256"]
@@ -771,6 +805,14 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
                            "status": "CANDIDATE" if changed else "NO_CHANGE"})
             if publish and changed:
                 _check_public_pointer(_public_pointer(config), previous)
+                if reconciliation:
+                    current = historical.check_current(approved, public)
+                    require(current == start_current, "reconciliation Current changed before publication")
+                    refreshed, rechecked = historical.load_manifest(reconciliation_manifest)
+                    require(refreshed == approved and rechecked["manifest_sha256"] == checked["manifest_sha256"],
+                            "reconciliation evidence changed before publication")
+                    result.update(pre_publish_current_id=current["id"],
+                                  pre_publish_current_sha256=current["manifest_sha256"])
                 transported = _run([config["python"], "-I", "-B", "-X", "utf8",
                                     str(source / "04_scripts/transfer_public_data_package.py"),
                                     "--package", str(package.directory), "--ssh-target", config["ssh_target"],
@@ -782,6 +824,7 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
                 _save_continuation(config, domain, baseline_root, work, source, receipt)
                 result.update(status="PUBLISHED", published=True)
             elif publish:
+                require(not reconciliation, "reconciliation produced no Public Current change")
                 pointer = _public_pointer(config)
                 _check_public_pointer(pointer, previous)
                 remote_manifest_sha = _remote_hash(config, config["remote_store_root"] + "/releases/" + pointer["package_id"] + "/manifest.json")
