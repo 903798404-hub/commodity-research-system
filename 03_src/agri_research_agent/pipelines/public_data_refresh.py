@@ -18,6 +18,7 @@ from agri_research_agent.shared.runtime_context import RuntimeContext, assert_ru
 
 class ProviderStatus(StrEnum):
     READY = "READY"
+    DEPENDENCY_UNAVAILABLE = "DEPENDENCY_UNAVAILABLE"
     LIVE_VERIFICATION_PENDING = "LIVE_VERIFICATION_PENDING"
     SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
     NETWORK_UNAVAILABLE = "NETWORK_UNAVAILABLE"
@@ -28,6 +29,14 @@ class ProviderStatus(StrEnum):
     PROMOTION_FAILURE = "PROMOTION_FAILURE"
     NO_CHANGE = "NO_CHANGE"
     UPDATED = "UPDATED"
+
+
+class DomainStatus(StrEnum):
+    UPDATED = "UPDATED"
+    NO_CHANGE = "NO_CHANGE"
+    MISSING = "MISSING"
+    ERROR = "ERROR"
+    SKIPPED_DEPENDENCY_UNAVAILABLE = "SKIPPED_DEPENDENCY_UNAVAILABLE"
 
 
 class OverallStatus(StrEnum):
@@ -43,6 +52,9 @@ class CurrentIdentity:
     release_id: str | None
     manifest_sha256: str | None
     source_max_dates: Mapping[str, str] = field(default_factory=dict)
+    dataset_identities: Mapping[str, Mapping[str, str | None]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,22 +151,34 @@ def run_unified_refresh(
     adapters: Sequence[ProviderAdapter],
     report_builder: Callable[[Mapping[str, object]], str] | None = None,
     require_all_sources: bool = False,
+    preset_outcomes: Sequence[ProviderOutcome] = (),
+    provider_order: Sequence[str] | None = None,
 ) -> UnifiedRunResult:
     """Run providers independently and seal one immutable orchestration report."""
 
     safe_run_id = validate_candidate_id(run_id)
-    if not adapters:
+    if not adapters and not preset_outcomes:
         raise ValueError("at least one provider is required")
-    names = tuple(adapter.name for adapter in adapters)
+    adapter_names = tuple(adapter.name for adapter in adapters)
+    preset_names = tuple(outcome.provider for outcome in preset_outcomes)
+    if len((*adapter_names, *preset_names)) != len(set((*adapter_names, *preset_names))):
+        raise ValueError("provider names must be unique")
+    names = tuple(provider_order or (*adapter_names, *preset_names))
     if len(names) != len(set(names)):
         raise ValueError("provider names must be unique")
+    if set(names) != set((*adapter_names, *preset_names)):
+        raise ValueError("provider_order must contain every adapter and preset outcome")
+    if require_all_sources and preset_outcomes:
+        raise ValueError("preset outcomes are incompatible with require_all_sources")
     started = datetime.now(timezone.utc)
     pointer_snapshot = _snapshot_current_pointers(runtime) if require_all_sources else None
-    outcomes = (
+    executed = (
         _run_all_required(adapters)
         if require_all_sources
         else tuple(_run_provider(adapter) for adapter in adapters)
     )
+    by_name = {item.provider: item for item in (*executed, *preset_outcomes)}
+    outcomes = tuple(by_name[name] for name in names)
     root_failure = next(
         (item.root_failure for item in outcomes if item.root_failure is not None), None
     )
@@ -544,6 +568,7 @@ def _overall(outcomes: Sequence[ProviderOutcome]) -> OverallStatus:
     statuses = [item.status for item in outcomes]
     success = {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
     unavailable = {
+        ProviderStatus.DEPENDENCY_UNAVAILABLE,
         ProviderStatus.SOURCE_UNAVAILABLE,
         ProviderStatus.NETWORK_UNAVAILABLE,
         ProviderStatus.LIVE_VERIFICATION_PENDING,
@@ -564,6 +589,10 @@ def _identity_payload(value: CurrentIdentity) -> dict[str, object]:
         "release_id": value.release_id,
         "manifest_sha256": value.manifest_sha256,
         "source_max_dates": dict(value.source_max_dates),
+        "dataset_identities": {
+            name: dict(identity)
+            for name, identity in sorted(value.dataset_identities.items())
+        },
     }
 
 
@@ -671,7 +700,7 @@ def _reject_sensitive_metadata(payload: object) -> None:
 
 
 __all__ = [
-    "CurrentIdentity", "OverallStatus", "ProviderAdapter", "ProviderFailure",
+    "CurrentIdentity", "DomainStatus", "OverallStatus", "ProviderAdapter", "ProviderFailure",
     "ProviderOutcome", "ProviderStatus", "RefreshResult", "RootFailure",
     "UnifiedRunResult", "root_failure_from_exception",
     "render_report", "run_unified_refresh",

@@ -35,6 +35,25 @@ REQUIRED_PROVIDERS = {
 }
 UNAVAILABLE = {"SOURCE_UNAVAILABLE", "NETWORK_UNAVAILABLE", "LIVE_VERIFICATION_PENDING"}
 SUCCESS_BUSINESS = {"UPDATED", "NO_CHANGE"}
+ACCEPTED_BUSINESS = {*SUCCESS_BUSINESS, "PARTIAL_SUCCESS"}
+DOMAIN_SUCCESS = {"UPDATED", "NO_CHANGE"}
+DOMAIN_INCOMPLETE = {"MISSING", "ERROR", "SKIPPED_DEPENDENCY_UNAVAILABLE"}
+PROVIDER_DOMAINS = {
+    "tankan": {"tankan_market", "fx"},
+    "lutou": {
+        "three_oil", "soil_moisture", "weather_observation", "weather_forecast",
+    },
+    "lutou_domestic_basis": {"domestic_basis"},
+}
+DOMAIN_DATASETS = {
+    "tankan_market": "tankan",
+    "fx": "tankan",
+    "three_oil": "lutou-three-oil",
+    "soil_moisture": "lutou-soil-moisture",
+    "weather_observation": "lutou-weather",
+    "weather_forecast": "lutou-weather",
+    "domestic_basis": "lutou-domestic-basis",
+}
 PREWARM_WARNINGS = {"SKIPPED", "PARTIAL", "FAIL"}
 FAILED_STAGES = {
     "LOCK", "WINDOWS_ENV", "RUNTIME_FILESYSTEM", "REPOSITORY", "PYTHON_RUNTIME", "CREDENTIALS",
@@ -217,6 +236,19 @@ def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+
+
+def persist_completed_status(
+    automation_root: Path,
+    final: Mapping[str, Any],
+    *,
+    full_success: bool,
+) -> None:
+    """Advance current status; reserve last-success for complete provider success."""
+
+    atomic_write_json(automation_root / "current-status.json", final)
+    if full_success:
+        atomic_write_json(automation_root / "last-success.json", final)
 
 
 def sha256_file(path: Path) -> str:
@@ -473,7 +505,7 @@ def validate_daily_manifest(path: Path, run_id: str, process_exit_code: int) -> 
     if process_exit_code != 0:
         raise WrapperFailure(classify_manifest_failure(value), "FULL DAILY process and Daily Manifest report failure")
     business = value.get("business_status")
-    if value.get("succeeded") is not True or business not in SUCCESS_BUSINESS:
+    if value.get("succeeded") is not True or business not in ACCEPTED_BUSINESS:
         raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest reports an incomplete business outcome")
     sources = value.get("sources")
     if not isinstance(sources, list):
@@ -484,8 +516,60 @@ def validate_daily_manifest(path: Path, run_id: str, process_exit_code: int) -> 
     }
     if set(provider_status) != REQUIRED_PROVIDERS:
         raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest required provider set is incomplete")
-    if any(status not in SUCCESS_BUSINESS for status in provider_status.values()):
-        raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest contains an unavailable or failed provider")
+    domain_completed = 0
+    domain_incomplete = 0
+    for item in sources:
+        if not isinstance(item, Mapping):
+            raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest source result is invalid")
+        domains = item.get("domains")
+        if not isinstance(domains, Mapping) or not domains:
+            if business in SUCCESS_BUSINESS and str(item.get("status")) in SUCCESS_BUSINESS:
+                # Historical complete-success manifests predate domain-level evidence.
+                # They remain valid inputs for downstream audit/alert consumers, while
+                # PARTIAL_SUCCESS always requires the stricter dataset-preservation proof.
+                domain_completed += 1
+                continue
+            raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest domain evidence is incomplete")
+        provider = str(item.get("source"))
+        if set(map(str, domains)) != PROVIDER_DOMAINS[provider]:
+            raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest domain set is incomplete")
+        before = item.get("current_before")
+        after = item.get("current_after")
+        if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+            raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest Current evidence is invalid")
+        before_datasets = before.get("dataset_identities")
+        after_datasets = after.get("dataset_identities")
+        if not isinstance(before_datasets, Mapping) or not isinstance(after_datasets, Mapping):
+            raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest dataset Current evidence is invalid")
+        item_incomplete = 0
+        for domain, raw_status in domains.items():
+            status = str(raw_status)
+            if status in DOMAIN_SUCCESS:
+                domain_completed += 1
+                continue
+            if status not in DOMAIN_INCOMPLETE:
+                raise WrapperFailure("MANIFEST_VALIDATION", "Daily Manifest domain status is invalid")
+            domain_incomplete += 1
+            item_incomplete += 1
+            dataset = DOMAIN_DATASETS.get(str(domain))
+            if dataset is None or before_datasets.get(dataset) != after_datasets.get(dataset):
+                raise WrapperFailure(
+                    "MANIFEST_VALIDATION",
+                    "incomplete domain changed its trusted Public Current identity",
+                )
+        item_status = str(item.get("status"))
+        if (item_incomplete == 0) != (item_status in SUCCESS_BUSINESS):
+            raise WrapperFailure(
+                "MANIFEST_VALIDATION", "provider status conflicts with domain evidence"
+            )
+    if business in SUCCESS_BUSINESS:
+        if domain_incomplete or any(
+            status not in SUCCESS_BUSINESS for status in provider_status.values()
+        ):
+            raise WrapperFailure("MANIFEST_VALIDATION", "complete success contains an incomplete provider")
+    elif business == "PARTIAL_SUCCESS":
+        if not domain_completed or not domain_incomplete:
+            raise WrapperFailure("MANIFEST_VALIDATION", "partial success domain accounting is invalid")
     freshness = value.get("consumer_freshness_validation")
     if not isinstance(freshness, dict) or freshness.get("status") in {"STALE", "FAIL", None}:
         raise WrapperFailure("CONSUMER_FRESHNESS", "consumer freshness contract did not pass")
@@ -655,6 +739,7 @@ def run_logged(command: Sequence[str], cwd: Path, env: Mapping[str, str], log_pa
 def business_command(
     python: Path, tool_repo: Path, runtime: Path, run_id: str,
     ssh_target: str, remote_store_root: str, activation_image_id: str,
+    provider_preflight_evidence: Path,
 ) -> list[str]:
     return [
         str(python), "-I", str(tool_repo / "04_scripts" / "refresh_public_data.py"),
@@ -663,6 +748,7 @@ def business_command(
         "--packages-root", str(runtime / "public-data-packages"), "--run-id", run_id,
         "--ssh-target", ssh_target, "--remote-store-root", remote_store_root,
         "--activation-image-id", activation_image_id, "--prewarm",
+        "--provider-preflight-evidence", str(provider_preflight_evidence),
     ]
 
 
@@ -715,11 +801,52 @@ def run_provider_preflight(
         and len(source_names) == len(set(source_names))
         and set(source_names) == REQUIRED_PROVIDERS
     )
-    if result.returncode or not valid_identity or any(
-        item.get("status") != "READY" for item in sources if isinstance(item, dict)
-    ):
-        raise WrapperFailure("PROVIDER_PREFLIGHT", "one or more formal providers did not pass read-only preflight")
-    return {"sources": [{"source": item.get("source"), "status": item.get("status")} for item in sources]}
+    allowed_statuses = {
+        "READY", "DEPENDENCY_UNAVAILABLE", "LIVE_VERIFICATION_PENDING",
+        "SOURCE_UNAVAILABLE", "NETWORK_UNAVAILABLE", "AUTH_FAILURE",
+        "SOURCE_SCHEMA_FAILURE", "INGESTION_FAILURE", "QC_FAILURE",
+        "PROMOTION_FAILURE",
+    }
+    valid_statuses = valid_sources and all(
+        item.get("status") in allowed_statuses for item in sources
+        if isinstance(item, dict)
+    )
+    ready_count = sum(
+        item.get("status") == "READY" for item in sources if isinstance(item, dict)
+    )
+    valid_details = valid_sources and all(
+        isinstance(item.get("current_identity"), Mapping)
+        and isinstance(item["current_identity"].get("dataset_identities"), Mapping)
+        and isinstance(item.get("domains"), Mapping)
+        and set(map(str, item["domains"]))
+        == PROVIDER_DOMAINS.get(str(item.get("source")), set())
+        and all(
+            str(status) in {"READY", *DOMAIN_SUCCESS, *DOMAIN_INCOMPLETE}
+            for status in item["domains"].values()
+        )
+        and (
+            all(str(status) == "READY" for status in item["domains"].values())
+            == (item.get("status") == "READY")
+        )
+        for item in sources if isinstance(item, dict)
+    )
+    if result.returncode or not valid_identity or not valid_statuses or not valid_details:
+        raise WrapperFailure("PROVIDER_PREFLIGHT", "provider preflight returned invalid evidence")
+    if ready_count == 0:
+        raise WrapperFailure("PROVIDER_PREFLIGHT", "no independent provider passed read-only preflight")
+    return {
+        "sources": [
+            {
+                "source": item.get("source"),
+                "status": item.get("status"),
+                "domains": item.get("domains", {}),
+                "safe_reason": item.get("safe_reason"),
+            }
+            for item in sources
+        ],
+        "ready_provider_count": ready_count,
+        "evidence_path": str(evidence_path),
+    }
 
 
 def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, automation_root: Path | None = None, python: Path = DEFAULT_PYTHON, timeout_seconds: float = 14400) -> int:
@@ -802,8 +929,6 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
             record_gate("PYTHON_RUNTIME", python_gate)
             home = Path.home()
             tankan_file, lutou_file = home / ".market-data-secrets" / "tankan.env", home / ".market-data-secrets" / "lutou.env"
-            tankan = load_env_file_structure(tankan_file, ("TANKAN_HOST", "TANKAN_PORT", "TANKAN_DATABASE", "TANKAN_USER", "TANKAN_PASSWORD"))
-            lutou = load_env_file_structure(lutou_file, ("LUTOU_HOST", "LUTOU_PORT", "LUTOU_USER", "LUTOU_PASSWORD"))
             ssh_target = os.environ.get("MARKET_DATA_SSH_TARGET", "").strip()
             remote_store = os.environ.get("MARKET_DATA_REMOTE_STORE_ROOT", "").strip()
             image_id = os.environ.get("MARKET_DATA_ACTIVATION_IMAGE_ID", "").strip()
@@ -811,40 +936,7 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
                 raise WrapperFailure("CREDENTIALS", "required non-secret FULL DAILY configuration is incomplete")
             if not _SSH_TARGET.fullmatch(ssh_target) or not _REMOTE_PATH.fullmatch(remote_store) or ".." in Path(remote_store).parts or not _IMAGE_ID.fullmatch(image_id):
                 raise WrapperFailure("CREDENTIALS", "FULL DAILY configuration contains an unsafe identity")
-            record_gate("CREDENTIALS", lambda: "required credential files are structurally complete")
-            def tailscale_gate() -> str:
-                result = subprocess.run([tool_path("tailscale"), "status", "--json"], text=True, encoding="utf-8", capture_output=True, check=False, timeout=20)
-                if result.returncode or json.loads(result.stdout).get("BackendState") != "Running":
-                    raise WrapperFailure("TAILSCALE", "Tailscale backend is not Running")
-                return "Tailscale backend is Running"
-            record_gate("TAILSCALE", tailscale_gate)
-            record_gate("NETWORK", lambda: "source hostnames resolved" if socket.getaddrinfo(tankan["TANKAN_HOST"], int(tankan["TANKAN_PORT"])) and socket.getaddrinfo(lutou["LUTOU_HOST"], int(lutou["LUTOU_PORT"])) else "source hostname resolution failed")
-            record_gate("TANKAN_TCP", lambda: (tcp_probe(tankan["TANKAN_HOST"], int(tankan["TANKAN_PORT"]), stage="TANKAN_TCP") or "Tankan TCP connected"))
-            record_gate("LUTOU_TCP", lambda: (tcp_probe(lutou["LUTOU_HOST"], int(lutou["LUTOU_PORT"]), stage="LUTOU_TCP") or "Lutou TCP connected"))
-            def tankan_auth() -> str:
-                from agri_research_agent.data_sources.tankan.client import TankanClient, TankanConnectionSettings
-                settings = TankanConnectionSettings.from_secret_file(tankan_file)
-                try:
-                    with TankanClient(settings):
-                        pass
-                except Exception as exc:
-                    raise WrapperFailure("TANKAN_AUTH", f"Tankan authentication/read-only contract failed: {type(exc).__name__}") from exc
-                finally:
-                    settings.clear_password()
-                return "Tankan authentication and read-only contract passed"
-            def lutou_auth() -> str:
-                from agri_research_agent.data_sources.lutou.live import LutouClient, LutouConnectionSettings
-                settings = LutouConnectionSettings.from_secret_file(lutou_file)
-                try:
-                    with LutouClient(settings):
-                        pass
-                except Exception as exc:
-                    raise WrapperFailure("LUTOU_AUTH", f"Lutou authentication/read-only contract failed: {type(exc).__name__}") from exc
-                finally:
-                    settings.clear_password()
-                return "Lutou authentication and read-only contract passed"
-            record_gate("TANKAN_AUTH", tankan_auth)
-            record_gate("LUTOU_AUTH", lutou_auth)
+            record_gate("CREDENTIALS", lambda: "shared non-secret production configuration is complete")
             remote = ssh_command(ssh_target, "true")
             if remote.returncode:
                 raise WrapperFailure("SSH", "strict non-interactive SSH preflight failed")
@@ -888,7 +980,10 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
                 python, tool_repo, runtime, run_id, tankan_file, lutou_file
             ))
             env = runtime_environment()
-            command = business_command(python, tool_repo, runtime, run_id, ssh_target, remote_store, image_id)
+            command = business_command(
+                python, tool_repo, runtime, run_id, ssh_target, remote_store, image_id,
+                runtime / "provider-preflight-evidence.json",
+            )
             process_exit_code = run_logged(command, tool_repo, env, run_dir / "run.log", timeout_seconds)
             (run_dir / "process-exit-code.txt").write_text(f"{process_exit_code}\n", encoding="utf-8")
             daily_manifest_path = runtime / "public-data-daily" / "runs" / run_id / "manifest.json"
@@ -900,10 +995,17 @@ def run_wrapper(trigger_source: str, *, repository: Path = DEFAULT_REPOSITORY, a
                 except (OSError, UnicodeError, ValueError):
                     pass
             evaluation = validate_daily_manifest(daily_manifest_path, run_id, process_exit_code)
-            final = make_final_status(invocation, status="SUCCESS", completed_at=utc_now(), failed_stage=None, safe_reason="FULL DAILY completed and manifest contract passed", process_exit_code=process_exit_code, manifest_path=daily_manifest_path, manifest=evaluation["manifest"], warnings=evaluation["warnings"], prewarm_status=evaluation["prewarm_status"])
+            business_status = str(evaluation["manifest"]["business_status"])
+            wrapper_status = (
+                "PARTIAL_SUCCESS"
+                if business_status == "PARTIAL_SUCCESS"
+                else "SUCCESS"
+            )
+            final = make_final_status(invocation, status=wrapper_status, completed_at=utc_now(), failed_stage=None, safe_reason="FULL DAILY completed and manifest contract passed", process_exit_code=process_exit_code, manifest_path=daily_manifest_path, manifest=evaluation["manifest"], warnings=evaluation["warnings"], prewarm_status=evaluation["prewarm_status"])
             atomic_write_json(run_dir / "final-status.json", final)
-            atomic_write_json(automation_root / "current-status.json", final)
-            atomic_write_json(automation_root / "last-success.json", final)
+            persist_completed_status(
+                automation_root, final, full_success=wrapper_status == "SUCCESS"
+            )
             return 0
     except WrapperFailure as exc:
         active_id = None

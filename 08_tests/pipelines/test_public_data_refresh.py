@@ -186,7 +186,7 @@ def test_pipeline_failures_preserve_current(runtime: RuntimeContext, status: Pro
     assert outcome.current_before == outcome.current_after
 
 
-def test_unavailable_provider_does_not_block_other_provider(runtime: RuntimeContext) -> None:
+def test_tankan_unavailable_does_not_block_lutou_update(runtime: RuntimeContext) -> None:
     result = run_unified_refresh(
         runtime=runtime,
         run_id="independent",
@@ -197,6 +197,26 @@ def test_unavailable_provider_does_not_block_other_provider(runtime: RuntimeCont
     )
     assert result.overall_status is OverallStatus.SUCCESS_WITH_UNAVAILABLE_SOURCE
     assert result.providers[1].status is ProviderStatus.UPDATED
+
+
+def test_lutou_unavailable_does_not_block_tankan_update(runtime: RuntimeContext) -> None:
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="lutou-down-tankan-up",
+        adapters=[
+            FakeAdapter("tankan", RefreshResult(True, {"data": "2026-08-19"})),
+            FakeAdapter(
+                "lutou",
+                preflight_failure=ProviderFailure(
+                    ProviderStatus.NETWORK_UNAVAILABLE, "safe"
+                ),
+            ),
+        ],
+    )
+    assert result.overall_status is OverallStatus.SUCCESS_WITH_UNAVAILABLE_SOURCE
+    assert result.providers[0].status is ProviderStatus.UPDATED
+    assert result.providers[0].current_before != result.providers[0].current_after
+    assert result.providers[1].current_before == result.providers[1].current_after
 
 
 def test_required_source_mode_preflights_all_and_preserves_every_current(

@@ -24,6 +24,7 @@ from agri_research_agent.pipelines.public_data_delivery import (
     sync_to_local_server_store,
 )
 from agri_research_agent.pipelines.public_data_refresh import (
+    DomainStatus,
     ProviderOutcome,
     ProviderStatus,
     UnifiedRunResult,
@@ -39,6 +40,7 @@ from agri_research_agent.shared.runtime_context import RuntimeContext, assert_ru
 class DailyBusinessStatus(StrEnum):
     UPDATED = "UPDATED"
     NO_CHANGE = "NO_CHANGE"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
     SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
     FAILED = "FAILED"
 
@@ -84,6 +86,8 @@ def run_daily_update(
     post_switch_validator: Callable[[Path], None] | None = None,
     consumer_freshness_validator: FreshnessValidator | None = None,
     delivery_artifact_runner: DeliveryArtifactRunner | None = None,
+    delivery_artifact_provider: str | None = None,
+    preserved_delivery_artifacts: Mapping[str, str | Path] | None = None,
     initial_seed: bool = False,
     package_builder: PackageBuilder = build_production_package,
     syncer: Syncer = sync_to_local_server_store,
@@ -110,21 +114,52 @@ def run_daily_update(
     delivery_identity: str | None = None
     aggregate_unchanged = False
 
-    if refresh_status in {DailyBusinessStatus.UPDATED, DailyBusinessStatus.NO_CHANGE}:
+    partial_statuses = {
+        DailyBusinessStatus.UPDATED,
+        DailyBusinessStatus.NO_CHANGE,
+        DailyBusinessStatus.PARTIAL_SUCCESS,
+    }
+    if refresh_status in partial_statuses:
         if delivery_artifact_runner is not None:
-            try:
-                delivery_artifacts = delivery_artifact_runner()
-                if not delivery_artifacts:
-                    raise ValueError("delivery artifact runner returned no artifacts")
-                delivery_artifact_status = "PASS"
-            except Exception as exc:
-                status = DailyBusinessStatus.FAILED
-                delivery_artifact_status = "FAIL"
-                safe_reason = f"delivery artifact producer failed: {type(exc).__name__}"
+            provider_ready = (
+                delivery_artifact_provider is None
+                or _provider_completed(refresh.providers, delivery_artifact_provider)
+            )
+            if not provider_ready:
+                delivery_artifacts = dict(preserved_delivery_artifacts or {})
+                if delivery_artifacts:
+                    delivery_artifact_status = "PRESERVED"
+                    status = DailyBusinessStatus.PARTIAL_SUCCESS
+                else:
+                    status = DailyBusinessStatus.FAILED
+                    delivery_artifact_status = "FAIL"
+                    safe_reason = "delivery artifact dependency failed and no trusted baseline exists"
+            else:
+                try:
+                    delivery_artifacts = delivery_artifact_runner()
+                    if not delivery_artifacts:
+                        raise ValueError("delivery artifact runner returned no artifacts")
+                    delivery_artifact_status = "PASS"
+                except Exception as exc:
+                    delivery_artifacts = dict(preserved_delivery_artifacts or {})
+                    if delivery_artifacts:
+                        status = DailyBusinessStatus.PARTIAL_SUCCESS
+                        delivery_artifact_status = "ERROR_PRESERVED"
+                        safe_reason = (
+                            f"delivery artifact producer failed: {type(exc).__name__}; "
+                            "trusted baseline preserved"
+                        )
+                    else:
+                        status = DailyBusinessStatus.FAILED
+                        delivery_artifact_status = "FAIL"
+                        safe_reason = f"delivery artifact producer failed: {type(exc).__name__}"
 
     has_delivery_baseline = _has_delivery_package(packages_root)
+    refresh_changed = any(
+        item.current_before != item.current_after for item in refresh.providers
+    )
     should_package = (
-        status is DailyBusinessStatus.UPDATED
+        status in {DailyBusinessStatus.UPDATED, DailyBusinessStatus.PARTIAL_SUCCESS}
         or (
             status is DailyBusinessStatus.NO_CHANGE
             and delivery_artifact_runner is not None
@@ -157,24 +192,26 @@ def run_daily_update(
                     delivery_artifacts=delivery_artifacts,
                 )
                 package_status = (
-                    "GENERATED"
-                    if refresh_status is DailyBusinessStatus.UPDATED or package.created
-                    else "NO_CHANGE"
+                    "GENERATED" if package.created or refresh_changed else "NO_CHANGE"
                 )
                 delivery_identity = package.manifest.get("delivery_identity_sha256")
-                if refresh_status is DailyBusinessStatus.UPDATED:
+                if status in {
+                    DailyBusinessStatus.UPDATED,
+                    DailyBusinessStatus.PARTIAL_SUCCESS,
+                } and package.created:
                     delivery_action = DeliveryAction.STANDARD
                 elif initial_seed:
                     package_status = "GENERATED" if package.created else "REUSED"
                 elif package.created:
                     delivery_action = DeliveryAction.STANDARD
             except Exception as exc:
+                status = DailyBusinessStatus.FAILED
                 package_status = "FAILED"
                 safe_reason = f"production package failed: {type(exc).__name__}"
         aggregate_unchanged = (
             package is not None
-            and refresh_status is DailyBusinessStatus.NO_CHANGE
             and not package.created
+            and not refresh_changed
             and not initial_seed
         )
         if aggregate_unchanged:
@@ -199,20 +236,22 @@ def run_daily_update(
                 switch_status = sync.atomic_switch
                 read_status = sync.formal_read_validation
                 if sync.status == "SYNCED":
-                    if not seed_action:
+                    if not seed_action and status is not DailyBusinessStatus.PARTIAL_SUCCESS:
                         status = DailyBusinessStatus.UPDATED
                     targets = prewarm_targets
                     if prewarm_target_factory is not None and sync.current_directory is not None:
                         targets = prewarm_target_factory(sync.current_directory / "data")
                     prewarm = prewarmer(targets)
                 else:
+                    status = DailyBusinessStatus.FAILED
                     safe_reason = sync.safe_reason
             except Exception as exc:
+                status = DailyBusinessStatus.FAILED
                 server_status = "FAILED"
                 safe_reason = f"server sync failed: {type(exc).__name__}"
         elif package is not None:
             server_status = "SKIPPED"
-            if package.created:
+            if package.created and status is not DailyBusinessStatus.PARTIAL_SUCCESS:
                 status = DailyBusinessStatus.UPDATED
 
     if (
@@ -241,8 +280,10 @@ def run_daily_update(
         "run_id": safe_run_id,
         "completed_at": now,
         "business_status": status.value,
-        "aggregate_status": refresh.manifest.get(
-            "aggregate_status", refresh.overall_status.value
+        "aggregate_status": (
+            DailyBusinessStatus.PARTIAL_SUCCESS.value
+            if status is DailyBusinessStatus.PARTIAL_SUCCESS
+            else refresh.manifest.get("aggregate_status", refresh.overall_status.value)
         ),
         "root_failure": (
             refresh.manifest.get("root_failure")
@@ -269,7 +310,7 @@ def run_daily_update(
         "canonical": _stage_summary(refresh.providers, "canonical"),
         "public_current_identity": current_identity,
         "public_current_vector": current_vector,
-        "current_changed": refresh_status is DailyBusinessStatus.UPDATED,
+        "current_changed": refresh_changed,
         "delivery_identity": delivery_identity,
         "delivery_action": delivery_action.value,
         "delivery_changed": bool(
@@ -340,6 +381,27 @@ def render_final_line(manifest: Mapping[str, Any]) -> str:
         return f"SOURCE_UNAVAILABLE | {unavailable} unavailable | Current preserved | Server=SKIPPED"
     if status == DailyBusinessStatus.FAILED.value:
         return "FAILED | Current/package publication blocked | Server=SKIPPED"
+    if status == DailyBusinessStatus.PARTIAL_SUCCESS.value:
+        completed = ",".join(
+            str(item["source"])
+            for item in manifest["sources"]
+            if any(
+                value in {DomainStatus.UPDATED.value, DomainStatus.NO_CHANGE.value}
+                for value in item.get("domains", {}).values()
+            )
+        )
+        incomplete = ",".join(
+            str(item["source"])
+            for item in manifest["sources"]
+            if any(
+                value not in {DomainStatus.UPDATED.value, DomainStatus.NO_CHANGE.value}
+                for value in item.get("domains", {}).values()
+            )
+        )
+        return (
+            f"PARTIAL_SUCCESS | completed={completed or 'none'} | "
+            f"incomplete={incomplete or 'none'} | Server={manifest['server_sync']}"
+        )
     latest = " | ".join(
         f"{key} latest={value}" for key, value in manifest["source_max_dates"].items()
     )
@@ -393,26 +455,35 @@ def render_daily_report(manifest: Mapping[str, Any]) -> str:
 
 
 def _business_status(outcomes: Sequence[ProviderOutcome]) -> DailyBusinessStatus:
-    statuses = {item.status for item in outcomes}
-    failures = statuses - {
-        ProviderStatus.UPDATED,
-        ProviderStatus.NO_CHANGE,
-        ProviderStatus.SOURCE_UNAVAILABLE,
-        ProviderStatus.NETWORK_UNAVAILABLE,
-        ProviderStatus.LIVE_VERIFICATION_PENDING,
+    domain_statuses: list[str] = []
+    for outcome in outcomes:
+        if outcome.domains:
+            domain_statuses.extend(str(value) for value in outcome.domains.values())
+        elif outcome.status in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}:
+            domain_statuses.append(outcome.status.value)
+        else:
+            domain_statuses.append(DomainStatus.ERROR.value)
+    completed = {
+        DomainStatus.UPDATED.value,
+        DomainStatus.NO_CHANGE.value,
     }
-    if failures:
+    completed_count = sum(value in completed for value in domain_statuses)
+    incomplete_count = len(domain_statuses) - completed_count
+    if completed_count and incomplete_count:
+        return DailyBusinessStatus.PARTIAL_SUCCESS
+    if not completed_count:
         return DailyBusinessStatus.FAILED
-    unavailable = statuses & {
-        ProviderStatus.SOURCE_UNAVAILABLE,
-        ProviderStatus.NETWORK_UNAVAILABLE,
-        ProviderStatus.LIVE_VERIFICATION_PENDING,
-    }
-    if unavailable:
-        return DailyBusinessStatus.SOURCE_UNAVAILABLE
-    if ProviderStatus.UPDATED in statuses:
+    if DomainStatus.UPDATED.value in domain_statuses:
         return DailyBusinessStatus.UPDATED
     return DailyBusinessStatus.NO_CHANGE
+
+
+def _provider_completed(outcomes: Sequence[ProviderOutcome], provider: str) -> bool:
+    return any(
+        item.provider == provider
+        and item.status in {ProviderStatus.UPDATED, ProviderStatus.NO_CHANGE}
+        for item in outcomes
+    )
 
 
 def _has_delivery_package(packages_root: str | Path) -> bool:
@@ -484,6 +555,12 @@ def _formal_identity_payload(value: object) -> dict[str, Any]:
     return {
         "release_id": getattr(value, "release_id"),
         "manifest_sha256": getattr(value, "manifest_sha256"),
+        "dataset_identities": {
+            name: dict(identity)
+            for name, identity in sorted(
+                getattr(value, "dataset_identities", {}).items()
+            )
+        },
     }
 
 
@@ -492,6 +569,12 @@ def _identity_payload(value: object) -> dict[str, Any]:
         "release_id": getattr(value, "release_id"),
         "manifest_sha256": getattr(value, "manifest_sha256"),
         "source_max_dates": dict(getattr(value, "source_max_dates")),
+        "dataset_identities": {
+            name: dict(identity)
+            for name, identity in sorted(
+                getattr(value, "dataset_identities", {}).items()
+            )
+        },
     }
 
 

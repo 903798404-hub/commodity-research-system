@@ -23,6 +23,7 @@ from agri_research_agent.pipelines.public_data_delivery import (
 )
 from agri_research_agent.pipelines.public_data_refresh import (
     CurrentIdentity,
+    DomainStatus,
     OverallStatus,
     ProviderOutcome,
     ProviderStatus,
@@ -322,7 +323,7 @@ def test_source_unavailable_cannot_initial_seed(runtime: RuntimeContext) -> None
         syncer=lambda *_args, **_kwargs: calls.append("sync"),
         initial_seed=True,
     )
-    assert result.business_status is DailyBusinessStatus.SOURCE_UNAVAILABLE
+    assert result.business_status is DailyBusinessStatus.FAILED
     assert result.manifest["delivery_action"] == DeliveryAction.SKIPPED.value
     assert result.manifest["server_sync"] == "SKIPPED"
     assert calls == []
@@ -552,9 +553,9 @@ def test_source_unavailable_preserves_current_and_short_circuits(runtime: Runtim
         packages_root=runtime.runtime_root / "packages",
         package_builder=forbidden,
     )
-    assert result.business_status is DailyBusinessStatus.SOURCE_UNAVAILABLE
+    assert result.business_status is DailyBusinessStatus.FAILED
     assert result.manifest["current_changed"] is False
-    assert "Current preserved" in result.manifest["summary"]
+    assert "publication blocked" in result.manifest["summary"]
     assert called is False
 
 
@@ -736,7 +737,8 @@ def test_aggregate_current_identity_excludes_source_dates(runtime: RuntimeContex
     assert first.manifest["public_current_identity"] == second.manifest["public_current_identity"]
 
 
-def test_mixed_updated_and_unavailable_never_publishes_partial_snapshot(runtime: RuntimeContext) -> None:
+def test_mixed_updated_and_unavailable_publishes_partial_snapshot(runtime: RuntimeContext) -> None:
+    package_dir = runtime.runtime_root / "packages" / "partial-package"
     result = run_daily_update(
         runtime=runtime,
         run_id="daily-mixed-unavailable",
@@ -747,11 +749,70 @@ def test_mixed_updated_and_unavailable_never_publishes_partial_snapshot(runtime:
         ),
         public_current_root=runtime.runtime_root / "public-market-data",
         packages_root=runtime.runtime_root / "packages",
-        package_builder=lambda **_kwargs: pytest.fail("partial package must be skipped"),
+        package_builder=lambda **_kwargs: ProductionPackage(
+            "partial-package", package_dir, {}, True
+        ),
     )
-    assert result.business_status is DailyBusinessStatus.SOURCE_UNAVAILABLE
-    assert result.manifest["production_data_package"]["status"] == "SKIPPED"
+    assert result.business_status is DailyBusinessStatus.PARTIAL_SUCCESS
+    assert result.succeeded is True
+    assert result.manifest["production_data_package"]["status"] == "GENERATED"
+    assert result.manifest["current_changed"] is True
     assert result.manifest["server_sync"] == "SKIPPED"
+
+
+def test_single_lutou_domain_failure_publishes_successful_domains_and_preserves_failed_current(
+    runtime: RuntimeContext,
+) -> None:
+    tankan = replace(
+        _outcome(ProviderStatus.NO_CHANGE, provider="tankan"),
+        domains={
+            "tankan_market": DomainStatus.NO_CHANGE.value,
+            "fx": DomainStatus.NO_CHANGE.value,
+        },
+    )
+    old = {
+        "lutou-three-oil": {"release_id": "oil-old", "manifest_sha256": "a" * 64},
+        "lutou-soil-moisture": {"release_id": "soil-old", "manifest_sha256": "b" * 64},
+        "lutou-weather": {"release_id": "weather-old", "manifest_sha256": "c" * 64},
+    }
+    new = {
+        **old,
+        "lutou-three-oil": {"release_id": "oil-new", "manifest_sha256": "d" * 64},
+    }
+    lutou = ProviderOutcome(
+        "lutou",
+        ProviderStatus.READY,
+        ProviderStatus.INGESTION_FAILURE,
+        CurrentIdentity("old", "e" * 64, {}, old),
+        CurrentIdentity("mixed", "f" * 64, {}, new),
+        {},
+        {
+            "three_oil": DomainStatus.UPDATED.value,
+            "soil_moisture": DomainStatus.NO_CHANGE.value,
+            "weather_observation": DomainStatus.ERROR.value,
+            "weather_forecast": DomainStatus.ERROR.value,
+        },
+        "weather failed",
+    )
+    package_dir = runtime.runtime_root / "packages" / "mixed-domain-package"
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-single-lutou-domain-failure",
+        refresh_runner=lambda: _refresh(runtime.runtime_root, tankan, lutou),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        package_builder=lambda **_kwargs: ProductionPackage(
+            "mixed-domain-package", package_dir, {}, True
+        ),
+    )
+    assert result.business_status is DailyBusinessStatus.PARTIAL_SUCCESS
+    source = result.manifest["sources"][1]
+    assert source["current_after"]["dataset_identities"]["lutou-three-oil"] != (
+        source["current_before"]["dataset_identities"]["lutou-three-oil"]
+    )
+    assert source["current_after"]["dataset_identities"]["lutou-weather"] == (
+        source["current_before"]["dataset_identities"]["lutou-weather"]
+    )
 
 
 def test_dry_run_is_read_only_and_reports_all_publication_steps_skipped(

@@ -27,16 +27,37 @@ def _load_script(name: str, path: Path):
 
 
 def _manifest(run_id: str, *, business: str = "UPDATED", succeeded: bool = True, prewarm: str = "PASS") -> dict[str, object]:
+    domains_by_provider = {
+        "tankan": ("tankan_market", "fx"),
+        "lutou": (
+            "three_oil", "soil_moisture", "weather_observation", "weather_forecast",
+        ),
+        "lutou_domestic_basis": ("domestic_basis",),
+    }
+    datasets_by_provider = {
+        "tankan": ("tankan",),
+        "lutou": ("lutou-three-oil", "lutou-soil-moisture", "lutou-weather"),
+        "lutou_domestic_basis": ("lutou-domestic-basis",),
+    }
+    def source(provider: str) -> dict[str, object]:
+        before = {dataset: f"{dataset}-old" for dataset in datasets_by_provider[provider]}
+        after = (
+            {dataset: f"{dataset}-new" for dataset in datasets_by_provider[provider]}
+            if business == "UPDATED" else before.copy()
+        )
+        return {
+            "source": provider,
+            "status": business,
+            "domains": {domain: business for domain in domains_by_provider[provider]},
+            "current_before": {"dataset_identities": before},
+            "current_after": {"dataset_identities": after},
+        }
     return {
         "schema_version": wrapper.DAILY_SCHEMA,
         "run_id": run_id,
         "business_status": business,
         "succeeded": succeeded,
-        "sources": [
-            {"source": "tankan", "status": business},
-            {"source": "lutou", "status": business},
-            {"source": "lutou_domestic_basis", "status": business},
-        ],
+        "sources": [source("tankan"), source("lutou"), source("lutou_domestic_basis")],
         "consumer_freshness_validation": {"status": "PASS", "results": []},
         "production_data_package": {"status": "GENERATED", "package_id": "public-current-abc"},
         "server_sync": "SYNCED",
@@ -321,14 +342,24 @@ def test_runtime_baseline_identity_mismatch_stops_refresh() -> None:
 
 
 def _preflight_payload(run_id: str = "run-preflight") -> dict[str, object]:
+    def source(name: str, domains: tuple[str, ...]) -> dict[str, object]:
+        return {
+            "source": name,
+            "status": "READY",
+            "domains": {domain: "READY" for domain in domains},
+            "current_identity": {"dataset_identities": {}},
+        }
     return {
         "schema_version": "unified-public-data-dry-run/1",
         "run_id": run_id,
         "dry_run": True,
         "sources": [
-            {"source": "tankan", "status": "READY"},
-            {"source": "lutou", "status": "READY"},
-            {"source": "lutou_domestic_basis", "status": "READY"},
+            source("tankan", ("tankan_market", "fx")),
+            source(
+                "lutou",
+                ("three_oil", "soil_moisture", "weather_observation", "weather_forecast"),
+            ),
+            source("lutou_domestic_basis", ("domestic_basis",)),
         ],
     }
 
@@ -380,7 +411,11 @@ def test_provider_preflight_is_read_only_and_requires_every_source_ready(
         )
     monkeypatch.setattr(wrapper.subprocess, "run", complete)
     result = wrapper.run_provider_preflight(Path("python.exe"), tmp_path, tmp_path / "runtime", "run", tmp_path / "t.env", tmp_path / "l.env")
-    assert result["sources"] == payload["sources"]
+    assert [item["source"] for item in result["sources"]] == [
+        item["source"] for item in payload["sources"]
+    ]
+    assert {item["status"] for item in result["sources"]} == {"READY"}
+    assert result["ready_provider_count"] == 3
     assert "--dry-run" in seen["command"]
     assert "--evidence-output" in seen["command"]
     assert seen["env"]["PYTHONUTF8"] == "1"
@@ -431,9 +466,9 @@ payload = {
     'run_id': args.run_id,
     'dry_run': True,
     'sources': [
-        {'source': 'tankan', 'status': 'READY'},
-        {'source': 'lutou', 'status': 'READY'},
-        {'source': 'lutou_domestic_basis', 'status': 'READY'},
+        {'source': 'tankan', 'status': 'READY', 'domains': {'tankan_market': 'READY', 'fx': 'READY'}, 'current_identity': {'dataset_identities': {}}},
+        {'source': 'lutou', 'status': 'READY', 'domains': {'three_oil': 'READY', 'soil_moisture': 'READY', 'weather_observation': 'READY', 'weather_forecast': 'READY'}, 'current_identity': {'dataset_identities': {}}},
+        {'source': 'lutou_domestic_basis', 'status': 'READY', 'domains': {'domestic_basis': 'READY'}, 'current_identity': {'dataset_identities': {}}},
     ],
 }
 temporary = args.evidence_output.with_name('.evidence-' + uuid.uuid4().hex + '.tmp')
@@ -466,13 +501,18 @@ sys.stderr.buffer.write(b'stderr=codex\\xd7\\xd4\\xb6\\xaf\\xb8\\xfc\\xd0\\xc2\\
 def test_provider_preflight_hard_failure_is_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "tool_path", lambda name: str(Path(sys.executable).parent / (name + ".exe")))
     payload = _preflight_payload()
-    payload["sources"][0]["status"] = "SOURCE_UNAVAILABLE"
+    for source in payload["sources"]:
+        source["status"] = "SOURCE_UNAVAILABLE"
+        source["domains"] = {domain: "MISSING" for domain in source["domains"]}
     monkeypatch.setattr(
         wrapper.subprocess, "run",
         lambda command, **kwargs: _complete_preflight(command, kwargs, payload),
     )
     with pytest.raises(wrapper.WrapperFailure) as caught:
-        wrapper.run_provider_preflight(Path("python.exe"), tmp_path, tmp_path / "runtime", "run", tmp_path / "t.env", tmp_path / "l.env")
+        wrapper.run_provider_preflight(
+            Path("python.exe"), tmp_path, tmp_path / "runtime", "run",
+            tmp_path / "t.env", tmp_path / "l.env",
+        )
     assert caught.value.stage == "PROVIDER_PREFLIGHT"
 
 
@@ -627,7 +667,10 @@ def test_child_environment_forces_utf8_and_never_uses_partial_lutou_override(mon
 
 
 def test_manual_and_scheduled_have_identical_business_command() -> None:
-    arguments = (Path("python.exe"), Path("tool"), Path("runtime"), "run", "host", "/store", f"sha256:{'a' * 64}")
+    arguments = (
+        Path("python.exe"), Path("tool"), Path("runtime"), "run", "host", "/store",
+        f"sha256:{'a' * 64}", Path("runtime/provider-preflight-evidence.json"),
+    )
     manual = wrapper.business_command(*arguments)
     scheduled = wrapper.business_command(*arguments)
     assert manual == scheduled

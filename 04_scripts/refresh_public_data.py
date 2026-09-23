@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -22,10 +23,16 @@ from agri_research_agent.data_sources.lutou.live import (
     LutouConnectionSettings,
 )
 from agri_research_agent.data_sources.tankan.client import TankanConnectionSettings
+from agri_research_agent.data_sources.tankan.client import TankanClient
 from agri_research_agent.pipelines.public_data_providers import (
     DomesticBasisRefreshAdapter,
     LutouRefreshAdapter,
     TankanRefreshAdapter,
+    domestic_basis_current_identity,
+    lutou_current_identity,
+    tailscale_ready,
+    tankan_current_identity,
+    tcp_reachable,
 )
 from agri_research_agent.pipelines.public_data_daily import run_daily_update
 from agri_research_agent.pipelines.public_data_freshness import (
@@ -38,9 +45,13 @@ from agri_research_agent.pipelines.public_data_prewarm import (
 from agri_research_agent.pipelines.public_data_delivery import (
     ServerSyncResult,
     sync_to_local_server_store,
+    validate_production_package,
 )
 from agri_research_agent.pipelines.public_data_refresh import (
+    CurrentIdentity,
+    DomainStatus,
     ProviderFailure,
+    ProviderOutcome,
     ProviderStatus,
     run_unified_refresh,
 )
@@ -54,6 +65,16 @@ class ServerTransportTimeout(TimeoutError):
 
 class ServerActivationFailure(RuntimeError):
     """Transport reached the remote activation stage, which then failed."""
+
+
+PROVIDER_ORDER = ("tankan", "lutou", "lutou_domestic_basis")
+PROVIDER_DOMAINS = {
+    "tankan": ("tankan_market", "fx"),
+    "lutou": (
+        "three_oil", "soil_moisture", "weather_observation", "weather_forecast",
+    ),
+    "lutou_domestic_basis": ("domestic_basis",),
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -101,6 +122,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Explicit UTF-8 machine evidence file for --dry-run",
     )
     parser.add_argument(
+        "--provider-preflight-evidence",
+        type=Path,
+        help="Validated provider-scoped preflight evidence from the Production Wrapper",
+    )
+    parser.add_argument(
         "--initial-seed",
         action="store_true",
         help="Explicitly initialize an empty server store from validated unchanged data",
@@ -127,6 +153,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--initial-seed and --dry-run are mutually exclusive")
     if args.evidence_output is not None and not args.dry_run:
         parser.error("--evidence-output requires --dry-run")
+    if args.provider_preflight_evidence is not None and args.dry_run:
+        parser.error("--provider-preflight-evidence cannot be used with --dry-run")
+    if all(remote) and not args.dry_run and args.provider_preflight_evidence is None:
+        parser.error("formal remote execution requires --provider-preflight-evidence")
     if args.initial_seed and not (all(remote) or args.sync_target_root is not None):
         parser.error("--initial-seed requires a remote transport or --sync-target-root")
     if args.initial_seed and set(args.sources or ("tankan", "lutou")) != {"tankan", "lutou"}:
@@ -149,47 +179,44 @@ def main(argv: list[str] | None = None) -> int:
             str(ROOT / "01_data" / "processed" / "weather"),
         )
     )
-    adapters = []
-    if "tankan" in sources:
-        adapters.append(
-            TankanRefreshAdapter(
-                TankanConnectionSettings.from_secret_file(args.tankan_secret_file),
-                runtime,
-                run_id,
-                args.end_date,
-                ROOT / "02_configs" / "tankan_goal_a_market_price.yaml",
-                ROOT / "02_configs" / "tankan_fx.yaml",
-            )
-        )
-    if "lutou" in sources:
-        adapters.append(
-            LutouRefreshAdapter(
-                _lutou_settings(args.lutou_secret_file),
-                runtime,
-                run_id,
-                args.end_date,
-                ROOT / "02_configs" / "public_research_data_catalog.candidate.json",
-                ROOT / "02_configs" / "international_three_oil_v1.sealed.json",
-                ROOT / "02_configs" / "lutou_weather_current.yaml",
-                weather_baseline_root,
-                recovery_client_factory=lambda: LutouClient(
-                    _lutou_settings(args.lutou_secret_file)
-                ),
-            )
-        )
-        adapters.append(
-            DomesticBasisRefreshAdapter(
-                _lutou_settings(args.lutou_secret_file),
-                runtime,
-                run_id,
-                ROOT / "02_configs" / "lutou_domestic_basis.yaml",
-                recovery_client_factory=lambda: LutouClient(
-                    _lutou_settings(args.lutou_secret_file)
-                ),
-            )
-        )
     if args.dry_run:
-        return _dry_run(adapters, run_id=run_id, evidence_output=args.evidence_output)
+        adapters, blocked = _dry_run_plan(
+            args=args,
+            runtime=runtime,
+            run_id=run_id,
+            sources=sources,
+            weather_baseline_root=weather_baseline_root,
+        )
+        return _dry_run(
+            adapters,
+            run_id=run_id,
+            evidence_output=args.evidence_output,
+            preset_sources=blocked,
+            provider_order=_provider_order(sources),
+        )
+    if args.provider_preflight_evidence is not None:
+        evidence = _load_provider_preflight_evidence(
+            args.provider_preflight_evidence,
+            run_id=run_id,
+            provider_order=_provider_order(sources),
+        )
+        adapters, preset_outcomes = _execution_plan_from_evidence(
+            args=args,
+            runtime=runtime,
+            run_id=run_id,
+            sources=sources,
+            weather_baseline_root=weather_baseline_root,
+            evidence=evidence,
+        )
+    else:
+        adapters = _build_adapters(
+            args=args,
+            runtime=runtime,
+            run_id=run_id,
+            sources=sources,
+            weather_baseline_root=weather_baseline_root,
+        )
+        preset_outcomes = ()
     packages_root = args.packages_root or runtime.runtime_root / "public-data-packages"
     required_datasets = []
     if "tankan" in sources:
@@ -206,7 +233,9 @@ def main(argv: list[str] | None = None) -> int:
             runtime=runtime,
             run_id=f"{run_id}-refresh",
             adapters=adapters,
-            require_all_sources=True,
+            require_all_sources=False,
+            preset_outcomes=preset_outcomes,
+            provider_order=_provider_order(sources),
         ),
         public_current_root=runtime.runtime_root / "public-market-data",
         packages_root=packages_root,
@@ -242,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
             if "tankan" in sources
             else None
         ),
+        delivery_artifact_provider=("tankan" if "tankan" in sources else None),
+        preserved_delivery_artifacts=_baseline_delivery_artifacts(packages_root),
         initial_seed=args.initial_seed,
     )
     print(f"run_id={result.run_id}")
@@ -252,14 +283,328 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if result.succeeded else 1
 
 
+def _provider_order(sources: tuple[str, ...]) -> tuple[str, ...]:
+    requested: list[str] = []
+    if "tankan" in sources:
+        requested.append("tankan")
+    if "lutou" in sources:
+        requested.extend(("lutou", "lutou_domestic_basis"))
+    return tuple(requested)
+
+
+def _build_adapters(
+    *,
+    args: argparse.Namespace,
+    runtime: RuntimeContext,
+    run_id: str,
+    sources: tuple[str, ...],
+    weather_baseline_root: Path,
+    allowed_providers: set[str] | None = None,
+) -> list[object]:
+    allowed = set(_provider_order(sources)) if allowed_providers is None else allowed_providers
+    adapters: list[object] = []
+    if "tankan" in allowed:
+        adapters.append(
+            TankanRefreshAdapter(
+                TankanConnectionSettings.from_secret_file(args.tankan_secret_file),
+                runtime,
+                run_id,
+                args.end_date,
+                ROOT / "02_configs" / "tankan_goal_a_market_price.yaml",
+                ROOT / "02_configs" / "tankan_fx.yaml",
+            )
+        )
+    if {"lutou", "lutou_domestic_basis"} & allowed:
+        if "lutou" in allowed:
+            adapters.append(
+                LutouRefreshAdapter(
+                    _lutou_settings(args.lutou_secret_file),
+                    runtime,
+                    run_id,
+                    args.end_date,
+                    ROOT / "02_configs" / "public_research_data_catalog.candidate.json",
+                    ROOT / "02_configs" / "international_three_oil_v1.sealed.json",
+                    ROOT / "02_configs" / "lutou_weather_current.yaml",
+                    weather_baseline_root,
+                    recovery_client_factory=lambda: LutouClient(
+                        _lutou_settings(args.lutou_secret_file)
+                    ),
+                )
+            )
+        if "lutou_domestic_basis" in allowed:
+            adapters.append(
+                DomesticBasisRefreshAdapter(
+                    _lutou_settings(args.lutou_secret_file),
+                    runtime,
+                    run_id,
+                    ROOT / "02_configs" / "lutou_domestic_basis.yaml",
+                    recovery_client_factory=lambda: LutouClient(
+                        _lutou_settings(args.lutou_secret_file)
+                    ),
+                )
+            )
+    return adapters
+
+
+def _dry_run_plan(
+    *,
+    args: argparse.Namespace,
+    runtime: RuntimeContext,
+    run_id: str,
+    sources: tuple[str, ...],
+    weather_baseline_root: Path,
+) -> tuple[list[object], list[dict[str, object]]]:
+    ready: set[str] = set()
+    blocked: list[dict[str, object]] = []
+    if "tankan" in sources:
+        identity = tankan_current_identity(runtime)
+        try:
+            settings = TankanConnectionSettings.from_secret_file(args.tankan_secret_file)
+            if not tcp_reachable(settings.host, settings.port, 5.0):
+                raise ConnectionError("Tankan TCP endpoint is unavailable")
+            with TankanClient(settings):
+                pass
+            ready.add("tankan")
+        except (Exception, SystemExit) as exc:
+            blocked.append(
+                _dependency_unavailable_source(
+                    "tankan", identity, f"Tankan dependency unavailable: {type(exc).__name__}"
+                )
+            )
+    if "lutou" in sources:
+        identities = {
+            "lutou": lutou_current_identity(runtime),
+            "lutou_domestic_basis": domestic_basis_current_identity(runtime),
+        }
+        try:
+            settings = _lutou_settings(args.lutou_secret_file)
+            if not tailscale_ready():
+                raise ConnectionError("Lutou network dependency is unavailable")
+            if not tcp_reachable(settings.host, settings.port, 5.0):
+                raise ConnectionError("Lutou TCP endpoint is unavailable")
+            with LutouClient(settings):
+                pass
+            ready.update(("lutou", "lutou_domestic_basis"))
+        except (Exception, SystemExit) as exc:
+            for provider in ("lutou", "lutou_domestic_basis"):
+                blocked.append(
+                    _dependency_unavailable_source(
+                        provider,
+                        identities[provider],
+                        f"Lutou dependency unavailable: {type(exc).__name__}",
+                    )
+                )
+    adapters = _build_adapters(
+        args=args,
+        runtime=runtime,
+        run_id=run_id,
+        sources=sources,
+        weather_baseline_root=weather_baseline_root,
+        allowed_providers=ready,
+    )
+    return adapters, blocked
+
+
+def _identity_payload(identity: CurrentIdentity) -> dict[str, object]:
+    return {
+        "release_id": identity.release_id,
+        "manifest_sha256": identity.manifest_sha256,
+        "source_max_dates": dict(identity.source_max_dates),
+        "dataset_identities": {
+            name: dict(value)
+            for name, value in sorted(identity.dataset_identities.items())
+        },
+    }
+
+
+def _dependency_unavailable_source(
+    provider: str, identity: CurrentIdentity, safe_reason: str,
+) -> dict[str, object]:
+    return {
+        "source": provider,
+        "status": ProviderStatus.DEPENDENCY_UNAVAILABLE.value,
+        "source_max_dates": dict(identity.source_max_dates),
+        "current_identity": _identity_payload(identity),
+        "domains": {
+            domain: DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
+            for domain in PROVIDER_DOMAINS[provider]
+        },
+        "safe_reason": safe_reason,
+    }
+
+
+def _domain_preflight_status(status: ProviderStatus) -> str:
+    if status is ProviderStatus.READY:
+        return ProviderStatus.READY.value
+    if status is ProviderStatus.DEPENDENCY_UNAVAILABLE:
+        return DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
+    if status is ProviderStatus.SOURCE_UNAVAILABLE:
+        return DomainStatus.MISSING.value
+    return DomainStatus.ERROR.value
+
+
+def _load_provider_preflight_evidence(
+    path: Path, *, run_id: str, provider_order: tuple[str, ...],
+) -> dict[str, object]:
+    value = json.loads(path.resolve().read_text(encoding="utf-8"))
+    sources = value.get("sources") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != "unified-public-data-dry-run/1"
+        or value.get("run_id") != f"{run_id}-preflight"
+        or value.get("dry_run") is not True
+        or not isinstance(sources, list)
+        or [item.get("source") for item in sources if isinstance(item, dict)]
+        != list(provider_order)
+    ):
+        raise ValueError("provider preflight evidence identity is invalid")
+    for item in sources:
+        if not isinstance(item, dict):
+            raise ValueError("provider preflight evidence status is invalid")
+        try:
+            ProviderStatus(str(item.get("status")))
+        except ValueError as exc:
+            raise ValueError("provider preflight evidence status is invalid") from exc
+        identity = item.get("current_identity")
+        if not isinstance(identity, dict):
+            raise ValueError("provider preflight Current identity is invalid")
+    return value
+
+
+def _current_identity_from_payload(value: Mapping[str, object]) -> CurrentIdentity:
+    maxima = value.get("source_max_dates", {})
+    datasets = value.get("dataset_identities", {})
+    if not isinstance(maxima, Mapping) or not isinstance(datasets, Mapping):
+        raise ValueError("provider preflight identity payload is invalid")
+    return CurrentIdentity(
+        value.get("release_id") if isinstance(value.get("release_id"), str) else None,
+        (
+            value.get("manifest_sha256")
+            if isinstance(value.get("manifest_sha256"), str)
+            else None
+        ),
+        {str(key): str(item) for key, item in maxima.items()},
+        {
+            str(name): {
+                str(key): (str(item) if item is not None else None)
+                for key, item in identity.items()
+            }
+            for name, identity in datasets.items()
+            if isinstance(identity, Mapping)
+        },
+    )
+
+
+def _preset_outcome_from_source(item: Mapping[str, object]) -> ProviderOutcome:
+    provider = str(item["source"])
+    status = ProviderStatus(str(item["status"]))
+    identity_value = item["current_identity"]
+    if not isinstance(identity_value, Mapping):
+        raise ValueError("provider preflight Current identity is invalid")
+    identity = _current_identity_from_payload(identity_value)
+    domains = item.get("domains")
+    if not isinstance(domains, Mapping):
+        domains = {
+            domain: _domain_preflight_status(status)
+            for domain in PROVIDER_DOMAINS[provider]
+        }
+    return ProviderOutcome(
+        provider,
+        status,
+        status,
+        identity,
+        identity,
+        identity.source_max_dates,
+        {str(key): str(value) for key, value in domains.items()},
+        str(item.get("safe_reason") or "provider preflight did not pass"),
+    )
+
+
+def _execution_plan_from_evidence(
+    *,
+    args: argparse.Namespace,
+    runtime: RuntimeContext,
+    run_id: str,
+    sources: tuple[str, ...],
+    weather_baseline_root: Path,
+    evidence: Mapping[str, object],
+) -> tuple[list[object], tuple[ProviderOutcome, ...]]:
+    source_items = {
+        str(item["source"]): item
+        for item in evidence["sources"]  # type: ignore[index]
+        if isinstance(item, Mapping)
+    }
+    ready = {
+        name for name, item in source_items.items()
+        if item.get("status") == ProviderStatus.READY.value
+    }
+    preset: list[ProviderOutcome] = [
+        _preset_outcome_from_source(source_items[name])
+        for name in _provider_order(sources)
+        if name not in ready
+    ]
+    adapters: list[object] = []
+    for provider in _provider_order(sources):
+        if provider not in ready:
+            continue
+        try:
+            adapters.extend(
+                _build_adapters(
+                    args=args,
+                    runtime=runtime,
+                    run_id=run_id,
+                    sources=sources,
+                    weather_baseline_root=weather_baseline_root,
+                    allowed_providers={provider},
+                )
+            )
+        except (Exception, SystemExit) as exc:
+            changed = dict(source_items[provider])
+            changed["status"] = ProviderStatus.DEPENDENCY_UNAVAILABLE.value
+            changed["domains"] = {
+                domain: DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
+                for domain in PROVIDER_DOMAINS[provider]
+            }
+            changed["safe_reason"] = (
+                "provider dependency changed after preflight: " + type(exc).__name__
+            )
+            preset.append(_preset_outcome_from_source(changed))
+    return adapters, tuple(preset)
+
+
+def _baseline_delivery_artifacts(packages_root: str | Path) -> dict[str, Path]:
+    root = Path(packages_root)
+    candidates = sorted(
+        path for path in root.glob("public-current-*") if path.is_dir()
+    ) if root.is_dir() else []
+    if len(candidates) != 1:
+        return {}
+    package = validate_production_package(candidates[0])
+    artifacts = package.manifest.get("delivery_artifacts", {})
+    if not isinstance(artifacts, Mapping):
+        return {}
+    output: dict[str, Path] = {}
+    for name, identity in artifacts.items():
+        if not isinstance(identity, Mapping):
+            continue
+        package_path = identity.get("package_path")
+        if not isinstance(package_path, str):
+            continue
+        path = package.directory / "data" / package_path
+        if path.is_file():
+            output[str(name)] = path
+    return output
+
+
 def _dry_run(
     adapters: list[object],
     *,
     run_id: str = "dry-run",
     evidence_output: Path | None = None,
+    preset_sources: list[dict[str, object]] | None = None,
+    provider_order: tuple[str, ...] | None = None,
 ) -> int:
-    sources: list[dict[str, object]] = []
-    failed = False
+    sources: list[dict[str, object]] = list(preset_sources or [])
     for adapter in adapters:
         name = str(getattr(adapter, "name", type(adapter).__name__))
         identity = None
@@ -277,16 +622,15 @@ def _dry_run(
             status = exc.status
             reason = exc.safe_reason
             source_max = {} if identity is None else dict(identity.source_max_dates)
-            failed = failed or status not in {
-                ProviderStatus.SOURCE_UNAVAILABLE,
-                ProviderStatus.NETWORK_UNAVAILABLE,
-                ProviderStatus.LIVE_VERIFICATION_PENDING,
-            }
         except Exception as exc:
+            if identity is None:
+                try:
+                    identity = getattr(adapter, "current_identity")()
+                except Exception:
+                    identity = CurrentIdentity(None, None, {})
             status = ProviderStatus.INGESTION_FAILURE
             reason = f"dry-run preflight failed: {type(exc).__name__}"
-            source_max = {}
-            failed = True
+            source_max = dict(identity.source_max_dates)
         finally:
             close = getattr(adapter, "close", None)
             if callable(close):
@@ -296,13 +640,21 @@ def _dry_run(
                 "source": name,
                 "status": status.value,
                 "source_max_dates": source_max,
-                "current_identity": None if identity is None else {
-                    "release_id": identity.release_id,
-                    "manifest_sha256": identity.manifest_sha256,
+                "current_identity": _identity_payload(
+                    identity or CurrentIdentity(None, None, {})
+                ),
+                "domains": {
+                    domain: _domain_preflight_status(status)
+                    for domain in PROVIDER_DOMAINS.get(name, ())
                 },
                 "safe_reason": reason,
             }
         )
+    if provider_order is not None:
+        by_name = {str(item["source"]): item for item in sources}
+        if set(by_name) != set(provider_order):
+            raise ValueError("provider preflight source set is incomplete")
+        sources = [by_name[name] for name in provider_order]
     payload = {
         "schema_version": "unified-public-data-dry-run/1",
         "run_id": run_id,
@@ -323,7 +675,10 @@ def _dry_run(
         # Preserve the existing interactive dry-run contract when an explicit
         # machine channel was not requested.
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-    return 1 if failed else 0
+    # A classified provider failure is machine evidence, not a process failure.
+    # The Production Wrapper decides whether at least one independent provider
+    # remains executable; malformed or unwritable evidence still raises.
+    return 0
 
 
 def _lutou_settings(secret_file: str | Path) -> LutouConnectionSettings:

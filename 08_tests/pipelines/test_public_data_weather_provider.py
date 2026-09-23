@@ -17,6 +17,7 @@ from agri_research_agent.pipelines import public_data_providers
 from agri_research_agent.pipelines.public_data_providers import LutouRefreshAdapter
 from agri_research_agent.pipelines.lutou_weather import LutouWeatherStageError
 from agri_research_agent.pipelines.public_data_refresh import (
+    DomainStatus,
     ProviderFailure,
     ProviderStatus,
 )
@@ -135,9 +136,10 @@ def test_unified_lutou_provider_calls_weather_once_and_reports_domain(
     assert result.promoted is True
     assert result.status is None
     assert result.domains == {
-        "three_oil": ProviderStatus.NO_CHANGE.value,
-        "soil_moisture": ProviderStatus.NO_CHANGE.value,
-        "weather": ProviderStatus.UPDATED.value,
+        "three_oil": DomainStatus.NO_CHANGE.value,
+        "soil_moisture": DomainStatus.NO_CHANGE.value,
+        "weather_observation": DomainStatus.UPDATED.value,
+        "weather_forecast": DomainStatus.UPDATED.value,
     }
     assert result.source_max_dates["weather_observation"] == "2026-08-18"
     assert result.source_max_dates["weather_forecast_valid"] == "2026-09-02"
@@ -185,8 +187,9 @@ def test_weather_soil_evidence_exception_preserves_structured_root(
     result = adapter.refresh()
 
     assert result.status is ProviderStatus.INGESTION_FAILURE
-    assert result.domains["three_oil"] == ProviderStatus.UPDATED.value
-    assert result.domains["weather"] == ProviderStatus.INGESTION_FAILURE.value
+    assert result.domains["three_oil"] == DomainStatus.UPDATED.value
+    assert result.domains["weather_observation"] == DomainStatus.ERROR.value
+    assert result.domains["weather_forecast"] == DomainStatus.ERROR.value
     assert result.root_failure is not None
     assert result.root_failure.provider == "lutou"
     assert result.root_failure.domain == "weather"
@@ -370,7 +373,8 @@ def test_weather_reconnect_failure_is_classified_and_query_is_not_started(
     result = adapter.refresh()
 
     assert result.status is ProviderStatus.SOURCE_UNAVAILABLE
-    assert result.domains["weather"] == ProviderStatus.SOURCE_UNAVAILABLE.value
+    assert result.domains["weather_observation"] == DomainStatus.MISSING.value
+    assert result.domains["weather_forecast"] == DomainStatus.MISSING.value
     assert recovery_calls == ["fresh"]
     assert weather_calls == []
     assert "connection-validation" in (result.safe_reason or "")
@@ -414,7 +418,8 @@ def test_weather_midflight_client_failure_is_not_replayed(
 
     assert weather_calls == ["query"]
     assert result.status is ProviderStatus.SOURCE_UNAVAILABLE
-    assert result.domains["weather"] == ProviderStatus.SOURCE_UNAVAILABLE.value
+    assert result.domains["weather_observation"] == DomainStatus.MISSING.value
+    assert result.domains["weather_forecast"] == DomainStatus.MISSING.value
     assert "query_retried=false" in (result.safe_reason or "")
     assert "fixture-secret" not in (result.safe_reason or "")
     assert "fixture.invalid" not in (result.safe_reason or "")

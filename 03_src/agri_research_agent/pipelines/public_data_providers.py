@@ -72,6 +72,7 @@ from agri_research_agent.pipelines.lutou_weather import (
 )
 from agri_research_agent.pipelines.public_data_refresh import (
     CurrentIdentity,
+    DomainStatus,
     ProviderFailure,
     ProviderStatus,
     RefreshResult,
@@ -132,20 +133,7 @@ class TankanRefreshAdapter:
     _preflight_source_max: Mapping[str, str] = field(default_factory=dict, init=False, repr=False)
 
     def current_identity(self) -> CurrentIdentity:
-        current = load_tankan_current(
-            self.runtime.runtime_root / "public-market-data" / "tankan"
-        )
-        if current is None:
-            return CurrentIdentity(None, None, {})
-        pointer = _pointer(self.runtime.runtime_root / "public-market-data" / "tankan")
-        return CurrentIdentity(
-            current.release_id,
-            str(pointer["manifest_sha256"]),
-            {
-                "market": str(current.manifest["market"]["source_max_date"]),
-                "fx": str(current.manifest["fx"]["source_max_date"]),
-            },
-        )
+        return tankan_current_identity(self.runtime)
 
     def preflight(self) -> Mapping[str, object]:
         if not self.connector(self.settings.host, self.settings.port, 5.0):
@@ -219,6 +207,14 @@ class TankanRefreshAdapter:
             return RefreshResult(
                 result.promoted,
                 source_max,
+                {
+                    "tankan_market": (
+                        DomainStatus.UPDATED if result.promoted else DomainStatus.NO_CHANGE
+                    ).value,
+                    "fx": (
+                        DomainStatus.UPDATED if result.promoted else DomainStatus.NO_CHANGE
+                    ).value,
+                },
                 performance={
                     "async_updates": dict(getattr(result, "async_reports", {})),
                     "domains": {"tankan": dict(getattr(result, "performance", {}))}
@@ -259,39 +255,7 @@ class LutouRefreshAdapter:
     _weather_catalog: WeatherSourceCatalog | None = field(default=None, init=False, repr=False)
 
     def current_identity(self) -> CurrentIdentity:
-        oil_root = self.runtime.runtime_root / "public-market-data" / "lutou-three-oil"
-        soil_root = self.runtime.runtime_root / "public-market-data" / "lutou-soil-moisture"
-        weather_root = self.runtime.runtime_root / "public-market-data" / "lutou-weather"
-        oil = load_lutou_current(oil_root)
-        soil = load_soil_current(soil_root)
-        weather = load_weather_current(weather_root)
-        identities: dict[str, object] = {}
-        maxima: dict[str, str] = {}
-        releases: list[str] = []
-        for domain, current, root in (
-            ("three_oil", oil, oil_root),
-            ("soil_moisture", soil, soil_root),
-            ("weather", weather, weather_root),
-        ):
-            if current is not None:
-                pointer = _pointer(root)
-                identities[domain] = pointer["manifest_sha256"]
-                if domain == "weather":
-                    maxima["weather_observation"] = str(
-                        current.manifest["source_max_dates"]["observation"]
-                    )
-                    maxima["weather_forecast_valid"] = str(
-                        current.manifest["source_max_dates"]["forecast_valid"]
-                    )
-                else:
-                    maxima[domain] = str(current.manifest["source_max_date"])
-                releases.append(f"{domain}:{current.release_id}")
-        digest = None
-        if identities:
-            digest = hashlib.sha256(
-                json.dumps(identities, sort_keys=True).encode("utf-8")
-            ).hexdigest()
-        return CurrentIdentity("|".join(releases) or None, digest, maxima)
+        return lutou_current_identity(self.runtime)
 
     def preflight(self) -> Mapping[str, object]:
         preflight_started = perf_counter()
@@ -386,7 +350,9 @@ class LutouRefreshAdapter:
                     full_load=False,
                     catalog_path=self.three_oil_catalog_path,
                 )
-                domains["three_oil"] = (ProviderStatus.UPDATED if oil.promoted else ProviderStatus.NO_CHANGE).value
+                domains["three_oil"] = (
+                    DomainStatus.UPDATED if oil.promoted else DomainStatus.NO_CHANGE
+                ).value
                 async_reports.update(getattr(oil, "async_reports", {}))
                 maxima["three_oil"] = str(oil.candidate_manifest["source_max_date"])
                 performance_domains["three_oil"] = dict(
@@ -394,11 +360,11 @@ class LutouRefreshAdapter:
                 )
                 promoted = promoted or oil.promoted
             except ProviderFailure as failure:
-                domains["three_oil"] = failure.status.value
+                domains["three_oil"] = _domain_failure_status(failure.status).value
                 failures.append(failure)
             except LutouGoalBError as exc:
                 failure = _pipeline_failure(exc, "Lutou three-oil")
-                domains["three_oil"] = failure.status.value
+                domains["three_oil"] = _domain_failure_status(failure.status).value
                 failures.append(failure)
             try:
                 self._ensure_domain_connection("soil-moisture")
@@ -410,7 +376,9 @@ class LutouRefreshAdapter:
                     full_load=False,
                     catalog_path=self.soil_catalog_path,
                 )
-                domains["soil_moisture"] = (ProviderStatus.UPDATED if soil.promoted else ProviderStatus.NO_CHANGE).value
+                domains["soil_moisture"] = (
+                    DomainStatus.UPDATED if soil.promoted else DomainStatus.NO_CHANGE
+                ).value
                 async_reports.update(getattr(soil, "async_reports", {}))
                 maxima["soil_moisture"] = str(soil.candidate_manifest["source_max_date"])
                 performance_domains["soil_moisture"] = dict(
@@ -418,11 +386,11 @@ class LutouRefreshAdapter:
                 )
                 promoted = promoted or soil.promoted
             except ProviderFailure as failure:
-                domains["soil_moisture"] = failure.status.value
+                domains["soil_moisture"] = _domain_failure_status(failure.status).value
                 failures.append(failure)
             except LutouGoalBSoilError as exc:
                 failure = _pipeline_failure(exc, "Lutou soil-moisture")
-                domains["soil_moisture"] = failure.status.value
+                domains["soil_moisture"] = _domain_failure_status(failure.status).value
                 failures.append(failure)
             if self.weather_policy_path is not None:
                 try:
@@ -438,11 +406,13 @@ class LutouRefreshAdapter:
                         source_catalog=self._weather_catalog,
                         async_report_sink=async_reports,
                     )
-                    domains["weather"] = (
-                        ProviderStatus.UPDATED
+                    weather_status = (
+                        DomainStatus.UPDATED
                         if weather.promoted
-                        else ProviderStatus.NO_CHANGE
+                        else DomainStatus.NO_CHANGE
                     ).value
+                    domains["weather_observation"] = weather_status
+                    domains["weather_forecast"] = weather_status
                     maxima["weather_observation"] = str(
                         weather.candidate_manifest["source_max_dates"]["observation"]
                     )
@@ -452,7 +422,9 @@ class LutouRefreshAdapter:
                     promoted = promoted or weather.promoted
                     async_reports.update(getattr(weather, "async_reports", {}))
                 except ProviderFailure as failure:
-                    domains["weather"] = failure.status.value
+                    weather_status = _domain_failure_status(failure.status).value
+                    domains["weather_observation"] = weather_status
+                    domains["weather_forecast"] = weather_status
                     failures.append(failure)
                 except LutouClientError as exc:
                     failure = ProviderFailure(
@@ -463,7 +435,9 @@ class LutouRefreshAdapter:
                             "lutou", "weather", "EXTRACTION", exc
                         ),
                     )
-                    domains["weather"] = failure.status.value
+                    weather_status = _domain_failure_status(failure.status).value
+                    domains["weather_observation"] = weather_status
+                    domains["weather_forecast"] = weather_status
                     failures.append(failure)
                 except LutouWeatherStageError as exc:
                     failure = ProviderFailure(
@@ -473,14 +447,18 @@ class LutouRefreshAdapter:
                             "lutou", "weather", exc.stage, exc
                         ),
                     )
-                    domains["weather"] = failure.status.value
+                    weather_status = _domain_failure_status(failure.status).value
+                    domains["weather_observation"] = weather_status
+                    domains["weather_forecast"] = weather_status
                     failures.append(failure)
                 except LutouWeatherError as exc:
                     failure = _pipeline_failure(
                         exc, "Lutou Weather", provider_id="lutou",
                         domain="weather", stage="WEATHER",
                     )
-                    domains["weather"] = failure.status.value
+                    weather_status = _domain_failure_status(failure.status).value
+                    domains["weather_observation"] = weather_status
+                    domains["weather_forecast"] = weather_status
                     failures.append(failure)
                 except Exception as exc:
                     failure = ProviderFailure(
@@ -490,7 +468,9 @@ class LutouRefreshAdapter:
                             "lutou", "weather", "WEATHER", exc
                         ),
                     )
-                    domains["weather"] = failure.status.value
+                    weather_status = _domain_failure_status(failure.status).value
+                    domains["weather_observation"] = weather_status
+                    domains["weather_forecast"] = weather_status
                     failures.append(failure)
             if failures:
                 status = failures[0].status
@@ -643,16 +623,7 @@ class DomesticBasisRefreshAdapter:
     _source_max: date | None = field(default=None, init=False, repr=False)
 
     def current_identity(self) -> CurrentIdentity:
-        root = self.runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
-        current = load_domestic_basis_current(root)
-        if current is None:
-            return CurrentIdentity(None, None, {})
-        pointer = _pointer(root)
-        return CurrentIdentity(
-            current.release_id,
-            str(pointer["manifest_sha256"]),
-            {"domestic_basis": str(current.manifest["source_max_date"])},
-        )
+        return domestic_basis_current_identity(self.runtime)
 
     def preflight(self) -> Mapping[str, object]:
         catalog = load_domestic_basis_catalog(self.mapping_path)
@@ -754,7 +725,11 @@ class DomesticBasisRefreshAdapter:
             return RefreshResult(
                 result.promoted,
                 {"domestic_basis": result.query_end_date.isoformat()},
-                {"domestic_basis": (ProviderStatus.UPDATED if result.promoted else ProviderStatus.NO_CHANGE).value},
+                {
+                    "domestic_basis": (
+                        DomainStatus.UPDATED if result.promoted else DomainStatus.NO_CHANGE
+                    ).value
+                },
                 performance={"async_updates": {"domestic_basis": dict(result.update_summary)} if hasattr(result, "update_summary") else {}},
             )
         except DomesticBasisPipelineError as exc:
@@ -810,6 +785,98 @@ def _lutou_connection_validation_failure(domain: str) -> ProviderFailure:
     )
 
 
+def _domain_failure_status(status: ProviderStatus) -> DomainStatus:
+    if status is ProviderStatus.SOURCE_UNAVAILABLE:
+        return DomainStatus.MISSING
+    if status is ProviderStatus.DEPENDENCY_UNAVAILABLE:
+        return DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE
+    return DomainStatus.ERROR
+
+
+def tankan_current_identity(runtime: RuntimeContext) -> CurrentIdentity:
+    root = runtime.runtime_root / "public-market-data" / "tankan"
+    current = load_tankan_current(root)
+    if current is None:
+        return CurrentIdentity(None, None, {})
+    pointer = _pointer(root)
+    identity = {
+        "release_id": current.release_id,
+        "manifest_sha256": str(pointer["manifest_sha256"]),
+    }
+    return CurrentIdentity(
+        current.release_id,
+        str(pointer["manifest_sha256"]),
+        {
+            "market": str(current.manifest["market"]["source_max_date"]),
+            "fx": str(current.manifest["fx"]["source_max_date"]),
+        },
+        {"tankan": identity},
+    )
+
+
+def lutou_current_identity(runtime: RuntimeContext) -> CurrentIdentity:
+    roots = {
+        "three_oil": runtime.runtime_root / "public-market-data" / "lutou-three-oil",
+        "soil_moisture": runtime.runtime_root / "public-market-data" / "lutou-soil-moisture",
+        "weather": runtime.runtime_root / "public-market-data" / "lutou-weather",
+    }
+    currents = {
+        "three_oil": load_lutou_current(roots["three_oil"]),
+        "soil_moisture": load_soil_current(roots["soil_moisture"]),
+        "weather": load_weather_current(roots["weather"]),
+    }
+    identities: dict[str, Mapping[str, str | None]] = {}
+    maxima: dict[str, str] = {}
+    releases: list[str] = []
+    dataset_names = {
+        "three_oil": "lutou-three-oil",
+        "soil_moisture": "lutou-soil-moisture",
+        "weather": "lutou-weather",
+    }
+    for domain, current in currents.items():
+        if current is None:
+            continue
+        pointer = _pointer(roots[domain])
+        identities[dataset_names[domain]] = {
+            "release_id": current.release_id,
+            "manifest_sha256": str(pointer["manifest_sha256"]),
+        }
+        if domain == "weather":
+            maxima["weather_observation"] = str(
+                current.manifest["source_max_dates"]["observation"]
+            )
+            maxima["weather_forecast_valid"] = str(
+                current.manifest["source_max_dates"]["forecast_valid"]
+            )
+        else:
+            maxima[domain] = str(current.manifest["source_max_date"])
+        releases.append(f"{domain}:{current.release_id}")
+    digest = None
+    if identities:
+        digest = hashlib.sha256(
+            json.dumps(identities, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+    return CurrentIdentity("|".join(releases) or None, digest, maxima, identities)
+
+
+def domestic_basis_current_identity(runtime: RuntimeContext) -> CurrentIdentity:
+    root = runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+    current = load_domestic_basis_current(root)
+    if current is None:
+        return CurrentIdentity(None, None, {})
+    pointer = _pointer(root)
+    identity = {
+        "release_id": current.release_id,
+        "manifest_sha256": str(pointer["manifest_sha256"]),
+    }
+    return CurrentIdentity(
+        current.release_id,
+        str(pointer["manifest_sha256"]),
+        {"domestic_basis": str(current.manifest["source_max_date"])},
+        {"lutou-domestic-basis": identity},
+    )
+
+
 def _pointer(root: Path) -> Mapping[str, object]:
     return json.loads((root / "current.json").read_text(encoding="utf-8"))
 
@@ -817,5 +884,6 @@ def _pointer(root: Path) -> Mapping[str, object]:
 __all__ = [
     "DomesticBasisPendingAdapter", "DomesticBasisRefreshAdapter",
     "LutouRefreshAdapter", "TankanRefreshAdapter",
-    "tailscale_ready", "tcp_reachable"
+    "domestic_basis_current_identity", "lutou_current_identity",
+    "tankan_current_identity", "tailscale_ready", "tcp_reachable"
 ]
