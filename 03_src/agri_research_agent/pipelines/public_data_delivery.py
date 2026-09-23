@@ -377,16 +377,8 @@ def activate_incoming_server_package(
                     old_package.directory if actual_old is not None else None,
                     "Current differs from expected base", cas,
                 )
-        if old_pointer and old_pointer.get("package_id") == package.package_id:
-            current = resolve_server_current(root)
-            _safe_remove_tree(uploaded, incoming_root)
-            return ServerSyncResult(
-                "NO_CHANGE", package.package_id, "PASS", "PASS", "N/A", "PASS", current,
-                cas={**cas, "switch_timestamp": datetime.now(timezone.utc).isoformat()} if cas else None,
-            )
-
-        # Revalidate exact candidate bytes under the lock immediately before moving
-        # the uploaded package into the formal release directory.
+        # Revalidate exact candidate bytes under the lock before every outcome,
+        # including an idempotent same-id activation.
         package = validate_production_package(uploaded, require_directory_name=False)
         if expected_candidate is not None:
             actual_candidate = {
@@ -396,6 +388,14 @@ def activate_incoming_server_package(
             }
             if actual_candidate != dict(expected_candidate):
                 raise DeliveryError("candidate identity changed before Current switch")
+        if old_pointer and old_pointer.get("package_id") == package.package_id:
+            current = resolve_server_current(root)
+            _safe_remove_tree(uploaded, incoming_root)
+            return ServerSyncResult(
+                "NO_CHANGE", package.package_id, "PASS", "PASS", "N/A", "PASS", current,
+                cas={**cas, "switch_timestamp": datetime.now(timezone.utc).isoformat()} if cas else None,
+            )
+
         formal = releases / package.package_id
         if formal.exists():
             existing = validate_production_package(formal)
