@@ -75,7 +75,10 @@ def test_validate_only_reads_sealed_package_without_activation(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "VALIDATED"
     assert payload["consumer_reads"] == {"consumer": "PASS"}
-    assert payload["activation_capabilities"] == ["public-current-server-cas/1"]
+    assert payload["activation_capabilities"] == [
+        "public-current-server-cas/1",
+        "application-runtime-readability-rollback/1",
+    ]
     assert payload["manifest_sha256"] == activation.hashlib.sha256(b"{}").hexdigest()
     assert calls == ["package:public-current-abc.upload-one:False", "formal:data"]
 
@@ -101,3 +104,42 @@ def test_validate_only_fails_closed_on_consumer_failure(
             "--store-root", str(tmp_path / "store"),
             "--validate-only",
         ])
+
+
+def test_application_runtime_failure_rollback_cli_uses_formal_validator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed: dict[str, object] = {}
+
+    def rollback(**kwargs):
+        observed.update(kwargs)
+        kwargs["post_rollback_validator"](tmp_path / "old" / "data")
+        return SimpleNamespace(
+            status="ROLLED_BACK",
+            failed_package_id="public-current-new",
+            restored_package_id="public-current-old",
+            atomic_switch="PASS",
+            formal_read_validation="PASS",
+            safe_reason=None,
+        )
+
+    formal: list[Path] = []
+    monkeypatch.setattr(
+        activation, "rollback_server_current_after_application_failure", rollback
+    )
+    monkeypatch.setattr(
+        activation, "validate_formal_consumer_reads",
+        lambda **kwargs: formal.append(Path(kwargs["runtime_root"])),
+    )
+    assert activation.main([
+        "--store-root", str(tmp_path / "store"),
+        "--rollback-after-application-readability-failure",
+        "--expected-failed-current-id", "public-current-new",
+        "--rollback-current-id", "public-current-old",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ROLLED_BACK"
+    assert observed["expected_failed_package_id"] == "public-current-new"
+    assert observed["rollback_package_id"] == "public-current-old"
+    assert formal == [tmp_path / "old" / "data"]

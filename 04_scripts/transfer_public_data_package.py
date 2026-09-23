@@ -8,6 +8,7 @@ disabling host verification.  SSH trust stays in the operator's existing config.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -57,6 +58,9 @@ _SSH_OPTIONS = (
     "-o", "ServerAliveCountMax=3",
 )
 _DEFAULT_TRANSPORT_TIMEOUT_SECONDS = 3600.0
+_APPLICATION_SERVICE_LABEL = "market-data.service=spread-dashboard"
+_APPLICATION_IDENTITY_SOURCE = "running-container:market-data.service=spread-dashboard"
+_APPLICATION_GATE_SCRIPT = ROOT / "04_scripts" / "application_runtime_readability_gate.py"
 _transport_deadline: float | None = None
 
 
@@ -211,25 +215,8 @@ def _remote_integer(target: str, arguments: list[str], label: str) -> int:
     return value
 
 
-def _candidate_runtime_identity(target: str, image: str) -> dict[str, object]:
-    code = (
-        "import json,os;"
-        "print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),"
-        "'groups':os.getgroups()},sort_keys=True))"
-    )
-    command = [
-        "docker", "run", "--rm", "--pull", "never", "--network", "none",
-        "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=16m",
-        image, "python", "-c", code,
-    ]
-    result = _ssh(target, command)
-    if result.returncode != 0:
-        raise RuntimeError("exact Candidate runtime identity probe failed")
-    try:
-        identity = json.loads(result.stdout.strip().splitlines()[-1])
-    except (IndexError, ValueError) as exc:
-        raise RuntimeError("exact Candidate runtime identity is invalid") from exc
+def _parse_runtime_identity(value: object) -> dict[str, object]:
+    identity = value
     if (
         not isinstance(identity, dict)
         or set(identity) != {"uid", "gid", "groups"}
@@ -237,9 +224,173 @@ def _candidate_runtime_identity(target: str, image: str) -> dict[str, object]:
         or not isinstance(identity["gid"], int)
         or not isinstance(identity["groups"], list)
         or not all(isinstance(item, int) for item in identity["groups"])
+        or identity["uid"] < 0
+        or identity["gid"] < 0
     ):
-        raise RuntimeError("exact Candidate runtime identity schema is invalid")
+        raise RuntimeError("application runtime identity schema is invalid")
     return identity
+
+
+def _discover_application_runtime(target: str, store: str) -> dict[str, object]:
+    containers = _ssh(target, [
+        "docker", "ps", "--filter", f"label={_APPLICATION_SERVICE_LABEL}",
+        "--format", "{{.ID}}|{{.Names}}",
+    ])
+    matches = [line.split("|", 1) for line in containers.stdout.splitlines() if line.strip()]
+    if containers.returncode != 0 or len(matches) != 1 or len(matches[0]) != 2:
+        raise RuntimeError("exact running application container could not be resolved")
+    container_id, container_name = matches[0]
+    if not container_id or not container_name:
+        raise RuntimeError("application container identity is invalid")
+
+    inspected = _ssh(target, ["docker", "inspect", container_id])
+    try:
+        values = json.loads(inspected.stdout)
+        detail = values[0]
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("application container inspection is invalid") from exc
+    if (
+        inspected.returncode != 0
+        or not isinstance(values, list)
+        or len(values) != 1
+        or not isinstance(detail, dict)
+        or not isinstance(detail.get("State"), dict)
+        or detail["State"].get("Running") is not True
+        or not isinstance(detail.get("Mounts"), list)
+    ):
+        raise RuntimeError("application container is not a single running instance")
+
+    host_store = PurePosixPath(store)
+    candidates: list[tuple[int, PurePosixPath]] = []
+    for mount in detail["Mounts"]:
+        if not isinstance(mount, dict) or mount.get("Type") != "bind":
+            continue
+        try:
+            source = PurePosixPath(str(mount["Source"]))
+            destination = PurePosixPath(str(mount["Destination"]))
+            relative = host_store.relative_to(source)
+        except (KeyError, ValueError):
+            continue
+        if mount.get("RW") is not False:
+            raise RuntimeError("application package-store mount must be read-only")
+        candidates.append((len(source.parts), destination / relative))
+    if not candidates:
+        raise RuntimeError("application container cannot access the package store")
+    _, container_store = max(candidates, key=lambda item: item[0])
+
+    code = (
+        "import json,os;"
+        "print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),"
+        "'groups':os.getgroups()},sort_keys=True))"
+    )
+    result = _ssh(target, ["docker", "exec", container_id, "python", "-c", code])
+    if result.returncode != 0:
+        raise RuntimeError("application runtime identity probe failed")
+    try:
+        identity = _parse_runtime_identity(
+            json.loads(result.stdout.strip().splitlines()[-1])
+        )
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError("application runtime identity is invalid") from exc
+    return {
+        **identity,
+        "container_id": container_id,
+        "container": container_name,
+        "container_store": container_store.as_posix(),
+        "identity_source": _APPLICATION_IDENTITY_SOURCE,
+    }
+
+
+def _run_application_runtime_gate(
+    target: str,
+    runtime: dict[str, object],
+    *,
+    phase: str,
+    package_root: str | None,
+    expected_package_id: str,
+) -> dict[str, object]:
+    source = _APPLICATION_GATE_SCRIPT.read_bytes()
+    encoded = base64.b64encode(source).decode("ascii")
+    bootstrap = (
+        "import base64;"
+        f"exec(compile(base64.b64decode('{encoded}'),"
+        "'<application-runtime-readability-gate>','exec'))"
+    )
+    environment = {
+        "APPLICATION_READABILITY_PHASE": phase,
+        "APPLICATION_READABILITY_STORE_ROOT": str(runtime["container_store"]),
+        "APPLICATION_READABILITY_PROJECT_ROOT": "/app",
+        "APPLICATION_READABILITY_PACKAGE_ID": expected_package_id,
+        "APPLICATION_READABILITY_UID": str(runtime["uid"]),
+        "APPLICATION_READABILITY_GID": str(runtime["gid"]),
+        "APPLICATION_READABILITY_CONTAINER": str(runtime["container"]),
+        "APPLICATION_READABILITY_IDENTITY_SOURCE": str(runtime["identity_source"]),
+    }
+    if package_root is not None:
+        environment["APPLICATION_READABILITY_PACKAGE_ROOT"] = package_root
+    command = ["docker", "exec"]
+    for key, value in environment.items():
+        command.extend(["--env", f"{key}={value}"])
+    command.extend([str(runtime["container_id"]), "python", "-c", bootstrap])
+    result = _ssh(target, command)
+    try:
+        evidence = json.loads(result.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError("application runtime readability evidence is invalid") from exc
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("schema_version") != "application-runtime-readability/1"
+        or evidence.get("APPLICATION_CONTAINER") != runtime["container"]
+        or evidence.get("APPLICATION_RUNTIME_UID") != runtime["uid"]
+        or evidence.get("APPLICATION_RUNTIME_GID") != runtime["gid"]
+        or evidence.get("IDENTITY_SOURCE") != runtime["identity_source"]
+        or (
+            evidence.get("STATUS") == "PASS"
+            and evidence.get("PACKAGE_ID") != expected_package_id
+        )
+        or (
+            evidence.get("STATUS") == "FAIL"
+            and evidence.get("PACKAGE_ID") not in {None, expected_package_id}
+        )
+        or evidence.get("PHASE") != phase
+        or evidence.get("STATUS") not in {"PASS", "FAIL"}
+        or (result.returncode == 0) != (evidence.get("STATUS") == "PASS")
+    ):
+        raise RuntimeError("application runtime readability evidence contract failed")
+    return evidence
+
+
+def _readability_summary(
+    runtime: dict[str, object],
+    *,
+    pre: dict[str, object],
+    post: dict[str, object] | None,
+    rollback_required: bool,
+    rollback_readback: str,
+) -> dict[str, object]:
+    final = post or pre
+    return {
+        "schema_version": "application-runtime-readability-evidence/1",
+        "APPLICATION_CONTAINER": runtime["container"],
+        "APPLICATION_RUNTIME_UID": runtime["uid"],
+        "APPLICATION_RUNTIME_GID": runtime["gid"],
+        "IDENTITY_SOURCE": runtime["identity_source"],
+        "PRE_SWITCH_RUNTIME_READABILITY": pre["STATUS"],
+        "POST_SWITCH_RUNTIME_READABILITY": post["STATUS"] if post else "NOT_REACHED",
+        "MANIFEST_READ": final["MANIFEST_READ"],
+        "JSON_PARSE": final["JSON_PARSE"],
+        "DIRECTORY_TRAVERSAL": final["DIRECTORY_TRAVERSAL"],
+        "PARQUET_METADATA_READ": final["PARQUET_METADATA_READ"],
+        "ACTIVATED_RUNTIME_RESOLVER": final["ACTIVATED_RUNTIME_RESOLVER"],
+        "DOMESTIC_SPREAD_READER": final["DOMESTIC_SPREAD_READER"],
+        "THREE_OIL_READER": final["THREE_OIL_READER"],
+        "DOMESTIC_BASIS_READER": final["DOMESTIC_BASIS_READER"],
+        "WEATHER_READER": final["WEATHER_READER"],
+        "ROLLBACK_REQUIRED": "YES" if rollback_required else "NO",
+        "ROLLBACK_RUNTIME_READBACK": rollback_readback,
+        "pre_switch": pre,
+        "post_switch": post,
+    }
 
 
 def _quarantine_upload(
@@ -299,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     current = _ssh(target, ["sh", "-c", pointer_probe, "public-data-probe", pointer_path])
     if current.returncode != 0:
         raise RuntimeError("remote Current preflight failed")
+    pointer = None
     if current.stdout != "__MISSING__":
         try:
             pointer = json.loads(current.stdout)
@@ -341,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
                 "remote_activation": "SKIPPED",
             }, sort_keys=True))
             return 0
-    runtime_identity = _candidate_runtime_identity(target, image)
+    runtime_identity = _discover_application_runtime(target, store)
     runtime_uid = int(runtime_identity["uid"])
     transport_uid = _remote_integer(target, ["id", "-u"], "transport UID")
     transport_gid = _remote_integer(target, ["id", "-g"], "transport GID")
@@ -399,6 +551,33 @@ def main(argv: list[str] | None = None) -> int:
         _quarantine_upload(target, store, remote_upload, upload_name)
         raise RuntimeError("SEAL_FOR_RUNTIME_READ failed")
 
+    pre_switch = _run_application_runtime_gate(
+        target,
+        runtime_identity,
+        phase="PRE_SWITCH",
+        package_root=(
+            f"{runtime_identity['container_store']}/incoming/{upload_name}"
+        ),
+        expected_package_id=package.package_id,
+    )
+    if pre_switch["STATUS"] != "PASS":
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        print(json.dumps({
+            "schema_version": "public-data-transport/1",
+            "status": "FAILED",
+            "package_id": package.package_id,
+            "transport": "PASS",
+            "remote_activation": "NOT_REACHED",
+            "application_runtime_readability": _readability_summary(
+                runtime_identity,
+                pre=pre_switch,
+                post=None,
+                rollback_required=False,
+                rollback_readback="N/A",
+            ),
+        }, ensure_ascii=False, sort_keys=True))
+        return 1
+
     validation_arguments = [
         "docker", "run", "--rm", "--pull", "never", "--network", "none",
         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -424,6 +603,11 @@ def main(argv: list[str] | None = None) -> int:
     ):
         _quarantine_upload(target, store, remote_upload, upload_name)
         raise RuntimeError("remote sealed-package validation identity mismatch")
+    if "application-runtime-readability-rollback/1" not in validation_result.get(
+        "activation_capabilities", []
+    ):
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("activation image lacks application readability rollback")
     if promotion and (
         "public-current-server-cas/1" not in validation_result.get("activation_capabilities", [])
         or
@@ -478,6 +662,70 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("remote activation result is invalid") from exc
     if result.get("package_id") != package.package_id:
         raise RuntimeError("remote activation package identity mismatch")
+
+    post_switch = _run_application_runtime_gate(
+        target,
+        runtime_identity,
+        phase="POST_SWITCH",
+        package_root=None,
+        expected_package_id=package.package_id,
+    )
+    if post_switch["STATUS"] != "PASS":
+        rollback_arguments = [
+            "docker", "run", "--rm", "--pull", "never", "--network", "none",
+            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
+            "--user", f"{transport_uid}:{transport_gid}",
+            "--mount", f"type=bind,src={store},dst={container_store}",
+            image, "python", "/app/04_scripts/activate_public_data_package.py",
+            "--store-root", container_store,
+            "--rollback-after-application-readability-failure",
+            "--expected-failed-current-id", package.package_id,
+        ]
+        previous_id = pointer.get("package_id") if isinstance(pointer, dict) else None
+        if previous_id is not None:
+            rollback_arguments.extend(["--rollback-current-id", str(previous_id)])
+        rollback = _ssh(target, rollback_arguments)
+        try:
+            rollback_result = json.loads(rollback.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError) as exc:
+            raise RuntimeError("application readability rollback result is invalid") from exc
+        if rollback.returncode != 0 or rollback_result.get("status") != "ROLLED_BACK":
+            raise RuntimeError("application readability rollback failed")
+
+        rollback_readback = "N/A"
+        rollback_evidence = None
+        if previous_id is not None:
+            rollback_evidence = _run_application_runtime_gate(
+                target,
+                runtime_identity,
+                phase="ROLLBACK_READBACK",
+                package_root=None,
+                expected_package_id=str(previous_id),
+            )
+            rollback_readback = str(rollback_evidence["STATUS"])
+            if rollback_readback != "PASS":
+                raise RuntimeError("application runtime rollback read-back failed")
+        readability = _readability_summary(
+            runtime_identity,
+            pre=pre_switch,
+            post=post_switch,
+            rollback_required=True,
+            rollback_readback=rollback_readback,
+        )
+        readability["rollback_readback"] = rollback_evidence
+        print(json.dumps({
+            "schema_version": "public-data-transport/1",
+            "status": "FAILED",
+            "package_id": package.package_id,
+            "transport": "PASS",
+            "remote_validation": validation_result,
+            "remote_activation": result,
+            "application_runtime_readability": readability,
+            "rollback": rollback_result,
+        }, ensure_ascii=False, sort_keys=True))
+        return 1
+
     receipt = {
         "schema_version": "public-data-transport/1",
         "status": result.get("status"),
@@ -485,6 +733,13 @@ def main(argv: list[str] | None = None) -> int:
         "transport": "PASS",
         "remote_validation": validation_result,
         "remote_activation": result,
+        "application_runtime_readability": _readability_summary(
+            runtime_identity,
+            pre=pre_switch,
+            post=post_switch,
+            rollback_required=False,
+            rollback_readback="N/A",
+        ),
     }
     if promotion:
         cas = result.get("cas") or {}

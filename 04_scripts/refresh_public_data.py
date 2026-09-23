@@ -779,9 +779,24 @@ def _build_remote_syncer(*, ssh_target: str, activation_image_id: str):
                 status, package_id, "PASS", "PASS", "N/A", "PASS", None
             )
         activation = payload.get("remote_activation")
+        readability = payload.get("application_runtime_readability")
+        readability_pass_fields = (
+            "PRE_SWITCH_RUNTIME_READABILITY",
+            "POST_SWITCH_RUNTIME_READABILITY",
+            "MANIFEST_READ",
+            "JSON_PARSE",
+            "DIRECTORY_TRAVERSAL",
+            "PARQUET_METADATA_READ",
+            "ACTIVATED_RUNTIME_RESOLVER",
+            "DOMESTIC_SPREAD_READER",
+            "THREE_OIL_READER",
+            "DOMESTIC_BASIS_READER",
+            "WEATHER_READER",
+        )
         if (
             status != "SYNCED"
             or not isinstance(activation, dict)
+            or not isinstance(readability, dict)
             or activation.get("status") != "SYNCED"
             or activation.get("package_id") != package_id
             or any(
@@ -790,6 +805,10 @@ def _build_remote_syncer(*, ssh_target: str, activation_image_id: str):
                     "manifest", "sha", "atomic_switch", "formal_read_validation"
                 )
             )
+            or readability.get("schema_version")
+            != "application-runtime-readability-evidence/1"
+            or any(readability.get(key) != "PASS" for key in readability_pass_fields)
+            or readability.get("ROLLBACK_REQUIRED") != "NO"
         ):
             raise RuntimeError("production package activation did not succeed")
         return ServerSyncResult(

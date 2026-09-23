@@ -76,6 +76,17 @@ class ServerSyncResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ServerRollbackResult:
+    status: str
+    failed_package_id: str
+    restored_package_id: str | None
+    atomic_switch: str
+    formal_read_validation: str
+    current_directory: Path | None
+    safe_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PrewarmTarget:
     name: str
     loader: Callable[[], object]
@@ -464,6 +475,69 @@ def resolve_server_current(store_root: str | Path) -> Path:
     return package.directory
 
 
+def rollback_server_current_after_application_failure(
+    *,
+    store_root: str | Path,
+    expected_failed_package_id: str,
+    rollback_package_id: str | None,
+    post_rollback_validator: Callable[[Path], None] | None = None,
+) -> ServerRollbackResult:
+    """CAS-restore the previous Current after an external runtime gate fails.
+
+    The application-runtime gate runs outside the activation container.  This
+    entrypoint reuses the same lock, strict package validation and atomic pointer
+    writer as ordinary activation, and refuses to roll back if Current moved.
+    """
+
+    failed_id = _safe_id(expected_failed_package_id, "failed package id")
+    restored_id = (
+        _safe_id(rollback_package_id, "rollback package id")
+        if rollback_package_id is not None
+        else None
+    )
+    root = Path(store_root).resolve()
+    pointer_path = root / "current.json"
+    lock_path = root / ".current.lock"
+    _reject_symlink(pointer_path, "server Current pointer")
+    _reject_symlink(lock_path, "Current lock path")
+
+    with FileLock(str(lock_path), timeout=60):
+        current_pointer = _strict_json(pointer_path)
+        if current_pointer.get("package_id") != failed_id:
+            return ServerRollbackResult(
+                "FAIL_STALE_CURRENT", failed_id, restored_id, "N/A", "N/A", None,
+                "Current differs from failed application-readable package",
+            )
+
+        if restored_id is None:
+            pointer_path.unlink()
+            return ServerRollbackResult(
+                "ROLLED_BACK", failed_id, None, "PASS", "N/A", None,
+            )
+
+        restored = validate_production_package(root / "releases" / restored_id)
+        restored_pointer = {
+            "schema_version": SERVER_POINTER_SCHEMA,
+            "package_id": restored.package_id,
+            "current_identity_sha256": restored.manifest["current_identity_sha256"],
+            "delivery_identity_sha256": restored.manifest["delivery_identity_sha256"],
+            "bundle_sha256": restored.manifest["bundle_sha256"],
+        }
+        atomic_write_json(pointer_path, restored_pointer, file_mode=SERVER_POINTER_MODE)
+        try:
+            current = resolve_server_current(root)
+            if post_rollback_validator is not None:
+                post_rollback_validator(current / "data")
+        except Exception as exc:
+            return ServerRollbackResult(
+                "FAILED", failed_id, restored_id, "PASS", "FAIL", None,
+                f"rollback formal read validation failed: {type(exc).__name__}",
+            )
+        return ServerRollbackResult(
+            "ROLLED_BACK", failed_id, restored_id, "PASS", "PASS", current,
+        )
+
+
 def run_prewarm(targets: Sequence[PrewarmTarget]) -> PrewarmResult:
     if not targets:
         return PrewarmResult(PrewarmStatus.SKIPPED, {})
@@ -786,7 +860,9 @@ def _safe_remove_tree(path: Path, expected_parent: Path, *, ignore_errors: bool 
 
 __all__ = [
     "DeliveryError", "PrewarmResult", "PrewarmStatus", "PrewarmTarget",
-    "ProductionPackage", "ServerSyncResult", "build_production_package",
+    "ProductionPackage", "ServerRollbackResult", "ServerSyncResult",
+    "build_production_package",
     "activate_incoming_server_package", "resolve_server_current", "run_prewarm",
+    "rollback_server_current_after_application_failure",
     "sync_to_local_server_store", "validate_production_package",
 ]

@@ -374,6 +374,17 @@ def test_remote_syncer_maps_sealed_activation_result(
         "status": "SYNCED",
         "package_id": "public-current-abc",
         "transport": "PASS",
+        "application_runtime_readability": {
+            "schema_version": "application-runtime-readability-evidence/1",
+            "PRE_SWITCH_RUNTIME_READABILITY": "PASS",
+            "POST_SWITCH_RUNTIME_READABILITY": "PASS",
+            "MANIFEST_READ": "PASS", "JSON_PARSE": "PASS",
+            "DIRECTORY_TRAVERSAL": "PASS", "PARQUET_METADATA_READ": "PASS",
+            "ACTIVATED_RUNTIME_RESOLVER": "PASS",
+            "DOMESTIC_SPREAD_READER": "PASS", "THREE_OIL_READER": "PASS",
+            "DOMESTIC_BASIS_READER": "PASS", "WEATHER_READER": "PASS",
+            "ROLLBACK_REQUIRED": "NO",
+        },
         "remote_activation": {
             "status": "SYNCED",
             "package_id": "public-current-abc",
@@ -404,6 +415,61 @@ def test_remote_syncer_maps_sealed_activation_result(
     assert "--ssh-target" in calls[0]
 
 
+@pytest.mark.parametrize(
+    "readability",
+    [
+        None,
+        {
+            "schema_version": "application-runtime-readability-evidence/1",
+            "PRE_SWITCH_RUNTIME_READABILITY": "PASS",
+            "POST_SWITCH_RUNTIME_READABILITY": "FAIL",
+            "MANIFEST_READ": "PASS", "JSON_PARSE": "PASS",
+            "DIRECTORY_TRAVERSAL": "PASS", "PARQUET_METADATA_READ": "PASS",
+            "ACTIVATED_RUNTIME_RESOLVER": "FAIL",
+            "DOMESTIC_SPREAD_READER": "FAIL", "THREE_OIL_READER": "PASS",
+            "DOMESTIC_BASIS_READER": "PASS", "WEATHER_READER": "PASS",
+            "ROLLBACK_REQUIRED": "YES",
+        },
+    ],
+    ids=["missing-evidence", "post-switch-failure"],
+)
+def test_remote_syncer_rejects_missing_or_failed_application_readability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    readability: dict[str, str] | None,
+) -> None:
+    payload = {
+        "schema_version": "public-data-transport/1",
+        "status": "SYNCED",
+        "package_id": "public-current-abc",
+        "remote_activation": {
+            "status": "SYNCED",
+            "package_id": "public-current-abc",
+            "manifest": "PASS",
+            "sha": "PASS",
+            "atomic_switch": "PASS",
+            "formal_read_validation": "PASS",
+        },
+    }
+    if readability is not None:
+        payload["application_runtime_readability"] = readability
+    monkeypatch.setattr(
+        refresh_public_data.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, json.dumps(payload), ""
+        ),
+    )
+    sync = refresh_public_data._build_remote_syncer(
+        ssh_target="trusted-host", activation_image_id=f"sha256:{'a' * 64}"
+    )
+
+    with pytest.raises(
+        RuntimeError, match="production package activation did not succeed"
+    ):
+        sync(tmp_path / "package", store_root="/safe/store")
+
+
 def test_remote_syncer_propagates_initial_seed_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -413,6 +479,17 @@ def test_remote_syncer_propagates_initial_seed_flag(
             "status": "SYNCED", "package_id": "public-current-abc",
             "manifest": "PASS", "sha": "PASS", "atomic_switch": "PASS",
             "formal_read_validation": "PASS",
+        },
+        "application_runtime_readability": {
+            "schema_version": "application-runtime-readability-evidence/1",
+            "PRE_SWITCH_RUNTIME_READABILITY": "PASS",
+            "POST_SWITCH_RUNTIME_READABILITY": "PASS",
+            "MANIFEST_READ": "PASS", "JSON_PARSE": "PASS",
+            "DIRECTORY_TRAVERSAL": "PASS", "PARQUET_METADATA_READ": "PASS",
+            "ACTIVATED_RUNTIME_RESOLVER": "PASS",
+            "DOMESTIC_SPREAD_READER": "PASS", "THREE_OIL_READER": "PASS",
+            "DOMESTIC_BASIS_READER": "PASS", "WEATHER_READER": "PASS",
+            "ROLLBACK_REQUIRED": "NO",
         },
     }
     calls: list[list[str]] = []

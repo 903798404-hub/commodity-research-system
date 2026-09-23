@@ -19,6 +19,7 @@ SPEC = importlib.util.spec_from_file_location("public_data_transport_test", SCRI
 assert SPEC and SPEC.loader
 transport = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(transport)
+ORIGINAL_DISCOVER_APPLICATION_RUNTIME = transport._discover_application_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +29,44 @@ def _formal_consumer_validation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
         "validate_formal_consumer_reads",
         lambda **_kwargs: SimpleNamespace(targets={"weather": "PASS"}),
     )
+    monkeypatch.setattr(
+        transport,
+        "_discover_application_runtime",
+        lambda _target, _store: {
+            "uid": 42424,
+            "gid": 42424,
+            "groups": [42424],
+            "container_id": "application-container-id",
+            "container": "spread-dashboard",
+            "container_store": "/runtime/01_data/public-data-server-store",
+            "identity_source": transport._APPLICATION_IDENTITY_SOURCE,
+        },
+    )
+
+    def gate(_target, runtime, *, phase, package_root, expected_package_id):
+        del package_root
+        resolver = "N/A" if phase == "PRE_SWITCH" else "PASS"
+        return {
+            "schema_version": "application-runtime-readability/1",
+            "PHASE": phase,
+            "STATUS": "PASS",
+            "APPLICATION_CONTAINER": runtime["container"],
+            "APPLICATION_RUNTIME_UID": runtime["uid"],
+            "APPLICATION_RUNTIME_GID": runtime["gid"],
+            "IDENTITY_SOURCE": runtime["identity_source"],
+            "DIRECTORY_TRAVERSAL": "PASS",
+            "MANIFEST_READ": "PASS",
+            "JSON_PARSE": "PASS",
+            "PARQUET_METADATA_READ": "PASS",
+            "ACTIVATED_RUNTIME_RESOLVER": resolver,
+            "DOMESTIC_SPREAD_READER": "PASS",
+            "THREE_OIL_READER": "PASS",
+            "DOMESTIC_BASIS_READER": "PASS",
+            "WEATHER_READER": "PASS",
+            "PACKAGE_ID": expected_package_id,
+        }
+
+    monkeypatch.setattr(transport, "_run_application_runtime_gate", gate)
 
 
 def _completed(
@@ -52,6 +91,10 @@ def _successful_delivery_run(calls: list[list[str]], command: list[str]):
     if "--validate-only" in joined:
         return _completed(command, stdout=json.dumps({
             "status": "VALIDATED", "package_id": "public-current-abc",
+            "activation_capabilities": [
+                "public-current-server-cas/1",
+                "application-runtime-readability-rollback/1",
+            ],
         }))
     if "activate_public_data_package.py" in joined:
         return _completed(command, stdout=json.dumps({
@@ -81,6 +124,9 @@ def test_promotion_rejects_activation_image_without_cas_before_switch(
                 "status": "VALIDATED", "package_id": candidate_id,
                 "manifest_sha256": manifest_sha,
                 "domestic_spread_artifact_sha256": "e" * 64,
+                "activation_capabilities": [
+                    "application-runtime-readability-rollback/1"
+                ],
                 # Older activation image has no server CAS capability.
             }))
         return result
@@ -222,6 +268,7 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
     assert 'u:$2:r-x' in seal and 'u:$2:r--' in seal
     assert "setfacl -b -k" in seal and "setfacl -b" in seal
     assert "chmod 0700" in seal and "chmod 0600" in seal
+    assert seal.endswith("42424")
     assert '^other::---$' in seal and '^group::---$' in seal
     assert "-perm /0007" in seal
     validation = joined_calls[validate_index]
@@ -241,6 +288,175 @@ def test_updated_package_uses_scp_then_immutable_image_activation(
     assert "ConnectTimeout=15" in all_commands
     assert "ServerAliveInterval=30" in all_commands
     assert "ServerAliveCountMax=3" in all_commands
+
+
+def test_application_runtime_identity_is_discovered_from_running_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter([
+        _completed([], stdout="abc123|spread-dashboard\n"),
+        _completed([], stdout=json.dumps([{
+            "State": {"Running": True},
+            "Mounts": [{
+                "Type": "bind",
+                "Source": "/srv/runtime/01_data",
+                "Destination": "/runtime/01_data",
+                "RW": False,
+            }],
+        }])),
+        _completed([], stdout=json.dumps({"uid": 7123, "gid": 8123, "groups": [8123]})),
+    ])
+    monkeypatch.setattr(transport, "_ssh", lambda *_args, **_kwargs: next(responses))
+    identity = ORIGINAL_DISCOVER_APPLICATION_RUNTIME(
+        "trusted-host", "/srv/runtime/01_data/public-data-server-store"
+    )
+    assert identity["container"] == "spread-dashboard"
+    assert identity["uid"] == 7123 and identity["gid"] == 8123
+    assert identity["container_store"] == "/runtime/01_data/public-data-server-store"
+
+
+def test_unresolved_application_runtime_identity_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transport, "_ssh", lambda *_args, **_kwargs: _completed([], stdout="")
+    )
+    with pytest.raises(RuntimeError, match="application container"):
+        ORIGINAL_DISCOVER_APPLICATION_RUNTIME("trusted-host", "/safe/store")
+
+
+def test_root_only_readability_regression_fails_before_current_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = SimpleNamespace(
+        package_id="public-current-abc", directory=tmp_path, manifest={}
+    )
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+
+    def fail_gate(_target, runtime, *, phase, package_root, expected_package_id):
+        del package_root
+        evidence = {
+            "schema_version": "application-runtime-readability/1",
+            "PHASE": phase,
+            "STATUS": "FAIL",
+            "APPLICATION_CONTAINER": runtime["container"],
+            "APPLICATION_RUNTIME_UID": runtime["uid"],
+            "APPLICATION_RUNTIME_GID": runtime["gid"],
+            "IDENTITY_SOURCE": runtime["identity_source"],
+            "DIRECTORY_TRAVERSAL": "FAIL",
+            "MANIFEST_READ": "FAIL",
+            "JSON_PARSE": "FAIL",
+            "PARQUET_METADATA_READ": "FAIL",
+            "ACTIVATED_RUNTIME_RESOLVER": "N/A",
+            "DOMESTIC_SPREAD_READER": "FAIL",
+            "THREE_OIL_READER": "FAIL",
+            "DOMESTIC_BASIS_READER": "FAIL",
+            "WEATHER_READER": "FAIL",
+            "PACKAGE_ID": expected_package_id,
+        }
+        return evidence
+
+    monkeypatch.setattr(transport, "_run_application_runtime_gate", fail_gate)
+    monkeypatch.setattr(
+        transport, "_run", lambda command: _successful_delivery_run(calls, command)
+    )
+    assert transport.main([
+        "--package", str(tmp_path), "--ssh-target", "trusted-host",
+        "--remote-store-root", "/safe/store",
+        "--activation-image-id", f"sha256:{'a' * 64}",
+    ]) == 1
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["application_runtime_readability"]["PRE_SWITCH_RUNTIME_READABILITY"] == "FAIL"
+    joined = [" ".join(command) for command in calls]
+    assert not any("--validate-only" in command for command in joined)
+    assert not any("activate_public_data_package.py" in command for command in joined)
+
+
+def test_post_switch_runtime_failure_rolls_back_and_reads_old_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = SimpleNamespace(
+        package_id="public-current-abc", directory=tmp_path, manifest={}
+    )
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    phases: list[str] = []
+
+    def gate(_target, runtime, *, phase, package_root, expected_package_id):
+        del package_root
+        phases.append(phase)
+        status = "FAIL" if phase == "POST_SWITCH" else "PASS"
+        resolver = "N/A" if phase == "PRE_SWITCH" else status
+        return {
+            "schema_version": "application-runtime-readability/1",
+            "PHASE": phase, "STATUS": status,
+            "APPLICATION_CONTAINER": runtime["container"],
+            "APPLICATION_RUNTIME_UID": runtime["uid"],
+            "APPLICATION_RUNTIME_GID": runtime["gid"],
+            "IDENTITY_SOURCE": runtime["identity_source"],
+            "DIRECTORY_TRAVERSAL": status, "MANIFEST_READ": status,
+            "JSON_PARSE": status, "PARQUET_METADATA_READ": status,
+            "ACTIVATED_RUNTIME_RESOLVER": resolver,
+            "DOMESTIC_SPREAD_READER": status, "THREE_OIL_READER": status,
+            "DOMESTIC_BASIS_READER": status, "WEATHER_READER": status,
+            "PACKAGE_ID": expected_package_id,
+        }
+
+    monkeypatch.setattr(transport, "_run_application_runtime_gate", gate)
+    calls: list[list[str]] = []
+    old_id = "public-current-old"
+
+    def run(command: list[str]):
+        calls.append(command)
+        joined = " ".join(command)
+        if len(calls) == 1:
+            return _completed(command, stdout=json.dumps({
+                "schema_version": "public-current-server-pointer/2",
+                "package_id": old_id,
+                "current_identity_sha256": "a" * 64,
+                "delivery_identity_sha256": "b" * 64,
+                "bundle_sha256": "c" * 64,
+            }))
+        if command[0] == "scp":
+            return _completed(command)
+        if command[-1] in {"id -u", "id -g"}:
+            return _completed(command, stdout="1000\n")
+        if "--validate-only" in joined:
+            return _completed(command, stdout=json.dumps({
+                "status": "VALIDATED", "package_id": package.package_id,
+                "activation_capabilities": [
+                    "public-current-server-cas/1",
+                    "application-runtime-readability-rollback/1",
+                ],
+            }))
+        if "--rollback-after-application-readability-failure" in joined:
+            return _completed(command, stdout=json.dumps({
+                "status": "ROLLED_BACK", "restored_package_id": old_id,
+            }))
+        if "activate_public_data_package.py" in joined:
+            return _completed(command, stdout=json.dumps({
+                "status": "SYNCED", "package_id": package.package_id,
+            }))
+        return _completed(command)
+
+    monkeypatch.setattr(transport, "_run", run)
+    assert transport.main([
+        "--package", str(tmp_path), "--ssh-target", "trusted-host",
+        "--remote-store-root", "/safe/store",
+        "--activation-image-id", f"sha256:{'a' * 64}",
+    ]) == 1
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    evidence = payload["application_runtime_readability"]
+    assert phases == ["PRE_SWITCH", "POST_SWITCH", "ROLLBACK_READBACK"]
+    assert evidence["POST_SWITCH_RUNTIME_READABILITY"] == "FAIL"
+    assert evidence["ROLLBACK_REQUIRED"] == "YES"
+    assert evidence["ROLLBACK_RUNTIME_READBACK"] == "PASS"
+    rollback_command = next(
+        " ".join(command) for command in calls
+        if "--rollback-after-application-readability-failure" in " ".join(command)
+    )
+    assert f"--expected-failed-current-id {package.package_id}" in rollback_command
+    assert f"--rollback-current-id {old_id}" in rollback_command
 
 
 def test_transport_subprocess_timeout_is_explicit_and_bounded(
@@ -625,6 +841,17 @@ def test_runtime_and_transport_owner_must_be_distinct(
 ) -> None:
     package = SimpleNamespace(package_id="public-current-abc", directory=tmp_path, manifest={})
     monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    monkeypatch.setattr(
+        transport,
+        "_discover_application_runtime",
+        lambda _target, _store: {
+            "uid": 1000, "gid": 1000, "groups": [1000],
+            "container_id": "application-container-id",
+            "container": "spread-dashboard",
+            "container_store": "/runtime/01_data/public-data-server-store",
+            "identity_source": transport._APPLICATION_IDENTITY_SOURCE,
+        },
+    )
     calls: list[list[str]] = []
 
     def run(command: list[str]):

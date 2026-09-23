@@ -17,6 +17,7 @@ if str(SRC) not in sys.path:
 
 from agri_research_agent.pipelines.public_data_delivery import (  # noqa: E402
     activate_incoming_server_package,
+    rollback_server_current_after_application_failure,
 )
 from agri_research_agent.pipelines.public_data_prewarm import (  # noqa: E402
     validate_activated_public_currents,
@@ -31,7 +32,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Validate incoming package and atomically switch server Current"
     )
-    parser.add_argument("--incoming-package", type=Path, required=True)
+    parser.add_argument("--incoming-package", type=Path)
     parser.add_argument("--store-root", type=Path, required=True)
     parser.add_argument("--initial-seed", action="store_true")
     parser.add_argument("--expected-current-id")
@@ -45,11 +46,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Validate a sealed staging package without writing server-store state",
     )
+    parser.add_argument(
+        "--rollback-after-application-readability-failure",
+        action="store_true",
+        help="CAS-restore the previous Current after the external application gate fails",
+    )
+    parser.add_argument("--expected-failed-current-id")
+    parser.add_argument("--rollback-current-id")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    def formal_consumer_validate(data_root: Path) -> None:
+        validate_formal_consumer_reads(project_root=ROOT, runtime_root=data_root)
+
+    if args.rollback_after_application_readability_failure:
+        if (
+            args.incoming_package is not None
+            or args.initial_seed
+            or args.validate_only
+            or not args.expected_failed_current_id
+        ):
+            raise ValueError("rollback requires only the failed and optional previous Current ids")
+        result = rollback_server_current_after_application_failure(
+            store_root=args.store_root,
+            expected_failed_package_id=args.expected_failed_current_id,
+            rollback_package_id=args.rollback_current_id,
+            post_rollback_validator=formal_consumer_validate,
+        )
+        print(json.dumps({
+            "schema_version": "public-data-application-runtime-rollback/1",
+            "status": result.status,
+            "failed_package_id": result.failed_package_id,
+            "restored_package_id": result.restored_package_id,
+            "atomic_switch": result.atomic_switch,
+            "formal_read_validation": result.formal_read_validation,
+            "safe_reason": result.safe_reason,
+        }, ensure_ascii=False, sort_keys=True))
+        return 0 if result.status == "ROLLED_BACK" else 1
+
+    if args.incoming_package is None:
+        raise ValueError("incoming package is required for validation or activation")
     expected_values = (args.expected_current_id, args.expected_current_artifact_sha256,
                        args.expected_current_manifest_sha256)
     candidate_values = (args.expected_candidate_id, args.expected_candidate_artifact_sha256,
@@ -90,21 +129,21 @@ def main(argv: list[str] | None = None) -> int:
             "sha": "PASS",
             "formal_read_validation": "PASS",
             "consumer_reads": dict(consumer_reads.targets),
-            "activation_capabilities": ["public-current-server-cas/1"],
+            "activation_capabilities": [
+                "public-current-server-cas/1",
+                "application-runtime-readability-rollback/1",
+            ],
             "manifest_sha256": hashlib.sha256((package.directory / "manifest.json").read_bytes()).hexdigest(),
             "domestic_spread_artifact_sha256": package.manifest["delivery_artifacts"].get(
                 "domestic-spread", {}).get("sha256"),
         }, ensure_ascii=False, sort_keys=True))
         return 0
 
-    def post_switch_validate(data_root: Path) -> None:
-        validate_formal_consumer_reads(project_root=ROOT, runtime_root=data_root)
-
     result = activate_incoming_server_package(
         args.incoming_package,
         store_root=args.store_root,
         pre_switch_validator=validate_activated_public_currents,
-        post_switch_validator=post_switch_validate,
+        post_switch_validator=formal_consumer_validate,
         initial_seed=args.initial_seed,
         expected_current=expected_current,
         expected_candidate=expected_candidate,

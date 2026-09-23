@@ -21,6 +21,7 @@ from agri_research_agent.pipelines.public_data_delivery import (
     PrewarmTarget,
     build_production_package,
     resolve_server_current,
+    rollback_server_current_after_application_failure,
     run_prewarm,
     sync_to_local_server_store,
     validate_production_package,
@@ -132,6 +133,68 @@ def test_server_cas_promotes_exact_candidate_under_current_lock(tmp_path: Path) 
     assert _sha(result.current_directory / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet") == \
         _sha(candidate.directory / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet")
     assert (store / "releases" / old.package_id).is_dir()
+
+
+def test_external_application_failure_cas_rolls_back_and_validates_old_current(
+    tmp_path: Path,
+) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    upload = store / "incoming" / f"{candidate.package_id}.upload-runtime-gate"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(candidate.directory, upload)
+    assert activate_incoming_server_package(upload, store_root=store).status == "SYNCED"
+    validated: list[str] = []
+
+    result = rollback_server_current_after_application_failure(
+        store_root=store,
+        expected_failed_package_id=candidate.package_id,
+        rollback_package_id=old.package_id,
+        post_rollback_validator=lambda data: validated.append(data.parent.name),
+    )
+
+    assert result.status == "ROLLED_BACK"
+    assert result.atomic_switch == "PASS"
+    assert result.formal_read_validation == "PASS"
+    assert result.restored_package_id == old.package_id
+    assert resolve_server_current(store).name == old.package_id
+    assert validated == [old.package_id]
+
+
+def test_external_application_failure_rollback_refuses_stale_current(
+    tmp_path: Path,
+) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    result = rollback_server_current_after_application_failure(
+        store_root=store,
+        expected_failed_package_id=candidate.package_id,
+        rollback_package_id=old.package_id,
+    )
+    assert result.status == "FAIL_STALE_CURRENT"
+    assert result.atomic_switch == "N/A"
+    assert resolve_server_current(store).name == old.package_id
+
+
+def test_external_rollback_read_failure_keeps_old_current_selected(
+    tmp_path: Path,
+) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    upload = store / "incoming" / f"{candidate.package_id}.upload-runtime-gate"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(candidate.directory, upload)
+    assert activate_incoming_server_package(upload, store_root=store).status == "SYNCED"
+
+    def fail(_data: Path) -> None:
+        raise PermissionError("injected old-Current runtime failure")
+
+    result = rollback_server_current_after_application_failure(
+        store_root=store,
+        expected_failed_package_id=candidate.package_id,
+        rollback_package_id=old.package_id,
+        post_rollback_validator=fail,
+    )
+    assert result.status == "FAILED"
+    assert result.formal_read_validation == "FAIL"
+    assert resolve_server_current(store).name == old.package_id
 
 
 @pytest.mark.parametrize("stale_field", ["id", "artifact_sha256", "manifest_sha256", "concurrent"])
