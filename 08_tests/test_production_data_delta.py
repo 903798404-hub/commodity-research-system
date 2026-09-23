@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import stat
 from contextlib import nullcontext
 from datetime import date
 from pathlib import Path
@@ -17,6 +19,7 @@ MODULE_PATH = ROOT / "03_src/agri_research_agent/automation/production_data_delt
 COMMIT = "a" * 40
 TREE = "b" * 40
 SHA = "c" * 64
+HISTORICAL_MISSING_COMMIT = "b0433d1930c9fc149519e20d1402eb472d9c904a"
 
 
 def load_module():
@@ -298,3 +301,173 @@ def test_fas_provider_is_explicitly_direct_without_inherited_proxy(monkeypatch, 
         "--runtime-root", str(tmp_path), "--candidate-only",
         "--ignore-environment-proxy",
     ]
+
+
+def git(root: Path, *args: str, input: str | None = None) -> str:
+    environment = os.environ.copy()
+    environment.update(GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                       GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid",
+                       GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                       GIT_OPTIONAL_LOCKS="0")
+    result = subprocess.run(["git", "-C", str(root), *args], input=input, text=True,
+                            capture_output=True, env=environment, check=False)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@pytest.fixture
+def source(tmp_path: Path):
+    root = tmp_path / "source"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    (root / "one.txt").write_text("approved source\n", encoding="utf-8")
+    git(root, "add", "one.txt")
+    git(root, "commit", "-qm", "approved")
+    module = load_module()
+    git(root, "remote", "add", "origin", module.ORIGIN)
+    target = git(root, "rev-parse", "HEAD")
+    tree = git(root, "rev-parse", "HEAD^{tree}")
+    blob = git(root, "rev-parse", "HEAD:one.txt")
+    git(root, "checkout", "-q", "--detach", target)
+    return root, target, tree, blob
+
+
+def remove_loose_object(root: Path, oid: str) -> None:
+    path = root / ".git/objects" / oid[:2] / oid[2:]
+    assert path.is_file()
+    path.chmod(stat.S_IREAD | stat.S_IWRITE)
+    path.unlink()
+
+
+def approval(module, target: str, tree: str) -> dict:
+    return {"approved_commit": target, "approved_tree": tree, "origin": module.ORIGIN}
+
+
+def test_exact_target_and_main_pass_without_commit_graph(source):
+    module = load_module()
+    root, target, tree, _ = source
+    assert not (root / ".git/objects/info/commit-graph").exists()
+    assert module.verify_clean_detached_clone(root, approval(module, target, tree)) == {
+        "commit": target, "tree": tree, "origin": module.ORIGIN,
+    }
+
+
+@pytest.mark.parametrize("object_kind", ["blob", "tree", "commit"])
+def test_missing_target_reachable_object_is_hard_failure(source, object_kind):
+    module = load_module()
+    root, target, tree, blob = source
+    remove_loose_object(root, {"blob": blob, "tree": tree, "commit": target}[object_kind])
+    with pytest.raises(module.ProductionDataError):
+        module.verify_clean_detached_clone(root, approval(module, target, tree))
+
+
+def test_main_ref_missing_reachable_blob_is_hard_failure(source):
+    module = load_module()
+    root, target, tree, _ = source
+    git(root, "checkout", "-q", "main")
+    (root / "new.txt").write_text("new main content\n", encoding="utf-8")
+    git(root, "add", "new.txt")
+    git(root, "commit", "-qm", "advance main")
+    new_blob = git(root, "rev-parse", "main:new.txt")
+    git(root, "checkout", "-q", "--detach", target)
+    remove_loose_object(root, new_blob)
+    assert module._object_closure(root, target, label="target")
+    with pytest.raises(module.ProductionDataError):
+        module._authoritative_ref_closure(root, target)
+
+
+@pytest.mark.parametrize("release_ref", ["branch", "tag"])
+def test_formal_release_ref_missing_reachable_blob_is_hard_failure(source, release_ref):
+    module = load_module()
+    root, target, _, _ = source
+    git(root, "checkout", "-q", "-b", "release/v1")
+    (root / "release.txt").write_text("release-only content\n", encoding="utf-8")
+    git(root, "add", "release.txt")
+    git(root, "commit", "-qm", "release")
+    blob = git(root, "rev-parse", "HEAD:release.txt")
+    if release_ref == "tag":
+        git(root, "tag", "-a", "release/v1", "-m", "formal release")
+    git(root, "checkout", "-q", "--detach", target)
+    if release_ref == "tag":
+        git(root, "branch", "-D", "release/v1")
+    remove_loose_object(root, blob)
+    with pytest.raises(module.ProductionDataError):
+        module._authoritative_ref_closure(root, target)
+
+
+def test_historical_b0433d_graph_failure_is_warning_after_hard_closures(
+        source, monkeypatch, capsys):
+    module = load_module()
+    root, target, tree, _ = source
+    original = module._git_probe
+
+    def historical_probe(selected, *args, **kwargs):
+        if args == ("fsck", "--strict", "--no-reflogs"):
+            return subprocess.CompletedProcess(args, 16, "",
+                f"error: Could not read {HISTORICAL_MISSING_COMMIT}\n"
+                f"failed to parse commit {HISTORICAL_MISSING_COMMIT} "
+                "from object database for commit-graph\n")
+        return original(selected, *args, **kwargs)
+
+    monkeypatch.setattr(module, "_git_probe", historical_probe)
+    assert module.verify_clean_detached_clone(root, approval(module, target, tree))["commit"] == target
+    assert HISTORICAL_MISSING_COMMIT in capsys.readouterr().err
+
+
+def test_graph_failure_cannot_downgrade_protected_or_unknown_object(source, monkeypatch):
+    module = load_module()
+    root, target, _, _ = source
+    original = module._git_probe
+
+    def graph_probe(selected, *args, **kwargs):
+        if args == ("fsck", "--strict", "--no-reflogs"):
+            return subprocess.CompletedProcess(args, 16, "",
+                f"error: Could not read {target}\n"
+                f"failed to parse commit {target} from object database for commit-graph\n")
+        return original(selected, *args, **kwargs)
+
+    monkeypatch.setattr(module, "_git_probe", graph_probe)
+    with pytest.raises(module.ProductionDataError, match="not proven unrelated"):
+        module._repository_maintenance_diagnostic(root, {target})
+    monkeypatch.setattr(module, "_git_probe", lambda *_a, **_k:
+                        subprocess.CompletedProcess([], 1, "", "fatal: unknown corruption\n"))
+    with pytest.raises(module.ProductionDataError, match="not proven unrelated"):
+        module._repository_maintenance_diagnostic(root, set())
+
+
+def test_unreachable_historical_garbage_does_not_block(source, capsys):
+    module = load_module()
+    root, target, _, _ = source
+    dangling = git(root, "hash-object", "-w", "--stdin", input="obsolete bytes")
+    assert dangling not in module._object_closure(root, target, label="target")
+    module._repository_maintenance_diagnostic(root, {target})
+    assert "REPOSITORY_MAINTENANCE_WARNING" in capsys.readouterr().err
+
+
+def test_archive_materialization_failure_remains_hard(source, monkeypatch):
+    module = load_module()
+    root, target, tree, _ = source
+    original = module._run
+
+    def failed_archive(command, **kwargs):
+        if "archive" in command:
+            raise module.ProductionDataError("archive unavailable")
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(module, "_run", failed_archive)
+    with pytest.raises(module.ProductionDataError, match="archive unavailable"):
+        module.verify_clean_detached_clone(root, approval(module, target, tree))
+
+
+def test_unverified_gitlink_remains_hard_failure(source):
+    module = load_module()
+    root, _, _, _ = source
+    git(root, "checkout", "-q", "main")
+    git(root, "update-index", "--add", "--cacheinfo",
+        "160000," + "a" * 40 + ",submodule")
+    git(root, "commit", "-qm", "add unverified gitlink")
+    target = git(root, "rev-parse", "HEAD")
+    tree = git(root, "rev-parse", "HEAD^{tree}")
+    git(root, "checkout", "-q", "--detach", target)
+    with pytest.raises(module.ProductionDataError, match="gitlink"):
+        module._reject_unverified_gitlinks(root, target)

@@ -60,6 +60,14 @@ Current、批准键数、source/audit SHA，以及发布前 Current ID/SHA。Man
 Preview 目录正式运行。每次执行创建唯一运行目录和源副本，核对真实 Git 对象与文件字节，
 不安装依赖、不改变业务公式、不调用 FULL DAILY 或 AM/PM capture。
 
+Git integrity 硬门槛分别验证获批 Commit/Tree 的完整可达对象、可归档的源码字节，
+以及 clone 中存在的 main / 正式 release refs 的完整可达对象；独立 detached control
+clone 没有本地 ref 时，获批 Commit 是其固定的 main 快照。目标或正式 ref 的可达对象
+缺失、损坏、身份不符或无法归档均停止。对象闭包检查直接基于 Git object database，
+显式禁用 commit-graph 优化。仓库级 fsck 仍运行；只有已经证明与目标和正式 refs
+无关、且错误类型可识别的历史对象问题才记录 `REPOSITORY_MAINTENANCE_WARNING`。
+未知完整性错误仍停止。Commit-graph 是性能与维护元数据，不是 release 身份权威。
+
 已验收的历史修订 candidate 使用同一 Windows 入口的 `--promote-candidate <absolute-package-path>`，
 同时提供原 `--historical-reconciliation-manifest`、`--promotion-evidence`、
 `--promotion-evidence-sha256` 与三项 `--expected-current-*`。这条路径只重新核验原 candidate

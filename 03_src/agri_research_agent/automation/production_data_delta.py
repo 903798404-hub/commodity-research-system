@@ -176,7 +176,8 @@ def safe_child_environment(extra: dict | None = None) -> dict:
 
 
 def _run(command: list[str], *, cwd: Path | None = None, env: dict | None = None,
-         timeout: int = 3600, binary: bool = False) -> subprocess.CompletedProcess:
+         timeout: int = 3600, binary: bool = False, input: str | None = None,
+         allow_failure: bool = False) -> subprocess.CompletedProcess:
     if os.name == "nt" and command[0] in {"git", "ssh", "scp"}:
         name = command[0]
         executable = (Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/cmd/git.exe" if name == "git"
@@ -184,19 +185,119 @@ def _run(command: list[str], *, cwd: Path | None = None, env: dict | None = None
         require(_unlinked(executable).is_file(), "approved system transport tool unavailable")
         command = [str(executable), *command[1:]]
     try:
-        result = subprocess.run(command, cwd=cwd, env=env or safe_child_environment(),
+        result = subprocess.run(command, cwd=cwd, env=env or safe_child_environment(), input=input,
                                 capture_output=True, text=not binary,
                                 **({"encoding": "utf-8", "errors": "strict"} if not binary else {}),
                                 timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
         raise ProductionDataError("bounded child command failed") from None
-    require(result.returncode == 0, "child command failed; diagnostic output withheld")
+    require(allow_failure or result.returncode == 0,
+            "child command failed; diagnostic output withheld")
     return result
 
 
 def _git(root: Path, *args: str) -> str:
     return _run(["git", "-c", "core.autocrlf=false", "-c", "core.fsmonitor=false", "-c", "http.sslBackend=openssl",
                  "-C", str(root), *args], timeout=300).stdout.strip()
+
+
+def _git_probe(root: Path, *args: str, input: str | None = None,
+               binary: bool = False) -> subprocess.CompletedProcess:
+    return _run(["git", "-c", "core.autocrlf=false", "-c", "core.fsmonitor=false",
+                 "-c", "http.sslBackend=openssl", "-C", str(root), *args],
+                timeout=300, input=input, binary=binary, allow_failure=True)
+
+
+def _object_closure(root: Path, revision: str, *, label: str,
+                    allow_tag: bool = False) -> set[str]:
+    """Check reachable objects against the object DB, never the commit-graph."""
+    options = ("-c", "core.commitGraph=false")
+    tip = _git_probe(root, *options, "cat-file", "-t", revision)
+    require(tip.returncode == 0 and tip.stdout.strip() in
+            ({"commit", "tag"} if allow_tag else {"commit"}),
+            f"{label} commit object is missing")
+    tree = _git_probe(root, *options, "cat-file", "-t", f"{revision}^{{tree}}")
+    require(tree.returncode == 0 and tree.stdout.strip() == "tree",
+            f"{label} root tree object is missing")
+    walk = _git_probe(root, *options, "rev-list", "--objects", "--no-object-names",
+                      "--missing=print", revision)
+    require(walk.returncode == 0, f"{label} object traversal failed")
+    lines = walk.stdout.splitlines()
+    require(lines and not any(line.startswith("?") for line in lines),
+            f"{label} reachable object is missing")
+    objects = set(lines)
+    objects.add(_git(root, *options, "rev-parse", revision))
+    require(all(HEX40.fullmatch(oid) for oid in objects), f"{label} object inventory is invalid")
+    batch = _git_probe(root, *options, "cat-file",
+                       "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+                       input="\n".join(sorted(objects)) + "\n")
+    require(batch.returncode == 0, f"{label} object inspection failed")
+    observed = {}
+    for line in batch.stdout.splitlines():
+        parts = line.split()
+        require(len(parts) == 3 and HEX40.fullmatch(parts[0]) and
+                parts[1] in {"commit", "tree", "blob", "tag"} and parts[2].isdigit(),
+                f"{label} reachable object is unreadable")
+        observed[parts[0]] = parts[1]
+    require(set(observed) == objects, f"{label} object inventory differs")
+    # Unlike batch-check, fsck also verifies object content hashes. An explicit
+    # revision and disabled commit-graph keep this check scoped to its closure.
+    fsck = _git_probe(root, *options, "fsck", "--strict", "--no-reflogs",
+                      "--no-dangling", revision)
+    require(fsck.returncode == 0, f"{label} reachable object integrity failed")
+    return objects
+
+
+def _authoritative_ref_closure(root: Path, approved_commit: str) -> set[str]:
+    # The approved detached control clone may have no refs. In that case its
+    # approved commit is the pinned main snapshot; it cannot claim to verify a
+    # later remote main which is absent from this independent object database.
+    listed = _git(root, "for-each-ref", "--format=%(refname)",
+                  "refs/heads/main", "refs/remotes/origin/main",
+                  "refs/heads/release", "refs/remotes/origin/release",
+                  "refs/tags/release").splitlines()
+    refs = [ref for ref in listed if ref in {"refs/heads/main", "refs/remotes/origin/main"}
+            or ref.startswith(("refs/heads/release/", "refs/remotes/origin/release/",
+                               "refs/tags/release/"))]
+    if not refs:
+        refs = [approved_commit]
+    reachable = set()
+    for ref in refs:
+        reachable.update(_object_closure(root, ref, label="authoritative ref",
+                                         allow_tag=ref.startswith("refs/tags/")))
+    return reachable
+
+
+def _reject_unverified_gitlinks(root: Path, commit: str) -> None:
+    tracked_tree = _git_probe(root, "-c", "core.commitGraph=false", "ls-tree", "-r", "-z",
+                              commit, binary=True)
+    require(tracked_tree.returncode == 0 and
+            not any(entry.startswith(b"160000 ") for entry in tracked_tree.stdout.split(b"\0")),
+            "unverified gitlink in approved target")
+
+
+def _repository_maintenance_diagnostic(root: Path, protected: set[str]) -> None:
+    result = _git_probe(root, "fsck", "--strict", "--no-reflogs")
+    output = "\n".join((result.stdout, result.stderr))
+    if result.returncode == 0:
+        if re.search(r"(?m)^dangling (?:commit|tree|blob|tag) [0-9a-f]{40}\s*$", output):
+            print("REPOSITORY_MAINTENANCE_WARNING=UNREACHABLE_HISTORICAL_OBJECT",
+                  file=sys.stderr)
+        return
+    # Only known, object-identified historical failures may be downgraded.
+    # An unknown fsck error remains blocking even if target/ref checks passed.
+    graph = re.findall(r"failed to parse commit ([0-9a-f]{40}) from object database for commit-graph", output)
+    unreadable = re.findall(r"Could not read ([0-9a-f]{40})", output)
+    missing = re.findall(r"(?m)^missing (?:commit|tree|blob|tag) ([0-9a-f]{40})\s*$", output)
+    observed = set(graph + unreadable + missing)
+    recognized = bool(observed) and set(graph) == set(unreadable)
+    remaining = re.sub(r"(?m)^(?:error: )?Could not read [0-9a-f]{40}\s*$", "", output)
+    remaining = re.sub(r"(?m)^failed to parse commit [0-9a-f]{40} from object database for commit-graph\s*$", "", remaining)
+    remaining = re.sub(r"(?m)^missing (?:commit|tree|blob|tag) [0-9a-f]{40}\s*$", "", remaining)
+    require(recognized and not remaining.strip() and not (observed & protected),
+            "repository integrity failure is not proven unrelated")
+    print("REPOSITORY_MAINTENANCE_WARNING=UNRELATED_HISTORICAL_OBJECT:" +
+          ",".join(sorted(observed)[:8]), file=sys.stderr)
 
 
 def verify_clean_detached_clone(root: Path, config: dict, *, allow_runtime: bool = False) -> dict:
@@ -219,6 +320,9 @@ def verify_clean_detached_clone(root: Path, config: dict, *, allow_runtime: bool
     identity = {"commit": _git(root, "rev-parse", "HEAD"), "tree": _git(root, "rev-parse", "HEAD^{tree}"),
                 "origin": _git(root, "remote", "get-url", "origin")}
     require(identity == {"commit": config["approved_commit"], "tree": config["approved_tree"], "origin": config["origin"]}, "source identity differs from approval")
+    target_objects = _object_closure(root, config["approved_commit"], label="target")
+    ref_objects = _authoritative_ref_closure(root, config["approved_commit"])
+    _reject_unverified_gitlinks(root, config["approved_commit"])
     archive = _run(["git", "-C", str(root), "archive", "--format=tar", "HEAD"], binary=True, timeout=300).stdout
     tracked = set()
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
@@ -240,7 +344,7 @@ def verify_clean_detached_clone(root: Path, config: dict, *, allow_runtime: bool
         require(allow_runtime and relative.split("/", 1)[0] in {"01_data", "06_outputs", "10_logs"}
                 and path.suffix.lower() not in {".py", ".pyc", ".pyo", ".pth", ".dll", ".exe", ".pyd", ".bat", ".cmd", ".ps1"},
                 "untracked or ignored source injection forbidden")
-    _git(root, "fsck", "--strict", "--no-reflogs")
+    _repository_maintenance_diagnostic(root, target_objects | ref_objects)
     return identity
 
 
