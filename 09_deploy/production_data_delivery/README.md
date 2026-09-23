@@ -73,7 +73,8 @@ reconciliation manifest SHA 和完整 expected Current。调用者须批准此 e
 传输后由 activation image 重新核验同一 manifest/artifact SHA，并声明
 `public-current-server-cas/1` 能力；旧镜像不支持该能力时，在 activation 前停止。
 服务器的普通发布和历史 candidate 晋升共用 Current 锁；晋升在锁内读取实际旧 Current
-的 ID、artifact SHA、manifest SHA，三项全等才原子切换指针。若 Current 已移动，返回
+的 ID、artifact SHA、manifest SHA，并在切换前再次核验上传 candidate 的同三项身份；
+两侧各自三项全等才原子切换指针。若 Current 已移动，返回
 `FAIL_STALE_BASE`，保留原指针及上传 candidate，不自动重算、覆盖或回退其他发布。
 成功回执单独记录原/新 Current 身份和切换时间，不修改已验收 candidate 文件。
 这是生产数据发布操作，仍须独立授权；代码进入 main 本身不触发晋升。

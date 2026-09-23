@@ -301,6 +301,7 @@ def activate_incoming_server_package(
     switch_hook: Callable[[], None] | None = None,
     initial_seed: bool = False,
     expected_current: Mapping[str, str] | None = None,
+    expected_candidate: Mapping[str, str] | None = None,
 ) -> ServerSyncResult:
     """Validate one uploaded directory and atomically activate it in-place.
 
@@ -330,6 +331,8 @@ def activate_incoming_server_package(
     if pre_switch_validator is not None:
         pre_switch_validator(package.directory / "data")
 
+    if (expected_current is None) != (expected_candidate is None):
+        raise DeliveryError("expected Current and candidate identities must be paired")
     if expected_current is not None and (
         set(expected_current) != {"id", "artifact_sha256", "manifest_sha256"}
         or not _SAFE_ID.fullmatch(str(expected_current["id"]))
@@ -337,6 +340,13 @@ def activate_incoming_server_package(
                for key in ("artifact_sha256", "manifest_sha256"))
     ):
         raise DeliveryError("expected Current identity is invalid")
+    if expected_candidate is not None and (
+        set(expected_candidate) != {"id", "artifact_sha256", "manifest_sha256"}
+        or not _SAFE_ID.fullmatch(str(expected_candidate["id"]))
+        or any(not re.fullmatch(r"[0-9a-f]{64}", str(expected_candidate[key]))
+               for key in ("artifact_sha256", "manifest_sha256"))
+    ):
+        raise DeliveryError("expected candidate identity is invalid")
     lock_path = root / ".current.lock"
     if lock_path.is_symlink():
         raise DeliveryError("Current lock path is unsafe")
@@ -375,8 +385,17 @@ def activate_incoming_server_package(
                 cas={**cas, "switch_timestamp": datetime.now(timezone.utc).isoformat()} if cas else None,
             )
 
-        # Revalidate under the lock; no unverified uploaded bytes are switched.
+        # Revalidate exact candidate bytes under the lock immediately before moving
+        # the uploaded package into the formal release directory.
         package = validate_production_package(uploaded, require_directory_name=False)
+        if expected_candidate is not None:
+            actual_candidate = {
+                "id": package.package_id,
+                "artifact_sha256": package.manifest["delivery_artifacts"][DOMESTIC_SPREAD_ARTIFACT]["sha256"],
+                "manifest_sha256": _sha256_file(package.directory / "manifest.json"),
+            }
+            if actual_candidate != dict(expected_candidate):
+                raise DeliveryError("candidate identity changed before Current switch")
         formal = releases / package.package_id
         if formal.exists():
             existing = validate_production_package(formal)

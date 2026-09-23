@@ -37,6 +37,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-current-id")
     parser.add_argument("--expected-current-artifact-sha256")
     parser.add_argument("--expected-current-manifest-sha256")
+    parser.add_argument("--expected-candidate-id")
+    parser.add_argument("--expected-candidate-artifact-sha256")
+    parser.add_argument("--expected-candidate-manifest-sha256")
     parser.add_argument(
         "--validate-only",
         action="store_true",
@@ -49,14 +52,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     expected_values = (args.expected_current_id, args.expected_current_artifact_sha256,
                        args.expected_current_manifest_sha256)
+    candidate_values = (args.expected_candidate_id, args.expected_candidate_artifact_sha256,
+                        args.expected_candidate_manifest_sha256)
     if any(value is not None for value in expected_values) and (
         not all(value is not None for value in expected_values)
+        or not all(value is not None for value in candidate_values)
         or args.initial_seed or args.validate_only
     ):
         raise ValueError("complete expected Current identity is required for activation")
+    if any(value is not None for value in candidate_values) and not all(
+        value is not None for value in expected_values
+    ):
+        raise ValueError("complete expected candidate and Current identities are required")
     expected_current = (
         dict(zip(("id", "artifact_sha256", "manifest_sha256"), expected_values))
         if all(value is not None for value in expected_values) else None
+    )
+    expected_candidate = (
+        dict(zip(("id", "artifact_sha256", "manifest_sha256"), candidate_values))
+        if all(value is not None for value in candidate_values) else None
     )
 
     if args.validate_only:
@@ -93,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         post_switch_validator=post_switch_validate,
         initial_seed=args.initial_seed,
         expected_current=expected_current,
+        expected_candidate=expected_candidate,
     )
     payload = {
         "schema_version": "public-data-remote-activation/1",

@@ -106,13 +106,22 @@ def _cas_packages(tmp_path: Path):
     return old, new, expected, store
 
 
+def _candidate_identity(candidate) -> dict[str, str]:
+    return {
+        "id": candidate.package_id,
+        "artifact_sha256": candidate.manifest["delivery_artifacts"]["domestic-spread"]["sha256"],
+        "manifest_sha256": _sha(candidate.directory / "manifest.json"),
+    }
+
+
 def test_server_cas_promotes_exact_candidate_under_current_lock(tmp_path: Path) -> None:
     old, candidate, expected, store = _cas_packages(tmp_path)
     upload = store / "incoming" / f"{candidate.package_id}.upload-cas"
     upload.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(candidate.directory, upload)
     result = activate_incoming_server_package(upload, store_root=store,
-                                              expected_current=expected)
+                                              expected_current=expected,
+                                              expected_candidate=_candidate_identity(candidate))
     assert result.status == "SYNCED"
     assert result.cas["result"] == "PASS"
     assert result.cas["actual_old_current"] == expected
@@ -149,7 +158,8 @@ def test_server_cas_stale_base_keeps_pointer_and_candidate(tmp_path: Path, stale
         unchanged = old.package_id
     pointer_bytes = (store / "current.json").read_bytes()
     result = activate_incoming_server_package(upload, store_root=store,
-                                              expected_current=expected)
+                                              expected_current=expected,
+                                              expected_candidate=_candidate_identity(candidate))
     assert result.status == "FAIL_STALE_BASE"
     assert result.cas["result"] == "FAIL_STALE_BASE"
     assert (store / "current.json").read_bytes() == pointer_bytes
@@ -187,6 +197,7 @@ def test_server_cas_compare_waits_for_concurrent_pointer_switch(tmp_path: Path) 
         cas = pool.submit(
             activate_incoming_server_package, candidate_upload, store_root=store,
             expected_current=expected,
+            expected_candidate=_candidate_identity(candidate),
         )
         try:
             assert not cas.done()
@@ -197,6 +208,23 @@ def test_server_cas_compare_waits_for_concurrent_pointer_switch(tmp_path: Path) 
     assert resolve_server_current(store).name == middle.package_id
     assert candidate_upload.is_dir()
     assert (store / "releases" / old.package_id).is_dir()
+
+
+def test_server_cas_rejects_different_candidate_before_pointer_switch(tmp_path: Path) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    upload = store / "incoming" / f"{candidate.package_id}.upload-cas"
+    shutil.copytree(candidate.directory, upload)
+    approved = _candidate_identity(candidate)
+    approved["artifact_sha256"] = "f" * 64
+    pointer_before = (store / "current.json").read_bytes()
+    with pytest.raises(DeliveryError, match="candidate identity changed"):
+        activate_incoming_server_package(
+            upload, store_root=store, expected_current=expected,
+            expected_candidate=approved,
+        )
+    assert (store / "current.json").read_bytes() == pointer_before
+    assert resolve_server_current(store).name == old.package_id
+    assert upload.is_dir()
 
 
 def test_same_current_build_is_content_idempotent_and_mtime_independent(tmp_path: Path) -> None:

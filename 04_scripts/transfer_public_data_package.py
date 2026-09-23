@@ -451,6 +451,9 @@ def main(argv: list[str] | None = None) -> int:
             "--expected-current-id", args.expected_current_id,
             "--expected-current-artifact-sha256", args.expected_current_artifact_sha256,
             "--expected-current-manifest-sha256", args.expected_current_manifest_sha256,
+            "--expected-candidate-id", package.package_id,
+            "--expected-candidate-artifact-sha256", args.candidate_artifact_sha256,
+            "--expected-candidate-manifest-sha256", args.candidate_manifest_sha256,
         ])
     activation = _ssh(target, activation_arguments)
     if activation.returncode != 0:
