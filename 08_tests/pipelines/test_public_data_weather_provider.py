@@ -372,9 +372,9 @@ def test_weather_reconnect_failure_is_classified_and_query_is_not_started(
 
     result = adapter.refresh()
 
-    assert result.status is ProviderStatus.SOURCE_UNAVAILABLE
-    assert result.domains["weather_observation"] == DomainStatus.MISSING.value
-    assert result.domains["weather_forecast"] == DomainStatus.MISSING.value
+    assert result.status is ProviderStatus.NETWORK_UNAVAILABLE
+    assert result.domains["weather_observation"] == DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
+    assert result.domains["weather_forecast"] == DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
     assert recovery_calls == ["fresh"]
     assert weather_calls == []
     assert "connection-validation" in (result.safe_reason or "")
@@ -417,9 +417,9 @@ def test_weather_midflight_client_failure_is_not_replayed(
     result = adapter.refresh()
 
     assert weather_calls == ["query"]
-    assert result.status is ProviderStatus.SOURCE_UNAVAILABLE
-    assert result.domains["weather_observation"] == DomainStatus.MISSING.value
-    assert result.domains["weather_forecast"] == DomainStatus.MISSING.value
+    assert result.status is ProviderStatus.NETWORK_UNAVAILABLE
+    assert result.domains["weather_observation"] == DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
+    assert result.domains["weather_forecast"] == DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE.value
     assert "query_retried=false" in (result.safe_reason or "")
     assert "fixture-secret" not in (result.safe_reason or "")
     assert "fixture.invalid" not in (result.safe_reason or "")

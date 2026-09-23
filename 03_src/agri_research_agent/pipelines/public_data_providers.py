@@ -263,7 +263,7 @@ class LutouRefreshAdapter:
         if not self.network_check():
             raise ProviderFailure(ProviderStatus.NETWORK_UNAVAILABLE, "Tailscale network is unavailable")
         if not self.connector(self.settings.host, self.settings.port, 5.0):
-            raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Lutou TCP endpoint is unavailable")
+            raise ProviderFailure(ProviderStatus.NETWORK_UNAVAILABLE, "Lutou TCP endpoint is unavailable")
         try:
             self._client = LutouClient(self.settings)
             self._client.__enter__()
@@ -328,7 +328,7 @@ class LutouRefreshAdapter:
             raise ProviderFailure(ProviderStatus.AUTH_FAILURE, "Lutou authentication failed") from None
         except LutouClientError:
             self.close()
-            raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Lutou required query readiness failed") from None
+            raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Lutou required query readiness failed") from None
 
     def refresh(self) -> RefreshResult:
         if self._client is None:
@@ -428,7 +428,7 @@ class LutouRefreshAdapter:
                     failures.append(failure)
                 except LutouClientError as exc:
                     failure = ProviderFailure(
-                        ProviderStatus.SOURCE_UNAVAILABLE,
+                        ProviderStatus.NETWORK_UNAVAILABLE,
                         "Lutou weather extraction failed: LutouClientError; "
                         "root_cause=SOURCE_CONNECTION_FAILURE; query_retried=false",
                         root_failure=root_failure_from_exception(
@@ -685,7 +685,7 @@ class DomesticBasisRefreshAdapter:
             raise ProviderFailure(ProviderStatus.AUTH_FAILURE, "Lutou authentication failed") from None
         except LutouClientError:
             self.close()
-            raise ProviderFailure(ProviderStatus.SOURCE_UNAVAILABLE, "Domestic Basis required query readiness failed") from None
+            raise ProviderFailure(ProviderStatus.INGESTION_FAILURE, "Domestic Basis required query readiness failed") from None
 
     def refresh(self) -> RefreshResult:
         if self._adapter is None or self._client is None:
@@ -707,7 +707,7 @@ class DomesticBasisRefreshAdapter:
                 if replacement is not None:
                     replacement.close()
                 raise ProviderFailure(
-                    ProviderStatus.SOURCE_UNAVAILABLE,
+                    ProviderStatus.NETWORK_UNAVAILABLE,
                     "Domestic Basis connection-validation failed after one fresh-client "
                     "recovery attempt: LutouClientError; "
                     "root_cause=SOURCE_CONNECTION_FAILURE",
@@ -779,7 +779,7 @@ def _pipeline_failure(
 def _lutou_connection_validation_failure(domain: str) -> ProviderFailure:
     safe_domain = domain.replace("_", "-")
     return ProviderFailure(
-        ProviderStatus.SOURCE_UNAVAILABLE,
+        ProviderStatus.NETWORK_UNAVAILABLE,
         f"Lutou {safe_domain} connection-validation failed after one fresh-client "
         "recovery attempt: LutouClientError; root_cause=SOURCE_CONNECTION_FAILURE",
     )
@@ -788,7 +788,10 @@ def _lutou_connection_validation_failure(domain: str) -> ProviderFailure:
 def _domain_failure_status(status: ProviderStatus) -> DomainStatus:
     if status is ProviderStatus.SOURCE_UNAVAILABLE:
         return DomainStatus.MISSING
-    if status is ProviderStatus.DEPENDENCY_UNAVAILABLE:
+    if status in {
+        ProviderStatus.DEPENDENCY_UNAVAILABLE,
+        ProviderStatus.NETWORK_UNAVAILABLE,
+    }:
         return DomainStatus.SKIPPED_DEPENDENCY_UNAVAILABLE
     return DomainStatus.ERROR
 

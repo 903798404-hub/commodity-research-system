@@ -205,8 +205,8 @@ def test_live_provider_required_query_failure_is_not_ready(
     )
     result = run_unified_refresh(runtime=runtime, run_id="provider-query-not-ready", adapters=[adapter])
     outcome = result.providers[0]
-    assert outcome.preflight_status is ProviderStatus.SOURCE_UNAVAILABLE
-    assert outcome.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert outcome.preflight_status is ProviderStatus.INGESTION_FAILURE
+    assert outcome.status is ProviderStatus.INGESTION_FAILURE
     assert outcome.current_before == outcome.current_after
 
 
@@ -314,7 +314,7 @@ def test_domestic_basis_fresh_reconnect_failure_fails_closed_once(
     with pytest.raises(ProviderFailure) as captured:
         adapter.refresh()
 
-    assert captured.value.status is ProviderStatus.SOURCE_UNAVAILABLE
+    assert captured.value.status is ProviderStatus.NETWORK_UNAVAILABLE
     assert recovery_calls == ["fresh"]
     assert extraction_calls == []
     assert broken.close_count == 1
