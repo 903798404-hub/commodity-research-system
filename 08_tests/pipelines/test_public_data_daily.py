@@ -760,6 +760,106 @@ def test_mixed_updated_and_unavailable_publishes_partial_snapshot(runtime: Runti
     assert result.manifest["server_sync"] == "SKIPPED"
 
 
+def test_mixed_updated_and_unavailable_never_publishes_partial_snapshot(
+    runtime: RuntimeContext,
+) -> None:
+    # Keep this legacy name for pytest/admission identity continuity. Here,
+    # "partial snapshot" means an incomplete/inconsistent publication, not the
+    # valid mixed trusted package supported by Provider Isolation.
+    tankan_before = CurrentIdentity(
+        "tankan-old",
+        "a" * 64,
+        {},
+        {
+            "tankan-market": {"release_id": "market-old", "manifest_sha256": "b" * 64},
+            "fx": {"release_id": "fx-old", "manifest_sha256": "c" * 64},
+        },
+    )
+    tankan_after = CurrentIdentity(
+        "tankan-new",
+        "d" * 64,
+        {},
+        {
+            "tankan-market": {"release_id": "market-new", "manifest_sha256": "e" * 64},
+            "fx": {"release_id": "fx-new", "manifest_sha256": "f" * 64},
+        },
+    )
+    lutou_baseline = CurrentIdentity(
+        "lutou-baseline",
+        "1" * 64,
+        {},
+        {
+            "lutou-three-oil": {"release_id": "oil-old", "manifest_sha256": "2" * 64},
+            "lutou-soil-moisture": {"release_id": "soil-old", "manifest_sha256": "3" * 64},
+            "lutou-weather": {"release_id": "weather-old", "manifest_sha256": "4" * 64},
+        },
+    )
+    tankan = ProviderOutcome(
+        "tankan",
+        ProviderStatus.READY,
+        ProviderStatus.UPDATED,
+        tankan_before,
+        tankan_after,
+        {},
+        {
+            "tankan_market": DomainStatus.UPDATED.value,
+            "fx": DomainStatus.UPDATED.value,
+        },
+        None,
+    )
+    lutou = ProviderOutcome(
+        "lutou",
+        ProviderStatus.SOURCE_UNAVAILABLE,
+        ProviderStatus.SOURCE_UNAVAILABLE,
+        lutou_baseline,
+        lutou_baseline,
+        {},
+        {
+            "three_oil": DomainStatus.ERROR.value,
+            "soil_moisture": DomainStatus.ERROR.value,
+            "weather_observation": DomainStatus.ERROR.value,
+            "weather_forecast": DomainStatus.ERROR.value,
+        },
+        "safe",
+    )
+    package_dir = runtime.runtime_root / "packages" / "mixed-trusted-package"
+    result = run_daily_update(
+        runtime=runtime,
+        run_id="daily-mixed-trusted-legacy-identity",
+        refresh_runner=lambda: _refresh(runtime.runtime_root, tankan, lutou),
+        public_current_root=runtime.runtime_root / "public-market-data",
+        packages_root=runtime.runtime_root / "packages",
+        server_store_root=runtime.runtime_root / "server",
+        package_builder=lambda **_kwargs: ProductionPackage(
+            "mixed-trusted-package", package_dir, {}, True
+        ),
+        syncer=lambda *_args, **_kwargs: ServerSyncResult(
+            "SYNCED",
+            "mixed-trusted-package",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            package_dir,
+        ),
+    )
+
+    assert result.business_status is DailyBusinessStatus.PARTIAL_SUCCESS
+    assert result.succeeded is True
+    assert result.manifest["production_data_package"]["status"] == "GENERATED"
+    assert result.manifest["server_sync"] == "SYNCED"
+    assert result.manifest["atomic_current_switch"] == "PASS"
+    current = result.manifest["public_current_vector"]
+    assert current["tankan"]["dataset_identities"] == tankan_after.dataset_identities
+    assert current["lutou"]["dataset_identities"] == lutou_baseline.dataset_identities
+    assert current["lutou"]["release_id"] == "lutou-baseline"
+    assert all(
+        item["release_id"]
+        for provider in current.values()
+        for item in provider["dataset_identities"].values()
+    )
+
+
 def test_single_lutou_domain_failure_publishes_successful_domains_and_preserves_failed_current(
     runtime: RuntimeContext,
 ) -> None:

@@ -199,6 +199,28 @@ def test_tankan_unavailable_does_not_block_lutou_update(runtime: RuntimeContext)
     assert result.providers[1].status is ProviderStatus.UPDATED
 
 
+def test_unavailable_provider_does_not_block_other_provider(runtime: RuntimeContext) -> None:
+    result = run_unified_refresh(
+        runtime=runtime,
+        run_id="legacy-independent-provider-identity",
+        adapters=[
+            FakeAdapter(
+                "tankan",
+                preflight_failure=ProviderFailure(
+                    ProviderStatus.NETWORK_UNAVAILABLE, "safe"
+                ),
+            ),
+            FakeAdapter("lutou", RefreshResult(True, {"data": "2026-08-19"})),
+        ],
+    )
+
+    assert result.overall_status is OverallStatus.SUCCESS_WITH_UNAVAILABLE_SOURCE
+    assert result.providers[0].status is ProviderStatus.NETWORK_UNAVAILABLE
+    assert result.providers[0].current_before == result.providers[0].current_after
+    assert result.providers[1].status is ProviderStatus.UPDATED
+    assert result.providers[1].current_before != result.providers[1].current_after
+
+
 def test_lutou_unavailable_does_not_block_tankan_update(runtime: RuntimeContext) -> None:
     result = run_unified_refresh(
         runtime=runtime,
