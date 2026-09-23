@@ -60,6 +60,24 @@ Current、批准键数、source/audit SHA，以及发布前 Current ID/SHA。Man
 Preview 目录正式运行。每次执行创建唯一运行目录和源副本，核对真实 Git 对象与文件字节，
 不安装依赖、不改变业务公式、不调用 FULL DAILY 或 AM/PM capture。
 
+已验收的历史修订 candidate 使用同一 Windows 入口的 `--promote-candidate <absolute-package-path>`，
+同时提供原 `--historical-reconciliation-manifest`、`--promotion-evidence`、
+`--promotion-evidence-sha256` 与三项 `--expected-current-*`。这条路径只重新核验原 candidate
+及其 validation、input-hash inventory、producer Commit/Tree 和 continuation 输入字节，
+不重新抓取、计算或打包。Promotion evidence 使用封闭
+`public-current-candidate-promotion/1` JSON，包含 candidate ID、artifact/manifest/result SHA、
+validation 与 inventory 的绝对路径和 SHA、三个 continuation 文件的 SHA、producer Commit/Tree、
+reconciliation manifest SHA 和完整 expected Current。调用者须批准此 evidence 的精确 SHA；
+临时改写 evidence 或调用参数不能替换已验收的旧 Current 基线。
+
+传输后由 activation image 重新核验同一 manifest/artifact SHA，并声明
+`public-current-server-cas/1` 能力；旧镜像不支持该能力时，在 activation 前停止。
+服务器的普通发布和历史 candidate 晋升共用 Current 锁；晋升在锁内读取实际旧 Current
+的 ID、artifact SHA、manifest SHA，三项全等才原子切换指针。若 Current 已移动，返回
+`FAIL_STALE_BASE`，保留原指针及上传 candidate，不自动重算、覆盖或回退其他发布。
+成功回执单独记录原/新 Current 身份和切换时间，不修改已验收 candidate 文件。
+这是生产数据发布操作，仍须独立授权；代码进入 main 本身不触发晋升。
+
 ## 配置、基线与凭据
 
 配置采用 `production-data-producer-config/1`，由 `validate_config` 拒绝未知字段。

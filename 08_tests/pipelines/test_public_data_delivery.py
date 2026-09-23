@@ -5,8 +5,10 @@ import json
 import os
 import shutil
 import stat
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from threading import Event
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -81,6 +83,120 @@ def _domestic_spread(path: Path, *, value: float, updated_at: str) -> Path:
         path,
     )
     return path
+
+
+def _cas_packages(tmp_path: Path):
+    public = tmp_path / "public-market-data"
+    _current(public, "tankan", "r1", "one")
+    first_spread = _domestic_spread(tmp_path / "old/historical_spread_database.parquet", value=10.0, updated_at="before")
+    old = build_production_package(
+        public_current_root=public, packages_root=tmp_path / "packages",
+        source_max_dates={}, delivery_artifacts={"domestic-spread": first_spread},
+    )
+    next_spread = _domestic_spread(tmp_path / "new/historical_spread_database.parquet", value=11.0, updated_at="after")
+    new = build_production_package(
+        public_current_root=public, packages_root=tmp_path / "packages",
+        source_max_dates={}, delivery_artifacts={"domestic-spread": next_spread},
+    )
+    expected = {"id": old.package_id,
+                "artifact_sha256": old.manifest["delivery_artifacts"]["domestic-spread"]["sha256"],
+                "manifest_sha256": _sha(old.directory / "manifest.json")}
+    store = tmp_path / "store"
+    sync_to_local_server_store(old.directory, store_root=store)
+    return old, new, expected, store
+
+
+def test_server_cas_promotes_exact_candidate_under_current_lock(tmp_path: Path) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    upload = store / "incoming" / f"{candidate.package_id}.upload-cas"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(candidate.directory, upload)
+    result = activate_incoming_server_package(upload, store_root=store,
+                                              expected_current=expected)
+    assert result.status == "SYNCED"
+    assert result.cas["result"] == "PASS"
+    assert result.cas["actual_old_current"] == expected
+    assert result.cas["new_current_id"] == candidate.package_id
+    assert result.cas["switch_timestamp"]
+    assert resolve_server_current(store).name == candidate.package_id
+    assert _sha(result.current_directory / "manifest.json") == _sha(candidate.directory / "manifest.json")
+    assert _sha(result.current_directory / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet") == \
+        _sha(candidate.directory / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet")
+    assert (store / "releases" / old.package_id).is_dir()
+
+
+@pytest.mark.parametrize("stale_field", ["id", "artifact_sha256", "manifest_sha256", "concurrent"])
+def test_server_cas_stale_base_keeps_pointer_and_candidate(tmp_path: Path, stale_field: str) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    upload = store / "incoming" / f"{candidate.package_id}.upload-cas"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(candidate.directory, upload)
+    if stale_field == "concurrent":
+        # A normal publication takes the shared lock and moves Current after
+        # the caller's old-Current precheck, before this activation.
+        third_spread = _domestic_spread(tmp_path / "middle/historical_spread_database.parquet", value=12.0, updated_at="middle")
+        public = tmp_path / "public-market-data"
+        middle = build_production_package(public_current_root=public,
+                                          packages_root=tmp_path / "packages",
+                                          source_max_dates={},
+                                          delivery_artifacts={"domestic-spread": third_spread})
+        middle_upload = store / "incoming" / f"{middle.package_id}.upload-middle"
+        shutil.copytree(middle.directory, middle_upload)
+        assert activate_incoming_server_package(middle_upload, store_root=store).status == "SYNCED"
+        unchanged = middle.package_id
+    else:
+        expected[stale_field] = ("public-current-" + "a" * 24) if stale_field == "id" else "a" * 64
+        unchanged = old.package_id
+    pointer_bytes = (store / "current.json").read_bytes()
+    result = activate_incoming_server_package(upload, store_root=store,
+                                              expected_current=expected)
+    assert result.status == "FAIL_STALE_BASE"
+    assert result.cas["result"] == "FAIL_STALE_BASE"
+    assert (store / "current.json").read_bytes() == pointer_bytes
+    assert resolve_server_current(store).name == unchanged
+    assert upload.is_dir()
+
+
+def test_server_cas_compare_waits_for_concurrent_pointer_switch(tmp_path: Path) -> None:
+    old, candidate, expected, store = _cas_packages(tmp_path)
+    candidate_upload = store / "incoming" / f"{candidate.package_id}.upload-cas"
+    shutil.copytree(candidate.directory, candidate_upload)
+    middle_spread = _domestic_spread(
+        tmp_path / "middle/historical_spread_database.parquet", value=12.0, updated_at="middle"
+    )
+    middle = build_production_package(
+        public_current_root=tmp_path / "public-market-data",
+        packages_root=tmp_path / "packages", source_max_dates={},
+        delivery_artifacts={"domestic-spread": middle_spread},
+    )
+    middle_upload = store / "incoming" / f"{middle.package_id}.upload-middle"
+    shutil.copytree(middle.directory, middle_upload)
+    entered_switch = Event()
+    release_switch = Event()
+
+    def hold_lock() -> None:
+        entered_switch.set()
+        assert release_switch.wait(10)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ordinary = pool.submit(
+            activate_incoming_server_package, middle_upload, store_root=store,
+            switch_hook=hold_lock,
+        )
+        assert entered_switch.wait(10)
+        cas = pool.submit(
+            activate_incoming_server_package, candidate_upload, store_root=store,
+            expected_current=expected,
+        )
+        try:
+            assert not cas.done()
+        finally:
+            release_switch.set()
+        assert ordinary.result(timeout=10).status == "SYNCED"
+        assert cas.result(timeout=10).status == "FAIL_STALE_BASE"
+    assert resolve_server_current(store).name == middle.package_id
+    assert candidate_upload.is_dir()
+    assert (store / "releases" / old.package_id).is_dir()
 
 
 def test_same_current_build_is_content_idempotent_and_mtime_independent(tmp_path: Path) -> None:

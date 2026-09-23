@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -33,6 +34,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--incoming-package", type=Path, required=True)
     parser.add_argument("--store-root", type=Path, required=True)
     parser.add_argument("--initial-seed", action="store_true")
+    parser.add_argument("--expected-current-id")
+    parser.add_argument("--expected-current-artifact-sha256")
+    parser.add_argument("--expected-current-manifest-sha256")
     parser.add_argument(
         "--validate-only",
         action="store_true",
@@ -43,6 +47,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    expected_values = (args.expected_current_id, args.expected_current_artifact_sha256,
+                       args.expected_current_manifest_sha256)
+    if any(value is not None for value in expected_values) and (
+        not all(value is not None for value in expected_values)
+        or args.initial_seed or args.validate_only
+    ):
+        raise ValueError("complete expected Current identity is required for activation")
+    expected_current = (
+        dict(zip(("id", "artifact_sha256", "manifest_sha256"), expected_values))
+        if all(value is not None for value in expected_values) else None
+    )
 
     if args.validate_only:
         package = validate_production_package(
@@ -61,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
             "sha": "PASS",
             "formal_read_validation": "PASS",
             "consumer_reads": dict(consumer_reads.targets),
+            "activation_capabilities": ["public-current-server-cas/1"],
+            "manifest_sha256": hashlib.sha256((package.directory / "manifest.json").read_bytes()).hexdigest(),
+            "domestic_spread_artifact_sha256": package.manifest["delivery_artifacts"].get(
+                "domestic-spread", {}).get("sha256"),
         }, ensure_ascii=False, sort_keys=True))
         return 0
 
@@ -73,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         pre_switch_validator=validate_activated_public_currents,
         post_switch_validator=post_switch_validate,
         initial_seed=args.initial_seed,
+        expected_current=expected_current,
     )
     payload = {
         "schema_version": "public-data-remote-activation/1",
@@ -83,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         "atomic_switch": result.atomic_switch,
         "formal_read_validation": result.formal_read_validation,
         "safe_reason": result.safe_reason,
+        "cas": result.cas,
     }
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if result.status in {"SYNCED", "NO_CHANGE"} else 1

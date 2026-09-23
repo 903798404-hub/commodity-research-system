@@ -8,6 +8,7 @@ disabling host verification.  SSH trust stays in the operator's existing config.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shlex
@@ -137,6 +138,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--remote-store-root", required=True)
     parser.add_argument("--activation-image-id", required=True)
     parser.add_argument("--initial-seed", action="store_true")
+    parser.add_argument("--expected-current-id")
+    parser.add_argument("--expected-current-artifact-sha256")
+    parser.add_argument("--expected-current-manifest-sha256")
+    parser.add_argument("--candidate-artifact-sha256")
+    parser.add_argument("--candidate-manifest-sha256")
+    parser.add_argument("--reconciliation-manifest-sha256")
     parser.add_argument(
         "--transport-timeout-seconds",
         type=float,
@@ -262,6 +269,24 @@ def main(argv: list[str] | None = None) -> int:
     _transport_deadline = time.monotonic() + args.transport_timeout_seconds
     target, store, image = _checked_inputs(args)
     package = validate_production_package(args.package)
+    promotion_values = (
+        args.expected_current_id, args.expected_current_artifact_sha256,
+        args.expected_current_manifest_sha256, args.candidate_artifact_sha256,
+        args.candidate_manifest_sha256, args.reconciliation_manifest_sha256,
+    )
+    promotion = any(value is not None for value in promotion_values)
+    if promotion:
+        if args.initial_seed or not all(value is not None for value in promotion_values):
+            raise ValueError("complete promotion and expected Current identity required")
+        if not re.fullmatch(r"public-current-[0-9a-f]{24}", args.expected_current_id):
+            raise ValueError("expected Current id invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in promotion_values[1:]):
+            raise ValueError("promotion SHA-256 identity invalid")
+        artifact = package.manifest["delivery_artifacts"]["domestic-spread"]
+        if (hashlib.sha256((package.directory / "manifest.json").read_bytes()).hexdigest()
+                != args.candidate_manifest_sha256 or
+                artifact["sha256"] != args.candidate_artifact_sha256):
+            raise ValueError("candidate identity changed before transfer")
     validate_formal_consumer_reads(
         project_root=ROOT,
         runtime_root=package.directory / "data",
@@ -298,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
                 "remote_activation": "SKIPPED",
             }, sort_keys=True))
             return 2
-        if pointer.get("package_id") == package.package_id:
+        if pointer.get("package_id") == package.package_id and not promotion:
             expected = package.manifest
             if any(
                 pointer[key] != expected[key]
@@ -399,6 +424,14 @@ def main(argv: list[str] | None = None) -> int:
     ):
         _quarantine_upload(target, store, remote_upload, upload_name)
         raise RuntimeError("remote sealed-package validation identity mismatch")
+    if promotion and (
+        "public-current-server-cas/1" not in validation_result.get("activation_capabilities", [])
+        or
+        validation_result.get("manifest_sha256") != args.candidate_manifest_sha256
+        or validation_result.get("domestic_spread_artifact_sha256") != args.candidate_artifact_sha256
+    ):
+        _quarantine_upload(target, store, remote_upload, upload_name)
+        raise RuntimeError("activation image lacks CAS or transferred candidate identity differs")
 
     activation_arguments = [
         "docker", "run", "--rm", "--pull", "never", "--network", "none",
@@ -413,8 +446,25 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if args.initial_seed:
         activation_arguments.append("--initial-seed")
+    if promotion:
+        activation_arguments.extend([
+            "--expected-current-id", args.expected_current_id,
+            "--expected-current-artifact-sha256", args.expected_current_artifact_sha256,
+            "--expected-current-manifest-sha256", args.expected_current_manifest_sha256,
+        ])
     activation = _ssh(target, activation_arguments)
     if activation.returncode != 0:
+        if promotion:
+            try:
+                stale = json.loads(activation.stdout.strip().splitlines()[-1])
+            except (IndexError, ValueError):
+                stale = None
+            if isinstance(stale, dict) and stale.get("status") == "FAIL_STALE_BASE" and (
+                stale.get("cas") or {}).get("result") == "FAIL_STALE_BASE":
+                print(json.dumps({"schema_version": "public-data-transport/1",
+                                  "status": "FAIL_STALE_BASE", "cas": stale["cas"],
+                                  "package_id": package.package_id}, sort_keys=True))
+                return 3
         detail = _bounded_remote_detail(activation)
         raise RuntimeError(
             f"remote activation failed; exit_code={activation.returncode}; detail={detail}"
@@ -425,14 +475,35 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("remote activation result is invalid") from exc
     if result.get("package_id") != package.package_id:
         raise RuntimeError("remote activation package identity mismatch")
-    print(json.dumps({
+    receipt = {
         "schema_version": "public-data-transport/1",
         "status": result.get("status"),
         "package_id": package.package_id,
         "transport": "PASS",
         "remote_validation": validation_result,
         "remote_activation": result,
-    }, ensure_ascii=False, sort_keys=True))
+    }
+    if promotion:
+        cas = result.get("cas") or {}
+        if (cas.get("result") != "PASS" or
+            (cas.get("actual_old_current") or {}).get("id") != args.expected_current_id or
+            cas.get("new_current_id") != package.package_id):
+            raise RuntimeError("server CAS receipt identity differs")
+        receipt["promotion"] = {
+            "promoted_candidate_id": package.package_id,
+            "promoted_artifact_sha256": args.candidate_artifact_sha256,
+            "promoted_manifest_sha256": args.candidate_manifest_sha256,
+            "reconciliation_manifest_sha256": args.reconciliation_manifest_sha256,
+            "expected_old_current_id": args.expected_current_id,
+            "actual_old_current_id": cas["actual_old_current"]["id"],
+            "expected_old_artifact_sha256": args.expected_current_artifact_sha256,
+            "actual_old_artifact_sha256": cas["actual_old_current"]["artifact_sha256"],
+            "expected_old_manifest_sha256": args.expected_current_manifest_sha256,
+            "actual_old_manifest_sha256": cas["actual_old_current"]["manifest_sha256"],
+            "new_current_id": cas["new_current_id"],
+            "cas_result": cas["result"], "switch_timestamp": cas["switch_timestamp"],
+        }
+    print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
     return 0 if result.get("status") in {"SYNCED", "NO_CHANGE"} else 1
 
 

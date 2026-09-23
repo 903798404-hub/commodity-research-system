@@ -41,8 +41,10 @@ def test_validate_only_reads_sealed_package_without_activation(
     package = SimpleNamespace(
         package_id="public-current-abc",
         directory=tmp_path / "incoming" / "public-current-abc.upload-one",
+        manifest={"delivery_artifacts": {}},
     )
     package.directory.mkdir(parents=True)
+    (package.directory / "manifest.json").write_text("{}", encoding="utf-8")
     calls: list[str] = []
     monkeypatch.setattr(
         activation,
@@ -73,6 +75,8 @@ def test_validate_only_reads_sealed_package_without_activation(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "VALIDATED"
     assert payload["consumer_reads"] == {"consumer": "PASS"}
+    assert payload["activation_capabilities"] == ["public-current-server-cas/1"]
+    assert payload["manifest_sha256"] == activation.hashlib.sha256(b"{}").hexdigest()
     assert calls == ["package:public-current-abc.upload-one:False", "formal:data"]
 
 

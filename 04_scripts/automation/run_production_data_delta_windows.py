@@ -75,6 +75,13 @@ def main(argv=None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--candidate-only", action="store_true", help="Produce locally; no SSH, publication or continuation activation (default)")
     mode.add_argument("--publish", action="store_true", help="Produce, transfer, validate, publish and persist verified continuation")
+    mode.add_argument("--promote-candidate", type=Path,
+                      help="Promote an already validated exact Public Current candidate without rebuilding it")
+    parser.add_argument("--promotion-evidence", type=Path)
+    parser.add_argument("--promotion-evidence-sha256")
+    parser.add_argument("--expected-current-id")
+    parser.add_argument("--expected-current-artifact-sha256")
+    parser.add_argument("--expected-current-manifest-sha256")
     args = parser.parse_args(argv)
     try:
         def closed_pairs(items):
@@ -96,6 +103,30 @@ def main(argv=None) -> int:
             args.domain != "akshare" or args.end_date is not None
         ):
             raise ValueError("historical reconciliation requires AkShare and its manifest-only scope")
+        promotion_fields = (args.promotion_evidence, args.promotion_evidence_sha256,
+                            args.expected_current_id, args.expected_current_artifact_sha256,
+                            args.expected_current_manifest_sha256)
+        if args.promote_candidate is not None:
+            if (args.domain != "akshare" or args.historical_reconciliation_manifest is None
+                    or not all(value is not None for value in promotion_fields)):
+                raise ValueError("exact historical promotion identity is required")
+            result = module.promote_existing_candidate(
+                config, candidate=args.promote_candidate,
+                reconciliation_manifest=args.historical_reconciliation_manifest,
+                evidence_path=args.promotion_evidence,
+                evidence_sha256=args.promotion_evidence_sha256,
+                expected_current={
+                    "id": args.expected_current_id,
+                    "artifact_sha256": args.expected_current_artifact_sha256,
+                    "manifest_sha256": args.expected_current_manifest_sha256,
+                },
+            )
+            if args.config.read_bytes() != raw:
+                raise ValueError("configuration changed during promotion")
+            print(json.dumps({"PRODUCTION_DATA_DELTA": result["status"], **result}, sort_keys=True))
+            return 0 if result["status"] == "PUBLISHED" else 1
+        if any(value is not None for value in promotion_fields):
+            raise ValueError("promotion evidence cannot accompany producer generation")
         end_date = (
             module.resolve_business_end_date(args.end_date)
             if args.domain == "akshare" and args.historical_reconciliation_manifest is None

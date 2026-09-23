@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -57,6 +58,48 @@ def _successful_delivery_run(calls: list[list[str]], command: list[str]):
             "status": "SYNCED", "package_id": "public-current-abc",
         }))
     return _completed(command)
+
+
+def test_promotion_rejects_activation_image_without_cas_before_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_id = "public-current-" + "d" * 24
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_bytes(b"{}")
+    manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    package = SimpleNamespace(
+        package_id=candidate_id, directory=tmp_path,
+        manifest={"delivery_artifacts": {"domestic-spread": {"sha256": "e" * 64}}},
+    )
+    monkeypatch.setattr(transport, "validate_production_package", lambda _path: package)
+    calls: list[list[str]] = []
+
+    def run(command: list[str]):
+        result = _successful_delivery_run(calls, command)
+        if "--validate-only" in " ".join(command):
+            return _completed(command, stdout=json.dumps({
+                "status": "VALIDATED", "package_id": candidate_id,
+                "manifest_sha256": manifest_sha,
+                "domestic_spread_artifact_sha256": "e" * 64,
+                # Older activation image has no server CAS capability.
+            }))
+        return result
+
+    monkeypatch.setattr(transport, "_run", run)
+    with pytest.raises(RuntimeError, match="activation image lacks CAS"):
+        transport.main([
+            "--package", str(tmp_path), "--ssh-target", "trusted-host",
+            "--remote-store-root", "/home/ubuntu/market-data/01_data/public-data-server-store",
+            "--activation-image-id", "sha256:" + "a" * 64,
+            "--expected-current-id", "public-current-" + "a" * 24,
+            "--expected-current-artifact-sha256", "b" * 64,
+            "--expected-current-manifest-sha256", "c" * 64,
+            "--candidate-artifact-sha256", "e" * 64,
+            "--candidate-manifest-sha256", manifest_sha,
+            "--reconciliation-manifest-sha256", "f" * 64,
+        ])
+    assert not any("activate_public_data_package.py" in " ".join(command)
+                   and "--validate-only" not in " ".join(command) for command in calls)
 
 
 def test_same_remote_identity_skips_scp_and_activation(

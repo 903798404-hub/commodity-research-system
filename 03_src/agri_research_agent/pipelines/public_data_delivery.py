@@ -25,6 +25,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
+from filelock import FileLock
 
 from agri_research_agent.shared.atomic_storage import atomic_write_json
 
@@ -71,6 +72,7 @@ class ServerSyncResult:
     formal_read_validation: str
     current_directory: Path | None
     safe_reason: str | None = None
+    cas: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +300,7 @@ def activate_incoming_server_package(
     post_switch_validator: Callable[[Path], None] | None = None,
     switch_hook: Callable[[], None] | None = None,
     initial_seed: bool = False,
+    expected_current: Mapping[str, str] | None = None,
 ) -> ServerSyncResult:
     """Validate one uploaded directory and atomically activate it in-place.
 
@@ -327,58 +330,98 @@ def activate_incoming_server_package(
     if pre_switch_validator is not None:
         pre_switch_validator(package.directory / "data")
 
-    pointer_path = root / "current.json"
-    if initial_seed and (pointer_path.exists() or pointer_path.is_symlink()):
-        raise DeliveryError("server store is already initialized")
-    old_pointer = _strict_json(pointer_path) if pointer_path.is_file() else None
-    if old_pointer and old_pointer.get("package_id") == package.package_id:
-        current = resolve_server_current(root)
-        _safe_remove_tree(uploaded, incoming_root)
-        return ServerSyncResult(
-            "NO_CHANGE", package.package_id, "PASS", "PASS", "N/A", "PASS", current
-        )
+    if expected_current is not None and (
+        set(expected_current) != {"id", "artifact_sha256", "manifest_sha256"}
+        or not _SAFE_ID.fullmatch(str(expected_current["id"]))
+        or any(not re.fullmatch(r"[0-9a-f]{64}", str(expected_current[key]))
+               for key in ("artifact_sha256", "manifest_sha256"))
+    ):
+        raise DeliveryError("expected Current identity is invalid")
+    lock_path = root / ".current.lock"
+    if lock_path.is_symlink():
+        raise DeliveryError("Current lock path is unsafe")
+    # Every activation, including ordinary daily delivery, uses the same lock.
+    # The exact old-Current comparison and pointer swap cannot interleave.
+    with FileLock(str(lock_path), timeout=60):
+        pointer_path = root / "current.json"
+        if initial_seed and (pointer_path.exists() or pointer_path.is_symlink()):
+            raise DeliveryError("server store is already initialized")
+        old_pointer = _strict_json(pointer_path) if pointer_path.is_file() else None
+        actual_old = None
+        if old_pointer is not None and expected_current is not None:
+            old_package = validate_production_package(resolve_server_current(root))
+            actual_old = {
+                "id": old_package.package_id,
+                "artifact_sha256": old_package.manifest["delivery_artifacts"][DOMESTIC_SPREAD_ARTIFACT]["sha256"],
+                "manifest_sha256": _sha256_file(old_package.directory / "manifest.json"),
+            }
+        cas = None
+        if expected_current is not None:
+            cas = {"expected_old_current": dict(expected_current),
+                   "actual_old_current": actual_old,
+                   "result": "PASS" if actual_old == dict(expected_current) else "FAIL_STALE_BASE"}
+            if cas["result"] != "PASS":
+                # Keep both the incoming candidate and the formal pointer intact.
+                return ServerSyncResult(
+                    "FAIL_STALE_BASE", package.package_id, "PASS", "PASS", "N/A", "N/A",
+                    old_package.directory if actual_old is not None else None,
+                    "Current differs from expected base", cas,
+                )
+        if old_pointer and old_pointer.get("package_id") == package.package_id:
+            current = resolve_server_current(root)
+            _safe_remove_tree(uploaded, incoming_root)
+            return ServerSyncResult(
+                "NO_CHANGE", package.package_id, "PASS", "PASS", "N/A", "PASS", current,
+                cas={**cas, "switch_timestamp": datetime.now(timezone.utc).isoformat()} if cas else None,
+            )
 
-    formal = releases / package.package_id
-    if formal.exists():
-        existing = validate_production_package(formal)
-        if existing.manifest["bundle_sha256"] != package.manifest["bundle_sha256"]:
-            raise DeliveryError("server release id collision")
-        _safe_remove_tree(uploaded, incoming_root)
-    else:
-        os.replace(uploaded, formal)
-    new_pointer = {
-        "schema_version": SERVER_POINTER_SCHEMA,
-        "package_id": package.package_id,
-        "current_identity_sha256": package.manifest["current_identity_sha256"],
-        "delivery_identity_sha256": package.manifest["delivery_identity_sha256"],
-        "bundle_sha256": package.manifest["bundle_sha256"],
-    }
-    try:
-        if switch_hook is not None:
-            switch_hook()
-        atomic_write_json(pointer_path, new_pointer, file_mode=SERVER_POINTER_MODE)
-    except Exception as exc:
-        return ServerSyncResult(
-            "FAILED", package.package_id, "PASS", "PASS", "FAIL", "N/A", None,
-            f"atomic Current switch failed: {type(exc).__name__}",
-        )
-    try:
-        current = resolve_server_current(root)
-        if post_switch_validator is not None:
-            post_switch_validator(current / "data")
-    except Exception as exc:
-        if old_pointer is None:
-            pointer_path.unlink(missing_ok=True)
+        # Revalidate under the lock; no unverified uploaded bytes are switched.
+        package = validate_production_package(uploaded, require_directory_name=False)
+        formal = releases / package.package_id
+        if formal.exists():
+            existing = validate_production_package(formal)
+            if existing.manifest["bundle_sha256"] != package.manifest["bundle_sha256"]:
+                raise DeliveryError("server release id collision")
+            _safe_remove_tree(uploaded, incoming_root)
         else:
-            atomic_write_json(pointer_path, old_pointer, file_mode=SERVER_POINTER_MODE)
+            os.replace(uploaded, formal)
+        new_pointer = {
+            "schema_version": SERVER_POINTER_SCHEMA,
+            "package_id": package.package_id,
+            "current_identity_sha256": package.manifest["current_identity_sha256"],
+            "delivery_identity_sha256": package.manifest["delivery_identity_sha256"],
+            "bundle_sha256": package.manifest["bundle_sha256"],
+        }
+        try:
+            if switch_hook is not None:
+                switch_hook()
+            atomic_write_json(pointer_path, new_pointer, file_mode=SERVER_POINTER_MODE)
+        except Exception as exc:
+            return ServerSyncResult(
+                "FAILED", package.package_id, "PASS", "PASS", "FAIL", "N/A", None,
+                f"atomic Current switch failed: {type(exc).__name__}", cas,
+            )
+        try:
+            current = resolve_server_current(root)
+            if post_switch_validator is not None:
+                post_switch_validator(current / "data")
+        except Exception as exc:
+            if old_pointer is None:
+                pointer_path.unlink(missing_ok=True)
+            else:
+                atomic_write_json(pointer_path, old_pointer, file_mode=SERVER_POINTER_MODE)
+            return ServerSyncResult(
+                "FAILED", package.package_id, "PASS", "PASS", "PASS", "FAIL",
+                resolve_server_current(root) if old_pointer is not None else None,
+                f"formal read validation failed: {type(exc).__name__}", cas,
+            )
+        if cas is not None:
+            cas = {**cas, "new_current_id": package.package_id,
+                   "switch_timestamp": datetime.now(timezone.utc).isoformat()}
         return ServerSyncResult(
-            "FAILED", package.package_id, "PASS", "PASS", "PASS", "FAIL",
-            resolve_server_current(root) if old_pointer is not None else None,
-            f"formal read validation failed: {type(exc).__name__}",
+            "SYNCED", package.package_id, "PASS", "PASS", "PASS", "PASS", current,
+            cas=cas,
         )
-    return ServerSyncResult(
-        "SYNCED", package.package_id, "PASS", "PASS", "PASS", "PASS", current
-    )
 
 
 def resolve_server_current(store_root: str | Path) -> Path:

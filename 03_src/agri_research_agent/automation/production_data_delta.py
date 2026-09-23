@@ -685,6 +685,192 @@ def _save_continuation(config: dict, domain: str, baseline: Path, work: Path, so
     os.replace(temporary, pointer)
 
 
+def _validated_promotion(config: dict, *, candidate: Path, reconciliation_manifest: Path,
+                         evidence_path: Path, evidence_sha256: str,
+                         expected_current: dict) -> tuple[dict, dict, Path, Path, dict]:
+    """Recheck the existing candidate and its independent validation evidence."""
+    from agri_research_agent.automation import historical_reconciliation as historical
+    from agri_research_agent.pipelines.public_data_delivery import validate_production_package
+
+    require(set(expected_current) == {"id", "artifact_sha256", "manifest_sha256"}
+            and re.fullmatch(r"public-current-[0-9a-f]{24}", expected_current["id"])
+            and all(HEX64.fullmatch(expected_current[key]) for key in
+                    ("artifact_sha256", "manifest_sha256")), "expected Current identity invalid")
+    require(isinstance(evidence_sha256, str) and HEX64.fullmatch(evidence_sha256),
+            "promotion evidence SHA invalid")
+    evidence_path = _absolute(str(evidence_path), file=True)
+    require(sha256_file(evidence_path) == evidence_sha256, "promotion evidence changed")
+    evidence = strict_json(evidence_path.read_bytes())
+    require(set(evidence) == {"schema_version", "candidate_id", "candidate_artifact_sha256",
+                              "candidate_manifest_sha256", "candidate_result_sha256",
+                              "candidate_validation_path", "candidate_validation_sha256",
+                              "input_hash_inventory_path", "input_hash_inventory_sha256",
+                              "source_files", "producer_commit", "producer_tree",
+                              "reconciliation_manifest_sha256", "expected_current"}
+            and evidence["schema_version"] == "public-current-candidate-promotion/1"
+            and evidence["expected_current"] == expected_current,
+            "closed promotion evidence or expected Current differs")
+    for key in ("candidate_artifact_sha256", "candidate_manifest_sha256",
+                "candidate_result_sha256", "candidate_validation_sha256",
+                "input_hash_inventory_sha256", "reconciliation_manifest_sha256"):
+        require(isinstance(evidence[key], str) and HEX64.fullmatch(evidence[key]),
+                "promotion SHA identity invalid")
+    require(isinstance(evidence["producer_commit"], str) and HEX40.fullmatch(evidence["producer_commit"])
+            and isinstance(evidence["producer_tree"], str) and HEX40.fullmatch(evidence["producer_tree"]),
+            "candidate producer identity invalid")
+    manifest, checked = historical.load_manifest(reconciliation_manifest)
+    require(manifest["expected_current"] == expected_current and
+            checked["manifest_sha256"] == evidence["reconciliation_manifest_sha256"],
+            "reconciliation manifest and promotion base differ")
+    candidate = _absolute(str(candidate))
+    require(candidate.name == evidence["candidate_id"] and
+            re.fullmatch(r"public-current-[0-9a-f]{24}", candidate.name),
+            "candidate id differs")
+    package = validate_production_package(candidate)
+    artifact = package.manifest["delivery_artifacts"]["domestic-spread"]
+    require(sha256_file(candidate / "manifest.json") == evidence["candidate_manifest_sha256"] and
+            artifact["sha256"] == evidence["candidate_artifact_sha256"] and
+            sha256_file(candidate / "data" / artifact["package_path"]) == evidence["candidate_artifact_sha256"],
+            "candidate artifact or manifest changed")
+    result_path = candidate.parent.parent / "result.json"
+    require(_identity(result_path)["sha256"] == evidence["candidate_result_sha256"],
+            "candidate run result changed")
+    result = strict_json(result_path.read_bytes())
+    require(result.get("status") == "CANDIDATE" and result.get("published") is False and
+            result.get("reconciliation_mode") == "HISTORICAL_RECONCILIATION" and
+            Path(result.get("candidate", "")).resolve() == candidate.resolve() and
+            result.get("manifest_sha256") == evidence["candidate_manifest_sha256"] and
+            result.get("reconciliation_manifest_sha256") == checked["manifest_sha256"] and
+            result.get("producer") == {"commit": evidence["producer_commit"],
+                                       "tree": evidence["producer_tree"], "origin": config["origin"]} and
+            all(result.get("expected_current_" + suffix) == expected_current[key]
+                for suffix, key in (("id", "id"), ("artifact_sha256", "artifact_sha256"),
+                                    ("manifest_sha256", "manifest_sha256"))) and
+            result.get("actual_start_current_id") == expected_current["id"] and
+            result.get("source_evidence_sha256") == manifest["source_evidence"]["sha256"] and
+            result.get("audit_evidence_sha256") == manifest["audit_evidence"]["sha256"],
+            "candidate run identity or validated base differs")
+    validation = _absolute(evidence["candidate_validation_path"], file=True)
+    require(sha256_file(validation) == evidence["candidate_validation_sha256"],
+            "candidate validation evidence changed")
+    check = strict_json(validation.read_bytes())
+    require(check.get("old_current_id") == expected_current["id"] and
+            check.get("new_candidate_id") == package.package_id and
+            check.get("approved_daily_close_rows") == manifest["counts"]["daily_close"] and
+            check.get("approved_daily_close_numeric_change_count") == 0 and
+            check.get("approved_derived_trading_numeric_change_count") == 0 and
+            check.get("exact_derived_deleted") == manifest["counts"]["non_trading_derived"] and
+            check.get("non_trading_daily_close_rows") == 0 and
+            check.get("non_trading_derived_rows") == 0 and
+            check.get("unapproved_business_diff_count") == 0 and
+            check.get("unapproved_date_diff_count") == 0 and
+            check.get("other_public_files_identical") is True and
+            all(value == "PASS" for value in check.get("consumer_formal_reads", {}).values()) and
+            bool(check.get("consumer_formal_reads")), "candidate business validation is incomplete")
+    inventory_path = _absolute(evidence["input_hash_inventory_path"], file=True)
+    require(sha256_file(inventory_path) == evidence["input_hash_inventory_sha256"],
+            "input hash inventory changed")
+    inventory = strict_json(inventory_path.read_bytes())
+    require(inventory.get("manifest_sha256") == checked["manifest_sha256"] and
+            inventory.get("current_id") == expected_current["id"] and
+            inventory.get("current_artifact_sha256") == expected_current["artifact_sha256"] and
+            inventory.get("current_manifest_sha256") == expected_current["manifest_sha256"] and
+            inventory.get("counts") == manifest["counts"] and
+            isinstance(inventory.get("inputs"), dict) and len(inventory["inputs"]) >= 6,
+            "input inventory and candidate base differ")
+    for path, digest in inventory["inputs"].items():
+        require(isinstance(digest, str) and HEX64.fullmatch(digest) and
+                sha256_file(_absolute(path, file=True)) == digest,
+                "approved input bytes changed")
+    require(inventory["inputs"].get(manifest["source_evidence"]["path"]) ==
+            manifest["source_evidence"]["sha256"] and
+            inventory["inputs"].get(manifest["audit_evidence"]["path"]) ==
+            manifest["audit_evidence"]["sha256"], "approved evidence missing from inventory")
+    source = _absolute(result["source"])
+    require(source.resolve() == (candidate.parent.parent / "source").resolve() and
+            set(evidence["source_files"]) == set(CONTINUATION_FILES),
+            "candidate source or continuation set differs")
+    producer_config = {**config, "approved_commit": evidence["producer_commit"],
+                       "approved_tree": evidence["producer_tree"]}
+    verify_clean_detached_clone(source, producer_config, allow_runtime=True)
+    for name, digest in evidence["source_files"].items():
+        require(isinstance(digest, str) and HEX64.fullmatch(digest) and
+                sha256_file(_unlinked(source / "01_data" / name)) == digest,
+                "candidate continuation source changed")
+    require(evidence["source_files"]["historical_spread_database.parquet"] ==
+            evidence["candidate_artifact_sha256"], "candidate and continuation artifact differ")
+    return evidence, manifest, candidate, source, result
+
+
+def promote_existing_candidate(config: dict, *, candidate: Path,
+                               reconciliation_manifest: Path, evidence_path: Path,
+                               evidence_sha256: str, expected_current: dict) -> dict:
+    """Promote exact validated bytes through the existing formal transport."""
+    validate_config(config)
+    require(sys.flags.isolated and sys.dont_write_bytecode and
+            Path(sys.executable).resolve() == Path(config["python"]).resolve(),
+            "formal Python identity differs")
+    verify_clean_detached_clone(ROOT, config)
+    runtime = Path(config["runtime_root"]).resolve()
+    runtime.mkdir(parents=True, exist_ok=True)
+    with ExitStack() as stack:
+        stack.enter_context(_domain_lock(runtime / "locks/akshare.lock"))
+        stack.enter_context(_domain_lock(Path(config["full_daily_lock_path"])))
+        evidence, manifest, candidate, source, original = _validated_promotion(
+            config, candidate=candidate, reconciliation_manifest=reconciliation_manifest,
+            evidence_path=evidence_path, evidence_sha256=evidence_sha256,
+            expected_current=expected_current)
+        baseline_root, baseline_sha, _ = _selected_baseline(config, "akshare")
+        require(baseline_sha == original["baseline_manifest_sha256"],
+                "promotion continuation baseline differs")
+        from agri_research_agent.automation import historical_reconciliation as historical
+        public = _public_baseline(config, remote=True)
+        historical.check_current(manifest, public)
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ").lower() + "-" + uuid.uuid4().hex[:12]
+        work = runtime / "runs" / run_id
+        work.mkdir(parents=True, exist_ok=False)
+        command = [config["python"], "-I", "-B", "-X", "utf8",
+                   str(ROOT / "04_scripts/transfer_public_data_package.py"),
+                   "--package", str(candidate), "--ssh-target", config["ssh_target"],
+                   "--remote-store-root", config["remote_store_root"],
+                   "--activation-image-id", config["image_id"],
+                   "--expected-current-id", expected_current["id"],
+                   "--expected-current-artifact-sha256", expected_current["artifact_sha256"],
+                   "--expected-current-manifest-sha256", expected_current["manifest_sha256"],
+                   "--candidate-artifact-sha256", evidence["candidate_artifact_sha256"],
+                   "--candidate-manifest-sha256", evidence["candidate_manifest_sha256"],
+                   "--reconciliation-manifest-sha256", evidence["reconciliation_manifest_sha256"]]
+        try:
+            transported = subprocess.run(command, cwd=ROOT, env=safe_child_environment(),
+                                         capture_output=True, text=True, encoding="utf-8",
+                                         errors="strict", timeout=3600, check=False)
+        except (OSError, subprocess.TimeoutExpired, UnicodeError):
+            raise ProductionDataError("exact candidate transport failed") from None
+        try:
+            receipt = strict_json(transported.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            raise ProductionDataError("exact candidate transport receipt invalid") from None
+        if transported.returncode == 3 and receipt.get("status") == "FAIL_STALE_BASE":
+            return {"status": "FAIL_STALE_BASE", "published": False,
+                    "candidate": str(candidate), "cas": receipt.get("cas")}
+        require(transported.returncode == 0 and receipt.get("status") == "SYNCED" and
+                receipt.get("package_id") == evidence["candidate_id"] and
+                receipt.get("promotion", {}).get("cas_result") == "PASS" and
+                receipt["promotion"]["promoted_artifact_sha256"] == evidence["candidate_artifact_sha256"] and
+                receipt["promotion"]["promoted_manifest_sha256"] == evidence["candidate_manifest_sha256"] and
+                receipt["promotion"]["reconciliation_manifest_sha256"] == evidence["reconciliation_manifest_sha256"],
+                "exact candidate promotion receipt invalid")
+        require(sha256_file(candidate / "manifest.json") == evidence["candidate_manifest_sha256"] and
+                sha256_file(candidate / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet") ==
+                evidence["candidate_artifact_sha256"], "candidate changed during promotion")
+        _check_public_pointer(_public_pointer(config),
+                              strict_json((candidate / "manifest.json").read_bytes()))
+        _save_continuation(config, "akshare", baseline_root, work, source, receipt)
+        (work / "promotion.json").write_bytes(canonical_json_bytes(receipt))
+        return {"status": "PUBLISHED", "published": True, "candidate": str(candidate),
+                "candidate_id": evidence["candidate_id"], "promotion": receipt["promotion"]}
+
+
 def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
                publish: bool = False, control_root: Path | None = None,
                end_date: date | None = None,
