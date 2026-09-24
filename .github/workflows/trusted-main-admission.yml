@@ -115,6 +115,8 @@ jobs:
         echo "PUBLIC_MARKET_DATA_RUNTIME_ROOT=$RUNNER_TEMP/required-fixtures/public-runtime" >> "$GITHUB_ENV"
     - name: Execute required linux tests
       working-directory: candidate
+      env:
+        APPLICATION_RUNTIME_ACCIDENT_EVIDENCE: ${{ runner.temp }}/platform-results/linux/application-runtime-incident.json
       run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan
         "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
