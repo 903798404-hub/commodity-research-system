@@ -124,6 +124,89 @@ def test_missing_write_runtime_keeps_page_readonly(tmp_path, monkeypatch):
     assert seen['write_unavailable'] is True
 
 
+def test_phase_a_runtime_routes_save_to_lifecycle_without_materialization(
+    tmp_path, monkeypatch
+):
+    import import_profit_intraday_runtime_page as runtime_page
+    from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
+
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    results = runtime / 'import-profit/operational/am-results'
+    results.mkdir(parents=True)
+    cnf = runtime / 'import-profit/operational/cnf/manual_cnf_quotes.parquet'
+    cnf.parent.mkdir()
+    lifecycle = runtime / 'import-profit/operational/lifecycle'
+    (runtime / '.market-data-runtime.json').write_text(json.dumps({
+        'schema_version': 1, 'runtime_id': 'phase-a-fixture',
+        'classification': 'fixture', 'module_id': 'soybean-pm',
+        'created_at': '2026-09-24T00:00:00+00:00',
+    }), encoding='utf-8')
+    context = RuntimeContext(RuntimeMode.FIXTURE, 'soybean-pm', runtime)
+    historical = runtime / 'history.parquet'
+    resolved = SimpleNamespace(
+        manual_cnf_path=runtime / 'cnf.parquet',
+        business_keys_path=runtime / 'keys.parquet',
+        snapshots_path=runtime / 'old.parquet',
+        results_path=historical,
+        manifest={'output_files': {'history.parquet': {'sha256': 'a' * 64}},
+                  'date_range': ['2020-01-01', '2026-08-28']},
+    )
+    seen = {}
+    monkeypatch.setattr(runtime_page, 'resolve_current_runtime_release', lambda _: resolved)
+    monkeypatch.setattr(runtime_page, 'render_import_profit_intraday_page',
+                        lambda paths, **kwargs: seen.update(paths=paths, **kwargs))
+    monkeypatch.setattr(runtime_page, 'save_manual_cnf_and_emit_lifecycle',
+                        lambda **kwargs: seen.update(lifecycle_saved=kwargs))
+    monkeypatch.setattr(runtime_page, 'save_manual_cnf_and_materialize_am',
+                        lambda **kwargs: pytest.fail('Phase A UI must not materialize'))
+    runtime_page.render_import_profit_intraday_runtime_page(
+        runtime, result_root=results, snapshot_root=runtime / 'snapshots',
+        config_path=ROOT / '02_configs/import_profit_soybean.yaml',
+        environment='TEST_ISOLATED_NON_PRODUCTION',
+        preview_historical_cnf_path=runtime / 'cnf-history.parquet',
+        intraday_cnf_store_path=cnf, operational_result_root=results,
+        lifecycle_state_root=lifecycle, allow_cnf_save=True,
+        business_date=DAY, write_context=context,
+    )
+    values = {
+        (origin, month): None
+        for origin in CONFIG.origin_codes
+        for month in range(1, 13)
+    }
+    seen['save_cnf_handler'](values)
+    assert seen['lifecycle_saved']['lifecycle_state_root'] == lifecycle
+    assert seen['lifecycle_saved']['values'] is values
+
+
+def test_phase_a_readiness_view_defaults_and_reads_durable_state(tmp_path):
+    from dataclasses import replace
+    from import_profit_intraday_page import load_lifecycle_readiness_view
+    from agri_research_agent.import_profit.lifecycle import (
+        CnfState, MarketState, ProfitState,
+    )
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+
+    root = tmp_path / 'lifecycle'
+    view = load_lifecycle_readiness_view(root, DAY)
+    assert view['AM'] == {
+        'market': 'NOT_READY', 'cnf': 'NOT_SUBMITTED',
+        'profit': 'WAITING_FOR_MARKET', 'blocking_reason': None,
+    }
+    store = SoybeanLifecycleStore(root)
+    current = store.load(DAY, MarketSession.AM)
+    store.save(
+        replace(current, market_state=MarketState.SEALED,
+                cnf_state=CnfState.SUBMITTED,
+                profit_state=ProfitState.READY_TO_MATERIALIZE),
+        expected_revision=0,
+    )
+    view = load_lifecycle_readiness_view(root, DAY)
+    assert view['AM']['market'] == 'SEALED'
+    assert view['AM']['cnf'] == 'SUBMITTED'
+    assert view['AM']['profit'] == 'READY_TO_MATERIALIZE'
+
+
 def _configured_page_fixture(tmp_path, monkeypatch):
     import shutil
     import import_profit_intraday_runtime_page as entry

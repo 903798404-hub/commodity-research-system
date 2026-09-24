@@ -22,13 +22,15 @@ from agri_research_agent.import_profit.intraday_store import (
 )
 from agri_research_agent.market_data.intraday import MarketSession
 from agri_research_agent.pipelines.soybean_intraday import (
+    save_manual_cnf_and_emit_lifecycle,
     save_manual_cnf_and_materialize_am,
 )
 from agri_research_agent.shared.runtime_context import (
     RuntimeContext, RuntimeMode,
 )
 from agri_research_agent.import_profit.operational_runtime import (
-    configured_operational_write, validate_operational_write,
+    configured_operational_write, validate_lifecycle_write,
+    validate_operational_write,
 )
 from import_profit_intraday_page import (
     FinalUiPreviewPaths,
@@ -49,6 +51,7 @@ def render_import_profit_intraday_runtime_page(
     preview_historical_cnf_path: str | Path | None = None,
     intraday_cnf_store_path: str | Path | None = None,
     operational_result_root: str | Path | None = None,
+    lifecycle_state_root: str | Path | None = None,
     allow_cnf_save: bool = False,
     business_date: date | None = None,
     write_context: RuntimeContext | None = None,
@@ -129,6 +132,10 @@ def render_import_profit_intraday_runtime_page(
             ):
                 raise ValueError("manual_ui write environment is not authorized")
             validate_operational_write(write_context, cnf_store, am_results)
+            if lifecycle_state_root and str(lifecycle_state_root).strip():
+                validate_lifecycle_write(
+                    write_context, Path(lifecycle_state_root)
+                )
         except (ValueError, OSError, RuntimeError):
             write_unavailable = True
         else:
@@ -141,6 +148,24 @@ def render_import_profit_intraday_runtime_page(
                         pass
                     else:
                         raise RuntimeError("AM result is already sealed in readonly history")
+                def authorize():
+                    validate_operational_write(
+                        write_context, cnf_store, am_results
+                    )
+                    if lifecycle_state_root and str(lifecycle_state_root).strip():
+                        validate_lifecycle_write(
+                            write_context, Path(lifecycle_state_root)
+                        )
+                if lifecycle_state_root and str(lifecycle_state_root).strip():
+                    return save_manual_cnf_and_emit_lifecycle(
+                        snapshot_root=snapshots,
+                        lifecycle_state_root=lifecycle_state_root,
+                        cnf_store_path=cnf_store,
+                        business_date=selected_date,
+                        values=values,
+                        config=config,
+                        authorize_write=authorize,
+                    )
                 return save_manual_cnf_and_materialize_am(
                     snapshot_root=snapshots,
                     result_root=am_results,
@@ -148,9 +173,7 @@ def render_import_profit_intraday_runtime_page(
                     business_date=selected_date,
                     values=values,
                     config=config,
-                    authorize_materialization=lambda: validate_operational_write(
-                        write_context, cnf_store, am_results
-                    ),
+                    authorize_materialization=authorize,
                 )
 
     if write_unavailable:
@@ -166,6 +189,11 @@ def render_import_profit_intraday_runtime_page(
             environment=environment,
             operational_result_root=Path(operational_result_root) if operational_result_root else None,
             historical_cnf_store_path=resolved.manual_cnf_path,
+            lifecycle_state_root=(
+                Path(lifecycle_state_root)
+                if lifecycle_state_root and str(lifecycle_state_root).strip()
+                else None
+            ),
         ),
         config=config,
         mode=mode,
@@ -200,6 +228,7 @@ def render_configured_intraday_runtime_page(runtime_root, *, config_path, allow_
         preview_historical_cnf_path=setting("IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH") or None,
         intraday_cnf_store_path=setting("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH") or None,
         operational_result_root=setting("IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT") or None,
+        lifecycle_state_root=setting("IMPORT_PROFIT_LIFECYCLE_STATE_ROOT") or None,
         allow_cnf_save=enabled and write_context is not None,
         business_date=business_date, write_context=write_context,
         write_unavailable=write_unavailable)

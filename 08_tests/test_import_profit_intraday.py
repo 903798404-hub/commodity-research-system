@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -721,3 +721,426 @@ def test_unavailable_far_contract_is_row_level_incomplete_without_substitution(
     assert by_period["2027-09"]["soyoil_contract"] == "Y2801"
     assert by_period["2027-09"]["soymeal_price_cny_per_tonne"] is None
     assert by_period["2027-09"]["net_crush_margin_cny_per_tonne"] is None
+
+
+def _lifecycle_market_evidence(
+    business_date: date,
+    session: MarketSession,
+    at: datetime,
+    *,
+    stale_component: str | None = None,
+    upstream_identity: str = "tankan-market-release-1",
+):
+    from agri_research_agent.import_profit.lifecycle import (
+        MarketObservation,
+        evaluate_market_readiness,
+        required_market_identities,
+    )
+
+    observations = []
+    floors = {}
+    for component, identities in required_market_identities(business_date, CONFIG).items():
+        for instrument, contract in identities:
+            floors[instrument] = at.replace(microsecond=0)
+            stamp = at
+            if component == stale_component:
+                stamp = at - timedelta(days=2)
+            observations.append(MarketObservation(instrument, contract, stamp, at))
+    return evaluate_market_readiness(
+        business_date=business_date,
+        session=session,
+        config=CONFIG,
+        observations=observations,
+        source_not_before=floors,
+        evaluated_at=at,
+        upstream_identity=upstream_identity,
+    )
+
+
+def _full_lifecycle_snapshot(
+    session: MarketSession,
+    captured_at: datetime,
+) -> IntradaySnapshot:
+    from agri_research_agent.import_profit.historical_cnf_adapter import shipment_year_for
+
+    quotes = {}
+    snapshot = None
+    for month in range(1, 13):
+        snapshot = public_snapshot(
+            session,
+            key(year=shipment_year_for(DAY, month), month=month),
+        )
+        for quote in snapshot.quotes:
+            quotes[quote.key] = replace(
+                quote,
+                business_date=DAY,
+                captured_at=captured_at,
+                source_updated_at=captured_at,
+                retrieved_at=captured_at,
+            )
+    assert snapshot is not None
+    return replace(
+        snapshot,
+        business_date=DAY,
+        captured_at=captured_at,
+        quotes=tuple(quotes.values()),
+    )
+
+
+def _complete_cnf_submission(at: datetime, *, revision: int = 1):
+    from agri_research_agent.import_profit.lifecycle import CnfValueKind
+    from agri_research_agent.import_profit.lifecycle_events import build_cnf_submission_envelope
+
+    values = {
+        (origin, month): (150.0 if month <= 6 else CnfValueKind.NO_QUOTE)
+        for origin in CONFIG.origin_codes
+        for month in range(1, 13)
+    }
+    return build_cnf_submission_envelope(
+        business_date=DAY,
+        values=values,
+        config=CONFIG,
+        revision=revision,
+        submitted_at=at,
+        store_sha256="a" * 64,
+        actor_id="legacy-ui-unverified",
+        actor_role="legacy_ui_adapter",
+    )
+
+
+def _lifecycle_runtime(tmp_path: Path):
+    from agri_research_agent.import_profit.lifecycle_reconciler import SoybeanLifecycleReconciler
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+
+    store = SoybeanLifecycleStore(tmp_path / "lifecycle")
+    snapshots = tmp_path / "snapshots"
+    return (
+        store,
+        SoybeanLifecycleReconciler(store=store, snapshot_root=snapshots),
+        snapshots,
+    )
+
+
+def _capture_fixture(snapshots: Path, at: datetime, calls: list[str]):
+    def capture(event, readiness):
+        calls.append(event.idempotency_key)
+        seal_fixture_snapshot(snapshots, _full_lifecycle_snapshot(event.session, at))
+
+    return capture
+
+
+def test_phase_a_cnf_first_and_market_first_are_order_independent(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle import CnfState, MarketState, ProfitState
+    from agri_research_agent.import_profit.lifecycle_events import (
+        cnf_submission_event,
+        full_daily_market_event,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    submission = _complete_cnf_submission(at)
+    readiness = _lifecycle_market_evidence(DAY, MarketSession.AM, at)
+
+    _, cnf_first, snapshots = _lifecycle_runtime(tmp_path / "cnf-first")
+    cnf_event = cnf_submission_event(submission, session=MarketSession.AM)
+    state = cnf_first.reconcile(cnf_event, now=at, cnf_submission=submission)
+    assert (state.cnf_state, state.market_state, state.profit_state) == (
+        CnfState.SUBMITTED, MarketState.NOT_READY, ProfitState.WAITING_FOR_MARKET,
+    )
+    market_event = full_daily_market_event(
+        full_daily_status="SUCCESS", full_daily_identity="daily-1",
+        readiness=readiness, occurred_at=at,
+    )
+    state = cnf_first.reconcile(
+        market_event, now=at, market_readiness=readiness,
+        capture=_capture_fixture(snapshots, at, []),
+    )
+    assert (state.market_state, state.profit_state) == (
+        MarketState.SEALED, ProfitState.READY_TO_MATERIALIZE,
+    )
+
+    _, market_first, snapshots = _lifecycle_runtime(tmp_path / "market-first")
+    state = market_first.reconcile(
+        market_event, now=at, market_readiness=readiness,
+        capture=_capture_fixture(snapshots, at, []),
+    )
+    assert (state.market_state, state.cnf_state, state.profit_state) == (
+        MarketState.SEALED, CnfState.NOT_SUBMITTED, ProfitState.WAITING_FOR_CNF,
+    )
+    state = market_first.reconcile(cnf_event, now=at, cnf_submission=submission)
+    assert state.profit_state is ProfitState.READY_TO_MATERIALIZE
+
+
+def test_phase_a_duplicate_events_restart_and_existing_snapshot_are_idempotent(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle import MarketState
+    from agri_research_agent.import_profit.lifecycle_events import full_daily_market_event
+    from agri_research_agent.import_profit.lifecycle_reconciler import SoybeanLifecycleReconciler
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(DAY, MarketSession.AM, at)
+    event = full_daily_market_event(
+        full_daily_status="PARTIAL_SUCCESS",
+        full_daily_identity="daily-partial-weather-failed",
+        readiness=readiness, occurred_at=at,
+    )
+    store, reconciler, snapshots = _lifecycle_runtime(tmp_path)
+    calls: list[str] = []
+    state = reconciler.reconcile(
+        event, now=at, market_readiness=readiness,
+        capture=_capture_fixture(snapshots, at, calls),
+    )
+    assert state.market_state is MarketState.SEALED
+    restarted = SoybeanLifecycleReconciler(store=store, snapshot_root=snapshots)
+    state = restarted.reconcile(
+        event, now=at, market_readiness=readiness,
+        capture=lambda *_: pytest.fail("sealed retry must not access the provider"),
+    )
+    assert calls == [event.idempotency_key]
+    assert state.transitions[-1].action == "NOOP_DUPLICATE_EVENT"
+    assert store.load(DAY, MarketSession.AM).market_snapshot_content_identity
+
+
+def test_phase_a_duplicate_cnf_submission_is_noop_and_envelope_is_durable(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_events import cnf_submission_event
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    submission = _complete_cnf_submission(at)
+    event = cnf_submission_event(submission, session=MarketSession.PM)
+    store, reconciler, _ = _lifecycle_runtime(tmp_path)
+    first = reconciler.reconcile(event, now=at, cnf_submission=submission)
+    second = reconciler.reconcile(event, now=at, cnf_submission=submission)
+    assert first.cnf_submission_identity == second.cnf_submission_identity
+    assert second.transitions[-1].action == "NOOP_DUPLICATE_EVENT"
+    assert store.load_cnf_submission(DAY) == submission
+
+
+def test_phase_a_market_readiness_is_component_level_and_not_full_daily_status() -> None:
+    from agri_research_agent.import_profit.lifecycle import MarketComponentStatus
+    from agri_research_agent.import_profit.lifecycle_events import full_daily_market_event
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    ready = _lifecycle_market_evidence(DAY, MarketSession.AM, at)
+    event = full_daily_market_event(
+        full_daily_status="PARTIAL_SUCCESS",
+        full_daily_identity="weather-and-lutou-unavailable",
+        readiness=ready, occurred_at=at,
+    )
+    assert ready.market_ready and event.upstream_identity.endswith("PARTIAL_SUCCESS")
+    stale = _lifecycle_market_evidence(
+        DAY, MarketSession.AM, at, stale_component="CBOT",
+        upstream_identity="full-daily-success-but-stale-cbot",
+    )
+    by_component = {item.component: item.status for item in stale.components}
+    assert by_component["CBOT"] is MarketComponentStatus.STALE
+    assert not stale.market_ready
+
+
+def test_phase_a_cnf_authorization_and_empty_cnf_do_not_block_market(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle import (
+        CnfAuthorizationState, CnfState, MarketState, ProfitState,
+    )
+    from agri_research_agent.import_profit.lifecycle_events import (
+        cnf_authorization_event, full_daily_market_event,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(DAY, MarketSession.AM, at)
+    store, reconciler, snapshots = _lifecycle_runtime(tmp_path)
+    auth = cnf_authorization_event(
+        business_date=DAY, session=MarketSession.AM,
+        state=CnfAuthorizationState.UNAVAILABLE, observed_at=at,
+        authority_identity="expired-dashboard-grant",
+    )
+    reconciler.reconcile(
+        auth, now=at, cnf_authorization=CnfAuthorizationState.UNAVAILABLE
+    )
+    market = full_daily_market_event(
+        full_daily_status="SUCCESS", full_daily_identity="daily-ready",
+        readiness=readiness, occurred_at=at,
+    )
+    state = reconciler.reconcile(
+        market, now=at, market_readiness=readiness,
+        capture=_capture_fixture(snapshots, at, []),
+    )
+    assert state.cnf_authorization_state is CnfAuthorizationState.UNAVAILABLE
+    assert state.cnf_state is CnfState.NOT_SUBMITTED
+    assert state.market_state is MarketState.SEALED
+    assert state.profit_state is ProfitState.WAITING_FOR_CNF
+    assert state.blocking_reason == "CNF_NOT_SUBMITTED"
+    assert store.load_cnf_submission(DAY) is None
+
+
+def test_phase_a_independent_blockers_do_not_overwrite_each_other(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle import MarketState
+    from agri_research_agent.import_profit.lifecycle_events import (
+        cnf_submission_event, full_daily_market_event,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(DAY, MarketSession.AM, at)
+    _, reconciler, _ = _lifecycle_runtime(tmp_path)
+    market_event = full_daily_market_event(
+        full_daily_status="SUCCESS", full_daily_identity="ready-no-machine",
+        readiness=readiness, occurred_at=at,
+    )
+    state = reconciler.reconcile(
+        market_event, now=at, market_readiness=readiness,
+    )
+    assert state.market_state is MarketState.READY_TO_CAPTURE
+    assert state.blocking_reason == "MACHINE_IDENTITY_BLOCKER;CNF_NOT_SUBMITTED"
+    submission = _complete_cnf_submission(at)
+    state = reconciler.reconcile(
+        cnf_submission_event(submission, session=MarketSession.AM),
+        now=at,
+        cnf_submission=submission,
+    )
+    assert state.blocking_reason == "MACHINE_IDENTITY_BLOCKER"
+
+
+@pytest.mark.parametrize(
+    ("session", "local_hour"),
+    ((MarketSession.AM, 12), (MarketSession.PM, 21)),
+)
+def test_phase_a_deadline_never_backfills(
+    tmp_path: Path, session: MarketSession, local_hour: int
+) -> None:
+    from agri_research_agent.import_profit.lifecycle import MarketState
+    from agri_research_agent.import_profit.lifecycle_events import full_daily_market_event
+
+    local = datetime.combine(DAY, time(local_hour, 0), tzinfo=CN)
+    now = local.astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(DAY, session, now)
+    event = full_daily_market_event(
+        full_daily_status="SUCCESS", full_daily_identity=f"late-{session.value}",
+        readiness=readiness, occurred_at=now,
+    )
+    _, reconciler, _ = _lifecycle_runtime(tmp_path)
+    calls = []
+    state = reconciler.reconcile(
+        event, now=now, market_readiness=readiness,
+        capture=lambda *_: calls.append("called"),
+    )
+    assert state.market_state is MarketState.MISSED_WINDOW
+    assert state.blocking_reason.startswith("MISSED_WINDOW")
+    assert calls == []
+
+
+def test_phase_a_2026_09_24_incident_fixture_is_missed_not_backfilled(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle import (
+        CnfAuthorizationState, CnfState, MarketState,
+    )
+    from agri_research_agent.import_profit.lifecycle_events import (
+        cnf_authorization_event, full_daily_market_event,
+    )
+
+    incident_day = date(2026, 9, 24)
+    observed = datetime(2026, 9, 24, 12, 18, tzinfo=CN).astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(
+        incident_day, MarketSession.AM, observed,
+        upstream_identity="incident-market-ready-hypothesis",
+    )
+    store, reconciler, _ = _lifecycle_runtime(tmp_path)
+    auth = cnf_authorization_event(
+        business_date=incident_day, session=MarketSession.AM,
+        state=CnfAuthorizationState.UNAVAILABLE, observed_at=observed,
+        authority_identity="grant-expired-2026-09-22T02:43:42Z",
+    )
+    reconciler.reconcile(
+        auth, now=observed, cnf_authorization=CnfAuthorizationState.UNAVAILABLE
+    )
+    event = full_daily_market_event(
+        full_daily_status="SUCCESS", full_daily_identity="incident-fixture",
+        readiness=readiness, occurred_at=observed,
+    )
+    state = reconciler.reconcile(
+        event, now=observed, market_readiness=readiness,
+        capture=lambda *_: pytest.fail("2026-09-24 AM must never be backfilled"),
+    )
+    assert state.cnf_authorization_state is CnfAuthorizationState.UNAVAILABLE
+    assert state.cnf_state is CnfState.NOT_SUBMITTED
+    assert state.market_state is MarketState.MISSED_WINDOW
+    assert store.load_cnf_submission(incident_day) is None
+
+
+def test_phase_a_cnf_submission_contract_distinguishes_null_semantics() -> None:
+    from agri_research_agent.import_profit.lifecycle import CnfState, CnfValueKind
+    from agri_research_agent.import_profit.lifecycle_events import build_cnf_submission_envelope
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    partial = build_cnf_submission_envelope(
+        business_date=DAY,
+        values={
+            ("brazil", 1): 0.0,
+            ("brazil", 2): CnfValueKind.NO_QUOTE,
+            ("brazil", 3): CnfValueKind.NOT_PROVIDED,
+        },
+        config=CONFIG, revision=1, submitted_at=at,
+        store_sha256="b" * 64,
+        actor_id="legacy-ui-unverified", actor_role="legacy_ui_adapter",
+    )
+    kinds = {
+        (row.origin, row.shipment_month): row.kind
+        for row in partial.values
+        if row.origin == "brazil" and row.shipment_month <= 3
+    }
+    assert kinds == {
+        ("brazil", 1): CnfValueKind.VALUE,
+        ("brazil", 2): CnfValueKind.NO_QUOTE,
+        ("brazil", 3): CnfValueKind.NOT_PROVIDED,
+    }
+    assert partial.status is CnfState.PARTIAL
+    assert partial.record_count == 2
+    assert partial.completeness == 2 / 48
+    assert _complete_cnf_submission(at).status is CnfState.SUBMITTED
+
+
+def test_phase_a_full_daily_and_provider_isolation_remain_one_way() -> None:
+    root = Path(__file__).resolve().parents[1]
+    daily = (root / "03_src/agri_research_agent/pipelines/public_data_daily.py").read_text(
+        encoding="utf-8"
+    )
+    refresh = (root / "03_src/agri_research_agent/pipelines/public_data_refresh.py").read_text(
+        encoding="utf-8"
+    )
+    adapter = (root / "03_src/agri_research_agent/import_profit/lifecycle_events.py").read_text(
+        encoding="utf-8"
+    )
+    assert "lifecycle" not in daily.lower()
+    assert "lifecycle" not in refresh.lower()
+    assert "public_data_daily" not in adapter
+    assert "public_data_refresh" not in adapter
+
+
+def test_phase_a_ui_adapter_persists_cnf_and_events_without_materialization(
+    tmp_path: Path,
+) -> None:
+    from agri_research_agent.import_profit.lifecycle import CnfState, ProfitState
+    from agri_research_agent.pipelines.soybean_intraday import (
+        save_manual_cnf_and_emit_lifecycle,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    values = {
+        (origin, month): None
+        for origin in CONFIG.origin_codes
+        for month in range(1, 13)
+    }
+    values["brazil", 1] = 0.0
+    result_root = tmp_path / "results"
+    receipt = save_manual_cnf_and_emit_lifecycle(
+        snapshot_root=tmp_path / "snapshots",
+        lifecycle_state_root=tmp_path / "lifecycle",
+        cnf_store_path=tmp_path / "manual.parquet",
+        business_date=DAY,
+        values=values,
+        config=CONFIG,
+        saved_at=at,
+    )
+    assert receipt.am_materialization_status == "LIFECYCLE_RECORDED"
+    assert receipt.submission.actor_id == "legacy-ui-unverified"
+    assert receipt.submission.status is CnfState.PARTIAL
+    assert receipt.submission.record_count == 1
+    assert receipt.am_state.cnf_state is CnfState.PARTIAL
+    assert receipt.pm_state.cnf_state is CnfState.PARTIAL
+    assert receipt.am_state.profit_state is ProfitState.WAITING_FOR_MARKET
+    assert receipt.pm_state.profit_state is ProfitState.WAITING_FOR_MARKET
+    assert not result_root.exists()

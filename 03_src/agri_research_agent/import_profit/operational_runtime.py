@@ -14,6 +14,7 @@ ROOT = Path('/runtime')
 SOURCE = Path(__file__).resolve().parents[3]
 CNF_RELATIVE = Path('import-profit/operational/cnf/manual_cnf_quotes.parquet')
 AM_RELATIVE = Path('import-profit/operational/am-results')
+LIFECYCLE_RELATIVE = Path('import-profit/operational/lifecycle')
 
 
 def operational_write_context() -> RuntimeContext:
@@ -50,6 +51,15 @@ def validate_operational_write(context: RuntimeContext, cnf: Path, results: Path
         for item in directory.rglob('*'):
             if item.is_symlink() or item.resolve() != item.absolute():
                 raise ValueError('operational store contains an aliased path')
+
+
+def validate_lifecycle_write(context: RuntimeContext, lifecycle: Path) -> None:
+    """Require the exact durable lifecycle root and the machine write capability."""
+    declared = context.runtime_root / LIFECYCLE_RELATIVE
+    target = Path(lifecycle)
+    if target.absolute() != declared or target.resolve() != declared:
+        raise ValueError('lifecycle write path must be the unaliased operational path')
+    assert_runtime_write(context, target)
 
 
 def configured_operational_write():

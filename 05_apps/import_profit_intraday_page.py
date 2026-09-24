@@ -41,6 +41,10 @@ from agri_research_agent.import_profit.intraday_store import (
     load_intraday_profit_batch,
     load_latest_intraday_profit_batch,
 )
+from agri_research_agent.import_profit.lifecycle_store import (
+    LifecycleStoreError,
+    SoybeanLifecycleStore,
+)
 from agri_research_agent.market_data.intraday import MarketSession
 from agri_research_agent.market_data.intraday import (
     IntradaySnapshotError,
@@ -95,6 +99,7 @@ class IntradayPageDataPaths:
     environment: str | None = None
     operational_result_root: Path | None = None
     historical_cnf_store_path: Path | None = None
+    lifecycle_state_root: Path | None = None
 
 
 def render_import_profit_intraday_page(
@@ -234,6 +239,7 @@ def _render_final_ui(
         am_release=am_release,
         pm_release=pm_release,
     )
+    _render_lifecycle_readiness(paths.lifecycle_state_root, business_date)
     edited = _render_preview_cnf_editor(
         paths.cnf_store_path,
         historical_cnf_store_path=paths.historical_cnf_store_path,
@@ -585,6 +591,57 @@ def _render_preview_header(
     return selected
 
 
+def load_lifecycle_readiness_view(
+    root: Path,
+    business_date: date,
+) -> dict[str, object]:
+    """Read durable state only; a missing date returns explicit initial states."""
+
+    store = SoybeanLifecycleStore(root)
+    am = store.load(business_date, MarketSession.AM)
+    pm = store.load(business_date, MarketSession.PM)
+    return {
+        "business_date": business_date.isoformat(),
+        "AM": {
+            "market": am.market_state.value,
+            "cnf": am.cnf_state.value,
+            "profit": am.profit_state.value,
+            "blocking_reason": am.blocking_reason,
+        },
+        "PM": {
+            "market": pm.market_state.value,
+            "cnf": pm.cnf_state.value,
+            "profit": pm.profit_state.value,
+            "blocking_reason": pm.blocking_reason,
+        },
+    }
+
+
+def _render_lifecycle_readiness(root: Path | None, business_date: date) -> None:
+    if root is None:
+        return
+    try:
+        view = load_lifecycle_readiness_view(root, business_date)
+    except (LifecycleStoreError, OSError, ValueError):
+        st.error("AM/PM 生命周期状态不可读取。")
+        return
+    am, pm = view["AM"], view["PM"]
+    blockers = "；".join(
+        f"{session}: {value['blocking_reason']}"
+        for session, value in (("AM", am), ("PM", pm))
+        if value["blocking_reason"]
+    ) or "无"
+    st.html(
+        '<div class="soy-lifecycle-status">'
+        f'<strong>{escape(str(view["business_date"]))}</strong> · '
+        f'AM Market={escape(str(am["market"]))}, CNF={escape(str(am["cnf"]))}, '
+        f'Profit={escape(str(am["profit"]))} · '
+        f'PM Market={escape(str(pm["market"]))}, CNF={escape(str(pm["cnf"]))}, '
+        f'Profit={escape(str(pm["profit"]))} · '
+        f'Blocking={escape(blockers)}</div>'
+    )
+
+
 @st.cache_data(show_spinner=False)
 def _load_preview_cnf_cache(path: Path) -> pd.DataFrame:
     frame = pd.read_parquet(path)
@@ -713,6 +770,9 @@ def _render_preview_cnf_editor(
                     elif status == "INPUT_INCOMPLETE":
                         st.success("今日 CNF 已正式保存。")
                         st.info("当前缺少 AM Snapshot 或必要行情输入，盘面榨利待计算。")
+                    elif status == "LIFECYCLE_RECORDED":
+                        st.success("今日 CNF 已正式保存并进入 AM/PM 生命周期。")
+                        st.info("行情封存与榨利生成由后台状态机继续处理。")
                     else:
                         st.success("今日 CNF 已正式保存。")
                         st.warning(

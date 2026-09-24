@@ -36,6 +36,20 @@ from agri_research_agent.import_profit.historical_cnf_adapter import (
     shipment_year_for,
 )
 from agri_research_agent.import_profit.models import BusinessKey
+from agri_research_agent.import_profit.lifecycle import (
+    CnfSubmissionEnvelope,
+    SoybeanLifecycleState,
+)
+from agri_research_agent.import_profit.lifecycle_events import (
+    build_cnf_submission_envelope,
+    cnf_submission_event,
+)
+from agri_research_agent.import_profit.lifecycle_reconciler import (
+    SoybeanLifecycleReconciler,
+)
+from agri_research_agent.import_profit.lifecycle_store import (
+    SoybeanLifecycleStore,
+)
 from agri_research_agent.market_data.intraday import (
     IntradaySnapshotNotFoundError,
     MarketSession,
@@ -68,6 +82,18 @@ class SoybeanAmClosureReceipt:
     snapshot_immutability_pass: bool | None
     am_materialization_status: str
     am_diagnostic: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SoybeanCnfLifecycleReceipt:
+    """Receipt for Phase A CNF persistence and lifecycle reconciliation only."""
+
+    cnf: SoybeanIntradayCnfSaveReceipt
+    submission: CnfSubmissionEnvelope
+    am_state: SoybeanLifecycleState
+    pm_state: SoybeanLifecycleState
+    am_materialization_status: str = "LIFECYCLE_RECORDED"
+    am_diagnostic: str | None = None
 
 
 def save_soybean_intraday_manual_cnf(
@@ -308,6 +334,68 @@ def save_manual_cnf_and_materialize_am(
     )
 
 
+def save_manual_cnf_and_emit_lifecycle(
+    *,
+    snapshot_root: str | Path,
+    lifecycle_state_root: str | Path,
+    cnf_store_path: str | Path,
+    business_date: date,
+    values: Mapping[tuple[str, int], float | None],
+    config: SoybeanImportProfitConfig,
+    saved_at: datetime | None = None,
+    actor_id: str = "legacy-ui-unverified",
+    actor_role: str = "legacy_ui_adapter",
+    authorize_write: Callable[[], None] | None = None,
+) -> SoybeanCnfLifecycleReceipt:
+    """Persist human CNF and emit independent AM/PM lifecycle events.
+
+    This Phase A adapter deliberately does not capture market data or materialize
+    profit.  The legacy UI has no explicit NO_QUOTE control, so blank cells are
+    represented truthfully as NOT_PROVIDED by the submission envelope.
+    """
+
+    at = saved_at or datetime.now(timezone.utc)
+    if authorize_write is not None:
+        authorize_write()
+    cnf = save_soybean_intraday_manual_cnf(
+        cnf_store_path=cnf_store_path,
+        business_date=business_date,
+        values=values,
+        config=config,
+        updated_at=at,
+    )
+    store = SoybeanLifecycleStore(lifecycle_state_root)
+    current = store.load_cnf_submission(business_date)
+    submission = build_cnf_submission_envelope(
+        business_date=business_date,
+        values=values,
+        config=config,
+        revision=1 if current is None else current.revision + 1,
+        submitted_at=at,
+        store_sha256=cnf.cnf_sha256,
+        actor_id=actor_id,
+        actor_role=actor_role,
+    )
+    reconciler = SoybeanLifecycleReconciler(
+        store=store,
+        snapshot_root=snapshot_root,
+    )
+    states = {}
+    for session in (MarketSession.AM, MarketSession.PM):
+        event = cnf_submission_event(submission, session=session)
+        states[session] = reconciler.reconcile(
+            event,
+            now=at,
+            cnf_submission=submission,
+        )
+    return SoybeanCnfLifecycleReceipt(
+        cnf=cnf,
+        submission=submission,
+        am_state=states[MarketSession.AM],
+        pm_state=states[MarketSession.PM],
+    )
+
+
 def _snapshot_identity(
     snapshot_root: str | Path,
     business_date: date,
@@ -383,8 +471,10 @@ def materialize_soybean_intraday_profit(
 
 __all__ = [
     "SoybeanAmClosureReceipt",
+    "SoybeanCnfLifecycleReceipt",
     "SoybeanIntradayCnfSaveReceipt",
     "materialize_soybean_intraday_profit",
     "save_manual_cnf_and_materialize_am",
+    "save_manual_cnf_and_emit_lifecycle",
     "save_soybean_intraday_manual_cnf",
 ]
