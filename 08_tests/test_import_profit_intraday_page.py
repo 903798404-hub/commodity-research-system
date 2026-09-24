@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timezone
 import json
 import re
@@ -192,6 +193,8 @@ def test_phase_a_readiness_view_defaults_and_reads_durable_state(tmp_path):
     assert view['AM'] == {
         'market': 'NOT_READY', 'cnf': 'NOT_SUBMITTED',
         'profit': 'WAITING_FOR_MARKET', 'blocking_reason': None,
+        'market_snapshot_release_id': None, 'profit_release_id': None,
+        'state_revision': 0,
     }
     store = SoybeanLifecycleStore(root)
     current = store.load(DAY, MarketSession.AM)
@@ -205,6 +208,87 @@ def test_phase_a_readiness_view_defaults_and_reads_durable_state(tmp_path):
     assert view['AM']['market'] == 'SEALED'
     assert view['AM']['cnf'] == 'SUBMITTED'
     assert view['AM']['profit'] == 'READY_TO_MATERIALIZE'
+
+
+@pytest.mark.parametrize(
+    ("label", "changes", "expected"),
+    (
+        (
+            "WAITING_FOR_MARKET",
+            {"market_state": "NOT_READY", "cnf_state": "SUBMITTED",
+             "profit_state": "WAITING_FOR_MARKET", "blocking_reason": "MARKET_NOT_READY"},
+            ("Market=NOT_READY", "CNF=SUBMITTED", "Profit=WAITING_FOR_MARKET"),
+        ),
+        (
+            "WAITING_FOR_CNF",
+            {"market_state": "SEALED", "cnf_state": "NOT_SUBMITTED",
+             "profit_state": "WAITING_FOR_CNF", "blocking_reason": "CNF_NOT_SUBMITTED",
+             "market_snapshot_release_id": "2026-08-28-AM"},
+            ("Market=SEALED", "CNF=NOT_SUBMITTED", "Profit=WAITING_FOR_CNF"),
+        ),
+        (
+            "READY_TO_MATERIALIZE",
+            {"market_state": "SEALED", "cnf_state": "SUBMITTED",
+             "profit_state": "READY_TO_MATERIALIZE", "blocking_reason": None,
+             "market_snapshot_release_id": "2026-08-28-AM"},
+            ("Market=SEALED", "CNF=SUBMITTED", "Profit=READY_TO_MATERIALIZE"),
+        ),
+        (
+            "SEALED",
+            {"market_state": "SEALED", "cnf_state": "SUBMITTED",
+             "profit_state": "SEALED", "blocking_reason": None,
+             "market_snapshot_release_id": "2026-08-28-AM",
+             "profit_release_id": "2026-08-28-AM-profit-r1"},
+            ("Profit=SEALED", "Snapshot=2026-08-28-AM",
+             "Profit=2026-08-28-AM-profit-r1"),
+        ),
+        (
+            "FAILED",
+            {"market_state": "SEALED", "cnf_state": "SUBMITTED",
+             "profit_state": "FAILED", "blocking_reason": "MATERIALIZATION_FAILED",
+             "market_snapshot_release_id": "2026-08-28-AM"},
+            ("Profit=FAILED", "MATERIALIZATION_FAILED"),
+        ),
+        (
+            "MISSED_WINDOW",
+            {"market_state": "MISSED_WINDOW", "cnf_state": "NOT_SUBMITTED",
+             "profit_state": "WAITING_FOR_MARKET", "blocking_reason": "MISSED_WINDOW: AM"},
+            ("Market=MISSED_WINDOW", "MISSED_WINDOW: AM"),
+        ),
+    ),
+)
+def test_phase_a_ui_readiness_renders_all_formal_states_without_side_effects(
+    tmp_path, monkeypatch, label, changes, expected,
+):
+    import import_profit_intraday_page as page
+    from agri_research_agent.import_profit.lifecycle import CnfState, MarketState, ProfitState
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+
+    root = tmp_path / "lifecycle"
+    store = SoybeanLifecycleStore(root)
+    current = store.load(DAY, MarketSession.AM)
+    enum_changes = dict(changes)
+    enum_changes["market_state"] = MarketState(enum_changes["market_state"])
+    enum_changes["cnf_state"] = CnfState(enum_changes["cnf_state"])
+    enum_changes["profit_state"] = ProfitState(enum_changes["profit_state"])
+    saved = store.save(replace(current, **enum_changes), expected_revision=0)
+    path = store.state_path(DAY, MarketSession.AM)
+    before_bytes = path.read_bytes()
+    before_revision = saved.state_revision
+    before_transitions = saved.transitions
+    rendered = []
+    monkeypatch.setattr(page.st, "html", rendered.append)
+    monkeypatch.setattr(page.st, "error", lambda message: pytest.fail(message))
+
+    page._render_lifecycle_readiness(root, DAY)
+
+    assert len(rendered) == 1, label
+    for token in expected:
+        assert token in rendered[0], (label, token, rendered[0])
+    after = store.load(DAY, MarketSession.AM)
+    assert path.read_bytes() == before_bytes
+    assert after.state_revision == before_revision
+    assert after.transitions == before_transitions
 
 
 def _configured_page_fixture(tmp_path, monkeypatch):

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
+import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import time as wall_time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1144,3 +1149,262 @@ def test_phase_a_ui_adapter_persists_cnf_and_events_without_materialization(
     assert receipt.am_state.profit_state is ProfitState.WAITING_FOR_MARKET
     assert receipt.pm_state.profit_state is ProfitState.WAITING_FOR_MARKET
     assert not result_root.exists()
+
+
+def _phase_a_subprocess_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    source = str(ROOT / "03_src")
+    current = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = source if not current else source + os.pathsep + current
+    environment["PYTHONUTF8"] = "1"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    return environment
+
+
+def test_phase_a_durable_state_restores_in_a_fresh_python_process(tmp_path: Path) -> None:
+    lifecycle_root = tmp_path / "lifecycle"
+    writer = r'''
+import json
+import sys
+from datetime import date, datetime, timezone
+from pathlib import Path
+from agri_research_agent.import_profit.lifecycle import (
+    CnfState, EventType, MarketState, ProfitState,
+    SoybeanLifecycleState, TransitionEvidence,
+)
+from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+from agri_research_agent.market_data.intraday import MarketSession
+
+root = Path(sys.argv[1])
+when = datetime(2026, 8, 28, 1, 20, tzinfo=timezone.utc)
+event_identity = "d" * 64
+snapshot_identity = "a" * 64
+cnf_identity = "b" * 64
+transition = TransitionEvidence(
+    sequence=1, transitioned_at=when,
+    event_type=EventType.CNF_SUBMITTED, event_identity=event_identity,
+    action="READY_TO_MATERIALIZE",
+    previous_market_state=MarketState.SEALED,
+    next_market_state=MarketState.SEALED,
+    previous_cnf_state=CnfState.NOT_SUBMITTED,
+    next_cnf_state=CnfState.SUBMITTED,
+    previous_profit_state=ProfitState.WAITING_FOR_CNF,
+    next_profit_state=ProfitState.READY_TO_MATERIALIZE,
+    snapshot_identity=snapshot_identity, cnf_identity=cnf_identity,
+    evidence_reference="fresh-process-evidence",
+)
+state = SoybeanLifecycleState(
+    business_date=date(2026, 8, 28), session=MarketSession.AM,
+    market_state=MarketState.SEALED, cnf_state=CnfState.SUBMITTED,
+    profit_state=ProfitState.READY_TO_MATERIALIZE,
+    market_snapshot_release_id="2026-08-28-AM",
+    market_snapshot_content_identity=snapshot_identity,
+    cnf_submission_identity=cnf_identity,
+    last_transition_at=when, last_event_type=EventType.CNF_SUBMITTED,
+    last_event_identity=event_identity, blocking_reason=None,
+    attempt_evidence_reference="ledger:2026-08-28-AM:1",
+    processed_event_keys=(event_identity,), transitions=(transition,),
+)
+saved = SoybeanLifecycleStore(root).save(state, expected_revision=0)
+print(json.dumps(saved.as_dict(), sort_keys=True))
+'''
+    reader = r'''
+import json
+import sys
+from datetime import date
+from pathlib import Path
+from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+from agri_research_agent.market_data.intraday import MarketSession
+state = SoybeanLifecycleStore(Path(sys.argv[1])).load(date(2026, 8, 28), MarketSession.AM)
+print(json.dumps(state.as_dict(), sort_keys=True))
+'''
+    environment = _phase_a_subprocess_environment()
+    process_a = subprocess.run(
+        [sys.executable, "-c", writer, str(lifecycle_root)],
+        cwd=ROOT, env=environment, capture_output=True, text=True,
+        encoding="utf-8", check=True, timeout=30,
+    )
+    process_b = subprocess.run(
+        [sys.executable, "-c", reader, str(lifecycle_root)],
+        cwd=ROOT, env=environment, capture_output=True, text=True,
+        encoding="utf-8", check=True, timeout=30,
+    )
+    written = json.loads(process_a.stdout)
+    restored = json.loads(process_b.stdout)
+    assert restored == written
+    assert restored["market_state"] == "SEALED"
+    assert restored["cnf_state"] == "SUBMITTED"
+    assert restored["profit_state"] == "READY_TO_MATERIALIZE"
+    assert restored["market_snapshot_release_id"] == "2026-08-28-AM"
+    assert restored["market_snapshot_content_identity"] == "a" * 64
+    assert restored["cnf_submission_identity"] == "b" * 64
+    assert restored["state_revision"] == 1
+    assert restored["blocking_reason"] is None
+    assert restored["last_event_identity"] == "d" * 64
+    assert len(restored["transitions"]) == 1
+    assert restored["transitions"][0]["event_identity"] == "d" * 64
+
+
+def test_phase_a_competing_reconcilers_observe_cas_conflict_without_lost_update(
+    tmp_path: Path,
+) -> None:
+    lifecycle_root = tmp_path / "lifecycle"
+    snapshot_root = tmp_path / "snapshots"
+    barrier_root = tmp_path / "barrier"
+    barrier_root.mkdir()
+    actor = r'''
+import json
+import sys
+import time
+from datetime import date, datetime, timezone
+from pathlib import Path
+from agri_research_agent.import_profit.lifecycle import CnfAuthorizationState
+from agri_research_agent.import_profit.lifecycle_events import cnf_authorization_event
+from agri_research_agent.import_profit.lifecycle_reconciler import (
+    LifecycleReconcileError, SoybeanLifecycleReconciler,
+)
+from agri_research_agent.import_profit.lifecycle_store import (
+    LifecycleStoreConflictError, SoybeanLifecycleStore,
+)
+from agri_research_agent.market_data.intraday import MarketSession
+
+root, snapshots, barrier, actor_id = map(Path, sys.argv[1:])
+class BarrierStore(SoybeanLifecycleStore):
+    def __init__(self, store_root):
+        super().__init__(store_root)
+        self.loads = 0
+    def load(self, business_date, session):
+        state = super().load(business_date, session)
+        self.loads += 1
+        if self.loads == 1:
+            (barrier / (actor_id.name + ".ready")).write_text(
+                str(state.state_revision), encoding="utf-8"
+            )
+            deadline = time.monotonic() + 20
+            while not (barrier / "go").exists():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("CAS barrier timed out")
+                time.sleep(0.01)
+        return state
+
+store = BarrierStore(root)
+reconciler = SoybeanLifecycleReconciler(store=store, snapshot_root=snapshots)
+state = CnfAuthorizationState.AVAILABLE if actor_id.name == "actor-a" else CnfAuthorizationState.UNAVAILABLE
+event = cnf_authorization_event(
+    business_date=date(2026, 8, 28), session=MarketSession.AM,
+    state=state, observed_at=datetime(2026, 8, 28, 1, 20, tzinfo=timezone.utc),
+    authority_identity=actor_id.name,
+)
+try:
+    saved = reconciler.reconcile(event, now=event.occurred_at, cnf_authorization=state)
+    result = {"result": "SAVED", "revision": saved.state_revision,
+              "event_identity": event.idempotency_key}
+except (LifecycleStoreConflictError, LifecycleReconcileError) as exc:
+    result = {"result": "CAS_CONFLICT", "error": type(exc).__name__}
+print(json.dumps(result, sort_keys=True))
+'''
+    environment = _phase_a_subprocess_environment()
+    processes = [
+        subprocess.Popen(
+            [
+                sys.executable, "-c", actor, str(lifecycle_root),
+                str(snapshot_root), str(barrier_root), name,
+            ],
+            cwd=ROOT, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        )
+        for name in ("actor-a", "actor-b")
+    ]
+    deadline = wall_time.monotonic() + 20
+    while not all((barrier_root / f"actor-{letter}.ready").exists() for letter in ("a", "b")):
+        if wall_time.monotonic() >= deadline:
+            for process in processes:
+                process.kill()
+            pytest.fail("both CAS actors did not reach the read barrier")
+        wall_time.sleep(0.01)
+    assert {
+        (barrier_root / "actor-a.ready").read_text(encoding="utf-8"),
+        (barrier_root / "actor-b.ready").read_text(encoding="utf-8"),
+    } == {"0"}
+    (barrier_root / "go").write_text("go", encoding="utf-8")
+    results = []
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=30)
+        assert process.returncode == 0, stderr
+        results.append(json.loads(stdout))
+    assert sorted(result["result"] for result in results) == ["CAS_CONFLICT", "SAVED"]
+
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+
+    final = SoybeanLifecycleStore(lifecycle_root).load(DAY, MarketSession.AM)
+    winner = next(result for result in results if result["result"] == "SAVED")
+    assert final.state_revision == 1
+    assert len(final.transitions) == 1
+    assert final.transitions[0].event_identity == winner["event_identity"]
+    assert final.last_event_identity == winner["event_identity"]
+    json.loads(
+        SoybeanLifecycleStore(lifecycle_root)
+        .state_path(DAY, MarketSession.AM)
+        .read_text(encoding="utf-8")
+    )
+
+
+def test_phase_a_new_market_event_is_noop_when_snapshot_is_already_sealed(
+    tmp_path: Path,
+) -> None:
+    from agri_research_agent.import_profit.lifecycle_events import full_daily_market_event
+    from agri_research_agent.import_profit.lifecycle_reconciler import SoybeanLifecycleReconciler
+    from agri_research_agent.market_data.intraday import load_intraday_snapshot
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(DAY, MarketSession.AM, at)
+    store, reconciler, snapshots = _lifecycle_runtime(tmp_path)
+    initial_event = full_daily_market_event(
+        full_daily_status="SUCCESS", full_daily_identity="initial-capture",
+        readiness=readiness, occurred_at=at,
+    )
+    first = reconciler.reconcile(
+        initial_event, now=at, market_readiness=readiness,
+        capture=_capture_fixture(snapshots, at, []),
+    )
+    before = load_intraday_snapshot(snapshots, DAY, MarketSession.AM)
+    release = snapshots / "releases" / before.release_id
+
+    def release_sha256() -> str:
+        digest = hashlib.sha256()
+        for path in sorted(item for item in release.rglob("*") if item.is_file()):
+            digest.update(path.relative_to(release).as_posix().encode("utf-8") + b"\0")
+            digest.update(path.read_bytes())
+        return digest.hexdigest()
+
+    before_hash = release_sha256()
+    before_retrieved = tuple(quote.retrieved_at for quote in before.quotes)
+    source_calls: list[str] = []
+
+    def forbidden_source_call(*_args):
+        source_calls.append("called")
+        pytest.fail("sealed snapshot must not requery Tankan or invoke capture")
+
+    current = first
+    for identity in ("new-upstream-event", "fresh-reconciler-event"):
+        event = full_daily_market_event(
+            full_daily_status="PARTIAL_SUCCESS", full_daily_identity=identity,
+            readiness=readiness, occurred_at=at + timedelta(minutes=1),
+        )
+        assert event.idempotency_key != initial_event.idempotency_key
+        current = SoybeanLifecycleReconciler(
+            store=store, snapshot_root=snapshots,
+        ).reconcile(
+            event, now=at + timedelta(minutes=1), market_readiness=readiness,
+            capture=forbidden_source_call,
+        )
+        assert current.transitions[-1].action == "NOOP_ALREADY_SEALED"
+
+    after = load_intraday_snapshot(snapshots, DAY, MarketSession.AM)
+    assert source_calls == []
+    assert after.release_id == before.release_id == first.market_snapshot_release_id
+    assert after.content_sha256 == before.content_sha256 == first.market_snapshot_content_identity
+    assert after.captured_at == before.captured_at
+    assert tuple(quote.retrieved_at for quote in after.quotes) == before_retrieved
+    assert release_sha256() == before_hash
+    assert len([path for path in (snapshots / "releases").iterdir() if path.is_dir()]) == 1

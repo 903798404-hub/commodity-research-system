@@ -607,12 +607,18 @@ def load_lifecycle_readiness_view(
             "cnf": am.cnf_state.value,
             "profit": am.profit_state.value,
             "blocking_reason": am.blocking_reason,
+            "market_snapshot_release_id": am.market_snapshot_release_id,
+            "profit_release_id": am.profit_release_id,
+            "state_revision": am.state_revision,
         },
         "PM": {
             "market": pm.market_state.value,
             "cnf": pm.cnf_state.value,
             "profit": pm.profit_state.value,
             "blocking_reason": pm.blocking_reason,
+            "market_snapshot_release_id": pm.market_snapshot_release_id,
+            "profit_release_id": pm.profit_release_id,
+            "state_revision": pm.state_revision,
         },
     }
 
@@ -631,6 +637,11 @@ def _render_lifecycle_readiness(root: Path | None, business_date: date) -> None:
         for session, value in (("AM", am), ("PM", pm))
         if value["blocking_reason"]
     ) or "无"
+    releases = "；".join(
+        f"{session}: Snapshot={value['market_snapshot_release_id'] or '-'}, "
+        f"Profit={value['profit_release_id'] or '-'}"
+        for session, value in (("AM", am), ("PM", pm))
+    )
     st.html(
         '<div class="soy-lifecycle-status">'
         f'<strong>{escape(str(view["business_date"]))}</strong> · '
@@ -638,7 +649,7 @@ def _render_lifecycle_readiness(root: Path | None, business_date: date) -> None:
         f'Profit={escape(str(am["profit"]))} · '
         f'PM Market={escape(str(pm["market"]))}, CNF={escape(str(pm["cnf"]))}, '
         f'Profit={escape(str(pm["profit"]))} · '
-        f'Blocking={escape(blockers)}</div>'
+        f'Blocking={escape(blockers)} · Releases={escape(releases)}</div>'
     )
 
 
