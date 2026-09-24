@@ -1408,3 +1408,476 @@ def test_phase_a_new_market_event_is_noop_when_snapshot_is_already_sealed(
     assert tuple(quote.retrieved_at for quote in after.quotes) == before_retrieved
     assert release_sha256() == before_hash
     assert len([path for path in (snapshots / "releases").iterdir() if path.is_dir()]) == 1
+
+
+def _phase_b_event(
+    root: Path,
+    session: MarketSession,
+    at: datetime,
+    *,
+    readiness=None,
+    upstream: str = "phase-b-full-daily",
+):
+    from agri_research_agent.import_profit.lifecycle_events import full_daily_market_event
+    from agri_research_agent.import_profit.lifecycle_worker import SoybeanDurableEventStore
+
+    readiness = readiness or _lifecycle_market_evidence(DAY, session, at)
+    event = full_daily_market_event(
+        full_daily_status="SUCCESS",
+        full_daily_identity=upstream,
+        readiness=readiness,
+        occurred_at=at,
+    )
+    store = SoybeanDurableEventStore(root)
+    durable, created = store.enqueue(event, readiness, created_at=at)
+    assert created
+    return store, durable, readiness
+
+
+def _phase_b_identity(event, at: datetime, *, suffix: str = "fresh"):
+    from agri_research_agent.import_profit.lifecycle_worker import (
+        MACHINE_CAPTURE_READ_PATHS,
+        MACHINE_CAPTURE_SECRET_ACCESS,
+        MACHINE_CAPTURE_WRITE_PATHS,
+        MachineCaptureIdentity,
+        machine_capture_task_id,
+    )
+
+    return MachineCaptureIdentity(
+        identity_id=f"machine-{event.session.value}-{suffix}",
+        task_id=machine_capture_task_id(event),
+        business_date=event.business_date,
+        session=event.session,
+        issued_at=at,
+        expires_at=at + timedelta(minutes=5),
+        read_paths=MACHINE_CAPTURE_READ_PATHS,
+        write_paths=MACHINE_CAPTURE_WRITE_PATHS,
+        secret_access=MACHINE_CAPTURE_SECRET_ACCESS,
+    )
+
+
+def _phase_b_worker(
+    tmp_path: Path,
+    event_store,
+    at: datetime,
+    *,
+    issued: list | None = None,
+    captures: list | None = None,
+    lease_seconds: int = 120,
+):
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+    from agri_research_agent.import_profit.lifecycle_worker import SoybeanCaptureWorker
+
+    issued = [] if issued is None else issued
+    captures = [] if captures is None else captures
+    snapshots = tmp_path / "snapshots"
+
+    def issue(event, *, now):
+        identity = _phase_b_identity(event, now, suffix=str(len(issued) + 1))
+        issued.append(identity)
+        return identity
+
+    def capture(event, readiness, identity):
+        captures.append((event, readiness, identity))
+        seal_fixture_snapshot(snapshots, _full_lifecycle_snapshot(event.session, at))
+
+    return SoybeanCaptureWorker(
+        event_store=event_store,
+        lifecycle_store=SoybeanLifecycleStore(tmp_path / "lifecycle"),
+        snapshot_root=snapshots,
+        identity_issuer=issue,
+        capture_executor=capture,
+        clock=lambda: at,
+        lease_seconds=lease_seconds,
+    ), issued, captures
+
+
+@pytest.mark.parametrize(
+    ("wrapper_status", "business_status"),
+    (("SUCCESS", "UPDATED"), ("PARTIAL_SUCCESS", "PARTIAL_SUCCESS")),
+)
+def test_phase_b_full_daily_completion_is_one_way_and_deduplicated(
+    tmp_path: Path,
+    wrapper_status: str,
+    business_status: str,
+) -> None:
+    from agri_research_agent.import_profit.lifecycle_worker import (
+        EventDeliveryStatus,
+        FullDailyCompletionObserver,
+        SoybeanDurableEventStore,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    source = tmp_path / "current-status.json"
+    source.write_text(json.dumps({
+        "status": wrapper_status,
+        "business_status": business_status,
+        "run_id": f"run-{wrapper_status.lower()}",
+    }), encoding="utf-8")
+    before = source.read_bytes()
+    store = SoybeanDurableEventStore(tmp_path / "events")
+    observer = FullDailyCompletionObserver(
+        store=store,
+        readiness_provider=lambda day, session, observed, identity:
+            _lifecycle_market_evidence(day, session, observed, upstream_identity=identity),
+    )
+    first = observer.observe(
+        source, business_date=DAY, session=MarketSession.AM, observed_at=at,
+    )
+    second = observer.observe(
+        source, business_date=DAY, session=MarketSession.AM, observed_at=at,
+    )
+    assert first.status == "QUEUED"
+    assert second.status == "DEDUPLICATED"
+    assert first.event_identity == second.event_identity
+    assert source.read_bytes() == before
+    durable = store.load(first.business_idempotency_key)
+    assert durable.status is EventDeliveryStatus.PENDING
+    assert durable.upstream_identity.endswith(f":{wrapper_status}")
+
+
+def test_phase_b_delivery_failure_never_changes_full_daily_result(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_worker import (
+        FullDailyCompletionObserver,
+        SoybeanDurableEventStore,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    source = tmp_path / "current-status.json"
+    source.write_text(json.dumps({
+        "status": "SUCCESS", "business_status": "UPDATED", "run_id": "run-ok",
+    }), encoding="utf-8")
+    before = source.read_bytes()
+    observer = FullDailyCompletionObserver(
+        store=SoybeanDurableEventStore(tmp_path / "events"),
+        readiness_provider=lambda *_args: (_ for _ in ()).throw(
+            RuntimeError("delivery unavailable")
+        ),
+    )
+    receipt = observer.observe(
+        source, business_date=DAY, session=MarketSession.AM, observed_at=at,
+    )
+    assert receipt.status == "DELIVERY_FAILED"
+    assert "delivery unavailable" in receipt.error
+    assert json.loads(receipt.evidence_path.read_text(encoding="utf-8"))["status"] == "FAILED"
+    assert source.read_bytes() == before
+
+
+def test_phase_b_durable_event_restores_in_fresh_process(tmp_path: Path) -> None:
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, event, _ = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    reader = r'''
+import json, sys
+from pathlib import Path
+from agri_research_agent.import_profit.lifecycle_worker import SoybeanDurableEventStore
+event = SoybeanDurableEventStore(Path(sys.argv[1])).load(sys.argv[2])
+print(json.dumps(event.as_dict(), sort_keys=True))
+'''
+    process = subprocess.run(
+        [sys.executable, "-c", reader, str(store.root), event.business_idempotency_key],
+        cwd=ROOT, env=_phase_a_subprocess_environment(), capture_output=True,
+        text=True, encoding="utf-8", check=True, timeout=30,
+    )
+    restored = json.loads(process.stdout)
+    assert restored == event.as_dict()
+    assert restored["status"] == "PENDING"
+    assert restored["event_identity"] == event.event_identity
+    assert restored["payload_identity"] == event.payload_identity
+
+
+def test_phase_b_competing_consumers_claim_exactly_once(tmp_path: Path) -> None:
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, event, _ = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    actor = r'''
+import json, sys
+from datetime import datetime
+from pathlib import Path
+from agri_research_agent.import_profit.lifecycle_worker import SoybeanDurableEventStore
+claimed = SoybeanDurableEventStore(Path(sys.argv[1])).claim_next(
+    owner=sys.argv[2], now=datetime.fromisoformat(sys.argv[3]), lease_seconds=60)
+print(json.dumps(None if claimed is None else claimed.as_dict(), sort_keys=True))
+'''
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", actor, str(store.root), owner, at.isoformat()],
+            cwd=ROOT, env=_phase_a_subprocess_environment(), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        )
+        for owner in ("consumer-a", "consumer-b")
+    ]
+    results = []
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=30)
+        assert process.returncode == 0, stderr
+        results.append(json.loads(stdout))
+    assert sum(result is not None for result in results) == 1
+    claimed = store.load(event.business_idempotency_key)
+    assert claimed.status.value == "CLAIMED"
+    assert claimed.attempt_count == 1
+
+
+@pytest.mark.parametrize("crash_stage", ("BEFORE_IDENTITY", "AFTER_IDENTITY"))
+def test_phase_b_expired_lease_recovers_with_fresh_task_identity(
+    tmp_path: Path,
+    crash_stage: str,
+) -> None:
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, event, _ = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    claimed = store.claim_next(owner="crashed", now=at, lease_seconds=2)
+    processing = store.mark_processing(claimed, owner="crashed", now=at)
+    abandoned = None
+    if crash_stage == "AFTER_IDENTITY":
+        abandoned = _phase_b_identity(processing, at, suffix="abandoned")
+    recovered_at = at + timedelta(seconds=3)
+    worker, issued, captures = _phase_b_worker(
+        tmp_path, store, recovered_at, lease_seconds=30,
+    )
+    receipt = worker.run_once(owner="recovery")
+    assert receipt.outcome == "MARKET_CAPTURE_SEALED"
+    assert receipt.event_status.value == "COMPLETED"
+    assert store.load(event.business_idempotency_key).attempt_count == 2
+    assert len(issued) == len(captures) == 1
+    if abandoned is not None:
+        assert issued[0].identity_id != abandoned.identity_id
+
+
+def test_phase_b_crash_after_seal_recovers_without_source_requery(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_reconciler import SoybeanLifecycleReconciler
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+    from agri_research_agent.import_profit.lifecycle_worker import SoybeanCaptureWorker
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, event, readiness = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    processing = store.mark_processing(
+        store.claim_next(owner="crashed", now=at, lease_seconds=2),
+        owner="crashed", now=at,
+    )
+    lifecycle_store = SoybeanLifecycleStore(tmp_path / "lifecycle")
+    snapshots = tmp_path / "snapshots"
+    state = SoybeanLifecycleReconciler(
+        store=lifecycle_store, snapshot_root=snapshots,
+    ).reconcile(
+        processing.lifecycle_event, now=at, market_readiness=readiness,
+        capture=_capture_fixture(snapshots, at, []),
+    )
+    assert state.market_state.value == "SEALED"
+    worker = SoybeanCaptureWorker(
+        event_store=store, lifecycle_store=lifecycle_store, snapshot_root=snapshots,
+        identity_issuer=lambda *_args, **_kwargs: pytest.fail("must not issue identity"),
+        capture_executor=lambda *_args: pytest.fail("must not requery source"),
+        clock=lambda: at + timedelta(seconds=3), lease_seconds=30,
+    )
+    receipt = worker.run_once(owner="recovery")
+    assert receipt.outcome == "NOOP_ALREADY_SEALED"
+    assert receipt.event_status.value == "COMPLETED"
+    assert store.load(event.business_idempotency_key).attempt_count == 2
+
+
+def test_phase_b_expired_human_grant_does_not_block_machine_capture(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle import CnfAuthorizationState
+    from agri_research_agent.import_profit.lifecycle_events import cnf_authorization_event
+    from agri_research_agent.import_profit.lifecycle_reconciler import SoybeanLifecycleReconciler
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, _, _ = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    lifecycle_store = SoybeanLifecycleStore(tmp_path / "lifecycle")
+    SoybeanLifecycleReconciler(
+        store=lifecycle_store, snapshot_root=tmp_path / "snapshots",
+    ).reconcile(
+        cnf_authorization_event(
+            business_date=DAY, session=MarketSession.AM,
+            state=CnfAuthorizationState.UNAVAILABLE, observed_at=at,
+            authority_identity="expired-dashboard-human-grant",
+        ),
+        now=at,
+        cnf_authorization=CnfAuthorizationState.UNAVAILABLE,
+    )
+    worker, issued, _ = _phase_b_worker(tmp_path, store, at)
+    receipt = worker.run_once(owner="machine")
+    assert len(issued) == 1
+    assert receipt.lifecycle_state.market_state.value == "SEALED"
+    assert receipt.lifecycle_state.cnf_authorization_state.value == "UNAVAILABLE"
+    assert receipt.lifecycle_state.cnf_state.value == "NOT_SUBMITTED"
+    assert receipt.lifecycle_state.profit_state.value == "WAITING_FOR_CNF"
+
+
+def test_phase_b_am_pm_use_distinct_task_scoped_grants(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_worker import MachineIdentityError
+
+    issued = []
+    durable_events = []
+    am_at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    pm_at = datetime.combine(DAY, time(15, 20), tzinfo=CN).astimezone(timezone.utc)
+    for session, at in ((MarketSession.AM, am_at), (MarketSession.PM, pm_at)):
+        session_root = tmp_path / session.value.lower()
+        store, durable, _ = _phase_b_event(session_root / "events", session, at)
+        durable_events.append(durable)
+        worker, issued, captures = _phase_b_worker(
+            session_root, store, at, issued=issued,
+        )
+        receipt = worker.run_once(owner=f"worker-{session.value.lower()}")
+        assert receipt.outcome == "MARKET_CAPTURE_SEALED"
+        assert len(captures) == 1
+    assert len(issued) == 2
+    assert issued[0].identity_id != issued[1].identity_id
+    assert issued[0].task_id != issued[1].task_id
+    with pytest.raises(MachineIdentityError):
+        issued[0].validate_for(durable_events[1], now=pm_at)
+
+
+def test_phase_b_machine_scope_is_minimal_and_excludes_human_and_results() -> None:
+    from agri_research_agent.import_profit.lifecycle_worker import (
+        MACHINE_CAPTURE_READ_PATHS,
+        MACHINE_CAPTURE_SECRET_ACCESS,
+        MACHINE_CAPTURE_WRITE_PATHS,
+    )
+
+    assert MACHINE_CAPTURE_SECRET_ACCESS == ("/run/secrets/tankan.env",)
+    assert set(MACHINE_CAPTURE_WRITE_PATHS) == {
+        "/runtime/capture-snapshots",
+        "/runtime/import-profit/operational/lifecycle",
+        "/runtime/import-profit/operational/soybean-events",
+    }
+    scope = " ".join(MACHINE_CAPTURE_READ_PATHS + MACHINE_CAPTURE_WRITE_PATHS).lower()
+    for forbidden in ("manual-cnf", "am-results", "pm-results", "public-current", "full-daily"):
+        assert forbidden not in scope
+
+
+def test_phase_b_existing_snapshot_skips_identity_and_capture(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+    from agri_research_agent.import_profit.lifecycle_worker import SoybeanCaptureWorker
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, _, _ = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    snapshots = tmp_path / "snapshots"
+    seal_fixture_snapshot(snapshots, _full_lifecycle_snapshot(MarketSession.AM, at))
+    worker = SoybeanCaptureWorker(
+        event_store=store,
+        lifecycle_store=SoybeanLifecycleStore(tmp_path / "lifecycle"),
+        snapshot_root=snapshots,
+        identity_issuer=lambda *_args, **_kwargs: pytest.fail("must not issue identity"),
+        capture_executor=lambda *_args: pytest.fail("must not capture"),
+        clock=lambda: at,
+    )
+    receipt = worker.run_once(owner="worker")
+    assert receipt.outcome == "NOOP_ALREADY_SEALED"
+    assert receipt.lifecycle_state.market_state.value == "SEALED"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    (
+        ("MISSED", "MARKET_WINDOW_MISSED"),
+        ("STALE", "MARKET_INPUT_NOT_READY"),
+        ("MISSING", "MARKET_INPUT_NOT_READY"),
+    ),
+)
+def test_phase_b_guards_skip_identity_and_source(
+    tmp_path: Path,
+    mode: str,
+    expected: str,
+) -> None:
+    session = MarketSession.AM
+    at = datetime.combine(DAY, time(12 if mode == "MISSED" else 9, 20), tzinfo=CN).astimezone(timezone.utc)
+    readiness = _lifecycle_market_evidence(
+        DAY, session, at,
+        stale_component="CBOT" if mode == "STALE" else None,
+    )
+    if mode == "MISSING":
+        from agri_research_agent.import_profit.lifecycle import MarketComponentStatus
+
+        readiness = replace(
+            readiness,
+            components=tuple(
+                replace(
+                    component,
+                    status=MarketComponentStatus.MISSING,
+                    available_identities=(),
+                    missing_identities=component.required_identities,
+                    reason="REQUIRED_INPUT_MISSING",
+                )
+                if component.component == "CBOT" else component
+                for component in readiness.components
+            ),
+        )
+    store, _, _ = _phase_b_event(
+        tmp_path / "events", session, at, readiness=readiness,
+    )
+    worker, issued, captures = _phase_b_worker(tmp_path, store, at)
+    receipt = worker.run_once(owner="worker")
+    assert receipt.outcome == expected
+    assert issued == []
+    assert captures == []
+
+
+def test_phase_b_worker_failure_is_durable_and_auditable(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+    from agri_research_agent.import_profit.lifecycle_worker import (
+        EventDeliveryStatus,
+        SoybeanCaptureWorker,
+    )
+
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+    store, event, _ = _phase_b_event(tmp_path / "events", MarketSession.AM, at)
+    worker = SoybeanCaptureWorker(
+        event_store=store,
+        lifecycle_store=SoybeanLifecycleStore(tmp_path / "lifecycle"),
+        snapshot_root=tmp_path / "snapshots",
+        identity_issuer=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("signer unavailable")
+        ),
+        capture_executor=lambda *_args: pytest.fail("capture must not start"),
+        clock=lambda: at,
+    )
+    with pytest.raises(RuntimeError, match="signer unavailable"):
+        worker.run_once(owner="worker")
+    failed = store.load(event.business_idempotency_key)
+    assert failed.status is EventDeliveryStatus.FAILED
+    assert failed.completed_at == at
+    assert failed.attempt_count == 1
+    assert failed.last_error == "RuntimeError: signer unavailable"
+
+
+def test_phase_b_cnf_ordering_and_source_of_truth_contract(tmp_path: Path) -> None:
+    from agri_research_agent.import_profit.lifecycle_events import cnf_submission_event
+    from agri_research_agent.import_profit.lifecycle_reconciler import SoybeanLifecycleReconciler
+    from agri_research_agent.import_profit.lifecycle_store import SoybeanLifecycleStore
+
+    expected_tables = {
+        "market.foreign_futures_live",
+        "market.exchange_rate_live",
+        "market.futures_live",
+    }
+    at = datetime.combine(DAY, time(9, 20), tzinfo=CN).astimezone(timezone.utc)
+
+    cnf_root = tmp_path / "cnf-first"
+    cnf_store = SoybeanLifecycleStore(cnf_root / "lifecycle")
+    submission = _complete_cnf_submission(at)
+    SoybeanLifecycleReconciler(
+        store=cnf_store, snapshot_root=cnf_root / "snapshots",
+    ).reconcile(
+        cnf_submission_event(submission, session=MarketSession.AM),
+        now=at, cnf_submission=submission,
+    )
+    queue, _, _ = _phase_b_event(cnf_root / "events", MarketSession.AM, at)
+    worker, _, captures = _phase_b_worker(cnf_root, queue, at)
+    state = worker.run_once(owner="cnf-first").lifecycle_state
+    assert state.profit_state.value == "READY_TO_MATERIALIZE"
+    tables = {quote.source_table for quote in _full_lifecycle_snapshot(MarketSession.AM, at).quotes}
+    assert tables == expected_tables
+    assert captures[0][1].market_ready
+
+    market_root = tmp_path / "market-first"
+    queue, _, _ = _phase_b_event(market_root / "events", MarketSession.AM, at)
+    worker, _, _ = _phase_b_worker(market_root, queue, at)
+    state = worker.run_once(owner="market-first").lifecycle_state
+    assert state.profit_state.value == "WAITING_FOR_CNF"
+    state = SoybeanLifecycleReconciler(
+        store=SoybeanLifecycleStore(market_root / "lifecycle"),
+        snapshot_root=market_root / "snapshots",
+    ).reconcile(
+        cnf_submission_event(submission, session=MarketSession.AM),
+        now=at, cnf_submission=submission,
+    )
+    assert state.profit_state.value == "READY_TO_MATERIALIZE"
