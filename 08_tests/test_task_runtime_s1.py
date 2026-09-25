@@ -219,3 +219,15 @@ def test_runtime_oom_is_not_task_failure(tmp_path):
     receipt = host.run_task("soybean_capture", {"business_date": "2026-09-25", "session": "AM"})
     assert receipt["result_status"] == "RUNTIME_FAILED"
     assert receipt["exit_code"] == 137
+
+
+def test_malformed_host_policy_still_writes_rejection_receipt(tmp_path):
+    config = tmp_path / "policies.json"
+    config.write_text("{}")
+    fake = FakeDocker()
+    host = module.HostLauncher(approval_path=tmp_path / "approved.json", policy_path=config,
+                               receipt_root=tmp_path / "receipts", docker=fake)
+    receipt = host.run_task("soybean_capture", {"business_date": "2026-09-25", "session": "AM"})
+    assert receipt["result_status"] == "POLICY_REJECTED"
+    assert json.loads((tmp_path / "receipts" / (receipt["task_id"] + ".json")).read_text()) == receipt
+    assert not fake.calls

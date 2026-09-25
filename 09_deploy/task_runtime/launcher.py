@@ -185,10 +185,14 @@ class HostLauncher:
     Approval, policies, receipts and Docker transport are host-owned inputs.
     """
 
-    def __init__(self, *, approval_path: Path, policies: dict[str, TaskPolicy], receipt_root: Path,
+    def __init__(self, *, approval_path: Path, receipt_root: Path,
+                 policies: dict[str, TaskPolicy] | None = None, policy_path: Path | None = None,
                  docker: Callable[[list[str]], str] = _docker):
+        if (policies is None) == (policy_path is None):
+            raise ValueError("provide exactly one host-owned policy source")
         self._approval_path = approval_path
-        self._policies = dict(policies)
+        self._policies = dict(policies) if policies is not None else None
+        self._policy_path = policy_path
         self._receipt_root = receipt_root
         self._docker = docker
 
@@ -265,7 +269,8 @@ class HostLauncher:
             if business_identity["session"] not in ("AM", "PM"):
                 raise PolicyError("invalid session")
             receipt["business_identity"] = dict(business_identity)
-            policy = self._policies.get(task_type)
+            policies = read_host_policies(self._policy_path) if self._policy_path is not None else self._policies
+            policy = policies.get(task_type)
             if policy is None:
                 raise PolicyError("unregistered task type")
             policy.validate()
@@ -343,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     launcher = HostLauncher(
         approval_path=Path("/etc/market-data/task-runtime/approved-image.json"),
-        policies=read_host_policies(Path("/etc/market-data/task-runtime/policies.json")),
+        policy_path=Path("/etc/market-data/task-runtime/policies.json"),
         receipt_root=Path("/var/lib/market-data/task-runtime/receipts"),
     )
     receipt = launcher.run_task(args.task_type, {"business_date": args.business_date, "session": args.session})
