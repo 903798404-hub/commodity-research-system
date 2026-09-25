@@ -36,6 +36,12 @@ _V2_EXTRA_FIELDS = frozenset({
     "candidate_scope_sha256",
 })
 _V2_PAYLOAD_FIELDS = _V1_PAYLOAD_FIELDS | _V2_EXTRA_FIELDS
+_V4_EXTRA_FIELDS = frozenset({
+    "task_id", "task_request_id", "task_request_sha256",
+    "runtime_observation_sha256", "approved_read_roots",
+    "approved_secret_targets",
+})
+_V4_PAYLOAD_FIELDS = _V2_PAYLOAD_FIELDS | _V4_EXTRA_FIELDS
 _ID = re.compile(r"[a-z][a-z0-9-]*\Z")
 _KEY_ID = re.compile(r"[a-z][a-z0-9-]{0,127}\Z")
 _HEX32 = re.compile(r"[a-f0-9]{32}\Z")
@@ -102,7 +108,9 @@ def _paths(value: object, message: str) -> None:
 def _validate_payload(payload: object, version: str) -> None:
     if type(payload) is not dict:
         _fail("execution grant payload must be an object")
-    expected = _V1_PAYLOAD_FIELDS if version == "production-execution-grant/1" else _V2_PAYLOAD_FIELDS
+    expected = (_V1_PAYLOAD_FIELDS if version == "production-execution-grant/1" else
+                _V4_PAYLOAD_FIELDS if version == "production-execution-grant/4" else
+                _V2_PAYLOAD_FIELDS)
     if set(payload) != expected:
         _fail("execution grant payload fields incomplete or unknown")
     _string(payload["grant_id"], "invalid grant id", _HEX32)
@@ -133,7 +141,8 @@ def _validate_payload(payload: object, version: str) -> None:
     _paths(payload["protected_mounts"], "invalid protected mounts")
     _string(payload["container_id"], "invalid container id", _HEX64)
     _string(payload["hostname_nonce"], "invalid hostname nonce", _HEX32)
-    if version in {"production-execution-grant/2", "production-execution-grant/3"}:
+    if version in {"production-execution-grant/2", "production-execution-grant/3",
+                   "production-execution-grant/4"}:
         expected_manifest = "runtime-manifest/2" if version.endswith("/2") else "runtime-manifest/3"
         if payload["runtime_manifest_schema_version"] != expected_manifest:
             _fail("invalid runtime manifest schema version")
@@ -145,10 +154,28 @@ def _validate_payload(payload: object, version: str) -> None:
         else:
             _string(scope_id, "invalid candidate scope id", _HEX32)
             _string(scope_hash, "invalid candidate scope hash", _HEX64)
+    if version == "production-execution-grant/4":
+        _string(payload["task_id"], "invalid task id", _ID)
+        _string(payload["task_request_id"], "invalid task request id", _HEX32)
+        for name in ("task_request_sha256", "runtime_observation_sha256"):
+            _string(payload[name], f"invalid {name}", _HEX64)
+        reads = payload["approved_read_roots"]
+        if type(reads) is not list:
+            _fail("invalid approved read roots")
+        read_paths = tuple(_path(item, "invalid approved read roots") for item in reads)
+        if len(read_paths) != len(set(read_paths)):
+            _fail("invalid approved read roots")
+        secrets = payload["approved_secret_targets"]
+        if type(secrets) is not list:
+            _fail("invalid approved secret targets")
+        secret_paths = tuple(_path(item, "invalid approved secret targets") for item in secrets)
+        if len(secret_paths) != len(set(secret_paths)) or any(
+                not path.startswith("/run/secrets/") for path in secret_paths):
+            _fail("invalid approved secret targets")
 
 
 def validate_execution_grant_envelope(value: object) -> None:
-    """Validate a v1, v2, or v3 grant envelope without authorization."""
+    """Validate a v1-v4 grant envelope without authorization."""
     try:
         primitive = type(value) is dict and _primitive(value)
     except RecursionError:
@@ -158,7 +185,8 @@ def validate_execution_grant_envelope(value: object) -> None:
     if set(value) != _ENVELOPE_FIELDS:
         _fail("execution grant envelope fields incomplete or unknown")
     version = value["schema_version"]
-    if version not in {"production-execution-grant/1", "production-execution-grant/2", "production-execution-grant/3"}:
+    if version not in {"production-execution-grant/1", "production-execution-grant/2",
+                       "production-execution-grant/3", "production-execution-grant/4"}:
         _fail("unsupported execution grant schema")
     if value["algorithm"] != "ed25519":
         _fail("unsupported execution grant algorithm")

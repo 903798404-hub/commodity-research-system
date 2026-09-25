@@ -197,6 +197,91 @@ def test_policy4_and_policy5_bind_v3_manifest_and_reserved_grant_directory(role:
     assert host._manifest_version(value["schema_version"]) == "runtime-manifest/3"
 
 
+def task_policy(role: str = "candidate_validation") -> dict:
+    value = v3_policy(role)
+    value["schema_version"] = "host-runtime-policy/6" if role == "candidate_validation" else "host-runtime-policy/7"
+    base = value["candidate_host_root"] if role == "candidate_validation" else value["production_storage_root"]
+    value["task_scope"] = {
+        "task_id":"generic-capture", "request_path":base + "/grants/task-request.json",
+        "request_sha256":"4" * 64,
+        "request_container_path":"/run/market-data-grants/task-request.json",
+        "runtime_observation_container_path":"/run/market-data-grants/runtime-observation.json",
+        "approved_read_roots":[value["runtime_root"]],
+        "approved_write_roots":[value["runtime_root"] + "/data"],
+        "approved_secret_targets":["/run/secrets/provider.env"],
+        "execution_evidence_path":base + "/evidence/result.json",
+    }
+    return value
+
+
+@pytest.mark.parametrize("role", ["candidate_validation", "production"])
+def test_task_policy6_and_policy7_are_generic_and_minimum_scope(role):
+    value = task_policy(role)
+    host.validate_policy(value, role)
+    assert host._manifest_version(value["schema_version"]) == "runtime-manifest/3"
+    for mutation in ("write-root", "secret", "unknown"):
+        broken = copy.deepcopy(value)
+        if mutation == "write-root": broken["task_scope"]["approved_write_roots"] = [broken["runtime_root"]]
+        elif mutation == "secret": broken["task_scope"]["approved_secret_targets"] = ["/runtime/secret"]
+        else: broken["task_scope"]["command"] = ["shell"]
+        with pytest.raises(host.HostAuthorizationError):
+            host.validate_policy(broken, role)
+
+
+@pytest.mark.parametrize("exit_code,state,outcome", [
+    (0, {"Status":"exited", "OOMKilled":False, "Error":""}, "success"),
+    (78, {"Status":"exited", "OOMKilled":False, "Error":""}, "validator_rejection"),
+    (5, {"Status":"exited", "OOMKilled":False, "Error":""}, "task_nonzero_exit"),
+    (137, {"Status":"dead", "OOMKilled":True, "Error":"killed"}, "runtime_crash"),
+])
+def test_ephemeral_launcher_reports_outcome_and_destroys(monkeypatch, tmp_path, exit_code, state, outcome):
+    value = task_policy()
+    grants = tmp_path / "grants"; grants.mkdir()
+    request = {"schema_version":"machine-task-request/1", "request_id":"8" * 32,
+               "task_id":"generic-capture", "requested_at":"2026-01-01T00:00:00+00:00",
+               "expires_at":"2026-01-01T01:00:00+00:00", "metadata":{"session":"opaque"}}
+    calls=[]; ps_calls=0; written=[]
+    monkeypatch.setattr(host, "_require_linux_root", lambda:None)
+    monkeypatch.setattr(host, "require_protected_authority_source", lambda:None)
+    monkeypatch.setattr(host, "_load_policy", lambda _path:value)
+    monkeypatch.setattr(host, "_protected_path", lambda path, **_kwargs:path)
+    monkeypatch.setattr(host, "_task_request", lambda _policy,_grants:(request,host._canonical(request)))
+    monkeypatch.setattr(host, "issue_execution_grant", lambda cid,**_kwargs:{"payload":{
+        "grant_id":"9"*32, "mount_contract_sha256":"a"*64, "actual_config_sha256":"b"*64}})
+    monkeypatch.setattr(host, "_write_task_evidence", lambda _policy,evidence:written.append(evidence))
+    def runner(command):
+        nonlocal ps_calls
+        calls.append(command)
+        if "ps" in command:
+            ps_calls += 1
+            return "" if ps_calls == 1 else CID + "\n"
+        if command[1:3] == ["container", "inspect"]:
+            return json.dumps([{"Id":CID, "State":state}])
+        if command[1] == "wait": return str(exit_code) + "\n"
+        return ""
+    result = host.execute_ephemeral_task(expected_policy_path="/policy", key_path="/key",
+        grant_dir=grants, role="candidate_validation", runner=runner)
+    assert result["outcome"] == outcome and result["container_destroyed"] is True
+    assert written == [result]
+    assert any(command[1:3] == ["rm", "-f"] for command in calls)
+
+
+def test_ephemeral_launcher_records_create_failure_without_grant(monkeypatch, tmp_path):
+    value = task_policy(); grants=tmp_path/"grants";grants.mkdir()
+    request={"schema_version":"machine-task-request/1","request_id":"8"*32,"task_id":"generic-capture",
+             "requested_at":"2026-01-01T00:00:00+00:00","expires_at":"2026-01-01T01:00:00+00:00","metadata":{}}
+    monkeypatch.setattr(host,"_require_linux_root",lambda:None)
+    monkeypatch.setattr(host,"require_protected_authority_source",lambda:None)
+    monkeypatch.setattr(host,"_load_policy",lambda _path:value)
+    monkeypatch.setattr(host,"_protected_path",lambda path,**_kwargs:path)
+    monkeypatch.setattr(host,"_task_request",lambda *_args:(request,host._canonical(request)))
+    monkeypatch.setattr(host,"issue_execution_grant",lambda *_args,**_kwargs:pytest.fail("grant must not be issued"))
+    monkeypatch.setattr(host,"_write_task_evidence",lambda *_args:None)
+    result=host.execute_ephemeral_task(expected_policy_path="/policy",key_path="/key",grant_dir=grants,
+        role="candidate_validation",runner=lambda _command:(_ for _ in ()).throw(host.HostAuthorizationError("launch")))
+    assert result["outcome"]=="container_launch_failure" and result["container_id"] is None
+
+
 def v3_runtime_manifest() -> dict:
     return {
         "schema_version": "runtime-manifest/3",
@@ -295,7 +380,7 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     from agri_research_agent.shared import production_identity as identity
 
     expected = policy(role)
-    if version == 2:
+    if version in (2, 3):
         expected["schema_version"] = "host-runtime-policy/2"
         expected["candidate_scope"] = None if role == "production" else {"descriptor_path":"/tmp/protected/descriptors/scope.json","descriptor_sha256":"3"*64,"scope_id":"4"*32}
         if role == "production":
@@ -312,6 +397,10 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
             expected["runtime_root"] = "/runtime/candidate"
             expected["mounts"][1]["target"] = expected["runtime_root"]
             expected["mounts"][2]["target"] = expected["runtime_root"] + "/data"
+        if version == 3:
+            expected["schema_version"] = "host-runtime-policy/6" if role == "candidate_validation" else "host-runtime-policy/7"
+            expected["grant_container_directory"] = "/run/market-data-grants"
+            expected["mounts"][0]["target"] = expected["grant_container_directory"]
     image_root, runtime, grants = tmp_path / "image", tmp_path / "runtime", tmp_path / "grants"
     for folder in (image_root / "02_configs", image_root / "03_src", image_root / "04_scripts", image_root / "05_apps", runtime / "data", grants):
         folder.mkdir(parents=True)
@@ -321,9 +410,9 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     trust = image_root / "02_configs" / "production_runtime_trust.json"
     trust.write_text(json.dumps({"schema_version":"production-runtime-trust/1", "keys":[{"key_id":expected["key_id"], "domain":role, "algorithm":"ed25519", "public_key_base64":base64.b64encode(private.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw)).decode()}],"revoked_key_ids":[],"revoked_grant_ids":[]}),encoding="utf-8")
     manifest = {"schema_version":"runtime-manifest/1", "runtime_target":"production_container", "identity_kind":"oci_container", **{name:expected[name] for name in ("project_id","module_id","service_id")}, "runtime_roots":[{"role":"marker", "container_path":expected["runtime_root"], "access":"ro"},{"role":"data", "container_path":expected["runtime_root"]+"/data", "access":"rw"}],"required_mounts":[{"role":"marker","container_path":expected["runtime_root"],"read_only":True},{"role":"data","container_path":expected["runtime_root"]+"/data","read_only":False}]}
-    if version == 2:
+    if version in (2, 3):
         manifest.update({
-            "schema_version":"runtime-manifest/2", "build":{"dockerfile":"Dockerfile","dockerignore":".dockerignore","dependency_contracts":["requirements.txt"],"compose_sources":["compose.yml"]},
+            "schema_version":"runtime-manifest/3" if version == 3 else "runtime-manifest/2", "build":{"dockerfile":"Dockerfile","dockerignore":".dockerignore","dependency_contracts":["requirements.txt"],"compose_sources":["compose.yml"]},
             "entrypoint":["python","app.py"], "working_directory":"/app", "required_environment":[], "secret_references":[],
             "required_executables":["python"], "required_python_modules":[],
             "production_policy":{"deployment_role":"production","write_grant_required":True},
@@ -332,6 +421,10 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
             "identity_root_role":"marker", "initialization_commands":[{"name":"initialize","argv":["python","init.py"]}],
             "source_inputs":[{"path":"app.py","role":"entrypoint"},{"path":"init.py","role":"initialization"}],
         })
+        if version == 3:
+            manifest.update(required_environment=["MARKET_DATA_EXECUTION_GRANT"],
+                environment_bindings=[{"name":"MARKET_DATA_EXECUTION_GRANT","kind":"execution_grant"}],
+                forbidden_environment=[], candidate_runtime_inputs=[])
         (image_root / "app.py").write_text("print('runtime')\n", encoding="utf-8")
         (image_root / "init.py").write_text("print('initialize')\n", encoding="utf-8")
     marker = {"schema_version":1,"runtime_id":"runtime","module_id":"shared-runtime","classification":"candidate-validation" if role=="candidate_validation" else "formal", "created_at":"2026-01-01T00:00:00Z"}
@@ -343,6 +436,8 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     expected["mounts"] = sorted(expected["mounts"], key=lambda item:item["target"])
     value = observed(expected)
     config = value["config"]
+    if version == 3:
+        config["Env"].append("MARKET_DATA_EXECUTION_GRANT=/run/market-data-grants/grant.json")
     config["Labels"] = {"com.docker.compose.project.config_files":"/tmp/compose.yml","com.docker.compose.project.working_dir":"/tmp","com.docker.compose.service":"svc"}
     container = {"Id":CID,"Image":IMAGE,"Config":config,"HostConfig":value["host_config"],"State":value["state"],"Path":"python","Args":["app.py"],"Mounts":[{"Type":"bind","Source":m["source"],"Destination":m["target"],"RW":not m["read_only"]} for m in expected["mounts"]]}
     image = {"Id":IMAGE,"Config":{**copy.deepcopy(config),"Labels":value["image_labels"]}}
@@ -353,6 +448,20 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     compose_file.write_text("services: {}\n",encoding="utf-8")
     env_file.write_text("",encoding="utf-8")
     expected["compose_sources"][0]["sha256"] = hashlib.sha256(compose_file.read_bytes()).hexdigest()
+    if version == 3:
+        now = host.datetime.now(host.timezone.utc)
+        request = {"schema_version":"machine-task-request/1", "request_id":"8"*32,
+                   "task_id":"generic-task", "requested_at":(now-host.timedelta(minutes=1)).isoformat(),
+                   "expires_at":(now+host.timedelta(minutes=10)).isoformat(), "metadata":{"session":"opaque"}}
+        request_file = grants / "task-request.json"
+        request_file.write_bytes(host._canonical(request))
+        evidence_root = expected["candidate_host_root"] if role == "candidate_validation" else expected["production_storage_root"]
+        expected["task_scope"] = {"task_id":"generic-task", "request_path":"/tmp/task-request.json",
+            "request_sha256":hashlib.sha256(request_file.read_bytes()).hexdigest(),
+            "request_container_path":"/run/market-data-grants/task-request.json",
+            "runtime_observation_container_path":"/run/market-data-grants/runtime-observation.json",
+            "approved_read_roots":[], "approved_write_roots":[expected["runtime_root"]+"/data"],
+            "approved_secret_targets":[], "execution_evidence_path":evidence_root+"/task-evidence.json"}
     policy_file = tmp_path / "policy.json"
     policy_file.write_text(json.dumps(expected),encoding="utf-8")
     container_files = {"/app/RELEASE.json":release_file,"/app/runtime.json":manifest_file,expected["runtime_root"]+"/.market-data-runtime.json":marker_file,"/app/02_configs/production_runtime_trust.json":trust}
@@ -376,6 +485,8 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
         raise AssertionError(args)
     original_path = Path
     host_paths = {"/tmp/compose.yml":compose_file,"/tmp/env":env_file}
+    if version == 3:
+        host_paths["/tmp/task-request.json"] = request_file
     monkeypatch.setattr(host,"Path",lambda value:host_paths.get(str(value),original_path(value)))
     monkeypatch.setattr(host,"TRUST_CONFIG_PATH",trust)
     monkeypatch.setattr(host,"_run_docker",transport)
@@ -386,7 +497,7 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     monkeypatch.setattr(host,"require_protected_key_and_grant_dirs",lambda *args:None)
     monkeypatch.setattr(host,"_validate_mount_sources",lambda *args:None)
     monkeypatch.setattr(host,"_candidate_descriptor",lambda *args,**kwargs:{"scope_id":"4"*32})
-    if version == 2 and role == "production":
+    if version in (2, 3) and role == "production":
         # This roundtrip isolates grant compatibility after pre-release succeeds.
         # Record verification and source/production bridges have separate tests.
         monkeypatch.setattr(host,"_validated_candidate_record",lambda policy:({"record_id":"5"*32}, manifest))
@@ -394,7 +505,7 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     monkeypatch.setattr(host,"_fsync_directory",lambda *args:None)
     monkeypatch.setattr(identity,"_ROOT",image_root)
     monkeypatch.setattr(identity,"TRUST_CONFIG_PATH",trust)
-    mapping={image_root:"/app",runtime:expected["runtime_root"],grants:"/run/grants"}
+    mapping={image_root:"/app",runtime:expected["runtime_root"],grants:expected["grant_container_directory"]}
     def runtime_path(path):
         for root,target in mapping.items():
             try:
@@ -407,6 +518,8 @@ def signing_fixture(tmp_path, monkeypatch, role="candidate_validation", version=
     monkeypatch.setattr(identity,"_mount_options",lambda:{"/":{"ro"}})
     monkeypatch.setattr(identity,"_mount_for",lambda mounts,path:{"rw"} if runtime_path(path)==expected["runtime_root"]+"/data" else {"ro"})
     monkeypatch.setattr(identity.os,"geteuid",lambda:1000,raising=False)
+    if version == 3:
+        monkeypatch.setattr(identity.os,"environ",{"MARKET_DATA_EXECUTION_GRANT":expected["grant_container_directory"]+"/grant.json"})
     monkeypatch.setattr(identity.socket,"gethostname",lambda:config["Hostname"])
     return expected,container,image,rendered,policy_file,key,grants,manifest_file,marker_file,release_file,identity
 
@@ -437,6 +550,24 @@ def test_v3_production_issuer_keeps_grant_v2_identity_root_and_null_scope(tmp_pa
     request=identity.OCIExecutionRequest(grant,release,manifest,marker.parent,marker)
     assert identity.verify_execution(request,expected_role="production",module_id="shared-runtime",runtime_id="runtime",
                                      runtime_root=marker.parent,marker_sha256=expected["runtime_marker_sha256"]).image_id == IMAGE
+
+
+@pytest.mark.parametrize("role", ["candidate_validation", "production"])
+def test_task_policy_uses_existing_signer_and_formal_consumer_roundtrip(tmp_path, monkeypatch, role):
+    expected,container,image,rendered,policy_file,key,grants,manifest,marker,release,identity = signing_fixture(
+        tmp_path,monkeypatch,role,3)
+    grant=grants/"grant.json"
+    envelope=host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,
+        grant_path=grant,grant_dir=grants,role=role)
+    assert envelope["schema_version"]=="production-execution-grant/4"
+    payload=envelope["payload"]
+    assert payload["task_id"]=="generic-task" and payload["task_request_id"]=="8"*32
+    assert payload["container_id"]==CID and payload["actual_config_sha256"]==expected["actual_config_sha256"]
+    request=identity.OCIExecutionRequest(grant,release,manifest,marker.parent,marker,
+        grants/"task-request.json",grants/"runtime-observation.json")
+    verified=identity.verify_execution(request,expected_role=role,module_id="shared-runtime",runtime_id="runtime",
+        runtime_root=marker.parent,marker_sha256=expected["runtime_marker_sha256"])
+    assert verified.task_id=="generic-task" and verified.grant_id==payload["grant_id"]
 
 
 def test_policy_v2_cannot_bypass_candidate_record_with_null_scope():

@@ -212,10 +212,10 @@ def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = 
     manifest = source / "manifests" / "runtime.json"
     commit, tree = "a" * 40, "b" * 40
     release.write_text(json.dumps({"git_commit": commit, "git_tree": tree, "application": "fixture"}), encoding="utf-8")
-    logical_root = "/runtime/fixture" if version in (2, 3) else ("/runtime" if role == "production" else "/tmp/runtime")
-    manifest_value = (manifest_v3(logical_root) if version == 3 else manifest_v2(logical_root)) if version in (2, 3) else {"project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service"}
+    logical_root = "/runtime/fixture" if version in (2, 3, 4) else ("/runtime" if role == "production" else "/tmp/runtime")
+    manifest_value = (manifest_v3(logical_root) if version in (3, 4) else manifest_v2(logical_root)) if version in (2, 3, 4) else {"project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service"}
     manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
-    if version in (2, 3):
+    if version in (2, 3, 4):
         (source / "app.py").write_text("print('fixture')\n", encoding="utf-8")
         (source / "init.py").write_text("print('initialized')\n", encoding="utf-8")
     private = Ed25519PrivateKey.generate()
@@ -246,22 +246,42 @@ def oci_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, role: str = 
         "project_id": "identity-fixture", "module_id": "shared-runtime", "service_id": "fixture-service", "runtime_id": "formal-runtime",
         "approved_commit": commit, "approved_tree": tree, "release_commit": commit, "release_tree": tree,
         "image_id": "sha256:" + "c" * 64, "release_sha256": hashlib.sha256(release.read_bytes()).hexdigest(), "runtime_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(), "runtime_marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
-        "runtime_root": root, "writable_roots": [root + "/data"], "protected_mounts": ["/app", *([root, root + "/history"] if version == 3 else [root] if version == 2 else [root + "/.market-data-runtime.json"])],
+        "runtime_root": root, "writable_roots": [root + "/data"], "protected_mounts": ["/app", *([root, root + "/history"] if version in (3, 4) else [root] if version == 2 else [root + "/.market-data-runtime.json"])],
         "rendered_compose_sha256": "d" * 64, "mount_contract_sha256": "e" * 64, "actual_config_sha256": "f" * 64, "container_id": "1" * 64, "hostname_nonce": "b" * 32,
     }
-    if version in (2, 3):
-        payload.update(runtime_manifest_schema_version=f"runtime-manifest/{version}", identity_root_role="marker",
+    if version in (2, 3, 4):
+        payload.update(runtime_manifest_schema_version=f"runtime-manifest/{3 if version == 4 else version}", identity_root_role="marker",
                        candidate_scope_id="6" * 32 if role == "candidate_validation" else None,
                        candidate_scope_sha256="7" * 64 if role == "candidate_validation" else None)
     grant = source / "auth" / "grant.json"
+    task_request = observation = None
+    if version == 4:
+        now = datetime.now(timezone.utc)
+        task_request = source / "auth" / "task-request.json"
+        task_value = {"schema_version":"machine-task-request/1", "request_id":"8" * 32,
+                      "task_id":"capture-task", "requested_at":(now-timedelta(minutes=1)).isoformat(),
+                      "expires_at":(now+timedelta(minutes=5)).isoformat(), "metadata":{"session":"opaque"}}
+        task_request.write_bytes(identity._canonical(task_value))
+        payload.update(task_id="capture-task", task_request_id="8" * 32,
+                       task_request_sha256=hashlib.sha256(task_request.read_bytes()).hexdigest(),
+                       approved_read_roots=[root + "/history"], approved_secret_targets=[])
+        observation = source / "auth" / "runtime-observation.json"
+        observed = {"schema_version":"machine-task-runtime-observation/1",
+                    **{name:payload[name] for name in ("container_id", "hostname_nonce", "image_id",
+                       "runtime_manifest_sha256", "runtime_marker_sha256", "mount_contract_sha256",
+                       "actual_config_sha256", "task_request_sha256", "approved_read_roots",
+                       "approved_secret_targets")}, "approved_write_roots":payload["writable_roots"]}
+        observation.write_bytes(identity._canonical(observed))
+        payload["runtime_observation_sha256"] = hashlib.sha256(observation.read_bytes()).hexdigest()
     envelope = {"schema_version": f"production-execution-grant/{version}", "algorithm": "ed25519", "key_id": role.replace("_", "-") + "-key", "payload": payload, "signature": base64.b64encode(private.sign(identity._canonical(payload))).decode("ascii")}
     grant.write_text(json.dumps(envelope), encoding="utf-8")
-    request = identity.OCIExecutionRequest(grant, release, manifest, runtime, marker)
+    request = identity.OCIExecutionRequest(grant, release, manifest, runtime, marker,
+                                           task_request, observation)
     return request, payload, private, marker, runtime
 
 
 def sign_grant(request: identity.OCIExecutionRequest, payload: dict, private: Ed25519PrivateKey) -> None:
-    version = int(payload["runtime_manifest_schema_version"].rsplit("/", 1)[1]) if "runtime_manifest_schema_version" in payload else 1
+    version = 4 if "task_request_sha256" in payload else int(payload["runtime_manifest_schema_version"].rsplit("/", 1)[1]) if "runtime_manifest_schema_version" in payload else 1
     envelope = {"schema_version": f"production-execution-grant/{version}", "algorithm": "ed25519", "key_id": payload["role"].replace("_", "-") + "-key", "payload": payload, "signature": base64.b64encode(private.sign(identity._canonical(payload))).decode("ascii")}
     request.grant_path.write_text(json.dumps(envelope), encoding="utf-8")
 
@@ -306,6 +326,65 @@ def test_v3_requires_observed_environment_bindings(tmp_path: Path, monkeypatch: 
     with pytest.raises(identity.ProductionIdentityError, match="environment"):
         identity.verify_execution(request, expected_role=role, module_id="shared-runtime", runtime_id="formal-runtime",
                                   runtime_root=runtime, marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+def test_v4_task_consumer_validates_full_signed_observation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=4)
+    environment = {"MODE":"STRICT_RUNTIME", "HISTORY_PATH":"/runtime/fixture/history/current.json",
+                   "SERVICE_URL":"https://production.invalid/", "MARKET_DATA_EXECUTION_GRANT":"/app/auth/grant.json"}
+    monkeypatch.setattr(identity.os, "environ", environment)
+    verified = identity.verify_execution(request, expected_role="production", module_id="shared-runtime",
+                                         runtime_id="formal-runtime", runtime_root=runtime,
+                                         marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+    assert verified.task_id == "capture-task"
+    assert payload["container_id"] == "1" * 64
+
+
+def test_fresh_container_b_cannot_reuse_container_a_task_grant(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _payload, _private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=4)
+    monkeypatch.setattr(identity.os, "environ", {"MODE":"STRICT_RUNTIME",
+        "HISTORY_PATH":"/runtime/fixture/history/current.json", "SERVICE_URL":"https://production.invalid/",
+        "MARKET_DATA_EXECUTION_GRANT":"/app/auth/grant.json"})
+    monkeypatch.setattr(identity.socket, "gethostname", lambda:"c" * 32)
+    with pytest.raises(identity.ProductionIdentityError, match="hostname"):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime",
+                                  runtime_id="formal-runtime", runtime_root=runtime,
+                                  marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
+
+
+@pytest.mark.parametrize("mutation", ["container", "config", "mount", "request", "write", "secret", "expired"])
+def test_v4_task_consumer_fails_closed_on_scope_and_freshness(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
+    request, payload, private, marker, runtime = oci_fixture(tmp_path, monkeypatch, version=4)
+    monkeypatch.setattr(identity.os, "environ", {"MODE":"STRICT_RUNTIME",
+        "HISTORY_PATH":"/runtime/fixture/history/current.json", "SERVICE_URL":"https://production.invalid/",
+        "MARKET_DATA_EXECUTION_GRANT":"/app/auth/grant.json"})
+    observation = json.loads(request.runtime_observation_path.read_text(encoding="utf-8"))
+    if mutation == "container": observation["container_id"] = "9" * 64
+    elif mutation == "config": observation["actual_config_sha256"] = "9" * 64
+    elif mutation == "mount": observation["mount_contract_sha256"] = "9" * 64
+    elif mutation == "request": observation["task_request_sha256"] = "9" * 64
+    elif mutation == "write":
+        payload["writable_roots"] = ["/runtime/fixture/other"]
+        observation["approved_write_roots"] = payload["writable_roots"]
+    elif mutation == "secret":
+        payload["approved_secret_targets"] = ["/run/secrets/other.env"]
+        observation["approved_secret_targets"] = payload["approved_secret_targets"]
+    elif mutation == "expired":
+        task = json.loads(request.task_request_path.read_text(encoding="utf-8"))
+        task["requested_at"] = "2025-01-01T00:00:00+00:00"
+        task["expires_at"] = "2025-01-01T01:00:00+00:00"
+        request.task_request_path.write_bytes(identity._canonical(task))
+        payload["task_request_sha256"] = hashlib.sha256(request.task_request_path.read_bytes()).hexdigest()
+        observation["task_request_sha256"] = payload["task_request_sha256"]
+    request.runtime_observation_path.write_bytes(identity._canonical(observation))
+    payload["runtime_observation_sha256"] = hashlib.sha256(request.runtime_observation_path.read_bytes()).hexdigest()
+    sign_grant(request, payload, private)
+    with pytest.raises(identity.ProductionIdentityError):
+        identity.verify_execution(request, expected_role="production", module_id="shared-runtime",
+                                  runtime_id="formal-runtime", runtime_root=runtime,
+                                  marker_sha256=hashlib.sha256(marker.read_bytes()).hexdigest())
 
 
 @pytest.mark.parametrize("version", [2, 3])

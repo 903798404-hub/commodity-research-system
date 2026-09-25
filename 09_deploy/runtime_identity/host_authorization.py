@@ -263,10 +263,12 @@ _POLICY_V1_FIELDS = {
 }
 _POLICY_V2_FIELDS = _POLICY_V1_FIELDS | {"candidate_scope"}
 _POLICY_V3_FIELDS = _POLICY_V2_FIELDS | {"candidate_record", "approved_source_root", "production_storage_root"}
-_CANDIDATE_POLICIES = {"host-runtime-policy/2", "host-runtime-policy/4"}
-_PRODUCTION_POLICIES = {"host-runtime-policy/3", "host-runtime-policy/5"}
+_TASK_SCOPE_FIELD = {"task_scope"}
+_CANDIDATE_POLICIES = {"host-runtime-policy/2", "host-runtime-policy/4", "host-runtime-policy/6"}
+_PRODUCTION_POLICIES = {"host-runtime-policy/3", "host-runtime-policy/5", "host-runtime-policy/7"}
 _SOURCE_POLICIES = _CANDIDATE_POLICIES | _PRODUCTION_POLICIES
-_V3_POLICIES = {"host-runtime-policy/4", "host-runtime-policy/5"}
+_V3_POLICIES = {"host-runtime-policy/4", "host-runtime-policy/5", "host-runtime-policy/6", "host-runtime-policy/7"}
+_TASK_POLICIES = {"host-runtime-policy/6", "host-runtime-policy/7"}
 
 
 def _manifest_version(version: str) -> str:
@@ -274,7 +276,9 @@ def _manifest_version(version: str) -> str:
             "host-runtime-policy/2": "runtime-manifest/2",
             "host-runtime-policy/3": "runtime-manifest/2",
             "host-runtime-policy/4": "runtime-manifest/3",
-            "host-runtime-policy/5": "runtime-manifest/3"}[version]
+            "host-runtime-policy/5": "runtime-manifest/3",
+            "host-runtime-policy/6": "runtime-manifest/3",
+            "host-runtime-policy/7": "runtime-manifest/3"}[version]
 
 
 def _contract_module(path: Path, name: str):
@@ -310,7 +314,9 @@ def validate_policy(policy: Mapping, role: str) -> None:
                        "host-runtime-policy/2": _POLICY_V2_FIELDS,
                        "host-runtime-policy/3": _POLICY_V3_FIELDS,
                        "host-runtime-policy/4": _POLICY_V2_FIELDS,
-                       "host-runtime-policy/5": _POLICY_V3_FIELDS}.get(version, set())
+                       "host-runtime-policy/5": _POLICY_V3_FIELDS,
+                       "host-runtime-policy/6": _POLICY_V2_FIELDS | _TASK_SCOPE_FIELD,
+                       "host-runtime-policy/7": _POLICY_V3_FIELDS | _TASK_SCOPE_FIELD}.get(version, set())
     if 'recovery' in policy:
         if version not in _PRODUCTION_POLICIES or role != 'production':
             raise HostAuthorizationError('recovery requires the existing production role')
@@ -322,6 +328,34 @@ def validate_policy(policy: Mapping, role: str) -> None:
         raise HostAuthorizationError("unknown authorization role")
     if version in _V3_POLICIES and policy["grant_container_directory"] != "/run/market-data-grants":
         raise HostAuthorizationError("v3 policy must use the reserved execution grant directory")
+    if version in _TASK_POLICIES:
+        scope = policy["task_scope"]
+        fields = {"task_id", "request_path", "request_sha256", "request_container_path",
+                  "runtime_observation_container_path", "approved_read_roots",
+                  "approved_write_roots", "approved_secret_targets", "execution_evidence_path"}
+        if type(scope) is not dict or set(scope) != fields:
+            raise HostAuthorizationError("task scope policy is incomplete")
+        if not isinstance(scope["task_id"], str) or not re.fullmatch(r"[a-z][a-z0-9-]*", scope["task_id"]):
+            raise HostAuthorizationError("task identity is invalid")
+        for name in ("request_path", "request_container_path", "runtime_observation_container_path",
+                     "execution_evidence_path"):
+            _absolute(scope[name])
+        if (scope["request_container_path"] != "/run/market-data-grants/task-request.json"
+                or scope["runtime_observation_container_path"] != "/run/market-data-grants/runtime-observation.json"
+                or not isinstance(scope["request_sha256"], str) or not _HEX64.fullmatch(scope["request_sha256"])):
+            raise HostAuthorizationError("task identity path or hash is invalid")
+        for name in ("approved_read_roots", "approved_write_roots", "approved_secret_targets"):
+            values = scope[name]
+            if type(values) is not list or (name == "approved_write_roots" and not values):
+                raise HostAuthorizationError("task minimum scope is invalid")
+            normalized = [_absolute(value) for value in values]
+            if len(normalized) != len(set(normalized)):
+                raise HostAuthorizationError("task minimum scope contains duplicates")
+        if (set(scope["approved_read_roots"]) & set(scope["approved_write_roots"])
+                or any(not value.startswith("/run/secrets/") for value in scope["approved_secret_targets"])
+                or any(not _within(value, policy["runtime_root"]) or value == policy["runtime_root"]
+                       for value in scope["approved_write_roots"])):
+            raise HostAuthorizationError("task minimum scope is overbroad")
     if version in _CANDIDATE_POLICIES and role != "candidate_validation":
         raise HostAuthorizationError("policy/2 candidate scope cannot authorize production; policy/3 record required")
     if version in _PRODUCTION_POLICIES:
@@ -336,6 +370,11 @@ def validate_policy(policy: Mapping, role: str) -> None:
         storage = _absolute(policy["production_storage_root"])
         if not _within(storage, "/var/lib/market-data/production-runtime") or storage == "/var/lib/market-data/production-runtime":
             raise HostAuthorizationError("production storage must have an explicit isolated runtime allocation")
+    if version in _TASK_POLICIES:
+        evidence = policy["task_scope"]["execution_evidence_path"]
+        authority_root = policy["candidate_host_root"] if role == "candidate_validation" else policy["production_storage_root"]
+        if not _within(evidence, authority_root):
+            raise HostAuthorizationError("task evidence is outside its isolated runtime allocation")
     for name in ("project_id", "module_id", "service_id", "runtime_id", "key_id", "artifact_service", "release_application"):
         if not isinstance(policy[name], str) or not re.fullmatch(r"[a-z][a-z0-9-]*", policy[name]):
             raise HostAuthorizationError("invalid policy identity")
@@ -502,6 +541,56 @@ def _rfc3339(value: object, label: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise HostAuthorizationError(f"invalid {label}")
     return parsed.astimezone(timezone.utc)
+
+
+def _task_request(policy: Mapping, grant_dir: Path) -> tuple[dict, bytes]:
+    """Load the immutable opaque request. It selects no path, secret, or command."""
+    if policy["schema_version"] not in _TASK_POLICIES:
+        raise HostAuthorizationError("task request requires a task runtime policy")
+    scope = policy["task_scope"]
+    path = _protected_path(Path(scope["request_path"]))
+    if path.parent != grant_dir or path.name != "task-request.json":
+        raise HostAuthorizationError("task request must be in the fresh grant directory")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != scope["request_sha256"]:
+        raise HostAuthorizationError("task request bytes differ from policy")
+    request = _json(raw)
+    fields = {"schema_version", "request_id", "task_id", "requested_at", "expires_at", "metadata"}
+    if (set(request) != fields or request.get("schema_version") != "machine-task-request/1"
+            or request.get("task_id") != scope["task_id"]
+            or not isinstance(request.get("request_id"), str)
+            or not re.fullmatch(r"[0-9a-f]{32}", request["request_id"])
+            or type(request.get("metadata")) is not dict or len(_canonical(request["metadata"])) > 16384):
+        raise HostAuthorizationError("task request schema is invalid")
+    requested = _rfc3339(request["requested_at"], "task request time")
+    expires = _rfc3339(request["expires_at"], "task request expiry")
+    now = datetime.now(timezone.utc)
+    if requested > now or expires <= now or expires <= requested or expires - requested > timedelta(days=1):
+        raise HostAuthorizationError("task request is not currently valid")
+    return request, raw
+
+
+def _validate_task_scope(policy: Mapping, manifest: Mapping, observed: Mapping,
+                         writable: list[str], grant_dir: Path) -> tuple[dict, bytes]:
+    request, raw = _task_request(policy, grant_dir)
+    scope = policy["task_scope"]
+    reads = sorted(item["container_path"] for item in manifest["runtime_roots"]
+                   if item["access"] == "ro" and item["role"] != manifest["identity_root_role"])
+    writes = sorted(writable)
+    secrets = sorted("/run/secrets/" + name for name in manifest["secret_references"])
+    mounted_secrets = sorted(item["target"] for item in observed["mounts"]
+                             if item["target"].startswith("/run/secrets/") and item["read_only"] is True)
+    if (sorted(scope["approved_read_roots"]) != reads
+            or sorted(scope["approved_write_roots"]) != writes
+            or sorted(scope["approved_secret_targets"]) != secrets
+            or mounted_secrets != secrets):
+        raise HostAuthorizationError("task policy scope differs from the actual runtime manifest")
+    evidence = Path(scope["execution_evidence_path"])
+    _protected_path(evidence.parent, directory=True,
+                    temporary=policy["role"] == "candidate_validation")
+    if evidence.exists() or evidence.is_symlink():
+        raise HostAuthorizationError("task execution evidence path must be new")
+    return request, raw
 
 
 def _host_mount_points() -> tuple[str, ...]:
@@ -1286,6 +1375,9 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     writable = [m["target"] for m in mounts if not m["read_only"] and _within(m["target"], policy["runtime_root"])]
     if not writable or any(target == policy["runtime_root"] for target in writable):
         raise HostAuthorizationError("runtime marker root must remain read-only with explicit writable children")
+    task_request = task_request_raw = None
+    if policy_version in _TASK_POLICIES:
+        task_request, task_request_raw = _validate_task_scope(policy, manifest, observed, writable, grant_dir)
     protected = ([policy["source_root"], policy["grant_container_directory"], marker_path]
                  if policy_version == "host-runtime-policy/1"
                  else [policy["source_root"], policy["grant_container_directory"],
@@ -1312,15 +1404,42 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     grant_id = (_recovery_call('grant_id', policy, container_id)
                 if 'recovery' in policy else os.urandom(16).hex())
     payload.update(grant_id=grant_id, issued_at=now.isoformat(), expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(), identity_kind="oci_container", authorization_mode=role, role=role, artifact_origin=observed["image_labels"]["market-data.artifact.origin"], release_commit=policy["approved_commit"], release_tree=policy["approved_tree"], release_sha256=observed["release_sha256"], rendered_compose_sha256=rendered_digest, mount_contract_sha256=_digest(mounts), actual_config_sha256=observed["actual_config_sha256"], container_id=container_id, hostname_nonce=observed["config"]["Hostname"], writable_roots=writable, protected_mounts=protected)
-    grant_version = ("production-execution-grant/3" if policy_version in _V3_POLICIES else
+    grant_version = ("production-execution-grant/4" if policy_version in _TASK_POLICIES else
+                     "production-execution-grant/3" if policy_version in _V3_POLICIES else
                      "production-execution-grant/1" if policy_version == "host-runtime-policy/1" else "production-execution-grant/2")
-    if grant_version in {"production-execution-grant/2", "production-execution-grant/3"}:
+    if grant_version in {"production-execution-grant/2", "production-execution-grant/3",
+                         "production-execution-grant/4"}:
         scope = policy["candidate_scope"]
         payload.update(
             runtime_manifest_schema_version=expected_manifest_version,
             identity_root_role=identity_root_role,
             candidate_scope_id=scope["scope_id"] if scope is not None else None,
             candidate_scope_sha256=scope["descriptor_sha256"] if scope is not None else None,
+        )
+    observation_raw = None
+    if grant_version == "production-execution-grant/4":
+        task_scope = policy["task_scope"]
+        observation = {
+            "schema_version": "machine-task-runtime-observation/1",
+            "container_id": container_id,
+            "hostname_nonce": observed["config"]["Hostname"],
+            "image_id": policy["image_id"],
+            "runtime_manifest_sha256": policy["runtime_manifest_sha256"],
+            "runtime_marker_sha256": policy["runtime_marker_sha256"],
+            "mount_contract_sha256": _digest(mounts),
+            "actual_config_sha256": observed["actual_config_sha256"],
+            "task_request_sha256": task_scope["request_sha256"],
+            "approved_read_roots": task_scope["approved_read_roots"],
+            "approved_write_roots": task_scope["approved_write_roots"],
+            "approved_secret_targets": task_scope["approved_secret_targets"],
+        }
+        observation_raw = _canonical(observation)
+        payload.update(
+            task_id=task_scope["task_id"], task_request_id=task_request["request_id"],
+            task_request_sha256=task_scope["request_sha256"],
+            runtime_observation_sha256=hashlib.sha256(observation_raw).hexdigest(),
+            approved_read_roots=task_scope["approved_read_roots"],
+            approved_secret_targets=task_scope["approved_secret_targets"],
         )
     envelope = {"schema_version": grant_version, "algorithm": "ed25519", "key_id": policy["key_id"], "payload": payload, "signature": base64.b64encode(key.sign(_canonical(payload))).decode("ascii")}
     try:
@@ -1348,7 +1467,19 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
         raise HostAuthorizationError("candidate record changed before grant sealing")
     if policy_version in _PRODUCTION_POLICIES and _secret_state(observed) != secret_state:
         raise HostAuthorizationError("secret file changed before grant sealing")
+    if policy_version in _TASK_POLICIES:
+        final_request, final_request_raw = _task_request(policy, grant_dir)
+        if final_request != task_request or final_request_raw != task_request_raw:
+            raise HostAuthorizationError("task request changed before grant sealing")
     try:
+        if observation_raw is not None:
+            observation_path = grant_dir / "runtime-observation.json"
+            observation_descriptor = os.open(observation_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+            with os.fdopen(observation_descriptor, "wb") as stream:
+                stream.write(observation_raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(observation_path, 0o444)
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(_canonical(envelope))
@@ -1428,18 +1559,148 @@ def validate_recovery_post_start(container_id: str, *, expected_policy_path: str
             'grant_id': payload['grant_id']}
 
 
+def _write_task_evidence(policy: Mapping, evidence: Mapping) -> None:
+    path = Path(policy["task_scope"]["execution_evidence_path"])
+    parent = _protected_path(path.parent, directory=True,
+                             temporary=policy["role"] == "candidate_validation")
+    if path.parent != parent or path.exists() or path.is_symlink():
+        raise HostAuthorizationError("task evidence destination is not fresh")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(_canonical(evidence))
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(path, 0o444)
+    _fsync_directory(parent)
+
+
+def execute_ephemeral_task(*, expected_policy_path: str | Path, key_path: str | Path,
+                           grant_dir: str | Path, role: str, ttl_seconds: int = 900,
+                           runner=None) -> dict:
+    """Create one Compose container, authorize it, run once, record, and destroy.
+
+    The task request carries opaque metadata only. The protected policy and
+    runtime manifest exclusively select the image, command, mounts and secrets.
+    Exit 78 is reserved for a formal in-container grant-consumer rejection.
+    """
+    _require_linux_root()
+    require_protected_authority_source()
+    policy = _load_policy(expected_policy_path)
+    validate_policy(policy, role)
+    if policy["schema_version"] not in _TASK_POLICIES:
+        raise HostAuthorizationError("ephemeral execution requires a task runtime policy")
+    grants = _protected_path(Path(grant_dir), directory=True)
+    request, request_raw = _task_request(policy, grants)
+    scope = policy["task_scope"]
+    grant_path = grants / "grant.json"
+    if grant_path.exists() or (grants / "runtime-observation.json").exists():
+        raise HostAuthorizationError("ephemeral task grant directory is not fresh")
+    project = "machine-task-" + request["request_id"][:12]
+    compose = ["compose", "--project-name", project, "--project-directory",
+               policy["compose_project_directory"], "--env-file", policy["compose_environment_file"]]
+    for item in policy["compose_sources"]:
+        compose.extend(("-f", item["path"]))
+    container_id = None
+    envelope = None
+    exit_code = None
+    phase = "create"
+    outcome = "container_launch_failure"
+    started_at = None
+    finished_at = None
+    error_type = None
+    destroyed = False
+    try:
+        before = _run_docker([*compose, "ps", "-aq", policy["service_id"]], runner=runner).decode("ascii").split()
+        if before:
+            raise HostAuthorizationError("ephemeral task namespace is not fresh")
+        _run_docker([*compose, "create", "--no-build", policy["service_id"]], runner=runner)
+        ids = _run_docker([*compose, "ps", "-aq", policy["service_id"]], runner=runner).decode("ascii").split()
+        if len(ids) != 1:
+            raise HostAuthorizationError("ephemeral task did not create exactly one container")
+        container_id = _container_id(ids[0])
+        phase = "authorize"
+        envelope = issue_execution_grant(
+            container_id, expected_policy_path=expected_policy_path, key_path=key_path,
+            grant_path=grant_path, grant_dir=grants, role=role, ttl_seconds=ttl_seconds)
+        phase = "start"
+        started_at = datetime.now(timezone.utc).isoformat()
+        _run_docker(["start", container_id], runner=runner)
+        phase = "wait"
+        raw_exit = _run_docker(["wait", container_id], runner=runner).decode("ascii").strip()
+        if not re.fullmatch(r"[0-9]{1,3}", raw_exit) or int(raw_exit) > 255:
+            raise HostAuthorizationError("task container returned an invalid exit status")
+        exit_code = int(raw_exit)
+        state = docker_inspect(container_id, runner=runner).get("State", {})
+        finished_at = datetime.now(timezone.utc).isoformat()
+        if exit_code == 0:
+            outcome = "success"
+        elif exit_code == 78:
+            outcome = "validator_rejection"
+        elif state.get("OOMKilled") is True or state.get("Status") == "dead" or state.get("Error"):
+            outcome = "runtime_crash"
+        else:
+            outcome = "task_nonzero_exit"
+    except (HostAuthorizationError, OSError, ValueError, TypeError, KeyError) as exc:
+        error_type = type(exc).__name__
+        if phase == "authorize":
+            outcome = "authorization_rejection"
+        elif phase == "wait":
+            outcome = "runtime_crash"
+        else:
+            outcome = "container_launch_failure"
+    finally:
+        if container_id is not None:
+            try:
+                _run_docker(["rm", "-f", container_id], runner=runner)
+                destroyed = True
+            except HostAuthorizationError:
+                destroyed = False
+    payload = envelope["payload"] if envelope is not None else {}
+    evidence = {
+        "schema_version": "machine-task-execution-result/1",
+        "request_id": request["request_id"], "task_id": request["task_id"],
+        "task_request_sha256": hashlib.sha256(request_raw).hexdigest(),
+        "policy_sha256": _digest(policy), "outcome": outcome, "exit_code": exit_code,
+        "container_id": container_id, "grant_id": payload.get("grant_id"),
+        "approved_commit": policy["approved_commit"], "approved_tree": policy["approved_tree"],
+        "image_id": policy["image_id"], "runtime_manifest_sha256": policy["runtime_manifest_sha256"],
+        "runtime_marker_sha256": policy["runtime_marker_sha256"],
+        "mount_contract_sha256": payload.get("mount_contract_sha256"),
+        "actual_config_sha256": payload.get("actual_config_sha256"),
+        "approved_read_roots": scope["approved_read_roots"],
+        "approved_write_roots": scope["approved_write_roots"],
+        "approved_secret_targets": scope["approved_secret_targets"],
+        "started_at": started_at, "finished_at": finished_at,
+        "container_destroyed": destroyed, "error_type": error_type,
+    }
+    _write_task_evidence(policy, evidence)
+    return evidence
+
+
 def main(argv=None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--container-id", required=True)
+    parser.add_argument("--container-id")
     parser.add_argument("--policy", required=True)
     parser.add_argument("--key", required=True)
     parser.add_argument("--grant-directory", required=True)
-    parser.add_argument("--grant", required=True)
+    parser.add_argument("--grant")
     parser.add_argument("--role", choices=("production", "candidate_validation"), required=True)
     parser.add_argument("--validate-recovery-post-start", action="store_true")
+    parser.add_argument("--execute-ephemeral-task", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.execute_ephemeral_task:
+            if args.container_id is not None or args.validate_recovery_post_start:
+                raise HostAuthorizationError("ephemeral task creates its own container")
+            result = execute_ephemeral_task(expected_policy_path=args.policy, key_path=args.key,
+                                            grant_dir=args.grant_directory, role=args.role)
+            print(json.dumps(result))
+            return 0 if result["outcome"] == "success" else 1
+        if args.container_id is None:
+            raise HostAuthorizationError("container ID is required for grant issuance")
+        if args.grant is None:
+            raise HostAuthorizationError("grant path is required")
         if args.validate_recovery_post_start:
             if args.role != "production":
                 raise HostAuthorizationError("post-start recovery validation requires production role")

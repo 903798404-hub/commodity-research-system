@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:market-data:production-execution-grant:1-3",
+  "$id": "urn:market-data:production-execution-grant:1-4",
   "description": "Structural grant schema only. Signature, trust, expiry, host observations and in-container mount validation are separate authorization checks.",
-  "oneOf": [{"$ref": "#/$defs/envelope-v1"}, {"$ref": "#/$defs/envelope-v2"}, {"$ref": "#/$defs/envelope-v3"}],
+  "oneOf": [{"$ref": "#/$defs/envelope-v1"}, {"$ref": "#/$defs/envelope-v2"}, {"$ref": "#/$defs/envelope-v3"}, {"$ref": "#/$defs/envelope-v4"}],
   "$defs": {
     "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
     "key-id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,127}$"},
@@ -50,6 +50,18 @@
         {"if": {"properties": {"role": {"const": "candidate_validation"}}, "required": ["role"]}, "then": {"properties": {"candidate_scope_id": {"$ref": "#/$defs/hex32"}, "candidate_scope_sha256": {"$ref": "#/$defs/hex64"}}}}
       ]
     },
+    "payload-v4": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "grant_id": {"$ref": "#/$defs/hex32"}, "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "identity_kind": {"const": "oci_container"}, "authorization_mode": {"enum": ["production", "candidate_validation"]}, "artifact_origin": {"enum": ["production", "candidate"]}, "role": {"enum": ["production", "candidate_validation"]}, "project_id": {"$ref": "#/$defs/id"}, "module_id": {"$ref": "#/$defs/id"}, "service_id": {"$ref": "#/$defs/id"}, "runtime_id": {"$ref": "#/$defs/id"}, "approved_commit": {"$ref": "#/$defs/hex40"}, "approved_tree": {"$ref": "#/$defs/hex40"}, "release_commit": {"$ref": "#/$defs/hex40"}, "release_tree": {"$ref": "#/$defs/hex40"}, "image_id": {"$ref": "#/$defs/image"}, "release_sha256": {"$ref": "#/$defs/hex64"}, "runtime_manifest_sha256": {"$ref": "#/$defs/hex64"}, "runtime_marker_sha256": {"$ref": "#/$defs/hex64"}, "runtime_root": {"$ref": "#/$defs/path"}, "writable_roots": {"$ref": "#/$defs/paths"}, "protected_mounts": {"$ref": "#/$defs/paths"}, "rendered_compose_sha256": {"$ref": "#/$defs/hex64"}, "mount_contract_sha256": {"$ref": "#/$defs/hex64"}, "actual_config_sha256": {"$ref": "#/$defs/hex64"}, "container_id": {"$ref": "#/$defs/hex64"}, "hostname_nonce": {"$ref": "#/$defs/hex32"}, "runtime_manifest_schema_version": {"const": "runtime-manifest/3"}, "identity_root_role": {"$ref": "#/$defs/id"}, "candidate_scope_id": {"type": ["string", "null"], "pattern": "^[a-f0-9]{32}$"}, "candidate_scope_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}, "task_id": {"$ref": "#/$defs/id"}, "task_request_id": {"$ref": "#/$defs/hex32"}, "task_request_sha256": {"$ref": "#/$defs/hex64"}, "runtime_observation_sha256": {"$ref": "#/$defs/hex64"}, "approved_read_roots": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/path"}}, "approved_secret_targets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]*$"}}
+      },
+      "required": ["grant_id", "issued_at", "expires_at", "identity_kind", "authorization_mode", "artifact_origin", "role", "project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "release_commit", "release_tree", "image_id", "release_sha256", "runtime_manifest_sha256", "runtime_marker_sha256", "runtime_root", "writable_roots", "protected_mounts", "rendered_compose_sha256", "mount_contract_sha256", "actual_config_sha256", "container_id", "hostname_nonce", "runtime_manifest_schema_version", "identity_root_role", "candidate_scope_id", "candidate_scope_sha256", "task_id", "task_request_id", "task_request_sha256", "runtime_observation_sha256", "approved_read_roots", "approved_secret_targets"],
+      "allOf": [
+        {"$ref": "#/$defs/role-rules"},
+        {"if": {"properties": {"role": {"const": "production"}}, "required": ["role"]}, "then": {"properties": {"candidate_scope_id": {"const": null}, "candidate_scope_sha256": {"const": null}}}},
+        {"if": {"properties": {"role": {"const": "candidate_validation"}}, "required": ["role"]}, "then": {"properties": {"candidate_scope_id": {"$ref": "#/$defs/hex32"}, "candidate_scope_sha256": {"$ref": "#/$defs/hex64"}}}}
+      ]
+    },
     "envelope-v1": {
       "type": "object", "additionalProperties": false,
       "properties": {"schema_version": {"const": "production-execution-grant/1"}, "algorithm": {"const": "ed25519"}, "key_id": {"$ref": "#/$defs/key-id"}, "signature": {"$ref": "#/$defs/signature"}, "payload": {"$ref": "#/$defs/payload-v1"}},
@@ -63,6 +75,11 @@
     "envelope-v3": {
       "type": "object", "additionalProperties": false,
       "properties": {"schema_version": {"const": "production-execution-grant/3"}, "algorithm": {"const": "ed25519"}, "key_id": {"$ref": "#/$defs/key-id"}, "signature": {"$ref": "#/$defs/signature"}, "payload": {"$ref": "#/$defs/payload-v3"}},
+      "required": ["schema_version", "algorithm", "key_id", "payload", "signature"]
+    },
+    "envelope-v4": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"schema_version": {"const": "production-execution-grant/4"}, "algorithm": {"const": "ed25519"}, "key_id": {"$ref": "#/$defs/key-id"}, "signature": {"$ref": "#/$defs/signature"}, "payload": {"$ref": "#/$defs/payload-v4"}},
       "required": ["schema_version", "algorithm", "key_id", "payload", "signature"]
     }
   }

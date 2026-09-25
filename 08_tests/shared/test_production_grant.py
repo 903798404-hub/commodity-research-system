@@ -51,11 +51,18 @@ def payload(version: int = 1, role: str = "production") -> dict:
         "rendered_compose_sha256": SHA, "mount_contract_sha256": SHA, "actual_config_sha256": SHA,
         "container_id": CID, "hostname_nonce": "1" * 32,
     }
-    if version in (2, 3):
+    if version in (2, 3, 4):
         value.update({"runtime_manifest_schema_version": f"runtime-manifest/{version}",
                       "identity_root_role": "marker",
                       "candidate_scope_id": "2" * 32 if candidate else None,
                       "candidate_scope_sha256": SHA if candidate else None})
+        if version == 4:
+            value["runtime_manifest_schema_version"] = "runtime-manifest/3"
+            value.update(task_id="capture-task", task_request_id="3" * 32,
+                         task_request_sha256="4" * 64,
+                         runtime_observation_sha256="5" * 64,
+                         approved_read_roots=["/runtime/inputs"],
+                         approved_secret_targets=["/run/secrets/tankan.env"])
     return value
 
 
@@ -64,7 +71,7 @@ def envelope(version: int = 1, role: str = "production") -> dict:
             "key_id": "fixture-key", "payload": payload(version, role), "signature": "A" * 86 + "=="}
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 @pytest.mark.parametrize("role", ["production", "candidate_validation"])
 def test_complete_grant_versions_and_roles(version: int, role: str):
     value = envelope(version, role)
@@ -74,7 +81,7 @@ def test_complete_grant_versions_and_roles(version: int, role: str):
 
 def test_json_schema_and_shared_validator_accept_the_same_complete_versions():
     validator = schema_validator()
-    for version in (1, 2, 3):
+    for version in (1, 2, 3, 4):
         for role in ("production", "candidate_validation"):
             value = envelope(version, role)
             grant.validate_execution_grant_envelope(value)
@@ -157,6 +164,18 @@ def test_v3_uses_the_v2_field_shape_and_pins_the_v3_manifest():
         grant.validate_execution_grant_envelope(v3)
 
 
+@pytest.mark.parametrize("mutation", ["request", "read-root", "secret", "unknown"])
+def test_v4_task_scope_is_exact_and_fail_closed(mutation: str):
+    item = envelope(4)
+    if mutation == "request": item["payload"]["task_request_id"] = "bad"
+    elif mutation == "read-root": item["payload"]["approved_read_roots"] = ["/runtime/../escape"]
+    elif mutation == "secret": item["payload"]["approved_secret_targets"] = ["/runtime/secret"]
+    else: item["payload"]["task_command"] = ["shell"]
+    with pytest.raises(grant.GrantShapeError):
+        grant.validate_execution_grant_envelope(item)
+    assert list(schema_validator().iter_errors(item))
+
+
 def v3_environment_manifest() -> dict:
     return {
         "schema_version": "runtime-manifest/3",
@@ -222,7 +241,7 @@ def test_cross_role_and_scope_contract_rejected(role: str, field: str, value):
 
 
 def test_duplicate_json_keys_rejected_for_all_versions(tmp_path: Path):
-    for version in (1, 2, 3):
+    for version in (1, 2, 3, 4):
         raw = (b'{"schema_version":"production-execution-grant/' + str(version).encode() +
                b'","schema_version":"production-execution-grant/' + str(version).encode() + b'"}')
         with pytest.raises(grant.GrantShapeError):

@@ -64,6 +64,8 @@ class OCIExecutionRequest:
     runtime_manifest_path: Path
     runtime_root: Path
     runtime_marker_path: Path
+    task_request_path: Path | None = None
+    runtime_observation_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,7 @@ class VerifiedExecutionIdentity:
     image_id: str | None
     grant_id: str | None
     writable_roots: tuple[Path, ...]
+    task_id: str | None = None
 
 
 def _canonical(value: object) -> bytes:
@@ -267,9 +270,61 @@ def _within_mount(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
+def _verify_task_binding(request: OCIExecutionRequest, payload: Mapping) -> tuple[set[str], set[str]]:
+    """Verify the protected host observation bound into a task-scoped v4 grant."""
+    request_path, observation_path = request.task_request_path, request.runtime_observation_path
+    if request_path is None or observation_path is None:
+        raise ProductionIdentityError("task grant requires request and runtime observation inputs")
+    grant_parent = request.grant_path.resolve(strict=True).parent
+    if (request_path.name != "task-request.json" or observation_path.name != "runtime-observation.json"
+            or request_path.resolve(strict=True).parent != grant_parent
+            or observation_path.resolve(strict=True).parent != grant_parent):
+        raise ProductionIdentityError("task identity inputs are outside the protected grant directory")
+    if (_sha_file(request_path) != payload["task_request_sha256"]
+            or _sha_file(observation_path) != payload["runtime_observation_sha256"]):
+        raise ProductionIdentityError("task request or runtime observation identity mismatch")
+    try:
+        task = _json_object(request_path.read_text(encoding="utf-8"), "task request")
+        observed = _json_object(observation_path.read_text(encoding="utf-8"), "runtime observation")
+    except (OSError, UnicodeError, ProductionIdentityError) as exc:
+        raise ProductionIdentityError("task identity material is invalid") from exc
+    task_fields = {"schema_version", "request_id", "task_id", "requested_at", "expires_at", "metadata"}
+    if (not isinstance(task, dict) or set(task) != task_fields
+            or task["schema_version"] != "machine-task-request/1"
+            or not isinstance(task["request_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", task["request_id"])
+            or not isinstance(task["task_id"], str) or not _ID.fullmatch(task["task_id"])
+            or not isinstance(task["metadata"], dict) or len(_canonical(task["metadata"])) > 16384
+            or task["request_id"] != payload["task_request_id"] or task["task_id"] != payload["task_id"]):
+        raise ProductionIdentityError("task request contract is invalid")
+    requested, request_expires = (_parse_time(task["requested_at"], "task request time"),
+                                  _parse_time(task["expires_at"], "task request expiry"))
+    now = datetime.now(timezone.utc)
+    if requested > now or request_expires <= now or request_expires <= requested or request_expires - requested > timedelta(days=1):
+        raise ProductionIdentityError("task request is not currently valid")
+    observation_fields = {
+        "schema_version", "container_id", "hostname_nonce", "image_id",
+        "runtime_manifest_sha256", "runtime_marker_sha256", "mount_contract_sha256",
+        "actual_config_sha256", "task_request_sha256", "approved_read_roots",
+        "approved_write_roots", "approved_secret_targets",
+    }
+    expected = {name: payload[name] for name in observation_fields - {"schema_version", "approved_write_roots"}}
+    expected["approved_write_roots"] = payload["writable_roots"]
+    if (not isinstance(observed, dict) or set(observed) != observation_fields
+            or observed.get("schema_version") != "machine-task-runtime-observation/1"
+            or any(observed.get(name) != value for name, value in expected.items())):
+        raise ProductionIdentityError("host runtime observation differs from signed task grant")
+    reads, secrets = set(payload["approved_read_roots"]), set(payload["approved_secret_targets"])
+    if (len(reads) != len(payload["approved_read_roots"])
+            or len(secrets) != len(payload["approved_secret_targets"])
+            or any(not value.startswith("/run/secrets/") for value in secrets)):
+        raise ProductionIdentityError("task minimum scope is invalid")
+    return reads, secrets
+
+
 def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id: str, runtime_id: str, marker_sha256: str) -> VerifiedExecutionIdentity:
     payload = _signed_payload(request.grant_path, role)
     grant_v2 = "runtime_manifest_schema_version" in payload
+    task_v4 = "task_request_sha256" in payload
     try:
         actual_role = AuthorizationRole(payload["role"])
     except (TypeError, ValueError) as exc:
@@ -358,6 +413,12 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
         raise ProductionIdentityError("execution grant is not currently valid")
     if not isinstance(payload.get("container_id"), str) or not re.fullmatch(r"[0-9a-f]{64}", payload["container_id"]):
         raise ProductionIdentityError("execution grant container identity is invalid")
+    approved_reads: set[str] = set()
+    approved_secrets: set[str] = set()
+    if task_v4:
+        approved_reads, approved_secrets = _verify_task_binding(request, payload)
+    elif request.task_request_path is not None or request.runtime_observation_path is not None:
+        raise ProductionIdentityError("non-task grant cannot consume task identity inputs")
     mounts = _mount_options()
     if not hasattr(os, "geteuid"):
         raise ProductionIdentityError("OCI execution identity requires Linux runtime support")
@@ -365,6 +426,8 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
         raise ProductionIdentityError("OCI runtime is not a non-root read-only filesystem")
     protected_paths = [Path(value) for value in protected]
     required_protected = [request.grant_path, TRUST_CONFIG_PATH, request.release_path, request.runtime_manifest_path, marker_path]
+    if task_v4:
+        required_protected.extend((request.task_request_path, request.runtime_observation_path))
     if grant_v2:
         # The signed manifest defines image inputs; CLI images need no UI tree.
         # Protect the whole executing source root, including undeclared children,
@@ -388,6 +451,13 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
     if (any("ro" not in _mount_for(mounts, path) for path in protected_paths + required_protected)
             or any("rw" not in _mount_for(mounts, Path(value)) for value in writable)):
         raise ProductionIdentityError("OCI runtime mount permissions disagree with signed contract")
+    if task_v4:
+        declared_reads = {item["container_path"] for item in manifest["runtime_roots"]
+                          if item["access"] == "ro" and item["role"] != manifest["identity_root_role"]}
+        declared_secrets = {"/run/secrets/" + name for name in manifest["secret_references"]}
+        if (approved_reads != declared_reads or approved_secrets != declared_secrets
+                or any("ro" not in _mount_for(mounts, Path(value)) for value in approved_reads | approved_secrets)):
+            raise ProductionIdentityError("task read or secret scope differs from runtime manifest")
     if grant_v2:
         declared_targets = {item["container_path"] for item in manifest["required_mounts"]}
         if any(_within_mount(target, root) and target not in declared_targets for target in mounts):
@@ -396,7 +466,7 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
         raise ProductionIdentityError("candidate validation identity is not isolated")
     if role is AuthorizationRole.PRODUCTION and payload["artifact_origin"] not in {"candidate", "production"}:
         raise ProductionIdentityError("production grant artifact origin is invalid")
-    return VerifiedExecutionIdentity(IdentityKind.OCI_CONTAINER, role, payload["project_id"], module_id, payload["service_id"], runtime_id, payload["approved_commit"], payload["approved_tree"], payload["image_id"], payload["grant_id"], tuple(Path(value) for value in writable))
+    return VerifiedExecutionIdentity(IdentityKind.OCI_CONTAINER, role, payload["project_id"], module_id, payload["service_id"], runtime_id, payload["approved_commit"], payload["approved_tree"], payload["image_id"], payload["grant_id"], tuple(Path(value) for value in writable), payload.get("task_id"))
 
 
 def verify_execution(request: GitExecutionRequest | OCIExecutionRequest, *, expected_role: AuthorizationRole | str, module_id: str, runtime_id: str, runtime_root: Path, marker_sha256: str) -> VerifiedExecutionIdentity:
