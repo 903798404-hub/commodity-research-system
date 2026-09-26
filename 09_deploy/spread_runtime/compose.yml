@@ -101,7 +101,11 @@ services:
     secrets:
     - source: tankan-reader
       target: /run/secrets/tankan.env
+    - source: market-data-service
+      target: /run/secrets/market-data-service.json
     restart: unless-stopped
 secrets:
   tankan-reader:
     file: ${TANKAN_SECRET_FILE:?TANKAN_SECRET_FILE is required}
+  market-data-service:
+    file: ${SPREAD_SERVICE_CREDENTIAL_FILE:?SPREAD_SERVICE_CREDENTIAL_FILE is required}

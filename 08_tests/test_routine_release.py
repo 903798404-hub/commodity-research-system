@@ -1,6 +1,8 @@
 """Release orchestration with inert Docker transports, never a production host."""
 import copy
+from datetime import datetime, timedelta, timezone
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -274,6 +276,58 @@ def test_compose_227_create_only_lifecycle(tmp_path, monkeypatch, fault):
     assert 'dependency' not in containers
     assert containers['production'] == production_before
     assert not any(isinstance(c, tuple) and c[0] == 'build' for c in events)
+
+
+def test_application_service_credential_precedes_legacy_grant_and_container_start(tmp_path):
+    events = []
+    secret = tmp_path / 'service.json'
+    secret.touch()
+    template = tmp_path / 'template.json'
+    policy = dict(approved_commit=IMAGE['commit'], approved_tree=IMAGE['tree'],
+        image_id=IMAGE['image_id'], role='production',
+        application_service=dict(service_id='service', runtime_id='runtime',
+                                 allowed_writable_roots=['/runtime/capture-snapshots']),
+        mounts=[dict(source=str(secret), target='/run/secrets/market-data-service.json', read_only=True)])
+    template.write_text(json.dumps(policy), encoding='utf-8')
+    spec = dict(policy_template=str(template), policy_output=str(tmp_path / 'policy.json'),
+                grant_directory=str(tmp_path), key_path='key')
+    acceptance = tmp_path / 'acceptance.json'
+    acceptance.write_text('{}', encoding='utf-8')
+    class Engine:
+        @staticmethod
+        def inspect_one(kind, identity):
+            return {'Id': identity}
+        @staticmethod
+        def _canonical(value):
+            return json.dumps(value).encode()
+        @staticmethod
+        def _write_new(path, raw):
+            path.write_bytes(raw)
+        @staticmethod
+        def _docker(action, identity):
+            assert action == 'start'
+            events.append('start')
+    def issue_credential(cid, **kwargs):
+        assert cid == 'container' and kwargs['credential_path'] == str(secret)
+        events.append('credential')
+        secret.write_text('deployment secret', encoding='utf-8')
+    def issue_grant(cid, **kwargs):
+        assert secret.read_text(encoding='utf-8') == 'deployment secret'
+        events.append('grant')
+        kwargs['grant_path'].write_text('{}', encoding='utf-8')
+        now = datetime.now(timezone.utc)
+        return {'payload': dict(container_id=cid, role='production', image_id=IMAGE['image_id'],
+            issued_at=now.isoformat(), expires_at=(now + timedelta(minutes=15)).isoformat())}
+    host = SimpleNamespace(_protected_path=lambda path, **kwargs: path, _json=json.loads,
+        copy_container_json=lambda cid: {'release_id': IMAGE['release_id']},
+        normalize_observation=lambda *args: {'actual_config_sha256': '0' * 64},
+        issue_application_service_credential=issue_credential, issue_execution_grant=issue_grant)
+    session = routine.DockerSession({'production': spec, 'acceptance_record': str(acceptance)}, Engine(), host, {},
+                                     dict(project_id='service', service_id='service'))
+    session.spec, session.container_id = spec, 'container'
+    session.assert_data_readonly = lambda: None
+    session.grant_and_start(IMAGE, 'production')
+    assert events == ['credential', 'grant', 'start']
 
 
 @pytest.mark.parametrize('fault', [None, 'internal', 'external', 'production-name', 'host-mode', 'extra-network', 'driver'])

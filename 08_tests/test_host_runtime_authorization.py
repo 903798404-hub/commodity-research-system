@@ -145,6 +145,81 @@ def observed(expected: dict) -> dict:
     return value
 
 
+def test_application_service_policy_is_exact_and_restricted():
+    value = v3_policy("production")
+    value["application_service"] = {"service_id": "svc", "runtime_id": "runtime",
+                                    "allowed_writable_roots": ["/runtime/data"]}
+    host.validate_policy(value, "production")
+    for change in ({"service_id": "other"}, {"runtime_id": "other"},
+                   {"allowed_writable_roots": ["/runtime"]},
+                   {"allowed_writable_roots": ["/other"]},
+                   {"allowed_writable_roots": ["/runtime/data", "/runtime/data"]}):
+        broken = copy.deepcopy(value)
+        broken["application_service"].update(change)
+        with pytest.raises(host.HostAuthorizationError):
+            host.validate_policy(broken, "production")
+
+
+def test_trusted_launcher_issues_once_after_exact_image_and_mount_validation(tmp_path, monkeypatch):
+    private = tmp_path / "service-private"
+    private.mkdir()
+    secret = private / "service.json"
+    secret.touch()
+    value = v3_policy("production")
+    value["application_service"] = {"service_id": "svc", "runtime_id": "runtime",
+                                    "allowed_writable_roots": ["/runtime/data"]}
+    value["mounts"].append({"source": str(secret),
+        "target": "/run/secrets/market-data-service.json", "read_only": True})
+    actual = observed(value)
+    calls = []
+    monkeypatch.setattr(host, "_require_linux_root", lambda: None)
+    monkeypatch.setattr(host, "require_protected_authority_source", lambda: None)
+    monkeypatch.setattr(host, "_load_policy", lambda path: value)
+    # The issuer is Linux-only; policy shape is exercised separately above.
+    monkeypatch.setattr(host, "validate_policy", lambda value, role: None)
+    monkeypatch.setattr(host, "_protected_path", lambda path, **kwargs: Path(path))
+    monkeypatch.setattr(host.stat, "S_IMODE", lambda mode: 0o700)
+    monkeypatch.setattr(host, "_fsync_directory", lambda path: None)
+    monkeypatch.setattr(host, "_secret_file_identity", lambda path, user: {
+        "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()})
+    monkeypatch.setattr(host, "copy_container_bytes", lambda cid, path: secret.read_bytes())
+    monkeypatch.setattr(host, "docker_inspect", lambda cid: {"Id": cid})
+    monkeypatch.setattr(host, "docker_image_inspect", lambda image: {"Id": image})
+    monkeypatch.setattr(host, "_render_actual_compose", lambda *args: calls.append("compose") or "approved")
+    def verify(cid, expected, *, role):
+        calls.append("approved-image-and-container")
+        if cid not in {CID, "e" * 64} or expected["image_id"] != IMAGE:
+            raise host.HostAuthorizationError("unapproved image or container")
+        return {**actual, "container_id": cid}
+    monkeypatch.setattr(host, "observe_and_validate", verify)
+    result = host.issue_application_service_credential(CID, expected_policy_path=tmp_path / "policy.json",
+        credential_path=secret, role="production")
+    payload = json.loads(secret.read_bytes())
+    assert calls[:2] == ["approved-image-and-container", "compose"]
+    assert result == {"service_id": "svc", "runtime_id": "runtime",
+                      "deployment_id": payload["deployment_id"]}
+    assert len(payload["credential"]) == 64 and payload["allowed_writable_roots"] == ["/runtime/data"]
+    assert "credential" not in result
+    host._validate_application_service_credential(CID, value, actual)
+    with pytest.raises(host.HostAuthorizationError, match="another deployment"):
+        host._validate_application_service_credential("e" * 64, value, actual)
+    with pytest.raises(host.HostAuthorizationError, match="newly allocated"):
+        host.issue_application_service_credential("e" * 64, expected_policy_path=tmp_path / "policy.json",
+            credential_path=secret, role="production")
+    secret.write_bytes(b"")
+    value["image_id"] = "sha256:" + "f" * 64
+    with pytest.raises(host.HostAuthorizationError, match="unapproved image"):
+        host.issue_application_service_credential(CID, expected_policy_path=tmp_path / "policy.json",
+            credential_path=secret, role="production")
+    assert secret.read_bytes() == b""
+    value["image_id"] = IMAGE
+    value["application_service"]["allowed_writable_roots"] = ["/runtime/01_data"]
+    with pytest.raises(host.HostAuthorizationError, match="exact approved writable mount"):
+        host.issue_application_service_credential(CID, expected_policy_path=tmp_path / "policy.json",
+            credential_path=secret, role="production")
+    assert secret.read_bytes() == b""
+
+
 def test_policy_rejects_non_temporary_candidate_and_unknown_fields():
     value=policy(); host.validate_policy(value,"candidate_validation")
     broken=copy.deepcopy(value); broken["runtime_root"]="/runtime"

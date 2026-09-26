@@ -52,7 +52,10 @@ def test_compose_binds_full_app_and_separates_consumer_from_capture():
     assert consumer["read_only"] and not capture["read_only"]
     assert consumer["source"] == capture["source"]
     assert mounts["/run/market-data-grants"]["read_only"]
-    assert service["secrets"] == [{"source": "tankan-reader", "target": "/run/secrets/tankan.env"}]
+    assert service["secrets"] == [
+        {"source": "tankan-reader", "target": "/run/secrets/tankan.env"},
+        {"source": "market-data-service", "target": "/run/secrets/market-data-service.json"},
+    ]
     assert service["environment"]["TMPDIR"] == "/runtime/10_logs"
 
 

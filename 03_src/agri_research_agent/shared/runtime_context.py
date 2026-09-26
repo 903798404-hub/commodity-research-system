@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
+import re
+import stat
 import tempfile
 from dataclasses import InitVar, dataclass, field
 from datetime import datetime
@@ -20,6 +24,10 @@ from .production_identity import (
 
 
 MARKER_FILENAME = ".market-data-runtime.json"
+APPLICATION_SERVICE_CREDENTIAL_PATH = Path("/run/secrets/market-data-service.json")
+_SERVICE_ID = re.compile(r"^[a-z][a-z0-9-]*$")
+_DEPLOYMENT_ID = re.compile(r"^[0-9a-f]{32}$")
+_CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
 
 
 class RuntimeMode(StrEnum):
@@ -185,9 +193,135 @@ def _require_within(candidate: Path, root: Path, label: str) -> None:
     raise RuntimeAuthorizationError(f"{label} is outside runtime_root")
 
 
-def assert_runtime_write(context: RuntimeContext | None, target: str | Path) -> Path:
+class ApplicationServiceContext:
+    """Process-local authority established from a root-injected service secret.
+
+    The constructor is intentionally unavailable to business callers.  This is
+    an application-process capability, not a serialized or permanent token.
+    """
+
+    __slots__ = ("mode", "module_id", "runtime_root", "identity", "service_id",
+                 "deployment_id", "writable_roots", "_credential_sha256", "_pid")
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeAuthorizationError("ApplicationServiceContext requires credential validation")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("ApplicationServiceContext is immutable")
+
+    def __reduce__(self) -> object:
+        raise TypeError("ApplicationServiceContext cannot be serialized")
+
+
+def _service_credential_bytes(path: Path) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeAuthorizationError("application service credential is missing or unsafe")
+    if os.name == "posix":
+        details = path.stat()
+        if details.st_uid != 0 or stat.S_IMODE(details.st_mode) & 0o007 or not stat.S_IMODE(details.st_mode) & 0o044:
+            raise RuntimeAuthorizationError("application service credential permissions are unsafe")
+        # A file bind-mounted from a root-controlled directory is read-only to
+        # the non-root service.  A writable local file cannot be authority.
+        from .production_identity import _mount_for, _mount_options
+        if not hasattr(os, "geteuid") or os.geteuid() == 0 or "ro" not in _mount_for(_mount_options(), path):
+            raise RuntimeAuthorizationError("application service credential is not a non-root read-only mount")
+    before = path.stat()
+    raw = path.read_bytes()
+    after = path.stat()
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if any(getattr(before, field) != getattr(after, field) for field in fields):
+        raise RuntimeAuthorizationError("application service credential changed during validation")
+    return raw
+
+
+def establish_application_service_context(
+    *, service_id: str, module_id: str, runtime_root: str | Path,
+) -> ApplicationServiceContext:
+    """Validate the current deployment secret once in this service process.
+
+    The launcher alone creates the secret after exact-image/container validation.
+    Its file identity and runtime marker are checked again on each write.
+    """
+    if not _SERVICE_ID.fullmatch(service_id) or not _SERVICE_ID.fullmatch(module_id):
+        raise RuntimeAuthorizationError("invalid application service identity")
+    identity = load_runtime_identity(runtime_root)
+    if identity.classification not in {RuntimeClassification.FORMAL, RuntimeClassification.CANDIDATE_VALIDATION} or identity.module_id != module_id:
+        raise RuntimeAuthorizationError("application service runtime identity mismatch")
+    path = APPLICATION_SERVICE_CREDENTIAL_PATH
+    try:
+        raw = _service_credential_bytes(path)
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise RuntimeAuthorizationError("application service credential is invalid") from exc
+    required = {"schema_version", "role", "service_id", "module_id", "runtime_id", "runtime_marker_sha256",
+                "container_id",
+                "deployment_id", "credential", "allowed_writable_roots"}
+    if (type(payload) is not dict or set(payload) != required
+            or payload["schema_version"] != "application-service-credential/1"
+            or payload["role"] != ("production" if identity.classification is RuntimeClassification.FORMAL else "candidate_validation")
+            or payload["service_id"] != service_id or payload["module_id"] != module_id
+            or payload["runtime_id"] != identity.runtime_id
+            or payload["runtime_marker_sha256"] != identity.marker_sha256
+            or not isinstance(payload["container_id"], str)
+            or not _CONTAINER_ID.fullmatch(payload["container_id"])
+            or not isinstance(payload["deployment_id"], str)
+            or not _DEPLOYMENT_ID.fullmatch(payload["deployment_id"])
+            or not isinstance(payload["credential"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", payload["credential"]) is None
+            or not isinstance(payload["allowed_writable_roots"], list)
+            or not payload["allowed_writable_roots"]):
+        raise RuntimeAuthorizationError("application service credential identity mismatch")
+    roots: list[Path] = []
+    for value in payload["allowed_writable_roots"]:
+        if not isinstance(value, str) or not Path(value).is_absolute() or ".." in Path(value).parts:
+            raise RuntimeAuthorizationError("application service root is invalid")
+        root = Path(value).resolve(strict=True)
+        _require_within(root, identity.resolved_root, "application service root")
+        if root == identity.resolved_root or root == identity.resolved_root / MARKER_FILENAME:
+            raise RuntimeAuthorizationError("application service root is too broad")
+        roots.append(root)
+    if len(set(roots)) != len(roots):
+        raise RuntimeAuthorizationError("duplicate application service root")
+    context = object.__new__(ApplicationServiceContext)
+    mode = (RuntimeMode.PRODUCTION_WRITE if identity.classification is RuntimeClassification.FORMAL
+            else RuntimeMode.CANDIDATE_VALIDATION)
+    values = dict(mode=mode, module_id=module_id,
+                  runtime_root=identity.resolved_root, identity=identity,
+                  service_id=service_id, deployment_id=payload["deployment_id"],
+                  writable_roots=tuple(roots),
+                  _credential_sha256=hashlib.sha256(raw).hexdigest(), _pid=os.getpid())
+    for name, value in values.items():
+        object.__setattr__(context, name, value)
+    return context
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate credential field")
+        result[key] = value
+    return result
+
+
+def assert_runtime_write(context: RuntimeContext | ApplicationServiceContext | None, target: str | Path) -> Path:
     if context is None:
         raise RuntimeAuthorizationError("RuntimeContext is required for runtime writes")
+    if isinstance(context, ApplicationServiceContext):
+        if context._pid != os.getpid():
+            raise RuntimeAuthorizationError("application service process changed")
+        if load_runtime_identity(context.runtime_root) != context.identity:
+            raise RuntimeAuthorizationError("runtime identity changed after authorization")
+        if hashlib.sha256(_service_credential_bytes(APPLICATION_SERVICE_CREDENTIAL_PATH)).hexdigest() != context._credential_sha256:
+            raise RuntimeAuthorizationError("application service deployment credential changed")
+        destination = Path(target).resolve(strict=False)
+        if destination == context.runtime_root / MARKER_FILENAME or not any(
+            destination == root or root in destination.parents for root in context.writable_roots
+        ):
+            raise RuntimeAuthorizationError("write target is outside authorized writable roots")
+        return destination
+    if not isinstance(context, RuntimeContext):
+        raise RuntimeAuthorizationError("unknown runtime write identity")
     if not context.write_allowed:
         raise RuntimeAuthorizationError("runtime mode is read-only")
     if load_runtime_identity(context.runtime_root) != context.identity:

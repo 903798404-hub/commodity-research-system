@@ -316,7 +316,10 @@ def validate_policy(policy: Mapping, role: str) -> None:
             raise HostAuthorizationError('recovery requires the existing production role')
         expected_fields = expected_fields | {'recovery'}
         _recovery_call('validate', policy)
-    if set(policy) != expected_fields or policy.get("role") != role:
+    application_fields = (expected_fields | {"application_service"}
+                          if version in {"host-runtime-policy/4", "host-runtime-policy/5"}
+                          else set())
+    if set(policy) not in (expected_fields, application_fields) or policy.get("role") != role:
         raise HostAuthorizationError("protected policy schema or role mismatch")
     if role not in {"production", "candidate_validation"}:
         raise HostAuthorizationError("unknown authorization role")
@@ -339,6 +342,20 @@ def validate_policy(policy: Mapping, role: str) -> None:
     for name in ("project_id", "module_id", "service_id", "runtime_id", "key_id", "artifact_service", "release_application"):
         if not isinstance(policy[name], str) or not re.fullmatch(r"[a-z][a-z0-9-]*", policy[name]):
             raise HostAuthorizationError("invalid policy identity")
+    if "application_service" in policy:
+        service = policy["application_service"]
+        if (type(service) is not dict or set(service) != {"service_id", "runtime_id", "allowed_writable_roots"}
+                or service["service_id"] != policy["service_id"]
+                or service["runtime_id"] != policy["runtime_id"]
+                or type(service["allowed_writable_roots"]) is not list
+                or not service["allowed_writable_roots"]
+                or any(type(root) is not str for root in service["allowed_writable_roots"])
+                or len(set(service["allowed_writable_roots"])) != len(service["allowed_writable_roots"])):
+            raise HostAuthorizationError("application service policy identity or roots are invalid")
+        for root in service["allowed_writable_roots"]:
+            _absolute(root)
+            if not _within(root, policy["runtime_root"]) or root == policy["runtime_root"]:
+                raise HostAuthorizationError("application service root is outside the runtime")
     for name in ("approved_commit", "approved_tree"):
         if not isinstance(policy[name], str) or not _COMMIT.fullmatch(policy[name]):
             raise HostAuthorizationError("invalid Approved Git identity")
@@ -1226,6 +1243,117 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
             **({"config_comparison": observed["config_comparison"]} if "config_comparison" in observed else {})}
 
 
+def issue_application_service_credential(
+    container_id: str, *, expected_policy_path: str | Path,
+    credential_path: str | Path, role: str,
+) -> dict[str, str]:
+    """Provision one deployment-bound bearer into an already approved, unstarted container.
+
+    The dedicated Docker file-secret mount is the transport; neither the
+    credential nor its allowed roots come from an application-supplied request.
+    The existing grant issuer still validates the same instance before start.
+    """
+    _require_linux_root()
+    require_protected_authority_source()
+    policy = _load_policy(expected_policy_path)
+    validate_policy(policy, role)
+    service = policy.get("application_service")
+    if service is None:
+        raise HostAuthorizationError("application service policy is not approved")
+    observed = observe_and_validate(container_id, policy, role=role)
+    if observed["state"].get("Status") != "created":
+        raise HostAuthorizationError("application service credential requires an unstarted container")
+    image = docker_image_inspect(policy["image_id"])
+    container = docker_inspect(container_id)
+    _render_actual_compose(container, policy, image)
+    mounts = observed["mounts"]
+    allowed = service["allowed_writable_roots"]
+    writable = {item["target"] for item in mounts if item["read_only"] is False}
+    if any(root not in writable for root in allowed):
+        raise HostAuthorizationError("application service root is not an exact approved writable mount")
+    destination = Path(credential_path)
+    matched = [item for item in mounts if item["target"] == "/run/secrets/market-data-service.json"]
+    if (len(matched) != 1 or matched[0]["read_only"] is not True
+            or destination != Path(matched[0]["source"])):
+        raise HostAuthorizationError("application service credential mount is missing or mismatched")
+    source = _protected_path(destination)
+    if stat.S_IMODE(source.parent.stat().st_mode) != 0o700:
+        raise HostAuthorizationError("application service credential host directory must be root-private")
+    if source.stat().st_size != 0:
+        raise HostAuthorizationError("application service credential must be newly allocated")
+    # The existing Docker file-secret contract verifies that only the service
+    # UID/GID can read this root-owned file; the host parent remains protected.
+    _secret_file_identity(source, observed["config"].get("User"))
+    credential = {
+        "schema_version": "application-service-credential/1",
+        "role": role,
+        "service_id": policy["service_id"],
+        "module_id": policy["module_id"],
+        "runtime_id": policy["runtime_id"],
+        "runtime_marker_sha256": policy["runtime_marker_sha256"],
+        "container_id": container_id,
+        "deployment_id": os.urandom(16).hex(),
+        "credential": os.urandom(32).hex(),
+        "allowed_writable_roots": allowed,
+    }
+    # Open the exact mounted inode without following a replacement symlink.
+    before = source.stat()
+    flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(source, flags)
+    try:
+        current = os.fstat(descriptor)
+        if ((current.st_dev, current.st_ino) != (before.st_dev, before.st_ino)
+                or current.st_size != 0):
+            raise HostAuthorizationError("application service credential source changed")
+        with os.fdopen(descriptor, "wb", closefd=False) as stream:
+            stream.write(_canonical(credential))
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        os.close(descriptor)
+    _fsync_directory(source.parent)
+    final_observed = observe_and_validate(container_id, policy, role=role)
+    if (_load_policy(expected_policy_path) != policy
+            or final_observed["container_id"] != container_id
+            or final_observed["state"].get("Status") != "created"
+            or copy_container_bytes(container_id, "/run/secrets/market-data-service.json") != _canonical(credential)
+            or _secret_file_identity(source, observed["config"].get("User"))["sha256"] != hashlib.sha256(_canonical(credential)).hexdigest()):
+        raise HostAuthorizationError("application service identity changed during issuance")
+    return {"service_id": policy["service_id"], "runtime_id": policy["runtime_id"],
+            "deployment_id": credential["deployment_id"]}
+
+
+def _validate_application_service_credential(container_id: str, policy: Mapping, observed: Mapping) -> None:
+    """Before any legacy grant is signed, reject a credential from another deployment."""
+    service = policy.get("application_service")
+    if service is None:
+        return
+    matches = [item for item in observed["mounts"]
+               if item["target"] == "/run/secrets/market-data-service.json"]
+    if len(matches) != 1 or matches[0]["read_only"] is not True:
+        raise HostAuthorizationError("application service secret mount is missing")
+    source = _protected_path(Path(matches[0]["source"]))
+    if stat.S_IMODE(source.parent.stat().st_mode) != 0o700:
+        raise HostAuthorizationError("application service credential host directory must be root-private")
+    _secret_file_identity(source, observed["config"].get("User"))
+    payload = _json(source.read_bytes())
+    required = {"schema_version", "role", "service_id", "module_id", "runtime_id",
+                "runtime_marker_sha256", "container_id", "deployment_id", "credential",
+                "allowed_writable_roots"}
+    if (set(payload) != required or payload["schema_version"] != "application-service-credential/1"
+            or payload["role"] != policy["role"]
+            or any(payload[name] != policy[name] for name in ("service_id", "module_id", "runtime_id", "runtime_marker_sha256"))
+            or payload["container_id"] != container_id
+            or not isinstance(payload["deployment_id"], str)
+            or not re.fullmatch(r"[0-9a-f]{32}", payload["deployment_id"])
+            or not isinstance(payload["credential"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", payload["credential"])
+            or payload["allowed_writable_roots"] != service["allowed_writable_roots"]):
+        raise HostAuthorizationError("application service credential belongs to another deployment or policy")
+    if copy_container_bytes(container_id, "/run/secrets/market-data-service.json") != _canonical(payload):
+        raise HostAuthorizationError("application service credential injection differs from approved source")
+
+
 def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900) -> dict:
     """Observe a fresh container, sign a bounded grant, and leave it unstarted."""
     _require_linux_root()
@@ -1245,6 +1373,7 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
         # A failed attempt is not replayable with a mutated scope.
         _candidate_descriptor(policy, consume=True)
     observed = observe_and_validate(container_id, policy, role=role)
+    _validate_application_service_credential(container_id, policy, observed)
     secret_state = _secret_state(observed) if policy_version in _PRODUCTION_POLICIES else None
     _validate_mount_sources(observed, policy, grant_dir)
     if role == "candidate_validation":
@@ -1438,8 +1567,18 @@ def main(argv=None) -> int:
     parser.add_argument("--grant", required=True)
     parser.add_argument("--role", choices=("production", "candidate_validation"), required=True)
     parser.add_argument("--validate-recovery-post-start", action="store_true")
+    parser.add_argument("--issue-application-service-credential", action="store_true")
+    parser.add_argument("--application-service-credential")
     args = parser.parse_args(argv)
     try:
+        if args.issue_application_service_credential:
+            if args.validate_recovery_post_start or not args.application_service_credential:
+                raise HostAuthorizationError("application service credential action is incomplete")
+            result = issue_application_service_credential(
+                args.container_id, expected_policy_path=args.policy,
+                credential_path=args.application_service_credential, role=args.role)
+            print(json.dumps({"APPLICATION_SERVICE_CREDENTIAL": "ISSUED", **result}))
+            return 0
         if args.validate_recovery_post_start:
             if args.role != "production":
                 raise HostAuthorizationError("post-start recovery validation requires production role")

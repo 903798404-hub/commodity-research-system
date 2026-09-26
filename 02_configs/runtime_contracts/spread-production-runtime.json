@@ -168,7 +168,8 @@
     "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT"
   ],
   "secret_references": [
-    "tankan-reader"
+    "tankan-reader",
+    "market-data-service"
   ],
   "required_executables": [
     "python",

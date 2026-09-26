@@ -517,6 +517,14 @@ class DockerSession:
         self.current_policy = policy
         path = Path(spec['policy_output'])
         self.engine._write_new(path, self.engine._canonical(policy))
+        if 'application_service' in policy:
+            credential_sources = [mount['source'] for mount in policy['mounts']
+                if mount['target'] == '/run/secrets/market-data-service.json'
+                and mount['read_only'] is True]
+            require(len(credential_sources) == 1, 'APPLICATION_SERVICE_SECRET_MOUNT_MISSING')
+            self.host.issue_application_service_credential(
+                self.container_id, expected_policy_path=path,
+                credential_path=credential_sources[0], role=role)
         grant_path = Path(spec['grant_directory']) / 'grant.json'
         envelope = self.host.issue_execution_grant(self.container_id, expected_policy_path=path,
             key_path=spec['key_path'], grant_path=grant_path, grant_dir=grant_path.parent, role=role, ttl_seconds=900)
