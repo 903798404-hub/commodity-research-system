@@ -714,6 +714,22 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/import_profit/lifecycle.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/lifecycle_events.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/lifecycle_reconciler.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/import_profit/lifecycle_store.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/import_profit/mapping_snapshot.py",
       "role": "runtime_configuration"
     },

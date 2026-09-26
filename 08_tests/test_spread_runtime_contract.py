@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -35,6 +36,70 @@ def fixture_bytes(path):
     return path.read_text(encoding="utf-8").encode("utf-8") if path.suffix == ".json" else path.read_bytes()
 
 
+def copied_runtime_inputs(manifest):
+    text = (ROOT / manifest["build"]["dockerfile"]).read_text(encoding="utf-8")
+    copied = set()
+    for line in text.splitlines():
+        if line.startswith("COPY ["):
+            copied.update(json.loads(line[5:])[:-1])
+        elif line.startswith("COPY "):
+            copied.update(line.split()[1:-1])
+    return copied
+
+
+def runtime_project_module_closure(manifest):
+    """Reuse the release risk engine's entrypoint/import graph, not a name list."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True,
+    ).stdout.decode("utf-8", errors="strict").split("\0")
+    sources = {name: (ROOT / name).read_bytes() for name in tracked if name}
+    graph = load_script("spread_runtime_import_graph", "04_scripts/runtime/pre_release_runtime.py")
+    result = graph._runtime_graph(sources, manifest)
+    assert result["complete"], result["unresolved"]
+    assert {
+        "05_apps/streamlit_app.py",
+        "05_apps/import_profit_intraday_runtime_page.py",
+        "05_apps/import_profit_intraday_page.py",
+        "04_scripts/runtime/spread_runtime_preflight.py",
+        "03_src/agri_research_agent/market_data/activated_runtime.py",
+    } <= set(result["active_paths"])
+    return {path for path in result["active_paths"]
+            if path.endswith(".py") and path.startswith(("03_src/", "04_scripts/", "05_apps/"))}
+
+
+def assert_runtime_import_closure(required, manifest_modules, copied_modules):
+    missing_manifest = required - manifest_modules
+    missing_dockerfile = required - copied_modules
+    assert not missing_manifest, f"runtime imports missing from manifest: {sorted(missing_manifest)}"
+    assert not missing_dockerfile, f"runtime imports missing from Dockerfile: {sorted(missing_dockerfile)}"
+
+
+def test_spread_runtime_project_import_closure_is_packaged():
+    manifest = contract()
+    required = runtime_project_module_closure(manifest)
+    # The manifest parser is already an explicit, separately bound build input.
+    packaged = {item["path"] for item in manifest["source_inputs"]}
+    packaged.add("03_src/agri_research_agent/shared/runtime_manifest.py")
+    assert_runtime_import_closure(required, packaged, copied_runtime_inputs(manifest))
+
+
+@pytest.mark.parametrize("omission", ["manifest", "dockerfile"])
+def test_spread_runtime_import_closure_rejects_lifecycle_omission(omission):
+    manifest = contract()
+    required = runtime_project_module_closure(manifest)
+    lifecycle = "03_src/agri_research_agent/import_profit/lifecycle.py"
+    assert lifecycle in required  # Recursive soybean_intraday import, not a string-only inventory.
+    packaged = {item["path"] for item in manifest["source_inputs"]}
+    packaged.add("03_src/agri_research_agent/shared/runtime_manifest.py")
+    copied = copied_runtime_inputs(manifest)
+    if omission == "manifest":
+        packaged.remove(lifecycle)
+    else:
+        copied.remove(lifecycle)
+    with pytest.raises(AssertionError, match="runtime imports missing from"):
+        assert_runtime_import_closure(required, packaged, copied)
+
+
 def test_compose_binds_full_app_and_separates_consumer_from_capture():
     m = contract()
     c = yaml.safe_load((ROOT / m["build"]["compose_sources"][0]).read_text(encoding="utf-8"))
@@ -62,12 +127,7 @@ def test_compose_binds_full_app_and_separates_consumer_from_capture():
 def test_image_copies_exact_code_inputs_and_excludes_candidate_fixtures():
     m = contract()
     text = (ROOT / m["build"]["dockerfile"]).read_text(encoding="utf-8")
-    copied = set()
-    for line in text.splitlines():
-        if line.startswith("COPY ["):
-            copied.update(json.loads(line[5:])[:-1])
-        elif line.startswith("COPY "):
-            copied.update(line.split()[1:-1])
+    copied = copied_runtime_inputs(m)
     expected = {x["path"] for x in m["source_inputs"]} | {
         "requirements.txt", "03_src/agri_research_agent/shared/runtime_manifest.py",
         "02_configs/runtime_manifest.schema.json", MANIFEST.relative_to(ROOT).as_posix()}
