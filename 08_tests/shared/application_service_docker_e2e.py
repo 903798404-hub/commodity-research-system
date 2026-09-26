@@ -310,6 +310,19 @@ def main() -> int:
         evidence["container_a_id"] = cid_a
         policy_a, policy_path_a = policy_for(cid_a, source_a, env_a, scope_root, scope,
             image, release_sha, manifest_sha, args.candidate_commit, args.candidate_tree, work, grant_dir)
+        secret_state = secret.stat()
+        evidence["credential_path_evidence"] = {
+            "candidate_scope_root": str(scope_root),
+            "credential_destination": str(secret),
+            "resolved_real_path": str(secret.resolve(strict=True)),
+            "owner": secret_state.st_uid,
+            "group": secret_state.st_gid,
+            "mode": oct(stat.S_IMODE(secret_state.st_mode)),
+            "temporary_path_branch": "candidate_validation_bound_scope",
+            "container_a_id": cid_a,
+            "credential_readonly_mount": {"target": SECRET_TARGET, "read_only": True},
+        }
+        assert host._application_service_credential_path(secret, policy_a) == secret
         host.issue_application_service_credential(cid_a, expected_policy_path=policy_path_a,
             credential_path=secret, role="candidate_validation")
         raw_a = secret.read_bytes()

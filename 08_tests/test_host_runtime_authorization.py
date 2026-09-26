@@ -729,6 +729,40 @@ def test_host_protected_path_rejects_untrusted_filesystem_observations(monkeypat
     with pytest.raises(host.HostAuthorizationError): host._protected_path(path,private=True)
 
 
+def test_application_service_candidate_credential_uses_only_bound_temporary_scope(monkeypatch):
+    f = isolation_fixture(monkeypatch)
+    f.nodes['/tmp']['mode'] = 0o1777
+    secret = f.root + '/service-private/service.json'
+    f.nodes[f.root + '/service-private'] = dict(kind='dir', mode=0o700, ino=9001, raw=b'')
+    f.nodes[secret] = dict(kind='file', mode=0o440, ino=9002, raw=b'')
+    mount = dict(source=secret, target='/run/secrets/market-data-service.json', read_only=True)
+    f.policy['mounts'].append(mount)
+    f.descriptor['binds'].append({**mount, 'device':1, 'inode':9002})
+    f.seal()
+    assert host._application_service_credential_path(f.P(secret), f.policy) == f.P(secret)
+    for outside in ('/tmp/foo', f.root + '/../outside'):
+        with pytest.raises(host.HostAuthorizationError):
+            host._application_service_credential_path(f.P(outside), f.policy)
+    f.nodes[secret]['kind'] = 'symlink'
+    f.nodes[secret]['resolved'] = '/tmp/outside'
+    with pytest.raises(host.HostAuthorizationError):
+        host._application_service_credential_path(f.P(secret), f.policy)
+
+
+def test_application_service_production_credential_keeps_original_protected_path(monkeypatch):
+    f = isolation_fixture(monkeypatch)
+    f.nodes['/tmp']['mode'] = 0o1777
+    protected = '/var/lib/service-private/service.json'
+    f.nodes['/var/lib/service-private'] = dict(kind='dir', mode=0o700, ino=9010, raw=b'')
+    f.nodes[protected] = dict(kind='file', mode=0o440, ino=9011, raw=b'')
+    assert host._application_service_credential_path(f.P(protected), f.production) == f.P(protected)
+    with pytest.raises(host.HostAuthorizationError, match='unprotected ancestor'):
+        host._application_service_credential_path(f.P('/tmp/market-data-candidate-scopes/candidate-test'), f.production)
+    f.nodes['/var/lib/service-private']['mode'] = 0o777
+    with pytest.raises(host.HostAuthorizationError, match='unprotected ancestor'):
+        host._application_service_credential_path(f.P(protected), f.production)
+
+
 @pytest.mark.parametrize("source,kind,resolved",[("/production/data","directory",None),("/tmp/candidate/socket","socket",None),("/tmp/candidate/link","directory","/production/data")])
 def test_candidate_mount_source_is_observed_not_self_declared(monkeypatch,source,kind,resolved):
     grants=ObservedHostPath("/run/grants")

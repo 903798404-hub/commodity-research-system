@@ -978,9 +978,12 @@ def _production_compose_bridge(rendered: Mapping, policy: Mapping, manifest: Map
     return mounts
 
 
-def _secret_file_identity(source: Path, user: str) -> dict:
+def _secret_file_identity(source: Path, user: str, *, temporary: bool = False) -> dict:
     """Observe a protected file without publishing its contents or credentials."""
-    _protected_path(source)
+    if temporary:
+        _protected_path(source, temporary=True)
+    else:
+        _protected_path(source)
     if not isinstance(user, str) or not re.fullmatch(r"[1-9][0-9]*:[1-9][0-9]*", user):
         raise HostAuthorizationError("file-secret access requires explicit numeric user and group")
     uid, gid = map(int, user.split(":"))
@@ -1276,14 +1279,14 @@ def issue_application_service_credential(
     if (len(matched) != 1 or matched[0]["read_only"] is not True
             or destination != Path(matched[0]["source"])):
         raise HostAuthorizationError("application service credential mount is missing or mismatched")
-    source = _protected_path(destination)
+    source = _application_service_credential_path(destination, policy)
     if stat.S_IMODE(source.parent.stat().st_mode) != 0o700:
         raise HostAuthorizationError("application service credential host directory must be root-private")
     if source.stat().st_size != 0:
         raise HostAuthorizationError("application service credential must be newly allocated")
     # The existing Docker file-secret contract verifies that only the service
     # UID/GID can read this root-owned file; the host parent remains protected.
-    _secret_file_identity(source, observed["config"].get("User"))
+    _application_service_secret_identity(source, observed["config"].get("User"), policy)
     credential = {
         "schema_version": "application-service-credential/1",
         "role": role,
@@ -1317,10 +1320,27 @@ def issue_application_service_credential(
             or final_observed["container_id"] != container_id
             or final_observed["state"].get("Status") != "created"
             or copy_container_bytes(container_id, "/run/secrets/market-data-service.json") != _canonical(credential)
-            or _secret_file_identity(source, observed["config"].get("User"))["sha256"] != hashlib.sha256(_canonical(credential)).hexdigest()):
+            or _application_service_secret_identity(source, observed["config"].get("User"), policy)["sha256"] != hashlib.sha256(_canonical(credential)).hexdigest()):
         raise HostAuthorizationError("application service identity changed during issuance")
     return {"service_id": policy["service_id"], "runtime_id": policy["runtime_id"],
             "deployment_id": credential["deployment_id"]}
+
+
+def _application_service_credential_path(source: Path, policy: Mapping) -> Path:
+    """Use the existing temporary-path exception only inside a bound candidate scope."""
+    if policy["role"] != "candidate_validation":
+        return _protected_path(source)
+    _absolute(str(source))
+    _candidate_descriptor(policy, consume=False)
+    if not _within(str(source), policy["candidate_host_root"]):
+        raise HostAuthorizationError("application service credential is outside candidate scope")
+    return _protected_path(source, temporary=True)
+
+
+def _application_service_secret_identity(source: Path, user: str, policy: Mapping) -> dict:
+    if policy["role"] == "candidate_validation":
+        return _secret_file_identity(source, user, temporary=True)
+    return _secret_file_identity(source, user)
 
 
 def _validate_application_service_credential(container_id: str, policy: Mapping, observed: Mapping) -> None:
@@ -1332,10 +1352,10 @@ def _validate_application_service_credential(container_id: str, policy: Mapping,
                if item["target"] == "/run/secrets/market-data-service.json"]
     if len(matches) != 1 or matches[0]["read_only"] is not True:
         raise HostAuthorizationError("application service secret mount is missing")
-    source = _protected_path(Path(matches[0]["source"]))
+    source = _application_service_credential_path(Path(matches[0]["source"]), policy)
     if stat.S_IMODE(source.parent.stat().st_mode) != 0o700:
         raise HostAuthorizationError("application service credential host directory must be root-private")
-    _secret_file_identity(source, observed["config"].get("User"))
+    _application_service_secret_identity(source, observed["config"].get("User"), policy)
     payload = _json(source.read_bytes())
     required = {"schema_version", "role", "service_id", "module_id", "runtime_id",
                 "runtime_marker_sha256", "container_id", "deployment_id", "credential",
