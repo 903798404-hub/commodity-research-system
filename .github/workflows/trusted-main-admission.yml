@@ -119,6 +119,23 @@ jobs:
         APPLICATION_RUNTIME_ACCIDENT_EVIDENCE: ${{ runner.temp }}/platform-results/linux/application-runtime-incident.json
       run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan
         "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
+    - name: Execute required real Docker application service identity evidence
+      working-directory: candidate
+      run: |
+        set -euo pipefail
+        source_root="/root/market-data-hosted-service-identity-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        test ! -e "$source_root"
+        sudo install -d -m 0755 "$source_root"
+        sudo cp -a 02_configs 03_src 09_deploy "$source_root/"
+        sudo install -d -m 0755 "$source_root/08_tests/shared"
+        sudo cp 08_tests/shared/application_service_docker_e2e.py "$source_root/08_tests/shared/"
+        sudo chown -R root:root "$source_root"
+        sudo chmod -R go-w "$source_root"
+        python_bin="$(command -v python)"
+        sudo "$python_bin" -I -B "$source_root/08_tests/shared/application_service_docker_e2e.py" \
+          --candidate-commit "$(git rev-parse HEAD)" \
+          --candidate-tree "$(git rev-parse 'HEAD^{tree}')" \
+          --output "$RUNNER_TEMP/platform-results/linux/application-service-identity-docker-evidence.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
