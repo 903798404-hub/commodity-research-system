@@ -128,6 +128,66 @@ def test_committed_v2_trust_has_distinct_role_keys_and_no_private_material() -> 
     assert all("private" not in item for item in value["keys"])
 
 
+def test_ephemeral_candidate_public_trust_is_role_scoped_and_readonly(tmp_path, monkeypatch):
+    from agri_research_agent.shared.production_grant import parse_external_candidate_trust
+    import stat
+    production_key, candidate_key = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    grants = tmp_path / "grants"
+    grants.mkdir()
+    external = grants / "candidate-validation-trust.json"
+    public = candidate_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    document = {"schema_version": "candidate-validation-public-trust/1",
+                "role": "candidate_validation", "key_id": "hosted-candidate-test",
+                "algorithm": "ed25519", "public_key_base64": base64.b64encode(public).decode("ascii")}
+    external.write_text(json.dumps(document), encoding="utf-8")
+    external.chmod(0o444)
+    fixed = tmp_path / "fixed-trust.json"
+    trust_file(fixed, "production-key", production_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+    monkeypatch.setattr(identity, "TRUST_CONFIG_PATH", fixed)
+    monkeypatch.setattr(identity, "EXTERNAL_CANDIDATE_TRUST_CONTAINER_PATH", str(external))
+    monkeypatch.setattr(identity, "_mount_options", lambda: {str(grants): {"ro"}})
+    monkeypatch.setattr(identity, "_mount_for", lambda mounts, path: {"ro"})
+    original_imode = stat.S_IMODE
+    monkeypatch.setattr(identity.stat, "S_IMODE",
+                        lambda mode: 0o755 if stat.S_ISDIR(mode) else original_imode(mode))
+    monkeypatch.setenv("MARKET_DATA_CANDIDATE_EXTERNAL_TRUST", "1")
+    assert parse_external_candidate_trust(external.read_bytes()) == ("hosted-candidate-test", public)
+    payload = complete_payload()
+    payload.update(role="candidate_validation", authorization_mode="candidate_validation")
+    envelope = {"schema_version": "production-execution-grant/1", "algorithm": "ed25519",
+                "key_id": "hosted-candidate-test", "payload": payload,
+                "signature": base64.b64encode(candidate_key.sign(identity._canonical(payload))).decode("ascii")}
+    grant = tmp_path / "grant.json"
+    grant.write_text(json.dumps(envelope), encoding="utf-8")
+    assert identity._signed_payload(grant, identity.AuthorizationRole.CANDIDATE_VALIDATION) == payload
+    with pytest.raises(identity.ProductionIdentityError, match="untrusted"):
+        identity._signed_payload(grant, identity.AuthorizationRole.PRODUCTION)
+    assert set(identity._load_trust("production")[0]) == {"production-key"}
+    document["public_key_base64"] = base64.b64encode(Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode("ascii")
+    external.chmod(0o666)
+    external.write_text(json.dumps(document), encoding="utf-8")
+    external.chmod(0o444)
+    with pytest.raises(identity.ProductionIdentityError, match="signature"):
+        identity._signed_payload(grant, identity.AuthorizationRole.CANDIDATE_VALIDATION)
+    document["role"] = "production"
+    external.chmod(0o666)
+    external.write_text(json.dumps(document), encoding="utf-8")
+    external.chmod(0o444)
+    with pytest.raises(identity.ProductionIdentityError, match="invalid"):
+        identity._load_trust("candidate_validation")
+    document["role"] = "candidate_validation"
+    external.chmod(0o666)
+    external.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(identity.ProductionIdentityError, match="protected"):
+        identity._load_trust("candidate_validation")
+    external.unlink()
+    with pytest.raises(identity.ProductionIdentityError, match="explicitly valid"):
+        identity._load_trust("candidate_validation")
+    monkeypatch.delenv("MARKET_DATA_CANDIDATE_EXTERNAL_TRUST")
+    trust_file(fixed, "fixed-candidate", public, "candidate_validation")
+    assert set(identity._load_trust("candidate_validation")[0]) == {"fixed-candidate"}
+
+
 @pytest.mark.parametrize("field,value", [
     ("schema_version", "wrong"), ("algorithm", "rsa"), ("key_id", "bad_key"),
     ("payload", []), ("signature", 1),

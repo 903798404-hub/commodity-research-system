@@ -60,6 +60,55 @@ def load_engine():
     return module
 
 
+def test_ephemeral_candidate_trust_is_public_only_and_not_mounted(tmp_path):
+    engine = load_engine()
+    contract = {"required_environment": [], "schema_version": "runtime-manifest/2"}
+    engine._ephemeral_candidate_identity(tmp_path, contract)
+    private = contract["_ephemeral_candidate_private_key"]
+    grants = tmp_path / "grants"
+    grants.mkdir()
+    public = engine._install_candidate_public_trust(grants, contract)
+    from agri_research_agent.shared.production_grant import parse_external_candidate_trust
+    key_id, raw = parse_external_candidate_trust(public.read_bytes())
+    assert key_id == contract["_ephemeral_candidate_key_id"]
+    assert hashlib.sha256(raw).hexdigest() == contract["_ephemeral_candidate_public_fingerprint"]
+    assert engine._candidate_signing_key(contract, ROOT) == private
+    assert "PRIVATE KEY" in private.read_text(encoding="ascii")
+    assert "PRIVATE KEY" not in public.read_text(encoding="utf-8")
+    assert engine._candidate_environment(contract)["MARKET_DATA_CANDIDATE_EXTERNAL_TRUST"] == "1"
+    assert str(private) not in json.dumps(engine._candidate_environment(contract))
+
+
+def test_final_image_import_closure_detects_missing_module(monkeypatch):
+    engine = load_engine()
+    contract = json.loads((ROOT / "02_configs/runtime_contracts/spread-production-runtime.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(engine, "_copy_bytes", lambda container, path: (ROOT / path.removeprefix("/app/")).read_bytes())
+    complete = engine._image_import_closure(ROOT, contract, "test-container")
+    assert complete["required_module_count"] > 0
+    assert complete["missing_from_final_image"] == []
+    original = engine._copy_bytes
+    def missing(container, path):
+        if path.endswith("/import_profit/lifecycle.py"):
+            raise engine.ValidationError("module absent")
+        return original(container, path)
+    monkeypatch.setattr(engine, "_copy_bytes", missing)
+    with pytest.raises(engine.ValidationError, match="final image runtime import closure"):
+        engine._image_import_closure(ROOT, contract, "test-container")
+
+
+def test_existing_admission_routes_spread_runtime_changes_to_real_docker():
+    path = ROOT / "04_scripts/quality/platform_ci.py"
+    spec = importlib.util.spec_from_file_location("platform_ci_spread_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    def report(changed):
+        return {"changed_paths": [{"path": name} for name in changed]}
+    assert module.requires_spread_runtime_docker(report(["03_src/agri_research_agent/shared/production_identity.py"]), ROOT)
+    assert module.requires_spread_runtime_docker(report(["09_deploy/spread_runtime/Dockerfile.spread-runtime"]), ROOT)
+    assert not module.requires_spread_runtime_docker(report(["07_docs/unrelated.md"]), ROOT)
+
+
 def binding():
     return {"project_id": "demo", "commit": "a" * 40, "tree": "b" * 40,
             "source_sha256": {"runtime.json": "c" * 64},
@@ -206,7 +255,11 @@ def test_cli_exposes_only_gate_controlled_source_arguments(tmp_path):
     args = engine.parse_args(["--project", "demo", "--runtime-contract", "runtime.json",
                               "--evidence-output", str(tmp_path / "evidence.json")])
     assert vars(args) == {"project": "demo", "runtime_contract": "runtime.json",
-                          "evidence_output": tmp_path / "evidence.json"}
+                          "evidence_output": tmp_path / "evidence.json",
+                          "ephemeral_candidate_trust": False}
+    assert engine.parse_args(["--project", "demo", "--runtime-contract", "runtime.json",
+                              "--evidence-output", str(tmp_path / "evidence.json"),
+                              "--ephemeral-candidate-trust"]).ephemeral_candidate_trust is True
     for forbidden in ("--image-id", "--evidence", "--ssh-host", "--docker-socket",
                       "--grant", "--production-volume"):
         with pytest.raises(SystemExit):

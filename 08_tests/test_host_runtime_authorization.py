@@ -501,6 +501,19 @@ def test_host_signature_roundtrip_is_accepted_only_for_its_role(tmp_path,monkeyp
         host.issue_execution_grant(CID,expected_policy_path=policy_file,key_path=key,grant_path=grant,grant_dir=grants,role=role)
 
 
+def test_ephemeral_candidate_public_trust_cannot_authorize_production(tmp_path, monkeypatch):
+    expected, container, image, rendered, policy_file, key, grants, manifest, marker, release, identity = signing_fixture(
+        tmp_path, monkeypatch, "production")
+    external = grants / "candidate-validation-trust.json"
+    external.write_text("{}", encoding="utf-8")
+    with pytest.raises(host.HostAuthorizationError, match="cannot authorize production"):
+        host.issue_execution_grant(
+            CID, expected_policy_path=policy_file, key_path=key,
+            grant_path=grants / "grant.json", grant_dir=grants, role="production",
+            external_candidate_trust_path=external)
+    assert not (grants / "grant.json").exists()
+
+
 def test_v3_production_issuer_keeps_grant_v2_identity_root_and_null_scope(tmp_path, monkeypatch):
     expected,container,image,rendered,policy_file,key,grants,manifest,marker,release,identity = signing_fixture(tmp_path,monkeypatch,"production",2)
     grant = grants / "grant-v2.json"

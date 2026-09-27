@@ -310,6 +310,47 @@ def _python_module_probe_argv(module: str) -> list[str]:
             "import importlib,sys;importlib.import_module(sys.argv[1])", module]
 
 
+def _ephemeral_candidate_identity(work: Path, contract: dict[str, Any]) -> None:
+    """Create a run-local candidate signer, never a production trust root."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import (Encoding, PrivateFormat,
+                                                               PublicFormat, NoEncryption)
+    import base64
+    key = Ed25519PrivateKey.generate()
+    public = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    key_id = "hosted-candidate-" + os.urandom(12).hex()
+    private_path = work / "ephemeral-candidate-key.pem"
+    _write_new(private_path, key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8,
+                                               NoEncryption()), 0o600)
+    contract["_ephemeral_candidate_private_key"] = private_path
+    contract["_ephemeral_candidate_key_id"] = key_id
+    contract["_ephemeral_candidate_public_fingerprint"] = _sha(public)
+    contract["_ephemeral_candidate_public_trust"] = _canonical({
+        "schema_version": "candidate-validation-public-trust/1",
+        "role": "candidate_validation", "key_id": key_id,
+        "algorithm": "ed25519", "public_key_base64": base64.b64encode(public).decode("ascii"),
+    })
+
+
+def _install_candidate_public_trust(grant_dir: Path, contract: Mapping[str, Any]) -> Path | None:
+    raw = contract.get("_ephemeral_candidate_public_trust")
+    if raw is None:
+        return None
+    path = grant_dir / "candidate-validation-trust.json"
+    _write_new(path, raw, 0o444)
+    return path
+
+
+def _candidate_signing_key(contract: Mapping[str, Any], root: Path) -> Path:
+    private = contract.get("_ephemeral_candidate_private_key")
+    if private is not None:
+        return private
+    trust = _strict_json((root / "02_configs/production_runtime_trust.json").read_bytes(), "trust")
+    key_id = next(item["key_id"] for item in trust["keys"]
+                  if item.get("domain") == "candidate_validation")
+    return _KEY_ROOT / (key_id + ".pem")
+
+
 def source_contract(root: Path, project_id: str, runtime_contract: str):
     if any(key.startswith("GIT_") for key in os.environ):
         raise ValidationError("caller Git environment is forbidden")
@@ -538,6 +579,46 @@ def _copy_bytes(container_id: str, path: str) -> bytes:
         raise ValidationError("invalid Docker copy payload") from exc
 
 
+def _image_import_closure(root: Path, contract: Mapping[str, Any],
+                          container_id: str) -> dict[str, Any]:
+    """Compare the existing import graph with the actual immutable image files."""
+    tracked = _git(root, "ls-files", "-z", binary=True).decode("utf-8").split("\0")
+    sources = {name: (root / name).read_bytes() for name in tracked if name}
+    graph_engine = _load(root / "04_scripts/runtime/pre_release_runtime.py",
+                         "_spread_runtime_import_graph")
+    graph = graph_engine._runtime_graph(sources, contract)
+    if not graph["complete"]:
+        raise ValidationError("spread runtime import graph is incomplete")
+    required = {name for name in graph["active_paths"] if name.endswith(".py")
+                and name.startswith(("03_src/", "04_scripts/", "05_apps/"))}
+    manifest = {item["path"] for item in contract["source_inputs"] if item["path"].endswith(".py")}
+    manifest.add(_MANIFEST_PARSER)
+    copied = set()
+    dockerfile = sources[contract["build"]["dockerfile"]].decode("utf-8")
+    for line in dockerfile.splitlines():
+        if line.startswith("COPY ["):
+            copied.update(name for name in json.loads(line[5:])[:-1]
+                          if name.endswith(".py"))
+    missing_manifest = sorted(required - manifest)
+    missing_dockerfile = sorted(required - copied)
+    missing_image = []
+    for name in sorted(required):
+        try:
+            actual = _copy_bytes(container_id, _SOURCE_ROOT + "/" + name)
+        except ValidationError:
+            missing_image.append(name)
+            continue
+        if actual != sources[name]:
+            missing_image.append(name)
+    if missing_manifest or missing_dockerfile or missing_image:
+        raise ValidationError("final image runtime import closure is incomplete: " +
+                              repr({"manifest": missing_manifest, "dockerfile": missing_dockerfile,
+                                    "image": missing_image}))
+    return {"required_module_count": len(required), "manifest_module_count": len(manifest),
+            "dockerfile_module_count": len(copied), "missing_from_manifest": [],
+            "missing_from_dockerfile": [], "missing_from_final_image": []}
+
+
 def _runtime_bindings(contract: Mapping[str, Any], uid: int, gid: int) -> list[dict[str, Any]]:
     result = []
     identity_role = contract["identity_root_role"]
@@ -603,6 +684,8 @@ def _candidate_environment(contract: Mapping[str, Any]) -> dict[str, str]:
     environment = {name: f"candidate-validation-{name.lower()}"
                    for name in contract["required_environment"]}
     environment["MARKET_DATA_EXECUTION_GRANT"] = _GRANT_ROOT + "/grant.json"
+    if contract.get("_ephemeral_candidate_public_trust") is not None:
+        environment["MARKET_DATA_CANDIDATE_EXTERNAL_TRUST"] = "1"
     if contract.get("schema_version") != "runtime-manifest/3":
         return environment
     roots = {item["role"]: item["container_path"] for item in contract["runtime_roots"]}
@@ -788,10 +871,11 @@ def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: s
     keys = [item for item in trust.get("keys", []) if isinstance(item, dict) and item.get("domain") == "candidate_validation"]
     if len(keys) != 1:
         raise ValidationError("candidate validation trust key is not unique")
+    key_id = contract.get("_ephemeral_candidate_key_id", keys[0]["key_id"])
     return {
         "schema_version": ("host-runtime-policy/4" if contract.get("schema_version") == "runtime-manifest/3"
                            else "host-runtime-policy/2"), "role": "candidate_validation",
-        "key_id": keys[0]["key_id"], "project_id": contract["project_id"],
+        "key_id": key_id, "project_id": contract["project_id"],
         "module_id": contract["module_id"], "service_id": contract["service_id"],
         "runtime_id": "target-validation", "approved_commit": binding["commit"],
         "approved_tree": binding["tree"], "image_id": image_id,
@@ -810,7 +894,7 @@ def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: s
 
 
 def _exec(container_id: str, argv: Sequence[str], *, cwd: str | None = None,
-          expect_success: bool = True, label: str = "unnamed") -> None:
+          expect_success: bool = True, label: str = "unnamed") -> subprocess.CompletedProcess[bytes]:
     args = ["exec"]
     if cwd:
         args.extend(("--workdir", cwd))
@@ -819,6 +903,7 @@ def _exec(container_id: str, argv: Sequence[str], *, cwd: str | None = None,
     if (result.returncode == 0) != expect_success:
         detail = result.stderr.decode("utf-8", "replace")[-800:].strip()
         raise ValidationError(f"container probe {label} returned an unexpected result: {detail}")
+    return result
 
 
 def _identity_probe_argv(contract: Mapping[str, Any], marker_hash: str, *,
@@ -874,6 +959,7 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
     probe_work.mkdir(mode=0o700)
     grant_dir = probe_work / "grants"
     grant_dir.mkdir(mode=0o755)
+    external_trust = _install_candidate_public_trust(grant_dir, contract)
     compose = probe_work / "compose.json"
     env_file = probe_work / "compose.env"
     project_name = "market-data-runtime-negative-" + mutation
@@ -921,14 +1007,12 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
         policy_path = probe_work / "policy.json"
         policy_path.write_bytes(_canonical(policy))
         os.chmod(policy_path, 0o600)
-        trust = _strict_json((root / "02_configs/production_runtime_trust.json").read_bytes(), "trust")
-        key_id = next(item["key_id"] for item in trust["keys"]
-                      if item.get("domain") == "candidate_validation")
         try:
             host.issue_execution_grant(container_id, expected_policy_path=policy_path,
-                                       key_path=_KEY_ROOT / (key_id + ".pem"),
+                                       key_path=_candidate_signing_key(contract, root),
                                        grant_path=grant_dir / "grant.json", grant_dir=grant_dir,
-                                       role="candidate_validation", ttl_seconds=900)
+                                       role="candidate_validation", ttl_seconds=900,
+                                       external_candidate_trust_path=external_trust)
         except host.HostAuthorizationError as exc:
             expected = ("runtime manifest/marker differs" if mutation == "manifest"
                         else "RELEASE bytes differ")
@@ -968,13 +1052,16 @@ def _protected_work() -> Iterator[Path]:
 
 
 def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, Any],
-                   binding: Mapping[str, Any], builder_id: str) -> dict[str, Any]:
+                   binding: Mapping[str, Any], builder_id: str, *,
+                   ephemeral_candidate_trust: bool = False) -> dict[str, Any]:
     host = _load(root / "09_deploy/runtime_identity/host_authorization.py",
                  "_host_authorization_engine")
     parser = _load(root / "03_src/agri_research_agent/shared/runtime_manifest.py",
                    "_runtime_manifest_engine")
     container_id = None
     with _protected_work() as work:
+        if ephemeral_candidate_trust:
+            _ephemeral_candidate_identity(work, contract)
         validate_source_compose(root, contract)
         context = work / "context"
         create_archive_context(root, context, binding)
@@ -989,6 +1076,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         _actual_host_rejection(root, host, contract, binding, image_id, image, work, "release")
         grant_dir = work / "grants"
         grant_dir.mkdir(mode=0o755)
+        external_trust = _install_candidate_public_trust(grant_dir, contract)
         contract["_grant_dir"] = grant_dir
         compose = work / "compose.json"
         env_file = work / "compose.env"
@@ -1027,6 +1115,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 raise ValidationError("grant issuer requires an unstarted container")
             if _docker("cp", f"{container_id}:{_SOURCE_ROOT}/.git", "-", check=False).returncode == 0:
                 raise ValidationError("Git metadata is present in candidate image")
+            packaging = _image_import_closure(root, contract, container_id)
             manifest_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/" + project["runtime_contract"])
             if _sha(manifest_raw) != binding["source_sha256"][project["runtime_contract"]]:
                 raise ValidationError("image runtime manifest differs from candidate")
@@ -1047,16 +1136,24 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             probes = _negative_observation_probes(host, observed, policy)
             probes["wrong_manifest_rejected"] = "PASS"
             probes["release_mismatch_rejected"] = "PASS"
-            key_path = _KEY_ROOT / (policy["key_id"] + ".pem")
+            key_path = _candidate_signing_key(contract, root)
             host.issue_execution_grant(container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
-                                       grant_dir=grant_dir, role="candidate_validation", ttl_seconds=900)
+                                       grant_dir=grant_dir, role="candidate_validation", ttl_seconds=900,
+                                       external_candidate_trust_path=external_trust)
+            if ephemeral_candidate_trust:
+                key_path.unlink()
             _docker("start", container_id, timeout=120)
             started = inspect_one("container", container_id)
             if started.get("State", {}).get("Running") is not True:
                 raise ValidationError("declared entrypoint did not remain running")
             _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw)), label="runtime_identity")
             probes["runtime_identity"] = "PASS"
+            lifecycle_imports = {}
+            for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store"):
+                module = "agri_research_agent.import_profit." + name
+                _exec(container_id, _python_module_probe_argv(module), label="image-import:" + module)
+                lifecycle_imports[name] = "PASS"
             _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw), missing=True),
                   expect_success=False, label="missing_grant_rejected")
             probes["missing_grant_rejected"] = "PASS"
@@ -1068,9 +1165,14 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 _exec(container_id, _python_module_probe_argv(module),
                       label="python-module:" + module)
             probes["dependencies"] = "PASS"
+            readonly_result = None
             for command in contract["initialization_commands"]:
-                _exec(container_id, command["argv"], cwd=contract["working_directory"],
-                      label="initialization:" + command["name"])
+                result = _exec(container_id, command["argv"], cwd=contract["working_directory"],
+                               label="initialization:" + command["name"])
+                if command["name"] == "spread-runtime-readonly-initialization":
+                    readonly_result = _strict_json(result.stdout.strip(), "readonly initialization")
+                    if readonly_result.get("status") != "PASS":
+                        raise ValidationError("readonly initialization did not report PASS")
             probes["entrypoint_initialization"] = "PASS"
             # Permission checks use direct argv. The first readonly root must reject,
             # every declared writable child must accept and remove a sentinel.
@@ -1111,6 +1213,28 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     "authorization_role": "candidate_validation", "git_metadata_present": False,
                     "production_volumes_mounted": False},
                 "probes": probes,
+                "spread_runtime_packaging": {
+                    "workflow_run_id": os.environ.get("GITHUB_RUN_ID"),
+                    "candidate_commit": binding["commit"], "candidate_tree": binding["tree"],
+                    "image_id": image_id, "release_commit": binding["commit"],
+                    "release_tree": binding["tree"], "oci_revision": binding["commit"],
+                    "identity_kind": ("EPHEMERAL_CI_CANDIDATE_VALIDATION_ROOT"
+                                      if ephemeral_candidate_trust else "FIXED_CANDIDATE_VALIDATION_ROOT"),
+                    "role": "candidate_validation", "production_key_used": False,
+                    "private_key_persisted": False if ephemeral_candidate_trust else None,
+                    "private_key_visible_to_container": False,
+                    "public_key_fingerprint": contract.get("_ephemeral_candidate_public_fingerprint"),
+                    "grant_binding": {"commit": binding["commit"], "tree": binding["tree"],
+                                      "image_id": image_id, "container_id": container_id,
+                                      "runtime_id": "target-validation"},
+                    "import_closure": packaging, "lifecycle_imports": lifecycle_imports,
+                    "readonly_initialization": readonly_result,
+                    "readonly_exit_code": 0 if readonly_result is not None else None,
+                    "initialize_strict_page": "PASS" if readonly_result is not None else "NOT_RUN",
+                    "app_test": "PASS" if readonly_result is not None else "NOT_RUN",
+                    "probe_stages": probes,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
             }
         finally:
             if container_id:
@@ -1133,6 +1257,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", required=True)
     parser.add_argument("--runtime-contract", required=True)
     parser.add_argument("--evidence-output", required=True)
+    parser.add_argument("--ephemeral-candidate-trust", action="store_true")
     args = parser.parse_args(argv)
     if not _ID.fullmatch(args.project):
         parser.error("invalid project identity")
@@ -1153,7 +1278,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         except BuilderUnavailable:
             write_evidence(args.evidence_output, blocked_evidence(binding))
             return 3
-        evidence = validate_linux(root, project, contract, binding, builder_id)
+        evidence = validate_linux(root, project, contract, binding, builder_id,
+                                  ephemeral_candidate_trust=args.ephemeral_candidate_trust)
         write_evidence(args.evidence_output, evidence)
         return 0
     except (ValidationError, OSError, KeyError, TypeError, ValueError) as exc:

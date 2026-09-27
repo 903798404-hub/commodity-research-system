@@ -6,6 +6,8 @@ shape consumed by the host signer and the in-container verifier.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime
 import json
 import math
@@ -38,6 +40,42 @@ _V2_EXTRA_FIELDS = frozenset({
 _V2_PAYLOAD_FIELDS = _V1_PAYLOAD_FIELDS | _V2_EXTRA_FIELDS
 _ID = re.compile(r"[a-z][a-z0-9-]*\Z")
 _KEY_ID = re.compile(r"[a-z][a-z0-9-]{0,127}\Z")
+EXTERNAL_CANDIDATE_TRUST_NAME = "candidate-validation-trust.json"
+EXTERNAL_CANDIDATE_TRUST_CONTAINER_PATH = "/run/market-data-grants/" + EXTERNAL_CANDIDATE_TRUST_NAME
+
+
+def parse_external_candidate_trust(raw: bytes) -> tuple[str, bytes]:
+    """Parse one public-only, candidate-validation-only external trust root."""
+    if not isinstance(raw, bytes) or len(raw) > 2048:
+        raise GrantShapeError("invalid external candidate trust size")
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise GrantShapeError("duplicate external candidate trust field")
+            value[key] = item
+        return value
+    try:
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                              parse_constant=lambda _: (_fail("invalid external candidate trust constant")))
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise GrantShapeError("invalid external candidate trust JSON") from exc
+    if (type(document) is not dict or set(document) != {
+            "schema_version", "role", "key_id", "algorithm", "public_key_base64"}
+            or document["schema_version"] != "candidate-validation-public-trust/1"
+            or document["role"] != "candidate_validation"
+            or document["algorithm"] != "ed25519"
+            or type(document["key_id"]) is not str
+            or _KEY_ID.fullmatch(document["key_id"]) is None
+            or type(document["public_key_base64"]) is not str):
+        raise GrantShapeError("invalid external candidate trust contract")
+    try:
+        public = base64.b64decode(document["public_key_base64"], validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise GrantShapeError("invalid external candidate public key") from exc
+    if len(public) != 32:
+        raise GrantShapeError("invalid external candidate public key length")
+    return document["key_id"], public
 _HEX32 = re.compile(r"[a-f0-9]{32}\Z")
 _HEX40 = re.compile(r"[a-f0-9]{40}\Z")
 _HEX64 = re.compile(r"[a-f0-9]{64}\Z")
