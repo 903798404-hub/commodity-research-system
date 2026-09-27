@@ -29,6 +29,7 @@ jobs:
       windows: ${{ steps.plan.outputs.windows }}
       full: ${{ steps.plan.outputs.full }}
       base_commit: ${{ steps.plan.outputs.base_commit }}
+      spread_runtime_docker: ${{ steps.plan.outputs.spread_runtime_docker }}
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false
@@ -69,7 +70,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.linux == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false
@@ -119,6 +120,28 @@ jobs:
         APPLICATION_RUNTIME_ACCIDENT_EVIDENCE: ${{ runner.temp }}/platform-results/linux/application-runtime-incident.json
       run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan
         "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
+    - name: Validate real spread-runtime image with ephemeral candidate trust
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      working-directory: candidate
+      run: |
+        set -euo pipefail
+        source_root="/root/market-data-spread-hosted-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        test ! -e "$source_root"
+        candidate_commit="$(git rev-parse HEAD)"
+        candidate_tree="$(git rev-parse 'HEAD^{tree}')"
+        test "$candidate_commit" = "$(python -I -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/platform-plan/plan.json"))["candidate"]["commit"])')"
+        sudo git -c safe.directory="$PWD" clone --local --no-hardlinks --no-checkout "$PWD" "$source_root"
+        sudo git -C "$source_root" checkout --detach "$candidate_commit"
+        test "$(sudo git -C "$source_root" rev-parse 'HEAD^{tree}')" = "$candidate_tree"
+        python_bin="$(command -v python)"
+        sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" "$python_bin" -I -B \
+          "$source_root/04_scripts/runtime/validate_target_runtime.py" \
+          --project spread-production-runtime-wiring \
+          --runtime-contract 02_configs/runtime_contracts/spread-production-runtime.json \
+          --ephemeral-candidate-trust \
+          --evidence-output "$RUNNER_TEMP/platform-results/linux/spread-runtime-hosted-evidence.json"
+        sudo "$python_bin" -I -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["TARGET_RUNTIME_CONTAINER_VALIDATION"]=="PASS"; e=p["spread_runtime_packaging"]; assert e["identity_kind"]=="EPHEMERAL_CI_CANDIDATE_VALIDATION_ROOT" and e["private_key_persisted"] is False and e["private_key_visible_to_container"] is False; assert not e["import_closure"]["missing_from_final_image"] and e["readonly_initialization"]["status"]=="PASS"' \
+          "$RUNNER_TEMP/platform-results/linux/spread-runtime-hosted-evidence.json"
     - name: Execute required real Docker application service identity evidence
       working-directory: candidate
       run: |
