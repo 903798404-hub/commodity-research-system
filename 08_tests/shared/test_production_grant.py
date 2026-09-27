@@ -99,7 +99,7 @@ def test_production_grant_module_has_only_standard_library_imports():
     tree = ast.parse(path.read_text(encoding="utf-8"))
     roots = {node.names[0].name.split(".")[0] for node in tree.body if isinstance(node, ast.Import)}
     roots |= {str(node.module).split(".")[0] for node in tree.body if isinstance(node, ast.ImportFrom) and node.module != "__future__"}
-    assert roots <= {"datetime", "json", "math", "re", "typing", "urllib"}
+    assert roots <= {"base64", "binascii", "datetime", "json", "math", "re", "typing", "urllib"}
 
 
 @pytest.mark.parametrize("field", ["schema_version", "algorithm", "key_id", "payload", "signature"])

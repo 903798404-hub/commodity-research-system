@@ -24,6 +24,25 @@ else:
 POLICY = '04_scripts/quality/test_platforms.json'
 
 
+def requires_spread_runtime_docker(report, repo):
+    """Route runtime-source changes from the existing admission diff to Linux Docker."""
+    changed = {item['path'] for item in report['changed_paths']}
+    manifest = json.loads((repo/'02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
+    packaged = {item['path'] for item in manifest['source_inputs']}
+    exact = packaged | {
+        '02_configs/runtime_contracts/spread-production-runtime.json',
+        '04_scripts/runtime/validate_target_runtime.py',
+        '04_scripts/runtime/pre_release_runtime.py',
+        '04_scripts/quality/platform_ci.py',
+        '09_deploy/runtime_identity/host_authorization.py',
+        '08_tests/test_spread_runtime_contract.py',
+        '08_tests/test_target_runtime_validator.py',
+        '.github/workflows/trusted-main-admission.yml',
+    }
+    return any(path in exact or path.startswith('09_deploy/spread_runtime/')
+               for path in changed)
+
+
 def requires_full(report):
     if report['lane'] not in {'business', 'strict', 'governance'}:
         raise ValueError('UNKNOWN_ADMISSION_LANE')
@@ -62,6 +81,8 @@ def make_plan(repo, base, candidate, output):
     sources = {p:admission.blob(repo,candidate,p) for p in required}
     trusted = {p:admission.blob(repo,base,p) if p in old else sources[p] for p in required}
     plan = platforms.plan(required,trusted,sources,policy,base=report['trusted_main'],candidate=report['candidate'])
+    plan['spread_runtime_docker'] = requires_spread_runtime_docker(report, repo)
+    plan['plan_sha256'] = platforms.digest({k: v for k, v in plan.items() if k != 'plan_sha256'})
     save(output/'plan.json',plan)
     return plan
 
@@ -161,6 +182,7 @@ def main():
                 report=read(a.output/'admission/main-admission.json')
                 f.write('full='+str(requires_full(report)).lower()+'\n')
                 f.write('base_commit='+plan['base']['commit']+'\n')
+                f.write('spread_runtime_docker='+str(plan['spread_runtime_docker']).lower()+'\n')
         return 0
     if a.action=='run': return execute(a.platform,a.plan,a.output)
     return finish(a.plan,a.receipts,a.output,json.loads(os.environ['PLATFORM_JOB_RESULTS']))

@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 import re
 import socket
+import stat
 import subprocess
 from typing import Mapping
 
@@ -22,7 +23,9 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from .production_grant import (GrantShapeError, GrantValidationError,
-                               parse_execution_grant_json, validate_runtime_environment)
+                               EXTERNAL_CANDIDATE_TRUST_CONTAINER_PATH,
+                               parse_execution_grant_json, parse_external_candidate_trust,
+                               validate_runtime_environment)
 from .runtime_manifest import ManifestValidationError, parse_runtime_manifest
 
 
@@ -165,6 +168,26 @@ def _verify_git(request: GitExecutionRequest, role: AuthorizationRole, module_id
 
 
 def _load_trust(domain: str) -> tuple[dict[str, Ed25519PublicKey], set[str], set[str]]:
+    if domain == AuthorizationRole.CANDIDATE_VALIDATION.value:
+        external = Path(EXTERNAL_CANDIDATE_TRUST_CONTAINER_PATH)
+        enabled = os.environ.get("MARKET_DATA_CANDIDATE_EXTERNAL_TRUST")
+        if enabled is not None:
+            if enabled != "1" or external.is_symlink() or not external.is_file():
+                raise ProductionIdentityError("external candidate trust is not explicitly valid")
+            try:
+                directory = external.parent.stat()
+                source = external.stat()
+                if (external.resolve(strict=True) != external or directory.st_uid != 0
+                        or stat.S_IMODE(directory.st_mode) != 0o755 or source.st_uid != 0
+                        or stat.S_IMODE(source.st_mode) != 0o444
+                        or "ro" not in _mount_for(_mount_options(), external)):
+                    raise ProductionIdentityError("external candidate trust is not protected")
+                key_id, public = parse_external_candidate_trust(external.read_bytes())
+                return {key_id: Ed25519PublicKey.from_public_bytes(public)}, set(), set()
+            except (OSError, ValueError, GrantShapeError) as exc:
+                raise ProductionIdentityError("external candidate trust is invalid") from exc
+        if external.is_symlink() or external.exists():
+            raise ProductionIdentityError("external candidate trust requires explicit enablement")
     try:
         raw = _json_object(TRUST_CONFIG_PATH.read_text(encoding="utf-8"), "production trust configuration")
     except (OSError, UnicodeError, ProductionIdentityError) as exc:
@@ -365,6 +388,8 @@ def _verify_oci(request: OCIExecutionRequest, role: AuthorizationRole, module_id
         raise ProductionIdentityError("OCI runtime is not a non-root read-only filesystem")
     protected_paths = [Path(value) for value in protected]
     required_protected = [request.grant_path, TRUST_CONFIG_PATH, request.release_path, request.runtime_manifest_path, marker_path]
+    if role is AuthorizationRole.CANDIDATE_VALIDATION and os.environ.get("MARKET_DATA_CANDIDATE_EXTERNAL_TRUST") == "1":
+        required_protected.append(Path(EXTERNAL_CANDIDATE_TRUST_CONTAINER_PATH))
     if grant_v2:
         # The signed manifest defines image inputs; CLI images need no UI tree.
         # Protect the whole executing source root, including undeclared children,

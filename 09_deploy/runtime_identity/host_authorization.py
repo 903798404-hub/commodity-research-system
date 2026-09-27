@@ -1374,12 +1374,14 @@ def _validate_application_service_credential(container_id: str, policy: Mapping,
         raise HostAuthorizationError("application service credential injection differs from approved source")
 
 
-def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900) -> dict:
+def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900, external_candidate_trust_path: str | Path | None = None) -> dict:
     """Observe a fresh container, sign a bounded grant, and leave it unstarted."""
     _require_linux_root()
     require_protected_authority_source()
     policy = _load_policy(expected_policy_path)
     validate_policy(policy, role)
+    if external_candidate_trust_path is not None and role != "candidate_validation":
+        raise HostAuthorizationError("external candidate trust cannot authorize production")
     require_protected_key_and_grant_dirs(key_path, grant_dir)
     if type(ttl_seconds) is not int or not 0 < ttl_seconds <= 3600:
         raise HostAuthorizationError("invalid grant lifetime")
@@ -1393,6 +1395,11 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
         # A failed attempt is not replayable with a mutated scope.
         _candidate_descriptor(policy, consume=True)
     observed = observe_and_validate(container_id, policy, role=role)
+    external_enabled = external_candidate_trust_path is not None
+    environment = _env(observed["config"]["Env"])
+    external_flag = environment.get("MARKET_DATA_CANDIDATE_EXTERNAL_TRUST")
+    if external_flag not in (None, "1") or external_enabled != (external_flag == "1"):
+        raise HostAuthorizationError("external candidate trust enablement differs from container")
     _validate_application_service_credential(container_id, policy, observed)
     secret_state = _secret_state(observed) if policy_version in _PRODUCTION_POLICIES else None
     _validate_mount_sources(observed, policy, grant_dir)
@@ -1453,9 +1460,27 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     key = _load_private_key(key_path)
     public = base64.b64encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode("ascii")
-    matches = [item for item in trust.get("keys", []) if item.get("key_id") == policy["key_id"] and item.get("domain") == role and item.get("algorithm") == "ed25519" and item.get("public_key_base64") == public]
-    if len(matches) != 1 or policy["key_id"] in trust.get("revoked_key_ids", []):
-        raise HostAuthorizationError("host signing key is not pinned for this authorization role")
+    external_raw = None
+    if external_enabled:
+        grant_contract = _contract_module(GRANT_CONTRACT_PATH, "_external_candidate_trust_contract")
+        path = Path(external_candidate_trust_path)
+        expected = grant_dir / grant_contract.EXTERNAL_CANDIDATE_TRUST_NAME
+        if path != expected or path.is_symlink():
+            raise HostAuthorizationError("external candidate trust path is not fixed")
+        _protected_path(path)
+        if stat.S_IMODE(path.stat().st_mode) != 0o444:
+            raise HostAuthorizationError("external candidate trust must be public read-only")
+        external_raw = path.read_bytes()
+        try:
+            external_key_id, external_public = grant_contract.parse_external_candidate_trust(external_raw)
+        except (ValueError, TypeError) as exc:
+            raise HostAuthorizationError("external candidate trust contract is invalid") from exc
+        if external_key_id != policy["key_id"] or base64.b64encode(external_public).decode("ascii") != public:
+            raise HostAuthorizationError("external candidate signing key does not match public trust")
+    else:
+        matches = [item for item in trust.get("keys", []) if item.get("key_id") == policy["key_id"] and item.get("domain") == role and item.get("algorithm") == "ed25519" and item.get("public_key_base64") == public]
+        if len(matches) != 1 or policy["key_id"] in trust.get("revoked_key_ids", []):
+            raise HostAuthorizationError("host signing key is not pinned for this authorization role")
     now = datetime.now(timezone.utc)
     payload = {key: policy[key] for key in ("project_id", "module_id", "service_id", "runtime_id", "approved_commit", "approved_tree", "image_id", "runtime_root", "runtime_manifest_sha256", "runtime_marker_sha256")}
     grant_id = (_recovery_call('grant_id', policy, container_id)
@@ -1491,7 +1516,8 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     _validate_v3_runtime(manifest, observed, policy, container_id)
     if policy_version in _CANDIDATE_POLICIES and role == "candidate_validation":
         _candidate_descriptor(policy, consume=False)
-    if _load_policy(expected_policy_path) != policy or TRUST_CONFIG_PATH.read_bytes() != trust_raw:
+    if (_load_policy(expected_policy_path) != policy or TRUST_CONFIG_PATH.read_bytes() != trust_raw
+            or (external_enabled and Path(external_candidate_trust_path).read_bytes() != external_raw)):
         raise HostAuthorizationError("host approval or trust changed before grant sealing")
     if policy_version in _PRODUCTION_POLICIES and _validated_candidate_record(policy) != candidate_record:
         raise HostAuthorizationError("candidate record changed before grant sealing")
