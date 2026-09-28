@@ -33,6 +33,8 @@ _RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|
 _ENVELOPE_FIELDS = frozenset({"schema_version", "algorithm", "key_id", "payload", "signature"})
 _PAYLOAD_FIELDS = frozenset({"record_id", "purpose", "authorization_role", "issued_at", "expires_at", "evidence_sha256", "evidence"})
 _EVIDENCE_FIELDS = frozenset({"schema_version", "binding", "TARGET_RUNTIME_STATIC_VALIDATION", "TARGET_RUNTIME_CONTAINER_VALIDATION", "image_id", "rendered_compose_sha256", "builder", "observed_identity", "probes"})
+_PACKAGING_FIELDS = frozenset({"workflow_run_id", "candidate_commit", "candidate_tree", "image_id", "release_commit", "release_tree", "oci_revision", "identity_kind", "role", "production_key_used", "private_key_persisted", "private_key_visible_to_container", "public_key_fingerprint", "grant_binding", "import_closure", "lifecycle_imports", "readonly_initialization", "readonly_exit_code", "initialize_strict_page", "app_test", "probe_stages", "timestamp"})
+_SECRET_PROBES = frozenset({"declared_readonly", "undeclared_rejected", "wrong_target_rejected", "writable_rejected"})
 _BINDING_FIELDS = frozenset({"project_id", "commit", "tree", "source_sha256", "validator_version"})
 _BUILDER_FIELDS = frozenset({"builder_id", "os", "execution"})
 _OBSERVED_FIELDS = frozenset({"image_id", "oci_revision", "git_tree", "source_sha256", "rendered_compose_sha256", "authorization_role", "git_metadata_present", "production_volumes_mounted"})
@@ -101,7 +103,9 @@ def _source_path(value: object) -> str:
 
 
 def _validate_evidence(evidence: object) -> None:
-    if type(evidence) is not dict or set(evidence) != _EVIDENCE_FIELDS:
+    # Explicit additive claim. Historical records without packaging stay valid;
+    # no other optional or unknown evidence field is accepted.
+    if type(evidence) is not dict or set(evidence) not in (_EVIDENCE_FIELDS, _EVIDENCE_FIELDS | {"spread_runtime_packaging"}):
         _fail("target runtime evidence fields incomplete or unknown")
     if evidence["schema_version"] != "target-runtime-evidence/1":
         _fail("unsupported target runtime evidence schema")
@@ -140,6 +144,95 @@ def _validate_evidence(evidence: object) -> None:
     probes = evidence["probes"]
     if type(probes) is not dict or set(probes) != _PROBES or any(value != "PASS" for value in probes.values()):
         _fail("candidate probes are incomplete or failed")
+    if "spread_runtime_packaging" in evidence:
+        _validate_packaging(evidence["spread_runtime_packaging"], evidence)
+
+
+def _validate_packaging(value: object, evidence: dict) -> None:
+    if type(value) is not dict or set(value) not in (_PACKAGING_FIELDS, _PACKAGING_FIELDS | {"service_credential_mounts"}):
+        _fail("packaging fields incomplete or unknown")
+    binding = evidence["binding"]
+    for name, expected in {"candidate_commit": binding["commit"], "release_commit": binding["commit"],
+                           "oci_revision": binding["commit"], "candidate_tree": binding["tree"],
+                           "release_tree": binding["tree"], "image_id": evidence["image_id"],
+                           "role": "candidate_validation", "probe_stages": evidence["probes"]}.items():
+        if value[name] != expected:
+            _fail("packaging identity or probes differ from evidence")
+    run = value["workflow_run_id"]
+    if run is not None and (type(run) is not str or not run.isascii() or not run.isdecimal()):
+        _fail("invalid packaging workflow run")
+    _time(value["timestamp"], "packaging timestamp")
+    kind = value["identity_kind"]
+    if kind not in {"FIXED_CANDIDATE_VALIDATION_ROOT", "EPHEMERAL_CI_CANDIDATE_VALIDATION_ROOT"}:
+        _fail("invalid packaging trust kind")
+    if value["production_key_used"] is not False or value["private_key_visible_to_container"] is not False:
+        _fail("packaging signer isolation failed")
+    if kind == "EPHEMERAL_CI_CANDIDATE_VALIDATION_ROOT":
+        if value["private_key_persisted"] is not False:
+            _fail("ephemeral candidate key persisted")
+        _string(value["public_key_fingerprint"], "candidate public key fingerprint", _HEX64)
+    elif value["private_key_persisted"] is not None or value["public_key_fingerprint"] is not None:
+        _fail("fixed candidate trust has ephemeral claims")
+    grant = value["grant_binding"]
+    if type(grant) is not dict or set(grant) != {"commit", "tree", "image_id", "container_id", "runtime_id"}:
+        _fail("packaging grant fields incomplete or unknown")
+    if any(grant[name] != expected for name, expected in {
+            "commit": binding["commit"], "tree": binding["tree"], "image_id": evidence["image_id"],
+            "runtime_id": "target-validation"}.items()):
+        _fail("packaging grant identity differs")
+    _string(grant["container_id"], "packaging container id", _HEX64)
+    closure = value["import_closure"]
+    counts = {"required_module_count", "manifest_module_count", "dockerfile_module_count"}
+    missing = {"missing_from_manifest", "missing_from_dockerfile", "missing_from_final_image"}
+    if type(closure) is not dict or set(closure) != counts | missing:
+        _fail("import closure fields incomplete or unknown")
+    if any(type(closure[name]) is not int or closure[name] <= 0 for name in counts):
+        _fail("invalid import closure counts")
+    if any(type(closure[name]) is not list or closure[name] for name in missing):
+        _fail("import closure has missing modules")
+    if any(closure[name] < closure["required_module_count"] for name in counts):
+        _fail("import closure counts disagree")
+    if value["lifecycle_imports"] != {name: "PASS" for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store")}:
+        _fail("lifecycle import claims incomplete or failed")
+    readonly = value["readonly_initialization"]
+    if readonly is None:
+        if value["readonly_exit_code"] is not None or value["initialize_strict_page"] != "NOT_EXECUTED" or value["app_test"] != "NOT_EXECUTED":
+            _fail("unexecuted initialization has success claims")
+        if binding["project_id"] == "spread-production-runtime-wiring":
+            _fail("spread initialization claim is required")
+    else:
+        fields = {"schema_version", "status", "mode", "runtime_id", "git_commit", "git_tree", "image_id", "identity_role", "domestic_spread_rows", "soybean_release", "snapshot_status", "snapshot_release", "snapshot_business_date", "capture_executed", "secret_accessed", "network_accessed"}
+        if type(readonly) is not dict or set(readonly) != fields:
+            _fail("readonly initialization fields incomplete or unknown")
+        expected = {"schema_version": "spread-runtime-preflight/1", "status": "PASS", "mode": "CANDIDATE_VALIDATION",
+                    "runtime_id": grant["runtime_id"], "git_commit": binding["commit"], "git_tree": binding["tree"],
+                    "image_id": evidence["image_id"], "identity_role": "candidate_validation"}
+        if any(readonly[name] != expected_value for name, expected_value in expected.items()):
+            _fail("readonly initialization identity differs")
+        if type(value["readonly_exit_code"]) is not int or value["readonly_exit_code"] != 0 or value["initialize_strict_page"] != "PASS" or value["app_test"] != "PASS":
+            _fail("readonly initialization did not pass")
+        if any(readonly[name] is not False for name in ("capture_executed", "secret_accessed", "network_accessed")):
+            _fail("readonly initialization performed forbidden operations")
+        if type(readonly["domestic_spread_rows"]) is not int or readonly["domestic_spread_rows"] <= 0:
+            _fail("invalid domestic reader row count")
+        if type(readonly["soybean_release"]) is not str or not readonly["soybean_release"]:
+            _fail("invalid soybean release identity")
+        if readonly["snapshot_status"] == "AVAILABLE":
+            if type(readonly["snapshot_release"]) is not str or not readonly["snapshot_release"]:
+                _fail("invalid snapshot release identity")
+            from datetime import date
+            try:
+                text = readonly["snapshot_business_date"]
+                if type(text) is not str or date.fromisoformat(text).isoformat() != text:
+                    _fail("invalid snapshot business date")
+            except (TypeError, ValueError):
+                _fail("invalid snapshot business date")
+        elif readonly["snapshot_status"] != "NOT_YET_AVAILABLE" or readonly["snapshot_release"] is not None or readonly["snapshot_business_date"] is not None:
+            _fail("invalid snapshot availability claim")
+    if "service_credential_mounts" in value:
+        probes = value["service_credential_mounts"]
+        if type(probes) is not dict or set(probes) != _SECRET_PROBES or any(status != "PASS" for status in probes.values()):
+            _fail("service credential mount probes incomplete or failed")
 
 
 def validate_payload(payload: object) -> None:

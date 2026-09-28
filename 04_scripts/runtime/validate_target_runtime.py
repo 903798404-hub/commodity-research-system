@@ -633,6 +633,9 @@ def _runtime_bindings(contract: Mapping[str, Any], uid: int, gid: int) -> list[d
                        "read_only": item["read_only"],
                        "owner_uid": 0 if item["read_only"] else uid,
                        "owner_gid": 0 if item["read_only"] else gid})
+    for name, target in contract.get("_secret_declarations", {}).items():
+        result.append({"relative_path": "service-private/" + name + ".json", "target": target,
+                       "read_only": True, "owner_uid": 0, "owner_gid": gid, "kind": "file"})
     return sorted(result, key=lambda item: (item["relative_path"].count("/"), item["relative_path"]))
 
 
@@ -708,12 +711,13 @@ def _candidate_environment(contract: Mapping[str, Any]) -> dict[str, str]:
 def _compose_document(contract: Mapping[str, Any], image_id: str,
                       mounts: Sequence[Mapping[str, Any]], grant_dir: Path,
                       hostname: str) -> dict[str, Any]:
+    secret_targets = set(contract.get("_secret_declarations", {}).values())
     volumes = [{"type": "bind", "source": item["source"], "target": item["target"],
-                "read_only": item["read_only"]} for item in mounts]
+                "read_only": item["read_only"]} for item in mounts if item["target"] not in secret_targets]
     volumes.append({"type": "bind", "source": str(grant_dir),
                     "target": _GRANT_ROOT, "read_only": True})
     environment = _candidate_environment(contract)
-    return {"name": "market-data-runtime-validation",
+    result = {"name": "market-data-runtime-validation",
             "services": {contract["service_id"]: {
                 "image": image_id, "entrypoint": contract["entrypoint"],
                 "working_dir": contract["working_directory"], "hostname": hostname,
@@ -722,6 +726,13 @@ def _compose_document(contract: Mapping[str, Any], image_id: str,
                 "security_opt": ["no-new-privileges:true"],
                 "environment": environment, "volumes": volumes,
             "restart": "no"}}}
+    if secret_targets:
+        service = result["services"][contract["service_id"]]
+        service["secrets"] = [{"source": name, "target": target}
+                              for name, target in contract["_secret_declarations"].items()]
+        result["secrets"] = {name: {"file": next(item["source"] for item in mounts if item["target"] == target)}
+                             for name, target in contract["_secret_declarations"].items()}
+    return result
 
 
 def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str, Any]:
@@ -872,7 +883,7 @@ def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: s
     if len(keys) != 1:
         raise ValidationError("candidate validation trust key is not unique")
     key_id = contract.get("_ephemeral_candidate_key_id", keys[0]["key_id"])
-    return {
+    result = {
         "schema_version": ("host-runtime-policy/4" if contract.get("schema_version") == "runtime-manifest/3"
                            else "host-runtime-policy/2"), "role": "candidate_validation",
         "key_id": key_id, "project_id": contract["project_id"],
@@ -891,6 +902,10 @@ def _policy(contract: Mapping[str, Any], binding: Mapping[str, Any], image_id: s
         "rendered_compose_sha256": rendered_hash, "grant_container_directory": _GRANT_ROOT,
         "candidate_host_root": scope["candidate_host_root"], "candidate_scope": scope["candidate_scope"],
     }
+    if "/run/secrets/market-data-service.json" in contract.get("_secret_declarations", {}).values():
+        result["application_service"] = {"service_id": contract["service_id"], "runtime_id": "target-validation",
+            "allowed_writable_roots": [item["container_path"] for item in contract["runtime_roots"] if item["access"] == "rw"]}
+    return result
 
 
 def _exec(container_id: str, argv: Sequence[str], *, cwd: str | None = None,
@@ -953,7 +968,8 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
                            image: Mapping[str, Any], work: Path,
                            mutation: str) -> None:
     """Require the real host grant issuer to reject altered identity material."""
-    if mutation not in {"manifest", "release"}:
+    secret_mutations = {"undeclared_secret", "wrong_secret_target", "writable_secret"}
+    if mutation not in {"manifest", "release"} | secret_mutations:
         raise ValidationError("unknown host rejection probe")
     probe_work = work / ("negative-" + mutation)
     probe_work.mkdir(mode=0o700)
@@ -981,8 +997,21 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
         marker_path = identity_source / ".market-data-runtime.json"
         marker_path.write_bytes(_canonical(marker) + b"\n")
         os.chmod(marker_path, 0o444)
-        compose.write_bytes(_canonical(_compose_document(
-            contract, image_id, scope["mounts"], grant_dir, os.urandom(16).hex())) + b"\n")
+        document = _compose_document(contract, image_id, scope["mounts"], grant_dir, os.urandom(16).hex())
+        if mutation in secret_mutations:
+            service = document["services"][contract["service_id"]]
+            ref = next(item for item in service["secrets"] if item["target"] == "/run/secrets/market-data-service.json")
+            if mutation == "undeclared_secret":
+                document["secrets"]["undeclared-runtime-secret"] = dict(document["secrets"][ref["source"]])
+                service["secrets"].append({"source": "undeclared-runtime-secret", "target": "/run/secrets/undeclared.json"})
+            elif mutation == "wrong_secret_target":
+                ref["target"] = "/run/secrets/wrong-service.json"
+            else:
+                secret_file = document["secrets"].pop(ref["source"])["file"]
+                service["secrets"].remove(ref)
+                service["volumes"].append({"type": "bind", "source": secret_file,
+                    "target": "/run/secrets/market-data-service.json", "read_only": False})
+        compose.write_bytes(_canonical(document) + b"\n")
         os.chmod(compose, 0o600)
         env_file.write_text("", encoding="utf-8")
         os.chmod(env_file, 0o600)
@@ -1002,6 +1031,21 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
         policy = _policy(contract, binding, image_id, image, container, scope, compose,
                          env_file, rendered_hash, _sha(manifest_raw), _sha(marker_path.read_bytes()),
                          _sha(release_raw), host)
+        if mutation in secret_mutations:
+            try:
+                host._validate_runtime_mounts(contract, host._mounts(container), policy)
+            except host.HostAuthorizationError as exc:
+                if "secret" not in str(exc):
+                    raise ValidationError("secret rejection occurred at an unrelated check") from exc
+            else:
+                raise ValidationError("actual Docker secret permission/target violation was accepted")
+            return
+        if "application_service" in policy:
+            credential_policy = probe_work / "credential-policy.json"
+            _write_new(credential_policy, _canonical(policy), 0o600)
+            credential = next(item["source"] for item in scope["mounts"] if item["target"] == "/run/secrets/market-data-service.json")
+            host.issue_application_service_credential(container_id, expected_policy_path=credential_policy,
+                credential_path=credential, role="candidate_validation")
         field = "runtime_manifest_sha256" if mutation == "manifest" else "release_sha256"
         policy[field] = "0" * 64
         policy_path = probe_work / "policy.json"
@@ -1062,7 +1106,8 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
     with _protected_work() as work:
         if ephemeral_candidate_trust:
             _ephemeral_candidate_identity(work, contract)
-        validate_source_compose(root, contract)
+        source_compose = validate_source_compose(root, contract)
+        contract["_secret_declarations"] = host.declared_secret_targets(contract, source_compose)
         context = work / "context"
         create_archive_context(root, context, binding)
         _exclude_candidate_inputs(context, contract)
@@ -1074,6 +1119,12 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         contract["_runtime_contract"] = project["runtime_contract"]
         _actual_host_rejection(root, host, contract, binding, image_id, image, work, "manifest")
         _actual_host_rejection(root, host, contract, binding, image_id, image, work, "release")
+        service_mounts = None
+        if "/run/secrets/market-data-service.json" in contract["_secret_declarations"].values():
+            for mutation in ("undeclared_secret", "wrong_secret_target", "writable_secret"):
+                _actual_host_rejection(root, host, contract, binding, image_id, image, work, mutation)
+            service_mounts = {"declared_readonly": "PASS", "undeclared_rejected": "PASS",
+                              "wrong_target_rejected": "PASS", "writable_rejected": "PASS"}
         grant_dir = work / "grants"
         grant_dir.mkdir(mode=0o755)
         external_trust = _install_candidate_public_trust(grant_dir, contract)
@@ -1137,6 +1188,10 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             probes["wrong_manifest_rejected"] = "PASS"
             probes["release_mismatch_rejected"] = "PASS"
             key_path = _candidate_signing_key(contract, root)
+            if "application_service" in policy:
+                credential = next(item["source"] for item in scope["mounts"] if item["target"] == "/run/secrets/market-data-service.json")
+                host.issue_application_service_credential(container_id, expected_policy_path=policy_path,
+                    credential_path=credential, role="candidate_validation")
             host.issue_execution_grant(container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
                                        grant_dir=grant_dir, role="candidate_validation", ttl_seconds=900,
@@ -1148,6 +1203,11 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             if started.get("State", {}).get("Running") is not True:
                 raise ValidationError("declared entrypoint did not remain running")
             _exec(container_id, _identity_probe_argv(contract, _sha(marker_raw)), label="runtime_identity")
+            if "application_service" in policy:
+                _exec(container_id, ["python", "-B", "-c",
+                    "from agri_research_agent.shared.runtime_context import establish_application_service_context; "
+                    f"establish_application_service_context(service_id={contract['service_id']!r},module_id={contract['module_id']!r},runtime_root={identity_root!r})"],
+                    label="application-service-context")
             probes["runtime_identity"] = "PASS"
             lifecycle_imports = {}
             for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store"):
@@ -1230,9 +1290,10 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     "import_closure": packaging, "lifecycle_imports": lifecycle_imports,
                     "readonly_initialization": readonly_result,
                     "readonly_exit_code": 0 if readonly_result is not None else None,
-                    "initialize_strict_page": "PASS" if readonly_result is not None else "NOT_RUN",
-                    "app_test": "PASS" if readonly_result is not None else "NOT_RUN",
+                    "initialize_strict_page": "PASS" if readonly_result is not None else "NOT_EXECUTED",
+                    "app_test": "PASS" if readonly_result is not None else "NOT_EXECUTED",
                     "probe_stages": probes,
+                    **({"service_credential_mounts": service_mounts} if service_mounts is not None else {}),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             }
