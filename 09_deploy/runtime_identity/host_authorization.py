@@ -706,8 +706,11 @@ def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 36
         targets.update(item['target'] for item in readonly_records)
         for binding in bindings:
             required = {"relative_path", "target", "read_only", "owner_uid", "owner_gid"}
-            if not isinstance(binding, Mapping) or set(binding) != required or type(binding["read_only"]) is not bool:
+            if not isinstance(binding, Mapping) or set(binding) not in (required, required | {"kind"}) or type(binding["read_only"]) is not bool:
                 raise HostAuthorizationError("candidate scope binding is invalid")
+            kind = binding.get("kind", "directory")
+            if kind not in {"directory", "file"} or (kind == "file" and (binding["read_only"] is not True or binding["owner_uid"] != 0)):
+                raise HostAuthorizationError("candidate file binding must be root-owned and readonly")
             relative = binding["relative_path"]
             pure = PurePosixPath(relative) if isinstance(relative, str) else PurePosixPath("/")
             if (not isinstance(relative, str) or not relative or pure.is_absolute() or str(pure) != relative
@@ -726,7 +729,12 @@ def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 36
                 if (uid, gid) != (0, 0):
                     raise HostAuthorizationError("candidate scope root ownership cannot change")
             else:
-                source.mkdir(parents=True, exist_ok=False)
+                if kind == "file":
+                    source.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                    fd = os.open(source, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o440)
+                    os.close(fd)
+                else:
+                    source.mkdir(parents=True, exist_ok=False)
                 os.chown(source, uid, gid)
             state = source.stat()
             records.append({"source": str(source), "device": state.st_dev, "inode": state.st_ino, "target": target, "read_only": binding["read_only"]})
@@ -1006,6 +1014,71 @@ def _secret_state(observed: Mapping) -> dict:
             for mount in observed["mounts"] if mount["target"].startswith("/run/secrets/")}
 
 
+def declared_secret_targets(manifest: Mapping, rendered: Mapping) -> dict[str, str]:
+    """Resolve exact secret names/targets from the manifest-owned Compose.
+
+    A namespace prefix is a syntax check, never authorization. Each accepted
+    target must be explicitly declared by a named manifest secret reference.
+    """
+    service = rendered.get("services", {}).get(manifest["service_id"], {})
+    refs, definitions = service.get("secrets") or [], rendered.get("secrets") or {}
+    if (type(refs) is not list or type(definitions) is not dict
+            or any(type(item) is not dict or set(item) != {"source", "target"} for item in refs)):
+        raise HostAuthorizationError("invalid declared file-secret references")
+    names = [item["source"] for item in refs]
+    targets = [item["target"] for item in refs]
+    if (any(type(name) is not str for name in names) or any(type(target) is not str for target in targets)
+            or len(names) != len(set(names)) or set(names) != set(manifest["secret_references"])
+            or set(definitions) != set(names) or len(targets) != len(set(targets))
+            or any(type(target) is not str or not re.fullmatch(r"/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]*", target) for target in targets)):
+        raise HostAuthorizationError("secret declarations differ from runtime contract")
+    if any(type(definitions[name]) is not dict or set(definitions[name]) - {"file", "name"}
+           or type(definitions[name].get("file")) is not str for name in names):
+        raise HostAuthorizationError("only declared file secrets are supported")
+    return {item["source"]: item["target"] for item in refs}
+
+
+def _candidate_secret_mounts(manifest: Mapping, policy: Mapping, rendered: Mapping | None = None) -> list[dict]:
+    source_command = ["compose", "--project-directory", str(SOURCE_ROOT)]
+    for relative in manifest["build"]["compose_sources"]:
+        source_command.extend(["-f", str(_protected_path(SOURCE_ROOT / relative))])
+    declarations = declared_secret_targets(manifest, _json(_run_docker(
+        [*source_command, "config", "--no-interpolate", "--format", "json"])))
+    if rendered is None:
+        command = ["compose", "--project-directory", policy["compose_project_directory"],
+                   "--env-file", policy["compose_environment_file"]]
+        for item in policy["compose_sources"]:
+            path = _protected_path(Path(item["path"]))
+            if hashlib.sha256(path.read_bytes()).hexdigest() != item["sha256"]:
+                raise HostAuthorizationError("candidate secret Compose source changed")
+            command.extend(["-f", str(path)])
+        rendered = _json(_run_docker([*command, "config", "--format", "json"]))
+        if _digest(rendered) != policy["rendered_compose_sha256"]:
+            raise HostAuthorizationError("candidate secret Compose differs from policy")
+    service = rendered.get("services", {}).get(policy["service_id"], {})
+    refs, definitions = service.get("secrets") or [], rendered.get("secrets") or {}
+    if (type(refs) is not list or type(definitions) is not dict
+            or any(type(item) is not dict or set(item) != {"source", "target"} for item in refs)):
+        raise HostAuthorizationError("invalid candidate file-secret references")
+    names = [item["source"] for item in refs]
+    if any(type(name) is not str for name in names) or len(names) != len(set(names)) or set(definitions) != set(names):
+        raise HostAuthorizationError("duplicate or undeclared candidate secret")
+    mounts = []
+    for item in refs:
+        name = item["source"]
+        if name not in declarations or item["target"] != declarations[name]:
+            raise HostAuthorizationError("undeclared candidate secret or wrong target")
+        definition = definitions[name]
+        if type(definition) is not dict or set(definition) - {"file", "name"} or type(definition.get("file")) is not str:
+            raise HostAuthorizationError("candidate secret must be a declared file")
+        source = _protected_path(Path(definition["file"]), temporary=True)
+        if not _within(str(source), policy["candidate_host_root"]):
+            raise HostAuthorizationError("candidate secret is outside its isolated scope")
+        _secret_file_identity(source, service.get("user"), temporary=True)
+        mounts.append({"source": str(source), "target": item["target"], "read_only": True})
+    return mounts
+
+
 def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping,
                            *, recovery_phase: str = 'pre_start') -> str:
     labels = container["Config"].get("Labels") or {}
@@ -1049,6 +1122,9 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping,
     if policy["schema_version"] in _PRODUCTION_POLICIES:
         _, manifest = _validated_candidate_record(policy)
         expected_mounts = sorted([*expected_mounts, *_production_compose_bridge(rendered, policy, manifest)], key=lambda m: m["target"])
+    elif policy["schema_version"] in _CANDIDATE_POLICIES and service.get("secrets"):
+        manifest = _json(copy_container_bytes(container["Id"], policy["runtime_manifest_path"]))
+        expected_mounts = sorted([*expected_mounts, *_candidate_secret_mounts(manifest, policy, rendered)], key=lambda m: m["target"])
     if expected_mounts != _mounts(container):
         raise HostAuthorizationError("rendered mounts differ from actual container")
     if 'recovery' in policy:
@@ -1118,6 +1194,12 @@ def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapp
     secrets = [m for m in mounts if m["target"].startswith("/run/secrets/")] if policy["schema_version"] in _PRODUCTION_POLICIES else []
     if secrets and (len(secrets) != len(manifest["secret_references"]) or any(m["read_only"] is not True for m in secrets)):
         raise HostAuthorizationError("production secret mount permissions differ")
+    if policy["schema_version"] in _CANDIDATE_POLICIES:
+        secrets = [m for m in mounts if m["target"].startswith("/run/secrets/")]
+        if secrets:
+            declared = _candidate_secret_mounts(manifest, policy)
+            if sorted(secrets, key=lambda m: m["target"]) != sorted(declared, key=lambda m: m["target"]):
+                raise HostAuthorizationError("candidate secret mounts differ from exact readonly declarations")
     allowed = targets | {policy["grant_container_directory"]} | {m["target"] for m in secrets}
     if by_role or any(m["target"] not in allowed for m in mounts):
         raise HostAuthorizationError("undeclared runtime mount")

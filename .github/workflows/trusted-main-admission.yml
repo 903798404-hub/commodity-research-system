@@ -143,6 +143,10 @@ jobs:
         sudo "$python_bin" -I -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["TARGET_RUNTIME_CONTAINER_VALIDATION"]=="PASS"; e=p["spread_runtime_packaging"]; assert e["identity_kind"]=="EPHEMERAL_CI_CANDIDATE_VALIDATION_ROOT" and e["private_key_persisted"] is False and e["private_key_visible_to_container"] is False; assert not e["import_closure"]["missing_from_final_image"] and e["readonly_initialization"]["status"]=="PASS"; assert e["initialize_strict_page"]==e["app_test"]=="PASS"; assert len(e["lifecycle_imports"])==4 and set(e["lifecycle_imports"].values())=={"PASS"}' \
           "$RUNNER_TEMP/platform-results/linux/spread-runtime-hosted-evidence.json"
         sudo chmod 0644 "$RUNNER_TEMP/platform-results/linux/spread-runtime-hosted-evidence.json"
+        sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
+          "$source_root/08_tests/shared/runtime_release_record_e2e.py" \
+          --evidence "$RUNNER_TEMP/platform-results/linux/spread-runtime-hosted-evidence.json" \
+          --output "$RUNNER_TEMP/platform-results/linux/runtime-release-record-contract"
     - name: Execute required real Docker application service identity evidence
       working-directory: candidate
       run: |
