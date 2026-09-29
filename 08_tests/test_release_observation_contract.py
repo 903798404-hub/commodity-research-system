@@ -41,6 +41,21 @@ def test_hosted_fixture_prepares_nested_readonly_parent_mountpoints(tmp_path):
     assert not list(identity.rglob('*.*'))
 
 
+def test_hosted_recovery_render_uses_formal_sandbox_sources_and_keeps_access():
+    fixture = load('08_tests/shared/release_canonicalization_docker_e2e.py', 'hosted_recovery_fixture')
+    old = [dict(source='/baseline/state', target='/runtime/snapshot', read_only=True),
+           dict(source='/baseline/state', target='/runtime/capture', read_only=False)]
+    projected = [dict(item, source='/sandbox/state') for item in old]
+    values = dict(SNAPSHOT='/baseline/state', CAPTURE='/baseline/state', SECRET='/test/secret')
+    assert fixture.recovery_environment(values, old, projected) == dict(
+        SNAPSHOT='/sandbox/state', CAPTURE='/sandbox/state', SECRET='/test/secret')
+    assert values['SNAPSHOT'] == '/baseline/state'
+    wrong_access = copy.deepcopy(projected)
+    wrong_access[0]['read_only'] = False
+    with pytest.raises(AssertionError):
+        fixture.recovery_environment(values, old, wrong_access)
+
+
 @pytest.mark.parametrize('kind,identity', [('image', IMAGE), ('container', CID)])
 @pytest.mark.parametrize('raw', [b'[]', b'[{},{}]', b'[null]', b'{}', b'[{"Id":"wrong"}]',
     b'[{"Id":"a","Id":"b"}]', b'[{"Id":NaN}]', b'[{"Id":Infinity}]', b'[{"Id":1e999}]'])

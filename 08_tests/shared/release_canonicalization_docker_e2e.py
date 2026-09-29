@@ -76,6 +76,17 @@ def prepare_nested_mountpoints(manifest, sources):
         sources[identity['role']].joinpath(*relative.parts).mkdir(parents=True, exist_ok=True)
 
 
+def recovery_environment(values, old_mounts, recovery_mounts):
+    """Render declared Compose using sources already approved by sandbox_mounts."""
+    replacements = {}
+    for old in old_mounts:
+        new = next(item for item in recovery_mounts if item['target'] == old['target'])
+        assert new['read_only'] is old['read_only']
+        assert replacements.get(old['source'], new['source']) == new['source']
+        replacements[old['source']] = new['source']
+    return {key: replacements.get(value, value) for key, value in values.items()}
+
+
 def exercise(work, receipt):
     source = work / 'test-source'
     candidate = run('git', '-C', str(ROOT), 'rev-parse', 'HEAD')
@@ -129,6 +140,9 @@ def exercise(work, receipt):
     image_id = evidence['image_id']
     image = host.docker_image_inspect(image_id)  # real strict adapter, not a mock
     receipt['image_adapter'] = dict(status='PASS', image_id=image['Id'])
+    # These complete observations belong exclusively to generated test data.
+    # Never publish credential contents or either fixture private signing key.
+    receipt['raw_evidence'] = dict(image=image)
     allocation = Path('/var/lib/market-data/production-runtime') / ('hosted-canonicalization-' + uuid.uuid4().hex)
     allocation.parent.mkdir(parents=True, exist_ok=True)
     directory(allocation, 0o700)
@@ -182,9 +196,11 @@ def exercise(work, receipt):
         cid = run(*compose_cmd, 'ps', '-q', '--all', manifest['service_id'])
         assert re.fullmatch(r'[0-9a-f]{64}', cid)
         container = host.docker_inspect(cid)
+        receipt['raw_evidence']['baseline_created'] = container
         release_raw = host.copy_container_bytes(cid, '/app/RELEASE.json')
         observed = host.normalize_observation(container, image, host._json(release_raw))
         rendered = host._json(run(*compose_cmd, 'config', '--format', 'json').encode())
+        receipt['raw_evidence']['baseline_compose'] = rendered
         policy = dict(schema_version='host-runtime-policy/5', role='production', key_id=keys['production'][0],
             project_id=PROJECT, module_id=manifest['module_id'], service_id=manifest['service_id'],
             runtime_id='target-validation', approved_commit=receipt['synthetic_commit'], approved_tree=receipt['synthetic_tree'],
@@ -207,6 +223,7 @@ def exercise(work, receipt):
         host.issue_execution_grant(cid, expected_policy_path=baseline_path, key_path=keys['production'][2],
             grant_path=baseline_grants / 'grant.json', grant_dir=baseline_grants, role='production')
         run('docker', 'start', cid)
+        receipt['raw_evidence']['baseline_running'] = host.docker_inspect(cid)
         # Retain the actually running synthetic baseline, never pretend created
         # raw configuration remained unchanged on an unobserved platform.
         policy['actual_config_sha256'] = host.normalize_observation(host.docker_inspect(cid), image, host._json(release_raw))['actual_config_sha256']
@@ -232,20 +249,30 @@ def exercise(work, receipt):
         projected = recovery.sandbox_mounts(host, recovered, policy, check_files=False)
         recovered['mounts'] = [dict(m, source=str(grants)) if m['target'] == '/run/market-data-grants' else m for m in projected]
         built = recovery.build_sandbox(host, recovered)
-        projected_compose = recovery.project_compose(host, desired, recovered)
+        recovery_env = work / 'recovery.env'
+        recovery_values = recovery_environment(values, policy['mounts'], recovered['mounts'])
+        write(recovery_env, ''.join(f'{k}={v}\n' for k, v in recovery_values.items()).encode())
+        recovery_command = ['docker', 'compose', '--project-directory', str(source),
+            '--project-name', recovered['recovery']['project'], '--env-file', str(recovery_env)]
+        for relative in manifest['build']['compose_sources']:
+            recovery_command += ['-f', str(source / relative)]
+        recovery_desired = host._json(run(*recovery_command, 'config', '--format', 'json').encode())
+        projected_compose = recovery.project_compose(host, recovery_desired, recovered)
         projected_compose['services'][manifest['service_id']].pop('build', None)
         projected_compose['services'][manifest['service_id']]['hostname'] = nonce
         fresh_file = work / 'recovery-compose.json'
         write(fresh_file, host._canonical(projected_compose))
-        fresh_cmd = ['docker', 'compose', '--project-directory', str(work), '--env-file', str(env), '-f', str(fresh_file)]
+        fresh_cmd = ['docker', 'compose', '--project-directory', str(work), '--env-file', str(recovery_env), '-f', str(fresh_file)]
         run(*fresh_cmd, 'create', '--no-build')
         fresh = run(*fresh_cmd, 'ps', '-q', '--all', manifest['service_id'])
         c = host.docker_inspect(fresh)
+        receipt['raw_evidence']['recovery_created'] = c
         network = recovered['recovery']['network']
         network_id = host._observe('inspect_object', host._run_docker(['network', 'inspect', network]), 'network')['Id']
         recovered['recovery']['expected_network_id'] = network_id
         recovered.update(actual_config_sha256=host.normalize_observation(c, image, host._json(release_raw))['actual_config_sha256'],
             compose_sources=[dict(path=str(fresh_file), sha256=hashlib.sha256(fresh_file.read_bytes()).hexdigest())],
+            compose_environment_file=str(recovery_env),
             rendered_compose_sha256=host._digest(host._json(run(*fresh_cmd, 'config', '--format', 'json').encode())))
         recovery_path = work / 'recovery-policy.json'
         write(recovery_path, host._canonical(recovered))
@@ -253,7 +280,11 @@ def exercise(work, receipt):
         host.issue_execution_grant(fresh, expected_policy_path=recovery_path, key_path=keys['production'][2],
             grant_path=grant_path, grant_dir=grants, role='production')
         grant_raw = grant_path.read_bytes()
+        receipt['raw_evidence']['signed_grant'] = host._json(grant_raw)
+        receipt['raw_evidence']['recovery_compose'] = host._json(
+            run(*fresh_cmd, 'config', '--format', 'json').encode())
         run('docker', 'start', fresh)
+        receipt['raw_evidence']['recovery_running'] = host.docker_inspect(fresh)
         post = host.validate_recovery_post_start(fresh, expected_policy_path=recovery_path,
             grant_path=grant_path, key_path=keys['production'][2])
         assert grant_path.read_bytes() == grant_raw
@@ -300,11 +331,14 @@ def exercise(work, receipt):
         receipt['formal_high_risk_assessment'] = dict(execution='PASS', release_gate='FAIL',
             production_authorized=False, reason='Complete release recovery observation intentionally NOT_PROVEN')
     finally:
+        receipt['cleanup'] = []
         for instance in (fresh, cid):
             if instance:
                 run('docker', 'rm', '--force', instance)
+                receipt['cleanup'].append(dict(kind='container', identity=instance, result='PASS'))
         if network:
             run('docker', 'network', 'rm', network)
+            receipt['cleanup'].append(dict(kind='network', identity=network, result='PASS'))
         # Retained nonsecret receipts remain; fixture private keys are not artifacts.
         for _, _, path in keys.values():
             path.unlink()
