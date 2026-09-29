@@ -1287,7 +1287,7 @@ def test_recovery_fresh_grant_preserves_old_image_protocol_and_instance_binding(
 
 
 @pytest.mark.parametrize('fault',[None,'network-policy-changed','grant-tampered','not-running',
-    'oom-supported','oom-unsupported','oom-plus-user','oom-plus-mount'])
+    'oom-supported','oom-unsupported','oom-plus-user','oom-plus-mount','oom-28-supported'])
 def test_recovery_post_start_requires_signed_grant_network_commitment(tmp_path,monkeypatch,fault):
     p,c,image,rendered,file,key,grants,manifest,marker,release,identity=signing_fixture(
         tmp_path,monkeypatch,'production',2)
@@ -1331,11 +1331,12 @@ def test_recovery_post_start_requires_signed_grant_network_commitment(tmp_path,m
         c['HostConfig']['OomKillDisable'] = None
         transport = host._run_docker
         platform = SEMANTIC_PLATFORM if fault != 'oom-unsupported' else dict(ServerVersion='27.0.0', CgroupVersion='2')
+        if fault == 'oom-28-supported': platform = dict(ServerVersion='28.0.4', CgroupVersion='2')
         monkeypatch.setattr(host, '_run_docker', lambda args, **kw: host._canonical(platform)
             if args[0] == 'info' else transport(args, **kw))
         if fault == 'oom-plus-user': c['Config']['User'] = '65533:65533'
         if fault == 'oom-plus-mount': c['Mounts'][0]['RW'] = not c['Mounts'][0]['RW']
-    if fault not in (None, 'oom-supported'):
+    if fault not in (None, 'oom-supported', 'oom-28-supported'):
         with pytest.raises(host.HostAuthorizationError):
             host.validate_recovery_post_start(CID,expected_policy_path=file,grant_path=grant_file,key_path=key)
     else:

@@ -289,6 +289,19 @@ def exercise(work, receipt):
             grant_path=grant_path, key_path=keys['production'][2])
         assert grant_path.read_bytes() == grant_raw
         assert post['POST_START_NETWORK_IDENTITY_VALIDATION'] == 'PASS'
+        before = receipt['raw_evidence']['recovery_created']
+        after = receipt['raw_evidence']['recovery_running']
+        assert before['Id'] == after['Id'] == fresh
+        assert before['State']['Status'] == 'created' and after['State']['Status'] == 'running'
+        assert before['HostConfig']['OomKillDisable'] is False
+        assert 'OomKillDisable' in after['HostConfig'] and after['HostConfig']['OomKillDisable'] is None
+        comparison = post['config_comparison']
+        assert comparison['raw_hash_match'] is False and comparison['semantic_config_match'] is True
+        assert comparison['matched_platform'] == 'Docker 28.0.4 / cgroup 2'
+        assert comparison['normalized_field'] == 'HostConfig.OomKillDisable'
+        receipt['created_running_transition'] = dict(container_id=fresh,
+            unique_difference='HostConfig.OomKillDisable', created=False, running=None,
+            comparison=comparison)
         receipt['formal_post_start'] = post
         receipt['sandbox'] = dict(status='PASS', production_before=built['production_before'], production_after=built['production_after'])
         receipt['signed_record'] = dict(status='PASS', sha256=hashlib.sha256(record_raw).hexdigest(), synthetic_binding=evidence['binding'])
@@ -350,11 +363,19 @@ def main():
     args = parser.parse_args()
     assert sys.platform == 'linux' and os.geteuid() == 0 and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
     work = directory(Path('/root') / ('hosted-release-canonicalization-' + uuid.uuid4().hex), 0o700)
-    receipt = dict(status='STARTED', docker_platform=json.loads(run('docker', 'info', '--format', 'json')),
+    info = json.loads(run('docker', 'info', '--format', 'json'))
+    version = json.loads(run('docker', 'version', '--format', '{{json .Server}}'))
+    receipt = dict(status='STARTED', docker_platform=info,
+        engine_environment={k: info.get(k) for k in ('ServerVersion', 'CgroupVersion', 'CgroupDriver',
+            'KernelVersion', 'OperatingSystem', 'OSType', 'Architecture')},
+        server_api={k: version.get(k) for k in ('Version', 'ApiVersion', 'MinAPIVersion', 'GitCommit', 'Os', 'Arch')},
         production_acceptance='NOT_EXECUTED', production_authorized=False)
     # Restrict public platform evidence to the rule's actual inputs.
     receipt['docker_platform'] = {k: receipt['docker_platform'].get(k) for k in ('ServerVersion', 'CgroupVersion', 'CgroupDriver')}
     try:
+        if (info.get('ServerVersion') != '28.0.4' or info.get('CgroupVersion') != '2'
+                or version.get('Version') != info.get('ServerVersion')):
+            raise RuntimeError('Actual Engine/cgroup is not the exact 28.0.4 / 2 evidence platform')
         exercise(work, receipt)
         receipt['status'] = 'PASS'
     except Exception as exc:

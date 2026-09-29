@@ -1,0 +1,480 @@
+{
+  "source_run": "36529881867",
+  "source_receipt_sha256": "5e435000442a5e4e59dc310393dd6b97b825947ddd201f77c19f8a61a839bb02",
+  "container_id": "c5a3445952be99ec988d9322e89793dd8b7d98107fb4a594d9f5144a1e88e9f5",
+  "platform": {
+    "CgroupDriver": "systemd",
+    "CgroupVersion": "2",
+    "ServerVersion": "28.0.4"
+  },
+  "created_raw_sha256": "965d13a3d316264562535ae6b48e8c6781ff14c7579585366657119ff8951374",
+  "running_raw_sha256": "ddec374682fcdeaef7b35b7ec6359e1033ef3e5f80a2b0f7e161b834c3178262",
+  "created": {
+    "config": {
+      "AttachStderr": true,
+      "AttachStdin": false,
+      "AttachStdout": true,
+      "Cmd": null,
+      "Domainname": "",
+      "Entrypoint": [
+        "streamlit",
+        "run",
+        "05_apps/streamlit_app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501"
+      ],
+      "Env": [
+        "USDA_DASHBOARD_URL=https://hosted-test.invalid/",
+        "MARKET_DATA_EXECUTION_GRANT=/run/market-data-grants/grant.json",
+        "MPLCONFIGDIR=/runtime/10_logs/matplotlib",
+        "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH=/runtime/import-profit/operational/cnf/manual_cnf_quotes.parquet",
+        "OIL_WORLD_DASHBOARD_URL=https://hosted-test.invalid/",
+        "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE=1",
+        "PUBLIC_DATA_SERVER_STORE_ROOT=/runtime/01_data/public-data-server-store",
+        "IMPORT_PROFIT_INTRADAY_RESULT_ROOT=/runtime/import-profit/results",
+        "PUBLIC_MARKET_DATA_RUNTIME_ROOT=/runtime/01_data",
+        "IMPORT_PROFIT_RUNTIME_ROOT=/runtime/import-profit/history",
+        "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT=/runtime/import-profit/operational/am-results",
+        "TMPDIR=/runtime/10_logs",
+        "HOME=/runtime/06_outputs",
+        "IMPORT_PROFIT_INTRADAY_ENVIRONMENT=FORMAL",
+        "IMPORT_PROFIT_CONFIG_PATH=/app/02_configs/import_profit_soybean.yaml",
+        "IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH=/runtime/import-profit/cnf/historical_cnf_cache.parquet",
+        "IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT=/runtime/import-profit/snapshots",
+        "IMPORT_PROFIT_INTRADAY_PAGE_MODE=STRICT_RUNTIME",
+        "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG=C.UTF-8",
+        "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+        "PYTHON_VERSION=3.12.13",
+        "PYTHON_SHA256=c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "PYTHONUNBUFFERED=1",
+        "MARKET_DATA_GIT_HEAD=906f2b28d153b97ac7ca6b5a4fa71e26fe0ee6c7",
+        "MARKET_DATA_GIT_TREE=6cb3dcffb9283f116b2f754ed7d1e5152c46408b",
+        "PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple",
+        "PIP_DEFAULT_TIMEOUT=120",
+        "PYTHONPATH=/app/03_src"
+      ],
+      "ExposedPorts": {
+        "8501/tcp": {}
+      },
+      "Hostname": "00779b01c5f349f8826ce5d22460bf20",
+      "Image": "sha256:6b86a1d8e27a0d1d3c87e8b69cfa6c36895f349e06762b1a0b1b356bc19afc61",
+      "Labels": {
+        "com.docker.compose.config-hash": "770ca0988a5e2fa6e7d912a82e37bef45c83e78679789449e1d69749b6d8fb00",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "",
+        "com.docker.compose.image": "sha256:6b86a1d8e27a0d1d3c87e8b69cfa6c36895f349e06762b1a0b1b356bc19afc61",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "spread-recovery-00779b01c5f349f8826ce5d22460bf20",
+        "com.docker.compose.project.config_files": "/root/hosted-release-canonicalization-2ab51ed2909a46288cf5717107989d02/recovery-compose.json",
+        "com.docker.compose.project.environment_file": "/root/hosted-release-canonicalization-2ab51ed2909a46288cf5717107989d02/recovery.env",
+        "com.docker.compose.project.working_dir": "/root/hosted-release-canonicalization-2ab51ed2909a46288cf5717107989d02",
+        "com.docker.compose.service": "spread-dashboard",
+        "com.docker.compose.version": "2.38.2",
+        "market-data.artifact.origin": "candidate",
+        "market-data.artifact.promotable": "true",
+        "market-data.deployment.role": "candidate",
+        "market-data.git.tree": "6cb3dcffb9283f116b2f754ed7d1e5152c46408b",
+        "market-data.release.id": "spread-dashboard-20260929-906f2b28d153-b01",
+        "market-data.service": "spread-dashboard",
+        "org.opencontainers.image.created": "2026-09-29T06:22:56.542790+00:00",
+        "org.opencontainers.image.revision": "906f2b28d153b97ac7ca6b5a4fa71e26fe0ee6c7",
+        "org.opencontainers.image.source": "target-runtime-validator/2",
+        "org.opencontainers.image.version": "spread-dashboard-20260929-906f2b28d153-b01"
+      },
+      "OnBuild": null,
+      "OpenStdin": false,
+      "StdinOnce": false,
+      "Tty": false,
+      "User": "65532:65532",
+      "Volumes": null,
+      "WorkingDir": "/app"
+    },
+    "host_config": {
+      "AutoRemove": false,
+      "Binds": [
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-0:/runtime/06_outputs:rw",
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-1:/runtime/10_logs:rw",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/recovery-grants:/run/market-data-grants:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/data:/runtime/01_data:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/history:/runtime/import-profit/history:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/cnf:/runtime/import-profit/cnf:ro",
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-2:/runtime/import-profit/snapshots:ro",
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-2:/runtime/capture-snapshots:rw",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/identity:/runtime:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/weather:/runtime/weather:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/results:/runtime/import-profit/results:ro"
+      ],
+      "BlkioDeviceReadBps": null,
+      "BlkioDeviceReadIOps": null,
+      "BlkioDeviceWriteBps": null,
+      "BlkioDeviceWriteIOps": null,
+      "BlkioWeight": 0,
+      "BlkioWeightDevice": null,
+      "CapAdd": null,
+      "CapDrop": [
+        "ALL"
+      ],
+      "Cgroup": "",
+      "CgroupParent": "",
+      "CgroupnsMode": "private",
+      "ConsoleSize": [
+        0,
+        0
+      ],
+      "ContainerIDFile": "",
+      "CpuCount": 0,
+      "CpuPercent": 0,
+      "CpuPeriod": 0,
+      "CpuQuota": 0,
+      "CpuRealtimePeriod": 0,
+      "CpuRealtimeRuntime": 0,
+      "CpuShares": 0,
+      "CpusetCpus": "",
+      "CpusetMems": "",
+      "DeviceCgroupRules": null,
+      "DeviceRequests": null,
+      "Devices": null,
+      "Dns": null,
+      "DnsOptions": null,
+      "DnsSearch": null,
+      "ExtraHosts": [],
+      "GroupAdd": null,
+      "IOMaximumBandwidth": 0,
+      "IOMaximumIOps": 0,
+      "IpcMode": "private",
+      "Isolation": "",
+      "Links": null,
+      "LogConfig": {
+        "Config": {},
+        "Type": "json-file"
+      },
+      "MaskedPaths": [
+        "/proc/asound",
+        "/proc/acpi",
+        "/proc/interrupts",
+        "/proc/kcore",
+        "/proc/keys",
+        "/proc/latency_stats",
+        "/proc/timer_list",
+        "/proc/timer_stats",
+        "/proc/sched_debug",
+        "/proc/scsi",
+        "/sys/firmware",
+        "/sys/devices/virtual/powercap"
+      ],
+      "Memory": 0,
+      "MemoryReservation": 0,
+      "MemorySwap": 0,
+      "MemorySwappiness": null,
+      "Mounts": [
+        {
+          "BindOptions": {},
+          "ReadOnly": true,
+          "Source": "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/secrets/tankan-reader",
+          "Target": "/run/secrets/tankan.env",
+          "Type": "bind"
+        },
+        {
+          "BindOptions": {},
+          "ReadOnly": true,
+          "Source": "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/secrets/market-data-service",
+          "Target": "/run/secrets/market-data-service.json",
+          "Type": "bind"
+        },
+        {
+          "BindOptions": {},
+          "Source": "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-4",
+          "Target": "/runtime/import-profit/operational/cnf",
+          "Type": "bind"
+        },
+        {
+          "BindOptions": {},
+          "Source": "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-3",
+          "Target": "/runtime/import-profit/operational/am-results",
+          "Type": "bind"
+        }
+      ],
+      "NanoCpus": 0,
+      "NetworkMode": "spread-recovery-00779b01c5f349f8826ce5d22460bf20-net",
+      "OomKillDisable": false,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "PidsLimit": null,
+      "PortBindings": {
+        "8501/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "18541"
+          }
+        ]
+      },
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyPaths": [
+        "/proc/bus",
+        "/proc/fs",
+        "/proc/irq",
+        "/proc/sys",
+        "/proc/sysrq-trigger"
+      ],
+      "ReadonlyRootfs": true,
+      "RestartPolicy": {
+        "MaximumRetryCount": 0,
+        "Name": "unless-stopped"
+      },
+      "Runtime": "runc",
+      "SecurityOpt": [
+        "no-new-privileges:true"
+      ],
+      "ShmSize": 67108864,
+      "UTSMode": "",
+      "Ulimits": null,
+      "UsernsMode": "",
+      "VolumeDriver": "",
+      "VolumesFrom": null
+    },
+    "path": "streamlit",
+    "args": [
+      "run",
+      "05_apps/streamlit_app.py",
+      "--server.address=0.0.0.0",
+      "--server.port=8501"
+    ]
+  },
+  "running": {
+    "config": {
+      "AttachStderr": true,
+      "AttachStdin": false,
+      "AttachStdout": true,
+      "Cmd": null,
+      "Domainname": "",
+      "Entrypoint": [
+        "streamlit",
+        "run",
+        "05_apps/streamlit_app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501"
+      ],
+      "Env": [
+        "USDA_DASHBOARD_URL=https://hosted-test.invalid/",
+        "MARKET_DATA_EXECUTION_GRANT=/run/market-data-grants/grant.json",
+        "MPLCONFIGDIR=/runtime/10_logs/matplotlib",
+        "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH=/runtime/import-profit/operational/cnf/manual_cnf_quotes.parquet",
+        "OIL_WORLD_DASHBOARD_URL=https://hosted-test.invalid/",
+        "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE=1",
+        "PUBLIC_DATA_SERVER_STORE_ROOT=/runtime/01_data/public-data-server-store",
+        "IMPORT_PROFIT_INTRADAY_RESULT_ROOT=/runtime/import-profit/results",
+        "PUBLIC_MARKET_DATA_RUNTIME_ROOT=/runtime/01_data",
+        "IMPORT_PROFIT_RUNTIME_ROOT=/runtime/import-profit/history",
+        "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT=/runtime/import-profit/operational/am-results",
+        "TMPDIR=/runtime/10_logs",
+        "HOME=/runtime/06_outputs",
+        "IMPORT_PROFIT_INTRADAY_ENVIRONMENT=FORMAL",
+        "IMPORT_PROFIT_CONFIG_PATH=/app/02_configs/import_profit_soybean.yaml",
+        "IMPORT_PROFIT_PREVIEW_HISTORICAL_CNF_PATH=/runtime/import-profit/cnf/historical_cnf_cache.parquet",
+        "IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT=/runtime/import-profit/snapshots",
+        "IMPORT_PROFIT_INTRADAY_PAGE_MODE=STRICT_RUNTIME",
+        "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG=C.UTF-8",
+        "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+        "PYTHON_VERSION=3.12.13",
+        "PYTHON_SHA256=c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "PYTHONUNBUFFERED=1",
+        "MARKET_DATA_GIT_HEAD=906f2b28d153b97ac7ca6b5a4fa71e26fe0ee6c7",
+        "MARKET_DATA_GIT_TREE=6cb3dcffb9283f116b2f754ed7d1e5152c46408b",
+        "PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple",
+        "PIP_DEFAULT_TIMEOUT=120",
+        "PYTHONPATH=/app/03_src"
+      ],
+      "ExposedPorts": {
+        "8501/tcp": {}
+      },
+      "Hostname": "00779b01c5f349f8826ce5d22460bf20",
+      "Image": "sha256:6b86a1d8e27a0d1d3c87e8b69cfa6c36895f349e06762b1a0b1b356bc19afc61",
+      "Labels": {
+        "com.docker.compose.config-hash": "770ca0988a5e2fa6e7d912a82e37bef45c83e78679789449e1d69749b6d8fb00",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "",
+        "com.docker.compose.image": "sha256:6b86a1d8e27a0d1d3c87e8b69cfa6c36895f349e06762b1a0b1b356bc19afc61",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "spread-recovery-00779b01c5f349f8826ce5d22460bf20",
+        "com.docker.compose.project.config_files": "/root/hosted-release-canonicalization-2ab51ed2909a46288cf5717107989d02/recovery-compose.json",
+        "com.docker.compose.project.environment_file": "/root/hosted-release-canonicalization-2ab51ed2909a46288cf5717107989d02/recovery.env",
+        "com.docker.compose.project.working_dir": "/root/hosted-release-canonicalization-2ab51ed2909a46288cf5717107989d02",
+        "com.docker.compose.service": "spread-dashboard",
+        "com.docker.compose.version": "2.38.2",
+        "market-data.artifact.origin": "candidate",
+        "market-data.artifact.promotable": "true",
+        "market-data.deployment.role": "candidate",
+        "market-data.git.tree": "6cb3dcffb9283f116b2f754ed7d1e5152c46408b",
+        "market-data.release.id": "spread-dashboard-20260929-906f2b28d153-b01",
+        "market-data.service": "spread-dashboard",
+        "org.opencontainers.image.created": "2026-09-29T06:22:56.542790+00:00",
+        "org.opencontainers.image.revision": "906f2b28d153b97ac7ca6b5a4fa71e26fe0ee6c7",
+        "org.opencontainers.image.source": "target-runtime-validator/2",
+        "org.opencontainers.image.version": "spread-dashboard-20260929-906f2b28d153-b01"
+      },
+      "OnBuild": null,
+      "OpenStdin": false,
+      "StdinOnce": false,
+      "Tty": false,
+      "User": "65532:65532",
+      "Volumes": null,
+      "WorkingDir": "/app"
+    },
+    "host_config": {
+      "AutoRemove": false,
+      "Binds": [
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-0:/runtime/06_outputs:rw",
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-1:/runtime/10_logs:rw",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/recovery-grants:/run/market-data-grants:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/data:/runtime/01_data:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/history:/runtime/import-profit/history:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/cnf:/runtime/import-profit/cnf:ro",
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-2:/runtime/import-profit/snapshots:ro",
+        "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-2:/runtime/capture-snapshots:rw",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/identity:/runtime:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/weather:/runtime/weather:ro",
+        "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/results:/runtime/import-profit/results:ro"
+      ],
+      "BlkioDeviceReadBps": null,
+      "BlkioDeviceReadIOps": null,
+      "BlkioDeviceWriteBps": null,
+      "BlkioDeviceWriteIOps": null,
+      "BlkioWeight": 0,
+      "BlkioWeightDevice": null,
+      "CapAdd": null,
+      "CapDrop": [
+        "ALL"
+      ],
+      "Cgroup": "",
+      "CgroupParent": "",
+      "CgroupnsMode": "private",
+      "ConsoleSize": [
+        0,
+        0
+      ],
+      "ContainerIDFile": "",
+      "CpuCount": 0,
+      "CpuPercent": 0,
+      "CpuPeriod": 0,
+      "CpuQuota": 0,
+      "CpuRealtimePeriod": 0,
+      "CpuRealtimeRuntime": 0,
+      "CpuShares": 0,
+      "CpusetCpus": "",
+      "CpusetMems": "",
+      "DeviceCgroupRules": null,
+      "DeviceRequests": null,
+      "Devices": null,
+      "Dns": null,
+      "DnsOptions": null,
+      "DnsSearch": null,
+      "ExtraHosts": [],
+      "GroupAdd": null,
+      "IOMaximumBandwidth": 0,
+      "IOMaximumIOps": 0,
+      "IpcMode": "private",
+      "Isolation": "",
+      "Links": null,
+      "LogConfig": {
+        "Config": {},
+        "Type": "json-file"
+      },
+      "MaskedPaths": [
+        "/proc/asound",
+        "/proc/acpi",
+        "/proc/interrupts",
+        "/proc/kcore",
+        "/proc/keys",
+        "/proc/latency_stats",
+        "/proc/timer_list",
+        "/proc/timer_stats",
+        "/proc/sched_debug",
+        "/proc/scsi",
+        "/sys/firmware",
+        "/sys/devices/virtual/powercap"
+      ],
+      "Memory": 0,
+      "MemoryReservation": 0,
+      "MemorySwap": 0,
+      "MemorySwappiness": null,
+      "Mounts": [
+        {
+          "BindOptions": {},
+          "ReadOnly": true,
+          "Source": "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/secrets/tankan-reader",
+          "Target": "/run/secrets/tankan.env",
+          "Type": "bind"
+        },
+        {
+          "BindOptions": {},
+          "ReadOnly": true,
+          "Source": "/var/lib/market-data/production-runtime/hosted-canonicalization-a6ddd1e7198e408080d1a3c39e84e845/secrets/market-data-service",
+          "Target": "/run/secrets/market-data-service.json",
+          "Type": "bind"
+        },
+        {
+          "BindOptions": {},
+          "Source": "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-4",
+          "Target": "/runtime/import-profit/operational/cnf",
+          "Type": "bind"
+        },
+        {
+          "BindOptions": {},
+          "Source": "/var/lib/market-data/recovery-sandboxes/00779b01c5f349f8826ce5d22460bf20/root-3",
+          "Target": "/runtime/import-profit/operational/am-results",
+          "Type": "bind"
+        }
+      ],
+      "NanoCpus": 0,
+      "NetworkMode": "spread-recovery-00779b01c5f349f8826ce5d22460bf20-net",
+      "OomKillDisable": null,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "PidsLimit": null,
+      "PortBindings": {
+        "8501/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "18541"
+          }
+        ]
+      },
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyPaths": [
+        "/proc/bus",
+        "/proc/fs",
+        "/proc/irq",
+        "/proc/sys",
+        "/proc/sysrq-trigger"
+      ],
+      "ReadonlyRootfs": true,
+      "RestartPolicy": {
+        "MaximumRetryCount": 0,
+        "Name": "unless-stopped"
+      },
+      "Runtime": "runc",
+      "SecurityOpt": [
+        "no-new-privileges:true"
+      ],
+      "ShmSize": 67108864,
+      "UTSMode": "",
+      "Ulimits": null,
+      "UsernsMode": "",
+      "VolumeDriver": "",
+      "VolumesFrom": null
+    },
+    "path": "streamlit",
+    "args": [
+      "run",
+      "05_apps/streamlit_app.py",
+      "--server.address=0.0.0.0",
+      "--server.port=8501"
+    ]
+  }
+}

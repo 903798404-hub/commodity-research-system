@@ -173,9 +173,15 @@ def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
                     semantic_config_match=True, compatibility_rule=None, platform=dict(platform or {}))
     if evidence["raw_hash_match"]:
         return evidence
-    if not platform or platform.get("ServerVersion") != "26.1.3" or platform.get("CgroupVersion") != "2":
+    version = (platform or {}).get("ServerVersion")
+    if not platform or version not in {"26.1.3", "28.0.4"} or platform.get("CgroupVersion") != "2":
         raise HostAuthorizationError("config mismatch: unsupported Docker/cgroup compatibility evidence")
     left, right = _json(_canonical(policy_payload)), _json(_canonical(actual_payload))
+    if version == "28.0.4":
+        before, after = left.get("host_config", {}), right.get("host_config", {})
+        if ("OomKillDisable" not in before or "OomKillDisable" not in after
+                or before["OomKillDisable"] is not False or after["OomKillDisable"] is not None):
+            raise HostAuthorizationError("config mismatch: 28.0.4 requires created false to running explicit null")
     for payload in (left, right):
         host = payload.get("host_config", {})
         if "OomKillDisable" not in host or not (host["OomKillDisable"] is False or host["OomKillDisable"] is None):
@@ -184,6 +190,9 @@ def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
     if _canonical(left) != _canonical(right):
         raise HostAuthorizationError("config mismatch outside OomKillDisable false/null")
     evidence["compatibility_rule"] = "OOM_KILL_DISABLE_FALSE_NULL_EQUIVALENCE"
+    if version == "28.0.4":
+        evidence.update(matched_platform="Docker 28.0.4 / cgroup 2",
+                        normalized_field="HostConfig.OomKillDisable")
     return evidence
 
 
@@ -205,6 +214,12 @@ def compare_observed_config(observed: Mapping, policy_raw_sha256: str) -> dict:
         raise HostAuthorizationError("reconstructed config does not reproduce sealed raw hash")
     info = _json(_run_docker(["info", "--format", "json"]))
     platform = {key: info.get(key) for key in ("ServerVersion", "CgroupVersion", "CgroupDriver")}
+    if platform.get("ServerVersion") == "28.0.4":
+        state = observed.get("state", {})
+        if (state.get("Status") != "running" or state.get("Running") is not True
+                or not isinstance(observed.get("container_id"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", observed["container_id"])):
+            raise HostAuthorizationError("28.0.4 compatibility requires the bound running instance")
     return compare_config_payloads(reconstructed, actual, policy_raw_sha256=policy_raw_sha256,
                                    actual_raw_sha256=actual_hash, platform=platform)
 
