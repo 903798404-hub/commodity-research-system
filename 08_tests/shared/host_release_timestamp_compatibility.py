@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
+import linecache
 import os
 from pathlib import Path
 import platform
@@ -42,7 +43,11 @@ def exercise(args, receipt):
     base_raw = git("show", args.base + ":" + RUNTIME)
     baseline = ModuleType("timestamp_baseline_release")
     baseline.__file__ = str(ROOT / RUNTIME)
-    exec(compile(base_raw, baseline.__file__, "exec"), baseline.__dict__)
+    # Traceback must show the baseline's actual lines, not today's candidate
+    # file at the same path/line number. __file__ still supplies its source ROOT.
+    baseline_label = "git:" + args.base + ":" + RUNTIME
+    linecache.cache[baseline_label] = (len(base_raw), None, base_raw.decode("utf-8").splitlines(True), baseline_label)
+    exec(compile(base_raw, baseline_label, "exec"), baseline.__dict__)
     grant_path = "03_src/agri_research_agent/shared/production_grant.py"
     assert git("show", args.base + ":" + grant_path) == git("show", "HEAD:" + grant_path)
     assert not git("diff", "HEAD", "--", grant_path), "grant parser must remain unchanged"
@@ -74,9 +79,14 @@ def exercise(args, receipt):
         receipt["original_input_formal_recovery_validation"] = "PASS"
         receipt["original_input"] = dict(created_at=fixtures.ORIGINAL_CREATED, started_at=fixtures.ORIGINAL_STARTED)
         receipt["fixture_raw_hashes_preserved"] = before
-    result = subprocess.run([sys.executable, "-I", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "08_tests/shared/test_host_release_timestamps.py",
-        "08_tests/test_pre_release_runtime.py::test_recovery_requires_fresh_signed_grant_and_bound_real_probes",
+    selectors = ["08_tests/shared/test_host_release_timestamps.py"]
+    # Preserve the original application's fixture regression on its supported
+    # version; host-only fixtures above cover the same formal verifier negatives
+    # on 3.10 without importing the application's StrEnum-based identity module.
+    if sys.version_info[:2] == (3, 12):
+        selectors.append("08_tests/test_pre_release_runtime.py::test_recovery_requires_fresh_signed_grant_and_bound_real_probes")
+    receipt["host_test_selectors"] = selectors
+    result = subprocess.run([sys.executable, "-I", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider", *selectors,
         "--junitxml=" + str(args.output.with_suffix(".junit.xml"))], cwd=ROOT, check=False)
     assert result.returncode == 0, "host compatibility regressions failed"
     receipt["formal_boundary_regressions"] = "PASS"

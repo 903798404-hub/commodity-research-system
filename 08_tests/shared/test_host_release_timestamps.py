@@ -27,7 +27,7 @@ def load_runtime():
 
 def recovery_fixture(root, runtime, *, created=ORIGINAL_CREATED, started=ORIGINAL_STARTED,
                      issued="2026-09-29T10:11:00+00:00", expires="2026-09-29T11:11:00+00:00",
-                     observed="2026-09-29T10:13:21.949559+00:00", envelope=None, trust=None):
+                     observed="2026-09-29T10:13:21.949559+00:00", envelope=None, trust=None, grant_role="production"):
     """Generate bound test probes; optionally retain a Hosted test grant verbatim.
 
     Probe bodies are explicitly fixtures, not claims of production acceptance.
@@ -37,7 +37,7 @@ def recovery_fixture(root, runtime, *, created=ORIGINAL_CREATED, started=ORIGINA
     if envelope is None:
         key = Ed25519PrivateKey.generate()
         payload = dict(grant_id="a" * 32, issued_at=issued, expires_at=expires,
-            identity_kind="oci_container", authorization_mode="production", artifact_origin="candidate", role="production",
+            identity_kind="oci_container", authorization_mode=grant_role, artifact_origin="candidate", role=grant_role,
             project_id="identity-fixture", module_id="shared-runtime", service_id="fixture-service", runtime_id="formal-runtime",
             approved_commit="a" * 40, approved_tree="b" * 40, release_commit="a" * 40, release_tree="b" * 40,
             image_id="sha256:" + "c" * 64, release_sha256="1" * 64, runtime_manifest_sha256="2" * 64,
@@ -136,3 +136,43 @@ def test_offset_equivalence_and_integer_precision_before_epoch():
     parse = runtime._docker_timestamp_nanoseconds
     assert parse("1969-12-31T23:59:59.999999999Z", "created_at") == -1
     assert parse("2026-09-29T10:11:00.000000001Z", "created_at") - parse("2026-09-29T18:11:00+08:00", "created_at") == 1
+
+
+@pytest.mark.parametrize("mutation", [None, "expired-start", "wrong-instance", "failed-consumer", "wrong-probe-tree",
+                                    "signature", "revoked", "candidate-role", "sandbox-without-policy"])
+def test_host_only_formal_signature_identity_and_probe_contract(tmp_path, mutation):
+    """Same negative coverage without the Python 3.12 application's StrEnum fixture."""
+    runtime = load_runtime()
+    recovery, host, paths = recovery_fixture(tmp_path, runtime,
+        grant_role="candidate_validation" if mutation == "candidate-role" else "production",
+        started="2026-09-29T11:11:00.000000001Z" if mutation == "expired-start" else ORIGINAL_STARTED)
+    def mutate(path, transform, reference=None):
+        value = json.loads(path.read_bytes())
+        transform(value)
+        raw = json.dumps(value, sort_keys=True).encode()
+        path.write_bytes(raw)
+        if reference is not None:
+            reference["sha256"] = hashlib.sha256(raw).hexdigest()
+    if mutation == "revoked":
+        mutate(paths[0], lambda value: value["revoked_grant_ids"].append("a" * 32))
+    if mutation == "signature":
+        ref = recovery["evidence"]["grant"]
+        mutate(Path(ref["path"]), lambda value: value.update(signature=base64.b64encode(b"0" * 64).decode()), ref)
+    if mutation == "wrong-instance":
+        ref = recovery["evidence"]["instance"]
+        mutate(Path(ref["path"]), lambda value: value.update(container_id="f" * 64), ref)
+    if mutation in {"failed-consumer", "wrong-probe-tree"}:
+        ref = recovery["evidence"]["consumer" if mutation == "failed-consumer" else "preflight"]
+        change = {"exit_code": 1} if mutation == "failed-consumer" else {"tree": "e" * 40}
+        mutate(Path(ref["path"]), lambda value: value.update(change), ref)
+    if mutation == "sandbox-without-policy":
+        ref = recovery["evidence"]["data_unchanged"]
+        probe = json.loads(Path(ref["path"]).read_bytes())
+        raw_ref = probe["raw"]
+        mutate(Path(raw_ref["path"]), lambda value: value.update(sandbox_preservation={}), raw_ref)
+        mutate(Path(ref["path"]), lambda value: value.update(raw=raw_ref), ref)
+    if mutation is None:
+        runtime.verify_recovery_observation(recovery, host)
+    else:
+        with pytest.raises(runtime.PreReleaseError):
+            runtime.verify_recovery_observation(recovery, host)
