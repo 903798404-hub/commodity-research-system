@@ -8,6 +8,7 @@ validators so a caller cannot turn a hand-crafted mapping into authorization.
 from __future__ import annotations
 
 import io
+from functools import lru_cache
 import importlib.util
 import json
 import hashlib
@@ -38,6 +39,19 @@ MANIFEST_CONTRACT_PATH = SOURCE_ROOT / "03_src" / "agri_research_agent" / "share
 CANDIDATE_SCOPE_PARENT = "/tmp/market-data-candidate-scopes"
 
 
+@lru_cache(maxsize=1)
+def _observation():
+    return _contract_module(Path(__file__).with_name("runtime_observation.py"), "_host_runtime_observation")
+
+
+def _observe(name, *args, **kwargs):
+    module = _observation()
+    try:
+        return getattr(module, name)(*args, **kwargs)
+    except module.ObservationError as exc:
+        raise HostAuthorizationError(str(exc)) from exc
+
+
 def _run_docker(args: Sequence[str], *, runner=None) -> bytes:
     command = ["docker", *args]
     if runner is not None:
@@ -61,35 +75,14 @@ def _container_id(value: str) -> str:
 
 
 def docker_inspect(container_id: str, *, runner=None) -> dict[str, Any]:
-    """Return exactly one actual Docker container inspection."""
     cid = _container_id(container_id)
-    raw = _run_docker(["container", "inspect", cid], runner=runner)
-    try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise HostAuthorizationError("docker inspect returned invalid JSON") from exc
-    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
-        raise HostAuthorizationError("docker inspect must return exactly one container")
-    actual = value[0]
-    if actual.get("Id") != cid:
-        raise HostAuthorizationError("docker inspect container ID mismatch")
-    return actual
+    return _observe("inspect_object", _run_docker(["container", "inspect", cid], runner=runner), "docker container inspect", expected_id=cid)
 
 
 def docker_image_inspect(image_id: str, *, runner=None) -> dict[str, Any]:
-    """Inspect an immutable image ID, never a mutable tag."""
     if not isinstance(image_id, str) or not _IMAGE.fullmatch(image_id):
         raise HostAuthorizationError("image must be an immutable sha256 ID")
-    raw = _run_docker(["image", "inspect", image_id], runner=runner)
-    try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise HostAuthorizationError("docker image inspect returned invalid JSON") from exc
-    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
-        raise HostAuthorizationError("docker image inspect must return exactly one image")
-    if value[0].get("Id") != image_id:
-        raise HostAuthorizationError("image inspect ID mismatch")
-    return value[0]
+    return _observe("inspect_object", _run_docker(["image", "inspect", image_id], runner=runner), "docker image inspect", expected_id=image_id)
 
 
 def copy_container_bytes(container_id: str, path: str = "/app/RELEASE.json", *, runner=None) -> bytes:
@@ -132,20 +125,7 @@ def _canonical(value: object) -> bytes:
 
 
 def _json(raw: bytes) -> dict:
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise HostAuthorizationError("duplicate JSON field")
-            result[key] = value
-        return result
-    try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
-    except (ValueError, UnicodeError) as exc:
-        raise HostAuthorizationError("invalid identity JSON") from exc
-    if not isinstance(value, dict):
-        raise HostAuthorizationError("identity JSON must be an object")
-    return value
+    return _observe("strict_object", raw, "identity")
 
 
 def _digest(value: object) -> str:
@@ -153,10 +133,7 @@ def _digest(value: object) -> str:
 
 
 def _absolute(value: str) -> str:
-    from pathlib import PurePosixPath
-    if not isinstance(value, str) or not value.startswith("/") or str(PurePosixPath(value)) != value or ".." in value.split("/") or "\\" in value:
-        raise HostAuthorizationError("non-canonical container path")
-    return value
+    return _observe("absolute", value)
 
 
 def _within(path: str, root: str) -> bool:
@@ -164,37 +141,16 @@ def _within(path: str, root: str) -> bool:
 
 
 def _env(values: list[str]) -> dict[str, str]:
-    if not isinstance(values, list):
-        raise HostAuthorizationError("invalid environment")
-    result = {}
-    for value in values:
-        if not isinstance(value, str) or "=" not in value:
-            raise HostAuthorizationError("invalid environment entry")
-        key, content = value.split("=", 1)
-        if not key or key in result:
-            raise HostAuthorizationError("duplicate environment key")
-        result[key] = content
-    return result
+    return _observe("environment", values)
 
 
 def _mounts(container: Mapping) -> list[dict]:
-    mounts = container.get("Mounts")
-    if not isinstance(mounts, list):
-        raise HostAuthorizationError("mount observations missing")
-    result = []
-    for item in mounts:
-        if not isinstance(item, dict) or item.get("Type") != "bind" or type(item.get("RW")) is not bool:
-            raise HostAuthorizationError("only explicit bind mounts are supported by authorization v1")
-        result.append({"source": _absolute(item.get("Source")), "target": _absolute(item.get("Destination")), "read_only": not item["RW"]})
-    if len({m["target"] for m in result}) != len(result):
-        raise HostAuthorizationError("duplicate mount target")
-    return sorted(result, key=lambda m: m["target"])
+    return _observe("mount_projection", container.get("Mounts"), purpose="authorization")
 
 
 def normalize_observation(container: Mapping, image: Mapping, release: Mapping) -> dict:
-    config, host = container.get("Config"), container.get("HostConfig")
-    if not isinstance(config, dict) or not isinstance(host, dict):
-        raise HostAuthorizationError("Docker configuration missing")
+    payload = _observe("config_payload", container)
+    config, host = payload["config"], payload["host_config"]
     labels = image.get("Config", {}).get("Labels") or {}
     return {
         "container_id": container.get("Id"), "image_id": container.get("Image"),
@@ -202,7 +158,7 @@ def normalize_observation(container: Mapping, image: Mapping, release: Mapping) 
         "image_labels": labels, "release_manifest": release,
         "mounts": _mounts(container), "state": container.get("State", {}),
         "path": container.get("Path"), "args": container.get("Args"),
-        "actual_config_sha256": _digest({"config": config, "host_config": host, "path": container.get("Path"), "args": container.get("Args")}),
+        "actual_config_sha256": _digest(payload),
     }
 
 
@@ -503,7 +459,8 @@ def require_protected_key_and_grant_dirs(key_path: str | Path, grant_dir: str | 
 def require_protected_authority_source() -> None:
     """Require the root-run signer and source contracts to be immutable to non-root users."""
     for path in (Path(__file__).resolve(strict=True), GRANT_CONTRACT_PATH, MANIFEST_CONTRACT_PATH, TRUST_CONFIG_PATH,
-                 SOURCE_ROOT / "09_deploy/runtime_identity/recovery_namespace.py"):
+                 SOURCE_ROOT / "09_deploy/runtime_identity/recovery_namespace.py",
+                 Path(__file__).with_name("runtime_observation.py")):
         _protected_path(path)
 
 
@@ -1022,27 +979,7 @@ def _secret_state(observed: Mapping) -> dict:
 
 
 def declared_secret_targets(manifest: Mapping, rendered: Mapping) -> dict[str, str]:
-    """Resolve exact secret names/targets from the manifest-owned Compose.
-
-    A namespace prefix is a syntax check, never authorization. Each accepted
-    target must be explicitly declared by a named manifest secret reference.
-    """
-    service = rendered.get("services", {}).get(manifest["service_id"], {})
-    refs, definitions = service.get("secrets") or [], rendered.get("secrets") or {}
-    if (type(refs) is not list or type(definitions) is not dict
-            or any(type(item) is not dict or set(item) != {"source", "target"} for item in refs)):
-        raise HostAuthorizationError("invalid declared file-secret references")
-    names = [item["source"] for item in refs]
-    targets = [item["target"] for item in refs]
-    if (any(type(name) is not str for name in names) or any(type(target) is not str for target in targets)
-            or len(names) != len(set(names)) or set(names) != set(manifest["secret_references"])
-            or set(definitions) != set(names) or len(targets) != len(set(targets))
-            or any(type(target) is not str or not re.fullmatch(r"/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]*", target) for target in targets)):
-        raise HostAuthorizationError("secret declarations differ from runtime contract")
-    if any(type(definitions[name]) is not dict or set(definitions[name]) - {"file", "name"}
-           or type(definitions[name].get("file")) is not str for name in names):
-        raise HostAuthorizationError("only declared file secrets are supported")
-    return {item["source"]: item["target"] for item in refs}
+    return _observe("declared_secret_targets", manifest, rendered)
 
 
 def _candidate_secret_mounts(manifest: Mapping, policy: Mapping, rendered: Mapping | None = None) -> list[dict]:
@@ -1125,7 +1062,7 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping,
     volumes = service.get("volumes") or []
     if any(not isinstance(v, dict) or v.get("type") != "bind" for v in volumes):
         raise HostAuthorizationError("rendered mounts must be explicit bind contracts")
-    expected_mounts = sorted([{"source": v.get("source"), "target": v.get("target"), "read_only": v.get("read_only", False)} for v in volumes], key=lambda m: m["target"])
+    expected_mounts = _observe("compose_mounts", volumes)
     if policy["schema_version"] in _PRODUCTION_POLICIES:
         _, manifest = _validated_candidate_record(policy)
         expected_mounts = sorted([*expected_mounts, *_production_compose_bridge(rendered, policy, manifest)], key=lambda m: m["target"])
@@ -1165,37 +1102,6 @@ def observe_and_validate(container_id: str, expected: Mapping, *, role: str, run
 
 def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapping) -> None:
     required = manifest.get("required_mounts")
-    roots = manifest.get("runtime_roots")
-    if not isinstance(required, list) or not isinstance(roots, list):
-        raise HostAuthorizationError("runtime manifest mount contract missing")
-    by_role = {}
-    for item in roots:
-        if not isinstance(item, dict) or set(item) != {"role", "container_path", "access"} or item["role"] in by_role or item["access"] not in {"ro", "rw"}:
-            raise HostAuthorizationError("invalid runtime root contract")
-        by_role[item["role"]] = item
-    targets = set()
-    for item in required:
-        if not isinstance(item, dict) or set(item) != {"role", "container_path", "read_only"} or type(item["read_only"]) is not bool:
-            raise HostAuthorizationError("invalid required mount contract")
-        root = by_role.pop(item["role"], None)
-        target = _absolute(item["container_path"])
-        if root is None or root["container_path"] != target or (root["access"] == "ro") != item["read_only"] or target in targets:
-            raise HostAuthorizationError("runtime roots and required mounts disagree")
-        targets.add(target)
-        actual = [m for m in mounts if m["target"] == target]
-        if len(actual) != 1 or actual[0]["read_only"] != item["read_only"]:
-            raise HostAuthorizationError("actual mount permission differs from runtime manifest")
-    # Operational business state must not alias sealed inputs or each other.
-    operational = {'manual-cnf', 'am-results'}
-    sources = {item['role']: Path(next(m['source'] for m in mounts
-               if m['target'] == item['container_path'])).resolve(strict=True)
-               for item in required} if any(item['role'] in operational for item in required) else {}
-    protected = {item['role'] for item in required if item['read_only'] and item['role'] != manifest.get('identity_root_role')}
-    for role in operational & sources.keys():
-        for other in ((protected | operational) & sources.keys()) - {role}:
-            a, b = str(sources[role]), str(sources[other])
-            if _within(a, b) or _within(b, a):
-                raise HostAuthorizationError('operational write source overlaps historical or other operational source')
     # For policy/3 the source/render bridge has already proved the exact secret
     # names, file sources and targets against the Approved manifest and inspect.
     secrets = [m for m in mounts if m["target"].startswith("/run/secrets/")] if policy["schema_version"] in _PRODUCTION_POLICIES else []
@@ -1207,9 +1113,18 @@ def _validate_runtime_mounts(manifest: Mapping, mounts: list[dict], policy: Mapp
             declared = _candidate_secret_mounts(manifest, policy)
             if sorted(secrets, key=lambda m: m["target"]) != sorted(declared, key=lambda m: m["target"]):
                 raise HostAuthorizationError("candidate secret mounts differ from exact readonly declarations")
-    allowed = targets | {policy["grant_container_directory"]} | {m["target"] for m in secrets}
-    if by_role or any(m["target"] not in allowed for m in mounts):
-        raise HostAuthorizationError("undeclared runtime mount")
+    _observe("resolve_mount_interpretation", manifest, policy, mounts, secrets)
+    # Operational business state must not alias sealed inputs or each other.
+    operational = {'manual-cnf', 'am-results'}
+    sources = {item['role']: Path(next(m['source'] for m in mounts
+               if m['target'] == item['container_path'])).resolve(strict=True)
+               for item in required} if any(item['role'] in operational for item in required) else {}
+    protected = {item['role'] for item in required if item['read_only'] and item['role'] != manifest.get('identity_root_role')}
+    for role in operational & sources.keys():
+        for other in ((protected | operational) & sources.keys()) - {role}:
+            a, b = str(sources[role]), str(sources[other])
+            if _within(a, b) or _within(b, a):
+                raise HostAuthorizationError('operational write source overlaps historical or other operational source')
 
 
 def _validate_v3_runtime(manifest: Mapping, observed: Mapping, policy: Mapping, container_id: str) -> None:
@@ -1680,16 +1595,16 @@ def validate_recovery_post_start(container_id: str, *, expected_policy_path: str
             or payload['mount_contract_sha256'] != _digest(observed['mounts'])
             or payload['release_sha256'] != hashlib.sha256(release_raw).hexdigest()
             or payload['release_sha256'] != policy['release_sha256']
-            or payload['actual_config_sha256'] != observed['actual_config_sha256']
             or payload['actual_config_sha256'] != policy['actual_config_sha256']
             or not datetime.fromisoformat(payload['issued_at']) <= now <
                    datetime.fromisoformat(payload['expires_at'])):
         raise HostAuthorizationError('post-start grant does not bind the actual recovery instance')
+    comparison = compare_observed_config(observed, payload['actual_config_sha256'])
     if (_load_policy(expected_policy_path) != policy or _protected_path(path).read_bytes() != raw
             or _recovery_call('validate_instance', docker_inspect(container_id), policy, 'post_start') != network):
         raise HostAuthorizationError('recovery identity changed during post-start validation')
     return {'POST_START_NETWORK_IDENTITY_VALIDATION': 'PASS', **network,
-            'grant_id': payload['grant_id']}
+            'grant_id': payload['grant_id'], 'config_comparison': comparison}
 
 
 def main(argv=None) -> int:

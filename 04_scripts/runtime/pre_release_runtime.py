@@ -668,10 +668,11 @@ def verify_rollback_assets(repo: Path, assets: dict, host) -> dict:
         raise PreReleaseError("rollback tree mismatch")
     if not isinstance(assets["image_id"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", assets["image_id"]):
         raise PreReleaseError("immutable image identity required")
-    image = json.loads(host._run_docker(["image", "inspect", assets["image_id"]]))
-    if len(image) != 1 or image[0]["Id"] != assets["image_id"]:
-        raise PreReleaseError("rollback image unavailable")
-    labels = image[0]["Config"]["Labels"]
+    try:
+        image = host.docker_image_inspect(assets["image_id"])
+    except ValueError as exc:
+        raise PreReleaseError("rollback image unavailable") from exc
+    labels = image["Config"]["Labels"]
     if labels.get("org.opencontainers.image.revision") != assets["commit"] or labels.get("market-data.git.tree") != assets["tree"]:
         raise PreReleaseError("rollback image source mismatch")
     location, digest = assets["image_location"], assets["registry_digest"]
@@ -679,7 +680,7 @@ def verify_rollback_assets(repo: Path, assets: dict, host) -> dict:
         if digest is not None:
             raise PreReleaseError("local image cannot claim registry identity")
     elif location == "REGISTRY_IMMUTABLE_IMAGE":
-        if not isinstance(digest, str) or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", digest) or digest not in image[0].get("RepoDigests", []):
+        if not isinstance(digest, str) or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", digest) or digest not in image.get("RepoDigests", []):
             raise PreReleaseError("registry digest not observed for image")
     else:
         raise PreReleaseError("unknown image retention mode")
@@ -950,10 +951,10 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     _, manifest, binding = engine.source_contract(target_source, request["project_id"], engine._project(target_source, request["project_id"])["runtime_contract"])
     if candidate["binding"] != binding or binding["commit"] != risk["target"]["commit"] or binding["tree"] != risk["target"]["tree"]:
         raise PreReleaseError("candidate record does not bind target")
-    target_image = host._json(host._run_docker(["image", "inspect", candidate["image_id"]]))
-    if (len(target_image) != 1 or target_image[0]["Id"] != candidate["image_id"]
-            or target_image[0]["Config"]["Labels"].get("org.opencontainers.image.revision") != risk["target"]["commit"]
-            or target_image[0]["Config"]["Labels"].get("market-data.git.tree") != risk["target"]["tree"]):
+    target_image = host.docker_image_inspect(candidate["image_id"])
+    if (target_image["Id"] != candidate["image_id"]
+            or target_image["Config"]["Labels"].get("org.opencontainers.image.revision") != risk["target"]["commit"]
+            or target_image["Config"]["Labels"].get("market-data.git.tree") != risk["target"]["tree"]):
         raise PreReleaseError("validated target image is not available with exact source identity")
     # The sealed state plan is an operator-reviewed fact, never a low-risk switch.
     state = host._json(_risk_file(request["state_plan"], host))

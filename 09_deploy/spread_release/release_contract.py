@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from wait_for_service_ready import (
     DEFAULT_READINESS_POLICY,
+    interpret_observation,
     validate_log_summary,
     validate_readiness_policy,
 )
@@ -419,41 +420,7 @@ class DockerReleaseRuntime:
         }
         if "Mounts" not in payload:
             return record
-        raw_mounts = payload["Mounts"]
-        if not isinstance(raw_mounts, list):
-            raise ContractError(f"container {container_name} mounts are invalid")
-        mounts: list[dict[str, Any]] = []
-        for mount in raw_mounts:
-            if not isinstance(mount, dict):
-                raise ContractError(f"container {container_name} mount is invalid")
-            mount_type = mount.get("Type")
-            source = mount.get("Source")
-            destination = mount.get("Destination")
-            rw = mount.get("RW")
-            if (
-                mount_type not in {"bind", "volume", "tmpfs", "npipe", "cluster"}
-                or not isinstance(source, str)
-                or not isinstance(destination, str)
-                or not isinstance(rw, bool)
-            ):
-                raise ContractError(f"container {container_name} mount fields are invalid")
-            mounts.append(
-                {
-                    "type": mount_type,
-                    "source": source,
-                    "destination": destination,
-                    "read_only": not rw,
-                }
-            )
-        record["mounts"] = sorted(
-            mounts,
-            key=lambda item: (
-                item["type"],
-                item["source"],
-                item["destination"],
-                item["read_only"],
-            ),
-        )
+        record["mounts"] = _evidence_mounts(payload["Mounts"])
         return record
 
     def formal_container_identity(self, container_name: str) -> dict[str, Any]:
@@ -565,40 +532,7 @@ class DockerReleaseRuntime:
                 item["host_port"] if item["host_port"] is not None else -1,
             )
         )
-        mounts: list[dict[str, Any]] = []
-        raw_mounts = payload.get("Mounts") or []
-        if not isinstance(raw_mounts, list):
-            raise ContractError(f"container {container_name} mounts are invalid")
-        for mount in raw_mounts:
-            if not isinstance(mount, dict):
-                raise ContractError(f"container {container_name} mount is invalid")
-            mount_type = mount.get("Type")
-            source = mount.get("Source")
-            destination = mount.get("Destination")
-            rw = mount.get("RW")
-            if (
-                mount_type not in {"bind", "volume", "tmpfs", "npipe", "cluster"}
-                or not isinstance(source, str)
-                or not isinstance(destination, str)
-                or not isinstance(rw, bool)
-            ):
-                raise ContractError(f"container {container_name} mount fields are invalid")
-            mounts.append(
-                {
-                    "type": mount_type,
-                    "source": source,
-                    "destination": destination,
-                    "read_only": not rw,
-                }
-            )
-        mounts.sort(
-            key=lambda item: (
-                item["type"],
-                item["source"],
-                item["destination"],
-                item["read_only"],
-            )
-        )
+        mounts = _evidence_mounts(payload.get("Mounts", []))
         return {
             "service": container_name,
             "container_id": container_id,
@@ -741,8 +675,8 @@ class DockerReleaseRuntime:
             env=compose_environment,
         )
         try:
-            parsed = json.loads(raw_config)
-        except json.JSONDecodeError as exc:
+            parsed = interpret_observation("strict_object", raw_config, "Compose config")
+        except ValueError as exc:
             raise ContractError(f"docker compose config returned invalid JSON: {exc}") from exc
         raw_images = self.runner.run(
             [*base, "config", "--images"],
@@ -843,17 +777,17 @@ print(
 
 def _load_docker_array(raw: str, description: str) -> dict[str, Any]:
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ContractError(f"{description} inspect output is not JSON: {exc}") from exc
-    if not isinstance(payload, list) or len(payload) != 1:
-        count = len(payload) if isinstance(payload, list) else "non-list"
-        raise ContractError(
-            f"{description} must resolve to exactly one object, got {count}"
-        )
-    if not isinstance(payload[0], dict):
-        raise ContractError(f"{description} inspect object is invalid")
-    return payload[0]
+        return interpret_observation("inspect_object", raw, description)
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
+
+
+def _evidence_mounts(raw):
+    # Legacy inventory evidence is not an authorization projection.
+    try:
+        return interpret_observation("mount_projection", raw, purpose="legacy-evidence")
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
 
 
 def validate_server_store_contract_evidence(evidence: Any) -> dict[str, Any]:

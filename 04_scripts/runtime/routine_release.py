@@ -478,14 +478,17 @@ class DockerSession:
     def _check_mounts(self, mounts):
         require(all(m.get('type') == 'bind' for m in mounts), 'EXPLICIT_BIND_REQUIRED')
         policy = self.protected_json(self.spec['policy_template'])
-        normalized = [dict(source=m['source'], target=m['target'], read_only=m.get('read_only', False)) for m in mounts]
+        normalized = self.host._observe('compose_mounts', mounts)
         if self.role == 'candidate_validation':
             self.host.validate_candidate_mounts(self.contract, normalized, policy,
                 Path(self.spec['grant_directory']), live=bool(self.container_id), container_id=self.container_id)
             return
         # The signed runtime manifest owns target/mode permissions. The
         # protected policy binds each approved target to its exact host source.
-        self.host._validate_runtime_mounts(self.contract, normalized, policy)
+        try:
+            self.host._validate_runtime_mounts(self.contract, normalized, policy)
+        except ValueError as exc:
+            raise RoutineError('PRODUCTION_MOUNT_POLICY_MISMATCH: ' + str(exc)) from exc
         for mount in normalized:
             require(mount in policy['mounts'], 'PRODUCTION_MOUNT_POLICY_MISMATCH')
             if not mount['read_only']:
@@ -495,8 +498,7 @@ class DockerSession:
 
     def assert_data_readonly(self):
         container = self.engine.inspect_one('container', self.container_id)
-        mounts = [{'type': m['Type'], 'source': m['Source'], 'target': m['Destination'],
-                   'read_only': not m['RW']} for m in container['Mounts']]
+        mounts = [dict(type='bind', **m) for m in self.host._mounts(container)]
         self._check_mounts(mounts)
 
     def grant_and_start(self, image, role):

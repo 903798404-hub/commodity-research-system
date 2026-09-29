@@ -18,6 +18,16 @@ from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlsplit
 
 
+def interpret_observation(name, *args, **kwargs):
+    """Pure shared decoder; transport and bounded readiness remain owned here."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "runtime_identity/runtime_observation.py"
+    spec = importlib.util.spec_from_file_location("_readiness_runtime_observation", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, name)(*args, **kwargs)
+
+
 DEFAULT_READINESS_POLICY: dict[str, Any] = {
     "total_timeout_seconds": 90,
     "poll_interval_seconds": 2,
@@ -143,27 +153,9 @@ class DockerCurlRuntime:
                 "exists": False,
                 "inspect_error": completed.stderr.strip() or completed.stdout.strip(),
             }
-        payload = json.loads(completed.stdout)[0]
-        state = payload.get("State") or {}
-        config = payload.get("Config") or {}
-        return {
-            "exists": True,
-            "container_id": payload.get("Id"),
-            "container_name": str(payload.get("Name") or "").lstrip("/"),
-            "image_id": payload.get("Image"),
-            "config_image": config.get("Image"),
-            "status": state.get("Status"),
-            "running": bool(state.get("Running")),
-            "dead": bool(state.get("Dead")),
-            "restarting": bool(state.get("Restarting")),
-            "removal_in_progress": bool(state.get("RemovalInProgress")),
-            "restart_count": int(payload.get("RestartCount") or 0),
-            "created_at": payload.get("Created"),
-            "started_at": state.get("StartedAt"),
-            "finished_at": state.get("FinishedAt"),
-            "exit_code": state.get("ExitCode"),
-            "error": state.get("Error"),
-        }
+        payload = interpret_observation("inspect_object", completed.stdout, "readiness container inspect",
+            expected_id=container if re.fullmatch(r"[0-9a-f]{64}", container) else None)
+        return interpret_observation("readiness_projection", payload)
 
     def request(self, url: str, timeout_seconds: int) -> Mapping[str, Any]:
         fd, body_name = tempfile.mkstemp(prefix="spread-readiness-", suffix=".body")

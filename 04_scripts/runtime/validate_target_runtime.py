@@ -8,6 +8,7 @@ or production host paths.
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -65,23 +66,7 @@ def _sha(raw: bytes) -> str:
 
 
 def _strict_json(raw: bytes, label: str) -> dict[str, Any]:
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValidationError(f"duplicate {label} JSON field")
-            result[key] = value
-        return result
-    def constant(value):
-        raise ValidationError(f"non-finite {label} JSON value: {value}")
-    try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
-                           parse_constant=constant)
-    except (UnicodeError, ValueError, RecursionError) as exc:
-        raise ValidationError(f"invalid {label} JSON") from exc
-    if type(value) is not dict:
-        raise ValidationError(f"{label} JSON must be an object")
-    return value
+    return _interpret("strict_object", raw, label)
 
 
 def _load(path: Path, name: str):
@@ -102,6 +87,20 @@ def _load(path: Path, name: str):
         return module
     except (OSError, ImportError, TypeError, ValueError) as exc:
         raise ValidationError(f"cannot load trusted source: {path}") from exc
+
+
+@lru_cache(maxsize=1)
+def _observation():
+    path = Path(__file__).resolve().parents[2] / "09_deploy/runtime_identity/runtime_observation.py"
+    return _load(path, "_engine_runtime_observation")
+
+
+def _interpret(name, *args, **kwargs):
+    module = _observation()
+    try:
+        return getattr(module, name)(*args, **kwargs)
+    except module.ObservationError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def repository_root() -> Path:
@@ -299,7 +298,10 @@ def require_base_image(base_image: str) -> None:
     # ONBUILD COPY/ADD in the base executes even if this Dockerfile has no such
     # instruction. Inspect the exact digest before allowing the candidate build.
     _docker("pull", base_image, timeout=600)
-    base = inspect_one("image", base_image)
+    base_id = _docker("image", "inspect", "--format", "{{.Id}}", base_image).stdout.decode("utf-8", "strict").strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", base_id):
+        raise ValidationError("base image resolved ID is invalid")
+    base = inspect_one("image", base_id)
     config = base.get("Config")
     if not isinstance(config, dict) or "OnBuild" not in config or config["OnBuild"] not in (None, []):
         raise ValidationError("base image ONBUILD contract is missing or contains inherited instructions")
@@ -476,28 +478,13 @@ def create_archive_context(root: Path, destination: Path,
         raise ValidationError("bound Git object changed during archive")
 
 
-def _strict_json_value(raw: bytes, label: str) -> Any:
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValidationError(f"duplicate {label} JSON field")
-            result[key] = value
-        return result
-    try:
-        return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
-                          parse_constant=lambda value: (_ for _ in ()).throw(
-                              ValidationError(f"non-finite {label} JSON value")))
-    except (UnicodeError, ValueError, RecursionError) as exc:
-        raise ValidationError(f"invalid {label} JSON") from exc
+def _strict_json_value(raw: bytes, label: str):
+    return _interpret("strict_json_value", raw, label)
 
 
 def inspect_one(kind: str, identity: str) -> dict[str, Any]:
-    value = _strict_json_value(_docker(kind, "inspect", identity).stdout,
-                               f"{kind} inspect")
-    if not isinstance(value, list) or len(value) != 1 or type(value[0]) is not dict:
-        raise ValidationError(f"invalid {kind} inspect result")
-    return value[0]
+    exact = identity if kind == "image" or re.fullmatch(r"[0-9a-f]{64}", identity) else None
+    return _interpret("inspect_object", _docker(kind, "inspect", identity).stdout, f"{kind} inspect", expected_id=exact)
 
 
 def _numeric_user(image: Mapping[str, Any]) -> tuple[int, int]:
@@ -778,37 +765,9 @@ def validate_source_compose(root: Path, contract: Mapping[str, Any]) -> dict[str
     if ("MARKET_DATA_EXECUTION_GRANT" not in contract["required_environment"]
             or environment.get("MARKET_DATA_EXECUTION_GRANT") != _GRANT_ROOT + "/grant.json"):
         raise ValidationError("source Compose execution grant environment is invalid")
-    secrets = service.get("secrets") or []
-    if any(not isinstance(item, dict) for item in secrets):
-        raise ValidationError("source Compose secret references are invalid")
-    secret_names = [item.get("source") for item in secrets]
-    secret_targets = [item.get("target") for item in secrets]
-    if (len(secret_names) != len(set(secret_names))
-            or set(secret_names) != set(contract["secret_references"])):
-        raise ValidationError("source Compose secret references differ from runtime manifest")
-    if (any(not isinstance(target, str)
-            or not re.fullmatch(r"/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]*", target)
-            for target in secret_targets)
-            or len(secret_targets) != len(set(secret_targets))):
-        raise ValidationError("source Compose secret targets are invalid")
-    top_secrets = rendered.get("secrets") or {}
-    if not isinstance(top_secrets, dict) or set(top_secrets) != set(secret_names):
-        raise ValidationError("source Compose secret definitions are invalid")
-    for name in secret_names:
-        definition = top_secrets.get(name)
-        if (not isinstance(definition, dict)
-                or not isinstance(definition.get("file"), str)
-                or not definition["file"].strip()
-                or any(key in definition for key in ("external", "driver", "driver_opts"))):
-            raise ValidationError("source Compose secrets must be file-backed")
+    _interpret("declared_secret_targets", contract, rendered)
     volumes = service.get("volumes") or []
-    if any(not isinstance(item, dict) or item.get("type") not in {"bind", "volume"}
-           for item in volumes):
-        raise ValidationError("source Compose mounts are not explicit contracts")
-    mount_targets = [item.get("target") for item in volumes]
-    if len(mount_targets) != len(set(mount_targets)):
-        raise ValidationError("source Compose has a duplicate mount target")
-    actual_mounts = {item.get("target"): bool(item.get("read_only", False)) for item in volumes}
+    actual_mounts = _interpret("compose_mount_targets", volumes)
     expected_mounts = {item["container_path"]: item["read_only"]
                        for item in contract["required_mounts"]}
     expected_mounts[_GRANT_ROOT] = True

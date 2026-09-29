@@ -350,7 +350,7 @@ def project_compose(h, desired, policy):
             replacement = next((m for m in sandbox_mounts(h, policy, old)
                 if m['target'] == mount['target']), None)
             require(h, replacement is not None, 'undeclared Compose mount')
-            require(h, bool(mount.get('read_only', False)) == replacement['read_only'], 'Compose access mode changed')
+            require(h, type(mount.get('read_only', False)) is bool and mount.get('read_only', False) == replacement['read_only'], 'Compose access mode changed')
             mount['source'] = replacement['source']
     expected = copy.deepcopy(desired)
     expected['networks']['default'] = desired_network
@@ -415,10 +415,8 @@ def validate_instance(h, container, policy, phase):
         {'8501/tcp': [{'HostIp':'127.0.0.1', 'HostPort':str(r['host_port'])}]}, 'actual port is not localhost recovery slot')
     require(h, set(container['NetworkSettings']['Networks']) == {r['network']} and
         container['HostConfig'].get('NetworkMode') == r['network'], 'actual recovery network differs')
-    import json
-    values = json.loads(h._run_docker(['network', 'inspect', r['network']]))
-    require(h, type(values) is list and len(values) == 1, 'network observation missing')
-    networks = values[0]
+    networks = h._observe("inspect_object", h._run_docker(['network', 'inspect', r['network']]),
+                          'recovery network inspect', expected_id=expected_id)
     require(h, networks.get('Name') == r['network'] and networks.get('Driver') == 'bridge' and
         networks.get('Internal') is False and not networks.get('EnableIPv6') and
         networks.get('Labels', {}).get('com.docker.compose.project') == r['project'] and

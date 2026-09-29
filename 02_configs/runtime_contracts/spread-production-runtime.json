@@ -226,6 +226,10 @@
   ],
   "source_inputs": [
     {
+      "path": "09_deploy/runtime_identity/runtime_observation.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": ".streamlit/config.toml",
       "role": "runtime_configuration"
     },
