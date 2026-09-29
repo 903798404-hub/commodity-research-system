@@ -1,0 +1,128 @@
+{
+  "base_commit": "ce3c9784f418cf184b652bb8a65b68860d841ba2",
+  "fixture_scope": "FIXED_BASELINE_TEST_ONLY_NOT_PRODUCTION",
+  "grant": {
+    "algorithm": "ed25519",
+    "key_id": "fixture-key",
+    "payload": {
+      "actual_config_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "approved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "approved_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "artifact_origin": "production",
+      "authorization_mode": "production",
+      "candidate_scope_id": null,
+      "candidate_scope_sha256": null,
+      "container_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "expires_at": "2026-01-01T01:00:00+00:00",
+      "grant_id": "ffffffffffffffffffffffffffffffff",
+      "hostname_nonce": "11111111111111111111111111111111",
+      "identity_kind": "oci_container",
+      "identity_root_role": "marker",
+      "image_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "issued_at": "2026-01-01T00:00:00Z",
+      "module_id": "fixture-module",
+      "mount_contract_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "project_id": "fixture-project",
+      "protected_mounts": [
+        "/runtime/fixture"
+      ],
+      "release_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "release_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "release_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "rendered_compose_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "role": "production",
+      "runtime_id": "fixture-runtime",
+      "runtime_manifest_schema_version": "runtime-manifest/2",
+      "runtime_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "runtime_marker_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "runtime_root": "/runtime/fixture",
+      "service_id": "fixture-service",
+      "writable_roots": [
+        "/runtime/fixture/data"
+      ]
+    },
+    "schema_version": "production-execution-grant/2",
+    "signature": "cGIT7k9B8FWZECMTYWjcRsRS3NzqZbp/2ohzR2ZjmrKgsp598fB+9I4/bLMggC3eSnJE+UpvKEtdlPX3W27bBw=="
+  },
+  "grant_payload_canonical_sha256": "12bb5ecac02f7910d2f831bc7c52a7b3207f8861c5993d83ba391acf4552ead4",
+  "public_key_base64": "4v4qObcyZkKCfW2C1JdiLNbCl/54Jw6qQ2sB8Ia288s=",
+  "record": {
+    "algorithm": "ed25519",
+    "key_id": "candidate-key",
+    "payload": {
+      "authorization_role": "candidate_validation",
+      "evidence": {
+        "TARGET_RUNTIME_CONTAINER_VALIDATION": "PASS",
+        "TARGET_RUNTIME_STATIC_VALIDATION": "PASS",
+        "binding": {
+          "commit": "cccccccccccccccccccccccccccccccccccccccc",
+          "project_id": "demo-runtime",
+          "source_sha256": {
+            "02_configs/runtime.json": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "04_scripts/runtime/validate_target_runtime.py": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "tree": "dddddddddddddddddddddddddddddddddddddddd",
+          "validator_version": "target-runtime-validator/1"
+        },
+        "builder": {
+          "builder_id": "linux-fixture",
+          "execution": "isolated",
+          "os": "linux"
+        },
+        "image_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "observed_identity": {
+          "authorization_role": "candidate_validation",
+          "git_metadata_present": false,
+          "git_tree": "dddddddddddddddddddddddddddddddddddddddd",
+          "image_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "oci_revision": "cccccccccccccccccccccccccccccccccccccccc",
+          "production_volumes_mounted": false,
+          "rendered_compose_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "source_sha256": {
+            "02_configs/runtime.json": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "04_scripts/runtime/validate_target_runtime.py": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "probes": {
+          "dependencies": "PASS",
+          "entrypoint_initialization": "PASS",
+          "missing_grant_rejected": "PASS",
+          "mount_permissions": "PASS",
+          "preview_write_rejected": "PASS",
+          "release_mismatch_rejected": "PASS",
+          "runtime_identity": "PASS",
+          "runtime_paths": "PASS",
+          "wrong_commit_rejected": "PASS",
+          "wrong_image_rejected": "PASS",
+          "wrong_manifest_rejected": "PASS",
+          "wrong_service_rejected": "PASS",
+          "wrong_tree_rejected": "PASS"
+        },
+        "rendered_compose_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "schema_version": "target-runtime-evidence/1"
+      },
+      "evidence_sha256": "ceecaa51ab714c84c4980ac561842c1d250be92aa94a3e73c638fb82d4dc0abc",
+      "expires_at": "2026-09-05T09:00:00+00:00",
+      "issued_at": "2026-09-05T07:59:00+00:00",
+      "purpose": "target-runtime-validation",
+      "record_id": "11111111111111111111111111111111"
+    },
+    "schema_version": "candidate-validation-record/1",
+    "signature": "0FJ1J178VelXIvBruyHP3Y0HzYZo47aa50mkb6KVqrhTmhrB5S8zUivngr0v6+cxLOf8wq7rnODlyk4Tl9lZBQ=="
+  },
+  "record_canonical_sha256": "b0a50d0ba5ce40866e21dda94a73ff1954f969daa823a7684099951d76152027",
+  "record_now": "2026-09-05T08:00:00+00:00",
+  "record_trust": {
+    "keys": [
+      {
+        "algorithm": "ed25519",
+        "domain": "candidate_validation",
+        "key_id": "candidate-key",
+        "public_key_base64": "4v4qObcyZkKCfW2C1JdiLNbCl/54Jw6qQ2sB8Ia288s="
+      }
+    ],
+    "revoked_grant_ids": [],
+    "revoked_key_ids": [],
+    "schema_version": "production-runtime-trust/1"
+  }
+}

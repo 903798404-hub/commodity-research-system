@@ -412,26 +412,26 @@ def test_secret_file_reference_is_static_only_and_never_enters_candidate(tmp_pat
     assert {item["target"] for item in candidate["volumes"]} == {
         "/runtime", "/runtime/state", "/run/market-data-grants"}
 
-    rendered["services"]["demo"]["secrets"].append({"source": "undeclared-secret"})
-    with pytest.raises(engine.ValidationError, match="differ from runtime manifest"):
+    rendered["services"]["demo"]["secrets"].append({"source": "undeclared-secret", "target": "/run/secrets/undeclared"})
+    with pytest.raises(engine.ValidationError, match="secret declarations differ from runtime contract"):
         engine.validate_source_compose(tmp_path, contract)
     rendered["services"]["demo"]["secrets"] = [
         {"source": "tankan-secret", "target": "relative-secret"}]
-    with pytest.raises(engine.ValidationError, match="secret targets are invalid"):
+    with pytest.raises(engine.ValidationError, match="secret declarations differ from runtime contract"):
         engine.validate_source_compose(tmp_path, contract)
     rendered["services"]["demo"]["secrets"][0]["target"] = "/app/RELEASE.json"
-    with pytest.raises(engine.ValidationError, match="secret targets are invalid"):
+    with pytest.raises(engine.ValidationError, match="secret declarations differ from runtime contract"):
         engine.validate_source_compose(tmp_path, contract)
     rendered["services"]["demo"]["secrets"][0]["target"] = "/run/secrets/tankan.env"
     rendered["secrets"]["unused-secret"] = {"file": "${UNUSED_SECRET_FILE:?required}"}
-    with pytest.raises(engine.ValidationError, match="secret definitions are invalid"):
+    with pytest.raises(engine.ValidationError, match="secret declarations differ from runtime contract"):
         engine.validate_source_compose(tmp_path, contract)
     rendered["secrets"].pop("unused-secret")
     rendered["secrets"]["tankan-secret"] = {"external": True}
-    with pytest.raises(engine.ValidationError, match="must be file-backed"):
+    with pytest.raises(engine.ValidationError, match="only declared file secrets are supported"):
         engine.validate_source_compose(tmp_path, contract)
     rendered["secrets"].clear()
-    with pytest.raises(engine.ValidationError, match="secret definitions are invalid"):
+    with pytest.raises(engine.ValidationError, match="secret declarations differ from runtime contract"):
         engine.validate_source_compose(tmp_path, contract)
 
 
@@ -470,7 +470,7 @@ def test_source_compose_requires_readonly_host_grant_injection(monkeypatch, tmp_
         engine.validate_source_compose(tmp_path, contract)
     service["environment"]["MARKET_DATA_EXECUTION_GRANT"] = "/run/market-data-grants/grant.json"
     service["volumes"].append(dict(service["volumes"][0]))
-    with pytest.raises(engine.ValidationError, match="duplicate mount target"):
+    with pytest.raises(engine.ValidationError, match="duplicate Compose mount target"):
         engine.validate_source_compose(tmp_path, contract)
 
 
@@ -695,7 +695,7 @@ def test_validate_dockerfile_inputs_rejects_unbound_or_ambiguous_sources(
 def test_base_image_onbuild_metadata_is_rejected(monkeypatch):
     engine = load_engine()
     monkeypatch.setattr(engine, "_docker", lambda *args, **kwargs: type(
-        "Result", (), {"stdout": b"", "stderr": b"", "returncode": 0})())
+        "Result", (), {"stdout": ("sha256:" + "b" * 64).encode(), "stderr": b"", "returncode": 0})())
     monkeypatch.setattr(engine, "inspect_one", lambda kind, identity: {
         "Config": {"OnBuild": ["COPY hidden /app/hidden"]}})
     with pytest.raises(engine.ValidationError, match="ONBUILD"):
@@ -706,7 +706,7 @@ def test_base_image_onbuild_metadata_is_rejected(monkeypatch):
 def test_base_image_explicitly_allows_empty_onbuild_metadata(monkeypatch, onbuild):
     engine = load_engine()
     monkeypatch.setattr(engine, "_docker", lambda *args, **kwargs: type(
-        "Result", (), {"stdout": b"", "stderr": b"", "returncode": 0})())
+        "Result", (), {"stdout": ("sha256:" + "b" * 64).encode(), "stderr": b"", "returncode": 0})())
     monkeypatch.setattr(engine, "inspect_one", lambda kind, identity: {
         "Config": {"OnBuild": onbuild}})
     engine.require_base_image(BASE_IMAGE)
@@ -716,7 +716,7 @@ def test_base_image_explicitly_allows_empty_onbuild_metadata(monkeypatch, onbuil
 def test_base_image_metadata_must_be_observed(monkeypatch, config):
     engine = load_engine()
     monkeypatch.setattr(engine, "_docker", lambda *args, **kwargs: type(
-        "Result", (), {"stdout": b"", "stderr": b"", "returncode": 0})())
+        "Result", (), {"stdout": ("sha256:" + "b" * 64).encode(), "stderr": b"", "returncode": 0})())
     monkeypatch.setattr(engine, "inspect_one", lambda kind, identity: {"Config": config})
     with pytest.raises(engine.ValidationError, match="ONBUILD"):
         engine.require_base_image(BASE_IMAGE)

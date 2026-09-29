@@ -1286,10 +1286,12 @@ def test_recovery_fresh_grant_preserves_old_image_protocol_and_instance_binding(
             grant_path=grants/'missing-network.json',grant_dir=grants,role='production')
 
 
-@pytest.mark.parametrize('fault',[None,'network-policy-changed','grant-tampered','not-running'])
+@pytest.mark.parametrize('fault',[None,'network-policy-changed','grant-tampered','not-running',
+    'oom-supported','oom-unsupported','oom-plus-user','oom-plus-mount'])
 def test_recovery_post_start_requires_signed_grant_network_commitment(tmp_path,monkeypatch,fault):
     p,c,image,rendered,file,key,grants,manifest,marker,release,identity=signing_fixture(
         tmp_path,monkeypatch,'production',2)
+    c['HostConfig']['OomKillDisable'] = False
     p['recovery']=recovery_policy()['recovery']
     p['recovery']['container']=p['service_id']+'-recovery-'+p['recovery']['nonce']
     c['Config']['Hostname']=p['recovery']['nonce']
@@ -1325,13 +1327,27 @@ def test_recovery_post_start_requires_signed_grant_network_commitment(tmp_path,m
         broken=json.loads(grant_file.read_bytes());broken['payload']['grant_id']='f'*32
         grant_file.chmod(0o600)
         grant_file.write_bytes(host._canonical(broken))
-    if fault:
+    if fault and fault.startswith('oom-'):
+        c['HostConfig']['OomKillDisable'] = None
+        transport = host._run_docker
+        platform = SEMANTIC_PLATFORM if fault != 'oom-unsupported' else dict(ServerVersion='27.0.0', CgroupVersion='2')
+        monkeypatch.setattr(host, '_run_docker', lambda args, **kw: host._canonical(platform)
+            if args[0] == 'info' else transport(args, **kw))
+        if fault == 'oom-plus-user': c['Config']['User'] = '65533:65533'
+        if fault == 'oom-plus-mount': c['Mounts'][0]['RW'] = not c['Mounts'][0]['RW']
+    if fault not in (None, 'oom-supported'):
         with pytest.raises(host.HostAuthorizationError):
             host.validate_recovery_post_start(CID,expected_policy_path=file,grant_path=grant_file,key_path=key)
     else:
         result=host.validate_recovery_post_start(CID,expected_policy_path=file,
             grant_path=grant_file,key_path=key)
         assert result['POST_START_NETWORK_IDENTITY_VALIDATION']=='PASS'
+        comparison = result['config_comparison']
+        assert comparison['semantic_config_match'] is True
+        assert comparison['raw_hash_match'] is (fault is None)
+        assert comparison['policy_raw_sha256'] == envelope['payload']['actual_config_sha256']
+        assert grant_file.read_bytes() == host._canonical(envelope)
+        assert comparison['compatibility_rule'] == ('OOM_KILL_DISABLE_FALSE_NULL_EQUIVALENCE' if fault else None)
         assert result['expected_network_id']==p['recovery']['expected_network_id']
 
 

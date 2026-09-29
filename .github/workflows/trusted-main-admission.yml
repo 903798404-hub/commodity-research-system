@@ -147,6 +147,9 @@ jobs:
           "$source_root/08_tests/shared/runtime_release_record_e2e.py" \
           --evidence "$RUNNER_TEMP/platform-results/linux/spread-runtime-hosted-evidence.json" \
           --output "$RUNNER_TEMP/platform-results/linux/runtime-release-record-contract"
+        sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
+          "$source_root/08_tests/shared/release_canonicalization_docker_e2e.py" \
+          --output "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json"
     - name: Execute required real Docker application service identity evidence
       working-directory: candidate
       run: |

@@ -177,7 +177,8 @@ def test_concrete_docker_adapter_rejects_before_create(tmp_path,mutation):
     elif mutation=='build':service['build']={'context':'.'}
     elif mutation=='hook':service['post_start']=[{'command':'refresh'}]
     else:service['volumes']=[dict(type='bind',source=str(tmp_path),target='/app/data',read_only=False)]
-    host=SimpleNamespace(_protected_path=lambda p,**k:p,_json=lambda raw:raw,
+    formal_host = routine.load('09_deploy/runtime_identity/host_authorization.py', '_routine_transport_host')
+    host=SimpleNamespace(_observe=formal_host._observe, _protected_path=lambda p,**k:p,_json=lambda raw:raw,
                          _validate_runtime_mounts=lambda *a: (_ for _ in ()).throw(
                              routine.RoutineError('UNDECLARED_RUNTIME_MOUNT')))
     request={'production':dict(compose='compose',environment='env',policy_template='policy',project_directory=str(tmp_path),writable_root=str(tmp_path))}
@@ -576,6 +577,7 @@ def test_host_consumes_plain_acceptance_only_for_machine_routine(tmp_path,monkey
         validate_source_compose=lambda *a:None)
     entry=SimpleNamespace(require_source=lambda *a,**k:(IMAGE['commit'],IMAGE['tree']))
     monkeypatch.setattr(host,'_protected_path',lambda p,**k:p)
+    host._observation()  # Keep the formal pure decoder active before domain mocks.
     monkeypatch.setattr(host,'_contract_module',lambda p,n:routine if p.name=='routine_release.py' else entry if p.name=='pre_release_runtime.py' else engine)
     monkeypatch.setattr(routine,'load',lambda *a:SimpleNamespace(classify_release=lambda *a:{'RELEASE_RISK_CLASS':risk_class}))
     if risk_class=='ROUTINE_STATELESS':assert host._validated_candidate_record(policy)==(record,manifest)

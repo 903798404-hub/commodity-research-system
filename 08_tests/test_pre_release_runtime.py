@@ -24,6 +24,10 @@ assert SPEC and SPEC.loader
 runtime = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime)
 
+HOST_SPEC = importlib.util.spec_from_file_location("formal_host_for_pre_release", ROOT / "09_deploy/runtime_identity/host_authorization.py")
+formal_host = importlib.util.module_from_spec(HOST_SPEC)
+HOST_SPEC.loader.exec_module(formal_host)
+
 RECORD_SPEC = importlib.util.spec_from_file_location("candidate_record_for_pre_release", ROOT / "09_deploy/runtime_identity/candidate_validation_record.py")
 assert RECORD_SPEC and RECORD_SPEC.loader
 record = importlib.util.module_from_spec(RECORD_SPEC)
@@ -232,7 +236,7 @@ def test_candidate_validation_engine_and_record_fail_closed(monkeypatch, tmp_pat
     host = SimpleNamespace(require_protected_authority_source=lambda: None,
                            _protected_path=lambda path, **kwargs: path,
                            _load_private_key=lambda path: private,
-                           _json=lambda raw: json.loads(raw),
+                           _json=formal_host._json,
                            _fsync_directory=lambda path: None)
     engine = SimpleNamespace(_project=lambda root, project_id: project,
                              source_contract=lambda *args: (project, {}, binding))
@@ -580,7 +584,8 @@ def rollback_assets(tmp_path, risk_repo):
                   procedure=sealed("procedure", dict(artifact=artifact, fresh_instance_required=True,
                       fresh_grant_required=True, steps=["create exact old image", "issue fresh grant", "start and accept"])))
     image = {"Id": image_id, "Config": {"Labels": {"org.opencontainers.image.revision": base, "market-data.git.tree": tree}}, "RepoDigests": []}
-    host = SimpleNamespace(_json=json.loads, _run_docker=lambda args: json.dumps([image]).encode(), _protected_path=lambda p, **kw: p)
+    host = SimpleNamespace(_json=formal_host._json, _run_docker=lambda args: json.dumps([image]).encode(), _protected_path=lambda p, **kw: p)
+    host.docker_image_inspect = lambda image_id: formal_host.docker_image_inspect(image_id, runner=lambda args: host._run_docker(args))
     return repo, assets, host, image
 
 
@@ -652,7 +657,7 @@ def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, t
     path = tmp_path / "request"
     path.write_text(json.dumps(request))
     host.require_protected_authority_source = lambda: None
-    host._json = json.loads
+    host._json = formal_host._json
     engine = SimpleNamespace(_project=lambda *a: {"runtime_contract": "contract"}, source_contract=lambda *a: (None, {}, dict(target, project_id="example")))
     records = SimpleNamespace(verify_record=lambda raw, trust: {"evidence": json.loads(raw)})
     monkeypatch.setattr(runtime, "ROOT", repo)
@@ -723,7 +728,7 @@ def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, mo
         evidence[name] = ref(name, probe)
     recovery = dict(base=dict(commit=payload["approved_commit"], tree=payload["approved_tree"]), old_image_id=payload["image_id"],
                     observed_at=(started+timedelta(seconds=1)).isoformat(), evidence=evidence)
-    host = SimpleNamespace(_json=json.loads, _protected_path=lambda p, **kw: p)
+    host = SimpleNamespace(_json=formal_host._json, _protected_path=lambda p, **kw: p)
     if mutation:
         from cryptography.exceptions import InvalidSignature
         with pytest.raises((runtime.PreReleaseError, InvalidSignature)):
@@ -847,7 +852,7 @@ def test_targeted_recovery_retains_history_and_new_bind_sources(tmp_path,fault):
     if fault=='empty-history':data['historical_before']=data['historical_after']={}
     observations=dict(consumer=dict(raw=ref('http',dict(url='http://127.0.0.1:18502/',status_code=503 if fault=='http' else 200))),
         data_unchanged=dict(raw=ref('data',data)))
-    host=SimpleNamespace(_json=json.loads,_protected_path=lambda p,**kw:p)
+    host=SimpleNamespace(_json=formal_host._json,_protected_path=lambda p,**kw:p)
     roots=[dict(container_path='/operational/entries')]
     if fault:
         with pytest.raises(runtime.PreReleaseError):runtime.verify_targeted_preservation(observations,host,roots)

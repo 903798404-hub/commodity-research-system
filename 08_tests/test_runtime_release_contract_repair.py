@@ -139,7 +139,7 @@ def test_runtime_secret_mounts_fail_closed(tmp_path,monkeypatch,fault):
 
 
 def test_candidate_secret_bindings_are_files_and_not_generic_secret_binds():
-    m=json.loads((ROOT/'02_configs/runtime_contracts/spread-production-runtime.json').read_text())
+    m=json.loads((ROOT/'02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
     m['_secret_declarations']={'market-data-service':'/run/secrets/market-data-service.json'}
     m['_container_user']='65532:65532'
     b=engine._runtime_bindings(m,65532,65532)
