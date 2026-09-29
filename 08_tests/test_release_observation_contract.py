@@ -28,6 +28,19 @@ IMAGE = 'sha256:' + 'b' * 64
 CID = 'a' * 64
 
 
+def test_hosted_fixture_prepares_nested_readonly_parent_mountpoints(tmp_path):
+    fixture = load('08_tests/shared/release_canonicalization_docker_e2e.py', 'hosted_mount_fixture')
+    manifest = json.loads((ROOT / '02_configs/runtime_contracts/spread-production-runtime.json').read_bytes())
+    identity = tmp_path / 'identity'
+    identity.mkdir()
+    sources = {manifest['identity_root_role']: identity}
+    fixture.prepare_nested_mountpoints(manifest, sources)
+    fixture.prepare_nested_mountpoints(manifest, sources)  # idempotent setup
+    assert (identity / 'weather').is_dir()
+    assert (identity / 'import-profit/operational/cnf').is_dir()
+    assert not list(identity.rglob('*.*'))
+
+
 @pytest.mark.parametrize('kind,identity', [('image', IMAGE), ('container', CID)])
 @pytest.mark.parametrize('raw', [b'[]', b'[{},{}]', b'[null]', b'{}', b'[{"Id":"wrong"}]',
     b'[{"Id":"a","Id":"b"}]', b'[{"Id":NaN}]', b'[{"Id":Infinity}]', b'[{"Id":1e999}]'])

@@ -15,7 +15,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -57,6 +57,23 @@ def directory(path, mode=0o755, uid=0):
     os.chown(path, uid, GID if uid else 0)
     path.chmod(mode)
     return path
+
+
+def prepare_nested_mountpoints(manifest, sources):
+    """Prepare fixture mountpoints before Docker makes parent binds read-only.
+
+    The sources remain separate and permissions/access contracts are unchanged;
+    these empty directories are only attachment points beneath the identity bind.
+    """
+    identity = next(item for item in manifest['runtime_roots']
+                    if item['role'] == manifest['identity_root_role'])
+    parent = PurePosixPath(identity['container_path'])
+    for item in manifest['runtime_roots']:
+        target = PurePosixPath(item['container_path'])
+        if target == parent:
+            continue
+        relative = target.relative_to(parent)
+        sources[identity['role']].joinpath(*relative.parts).mkdir(parents=True, exist_ok=True)
 
 
 def exercise(work, receipt):
@@ -122,6 +139,7 @@ def exercise(work, receipt):
             sources[role] = sources['snapshots']
         else:
             sources[role] = directory(allocation / role, 0o755, UID if item['access'] == 'rw' or role == 'snapshots' else 0)
+    prepare_nested_mountpoints(manifest, sources)
     marker = dict(schema_version=1, runtime_id='target-validation', module_id=manifest['module_id'],
         classification='formal', created_at=now.isoformat())
     write(sources['identity'] / '.market-data-runtime.json', host._canonical(marker), 0o444)
