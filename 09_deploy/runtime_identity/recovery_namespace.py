@@ -5,8 +5,143 @@ The protected policy binds a retained production policy and a live old instance.
 """
 import copy
 import hashlib
+import os
 from pathlib import Path
 import re
+import stat
+
+
+SANDBOX_PARENT = Path('/var/lib/market-data/recovery-sandboxes')
+
+
+def validate_sandbox_declaration(h, r):
+    s = r['sandbox']
+    require(h, type(s) is dict and set(s) == {'mode', 'root', 'roots'} and
+        s['mode'] == 'isolated-rehearsal', 'invalid sandbox declaration')
+    require(h, s['root'] == str(SANDBOX_PARENT / r['nonce']), 'sandbox outside approved parent/nonce')
+    require(h, type(s['roots']) is list and bool(s['roots']), 'sandbox roots missing')
+    sources, destinations = set(), set()
+    for item in s['roots']:
+        require(h, type(item) is dict and set(item) == {'production_source', 'sandbox_source',
+            'initialization', 'uid', 'gid', 'mode'}, 'invalid sandbox root fields')
+        h._absolute(item['production_source']); h._absolute(item['sandbox_source'])
+        root = Path(item['sandbox_source'])
+        require(h, root.parent == Path(s['root']) and re.fullmatch(r'root-[0-9]+', root.name),
+            'sandbox root is not a direct declared child')
+        require(h, item['initialization'] in {'EMPTY_SANDBOX_OK', 'COPY_CURRENT_STATE_REQUIRED'} and
+            all(type(item[k]) is int for k in ('uid', 'gid', 'mode')) and
+            item['uid'] > 0 and item['gid'] > 0 and 0 <= item['mode'] <= 0o777 and
+            item['mode'] & 0o700 == 0o700 and not item['mode'] & 0o022,
+            'sandbox ownership/mode/initialization invalid')
+        require(h, item['production_source'] not in sources and item['sandbox_source'] not in destinations,
+            'duplicate sandbox source')
+        sources.add(item['production_source']); destinations.add(item['sandbox_source'])
+
+
+def tree_identity(h, root):
+    """Observe regular byte-owned trees; links, devices and shared inodes fail closed."""
+    root = Path(root)
+    require(h, root.is_absolute() and root.resolve(strict=True) == root and root.is_dir(),
+        'sandbox/source tree missing or aliased')
+    result = {}
+    for item in (root, *sorted(root.rglob('*'))):
+        before = item.lstat()
+        require(h, not item.is_symlink() and item.resolve(strict=True) == item and
+            (stat.S_ISDIR(before.st_mode) or stat.S_ISREG(before.st_mode)), 'aliased/unsupported tree entry')
+        require(h, stat.S_ISDIR(before.st_mode) or before.st_nlink == 1, 'hardlinked tree content')
+        fields = {k: getattr(before, k) for k in ('st_dev', 'st_ino', 'st_uid', 'st_gid',
+            'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')}
+        fields['sha256'] = hashlib.sha256(item.read_bytes()).hexdigest() if item.is_file() else None
+        after = item.lstat()
+        require(h, all(getattr(after, k) == v for k, v in fields.items() if k != 'sha256'),
+            'tree changed during observation')
+        result[str(item.relative_to(root))] = fields
+    return result
+
+
+def sandbox_mounts(h, policy, old, *, check_files=True):
+    """One bounded source projection; target, access and alias groups stay exact."""
+    require(h, policy.get('role') == 'production', 'sandbox requires production domain')
+    r = policy['recovery']; validate_sandbox_declaration(h, r); s = r['sandbox']
+    writable_sources = {m['source'] for m in old['mounts'] if m['read_only'] is False}
+    declared = {item['production_source']: item for item in s['roots']}
+    require(h, set(declared) == writable_sources, 'sandbox must cover every and only production RW source')
+    require(h, all(not overlap(h, s['root'], m['source']) for m in old['mounts']),
+        'sandbox overlaps production source')
+    for a in declared:
+        require(h, all(a == b or not overlap(h, a, b) for b in declared), 'nested production RW sources unsupported')
+    if check_files:
+        h._protected_path(SANDBOX_PARENT, directory=True)
+        h._protected_path(Path(s['root']), directory=True)
+        require(h, stat.S_IMODE(Path(s['root']).stat().st_mode) == 0o700, 'sandbox allocation must be root-controlled 0700')
+        old_inodes = set()
+        for source in writable_sources:
+            state = tree_identity(h, source)
+            old_inodes.update((v['st_dev'], v['st_ino']) for v in state.values())
+            item = declared[source]; st = Path(source).stat()
+            require(h, (st.st_uid, st.st_gid, stat.S_IMODE(st.st_mode)) ==
+                (item['uid'], item['gid'], item['mode']), 'sandbox permissions differ from retained runtime')
+        for item in s['roots']:
+            state = tree_identity(h, item['sandbox_source']); st = Path(item['sandbox_source']).stat()
+            require(h, (st.st_uid, st.st_gid, stat.S_IMODE(st.st_mode)) ==
+                (item['uid'], item['gid'], item['mode']), 'sandbox ownership/mode differs')
+            require(h, all((v['st_dev'], v['st_ino']) not in old_inodes for v in state.values()),
+                'sandbox shares production inode')
+    # Include a retained RO alias only when it is the exact same old source.
+    # In particular capture-snapshots and its RO consumer must remain samefile.
+    return [{**m, 'source': declared[m['source']]['sandbox_source']}
+            if m['source'] in declared else copy.deepcopy(m) for m in old['mounts']]
+
+
+def validate_mount_projection(h, actual, expected, grant_target):
+    require(h, [m for m in actual if m['target'] != grant_target] ==
+        [m for m in expected if m['target'] != grant_target], 'business mount source or semantics changed')
+
+
+def build_sandbox(h, policy):
+    """Root-run controlled byte copy/empty allocation; never alter a source.
+
+    Call only under separately authorized rehearsal operations. Failures retain
+    the unique partial allocation for audit; no recursive cleanup is implicit.
+    """
+    h._require_linux_root(); h.require_protected_authority_source(); validate(h, policy)
+    r = policy['recovery']; require(h, 'sandbox' in r, 'explicit sandbox mode required')
+    old, _ = retained(h, policy, sandbox_ready=False)
+    h._protected_path(SANDBOX_PARENT, directory=True)
+    root = Path(r['sandbox']['root']); require(h, not root.exists(), 'sandbox allocation already exists')
+    h._reject_other_writable_sources(str(root), None)
+    before = {item['production_source']: tree_identity(h, item['production_source']) for item in r['sandbox']['roots']}
+    root.mkdir(mode=0o700); root.chmod(0o700)
+    for item in r['sandbox']['roots']:
+        src, dst = Path(item['production_source']), Path(item['sandbox_source'])
+        dst.mkdir(mode=0o700)
+        if item['initialization'] == 'COPY_CURRENT_STATE_REQUIRED':
+            for relative, identity in before[str(src)].items():
+                if relative == '.': continue
+                a, b = src / relative, dst / relative
+                if stat.S_ISDIR(identity['st_mode']):
+                    b.mkdir(mode=0o700)
+                else:
+                    # Plain bytes, O_NOFOLLOW and exclusive destination; no
+                    # symlink/hardlink/reflink or copy-on-write shortcut.
+                    fd = os.open(a, os.O_RDONLY | os.O_NOFOLLOW)
+                    try:
+                        opened = os.fstat(fd)
+                        require(h, (opened.st_dev, opened.st_ino) == (identity['st_dev'], identity['st_ino']),
+                            'copy source replaced')
+                        with os.fdopen(fd, 'rb', closefd=False) as reader, b.open('xb') as writer:
+                            for data in iter(lambda: reader.read(1048576), b''): writer.write(data)
+                            writer.flush(); os.fsync(writer.fileno())
+                    finally: os.close(fd)
+                    require(h, hashlib.sha256(b.read_bytes()).hexdigest() == identity['sha256'], 'copy bytes differ')
+                os.chown(b, item['uid'], item['gid']); b.chmod(stat.S_IMODE(identity['st_mode']))
+        os.chown(dst, item['uid'], item['gid']); dst.chmod(item['mode'])
+    after = {name: tree_identity(h, name) for name in before}
+    require(h, before == after, 'production source changed during copy')
+    projected = sandbox_mounts(h, policy, old)
+    return {'rehearsal_id': r['nonce'], 'root': str(root), 'mounts': projected,
+        'production_before': before, 'production_after': after,
+        'sandbox_initial': {i['sandbox_source']: tree_identity(h, i['sandbox_source']) for i in r['sandbox']['roots']}}
 
 
 def require(h, value, message):
@@ -21,7 +156,8 @@ def validate(h, policy):
         'preserved_store_sources'}
     # The network object does not exist while the Compose projection is prepared.
     # It must be pinned in the protected policy after create and before any grant.
-    require(h, type(r) is dict and set(r) in (fields, fields | {'expected_network_id'}),
+    require(h, type(r) is dict and set(r) in (fields, fields | {'expected_network_id'},
+        fields | {'sandbox'}, fields | {'expected_network_id', 'sandbox'}),
         'invalid protected projection fields')
     require(h, r['purpose'] == 'recovery-validation', 'not a recovery validation policy')
     require(h, isinstance(r['nonce'], str) and re.fullmatch('[0-9a-f]{32}', r['nonce']), 'invalid nonce')
@@ -45,6 +181,9 @@ def validate(h, policy):
     for path in paths:
         h._absolute(path)
     require(h, not any(overlap(h, a, b) for i, a in enumerate(paths) for b in paths[i+1:]), 'operational roots overlap')
+    if 'sandbox' in r:
+        require(h, policy.get('role') == 'production', 'sandbox requires production domain')
+        validate_sandbox_declaration(h, r)
 
 
 def overlap(h, a, b):
@@ -81,7 +220,7 @@ def preserved(h, policy):
     return result
 
 
-def retained(h, policy):
+def retained(h, policy, *, sandbox_ready=True):
     """Re-read protected old approval and Docker; never reuse its execution grant."""
     validate(h, policy)
     r = policy['recovery']
@@ -97,7 +236,8 @@ def retained(h, policy):
     grant_target = policy['grant_container_directory']
     old_mounts = [m for m in old['mounts'] if m['target'] != grant_target]
     mounts = [m for m in policy['mounts'] if m['target'] != grant_target]
-    require(h, mounts == old_mounts, 'business mount source or semantics changed')
+    expected_mounts = sandbox_mounts(h, policy, old, check_files=sandbox_ready) if 'sandbox' in r else old['mounts']
+    validate_mount_projection(h, policy['mounts'], expected_mounts, grant_target)
     og = [m for m in old['mounts'] if m['target'] == grant_target]
     ng = [m for m in policy['mounts'] if m['target'] == grant_target]
     require(h, len(og) == len(ng) == 1 and ng[0]['read_only'] is True and
@@ -108,6 +248,9 @@ def retained(h, policy):
     require(h, c.get('Name') == '/' + old['service_id'], 'old production name differs')
     require(h, c['State']['Running'] is True and production_identity(h, c) ==
         r['production_observation_sha256'], 'production instance changed')
+    if 'sandbox' in r:
+        require(h, all(c['Config'].get('User') == f"{item['uid']}:{item['gid']}"
+            for item in r['sandbox']['roots']), 'sandbox owner differs from actual non-root runtime user')
     image = h.docker_image_inspect(old['image_id'])
     release = h.copy_container_json(c['Id'], old['source_root'] + '/RELEASE.json')
     observed = h.normalize_observation(c, image, release)
@@ -203,6 +346,12 @@ def project_compose(h, desired, policy):
     for mount in service.get('volumes', []):
         if mount['target'] == policy['grant_container_directory']:
             mount['source'] = grant_source
+        elif 'sandbox' in r:
+            replacement = next((m for m in sandbox_mounts(h, policy, old)
+                if m['target'] == mount['target']), None)
+            require(h, replacement is not None, 'undeclared Compose mount')
+            require(h, bool(mount.get('read_only', False)) == replacement['read_only'], 'Compose access mode changed')
+            mount['source'] = replacement['source']
     expected = copy.deepcopy(desired)
     expected['networks']['default'] = desired_network
     for doc in (expected, projected):
@@ -308,8 +457,39 @@ def grant_id(h, policy, container_id):
         h._HEX64.fullmatch(r['expected_network_id']),
         'fresh recovery grant requires the expected network object ID')
     h._container_id(container_id)
-    return h._digest(dict(domain='recovery-network-grant-id/1',
+    binding = dict(domain='recovery-network-grant-id/1',
         nonce=r['nonce'], container_id=container_id, network=r['network'],
         network_id=r['expected_network_id'], host_port=r['host_port'],
         image_id=policy['image_id'], approved_commit=policy['approved_commit'],
-        approved_tree=policy['approved_tree']))[:32]
+        approved_tree=policy['approved_tree'])
+    if 'sandbox' in r:
+        binding['sandbox'] = r['sandbox']
+    return h._digest(binding)[:32]
+
+
+def verify_sandbox_evidence(h, policy, grant, data):
+    """Consume protected collector facts, never a caller-provided PASS flag."""
+    old, _ = retained(h, policy)
+    r = policy['recovery']; require(h, 'sandbox' in r, 'sandbox evidence lacks explicit mode')
+    require(h, grant['role'] == 'production' and grant['authorization_mode'] == 'production',
+        'sandbox evidence requires production grant')
+    require(h, grant['grant_id'] == grant_id(h, policy, grant['container_id']) and
+        grant['mount_contract_sha256'] == h._digest(policy['mounts']) and
+        grant['actual_config_sha256'] == policy['actual_config_sha256'] and
+        grant['rendered_compose_sha256'] == policy['rendered_compose_sha256'], 'sandbox grant scope differs')
+    writable = [m['target'] for m in policy['mounts'] if not m['read_only']]
+    require(h, sorted(grant['writable_roots']) == sorted(writable), 'grant writes outside sandbox scope')
+    require(h, type(data) is dict and set(data) == {'production_before', 'production_after',
+        'sandbox_before', 'sandbox_after'}, 'sandbox collector facts incomplete')
+    sources = {i['production_source'] for i in r['sandbox']['roots']}
+    destinations = {i['sandbox_source'] for i in r['sandbox']['roots']}
+    for name, expected in (('production_before', sources), ('production_after', sources),
+            ('sandbox_before', destinations), ('sandbox_after', destinations)):
+        require(h, type(data[name]) is dict and set(data[name]) == expected and
+            all(type(v) is dict and bool(v) for v in data[name].values()), 'sandbox tree coverage incomplete')
+    require(h, data['production_before'] == data['production_after'], 'live production tree changed')
+    require(h, data['production_after'] == {name: tree_identity(h, name) for name in sources},
+        'production preservation evidence no longer current')
+    require(h, data['sandbox_after'] == {name: tree_identity(h, name) for name in destinations},
+        'sandbox output evidence differs from actual allocation')
+    return old

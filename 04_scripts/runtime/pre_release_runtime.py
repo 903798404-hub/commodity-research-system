@@ -825,6 +825,26 @@ def verify_recovery_observation(recovery: dict, host, *, targeted_roots: list | 
                 or type(result["exit_code"]) is not int or result["exit_code"] != 0 or result["status"] != "PASS"
                 or not _risk_file(result["raw"], host).strip()):
             raise PreReleaseError("recovery probe failed or identity differs")
+    # Legacy non-sandbox probes were opaque nonempty raw observations. Do not
+    # impose a new JSON contract on them; sandbox facts remain strict JSON.
+    try:
+        preservation_raw = host._json(_risk_file(observations['data_unchanged']['raw'], host))
+    except ValueError:
+        if 'recovery_policy' in recovery:
+            raise PreReleaseError('sandbox preservation facts are not valid JSON')
+        preservation_raw = None
+    if type(preservation_raw) is dict and 'sandbox_preservation' in preservation_raw and 'recovery_policy' not in recovery:
+        raise PreReleaseError('sandbox preservation requires bound recovery policy')
+    if 'recovery_policy' in recovery:
+        policy = host._json(_risk_file(recovery['recovery_policy'], host))
+        host.validate_policy(policy, 'production')
+        if (policy['approved_commit'] != grant['approved_commit'] or
+                policy['approved_tree'] != grant['approved_tree'] or policy['image_id'] != grant['image_id']):
+            raise PreReleaseError('sandbox recovery policy artifact differs')
+        if type(preservation_raw) is not dict or 'sandbox_preservation' not in preservation_raw:
+            raise PreReleaseError('sandbox preservation facts missing')
+        module = _load('09_deploy/runtime_identity/recovery_namespace.py', '_release_sandbox_recovery')
+        module.verify_sandbox_evidence(host, policy, grant, preservation_raw['sandbox_preservation'])
     if targeted_roots is not None:
         verify_targeted_preservation(observations, host, targeted_roots)
 
@@ -962,8 +982,10 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     targeted_roots = None
     if request["recovery_evidence"] is not None:
         recovery = host._json(_risk_file(request["recovery_evidence"], host))
-        _risk_fields(recovery, ("schema_version", "base", "target", "old_image_id", "runtime_config_sha256",
-                               "data_schema_sha256", "method", "observed_at", "result", "evidence"), "recovery observation")
+        recovery_fields = {"schema_version", "base", "target", "old_image_id", "runtime_config_sha256",
+                          "data_schema_sha256", "method", "observed_at", "result", "evidence"}
+        _risk_fields(recovery, recovery_fields | ({'recovery_policy'} if 'recovery_policy' in recovery else set()),
+                     "recovery observation")
         if (recovery["schema_version"] != "production-recovery-observation/1" or recovery["base"] != risk["base"]
                 or recovery["target"] != risk["target"] or recovery["old_image_id"] != retained[0]["image_id"]
                 or recovery["runtime_config_sha256"] != request["current"]["runtime_config"]["sha256"]

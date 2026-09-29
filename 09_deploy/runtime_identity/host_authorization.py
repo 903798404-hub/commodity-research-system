@@ -835,7 +835,14 @@ def _validate_mount_sources(observed: Mapping, policy: Mapping, grant_dir: Path,
                 raise HostAuthorizationError("candidate source has no approved readonly identity")
         if policy["schema_version"] in _PRODUCTION_POLICIES:
             storage = _protected_path(Path(policy["production_storage_root"]), directory=True)
-            if not mount["target"].startswith("/run/secrets/") and not _within(str(source), str(storage)):
+            sandbox_mount = False
+            if 'sandbox' in policy.get('recovery', {}):
+                old, _ = _recovery_call('retained', policy)
+                sandbox_mount = mount in _recovery_call('sandbox_mounts', policy, old) and any(
+                    item['sandbox_source'] == str(source) for item in policy['recovery']['sandbox']['roots'])
+                if sandbox_mount:
+                    _reject_other_writable_sources(policy['recovery']['sandbox']['root'], observed.get('container_id'))
+            if not mount["target"].startswith("/run/secrets/") and not _within(str(source), str(storage)) and not sandbox_mount:
                 raise HostAuthorizationError("production mount is outside its approved storage allocation")
             if any((parent / ".git").exists() for parent in (source, *source.parents) if parent.is_dir()):
                 raise HostAuthorizationError("production cannot mount a development Git checkout")

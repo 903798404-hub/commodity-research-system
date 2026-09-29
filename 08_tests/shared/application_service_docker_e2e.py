@@ -6,6 +6,7 @@ All Docker objects and bind sources are test-only; no production authority is re
 from __future__ import annotations
 
 import argparse
+import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
@@ -265,6 +266,137 @@ def container_probe(cid: str, code: str) -> str:
     return run("docker", "exec", cid, "python", "-B", "-c", code)
 
 
+def recovery_sandbox_evidence(image: str, template: dict, work: Path) -> dict:
+    """Real Docker + formal sandbox builder on Hosted-only synthetic baseline.
+
+    This is not a production grant or actual old-production-image rehearsal.
+    No production key, secret, image or business root is available in Hosted.
+    """
+    module = host._contract_module(ROOT/'09_deploy/runtime_identity/recovery_namespace.py', '_hosted_sandbox')
+    nonce = uuid.uuid4().hex
+    storage = Path('/var/lib/market-data/production-runtime')/('hosted-recovery-'+nonce)
+    storage.parent.mkdir(parents=True, exist_ok=True)
+    scoped_directory(storage, 0o700)
+    module.SANDBOX_PARENT.mkdir(parents=True, exist_ok=True)
+    host._protected_path(module.SANDBOX_PARENT, directory=True)
+    targets=['/runtime/06_outputs','/runtime/10_logs','/runtime/capture-snapshots',
+        '/runtime/import-profit/operational/cnf','/runtime/import-profit/operational/am-results']
+    sources=[]
+    for index in range(5):
+        leaf=storage/('state-'+str(index)); scoped_directory(leaf,0o755 if index<3 else 0o700,UID,GID)
+        if index>=2:
+            write(leaf/'current',b'hosted synthetic retained state',0o600);os.chown(leaf/'current',UID,GID)
+        sources.append(leaf)
+    writable=sources[2]
+    grants = storage/'grants'; scoped_directory(grants, 0o755)
+    isolated_grants = storage/'rehearsal-grants'; scoped_directory(isolated_grants, 0o755)
+    mounts = [dict(source=str(s),target=t,read_only=False) for s,t in zip(sources,targets)] + [
+              dict(source=str(writable),target='/runtime/import-profit/snapshots',read_only=True),
+              dict(source=str(grants),target=GRANT_TARGET,read_only=True)]
+    cid = fresh = network_id = None
+    try:
+        args=['docker','create','--name',SERVICE,'--hostname',nonce,'--user',f'{UID}:{GID}',
+              '--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true']
+        for mt in mounts:
+            args += ['--mount',f"type=bind,src={mt['source']},dst={mt['target']}"+(',readonly' if mt['read_only'] else '')]
+        cid=run(*args,image);run('docker','start',cid)
+        c=host.docker_inspect(cid)
+        observed=host.normalize_observation(c,host.docker_image_inspect(image),host.copy_container_json(cid))
+        old=copy.deepcopy(template);old.pop('application_service')
+        old.update(schema_version='host-runtime-policy/5',role='production',candidate_host_root=None,
+            candidate_scope=None,approved_source_root=str(ROOT),production_storage_root=str(storage),
+            candidate_record={'path':str(work/'synthetic-acceptance.json'),'sha256':'1'*64},
+            actual_config_sha256=observed['actual_config_sha256'],mounts=observed['mounts'])
+        host.validate_policy(old,'production')
+        baseline=work/'sandbox-baseline-policy.json';write(baseline,canonical(old))
+        p=copy.deepcopy(old)
+        sandbox_root=module.SANDBOX_PARENT/nonce
+        declaration={'mode':'isolated-rehearsal','root':str(sandbox_root),'roots':[
+            {'production_source':str(s),'sandbox_source':str(sandbox_root/('root-'+str(index))),
+             'initialization':'EMPTY_SANDBOX_OK' if index<2 else 'COPY_CURRENT_STATE_REQUIRED',
+             'uid':UID,'gid':GID,'mode':0o755 if index<3 else 0o700} for index,s in enumerate(sources)]}
+        p['recovery']={'purpose':'recovery-validation','baseline_policy':{'path':str(baseline),'sha256':host._digest(old)},
+            'production_container_id':cid,'production_observation_sha256':module.production_identity(host,c),
+            'nonce':nonce,'project':'spread-recovery-'+nonce,'container':SERVICE+'-recovery-'+nonce,
+            'host_port':18531,'network':'spread-recovery-'+nonce+'-net',
+            'preserved_store_sources':[str(s) for s in sources],'sandbox':declaration}
+        projected=module.sandbox_mounts(host,p,old,check_files=False)
+        p['mounts']=[dict(mt,source=str(isolated_grants)) if mt['target']==GRANT_TARGET else mt for mt in projected]
+        built=module.build_sandbox(host,p)
+        assert built['production_before']==built['production_after']
+        before={str(s):module.tree_identity(host,s) for s in sources}
+        expected=module.sandbox_mounts(host,p,old)
+        by_target={v['target']:v for v in expected}
+        assert by_target['/runtime/capture-snapshots']['source']==by_target['/runtime/import-profit/snapshots']['source']
+        assert by_target['/runtime/capture-snapshots']['read_only'] is False and by_target['/runtime/import-profit/snapshots']['read_only'] is True
+        module.validate_mount_projection(host,p['mounts'],expected,GRANT_TARGET)
+        module.preserved(host,p)
+        network_id=run('docker','network','create','--driver','bridge','--label',
+            'com.docker.compose.project='+p['recovery']['project'],p['recovery']['network'])
+        p['recovery']['expected_network_id']=network_id
+        args=['docker','create','--name',p['recovery']['container'],'--user',f'{UID}:{GID}',
+            '--hostname',nonce,'--label','com.docker.compose.project='+p['recovery']['project'],
+            '--network',p['recovery']['network'],'--publish','127.0.0.1:18531:8501',
+            '--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true']
+        for mt in p['mounts']:
+            args += ['--mount',f"type=bind,src={mt['source']},dst={mt['target']}"+(',readonly' if mt['read_only'] else '')]
+        probe="""from pathlib import Path
+import os,json
+assert os.geteuid()==65532
+assert os.path.samefile('/runtime/capture-snapshots','/runtime/import-profit/snapshots')
+assert Path('/runtime/capture-snapshots/current').read_bytes()==b'hosted synthetic retained state'
+for t in ['/runtime/06_outputs','/runtime/10_logs','/runtime/capture-snapshots','/runtime/import-profit/operational/cnf','/runtime/import-profit/operational/am-results']:
+    assert os.access(t,os.W_OK|os.X_OK)
+Path('/runtime/10_logs/cache').write_bytes(b'normal isolated runtime write')
+try:Path('/runtime/import-profit/snapshots/current').write_bytes(b'forbidden')
+except OSError:pass
+else:raise AssertionError('RO alias writable')
+print(json.dumps({'uid':os.geteuid(),'rw_write':'PASS','ro_write_rejected':'PASS','samefile':'PASS'}))
+"""
+        args+=[image]
+        fresh=run(*args)
+        actual=host.docker_inspect(fresh)
+        mount_observation=host.normalize_observation(actual,host.docker_image_inspect(image),host.copy_container_json(fresh))
+        assert mount_observation['mounts']==p['mounts']
+        host._validate_mount_sources(mount_observation,p,isolated_grants)
+        pre_network=module.validate_instance(host,host.docker_inspect(fresh),p,'pre_start')
+        run('docker','start',fresh)
+        post_network=module.validate_instance(host,host.docker_inspect(fresh),p,'post_start')
+        probe_result=json.loads(container_probe(fresh,probe))
+        assert probe_result['rw_write']==probe_result['ro_write_rejected']==probe_result['samefile']=='PASS'
+        assert {str(s):module.tree_identity(host,s) for s in sources}==before
+        assert Path(by_target['/runtime/10_logs']['source'],'cache').read_bytes()==b'normal isolated runtime write'
+        rejected=[]
+        for fault in ('live-rw','rw-to-ro','ro-to-rw','target','missing','extra','outside'):
+            bad=copy.deepcopy(p)
+            rw_index=next(i for i,v in enumerate(bad['mounts']) if v['target']=='/runtime/capture-snapshots')
+            ro_index=next(i for i,v in enumerate(bad['mounts']) if v['target']=='/runtime/import-profit/snapshots')
+            if fault=='outside':bad['recovery']['sandbox']['root']='/tmp/outside'
+            elif fault=='live-rw':bad['mounts'][rw_index]['source']=str(writable)
+            elif fault=='rw-to-ro':bad['mounts'][rw_index]['read_only']=True
+            elif fault=='ro-to-rw':bad['mounts'][ro_index]['read_only']=False
+            elif fault=='target':bad['mounts'][rw_index]['target']='/different'
+            elif fault=='missing':bad['mounts'].pop(rw_index)
+            else:bad['mounts'].append(dict(bad['mounts'][0],target='/extra'))
+            try:
+                wanted=module.sandbox_mounts(host,bad,old)
+                module.validate_mount_projection(host,bad['mounts'],wanted,GRANT_TARGET)
+            except host.HostAuthorizationError:rejected.append(fault)
+            else:raise AssertionError('invalid sandbox scope accepted: '+fault)
+        return {'result':'PASS','evidence_class':'HOSTED_SYNTHETIC_BASELINE_NOT_PRODUCTION_TRUST',
+            'sandbox_write_occurred':True,'synthetic_retained_source_changed':False,
+            'rw_mount_count':5,'container_targets':targets,
+            'target_mode_and_alias_preserved':True,'negative_probes_rejected':rejected,
+            'pre_start_network':pre_network,'post_start_network':post_network,
+            'actual_runtime_probe':probe_result,
+            'formal_builder':'PASS','actual_nonroot_docker_write':'PASS',
+            'production_domain_grant':'NOT_EXECUTED','actual_production_rehearsal':'NOT_EXECUTED'}
+    finally:
+        if fresh:run('docker','rm','--force',fresh)
+        if network_id:run('docker','network','rm',network_id)
+        if cid:run('docker','rm','--force',cid)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate-commit", required=True)
@@ -385,6 +517,7 @@ def main() -> int:
         else:
             raise AssertionError("Container B accepted Container A credential")
         evidence["container_b_old_credential_rejected"] = True
+        evidence['isolated_recovery_sandbox'] = recovery_sandbox_evidence(image, policy_a, work)
         evidence["result"] = "PASS"
     except Exception as exc:
         evidence["result"] = "FAIL"

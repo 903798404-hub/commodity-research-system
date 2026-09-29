@@ -675,7 +675,7 @@ def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, t
         assert result["OLD_GRANT_EXPIRED"] == "NOT_READ_NOT_A_GATE"
         assert result["production_authorized"] is False
 
-@pytest.mark.parametrize("mutation", [None, "expired-start", "wrong-instance", "failed-consumer", "wrong-probe-tree", "signature", "revoked"])
+@pytest.mark.parametrize("mutation", [None, "expired-start", "wrong-instance", "failed-consumer", "wrong-probe-tree", "signature", "revoked", "candidate-role", "sandbox-without-policy"])
 def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, monkeypatch, mutation):
     from datetime import timedelta
     spec = importlib.util.spec_from_file_location("recovery_identity_fixture", ROOT / "08_tests/shared/test_production_identity.py")
@@ -697,6 +697,10 @@ def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, mo
     grant = json.loads(request.grant_path.read_bytes())
     if mutation == "signature":
         grant["signature"] = base64.b64encode(b"0" * 64).decode()
+    if mutation == 'candidate-role':
+        grant['payload'].update(role='candidate_validation', authorization_mode='candidate_validation')
+        grant['signature'] = base64.b64encode(private.sign(json.dumps(grant['payload'],
+            sort_keys=True,separators=(',', ':'),ensure_ascii=False).encode())).decode()
     if mutation == "revoked":
         trust_path = source / runtime.TRUST
         trust = json.loads(trust_path.read_bytes())
@@ -708,8 +712,10 @@ def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, mo
         instance["container_id"] = "f" * 64
     evidence = dict(instance=ref("instance", instance), grant=ref("grant", grant))
     for name in ("preflight", "health", "consumer", "data_unchanged"):
+        raw_value = ({'sandbox_preservation': {}} if mutation == 'sandbox-without-policy' and name == 'data_unchanged'
+                     else {"actual": "fixture"})
         probe = dict(container_id=payload["container_id"], commit=payload["approved_commit"], tree=payload["approved_tree"],
-                     image_id=payload["image_id"], exit_code=0, status="PASS", raw=ref(name+"-raw", {"actual": "fixture"}))
+                     image_id=payload["image_id"], exit_code=0, status="PASS", raw=ref(name+"-raw", raw_value))
         if name == "consumer" and mutation == "failed-consumer":
             probe["exit_code"] = 1
         if name == "preflight" and mutation == "wrong-probe-tree":
