@@ -776,6 +776,44 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
 
 
 
+_DOCKER_TIME = re.compile(
+    r"([0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2})"
+    r"(?:\.([0-9]{1,9}))?(Z|[+-][0-9]{2}:[0-9]{2})\Z"
+)
+_NANOSECONDS_PER_SECOND = 1_000_000_000
+
+
+def _datetime_nanoseconds(value: datetime) -> int:
+    """Exact UTC integer; never use a float Unix timestamp at a release Gate."""
+    utc = value.astimezone(timezone.utc)
+    seconds = ((utc.toordinal() - datetime(1970, 1, 1).toordinal()) * 86400
+               + utc.hour * 3600 + utc.minute * 60 + utc.second)
+    return seconds * _NANOSECONDS_PER_SECOND + utc.microsecond * 1000
+
+
+def _docker_timestamp_nanoseconds(value: object, label: str) -> int:
+    """Parse complete zoned RFC3339Nano Docker observations on Python 3.10.
+
+    Fractional seconds are 1..9 digits. Raw observations stay untouched; only
+    the internal comparison value is normalized. A zero Docker timestamp is
+    not a valid creation/start observation for an accepted recovery instance.
+    """
+    match = _DOCKER_TIME.fullmatch(value) if type(value) is str else None
+    if match is None:
+        raise PreReleaseError(f"invalid Docker {label} timestamp")
+    whole, fraction, zone = match.groups()
+    if zone != "Z" and (int(zone[1:3]) > 23 or int(zone[4:6]) > 59):
+        raise PreReleaseError(f"invalid Docker {label} timezone")
+    try:
+        parsed = datetime.fromisoformat(whole + ("+00:00" if zone == "Z" else zone))
+        result = _datetime_nanoseconds(parsed) + int((fraction or "").ljust(9, "0"))
+    except (ValueError, OverflowError) as exc:
+        raise PreReleaseError(f"invalid Docker {label} timestamp") from exc
+    if parsed.astimezone(timezone.utc) == datetime.min.replace(tzinfo=timezone.utc) and not int(fraction or "0"):
+        raise PreReleaseError(f"Docker {label} timestamp is an unset placeholder")
+    return result
+
+
 def verify_recovery_observation(recovery: dict, host, *, targeted_roots: list | None = None) -> None:
     """Verify sealed runtime observations, including fresh grant at actual start.
 
@@ -806,10 +844,13 @@ def verify_recovery_observation(recovery: dict, host, *, targeted_roots: list | 
         if parsed.tzinfo is None:
             raise PreReleaseError("recovery timestamp lacks timezone")
         return parsed
-    created, started = timestamp(instance["created_at"]), timestamp(instance["started_at"])
-    issued, expires = timestamp(grant["issued_at"]), timestamp(grant["expires_at"])
-    observed = timestamp(recovery["observed_at"])
-    if not created <= issued <= started < expires or not started <= observed < expires or expires - issued > timedelta(hours=1):
+    created = _docker_timestamp_nanoseconds(instance["created_at"], "created_at")
+    started = _docker_timestamp_nanoseconds(instance["started_at"], "started_at")
+    # Keep the existing grant/observation timestamp parsers and signed formats.
+    issued, expires = (_datetime_nanoseconds(timestamp(grant[name]))
+                       for name in ("issued_at", "expires_at"))
+    observed = _datetime_nanoseconds(timestamp(recovery["observed_at"]))
+    if not created <= issued <= started < expires or not started <= observed < expires or expires - issued > 3600 * _NANOSECONDS_PER_SECOND:
         raise PreReleaseError("fresh recovery grant was not valid at start/acceptance")
     if (grant["role"] != "production" or grant["approved_commit"] != recovery["base"]["commit"]
             or grant["approved_tree"] != recovery["base"]["tree"] or grant["image_id"] != recovery["old_image_id"]

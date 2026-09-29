@@ -150,6 +150,16 @@ jobs:
         sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
           "$source_root/08_tests/shared/release_canonicalization_docker_e2e.py" \
           --output "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json"
+    - name: Validate host release timestamps on current Python
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      working-directory: candidate
+      run: |
+        python_bin="$(command -v python)"
+        sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" "$python_bin" -I -B \
+          "$PWD/08_tests/shared/host_release_timestamp_compatibility.py" \
+          --base '${{ needs.plan.outputs.base_commit }}' --expected-python 3.12 \
+          --docker-evidence "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json" \
+          --output "$RUNNER_TEMP/platform-results/linux/host-release-python312.json"
     - name: Execute required real Docker application service identity evidence
       working-directory: candidate
       run: |
@@ -167,6 +177,26 @@ jobs:
           --candidate-commit "$(git rev-parse HEAD)" \
           --candidate-tree "$(git rev-parse 'HEAD^{tree}')" \
           --output "$RUNNER_TEMP/platform-results/linux/application-service-identity-docker-evidence.json"
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      id: host-python310
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      with:
+        python-version: '3.10.12'
+    - name: Install narrow host-tool compatibility dependencies
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      run: |
+        '${{ steps.host-python310.outputs.python-path }}' -I -m pip install \
+          pytest==9.1.1 cryptography==50.0.0 PyYAML==6.0.3 jsonschema==4.26.0
+    - name: Validate host release timestamps on actual Python 3.10.12
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      working-directory: candidate
+      run: |
+        sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+          '${{ steps.host-python310.outputs.python-path }}' -I -B \
+          "$PWD/08_tests/shared/host_release_timestamp_compatibility.py" \
+          --base '${{ needs.plan.outputs.base_commit }}' --expected-python 3.10.12 \
+          --docker-evidence "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json" \
+          --output "$RUNNER_TEMP/platform-results/linux/host-release-python31012.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:

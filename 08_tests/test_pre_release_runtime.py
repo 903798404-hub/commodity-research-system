@@ -628,7 +628,7 @@ def test_assessment_cli_cannot_be_combined_with_start_options(tmp_path):
     with pytest.raises(SystemExit):
         runtime.main(["--classify-release", "a" * 40, "b" * 40, "example", "--production-policy", "policy"])
 
-@pytest.mark.parametrize("mutation,expected", [(None, "PASS"), ("migration", "FAIL"), ("irreversible", "FAIL"), ("candidate", "ERROR"), ("acceptance", "ERROR"), ("extra-field", "ERROR"), ("target-output", "ERROR")])
+@pytest.mark.parametrize("mutation,expected", [(None, "PASS"), ("migration", "FAIL"), ("irreversible", "FAIL"), ("candidate", "ERROR"), ("acceptance", "ERROR"), ("extra-field", "ERROR"), ("target-output", "ERROR"), ("separate-tool", "PASS"), ("bind-tool", "ERROR")])
 def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, tmp_path, mutation, expected):
     import copy
     repo, current, host, image = rollback_assets
@@ -648,6 +648,9 @@ def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, t
     candidate = dict(binding=dict(target, project_id="example"), image_id=image["Id"])
     if mutation == "candidate":
         candidate["binding"]["tree"] = "9" * 40
+    tool_identity = ("d" * 40, "e" * 40) if mutation in {"separate-tool", "bind-tool"} else (target["commit"], target["tree"])
+    if mutation == "bind-tool":
+        candidate["binding"].update(commit=tool_identity[0], tree=tool_identity[1])
     request = dict(schema_version="production-release-request/1", project_id="example", current=current, previous=old,
                    target_commit=target["commit"], target_source_root=str(repo), candidate_record=ref("candidate-record", candidate),
                    state_plan=ref("state-plan", state), acceptance_plan=ref("acceptance-plan", dict(target=target,
@@ -663,7 +666,7 @@ def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, t
     monkeypatch.setattr(runtime, "ROOT", repo)
     (repo / runtime.TRUST).write_text("{}")
     monkeypatch.setattr(runtime, "_load", lambda name, alias: {runtime.HOST: host, runtime.ENGINE: engine, runtime.RECORD: records}[name])
-    monkeypatch.setattr(runtime, "require_source", lambda *a, **kw: (target["commit"], target["tree"]))
+    monkeypatch.setattr(runtime, "require_source", lambda *a, **kw: (target["commit"], target["tree"]) if "source_root" in kw else tool_identity)
     monkeypatch.setattr(runtime, "classify_release", lambda *a: dict(schema_version=runtime.RISK_SCHEMA, base=target, target=target, RELEASE_RISK_CLASS="ROUTINE_STATELESS"))
     monkeypatch.setattr(runtime, "verify_rollback_assets", lambda root, a, h: dict(commit=a["commit"], image_id=image["Id"], ROLLBACK_ASSETS_READY=True))
     # asset negative cases have dedicated real verifier tests above; here test
@@ -679,6 +682,7 @@ def test_protected_release_assessment_end_to_end(rollback_assets, monkeypatch, t
         assert result["PRODUCTION_RELEASE_PREFLIGHT"] == expected
         assert result["OLD_GRANT_EXPIRED"] == "NOT_READ_NOT_A_GATE"
         assert result["production_authorized"] is False
+        assert result["governance_identity"] == dict(commit=tool_identity[0], tree=tool_identity[1])
 
 @pytest.mark.parametrize("mutation", [None, "expired-start", "wrong-instance", "failed-consumer", "wrong-probe-tree", "signature", "revoked", "candidate-role", "sandbox-without-policy"])
 def test_recovery_requires_fresh_signed_grant_and_bound_real_probes(tmp_path, monkeypatch, mutation):
