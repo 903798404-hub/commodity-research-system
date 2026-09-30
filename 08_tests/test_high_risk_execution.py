@@ -24,7 +24,7 @@ def plan():
         target=copy.deepcopy(asset), primary_rollback=copy.deepcopy(asset),
         project_id='spread-production-runtime-wiring', source_container_id='7' * 64,
         release_request=ref, source_policy=ref, instances=dict(target=ref, primary_rollback=ref),
-        lock_file='/run/lock/market-data-spread-release.lock', policy=dict(
+        lock_file='/var/lib/market-data/production-runtime/spread-release.lock', policy=dict(
             readiness=copy.deepcopy(execution.contract().DEFAULT_READINESS_POLICY), observation_seconds=2,
             poll_interval_seconds=1, consecutive_failures=2, stop_timeout_seconds=10,
             start_timeout_seconds=60, rollback_timeout_seconds=90, rollback_on=[

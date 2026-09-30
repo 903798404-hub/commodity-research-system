@@ -483,7 +483,7 @@
           }
         },
         "lock_file": {
-          "const": "/run/lock/market-data-spread-release.lock"
+          "const": "/var/lib/market-data/production-runtime/spread-release.lock"
         },
         "policy": {
           "type": "object",

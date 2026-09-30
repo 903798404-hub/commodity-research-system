@@ -324,7 +324,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         formal_containers={}, tool=identity(tool), source=asset_old, target=asset_target, primary_rollback=asset_old,
         project_id=PROJECT, source_container_id=cid, source_policy=ref(baseline_path), release_request=ref(request_path),
         instances=dict(target=ref(target_spec), primary_rollback=ref(rollback_spec)),
-        lock_file='/run/lock/market-data-spread-release.lock', policy=dict(readiness=copy.deepcopy(execution.contract().DEFAULT_READINESS_POLICY),
+        lock_file='/var/lib/market-data/production-runtime/spread-release.lock', policy=dict(readiness=copy.deepcopy(execution.contract().DEFAULT_READINESS_POLICY),
             observation_seconds=2, poll_interval_seconds=1, consecutive_failures=2, stop_timeout_seconds=10,
             start_timeout_seconds=60, rollback_timeout_seconds=180, rollback_on=['create_failure', 'authorization_failure',
                 'start_failure', 'acceptance_failure', 'runtime_identity_failure', 'health_failure_threshold', 'observation_ended_unhealthy']))

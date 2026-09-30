@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -226,7 +227,9 @@ class HostBackend:
             self.host.require_protected_authority_source()
             self.engine.require_builder()
             self.host._protected_path(Path(plan['lock_file']).parent, directory=True)
-            with open(plan['lock_file'], 'a') as handle:
+            descriptor = os.open(plan['lock_file'], os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            with os.fdopen(descriptor, 'a') as handle:
+                self.host._protected_path(Path(plan['lock_file']), private=True)
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 yield
         return locked()
