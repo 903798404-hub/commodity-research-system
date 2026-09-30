@@ -459,12 +459,17 @@ class HostBackend:
                 'TEMPORARY_GRANT_CLEANUP_SCOPE')
         self.host._protected_path(grant_directory, directory=True)
         require({p.name for p in grant_directory.iterdir()} == {'grant.json'}, 'UNDECLARED_TEMPORARY_GRANT_CONTENT')
+        network_name = policy['recovery']['network']
+        network = self.host._json(self.engine._docker('network', 'inspect', network_name).stdout)[0]
+        require(network['Id'] == policy['recovery']['expected_network_id'] and
+                set(network.get('Containers', {})) <= {rehearsal}, 'TEMPORARY_NETWORK_CHANGED_OR_SHARED')
         ids = self.engine._docker('ps', '-aq', '--no-trunc').stdout.decode().split()
         if rehearsal in ids:
             c = self.host.docker_inspect(rehearsal)
             require(c['Image'] == plan['source']['image_id'] and
                     c['Name'] == '/' + policy['recovery']['container'], 'REHEARSAL_INSTANCE_CHANGED')
             self.engine._docker('rm', '-f', rehearsal)
+        self.engine._docker('network', 'rm', network_name)
         # Refuse deletion if any other instance still references the allocation.
         for cid in self.engine._docker('ps', '-aq', '--no-trunc').stdout.decode().split():
             c = self.host.docker_inspect(cid)
