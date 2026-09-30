@@ -116,6 +116,7 @@ def test_after_stop_failure_fresh_rollback(tmp_path, failure):
     result = run(sealed(tmp_path), backend)
     assert result['result'] == 'FAIL' and result['rollback'] == 'PASS'
     assert result['target'] != 'PASS'
+    assert result['target'] == ('NOT_EXECUTED' if failure == 'stop_source' else 'FAIL')
     assert 'authorize_primary_rollback' in backend.calls
     assert backend.calls.index('authorize_primary_rollback') < backend.calls.index('start_primary_rollback')
     if failure == 'authorize_target':

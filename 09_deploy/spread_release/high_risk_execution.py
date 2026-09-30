@@ -148,6 +148,8 @@ def execute_verified_plan(path, backend, *, monotonic=time.monotonic, sleep=time
         except Exception as exc:
             # Never report successful target deployment after a rollback.
             result['failure'] = type(exc).__name__ + ': ' + str(exc)
+            if any(name.startswith('target_') for name in result['steps']):
+                result['target'] = 'FAIL'
             if stopped:
                 rollback_started = monotonic()
                 try:
