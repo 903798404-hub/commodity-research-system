@@ -138,6 +138,9 @@ def test_missing_plan_before_lock_or_stop(tmp_path):
 
 def test_tampered_plan_before_stop(tmp_path):
     path = sealed(tmp_path)
+    # Deliberately corrupt an owner's disposable fixture. Production producer
+    # keeps the sealed artifact read-only; no permission rule is relaxed.
+    path.chmod(0o600)
     path.write_bytes(path.read_bytes() + b' ')
     backend = Backend()
     with pytest.raises(ValueError): run(path, backend)
