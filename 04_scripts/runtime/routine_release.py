@@ -502,6 +502,20 @@ class DockerSession:
         self._check_mounts(mounts)
 
     def grant_and_start(self, image, role):
+        self.authorize(image, role)
+        self.engine._docker('start', self.container_id)
+
+    def authorize(self, image, role):
+        """Existing instance-bound issuer; leave the container unstarted.
+
+        Shared by the Routine transport and the bounded HIGH_RISK adapter.
+        This split does not change policy, grant schema or trust semantics.
+        """
+        self.prepare_authorization(image, role)
+        return self.authorize_prepared(image, role)
+
+    def prepare_authorization(self, image, role):
+        """Observe created identity and publish a fresh protected host policy."""
         spec = self.spec
         policy = self.protected_json(spec['policy_template'])
         if role == 'production':
@@ -519,6 +533,15 @@ class DockerSession:
         self.current_policy = policy
         path = Path(spec['policy_output'])
         self.engine._write_new(path, self.engine._canonical(policy))
+
+    def authorize_prepared(self, image, role):
+        """Issue only against the prepared current instance; never start it."""
+        spec, policy = self.spec, self.current_policy
+        path = Path(spec['policy_output'])
+        require(policy is not None and self.protected_json(path) == policy,
+                'PREPARED_POLICY_CHANGED')
+        require(policy['approved_commit'] == image['commit'] and policy['approved_tree'] == image['tree']
+                and policy['image_id'] == image['image_id'] and policy['role'] == role, 'POLICY_TARGET_MISMATCH')
         if 'application_service' in policy:
             credential_sources = [mount['source'] for mount in policy['mounts']
                 if mount['target'] == '/run/secrets/market-data-service.json'
@@ -536,7 +559,7 @@ class DockerSession:
         require(datetime.fromisoformat(payload['issued_at']) <= datetime.now(timezone.utc)
                 < datetime.fromisoformat(payload['expires_at']), 'FRESH_GRANT_EXPIRED')
         self.assert_data_readonly()
-        self.engine._docker('start', self.container_id)
+        return envelope
 
     def preflight(self):
         container = self.engine.inspect_one('container', self.container_id)

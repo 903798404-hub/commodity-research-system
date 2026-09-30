@@ -70,7 +70,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.linux == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false
@@ -150,6 +150,16 @@ jobs:
         sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
           "$source_root/08_tests/shared/release_canonicalization_docker_e2e.py" \
           --output "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json"
+    - name: Execute same-entry HIGH_RISK success and fresh rollback with synthetic trust
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      working-directory: candidate
+      run: |
+        set -euo pipefail
+        source_root="/root/market-data-spread-hosted-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        python_bin="$(command -v python)"
+        sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
+          "$source_root/08_tests/shared/high_risk_execution_docker_e2e.py" \
+          --output "$RUNNER_TEMP/platform-results/linux/high-risk-execution-docker-evidence.json"
     - name: Validate host release timestamps on current Python
       if: needs.plan.outputs.spread_runtime_docker == 'true'
       working-directory: candidate

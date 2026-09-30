@@ -38,6 +38,7 @@ SUPPORTED_CANDIDATE_RESULT_SCHEMA_VERSIONS = {
     CANDIDATE_RESULT_SCHEMA_VERSION,
 }
 DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.7.0"
+HIGH_RISK_DEPLOYMENT_PLAN_SCHEMA_VERSION = "1.8.0"
 LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSIONS = {"1.5.0", "1.6.0"}
 DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.5.0"
 LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION = "1.4.0"
@@ -1780,6 +1781,16 @@ def validate_against_schema(
     path: str = "$",
 ) -> None:
     root = root_schema or schema
+    if "oneOf" in schema:
+        matches = 0
+        for alternative in schema["oneOf"]:
+            try:
+                validate_against_schema(value, alternative, root_schema=root, path=path)
+            except ContractError:
+                continue
+            matches += 1
+        if matches != 1:
+            raise ContractError(f"{path} must match exactly one schema alternative")
     if "$ref" in schema:
         validate_against_schema(
             value,
@@ -1809,6 +1820,8 @@ def validate_against_schema(
     if isinstance(value, int) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
             raise ContractError(f"{path} is below minimum")
+        if "maximum" in schema and value > schema["maximum"]:
+            raise ContractError(f"{path} is above maximum")
 
     if isinstance(value, list):
         if "minItems" in schema and len(value) < schema["minItems"]:
@@ -1826,6 +1839,8 @@ def validate_against_schema(
                 )
 
     if isinstance(value, dict):
+        if "minProperties" in schema and len(value) < schema["minProperties"]:
+            raise ContractError(f"{path} has too few properties")
         required = schema.get("required", [])
         for key in required:
             if key not in value:
@@ -1836,7 +1851,7 @@ def validate_against_schema(
             if extras:
                 raise ContractError(f"{path} contains unexpected keys: {extras}")
         for key, item in value.items():
-            child_schema = properties.get(key)
+            child_schema = properties.get(key, schema.get("additionalProperties"))
             if isinstance(child_schema, dict):
                 validate_against_schema(
                     item,
@@ -1891,6 +1906,7 @@ def create_artifact_manifest(
         accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
     elif artifact_type == "deployment_plan":
         accepted_target_versions.update(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSIONS)
+        accepted_target_versions.add(HIGH_RISK_DEPLOYMENT_PLAN_SCHEMA_VERSION)
     elif artifact_type == "deployment_result":
         accepted_target_versions.add(LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION)
     if target_schema_version not in accepted_target_versions:
@@ -2005,6 +2021,7 @@ def validate_artifact_manifest(
         accepted_target_versions.add(LEGACY_CANDIDATE_RESULT_SCHEMA_VERSION)
     elif artifact_type == "deployment_plan":
         accepted_target_versions.update(LEGACY_DEPLOYMENT_PLAN_SCHEMA_VERSIONS)
+        accepted_target_versions.add(HIGH_RISK_DEPLOYMENT_PLAN_SCHEMA_VERSION)
     elif artifact_type == "deployment_result":
         accepted_target_versions.add(LEGACY_DEPLOYMENT_RESULT_SCHEMA_VERSION)
     if manifest.get("target_schema_version") not in accepted_target_versions:

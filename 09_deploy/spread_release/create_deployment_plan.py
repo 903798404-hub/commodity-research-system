@@ -67,6 +67,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if '--high-risk-input' in arguments:
+        parser = argparse.ArgumentParser(allow_abbrev=False)
+        parser.add_argument('--high-risk-input', type=Path, required=True)
+        parser.add_argument('--output', type=Path, required=True)
+        args = parser.parse_args(arguments)
+        from high_risk_execution import HostBackend, seal_plan
+        backend = HostBackend(args.output.parent)
+        backend.host._require_linux_root()
+        backend.host.require_protected_authority_source()
+        raw = backend.host._protected_path(args.high_risk_input, private=True).read_bytes()
+        plan = backend.host._json(raw)
+        seal_plan(plan, args.output)
+        print(json.dumps({'deployment_plan': str(args.output), 'sha256': hash_file(args.output),
+                          'production_authorized': False}, sort_keys=True))
+        return 0
     args = build_parser().parse_args(argv)
     manifest_path = args.manifest.resolve()
     release_env_path = (

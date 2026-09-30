@@ -66,6 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if '--high-risk-plan' in arguments:
+        parser = argparse.ArgumentParser(allow_abbrev=False)
+        parser.add_argument('--high-risk-plan', type=Path, required=True)
+        args = parser.parse_args(arguments)
+        from high_risk_execution import verify_plan
+        plan = verify_plan(args.high_risk_plan)
+        print(json.dumps({'plan_verified': True, 'tool': plan['tool'], 'target': plan['target'],
+                          'production_authorized': False}, sort_keys=True))
+        return 0
     args = build_parser().parse_args(argv)
     manifest_path = args.manifest.resolve()
     env_path = (
