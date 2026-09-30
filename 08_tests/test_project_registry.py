@@ -1431,7 +1431,7 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
@@ -2747,4 +2747,32 @@ def test_windows_wrapper_platform_registration_is_exact_and_inert():
         '03_src/agri_research_agent/automation/other.py',
         '05_apps/import_profit_intraday_page.py',
         '09_deploy/spread_release/release_contract.py']:
+        assert not registry.owns(project, path)
+
+
+def test_high_risk_execution_registration_is_host_tool_only():
+    data, project = registry.select_project(ROOT, 'high-risk-execution-path-closure')
+    assert project['runtime_target'] == 'library_only'
+    assert project['change_class'] == 'shared'
+    assert not project.get('future_owned_paths') and not project.get('reserved_paths')
+    assert set(project['owned_paths']) == {
+        '09_deploy/spread_release/high_risk_execution.py',
+        '09_deploy/spread_release/deployment_plan.schema.json',
+        '09_deploy/spread_release/artifact_manifest.schema.json',
+        '09_deploy/spread_release/release_contract.py',
+        '09_deploy/spread_release/create_deployment_plan.py',
+        '09_deploy/spread_release/verify_release_contract.py',
+        '04_scripts/runtime/routine_release.py',
+        '08_tests/test_high_risk_execution.py',
+        '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '04_scripts/runtime/说明.md',
+    }
+    for path in project['owned_paths']:
+        assert all(not registry.owns(other, path) for other in data['projects'] if other is not project)
+    for path in project['forbidden_paths'] + [
+        '.github/workflows/trusted-main-admission.yml', '08_tests/test_project_registry.py',
+        '09_deploy/runtime_identity/host_authorization.py',
+        '04_scripts/runtime/validate_target_runtime.py',
+        '09_deploy/spread_release/other.py', '04_scripts/runtime/other.py',
+    ]:
         assert not registry.owns(project, path)
