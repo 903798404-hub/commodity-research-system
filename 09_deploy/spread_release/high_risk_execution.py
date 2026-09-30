@@ -328,6 +328,18 @@ class HostBackend:
         a, b = self.sessions['target'].spec, self.sessions['primary_rollback'].spec
         require(a['grant_directory'] != b['grant_directory'] and a['policy_output'] != b['policy_output'],
                 'INSTANCE_AUTHORIZATION_REUSE_FORBIDDEN')
+        original = self.read(plan['source_policy'])
+        rollback = self.sessions['primary_rollback'].protected_json(b['policy_template'])
+        instance_only = {'/run/market-data-grants', '/run/secrets/market-data-service.json'}
+        require([m for m in original['mounts'] if m['target'] not in instance_only] ==
+                [m for m in rollback['mounts'] if m['target'] not in instance_only],
+                'PRIMARY_ROLLBACK_DATA_MAPPING_CHANGED')
+        current = self.host.docker_inspect(plan['source_container_id'])
+        desired = self.host._json(self.sessions['primary_rollback'].compose(b, 'config', '--format', 'json').stdout)
+        service = desired['services'][rollback['service_id']]
+        require(service.get('container_name') == current['Name'].lstrip('/') and
+                desired.get('name') == current['Config']['Labels'].get('com.docker.compose.project'),
+                'PRIMARY_ROLLBACK_NAMESPACE_CHANGED')
 
     def stop_source(self, plan):
         self.engine._docker('stop', '--time', str(plan['policy']['stop_timeout_seconds']), plan['source_container_id'],
@@ -440,18 +452,6 @@ class HostBackend:
         rehearsal = scope['container_id']
         require(rehearsal != plan['source_container_id'] and
                 rehearsal not in {s.container_id for s in self.sessions.values()}, 'CLEANUP_REFERENCES_PRODUCTION_INSTANCE')
-        ids = self.engine._docker('ps', '-aq').stdout.decode().split()
-        if rehearsal in ids:
-            c = self.host.docker_inspect(rehearsal)
-            require(c['Image'] == plan['source']['image_id'] and
-                    c['Name'] == '/' + policy['recovery']['container'], 'REHEARSAL_INSTANCE_CHANGED')
-            self.engine._docker('rm', '-f', rehearsal)
-        # Refuse deletion if any other instance still references the allocation.
-        for cid in self.engine._docker('ps', '-aq').stdout.decode().split():
-            c = self.host.docker_inspect(cid)
-            require(not any(self.host._within(m['Source'], str(root)) or self.host._within(str(root), m['Source'])
-                    for m in c.get('Mounts', [])), 'REHEARSAL_ALLOCATION_STILL_MOUNTED')
-        shutil.rmtree(root)
         grant_directory = Path(next(m['source'] for m in policy['mounts']
             if m['target'] == policy['grant_container_directory']))
         require(grant_directory.parent == Path(policy['production_storage_root']) and
@@ -459,6 +459,18 @@ class HostBackend:
                 'TEMPORARY_GRANT_CLEANUP_SCOPE')
         self.host._protected_path(grant_directory, directory=True)
         require({p.name for p in grant_directory.iterdir()} == {'grant.json'}, 'UNDECLARED_TEMPORARY_GRANT_CONTENT')
+        ids = self.engine._docker('ps', '-aq', '--no-trunc').stdout.decode().split()
+        if rehearsal in ids:
+            c = self.host.docker_inspect(rehearsal)
+            require(c['Image'] == plan['source']['image_id'] and
+                    c['Name'] == '/' + policy['recovery']['container'], 'REHEARSAL_INSTANCE_CHANGED')
+            self.engine._docker('rm', '-f', rehearsal)
+        # Refuse deletion if any other instance still references the allocation.
+        for cid in self.engine._docker('ps', '-aq', '--no-trunc').stdout.decode().split():
+            c = self.host.docker_inspect(cid)
+            require(not any(self.host._within(m['Source'], str(root)) or self.host._within(str(root), m['Source'])
+                    for m in c.get('Mounts', [])), 'REHEARSAL_ALLOCATION_STILL_MOUNTED')
+        shutil.rmtree(root)
         (grant_directory / 'grant.json').unlink()
         grant_directory.rmdir()
         if 'primary_rollback' in self.envelopes:

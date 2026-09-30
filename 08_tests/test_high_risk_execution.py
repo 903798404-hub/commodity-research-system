@@ -166,6 +166,15 @@ def test_lease_requires_actual_consumption_and_terminal_state():
     assert clean == [True]
 
 
+def test_bad_semantic_intent_not_sealed(tmp_path):
+    value = plan()
+    value['policy']['observation_seconds'] = 2
+    value['policy']['consecutive_failures'] = 3
+    with pytest.raises(ValueError, match='OBSERVATION_TOO_SHORT'):
+        execution.seal_plan(value, tmp_path / 'deployment_plan.json')
+    assert not list(tmp_path.iterdir())
+
+
 def test_failed_rollback_preserves_recovery_resources(tmp_path):
     backend = Backend('accept_primary_rollback', ['FATAL'])
     result = run(sealed(tmp_path), backend)
