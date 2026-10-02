@@ -108,6 +108,22 @@ def test_both_lanes_use_same_existing_preparation():
     assert full_job.index('--prepare-checkout-directories') < full_job.index('Execute complete full regression')
 
 
+def test_high_risk_browser_setup_uses_executor_interpreter_and_root_browser_cache():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8'))
+    steps = workflow['jobs']['linux']['steps']
+    setup = next(step for step in steps if step.get('name') == 'Prepare real host browser for HIGH_RISK application smoke')
+    execute = next(step for step in steps if step.get('name') == 'Execute same-entry HIGH_RISK success and fresh rollback with synthetic trust')
+    assert steps.index(setup) < steps.index(execute)
+    assert setup['if'] == execute['if']
+    assert 'python_bin="$(command -v python)"' in setup['run']
+    assert '"$python_bin" -I -m pip install playwright==1.55.0' in setup['run']
+    assert 'sudo "$python_bin" -I -m playwright install --with-deps chromium' in setup['run']
+    assert 'p.chromium.launch(headless=True)' in setup['run']
+    assert 'DEPENDENCY_PREFLIGHT_NOT_APPLICATION_ACCEPTANCE' in setup['run']
+    assert 'sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B' in execute['run']
+
+
 def test_fixture_identity_is_deterministic_and_missing_or_changed_input_rejected(tmp_path):
     module = _module()
     first, second = tmp_path / 'base-fixtures', tmp_path / 'candidate-fixtures'
