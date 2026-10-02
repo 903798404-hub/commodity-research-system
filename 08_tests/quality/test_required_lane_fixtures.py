@@ -119,6 +119,9 @@ def test_fixture_identity_is_deterministic_and_missing_or_changed_input_rejected
     path.write_bytes(path.read_bytes() + b'changed')
     with pytest.raises(ValueError, match='fixture bytes changed'):
         module.fixture_input_identity(second)
+    # This deliberately damaged private test fixture must permit unlink on
+    # POSIX; writable file mode alone does not grant its parent directory write.
+    path.parent.chmod(0o700)
     path.unlink()
     with pytest.raises(ValueError, match='required fixture file'):
         module.fixture_input_identity(second)
