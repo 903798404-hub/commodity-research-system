@@ -86,7 +86,13 @@ def validate(source, work, key_path, trust, *, ttl_seconds=86400):
     payload = producer.validate_candidate(PROJECT, path, key_path, ttl_seconds=ttl_seconds)
     evidence = payload['evidence']
     parser = load(source, '09_deploy/runtime_identity/candidate_validation_record.py', '_execution_record_' + source.name)
-    assert parser.verify_record(path.read_bytes(), trust)['evidence'] == evidence
+    # The deliberately short-lived target may already have expired while the
+    # producer completed its final source-identity checks. Verify its authentic
+    # issuance here at the signed issuance instant (test clock only). main()
+    # separately requires the ORIGINAL verifier to reject it at real UTC now
+    # before preparation. No host clock, signed payload or runtime Gate changes.
+    issued = datetime.fromisoformat(payload['issued_at'])
+    assert parser.verify_record(path.read_bytes(), trust, now=issued)['evidence'] == evidence
     return evidence, path
 
 

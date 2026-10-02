@@ -86,6 +86,47 @@ def test_valid_record_reuses_without_validation_or_signing(refresh):
     assert not (refresh.path/'new.json').exists()
 
 
+def test_hosted_expiry_fixture_verifies_issuance_without_claiming_current_validity(refresh, monkeypatch):
+    """Replay the real Hosted failure: source checks outlive a short test TTL."""
+    fixture = load('08_tests/shared/high_risk_execution_docker_e2e.py', 'refresh_hosted_expiry_fixture')
+    refresh.payload['expires_at'] = (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+    refresh.old_record()
+    original = refresh.old.read_bytes()
+    issued = datetime.fromisoformat(refresh.payload['issued_at'])
+    payload = refresh.record.verify_record(original, refresh.trust, now=issued)
+    calls = []
+
+    def delayed_producer(project, destination, key, *, ttl_seconds):
+        calls.append(ttl_seconds)
+        destination.write_bytes(original)
+        return payload
+
+    producer = SimpleNamespace(validate_candidate=delayed_producer)
+    monkeypatch.setattr(fixture, 'load', lambda root, path, name:
+        producer if path.endswith('pre_release_runtime.py') else refresh.record)
+    evidence, path = fixture.validate(refresh.path/'target-source', refresh.path,
+        refresh.path/'test-key.pem', refresh.trust, ttl_seconds=1)
+    assert calls == [1] and evidence == payload['evidence']
+    assert path.read_bytes() == original
+    # Historical signature validity is NOT current admission. No current clock
+    # override is supplied to the real verifier at the preparation boundary.
+    with pytest.raises(refresh.record.CandidateValidationRecordExpired):
+        refresh.record.verify_record(path.read_bytes(), refresh.trust)
+
+
+def test_hosted_exports_only_nonsecret_engine_receipts_even_after_failure():
+    import yaml
+    workflow = yaml.safe_load((ROOT/'.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8'))
+    step = next(s for s in workflow['jobs']['linux']['steps']
+        if s.get('name') == 'Validate real spread-runtime image with ephemeral candidate trust')
+    command = step['run']
+    assert 'trap export_validation_receipts EXIT' in command
+    assert 'for name in spread-runtime-hosted-evidence.json image-validation-execution.json; do' in command
+    assert 'sudo chmod 0644 "$evidence"' in command
+    assert command.index('trap export_validation_receipts EXIT') < command.index('sudo GITHUB_RUN_ID=')
+    assert 'chmod -R' not in command
+
+
 @pytest.mark.parametrize('mode', ['expired', 'short', 'explicit', 'missing'])
 def test_refresh_uses_formal_producer_and_real_verifier(refresh, mode):
     if mode == 'expired':

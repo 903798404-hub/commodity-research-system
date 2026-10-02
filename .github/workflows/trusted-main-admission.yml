@@ -135,6 +135,16 @@ jobs:
         sudo git -C "$source_root" checkout --detach "$candidate_commit"
         test "$(sudo git -C "$source_root" rev-parse 'HEAD^{tree}')" = "$candidate_tree"
         python_bin="$(command -v python)"
+        # Only these two nonsecret engine receipts are exported; keep private
+        # runtime allocations and signing material untouched. Run on failure
+        # too so the artifact uploader cannot hide the original engine error.
+        export_validation_receipts() {
+          for name in spread-runtime-hosted-evidence.json image-validation-execution.json; do
+            evidence="$RUNNER_TEMP/platform-results/linux/$name"
+            if sudo test -f "$evidence"; then sudo chmod 0644 "$evidence"; fi
+          done
+        }
+        trap export_validation_receipts EXIT
         sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" "$python_bin" -I -B \
           "$source_root/04_scripts/runtime/validate_target_runtime.py" \
           --project spread-production-runtime-wiring \
