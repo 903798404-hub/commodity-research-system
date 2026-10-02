@@ -460,6 +460,54 @@ WINDOWS_WRAPPER_PLATFORM_REGISTRATION = {'project_id': 'windows-wrapper-platform
                    'remain unauthorized, including Git-ignored 01_data, 06_outputs and 10_logs; no runtime '
                    'directories are created for registration.'}
 
+RELEASE_REFRESH_REGISTRATION = {
+    'project_id': 'release-refresh',
+    'change_class': 'shared', 'status': 'ready', 'runtime_target': 'library_only',
+    'owned_paths': ['08_tests/test_release_refresh.py'],
+    'shared_dependencies': [
+        '04_scripts/runtime/pre_release_runtime.py',
+        '04_scripts/runtime/validate_target_runtime.py',
+        '09_deploy/runtime_identity/candidate_validation_record.py',
+        '09_deploy/spread_release/high_risk_execution.py',
+        '09_deploy/spread_release/create_deployment_plan.py',
+        '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '08_tests/shared/host_release_timestamp_compatibility.py',
+        '.github/workflows/trusted-main-admission.yml',
+    ],
+    'forbidden_paths': [
+        '03_src', '05_apps', '01_data', '06_outputs', '10_logs',
+        '02_configs/production_runtime_trust.json', '02_configs/runtime_contracts',
+        '09_deploy/runtime_identity/production_authorization.schema.json',
+    ],
+    'required_tests': [
+        '08_tests/test_release_refresh.py',
+        '08_tests/test_candidate_validation_record.py',
+        '08_tests/test_target_runtime_validator.py',
+        '08_tests/test_pre_release_runtime.py',
+        '08_tests/test_high_risk_execution.py',
+        '08_tests/test_routine_release.py',
+        '08_tests/test_host_runtime_authorization.py',
+        '08_tests/test_recovery_sandbox.py',
+        '08_tests/test_runtime_release_contract_repair.py',
+        '08_tests/shared/test_host_release_timestamps.py',
+        '08_tests/shared/test_production_identity.py',
+        '08_tests/shared/test_production_grant.py',
+        '08_tests/shared/test_application_service_identity.py',
+        '08_tests/pipelines/test_application_runtime_readability.py',
+        '08_tests/pipelines/test_full_daily_windows_wrapper.py',
+        '08_tests/test_project_registry.py',
+        '08_tests/test_quality_controls.py',
+        '08_tests/test_documentation_contract.py',
+    ],
+    'capabilities': [
+        'Exact existing-image validation through the same formal probe and signed record producer',
+        'Bounded preparation refresh, immutable downstream references and pre-stop time window checks',
+        'Synthetic-trust Hosted same-image revalidation and real executor success/rollback',
+    ],
+    'boundary_notes': 'Explicit GOAL RELEASE-REFRESH shared host-tool task. Existing ownership is retained; metadata does not replace user authorization or main admission. No production connections, private keys, image rebuild, trust/schema/identity changes, human Review policy changes, main integration or business writes. Expired signed records still reject. Default record TTL is unchanged. Scope includes necessary tests, interpreter compatibility and implementation/manual draft. Hosted evidence is not production acceptance. DRAFT_PENDING_PRODUCTION.',
+}
+
+
 def registration_baseline():
     """Permit only the approved PM delta before commit; keep other invariants."""
     baseline = json.loads(registry.git(ROOT, 'show', f'HEAD:{registry.REGISTRY_PATH}'))
@@ -566,6 +614,11 @@ def registration_baseline():
     if not any(p['project_id'] == 'windows-wrapper-platform' for p in baseline['projects']):
         expected = copy.deepcopy(baseline)
         expected['projects'].append(WINDOWS_WRAPPER_PLATFORM_REGISTRATION)
+        assert current == expected
+        baseline = expected
+    if not any(p['project_id'] == 'release-refresh' for p in baseline['projects']):
+        expected = copy.deepcopy(baseline)
+        expected['projects'].append(RELEASE_REFRESH_REGISTRATION)
         assert current == expected
         baseline = expected
     return baseline
@@ -1431,7 +1484,8 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
         assert by_id[old['project_id']] == expected
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure'}
+    assert by_id['release-refresh'] == RELEASE_REFRESH_REGISTRATION
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure', 'release-refresh'}
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():

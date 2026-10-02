@@ -148,6 +148,90 @@ def sealed(tmp_path, value=None):
     return path
 
 
+@pytest.mark.parametrize('scenario', ['reuse', 'refresh', 'review_blocked', 'probe_failure'])
+def test_preparation_produces_new_reference_chain_without_editing_old_plan(monkeypatch, scenario):
+    from pathlib import PurePosixPath
+    from types import SimpleNamespace
+    value = plan()
+    objects = {}
+    writes = {}
+    calls = []
+
+    def put(path, obj):
+        objects[path] = copy.deepcopy(obj)
+        return dict(path=path, sha256=hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest())
+
+    old_record = put('/old/candidate.json', {'historical': True})
+    review = {'reviewer': 'unchanged-existing-human-input'}
+    request = dict(project_id=value['project_id'], target_commit=value['target']['commit'],
+        target_source_root='/source', current=dict(commit=value['source']['commit']),
+        candidate_record=old_record, maintainer_risk_review=review)
+    value['release_request'] = put('/old/request.json', request)
+    for role in ('target', 'primary_rollback'):
+        policy = dict(approved_commit=value[role]['commit'], approved_tree=value[role]['tree'],
+            image_id=value[role]['image_id'], approved_source_root='/source', candidate_record=old_record)
+        pref = put('/old/' + role + '-policy.json', policy)
+        transport = dict(compose='/compose.yml', environment='/env', project_directory='/project',
+            policy_template=pref['path'], policy_output='/fresh/' + role + '-policy.json', writable_root='/fresh',
+            grant_directory='/fresh/' + role, key_path='/keys/production.pem', container_port=8501)
+        instance = dict(source_root='/source', policy=pref, transport=transport,
+            application_smoke=dict(kind='dom', path='/', selectors={'body': 1}))
+        value['instances'][role] = put('/old/' + role + '-instance.json', instance)
+    original_objects = copy.deepcopy(objects)
+    original_plan = copy.deepcopy(value)
+
+    def reviewed(request, risk, host):
+        if scenario == 'review_blocked':
+            raise ValueError('RISK_REVIEW_IDENTITY_CHANGED')
+        return dict(STATE_CHANGE_CLASS='HIGH_RISK'), {}, None
+
+    def ensure(project, ref, **kwargs):
+        calls.append(kwargs)
+        assert ref == old_record
+        if scenario == 'probe_failure':
+            raise ValueError('candidate engine did not complete successfully')
+        if scenario == 'reuse':
+            return dict(reference=ref, action='REUSED', validation_attempts=0)
+        return dict(reference=dict(path=str(kwargs['destination']).replace('\\', '/'), sha256='a'*64),
+                    action='REVALIDATED', validation_attempts=1)
+
+    def write(host, path, raw):
+        name = str(path)
+        assert name not in writes and name not in objects
+        writes[name] = json.loads(raw)
+
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.output = PurePosixPath('/prepared')
+    backend.host = SimpleNamespace(validate_policy=lambda policy, role: None)
+    backend.engine = SimpleNamespace(_canonical=lambda v: json.dumps(v, sort_keys=True).encode())
+    backend.pre = SimpleNamespace(require_source=lambda *a: (value['tool']['commit'], value['tool']['tree']),
+        classify_release=lambda *a: {}, reviewed_release_state=reviewed,
+        ensure_candidate_record=ensure, _write_new=write, VALIDATION_TIMEOUT_SECONDS=3900)
+    backend.read = lambda ref: copy.deepcopy(objects[ref['path']])
+    args = dict(candidate_key=Path('/test/key.pem'), remaining_seconds=dict(target=60, primary_rollback=240))
+    if scenario in {'review_blocked', 'probe_failure'}:
+        with pytest.raises(ValueError):
+            backend.refresh_plan_inputs(value, **args)
+        assert not writes
+        assert len(calls) == (0 if scenario == 'review_blocked' else 1)
+    else:
+        updated = backend.refresh_plan_inputs(value, **args)
+        assert len(calls) == 2
+        assert [call['minimum_remaining_seconds'] for call in calls] == [4140, 60]
+        if scenario == 'reuse':
+            assert updated == value and set(writes) == {'/prepared/candidate-refresh-result.json'}
+        else:
+            updated_request = writes[updated['release_request']['path']]
+            updated_spec = writes[updated['instances']['target']['path']]
+            updated_policy = writes[updated_spec['policy']['path']]
+            assert updated_request['candidate_record'] == updated_policy['candidate_record'] != old_record
+            assert updated_spec['transport']['policy_template'] == updated_spec['policy']['path']
+            assert updated_request['maintainer_risk_review'] == review
+            assert updated['source_policy'] == value['source_policy']
+        assert not any('deployment_plan' in name for name in writes)
+    assert value == original_plan and objects == original_objects
+
+
 class Backend:
     def __init__(self, fail=None, observations=None):
         self.calls = []
@@ -169,6 +253,7 @@ class Backend:
     def preconditions(self, plan): self.hit('preconditions')
     def consume_recovery(self, plan): self.hit('consume')
     def rollback_assets(self, plan): self.hit('assets')
+    def before_stop(self, plan): self.hit('record_window')
     def stop_source(self, plan): self.hit('stop_source')
     def create(self, plan, role): self.hit('create_' + role)
     def authorize(self, plan, role):
@@ -183,6 +268,7 @@ class Backend:
         return next(self.observations, 'PASS')
     def stop_target(self, plan): self.hit('stop_target')
     def rollback_window(self, seconds): return contextlib.nullcontext()
+    def phase_window(self, seconds, failure): return contextlib.nullcontext()
     def record(self, result):
         self.hit('record')
         self.result = copy.deepcopy(result)
@@ -200,17 +286,85 @@ def run(path, backend):
     return execution.execute_verified_plan(path, backend, monotonic=clock.now, sleep=clock.sleep)
 
 
+@pytest.mark.parametrize('failure', [None, 'preconditions', 'consume', 'assets', 'record_window'])
+def test_prepare_entry_seals_only_after_live_consumers_and_never_executes(tmp_path, failure):
+    class Preparing(Backend):
+        def refresh_plan_inputs(self, value, **kwargs):
+            self.hit('refresh')
+            assert kwargs['remaining_seconds'] == execution.record_consumption_windows(value)
+            assert kwargs['revalidate'] is False
+            return copy.deepcopy(value)
+
+    backend = Preparing(failure)
+    destination = tmp_path / 'deployment_plan.json'
+    if failure:
+        with pytest.raises(RuntimeError, match='controlled ' + failure):
+            execution.prepare_plan(plan(), destination, backend, candidate_key=Path('/test/key.pem'))
+        assert not destination.exists()
+    else:
+        actual = execution.prepare_plan(plan(), destination, backend, candidate_key=Path('/test/key.pem'))
+        assert execution.verify_plan(destination) == actual
+        assert backend.calls == ['lock', 'refresh', 'preconditions', 'consume', 'assets', 'record_window']
+    assert 'stop_source' not in backend.calls and 'cleanup' not in backend.calls
+    assert not any(call.startswith(('create_', 'authorize_', 'start_')) for call in backend.calls)
+
+
+def test_record_consumption_window_uses_each_consumers_actual_phases():
+    value = plan()
+    before = execution.record_consumption_windows(value)
+    value['policy']['observation_seconds'] += 20
+    after = execution.record_consumption_windows(value)
+    assert before['target'] == after['target']
+    assert after['primary_rollback'] == before['primary_rollback'] + 20
+    value['policy']['start_timeout_seconds'] += 1
+    latest = execution.record_consumption_windows(value)
+    assert all(latest[role] == after[role] + 1 for role in latest)
+
+
+def test_existing_plan_cli_calls_preparation_not_execution(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    class Preparing(Backend):
+        def __init__(self, output):
+            super().__init__()
+            self.output = output
+            self.host = SimpleNamespace(_require_linux_root=lambda: None,
+                require_protected_authority_source=lambda: None,
+                _protected_path=lambda p, **kw: p, _json=json.loads)
+            self.engine = SimpleNamespace(_candidate_signing_key=lambda *a: Path('/test/key.pem'))
+
+        def refresh_plan_inputs(self, value, **kwargs):
+            self.hit('refresh')
+            assert kwargs['candidate_key'] == Path('/test/key.pem')
+            assert kwargs['revalidate'] is True
+            return copy.deepcopy(value)
+
+    backend = Preparing(tmp_path)
+    monkeypatch.setitem(sys.modules, 'release_contract', execution.contract())
+    monkeypatch.setitem(sys.modules, 'high_risk_execution', SimpleNamespace(
+        HostBackend=lambda output: backend, prepare_plan=execution.prepare_plan))
+    cli = execution.load(ROOT, '09_deploy/spread_release/create_deployment_plan.py', '_refresh_actual_plan_cli')
+    input_path = tmp_path / 'request.json'
+    input_path.write_text(json.dumps(plan()), encoding='utf-8')
+    output = tmp_path / 'deployment_plan.json'
+    assert cli.main(['--high-risk-input', str(input_path), '--output', str(output),
+                     '--revalidate-existing-image']) == 0
+    assert execution.verify_plan(output) == plan()
+    assert backend.calls == ['lock', 'refresh', 'preconditions', 'consume', 'assets', 'record_window']
+    assert json.loads(capsys.readouterr().out)['production_authorized'] is False
+
+
 def test_sealed_plan_and_success(tmp_path):
     path = sealed(tmp_path)
     backend = Backend()
     result = run(path, backend)
     assert result['result'] == 'SUCCESS'
-    assert backend.calls == ['lock', 'preconditions', 'consume', 'assets', 'stop_source',
+    assert backend.calls == ['lock', 'preconditions', 'consume', 'assets', 'record_window', 'stop_source',
         'create_target', 'authorize_target', 'start_target', 'accept_target',
         'observe', 'observe', 'observe', 'cleanup', 'record']
 
 
-@pytest.mark.parametrize('failure', ['preconditions', 'consume', 'assets'])
+@pytest.mark.parametrize('failure', ['preconditions', 'consume', 'assets', 'record_window'])
 def test_failure_before_stop_preserves_source(tmp_path, failure):
     backend = Backend(failure)
     result = run(sealed(tmp_path), backend)

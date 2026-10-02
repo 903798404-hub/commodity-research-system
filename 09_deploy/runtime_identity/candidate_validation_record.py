@@ -23,6 +23,17 @@ class CandidateValidationRecordError(ValueError):
     """The record, trust anchor, or signed validation fact is invalid."""
 
 
+class CandidateValidationRecordExpired(CandidateValidationRecordError):
+    """Only raised AFTER strict schema, trust, revocation and signature checks.
+
+    The authenticated payload is historical evidence, never a valid record.
+    Preparation may use it to check the exact target before real revalidation.
+    """
+    def __init__(self, payload: dict):
+        super().__init__("candidate validation record is not currently valid")
+        self.payload = dict(payload)
+
+
 _ID = re.compile(r"[a-z][a-z0-9-]*\Z")
 _KEY_ID = re.compile(r"[a-z][a-z0-9-]{0,127}\Z")
 _HEX32 = re.compile(r"[0-9a-f]{32}\Z")
@@ -339,6 +350,8 @@ def verify_record(raw: bytes, trust: dict, *, now: datetime | None = None) -> di
     else:
         _fail("record verification time is invalid")
     issued, expires = _time(payload["issued_at"], "record issue time"), _time(payload["expires_at"], "record expiry time")
-    if issued > current or expires <= current:
+    if issued > current:
         _fail("candidate validation record is not currently valid")
+    if expires <= current:
+        raise CandidateValidationRecordExpired(payload)
     return dict(payload)

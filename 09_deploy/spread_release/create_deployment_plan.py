@@ -72,14 +72,18 @@ def main(argv: list[str] | None = None) -> int:
         parser = argparse.ArgumentParser(allow_abbrev=False)
         parser.add_argument('--high-risk-input', type=Path, required=True)
         parser.add_argument('--output', type=Path, required=True)
+        parser.add_argument('--candidate-key', type=Path)
+        parser.add_argument('--revalidate-existing-image', action='store_true')
         args = parser.parse_args(arguments)
-        from high_risk_execution import HostBackend, seal_plan
+        from high_risk_execution import HostBackend, prepare_plan
         backend = HostBackend(args.output.parent)
         backend.host._require_linux_root()
         backend.host.require_protected_authority_source()
         raw = backend.host._protected_path(args.high_risk_input, private=True).read_bytes()
         plan = backend.host._json(raw)
-        seal_plan(plan, args.output)
+        candidate_key = args.candidate_key or backend.engine._candidate_signing_key({}, DEFAULT_REPOSITORY)
+        prepare_plan(plan, args.output, backend, candidate_key=candidate_key,
+                     revalidate=args.revalidate_existing_image)
         print(json.dumps({'deployment_plan': str(args.output), 'sha256': hash_file(args.output),
                           'production_authorized': False}, sort_keys=True))
         return 0

@@ -79,7 +79,9 @@ def exercise(args, receipt):
         receipt["original_input_formal_recovery_validation"] = "PASS"
         receipt["original_input"] = dict(created_at=fixtures.ORIGINAL_CREATED, started_at=fixtures.ORIGINAL_STARTED)
         receipt["fixture_raw_hashes_preserved"] = before
-    selectors = ["08_tests/shared/test_host_release_timestamps.py"]
+    selectors = ["08_tests/shared/test_host_release_timestamps.py", "08_tests/test_release_refresh.py",
+                 "08_tests/test_high_risk_execution.py::test_prepare_entry_seals_only_after_live_consumers_and_never_executes",
+                 "08_tests/test_high_risk_execution.py::test_existing_plan_cli_calls_preparation_not_execution"]
     # Preserve the original application's fixture regression on its supported
     # version; host-only fixtures above cover the same formal verifier negatives
     # on 3.10 without importing the application's StrEnum-based identity module.

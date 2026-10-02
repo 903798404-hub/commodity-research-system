@@ -46,6 +46,8 @@ _MANIFEST_PARSER = "03_src/agri_research_agent/shared/runtime_manifest.py"
 _MANIFEST_SCHEMA = "02_configs/runtime_manifest.schema.json"
 _VALIDATOR_VERSION = "target-runtime-validator/1"
 _V3_VALIDATOR_VERSION = "target-runtime-validator/2"
+_BUILD_INVOCATIONS = 0
+_BUILD_ALLOWED = True
 
 
 class ValidationError(RuntimeError):
@@ -114,6 +116,11 @@ def repository_root() -> Path:
 def _run(args: Sequence[str], *, cwd: Path | None = None,
          input_bytes: bytes | None = None, timeout: int = 600,
          check: bool = True) -> subprocess.CompletedProcess[bytes]:
+    global _BUILD_INVOCATIONS
+    if len(args) >= 2 and args[0] == 'docker' and (args[1] == 'build' or tuple(args[1:3]) == ('buildx', 'build')):
+        _BUILD_INVOCATIONS += 1
+        if not _BUILD_ALLOWED:
+            raise ValidationError('existing-image validation must never invoke build')
     try:
         result = subprocess.run(list(args), cwd=cwd, input=input_bytes,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -205,7 +212,8 @@ def _candidate_binding(root: Path, project: Mapping[str, Any],
 
 
 def validate_dockerfile_inputs(root: Path, contract: Mapping[str, Any],
-                               binding: Mapping[str, Any]) -> str:
+                               binding: Mapping[str, Any], *,
+                               copy_targets: dict[str, str] | None = None) -> str:
     """Accept only explicit file COPY inputs in the supported build grammar.
 
     This checks context membership, not arbitrary RUN program behavior. Network
@@ -287,6 +295,15 @@ def validate_dockerfile_inputs(root: Path, contract: Mapping[str, Any],
                     or any(char in destination for char in "$\\")
                     or any(ord(char) < 32 or ord(char) == 127 for char in destination)):
                 raise ValidationError("Dockerfile COPY destination must be an absolute literal path")
+            if copy_targets is not None:
+                if len(operands) > 2 and not destination.endswith("/"):
+                    raise ValidationError("multiple COPY sources require a directory destination")
+                for source in operands[:-1]:
+                    target = str(pure_destination / PurePosixPath(source).name
+                                 if destination.endswith("/") else pure_destination)
+                    if target in copy_targets and copy_targets[target] != source:
+                        raise ValidationError("Dockerfile COPY overwrites a bound image input")
+                    copy_targets[target] = source
     if stages != 1:
         raise ValidationError("Dockerfile requires one source stage")
     if missing := required - copied:
@@ -604,6 +621,24 @@ def _image_import_closure(root: Path, contract: Mapping[str, Any],
     return {"required_module_count": len(required), "manifest_module_count": len(manifest),
             "dockerfile_module_count": len(copied), "missing_from_manifest": [],
             "missing_from_dockerfile": [], "missing_from_final_image": []}
+
+
+def _image_bound_inputs(root: Path, contract: Mapping[str, Any],
+                        binding: Mapping[str, Any], container_id: str) -> None:
+    """Verify actual copied bytes, not merely an image's self-reported labels.
+
+    Reuse the strict build grammar for destinations. Generated RELEASE identity
+    and dependency/runtime probes remain separately mandatory in the same lane.
+    This does not claim to reproduce arbitrary RUN instructions from file hashes.
+    """
+    targets: dict[str, str] = {}
+    validate_dockerfile_inputs(root, contract, binding, copy_targets=targets)
+    for target, source in sorted(targets.items()):
+        expected = binding["source_sha256"][source]
+        if _sha(_exact_source(root, source).read_bytes()) != expected:
+            raise ValidationError("bound source changed during image validation: " + source)
+        if _sha(_copy_bytes(container_id, target)) != expected:
+            raise ValidationError("image copied input differs from bound source: " + target)
 
 
 def _runtime_bindings(contract: Mapping[str, Any], uid: int, gid: int) -> list[dict[str, Any]]:
@@ -1056,7 +1091,11 @@ def _protected_work() -> Iterator[Path]:
 
 def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, Any],
                    binding: Mapping[str, Any], builder_id: str, *,
-                   ephemeral_candidate_trust: bool = False) -> dict[str, Any]:
+                   ephemeral_candidate_trust: bool = False,
+                   existing_image_id: str | None = None) -> dict[str, Any]:
+    if existing_image_id is not None and (type(existing_image_id) is not str
+                                         or not _IMAGE.fullmatch(existing_image_id)):
+        raise ValidationError("existing image must be an exact immutable Image ID")
     host = _load(root / "09_deploy/runtime_identity/host_authorization.py",
                  "_host_authorization_engine")
     parser = _load(root / "03_src/agri_research_agent/shared/runtime_manifest.py",
@@ -1067,11 +1106,17 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             _ephemeral_candidate_identity(work, contract)
         source_compose = validate_source_compose(root, contract)
         contract["_secret_declarations"] = host.declared_secret_targets(contract, source_compose)
-        context = work / "context"
-        create_archive_context(root, context, binding)
-        _exclude_candidate_inputs(context, contract)
-        image_id = build_image(root, context, contract, binding)
+        if existing_image_id is None:
+            context = work / "context"
+            create_archive_context(root, context, binding)
+            _exclude_candidate_inputs(context, contract)
+            image_id = build_image(root, context, contract, binding)
+        else:
+            image_id = existing_image_id
         image = inspect_one("image", image_id)
+        if image.get("Id") != image_id:
+            raise ValidationError("actual image ID differs from requested image")
+        _labels(image, binding, contract["service_id"])
         uid, gid = _numeric_user(image)
         contract["_numeric_uid"] = uid
         contract["_container_user"] = image["Config"]["User"]
@@ -1126,6 +1171,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             if _docker("cp", f"{container_id}:{_SOURCE_ROOT}/.git", "-", check=False).returncode == 0:
                 raise ValidationError("Git metadata is present in candidate image")
             packaging = _image_import_closure(root, contract, container_id)
+            _image_bound_inputs(root, contract, binding, container_id)
             manifest_raw = _copy_bytes(container_id, _SOURCE_ROOT + "/" + project["runtime_contract"])
             if _sha(manifest_raw) != binding["source_sha256"][project["runtime_contract"]]:
                 raise ValidationError("image runtime manifest differs from candidate")
@@ -1278,6 +1324,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runtime-contract", required=True)
     parser.add_argument("--evidence-output", required=True)
     parser.add_argument("--ephemeral-candidate-trust", action="store_true")
+    parser.add_argument("--existing-image-id")
+    parser.add_argument("--application-source-root", type=Path)
     args = parser.parse_args(argv)
     if not _ID.fullmatch(args.project):
         parser.error("invalid project identity")
@@ -1285,26 +1333,53 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if not output.is_absolute():
         parser.error("evidence output must be absolute")
     args.evidence_output = output
+    if args.existing_image_id is not None and not _IMAGE.fullmatch(args.existing_image_id):
+        parser.error("existing image must be an exact immutable Image ID")
+    if args.application_source_root is not None and args.existing_image_id is None:
+        parser.error("independent application source requires existing-image validation")
     return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    global _BUILD_INVOCATIONS, _BUILD_ALLOWED
     args = parse_args(argv)
+    _BUILD_INVOCATIONS = 0
+    _BUILD_ALLOWED = args.existing_image_id is None
+    outcome = 'FAIL'
     try:
         root = repository_root()
+        if args.existing_image_id is not None:
+            # The executing tool and immutable application source are separate
+            # protected identities. Never import a caller-provided probe file.
+            pre = _load(root / "04_scripts/runtime/pre_release_runtime.py", "_existing_image_pre")
+            host = _load(root / "09_deploy/runtime_identity/host_authorization.py", "_existing_image_host")
+            engine = pre._load(pre.ENGINE, "_existing_image_engine")
+            pre.require_source(host, engine, source_root=root)
+            root = args.application_source_root or root
+            pre.require_source(host, engine, source_root=root)
         project, contract, binding = source_contract(root, args.project, args.runtime_contract)
         try:
             builder_id = require_builder()
         except BuilderUnavailable:
             write_evidence(args.evidence_output, blocked_evidence(binding))
+            outcome = 'BLOCKED'
             return 3
         evidence = validate_linux(root, project, contract, binding, builder_id,
-                                  ephemeral_candidate_trust=args.ephemeral_candidate_trust)
+                                  ephemeral_candidate_trust=args.ephemeral_candidate_trust,
+                                  existing_image_id=args.existing_image_id)
         write_evidence(args.evidence_output, evidence)
+        outcome = 'PASS'
         return 0
     except (ValidationError, OSError, KeyError, TypeError, ValueError) as exc:
         print(f"TARGET_RUNTIME_VALIDATION=FAIL: {exc}", file=sys.stderr)
         return 2
+    finally:
+        # Supplemental execution evidence, not a signed claim or authorization.
+        # Never add these fields to the strict CandidateValidationRecord schema.
+        write_evidence(args.evidence_output.with_name('image-validation-execution.json'), dict(
+            mode='BUILD_AND_VALIDATE' if args.existing_image_id is None else 'VALIDATE_EXISTING_IMAGE',
+            requested_image_id=args.existing_image_id, docker_build_invocations=_BUILD_INVOCATIONS,
+            status=outcome))
 
 
 if __name__ == "__main__":

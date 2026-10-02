@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -78,22 +79,14 @@ def clone(work, name, commit, trust, project=None):
     return source
 
 
-def validate(source, work, key, key_id, trust):
-    output = work / (source.name + '-validation.json')
-    run(sys.executable, '-I', '-B', str(source / '04_scripts/runtime/validate_target_runtime.py'),
-        '--project', PROJECT, '--runtime-contract', CONTRACT, '--evidence-output', str(output), timeout=3900)
-    evidence = json.loads(output.read_bytes())
-    assert evidence['TARGET_RUNTIME_CONTAINER_VALIDATION'] == 'PASS'
-    parser = load(source, '09_deploy/runtime_identity/candidate_validation_record.py', '_execution_record_' + source.name)
-    stamp = datetime.now(timezone.utc)
-    payload = dict(record_id=uuid.uuid4().hex, purpose='target-runtime-validation', authorization_role='candidate_validation',
-        issued_at=stamp.isoformat(), expires_at=(stamp + timedelta(hours=2)).isoformat(), evidence=evidence,
-        evidence_sha256=hashlib.sha256(parser.canonical(evidence)).hexdigest())
-    envelope = dict(schema_version='candidate-validation-record/1', algorithm='ed25519', key_id=key_id, payload=payload)
-    envelope['signature'] = base64.b64encode(key.sign(parser.canonical(envelope))).decode('ascii')
+def validate(source, work, key_path, trust, *, ttl_seconds=86400):
+    # Formal build + validate + sign producer, never hand-sign copied evidence.
+    producer = load(source, '04_scripts/runtime/pre_release_runtime.py', '_initial_producer_' + source.name)
     path = work / (source.name + '-signed-record.json')
-    write(path, parser.canonical(envelope))
-    parser.verify_record(path.read_bytes(), trust)
+    payload = producer.validate_candidate(PROJECT, path, key_path, ttl_seconds=ttl_seconds)
+    evidence = payload['evidence']
+    parser = load(source, '09_deploy/runtime_identity/candidate_validation_record.py', '_execution_record_' + source.name)
+    assert parser.verify_record(path.read_bytes(), trust)['evidence'] == evidence
     return evidence, path
 
 
@@ -372,7 +365,27 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
             start_timeout_seconds=60, rollback_timeout_seconds=180, rollback_on=['create_failure', 'authorization_failure',
                 'start_failure', 'acceptance_failure', 'runtime_identity_failure', 'health_failure_threshold', 'observation_ended_unhealthy']))
     plan_path = work / 'deployment_plan.json'
-    execution.seal_plan(plan, plan_path)
+    preparation = execution.HostBackend(directory(work / 'preparation-receipts', 0o700))
+    # SAME safe preparation entry used by create_deployment_plan --high-risk-input.
+    # Expired target input is revalidated against the existing image before any
+    # stop; later cases consume the fresh record without repeating its build.
+    original_record_bytes = target_record.read_bytes()
+    plan = execution.prepare_plan(plan, plan_path, preparation, candidate_key=candidate_key_path)
+    assert target_record.read_bytes() == original_record_bytes
+    prepared_request = preparation.read(plan['release_request'])
+    refreshed_record = prepared_request['candidate_record']
+    assert preparation.host.docker_image_inspect(asset_target['image_id'])['Id'] == asset_target['image_id']
+    refresh_outcomes = json.loads((preparation.output / 'candidate-refresh-result.json').read_bytes())
+    audits = list(preparation.output.rglob('image-validation-execution.json'))
+    if refresh_outcomes['target']['action'] == 'REVALIDATED':
+        assert len(audits) == 1
+        audit = json.loads(audits[0].read_bytes())
+        assert audit == dict(mode='VALIDATE_EXISTING_IMAGE', requested_image_id=asset_target['image_id'],
+                             docker_build_invocations=0, status='PASS')
+        fresh_payload = json.loads(Path(refreshed_record['path']).read_bytes())['payload']
+        assert fresh_payload['record_id'] != json.loads(original_record_bytes)['payload']['record_id']
+    else:
+        assert refresh_outcomes['target']['action'] == 'REUSED' and not audits
     negatives = {}
     if injection == 'NONE':
         for name in ('missing', 'tamper', 'missing_observation', 'wrong_image'):
@@ -451,6 +464,9 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         return dict(status='PASS', path=injection,
                     tool=identity(tool), old=asset_old, target=asset_target,
                     plan=ref(plan_path), result=ref(actual_backend.output / 'execution-result.json'),
+                    candidate_record=refreshed_record,
+                    refresh_outcomes=ref(preparation.output / 'candidate-refresh-result.json'),
+                    image_validation_execution=[ref(path) for path in audits],
                     negative_probes=negatives, temporary_resource_cleanup='PASS', production_acceptance='NOT_EXECUTED')
     finally:
         # Preserve evidence first. Cleanup names only instances created here.
@@ -505,9 +521,21 @@ def main():
         run('git', 'init', '--bare', str(remote))
         run('git', '-C', str(tool), 'remote', 'set-url', 'origin', str(remote))
         run('git', '-C', str(tool), 'push', 'origin', 'HEAD:refs/heads/main')
-        candidate_key_id, candidate_key, _ = keys['candidate_validation']
-        old_evidence, old_record = validate(old_source, work, candidate_key, candidate_key_id, trust)
-        target_evidence, target_record = validate(target_source, work, candidate_key, candidate_key_id, trust)
+        candidate_key_path = keys['candidate_validation'][2]
+        old_evidence, old_record = validate(old_source, work, candidate_key_path, trust)
+        target_evidence, target_record = validate(target_source, work, candidate_key_path, trust, ttl_seconds=1)
+        expired_bytes = target_record.read_bytes()
+        expired = json.loads(expired_bytes)['payload']
+        time.sleep(max(0, (datetime.fromisoformat(expired['expires_at']) - datetime.now(timezone.utc)).total_seconds()) + 0.1)
+        old_parser = load(target_source, '09_deploy/runtime_identity/candidate_validation_record.py', '_old_expiry_contract')
+        try:
+            old_parser.verify_record(expired_bytes, trust)
+        except old_parser.CandidateValidationRecordError as exc:
+            assert str(exc) == 'candidate validation record is not currently valid'
+        else:
+            raise AssertionError('Original expired record unexpectedly accepted')
+        receipt['expired_record'] = dict(reference=ref(target_record), record_id=expired['record_id'],
+            issued_at=expired['issued_at'], expires_at=expired['expires_at'], original_verifier_rejected=True)
         receipt['synthetic_assets'] = dict(tool=identity(tool), old=identity(old_source), target=identity(target_source),
             old_image=old_evidence['image_id'], target_image=target_evidence['image_id'])
         receipt['paths'] = []
@@ -516,6 +544,8 @@ def main():
             key_id, _, key_path = keys['production']
             receipt['paths'].append(case(scope, tool, old_source, target_source, old_evidence, target_evidence,
                 old_record, target_record, key_id, key_path, injection=injected, candidate_key_path=keys['candidate_validation'][2]))
+            target_record = Path(receipt['paths'][-1]['candidate_record']['path'])
+        assert (work / 'target-source-signed-record.json').read_bytes() == expired_bytes
         receipt['status'] = 'PASS'
     except Exception as exc:
         receipt.update(status='FAIL', failure_type=type(exc).__name__, failure=str(exc)[-1800:])
@@ -532,7 +562,8 @@ def main():
             scope = work / scope_name
             if not scope.exists():
                 continue
-            for path in sorted(scope.rglob('*.json')):
+            for path in sorted(p for p in scope.rglob('*') if p.is_file() and
+                               (p.suffix == '.json' or p.name in {'engine.stdout', 'engine.stderr'})):
                 assert not path.is_symlink()
                 relative = path.relative_to(work)
                 destination = public_evidence / relative

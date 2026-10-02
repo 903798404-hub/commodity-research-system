@@ -15,7 +15,7 @@ import inspect
 import json
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 import time
@@ -117,6 +117,45 @@ def seal_plan(plan, path):
     verify_plan(path)
 
 
+def record_consumption_windows(plan):
+    """Bound only phases preceding each record's last authorization consumer.
+
+    Startup covers create/authorize/start as one bounded operation. Acceptance
+    covers the complete readonly acceptance, not only its HTTP polling loop.
+    Rollback can be needed after observation, so its record covers that path.
+    No candidate record is needed after its instance authorization completes.
+    """
+    p = plan['policy']
+    bootstrap = p['start_timeout_seconds']
+    acceptance = p['readiness']['total_timeout_seconds']
+    observation = p['observation_seconds'] + p['readiness']['request_timeout_seconds'] + p['poll_interval_seconds']
+    target = p['stop_timeout_seconds'] + 10 + bootstrap
+    return dict(target=target,
+                primary_rollback=target + acceptance + observation + p['rollback_timeout_seconds'])
+
+
+def prepare_plan(plan, path, backend, *, candidate_key, revalidate=False):
+    """Existing HIGH_RISK preparation, explicitly never the execution entry.
+
+    Revalidation is bounded once per role. Assessment and every live recovery
+    dependency consume the refreshed references before the plan is sealed.
+    No cleanup here: the executor still needs those live dependencies later.
+    """
+    require(path.name == 'deployment_plan.json', 'FORMAL_PLAN_FILENAME_REQUIRED')
+    require(not path.exists() and not path.with_name('deployment_plan.manifest.json').exists(),
+            'NEW_PREPARATION_OUTPUT_REQUIRED')
+    with backend.lock(plan):
+        updated = backend.refresh_plan_inputs(plan, candidate_key=candidate_key,
+            remaining_seconds=record_consumption_windows(plan), revalidate=revalidate)
+        backend.preconditions(updated)
+        backend.consume_recovery(updated)
+        backend.rollback_assets(updated)
+        backend.before_stop(updated)
+        seal_plan(updated, path)
+        require(verify_plan(path) == updated, 'PREPARED_PLAN_CHANGED')
+    return updated
+
+
 class EvidenceLease:
     """Do not destroy live verifier dependencies before the last consumer.
 
@@ -157,26 +196,32 @@ def execute_verified_plan(path, backend, *, monotonic=time.monotonic, sleep=time
             step('rollback_assets', lambda: backend.rollback_assets(plan))
             # Detect any sealed input drift immediately before a mutating action.
             require(verify_plan(path) == plan, 'PLAN_CHANGED_BEFORE_STOP')
+            step('record_window_before_stop', lambda: backend.before_stop(plan))
             stopped = True  # Stop can fail after stopping; recover conservatively.
             step('stop_source', lambda: backend.stop_source(plan))
-            step('target_create', lambda: backend.create(plan, 'target'))
-            step('target_authorize', lambda: backend.authorize(plan, 'target'))
-            step('target_start', lambda: backend.start(plan, 'target'))
-            step('target_accept', lambda: backend.accept(plan, 'target'))
+            with backend.phase_window(plan['policy']['start_timeout_seconds'], 'TARGET_STARTUP_TIMEOUT'):
+                step('target_create', lambda: backend.create(plan, 'target'))
+                step('target_authorize', lambda: backend.authorize(plan, 'target'))
+                step('target_start', lambda: backend.start(plan, 'target'))
+            with backend.phase_window(plan['policy']['readiness']['total_timeout_seconds'], 'TARGET_ACCEPTANCE_TIMEOUT'):
+                step('target_accept', lambda: backend.accept(plan, 'target'))
             policy = plan['policy']
             deadline = monotonic() + policy['observation_seconds']
             failures = 0
-            while True:
-                verdict = backend.observe(plan)
-                require(verdict in {'PASS', 'TRANSIENT', 'FATAL'}, 'UNKNOWN_OBSERVATION_RESULT')
-                require(verdict != 'FATAL', 'FATAL_OBSERVATION')
-                failures = failures + 1 if verdict == 'TRANSIENT' else 0
-                require(failures < policy['consecutive_failures'], 'OBSERVATION_FAILURE_THRESHOLD')
-                # An observation ending on a transient failure is not success.
-                if monotonic() >= deadline:
-                    require(verdict == 'PASS', 'OBSERVATION_ENDED_UNHEALTHY')
-                    break
-                sleep(min(policy['poll_interval_seconds'], max(0, deadline - monotonic())))
+            observation_window = (policy['observation_seconds'] + policy['readiness']['request_timeout_seconds']
+                                  + policy['poll_interval_seconds'])
+            with backend.phase_window(observation_window, 'TARGET_OBSERVATION_TIMEOUT'):
+                while True:
+                    verdict = backend.observe(plan)
+                    require(verdict in {'PASS', 'TRANSIENT', 'FATAL'}, 'UNKNOWN_OBSERVATION_RESULT')
+                    require(verdict != 'FATAL', 'FATAL_OBSERVATION')
+                    failures = failures + 1 if verdict == 'TRANSIENT' else 0
+                    require(failures < policy['consecutive_failures'], 'OBSERVATION_FAILURE_THRESHOLD')
+                    # An observation ending on a transient failure is not success.
+                    if monotonic() >= deadline:
+                        require(verdict == 'PASS', 'OBSERVATION_ENDED_UNHEALTHY')
+                        break
+                    sleep(min(policy['poll_interval_seconds'], max(0, deadline - monotonic())))
             result.update(result='SUCCESS', target='PASS')
             lease.terminal = True
         except Exception as exc:
@@ -234,15 +279,103 @@ class HostBackend:
         require(hashlib.sha256(raw).hexdigest() == ref['sha256'], 'REFERENCED_INPUT_CHANGED')
         return self.host._json(raw)
 
-    @contextlib.contextmanager
+    def refresh_plan_inputs(self, plan, *, candidate_key, remaining_seconds, revalidate=False):
+        """Preparation only: produce new immutable references, never a grant.
+
+        The caller owns the release lock and time budget. Final assessment and
+        plan sealing still follow this operation; no active pointer is changed.
+        A failure leaves diagnostic artifacts only, not a deployable plan.
+        """
+        c = contract()
+        schema = c.load_schema(Path(__file__).with_name('deployment_plan.schema.json'))
+        c.validate_against_schema(plan, schema)
+        validate_intent(plan, c)
+        require(self.pre.require_source(self.host, self.engine) ==
+                (plan['tool']['commit'], plan['tool']['tree']), 'TOOL_IDENTITY_CHANGED')
+        require(set(remaining_seconds) == {'target', 'primary_rollback'}, 'RECORD_BUDGET_ROLES')
+        request = self.read(plan['release_request'])
+        require(request['project_id'] == plan['project_id'] and
+                request['target_commit'] == plan['target']['commit'] and
+                request['current']['commit'] == plan['source']['commit'], 'REFRESH_REQUEST_IDENTITY')
+        risk = self.pre.classify_release(ROOT, request['current']['commit'],
+                                         request['target_commit'], request['project_id'])
+        # Exact existing Review parser/freshness/findings rules. Do this before
+        # expensive probes; never generate or revise a human Review here.
+        risk, _, _ = self.pre.reviewed_release_state(request, risk, self.host)
+        require(risk.get('STATE_CHANGE_CLASS') != 'NEEDS_MAINTAINER_RISK_REVIEW',
+                'HUMAN_RISK_REVIEW_REQUIRED_BEFORE_REVALIDATION')
+        specs = {}
+        policies = {}
+        for role in ('target', 'primary_rollback'):
+            spec = self.read(plan['instances'][role])
+            c.validate_against_schema(spec, schema['$defs']['highRiskInstanceSpec'], root_schema=schema)
+            policy = self.read(spec['policy'])
+            self.host.validate_policy(policy, 'production')
+            asset = plan[role]
+            require('recovery' not in policy and
+                    (policy['approved_commit'], policy['approved_tree'], policy['image_id']) ==
+                    (asset['commit'], asset['tree'], asset['image_id']), 'INSTANCE_POLICY_IDENTITY')
+            require(policy['approved_source_root'] == spec['source_root'] and
+                    spec['transport']['policy_template'] == spec['policy']['path'], 'POLICY_TEMPLATE_DIFFERS')
+            if role == 'target':
+                require(request['target_source_root'] == spec['source_root'] and
+                        request['candidate_record'] == policy['candidate_record'], 'TARGET_RECORD_REFERENCE_DIFFERS')
+            specs[role], policies[role] = spec, policy
+
+        def save(name, value):
+            path = self.output / name
+            raw = self.engine._canonical(value)
+            self.pre._write_new(self.host, path, raw)
+            return dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest())
+
+        updated = copy.deepcopy(plan)
+        changed_request = copy.deepcopy(request)
+        outcomes = {}
+        # Prepare rollback first, reserving the actual bounded engine time for
+        # the subsequent target validation. Target is checked after that work,
+        # not against a stale pre-validation clock. Each role still gets at
+        # most one revalidation; final consumers recheck without retrying.
+        for role in ('primary_rollback', 'target'):
+            spec, policy = specs[role], policies[role]
+            budget = remaining_seconds[role]
+            if role == 'primary_rollback':
+                budget += self.pre.VALIDATION_TIMEOUT_SECONDS
+            outcome = self.pre.ensure_candidate_record(plan['project_id'], policy['candidate_record'],
+                application_source_root=Path(spec['source_root']), image_id=plan[role]['image_id'],
+                destination=self.output / (role + '-candidate-record.json'), key_path=candidate_key,
+                minimum_remaining_seconds=budget, revalidate=revalidate)
+            outcomes[role] = outcome
+            if outcome['reference'] != policy['candidate_record']:
+                policy = copy.deepcopy(policy)
+                policy['candidate_record'] = outcome['reference']
+                self.host.validate_policy(policy, 'production')
+                new_policy = save(role + '-policy-template.json', policy)
+                spec = copy.deepcopy(spec)
+                spec['policy'] = new_policy
+                spec['transport']['policy_template'] = new_policy['path']
+                c.validate_against_schema(spec, schema['$defs']['highRiskInstanceSpec'], root_schema=schema)
+                updated['instances'][role] = save(role + '-instance-spec.json', spec)
+                if role == 'target':
+                    changed_request['candidate_record'] = outcome['reference']
+        if changed_request != request:
+            updated['release_request'] = save('refreshed-release-request.json', changed_request)
+        save('candidate-refresh-result.json', outcomes)
+        # Assessment, recovery and runtime checks must consume these exact new
+        # references before the existing producer can seal the final plan.
+        return updated
+
     def rollback_window(self, seconds):
+        return self.phase_window(seconds, 'ROLLBACK_TIMEOUT')
+
+    @contextlib.contextmanager
+    def phase_window(self, seconds, failure):
         # Linux host tools run on the main thread. Bound the complete recovery,
         # including legacy transports whose own per-command limits are larger.
         import signal
         require(signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0), 'NESTED_ROLLBACK_TIMER_FORBIDDEN')
         previous = signal.getsignal(signal.SIGALRM)
         def expired(signum, frame):
-            raise ExecutionError('ROLLBACK_TIMEOUT')
+            raise ExecutionError(failure)
         signal.signal(signal.SIGALRM, expired)
         signal.setitimer(signal.ITIMER_REAL, seconds)
         try:
@@ -250,6 +383,27 @@ class HostBackend:
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous)
+
+    def before_stop(self, plan):
+        """Read-only recheck after any human wait; never refresh after stop."""
+        record = self.pre._load(self.pre.RECORD, '_pre_stop_record')
+        trust = self.host._json((ROOT / self.pre.TRUST).read_bytes())
+        expirations = []
+        for role, seconds in record_consumption_windows(plan).items():
+            spec = self.read(plan['instances'][role])
+            policy = self.read(spec['policy'])
+            raw = self.pre._risk_file(policy['candidate_record'], self.host)
+            payload = record.verify_record(raw, trust)
+            asset = plan[role]
+            evidence = payload['evidence']
+            require((evidence['binding']['commit'], evidence['binding']['tree'], evidence['image_id']) ==
+                    (asset['commit'], asset['tree'], asset['image_id']), 'PRE_STOP_RECORD_IDENTITY')
+            expirations.append((role, seconds, record._time(payload['expires_at'], 'record expiry time')))
+        # Measure after all signature/file reads; their cost is not free time.
+        now = datetime.now(timezone.utc)
+        for role, seconds, expires_at in expirations:
+            require(expires_at > now + timedelta(seconds=seconds),
+                    'CANDIDATE_RECORD_WINDOW_INSUFFICIENT_REPREPARE_BEFORE_STOP: ' + role)
 
     def lock(self, plan):
         import contextlib

@@ -55,6 +55,34 @@ def test_valid_record_returns_fresh_payload():
     assert record.verify_record(raw(value), trust(private), now=NOW) == value["payload"]
 
 
+def test_expiry_is_typed_only_after_authenticated_record_validation():
+    private = Ed25519PrivateKey.generate()
+    value = envelope(private)
+    original = raw(value)
+    expiry = datetime.fromisoformat(value['payload']['expires_at'])
+    with pytest.raises(record.CandidateValidationRecordExpired) as failure:
+        record.verify_record(original, trust(private), now=expiry)
+    assert failure.value.payload == value['payload']
+    assert raw(value) == original
+    for revoked in (trust(private, revoked_keys=['candidate-key']),
+                    trust(private, revoked_records=[value['payload']['record_id']])):
+        with pytest.raises(record.CandidateValidationRecordError) as rejected:
+            record.verify_record(original, revoked, now=expiry)
+        assert not isinstance(rejected.value, record.CandidateValidationRecordExpired)
+    value['signature'] = base64.b64encode(b'0' * 64).decode()
+    with pytest.raises(record.CandidateValidationRecordError) as rejected:
+        record.verify_record(raw(value), trust(private), now=expiry)
+    assert not isinstance(rejected.value, record.CandidateValidationRecordExpired)
+
+
+def test_future_record_is_security_failure_not_refreshable_expiry():
+    private = Ed25519PrivateKey.generate()
+    value = envelope(private)
+    with pytest.raises(record.CandidateValidationRecordError) as rejected:
+        record.verify_record(raw(value), trust(private), now=NOW - timedelta(hours=1))
+    assert not isinstance(rejected.value, record.CandidateValidationRecordExpired)
+
+
 @pytest.mark.parametrize("mutation", ["wrong_signature", "production_domain", "revoked_key", "revoked_record", "expired", "future", "long_ttl", "wrong_hash", "missing_probe", "wrong_observed", "unknown", "nested_unknown", "bad_source", "wrong_role", "wrong_validator"])
 def test_record_rejects_security_mutations(mutation):
     private = Ed25519PrivateKey.generate()

@@ -27,6 +27,7 @@ RECORD = "09_deploy/runtime_identity/candidate_validation_record.py"
 HOST = "09_deploy/runtime_identity/host_authorization.py"
 TRUST = "02_configs/production_runtime_trust.json"
 KEY_DIRECTORY = Path("/etc/market-data/runtime-identity")
+VALIDATION_TIMEOUT_SECONDS = 3900
 
 
 class PreReleaseError(ValueError):
@@ -115,18 +116,36 @@ def _write_new(host, destination: Path, raw: bytes) -> None:
     host._fsync_directory(destination.parent)
 
 
-def _execute_validation(project: dict, output: Path) -> int:
+def _execute_validation(project: dict, output: Path, *, existing_image_id: str | None = None,
+                        application_source_root: Path | None = None) -> int:
     env = {key: value for key, value in os.environ.items()
            if key not in {"PYTHONPATH", "PYTHONHOME"}}
-    return subprocess.run(
-        [sys.executable, "-I", "-B", str(ROOT / ENGINE), "--project", project["project_id"],
-         "--runtime-contract", project["runtime_contract"], "--evidence-output", str(output)],
-        cwd=ROOT, env=env, check=False, timeout=3900,
-    ).returncode
+    command = [sys.executable, "-I", "-B", str(ROOT / ENGINE), "--project", project["project_id"],
+               "--runtime-contract", project["runtime_contract"], "--evidence-output", str(output)]
+    if existing_image_id is not None:
+        command += ["--existing-image-id", existing_image_id]
+        if application_source_root is not None:
+            command += ["--application-source-root", str(application_source_root)]
+    started = datetime.now(timezone.utc).isoformat()
+    code = None
+    try:
+        with os.fdopen(os.open(output.parent / 'engine.stdout', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stdout:
+            with os.fdopen(os.open(output.parent / 'engine.stderr', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stderr:
+                result = subprocess.run(command, cwd=ROOT, env=env, check=False, timeout=VALIDATION_TIMEOUT_SECONDS,
+                                        stdout=stdout, stderr=stderr)
+                code = result.returncode
+        return code
+    finally:
+        # Private, immutable diagnostics. Do not log environment values or keys.
+        receipt = dict(argv=command, cwd=str(ROOT), started_at=started,
+                       finished_at=datetime.now(timezone.utc).isoformat(), exit_code=code)
+        with os.fdopen(os.open(output.parent / 'engine-command.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
+            stream.write(json.dumps(receipt, sort_keys=True).encode('utf-8'))
 
 
 def validate_candidate(project_id: str, destination: Path, key_path: Path,
-                       *, ttl_seconds: int = 86400) -> dict:
+                       *, ttl_seconds: int = 86400, existing_image_id: str | None = None,
+                       application_source_root: Path | None = None) -> dict:
     """Run the actual engine, verify its result, and exclusively seal a record."""
     if sys.platform != "linux" or not hasattr(os, "geteuid") or os.geteuid() != 0:
         raise ValidationBlocked("LINUX_BUILDER_UNAVAILABLE")
@@ -136,6 +155,18 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
         host._protected_path(ROOT / name)
     engine = _load(ENGINE, "_pre_release_engine")
     before = require_source(host, engine)
+    source = ROOT
+    if existing_image_id is not None:
+        if type(existing_image_id) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", existing_image_id) is None:
+            raise PreReleaseError("existing image must be an exact immutable Image ID")
+        source = application_source_root or ROOT
+        application_before = require_source(host, engine, source_root=source)
+        if (source / TRUST).read_bytes() != (ROOT / TRUST).read_bytes():
+            raise PreReleaseError("tool and application trust domains differ")
+    elif application_source_root is not None:
+        raise PreReleaseError("independent application source requires existing-image validation")
+    else:
+        application_before = before
     _new_output(host, destination)
     if type(ttl_seconds) is not int or not 0 < ttl_seconds <= 7 * 86400:
         raise PreReleaseError("invalid candidate record lifetime")
@@ -150,23 +181,32 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
                and item.get("algorithm") == "ed25519" and item.get("public_key_base64") == public]
     if len(matches) != 1 or matches[0]["key_id"] in trust.get("revoked_key_ids", []):
         raise PreReleaseError("candidate key is untrusted or revoked")
-    project = engine._project(ROOT, project_id)
-    _, _, binding = engine.source_contract(ROOT, project_id, project["runtime_contract"])
-    if (binding["commit"], binding["tree"]) != before:
+    project = engine._project(source, project_id)
+    _, _, binding = engine.source_contract(source, project_id, project["runtime_contract"])
+    if (binding["commit"], binding["tree"]) != application_before:
         raise PreReleaseError("candidate identity changed before validation")
     record = _load(RECORD, "_pre_release_record")
     # Root-private, uniquely allocated evidence location: the CLI never imports
     # an externally supplied evidence file and does not expose this path as input.
-    with tempfile.TemporaryDirectory(prefix="candidate-validation-", dir=destination.parent) as folder:
-        output = Path(folder) / "evidence.json"
+    folder = Path(tempfile.mkdtemp(prefix="candidate-validation-", dir=destination.parent))
+    # Retain the actual probe output/error even on failure. The engine destroys
+    # its ephemeral containers/grants; this private directory contains evidence,
+    # not reusable credentials, and is not an input to a later signer call.
+    output = folder / "evidence.json"
+    if existing_image_id is None:
         code = _execute_validation(project, output)
-        if code == 3:
-            raise ValidationBlocked("LINUX_BUILDER_UNAVAILABLE")
-        if code != 0 or not output.is_file() or output.is_symlink():
-            raise PreReleaseError("candidate engine did not complete successfully")
-        evidence = host._json(output.read_bytes())
+    else:
+        code = _execute_validation(project, output, existing_image_id=existing_image_id,
+                                   application_source_root=source)
+    if code == 3:
+        raise ValidationBlocked("LINUX_BUILDER_UNAVAILABLE")
+    if code != 0 or not output.is_file() or output.is_symlink():
+        raise PreReleaseError("candidate engine did not complete successfully; evidence: " + str(folder))
+    evidence = host._json(output.read_bytes())
     if evidence.get("binding") != binding:
         raise PreReleaseError("candidate evidence binding differs")
+    if existing_image_id is not None and evidence.get("image_id") != existing_image_id:
+        raise PreReleaseError("candidate evidence image differs from fixed image")
     now = datetime.now(timezone.utc)
     payload = {"record_id": os.urandom(16).hex(), "purpose": "target-runtime-validation",
                "authorization_role": "candidate_validation", "issued_at": now.isoformat(),
@@ -181,10 +221,67 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
     record.verify_record(raw, trust, now=now)
     if require_source(host, engine) != before or (ROOT / TRUST).read_bytes() != trust_raw:
         raise PreReleaseError("candidate source changed during validation")
-    if engine.source_contract(ROOT, project_id, project["runtime_contract"])[2] != binding:
+    if existing_image_id is not None and require_source(host, engine, source_root=source) != application_before:
+        raise PreReleaseError("application source changed during validation")
+    if engine.source_contract(source, project_id, project["runtime_contract"])[2] != binding:
         raise PreReleaseError("candidate binding changed during validation")
     _write_new(host, destination, raw)
     return payload
+
+
+def ensure_candidate_record(project_id: str, reference: dict | None, *,
+                            application_source_root: Path, image_id: str,
+                            destination: Path, key_path: Path,
+                            minimum_remaining_seconds: int,
+                            revalidate: bool = False) -> dict:
+    """Preparation-only: reuse or perform ONE real same-image validation.
+
+    Expiry is distinguished by the verifier only after authenticating the full
+    record. Missing input explicitly requests initial validation, not reuse.
+    Security failures and future-issued records are never refreshable. There is
+    no retry/renewal daemon and no caller-supplied evidence or signing payload.
+    """
+    if (type(minimum_remaining_seconds) is not int or minimum_remaining_seconds < 0
+            or minimum_remaining_seconds >= 86400 or type(revalidate) is not bool):
+        raise PreReleaseError("CANDIDATE_RECORD_TIME_BUDGET_UNSATISFIABLE")
+    host = _load(HOST, "_refresh_host")
+    engine = _load(ENGINE, "_refresh_engine")
+    record = _load(RECORD, "_refresh_record")
+    host.require_protected_authority_source()
+    require_source(host, engine)
+    require_source(host, engine, source_root=application_source_root)
+    project = engine._project(application_source_root, project_id)
+    _, _, binding = engine.source_contract(application_source_root, project_id, project['runtime_contract'])
+    trust = host._json((ROOT / TRUST).read_bytes())
+    reason = 'MISSING'
+    if reference is not None:
+        raw = _risk_file(reference, host)
+        try:
+            payload = record.verify_record(raw, trust)
+            reason = 'VALID'
+        except record.CandidateValidationRecordExpired as exc:
+            payload, reason = exc.payload, 'EXPIRED'
+        if payload['evidence']['binding'] != binding or payload['evidence']['image_id'] != image_id:
+            raise PreReleaseError("CANDIDATE_RECORD_FIXED_TARGET_MISMATCH")
+        now = datetime.now(timezone.utc)
+        enough = record._time(payload['expires_at'], 'record expiry time') > now + timedelta(seconds=minimum_remaining_seconds)
+        if reason == 'VALID' and enough and not revalidate:
+            return dict(reference=reference, action='REUSED', record_id=payload['record_id'],
+                        expires_at=payload['expires_at'], validation_attempts=0)
+        if reason == 'VALID':
+            reason = 'EXPLICIT_REVALIDATION' if revalidate else 'INSUFFICIENT_REMAINING_TIME'
+    # Never extend the normal record lifetime. Validation completes BEFORE issue.
+    validate_candidate(project_id, destination, key_path, existing_image_id=image_id,
+                       application_source_root=application_source_root)
+    fresh_raw = host._protected_path(destination, private=True).read_bytes()
+    fresh = record.verify_record(fresh_raw, trust)
+    if fresh['evidence']['binding'] != binding or fresh['evidence']['image_id'] != image_id:
+        raise PreReleaseError("CANDIDATE_RECORD_FIXED_TARGET_MISMATCH")
+    if record._time(fresh['expires_at'], 'record expiry time') <= datetime.now(timezone.utc) + timedelta(seconds=minimum_remaining_seconds):
+        raise PreReleaseError("CANDIDATE_RECORD_TIME_BUDGET_INSUFFICIENT_AFTER_ONE_VALIDATION")
+    return dict(reference=dict(path=str(destination), sha256=hashlib.sha256(fresh_raw).hexdigest()),
+                action='REVALIDATED', reason=reason, record_id=fresh['record_id'],
+                expires_at=fresh['expires_at'], validation_attempts=1)
 
 
 def _validate_production_revalidation_report(report: object, container_id: str) -> dict:
@@ -957,6 +1054,32 @@ def verify_targeted_preservation(observations: dict, host, roots: list) -> None:
             raise PreReleaseError('old runtime can write new operational state')
 
 
+def reviewed_release_state(request: dict, risk: dict, host) -> tuple[dict, dict, dict | None]:
+    """Shared state/Review check for assessment and preparation before revalidation.
+
+    Reuse the human input unchanged; a technical refresh cannot approve it or
+    rewrite its current-main/findings binding.
+    """
+    state = host._json(_risk_file(request["state_plan"], host))
+    _risk_fields(state, ("base", "target", "data_schema_sha256", "irreversible", "compatible",
+                         "database_migration", "production_data_mutation", "storage_format_change"), "state plan")
+    if state["base"] != risk["base"] or state["target"] != risk["target"] or state["data_schema_sha256"] != request["current"]["data_schema"]["sha256"]:
+        raise PreReleaseError("state plan identity differs")
+    if any(type(state[k]) is not bool for k in ("compatible", "database_migration", "production_data_mutation", "storage_format_change")):
+        raise PreReleaseError("state plan requires boolean facts")
+    if state['irreversible'] == 'YES' or any(state[k] for k in ("database_migration", "production_data_mutation", "storage_format_change")):
+        risk.update(RELEASE_RISK_CLASS="STATEFUL_OR_INFRA", STATE_CHANGE_CLASS="IRREVERSIBLE_OR_DESTRUCTIVE",
+                    MACHINE_DESTRUCTIVE_EVIDENCE=True, MACHINE_STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE',
+                    ROLLBACK_REHEARSAL_REQUIRED=True, FULL_ROLLBACK_REHEARSAL_REQUIRED=True,
+                    TARGETED_RECOVERY_VALIDATION_REQUIRED=True)
+    review = request.get('maintainer_risk_review')
+    reviewed_main = None
+    if review is not None:
+        reviewed_main = current_main_identity(ROOT)
+        risk = apply_maintainer_review(risk, review, reviewed_main)
+    return risk, state, reviewed_main
+
+
 def assess_release(request_path: Path, destination: Path) -> dict:
     """Protected, read-only planning entry; no instance or grant mutations.
 
@@ -997,24 +1120,7 @@ def assess_release(request_path: Path, destination: Path) -> dict:
             or target_image["Config"]["Labels"].get("org.opencontainers.image.revision") != risk["target"]["commit"]
             or target_image["Config"]["Labels"].get("market-data.git.tree") != risk["target"]["tree"]):
         raise PreReleaseError("validated target image is not available with exact source identity")
-    # The sealed state plan is an operator-reviewed fact, never a low-risk switch.
-    state = host._json(_risk_file(request["state_plan"], host))
-    _risk_fields(state, ("base", "target", "data_schema_sha256", "irreversible", "compatible",
-                         "database_migration", "production_data_mutation", "storage_format_change"), "state plan")
-    if state["base"] != risk["base"] or state["target"] != risk["target"] or state["data_schema_sha256"] != request["current"]["data_schema"]["sha256"]:
-        raise PreReleaseError("state plan identity differs")
-    if any(type(state[k]) is not bool for k in ("compatible", "database_migration", "production_data_mutation", "storage_format_change")):
-        raise PreReleaseError("state plan requires boolean facts")
-    if state['irreversible'] == 'YES' or any(state[k] for k in ("database_migration", "production_data_mutation", "storage_format_change")):
-        risk.update(RELEASE_RISK_CLASS="STATEFUL_OR_INFRA", STATE_CHANGE_CLASS="IRREVERSIBLE_OR_DESTRUCTIVE",
-                    MACHINE_DESTRUCTIVE_EVIDENCE=True, MACHINE_STATE_CHANGE_CLASS='IRREVERSIBLE_OR_DESTRUCTIVE',
-                    ROLLBACK_REHEARSAL_REQUIRED=True, FULL_ROLLBACK_REHEARSAL_REQUIRED=True,
-                    TARGETED_RECOVERY_VALIDATION_REQUIRED=True)
-    review = request.get('maintainer_risk_review')
-    reviewed_main = None
-    if review is not None:
-        reviewed_main = current_main_identity(ROOT)
-        risk = apply_maintainer_review(risk, review, reviewed_main)
+    risk, state, reviewed_main = reviewed_release_state(request, risk, host)
     acceptance = host._json(_risk_file(request["acceptance_plan"], host))
     _risk_fields(acceptance, ("target", "image_id", "checks"), "acceptance plan")
     if acceptance["target"] != risk["target"] or acceptance["image_id"] != candidate["image_id"] or type(acceptance["checks"]) is not list or not acceptance["checks"] or any(not isinstance(c, str) or not c.strip() for c in acceptance["checks"]):
@@ -1079,10 +1185,18 @@ def main(argv=None) -> int:
     parser.add_argument("--record-output", type=Path)
     parser.add_argument("--candidate-key", type=Path)
     parser.add_argument("--ttl-seconds", type=int, default=86400)
+    parser.add_argument("--existing-image-id")
+    parser.add_argument("--application-source-root", type=Path)
     parser.add_argument("--production-policy", type=Path)
     parser.add_argument("--container-id")
     parser.add_argument("--report-output", type=Path)
     args = parser.parse_args(argv)
+    if ((args.existing_image_id is not None or args.application_source_root is not None)
+            and (args.project is None or args.production_policy is not None
+                 or args.release_request is not None or args.classify_release is not None)):
+        parser.error("existing-image options require candidate validation mode")
+    if args.application_source_root is not None and args.existing_image_id is None:
+        parser.error("independent application source requires existing-image validation")
     if args.maintainer_risk_review is not None and args.classify_release is None:
         parser.error('risk review option requires --classify-release; release requests embed their review')
     try:
@@ -1120,8 +1234,11 @@ def main(argv=None) -> int:
             if (args.project is None or args.record_output is None or args.candidate_key is None
                     or args.container_id is not None or args.report_output is not None):
                 parser.error("candidate mode requires candidate options")
-            result = validate_candidate(args.project, args.record_output, args.candidate_key,
-                                        ttl_seconds=args.ttl_seconds)
+            options = dict(ttl_seconds=args.ttl_seconds)
+            if args.existing_image_id is not None:
+                options.update(existing_image_id=args.existing_image_id,
+                               application_source_root=args.application_source_root)
+            result = validate_candidate(args.project, args.record_output, args.candidate_key, **options)
             print(json.dumps({"CANDIDATE_VALIDATION_RECORD": "PASS", "record_id": result["record_id"],
                               "image_id": result["evidence"]["image_id"]}))
         return 0

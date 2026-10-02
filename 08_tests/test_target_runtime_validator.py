@@ -60,6 +60,53 @@ def load_engine():
     return module
 
 
+@pytest.mark.parametrize('command', [('docker', 'build', '.'), ('docker', 'buildx', 'build', '.')])
+def test_existing_image_transport_rejects_build_before_spawning_process(monkeypatch, command):
+    engine = load_engine()
+    engine._BUILD_ALLOWED = False
+    calls = []
+    monkeypatch.setattr(engine.subprocess, 'run', lambda *a, **kw: calls.append(a))
+    with pytest.raises(engine.ValidationError, match='must never invoke build'):
+        engine._run(command)
+    assert not calls and engine._BUILD_INVOCATIONS == 1
+
+
+@pytest.mark.parametrize("mutation", [None, "config", "dependency", "source_changed"])
+def test_image_bound_inputs_verify_non_python_copied_bytes(tmp_path, monkeypatch, mutation):
+    engine = load_engine()
+    files = {"config.json": b'{"enabled":true}', "requirements.txt": b"example==1\n"}
+    dockerfile = ("FROM " + BASE_IMAGE + "\n"
+                  'COPY ["config.json", "/app/config.json"]\n'
+                  "COPY requirements.txt /app/\n")
+    (tmp_path / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    for name, raw in files.items():
+        (tmp_path / name).write_bytes(raw)
+    contract = {"build": {"dockerfile": "Dockerfile", "dockerignore": ".dockerignore",
+                           "compose_sources": []}}
+    binding = {"source_sha256": {name: engine._sha(raw) for name, raw in files.items()}}
+    observed = {"/app/" + name: raw for name, raw in files.items()}
+    if mutation == "config":
+        observed["/app/config.json"] = b'{"enabled":false}'
+    elif mutation == "dependency":
+        observed["/app/requirements.txt"] = b"example==2\n"
+    elif mutation == "source_changed":
+        (tmp_path / "config.json").write_bytes(b"changed")
+    reads = []
+
+    def copy(container, path):
+        assert container == "created-unstarted-candidate"
+        reads.append(path)
+        return observed[path]
+
+    monkeypatch.setattr(engine, "_copy_bytes", copy)
+    if mutation:
+        with pytest.raises(engine.ValidationError, match="bound source|source changed"):
+            engine._image_bound_inputs(tmp_path, contract, binding, "created-unstarted-candidate")
+    else:
+        engine._image_bound_inputs(tmp_path, contract, binding, "created-unstarted-candidate")
+        assert set(reads) == set(observed)
+
+
 def test_ephemeral_candidate_trust_is_public_only_and_not_mounted(tmp_path):
     engine = load_engine()
     contract = {"required_environment": [], "schema_version": "runtime-manifest/2"}
@@ -256,7 +303,8 @@ def test_cli_exposes_only_gate_controlled_source_arguments(tmp_path):
                               "--evidence-output", str(tmp_path / "evidence.json")])
     assert vars(args) == {"project": "demo", "runtime_contract": "runtime.json",
                           "evidence_output": tmp_path / "evidence.json",
-                          "ephemeral_candidate_trust": False}
+                            "ephemeral_candidate_trust": False,
+                            "existing_image_id": None, "application_source_root": None}
     assert engine.parse_args(["--project", "demo", "--runtime-contract", "runtime.json",
                               "--evidence-output", str(tmp_path / "evidence.json"),
                               "--ephemeral-candidate-trust"]).ephemeral_candidate_trust is True
