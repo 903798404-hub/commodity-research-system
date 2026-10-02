@@ -97,6 +97,30 @@ def validate(source, work, key, key_id, trust):
     return evidence, path
 
 
+def seed_formal_runtime_inputs(manifest, sources, target_source):
+    """Keep the existing FORMAL pre-capture state; never retag sealed fixtures.
+
+    Candidate-validation has its own sealed TEST_ISOLATED snapshot. Production
+    role fixtures instead exercise the already supported empty snapshot store;
+    real capture is not a release prerequisite and is never invoked here.
+    """
+    prepared = []
+    for item in manifest['candidate_runtime_inputs']:
+        if item['role'] in {'snapshots', 'capture-snapshots'}:
+            continue
+        raw = (target_source / item['source_path']).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == item['sha256'], item['source_path']
+        path = sources[item['role']] / item['relative_path']
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write(path, raw, 0o444)
+        prepared.append(dict(role=item['role'], relative_path=item['relative_path'],
+            source_path=item['source_path'], sha256=item['sha256']))
+    assert sources['snapshots'] == sources['capture-snapshots']
+    assert not any(sources['snapshots'].iterdir())
+    return dict(snapshot_state='FORMAL_PRE_CAPTURE_EMPTY', capture_executed=False,
+        sealed_candidate_snapshot_retagged=False, inputs=prepared)
+
+
 def runtime_inputs(work, old_source, target_source, host):
     allocation = Path('/var/lib/market-data/production-runtime') / ('hosted-execution-' + uuid.uuid4().hex)
     allocation.parent.mkdir(parents=True, exist_ok=True)
@@ -114,10 +138,8 @@ def runtime_inputs(work, old_source, target_source, host):
     marker = dict(schema_version=1, runtime_id='target-validation', module_id=manifest['module_id'],
         classification='formal', created_at=datetime.now(timezone.utc).isoformat())
     write(sources['identity'] / '.market-data-runtime.json', host._canonical(marker), 0o444)
-    for item in manifest['candidate_runtime_inputs']:
-        path = sources[item['role']] / item['relative_path']
-        path.parent.mkdir(parents=True, exist_ok=True)
-        write(path, (target_source / item['source_path']).read_bytes(), 0o444)
+    input_evidence = seed_formal_runtime_inputs(manifest, sources, target_source)
+    save(work, 'formal-runtime-inputs.json', input_evidence)
     secrets = directory(allocation / 'secrets', 0o700)
     tankan = secrets / 'tankan.env'
     write(tankan, b'HOSTED_TEST_ONLY=1\n', 0o440)

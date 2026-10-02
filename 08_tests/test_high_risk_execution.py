@@ -1,6 +1,7 @@
 """Sealed intent and stage-aware host adapter tests; not Docker evidence."""
 import contextlib
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -13,6 +14,55 @@ spec = importlib.util.spec_from_file_location('_test_high_risk_execution', ROOT 
 execution = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = execution
 spec.loader.exec_module(execution)
+
+
+def test_hosted_formal_runtime_fixture_preserves_candidate_snapshot_and_empty_formal_store(tmp_path):
+    fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '_test_formal_execution_inputs')
+    manifest = json.loads((ROOT / fixture.CONTRACT).read_text(encoding='utf-8'))
+    source = tmp_path / 'source'
+    sources = {}
+    for item in manifest['runtime_roots']:
+        if item['role'] != 'capture-snapshots':
+            sources[item['role']] = tmp_path / item['role']
+            sources[item['role']].mkdir()
+    sources['capture-snapshots'] = sources['snapshots']
+    originals = {}
+    for item in manifest['candidate_runtime_inputs']:
+        path = ROOT / item['source_path']
+        # Existing fixture contract uses Git LF JSON on both Windows and Linux.
+        raw = path.read_text(encoding='utf-8').encode('utf-8') if path.suffix == '.json' else path.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == item['sha256']
+        copy_path = source / item['source_path']
+        copy_path.parent.mkdir(parents=True, exist_ok=True)
+        copy_path.write_bytes(raw)
+        originals[copy_path] = raw
+    result = fixture.seed_formal_runtime_inputs(manifest, sources, source)
+    assert result['snapshot_state'] == 'FORMAL_PRE_CAPTURE_EMPTY'
+    assert result['capture_executed'] is result['sealed_candidate_snapshot_retagged'] is False
+    assert len(result['inputs']) == 11
+    assert not any(sources['snapshots'].iterdir())
+    assert all(path.read_bytes() == raw for path, raw in originals.items())
+    preflight = execution.load(ROOT, '04_scripts/runtime/spread_runtime_preflight.py',
+        '_test_formal_execution_snapshot_reader')
+    assert preflight.load_formal_preflight_snapshot(sources['snapshots']) is None
+    sealed_manifest = next(path for path in originals if path.name == 'shared_intraday_snapshot_manifest.json')
+    assert json.loads(sealed_manifest.read_bytes())['environment'] == 'TEST_ISOLATED_NON_PRODUCTION'
+
+
+def test_hosted_formal_runtime_fixture_rejects_input_hash_mismatch(tmp_path):
+    fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '_test_formal_execution_input_hash')
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'input.json').write_bytes(b'{}')
+    snapshot = tmp_path / 'snapshot'
+    snapshot.mkdir()
+    manifest = dict(candidate_runtime_inputs=[dict(role='history', source_path='input.json',
+        relative_path='input.json', sha256='0' * 64)])
+    with pytest.raises(AssertionError, match='input.json'):
+        fixture.seed_formal_runtime_inputs(manifest, dict(snapshots=snapshot,
+            **{'capture-snapshots': snapshot, 'history': tmp_path}), source)
 
 
 def plan():
