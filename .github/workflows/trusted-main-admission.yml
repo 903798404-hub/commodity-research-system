@@ -111,11 +111,7 @@ jobs:
     - name: Prepare deterministic required fixtures
       working-directory: candidate
       run: |
-        # Standard numbered path-boundary scaffold in this disposable checkout.
-        # Empty directories only: never substitute business inputs or initialize
-        # a production runtime. Required Registry checks assert their existence.
-        mkdir -p 01_data 06_outputs 10_logs
-        python -I -B 04_scripts/quality/required_lane_fixtures.py --source-root . --output "$RUNNER_TEMP/required-fixtures"
+        python -I -B 04_scripts/quality/required_lane_fixtures.py --source-root . --output "$RUNNER_TEMP/required-fixtures" --prepare-checkout-directories
         echo "SPREAD_REFERENCE_DATA_ROOT=$RUNNER_TEMP/required-fixtures/spread-reference" >> "$GITHUB_ENV"
         echo "PUBLIC_MARKET_DATA_RUNTIME_ROOT=$RUNNER_TEMP/required-fixtures/public-runtime" >> "$GITHUB_ENV"
     - name: Execute required linux tests
@@ -316,8 +312,21 @@ jobs:
       working-directory: candidate
       env:
         FULL_JOB_RESULT: ${{ needs.full.result }}
-      run: python -I -B 04_scripts/quality/full_regression.py compare --plan "$RUNNER_TEMP/platform-plan/full-plan.json"
-        --receipts "$RUNNER_TEMP/full-results" --output "$RUNNER_TEMP/final-admission/full-regression.json"
+      run: |
+        python -I -B - <<'PY'
+        import importlib.util, json, os
+        from pathlib import Path
+        root = Path(os.environ['RUNNER_TEMP'])
+        spec = importlib.util.spec_from_file_location('fixtures', Path('04_scripts/quality/required_lane_fixtures.py'))
+        fixtures = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixtures)
+        records = [json.loads((root / 'full-results' / side / 'input-preparation.json').read_text()) for side in ('base', 'candidate')]
+        result = fixtures.compare_prepared_inputs(*records)
+        output = root / 'final-admission/input-equivalence.json'
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, indent=2) + '\n')
+        PY
+        python -I -B 04_scripts/quality/full_regression.py compare --plan "$RUNNER_TEMP/platform-plan/full-plan.json" --receipts "$RUNNER_TEMP/full-results" --output "$RUNNER_TEMP/final-admission/full-regression.json"
     - name: Aggregate actual required platform jobs
       working-directory: candidate
       env:
@@ -389,14 +398,15 @@ jobs:
     - name: Prepare deterministic required fixtures
       working-directory: candidate
       run: |
-        python -I -B ../executor/04_scripts/quality/required_lane_fixtures.py --source-root . --output "$RUNNER_TEMP/required-fixtures"
+        python -I -B ../executor/04_scripts/quality/required_lane_fixtures.py --source-root . --output "$RUNNER_TEMP/required-fixtures" --prepare-checkout-directories
         echo "SPREAD_REFERENCE_DATA_ROOT=$RUNNER_TEMP/required-fixtures/spread-reference" >> "$GITHUB_ENV"
         echo "PUBLIC_MARKET_DATA_RUNTIME_ROOT=$RUNNER_TEMP/required-fixtures/public-runtime" >> "$GITHUB_ENV"
     - name: Execute complete full regression
       working-directory: candidate
-      run: python -I -B ../executor/04_scripts/quality/full_regression.py run --side
-        "${{ matrix.side }}" --plan "$RUNNER_TEMP/platform-plan/full-plan.json" --output
-        "$RUNNER_TEMP/full-results"
+      run: |
+        mkdir -p "$RUNNER_TEMP/full-results"
+        cp "$RUNNER_TEMP/required-fixtures/fixture-manifest.json" "$RUNNER_TEMP/full-results/input-preparation.json"
+        python -I -B ../executor/04_scripts/quality/full_regression.py run --side "${{ matrix.side }}" --plan "$RUNNER_TEMP/platform-plan/full-plan.json" --output "$RUNNER_TEMP/full-results"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:

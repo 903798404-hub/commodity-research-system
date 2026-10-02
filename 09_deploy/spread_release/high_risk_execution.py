@@ -11,6 +11,7 @@ import copy
 import contextlib
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import shutil
@@ -46,6 +47,38 @@ class ExecutionError(ValueError):
 def require(condition, message):
     if not condition:
         raise ExecutionError(message)
+
+
+def validate_issuer_api(issuer, *, application_service=False):
+    """Check the existing app-bound ABI before stop; never substitute a signer.
+
+    _observe is deliberately not required: pure Compose interpretation is owned
+    by the current transport. These are the actual issuer calls of this path.
+    """
+    calls = {
+        'require_protected_authority_source': ((), {}),
+        '_protected_path': ((Path('/unused'),), {'private': True}),
+        '_json': ((b'{}',), {}), '_digest': (({},), {}),
+        '_load_private_key': (('/unused',), {}), 'validate_policy': (({}, 'production'), {}),
+        '_validated_candidate_record': (({},), {}),
+        '_production_compose_bridge': (({}, {}, {}), {}),
+        '_validate_runtime_mounts': (({}, [], {}), {}), '_mounts': (({},), {}),
+        'copy_container_json': (('unused',), {}), 'normalize_observation': (({}, {}, {}), {}),
+        '_render_actual_compose': (({}, {}, {}), {}),
+        'revalidate_production': (('unused',), {'expected_policy_path': Path('/unused')}),
+        'issue_execution_grant': (('unused',), dict(expected_policy_path=Path('/unused'),
+            key_path='/unused', grant_path='/unused', grant_dir='/unused', role='production', ttl_seconds=900)),
+    }
+    if application_service:
+        calls['issue_application_service_credential'] = (('unused',), dict(
+            expected_policy_path=Path('/unused'), credential_path='/unused', role='production'))
+    for name, (args, kwargs) in calls.items():
+        method = vars(issuer).get(name)
+        require(callable(method), 'UNSUPPORTED_APPLICATION_ISSUER_API: ' + name)
+        try:
+            inspect.signature(method).bind(*args, **kwargs)
+        except (TypeError, ValueError) as exc:
+            raise ExecutionError('UNSUPPORTED_APPLICATION_ISSUER_API: ' + name) from exc
 
 
 def verify_plan(path):
@@ -271,11 +304,19 @@ class HostBackend:
         require(self.pre.require_source(self.host, self.engine, source_root=source) ==
                 (asset['commit'], asset['tree']), 'APPLICATION_SOURCE_CHANGED')
         issuer = load(source, '09_deploy/runtime_identity/host_authorization.py', '_high_risk_issuer_' + role)
+        self.engine._write_new(self.output / ('issuer-loading-' + role + '.json'), self.engine._canonical(dict(
+            tool_root=str(ROOT), issuer_kind='module', issuer_module=issuer.__name__,
+            issuer_file=issuer.__file__, issuer_source_commit=asset['commit'], issuer_source_tree=asset['tree'],
+            transport_file=self.routine.__file__, observation_file=str(ROOT / '09_deploy/runtime_identity/runtime_observation.py'))))
+        require(Path(issuer.__file__).resolve() == source / '09_deploy/runtime_identity/host_authorization.py',
+                'APPLICATION_ISSUER_LOADING_SOURCE_CHANGED')
+        validate_issuer_api(issuer)
         issuer.require_protected_authority_source()
         require(issuer.TRUST_CONFIG_PATH.read_bytes() == self.host.TRUST_CONFIG_PATH.read_bytes(), 'TRUST_DOMAIN_DIFFERS')
         project = self.engine._project(source, plan['project_id'])
         _, manifest, binding = self.engine.source_contract(source, plan['project_id'], project['runtime_contract'])
         policy = self.read(spec['policy'])
+        validate_issuer_api(issuer, application_service='application_service' in policy)
         require('recovery' not in policy, 'REHEARSAL_POLICY_CANNOT_DEPLOY_OR_RESTORE')
         issuer.validate_policy(policy, 'production')
         from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -310,7 +351,7 @@ class HostBackend:
         require(service['image'] == asset['image_id'] and 'build' not in service, 'IMMUTABLE_IMAGE_REQUIRED')
         require(issuer._digest(rendered) == policy['rendered_compose_sha256'], 'RENDERED_CONFIG_CHANGED')
         issuer._production_compose_bridge(rendered, policy, manifest)
-        session._check_mounts(service.get('volumes', []))
+        session._check_mounts(session.resolved_compose_mounts(rendered))
         require(not (Path(session.spec['grant_directory']) / 'grant.json').exists(), 'FRESH_GRANT_DIRECTORY_REQUIRED')
         require(not Path(session.spec['policy_output']).exists(), 'FRESH_POLICY_OUTPUT_REQUIRED')
         self.sessions[role] = session
@@ -437,7 +478,11 @@ class HostBackend:
             application_commit=session.binding['commit'], image_id=session.current_policy['image_id']
             if session.current_policy else None,
             grant_id=self.envelopes.get(role, {}).get('payload', {}).get('grant_id'),
-            policy_path=session.spec['policy_output']) for role, session in self.sessions.items()}
+            policy_path=session.spec['policy_output'],
+            issuer_module=session.host.__name__, issuer_file=session.host.__file__,
+            issuer_source_commit=session.binding['commit'],
+            transport_file=self.routine.__file__, observation_source_root=str(ROOT))
+            for role, session in self.sessions.items()}
         self.engine._write_new(self.output / 'execution-result.json', self.engine._canonical(result))
 
     def cleanup_temporary(self, plan):

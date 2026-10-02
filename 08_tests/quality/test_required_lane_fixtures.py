@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import pytest
 
 import pandas as pd
 
@@ -83,3 +84,57 @@ def test_final_aggregation_uses_only_its_runtime_dependency() -> None:
     assert "requirements-dev.in" not in final_job
     assert "Compare exact base and candidate full regression" in final_job
     assert "Aggregate actual required platform jobs" in final_job
+
+
+def test_checkout_scaffold_creates_only_empty_numbered_directories(tmp_path):
+    module = _module()
+    root = tmp_path / 'checkout'
+    root.mkdir()
+    evidence = module.prepare_checkout(root)
+    assert [r['relative_path'] for r in evidence] == list(module.NUMBERED_DIRECTORIES)
+    assert all(not list((root / r['relative_path']).iterdir()) for r in evidence)
+    assert all(r['business_files_created'] is False for r in evidence)
+    (root / '01_data').rmdir()
+    (root / '01_data').write_text('not a directory')
+    with pytest.raises(ValueError, match='INPUT_PREPARATION_FAILED'):
+        module.prepare_checkout(root)
+
+
+def test_both_lanes_use_same_existing_preparation():
+    workflow = (ROOT / '.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8')
+    assert workflow.count('--prepare-checkout-directories') == 2
+    full_job = workflow.split('  full:\n', 1)[1]
+    assert '../executor/04_scripts/quality/required_lane_fixtures.py --source-root .' in full_job
+    assert full_job.index('--prepare-checkout-directories') < full_job.index('Execute complete full regression')
+
+
+def test_fixture_identity_is_deterministic_and_missing_or_changed_input_rejected(tmp_path):
+    module = _module()
+    first, second = tmp_path / 'base-fixtures', tmp_path / 'candidate-fixtures'
+    a, b = module.build(ROOT, first), module.build(ROOT, second)
+    assert a['input_identity'] == b['input_identity']
+    assert first != second and a['spread_reference_data_root'] != b['spread_reference_data_root']
+    path = second / 'spread-reference/02_configs/historical_spread_config.xlsx'
+    path.chmod(0o600)
+    path.write_bytes(path.read_bytes() + b'changed')
+    with pytest.raises(ValueError, match='fixture bytes changed'):
+        module.fixture_input_identity(second)
+    path.unlink()
+    with pytest.raises(ValueError, match='required fixture file'):
+        module.fixture_input_identity(second)
+
+
+def test_input_equivalence_rejects_missing_setup_and_changed_dataset(tmp_path):
+    import copy
+    module = _module()
+    a = module.build(ROOT, tmp_path / 'inputs')
+    a['checkout_directories'] = [dict(relative_path=n) for n in module.NUMBERED_DIRECTORIES]
+    b = copy.deepcopy(a)
+    assert module.compare_prepared_inputs(a, b)['result'] == 'PASS'
+    b['checkout_directories'] = []
+    with pytest.raises(ValueError, match='missing checkout directory setup'):
+        module.compare_prepared_inputs(a, b)
+    b = copy.deepcopy(a)
+    b['input_identity']['files'][0]['sha256'] = '0' * 64
+    with pytest.raises(ValueError, match='digest mismatch'):
+        module.compare_prepared_inputs(a, b)

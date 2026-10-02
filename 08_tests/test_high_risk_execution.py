@@ -184,3 +184,63 @@ def test_failed_rollback_preserves_recovery_resources(tmp_path):
     result = run(sealed(tmp_path), backend)
     assert result['rollback'] == 'FAIL' and result['resources'] == 'RETAINED_FOR_RECOVERY'
     assert 'cleanup' not in backend.calls
+
+
+@pytest.mark.parametrize('revision', ['88df880127bea4308ee752a37a59884b9198b2ce',
+                                    '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00'])
+def test_actual_application_issuer_abi_is_supported_without_tool_observe(tmp_path, revision):
+    import subprocess
+    raw = subprocess.check_output(['git', '-C', str(ROOT), 'show',
+        revision + ':09_deploy/runtime_identity/host_authorization.py'])
+    path = tmp_path / '09_deploy/runtime_identity/host_authorization.py'
+    path.parent.mkdir(parents=True)
+    path.write_bytes(raw)
+    if revision.startswith('0d7'):
+        path.with_name('runtime_observation.py').write_bytes(subprocess.check_output([
+            'git', '-C', str(ROOT), 'show', revision + ':09_deploy/runtime_identity/runtime_observation.py']))
+    issuer = execution.load(tmp_path, '09_deploy/runtime_identity/host_authorization.py',
+                            '_test_actual_issuer_' + revision)
+    execution.validate_issuer_api(issuer, application_service=revision.startswith('0d7'))
+    assert Path(issuer.__file__) == path
+    if revision.startswith('88df'):
+        assert '_observe' not in vars(issuer)
+    # Current formal transport interprets Compose independently; do not add
+    # _observe to the old module or change its grant format.
+    routine = execution.load(ROOT, '04_scripts/runtime/routine_release.py', '_abi_routine_' + revision)
+    session = routine.DockerSession({}, None, issuer, {}, dict(project_id='test', service_id='test'))
+    mounts = [dict(type='bind', source='/isolated/data', target='/runtime/data', read_only=True)]
+    assert session.resolved_compose_mounts(dict(services=dict(test=dict(volumes=mounts)))) == mounts
+    # Exercise the original failed transport method with the real old/new
+    # manifest validator. Only host file I/O is replaced by this inert fixture.
+    session.contract.update(runtime_roots=[dict(role='data', container_path='/runtime/data', access='ro')],
+        required_mounts=[dict(role='data', container_path='/runtime/data', read_only=True)], secret_references=[])
+    session.role, session.spec = 'production', dict(policy_template='inert', writable_root=str(tmp_path))
+    session.protected_json = lambda path: dict(schema_version='host-runtime-policy/5',
+        grant_container_directory='/run/market-data-grants', mounts=[
+            {k: v for k, v in mounts[0].items() if k != 'type'}])
+    session._check_mounts(mounts)
+    with pytest.raises(ValueError):
+        session._check_mounts([dict(mounts[0], read_only=False)])
+
+
+@pytest.mark.parametrize('fault', ['missing', 'wrong_signature', 'missing_service_issuer'])
+def test_unsupported_issuer_rejected_by_execution_before_stop(tmp_path, fault):
+    from types import ModuleType
+    current = execution.load(ROOT, '09_deploy/runtime_identity/host_authorization.py', '_abi_current_host')
+    broken = ModuleType('_unsupported_fixture_issuer')
+    broken.__dict__.update(vars(current))
+    if fault == 'missing':
+        del broken._render_actual_compose
+    elif fault == 'wrong_signature':
+        broken.issue_execution_grant = lambda container_id: None
+    else:
+        del broken.issue_application_service_credential
+    class Unsupported(Backend):
+        def preconditions(self, value):
+            self.hit('preconditions')
+            execution.validate_issuer_api(broken, application_service=True)
+    backend = Unsupported()
+    result = run(sealed(tmp_path), backend)
+    assert result['result'] == 'FAIL' and result['source'] == 'PRESERVED_NOT_STOPPED'
+    assert 'UNSUPPORTED_APPLICATION_ISSUER_API' in result['failure']
+    assert backend.calls == ['lock', 'preconditions', 'record']

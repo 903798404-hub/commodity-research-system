@@ -460,7 +460,7 @@ class DockerSession:
             require(str(rendered.get('name', '')).startswith('routine-candidate-'), 'CANDIDATE_NAMESPACE')
             require(all(p.get('host_ip') == '127.0.0.1' for p in service.get('ports', [])), 'CANDIDATE_PORT_EXPOSURE')
             check_candidate_network(rendered, service)
-        self._check_mounts(service.get('volumes', []))
+        self._check_mounts(self.resolved_compose_mounts(rendered))
         # Candidate namespaces must be unused: never recreate a running service.
         if role == 'candidate_validation':
             require(not self.compose(spec, 'ps', '-q', '--all', service_id).stdout.strip(), 'CANDIDATE_NAMESPACE_IN_USE')
@@ -478,7 +478,10 @@ class DockerSession:
     def _check_mounts(self, mounts):
         require(all(m.get('type') == 'bind' for m in mounts), 'EXPLICIT_BIND_REQUIRED')
         policy = self.protected_json(self.spec['policy_template'])
-        normalized = self.host._observe('compose_mounts', mounts)
+        # Interpretation belongs to the independently versioned host transport,
+        # not the application-pinned signer (older issuers have no _observe).
+        observer = load('09_deploy/runtime_identity/runtime_observation.py', '_routine_mount_observer')
+        normalized = observer.compose_mounts(mounts)
         if self.role == 'candidate_validation':
             self.host.validate_candidate_mounts(self.contract, normalized, policy,
                 Path(self.spec['grant_directory']), live=bool(self.container_id), container_id=self.container_id)
@@ -495,6 +498,17 @@ class DockerSession:
                 source = Path(mount['source']).resolve()
                 root = Path(self.spec['writable_root']).resolve()
                 require(source != root and source.is_relative_to(root), 'WRITE_OUTSIDE_INSTANCE_RUNTIME')
+
+    def resolved_compose_mounts(self, rendered):
+        """Include only exact declared RO file secrets, never a path wildcard."""
+        observer = load('09_deploy/runtime_identity/runtime_observation.py', '_routine_compose_observer')
+        service = rendered['services'][self.contract['service_id']]
+        mounts = [dict(type='bind', **m) for m in observer.compose_mounts(service.get('volumes', []))]
+        if 'secret_references' in self.contract or service.get('secrets'):
+            targets = observer.declared_secret_targets(self.contract, rendered)
+            mounts.extend(dict(type='bind', source=rendered['secrets'][name]['file'],
+                               target=target, read_only=True) for name, target in targets.items())
+        return mounts
 
     def assert_data_readonly(self):
         container = self.engine.inspect_one('container', self.container_id)

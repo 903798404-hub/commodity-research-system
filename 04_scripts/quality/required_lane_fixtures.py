@@ -31,10 +31,65 @@ SEASON_STARTS = tuple(range(2021, 2027))
 OBSERVATION_DAYS = ((1, 0), (8, 7))
 PUBLIC_RELEASE_ID = "required-fixture-20260812"
 PUBLIC_SOURCE_MAX_DATE = date(2026, 8, 12)
+NUMBERED_DIRECTORIES = ('01_data', '06_outputs', '10_logs')
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def prepare_checkout(source_root: Path) -> list[dict]:
+    """Disposable checkout directory contract only, never business file data."""
+    root = source_root.resolve(strict=True)
+    result = []
+    for name in NUMBERED_DIRECTORIES:
+        path = root / name
+        if path.is_symlink() or (path.exists() and (not path.is_dir() or path.resolve() != path)):
+            raise ValueError('INPUT_PREPARATION_FAILED: numbered directory is aliased or invalid: ' + name)
+        path.mkdir(exist_ok=True)
+        if not os.access(path, os.R_OK | os.X_OK):
+            raise ValueError('INPUT_PREPARATION_FAILED: numbered directory unreadable: ' + name)
+        result.append(dict(relative_path=name, absolute_path=str(path), kind='directory',
+                           business_files_created=False))
+    return result
+
+
+def fixture_input_identity(output: Path) -> dict:
+    """Pre-test inventory and digest of actual isolated immutable input bytes."""
+    output = output.resolve(strict=True)
+    manifest = json.loads((output / 'fixture-manifest.json').read_text(encoding='utf-8'))
+    files = []
+    for role, key in (('spread-reference', 'spread_reference_required_files'),
+                      ('public-runtime', 'public_runtime_required_files')):
+        for relative in manifest[key]:
+            path = output / role / relative
+            if (not path.is_file() or path.is_symlink() or path.resolve() != path
+                    or not os.access(path, os.R_OK)):
+                raise ValueError('INPUT_PREPARATION_FAILED: required fixture file: ' + str(path))
+            files.append(dict(path=role + '/' + relative, size_bytes=path.stat().st_size, sha256=_sha256(path)))
+    files.sort(key=lambda item: item['path'])
+    identity = dict(source='required_lane_fixtures.py deterministic synthetic inputs', files=files,
+                    numbered_directories=list(NUMBERED_DIRECTORIES), production_data_dependency=False)
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if manifest.get('input_identity') is not None and manifest['input_identity'] != dict(identity, sha256=digest):
+        raise ValueError('INPUT_PREPARATION_FAILED: fixture bytes changed')
+    return dict(identity, sha256=digest)
+
+
+def compare_prepared_inputs(base: dict, candidate: dict) -> dict:
+    """Existing CI setup receipt comparison, no signed authorization semantics."""
+    for record in (base, candidate):
+        identity = record['input_identity']
+        raw = {k: v for k, v in identity.items() if k != 'sha256'}
+        if identity['sha256'] != hashlib.sha256(json.dumps(raw, sort_keys=True, separators=(',', ':')).encode()).hexdigest():
+            raise ValueError('INPUT_PREPARATION_FAILED: input receipt digest mismatch')
+        if [d['relative_path'] for d in record['checkout_directories']] != list(NUMBERED_DIRECTORIES):
+            raise ValueError('INPUT_PREPARATION_FAILED: missing checkout directory setup')
+    if base['input_identity'] != candidate['input_identity']:
+        raise ValueError('INPUT_PREPARATION_FAILED: base/candidate inputs differ')
+    return dict(result='PASS', input_identity=base['input_identity'],
+                base_checkout=base['checkout_root'], candidate_checkout=candidate['checkout_root'],
+                isolated_copies='separate ephemeral GitHub job allocations')
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -228,11 +283,14 @@ def _make_read_only(root: Path) -> None:
     )
 
 
-def build(source_root: Path, output: Path) -> dict[str, object]:
+def build(source_root: Path, output: Path, *, prepare_directories: bool = False) -> dict[str, object]:
     source_root = source_root.resolve(strict=True)
     output = output.resolve()
     if output.exists():
         raise ValueError("required fixture output must not already exist")
+    if output == source_root or source_root in output.parents:
+        raise ValueError('INPUT_PREPARATION_FAILED: fixtures must be outside tracked checkout')
+    checkout_directories = prepare_checkout(source_root) if prepare_directories else []
     output.mkdir(parents=True)
     spread_root = _build_spread_root(source_root, output)
     public_root = _build_public_root(source_root, output)
@@ -251,9 +309,14 @@ def build(source_root: Path, output: Path) -> dict[str, object]:
         ],
         "network_dependency": False,
         "production_data_dependency": False,
+        "checkout_root": str(source_root),
+        "checkout_directories": checkout_directories,
     }
     _write_json(output / "fixture-manifest.json", evidence)
+    evidence['input_identity'] = fixture_input_identity(output)
+    _write_json(output / 'fixture-manifest.json', evidence)
     _make_read_only(output)
+    fixture_input_identity(output)
     return evidence
 
 
@@ -261,8 +324,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument('--prepare-checkout-directories', action='store_true')
     args = parser.parse_args()
-    evidence = build(args.source_root, args.output)
+    if args.prepare_checkout_directories and os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
+        raise ValueError('INPUT_PREPARATION_FAILED: checkout scaffold requires disposable Hosted environment')
+    evidence = build(args.source_root, args.output, prepare_directories=args.prepare_checkout_directories)
     print(json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2))
     return 0
 

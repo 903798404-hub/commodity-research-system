@@ -493,6 +493,19 @@ def production_mount_fixture(tmp_path):
     return session,mounts,policy
 
 
+def test_declared_compose_file_secret_is_included_before_mount_validation():
+    b = routine.DockerSession({}, None, None, {}, dict(project_id='test', service_id='service',
+        secret_references=['market-data-service']))
+    rendered = dict(services=dict(service=dict(volumes=[], secrets=[
+        dict(source='market-data-service', target='/run/secrets/market-data-service.json')])),
+        secrets={'market-data-service': dict(file='/isolated/secrets/service.json')})
+    assert b.resolved_compose_mounts(rendered) == [dict(type='bind',
+        source='/isolated/secrets/service.json', target='/run/secrets/market-data-service.json', read_only=True)]
+    rendered['services']['service']['secrets'][0]['source'] = 'undeclared'
+    with pytest.raises(ValueError, match='secret declarations differ'):
+        b.resolved_compose_mounts(rendered)
+
+
 def test_declared_capture_write_uses_same_manifest_contract_for_deploy_and_rollback(tmp_path):
     session,mounts,policy=production_mount_fixture(tmp_path)
     assert next(m for m in mounts if m['target']=='/runtime/capture-snapshots')['read_only'] is False
