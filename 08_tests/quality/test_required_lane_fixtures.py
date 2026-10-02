@@ -144,6 +144,9 @@ def test_short_lived_docker_evidence_consumed_before_long_executor_without_inter
     assert legacy_setup['with']['python-version'] == '3.10.12'
     for step in (current, legacy):
         assert '--docker-evidence' in step['run'] and 'host_release_timestamp_compatibility.py' in step['run']
+        assert "--base '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00'" in step['run']
+        assert 'needs.plan.outputs.base_commit' not in step['run']
+    assert 'needs.plan.outputs.base_commit' in workflow['jobs']['full']['steps'][1]['with']['ref']
 
 
 def test_fixture_identity_is_deterministic_and_missing_or_changed_input_rejected(tmp_path):

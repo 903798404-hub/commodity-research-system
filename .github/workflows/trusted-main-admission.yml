@@ -180,6 +180,8 @@ jobs:
         output.write_text(json.dumps(evidence, sort_keys=True) + '\n', encoding='utf-8')
         output.chmod(0o644)
         PY
+    # Compatibility replay uses the original failing parser, not a moving main
+    # which already contains its repair. Full paired comparison keeps main.
     - name: Validate host release timestamps on current Python
       if: needs.plan.outputs.spread_runtime_docker == 'true'
       working-directory: candidate
@@ -187,7 +189,7 @@ jobs:
         python_bin="$(command -v python)"
         sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" "$python_bin" -I -B \
           "$PWD/08_tests/shared/host_release_timestamp_compatibility.py" \
-          --base '${{ needs.plan.outputs.base_commit }}' --expected-python 3.12 \
+          --base '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00' --expected-python 3.12 \
           --docker-evidence "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json" \
           --output "$RUNNER_TEMP/platform-results/linux/host-release-python312.json"
     - name: Execute required real Docker application service identity evidence
@@ -224,7 +226,7 @@ jobs:
         sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
           '${{ steps.host-python310.outputs.python-path }}' -I -B \
           "$PWD/08_tests/shared/host_release_timestamp_compatibility.py" \
-          --base '${{ needs.plan.outputs.base_commit }}' --expected-python 3.10.12 \
+          --base '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00' --expected-python 3.10.12 \
           --docker-evidence "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json" \
           --output "$RUNNER_TEMP/platform-results/linux/host-release-python31012.json"
     - name: Execute same-entry HIGH_RISK success and fresh rollback with synthetic trust
