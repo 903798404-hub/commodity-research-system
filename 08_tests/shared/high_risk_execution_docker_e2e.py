@@ -224,7 +224,7 @@ def initialize_baseline_font_cache(work, backend, cid):
     argv = ['docker', 'exec', cid, 'python', '-B', '-c', code]
     observed = backend.host._json(run(*argv, timeout=120).encode())
     assert observed['uid'] == observed['gid'] == 65532
-    assert observed['cache'] == '/runtime/logs/matplotlib' and observed['files']
+    assert observed['cache'] == '/runtime/10_logs/matplotlib' and observed['files']
     return save(work, 'baseline-font-cache-initialization.json', dict(
         container_id=cid, argv=argv, observation=observed,
         phase='BEFORE_SOURCE_ACCEPTANCE_AND_PRESERVATION', exit_code=0))

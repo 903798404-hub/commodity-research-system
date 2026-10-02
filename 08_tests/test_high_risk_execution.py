@@ -98,7 +98,7 @@ def test_hosted_baseline_cache_initialized_by_real_nonroot_command_before_preser
     from types import SimpleNamespace
     fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
         '_test_baseline_font_cache_' + fault)
-    observation = dict(uid=65532, gid=65532, cache='/runtime/logs/matplotlib',
+    observation = dict(uid=65532, gid=65532, cache='/runtime/10_logs/matplotlib',
         files={'fontlist-v3.11.0.json': 'a'*64})
     if fault == 'root': observation['uid'] = 0
     if fault == 'wrong_cache': observation['cache'] = '/production/logs'
