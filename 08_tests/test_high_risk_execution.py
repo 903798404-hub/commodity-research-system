@@ -244,3 +244,34 @@ def test_unsupported_issuer_rejected_by_execution_before_stop(tmp_path, fault):
     assert result['result'] == 'FAIL' and result['source'] == 'PRESERVED_NOT_STOPPED'
     assert 'UNSUPPORTED_APPLICATION_ISSUER_API' in result['failure']
     assert backend.calls == ['lock', 'preconditions', 'record']
+
+
+@pytest.mark.parametrize('exit_code', [0, 1])
+def test_formal_application_preflight_keeps_streams_and_never_promotes_diagnostic_success(tmp_path, exit_code):
+    from types import SimpleNamespace
+    import subprocess
+    ready = execution.load(ROOT, '09_deploy/spread_release/wait_for_service_ready.py', '_preflight_evidence_ready')
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.output = tmp_path
+    backend.sessions = dict(target=SimpleNamespace(container_id='a'*64))
+    calls = []
+    def docker(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(args, exit_code, b'{"status":"FAILED"}\n', b'')
+        return subprocess.CompletedProcess(args, 0, b'diagnostic-only\n', b'token=private-value\ntraceback\n')
+    backend.engine = SimpleNamespace(_docker=docker,
+        _canonical=lambda value: json.dumps(value).encode(), _write_new=lambda path, raw: path.write_bytes(raw))
+    if exit_code:
+        with pytest.raises(execution.ExecutionError, match='APPLICATION_RUNTIME_PREFLIGHT_FAILED'):
+            backend._application_preflight(plan(), 'target', ready)
+        diagnostic = json.loads((tmp_path/'target-application-preflight-diagnostic.json').read_bytes())
+        assert diagnostic['purpose'] == 'READONLY_DIAGNOSIS_NOT_ACCEPTANCE'
+        assert 'private-value' not in diagnostic['stderr'] and 'traceback' in diagnostic['stderr']
+        assert 'readonly_preflight' in diagnostic['argv'][-1]
+    else:
+        backend._application_preflight(plan(), 'target', ready)
+        assert len(calls) == 1
+    evidence = json.loads((tmp_path/'target-application-preflight.json').read_bytes())
+    assert evidence['exit_code'] == exit_code and evidence['stdout'] == '{"status":"FAILED"}\n'
+    assert evidence['stderr'] == '' and all(kwargs == {'check': False} for _, kwargs in calls)

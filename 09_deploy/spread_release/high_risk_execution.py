@@ -423,8 +423,7 @@ class HostBackend:
             health_url=session.url() + plan['policy']['readiness']['health_endpoint_path'],
             expected_image_id=plan[role]['image_id'], initial_restart_count=0,
             policy=plan['policy']['readiness'])
-        self.engine._docker('exec', session.container_id, 'python', '-B',
-            '/app/04_scripts/runtime/spread_runtime_preflight.py', '--identity-kind', 'oci_container')
+        self._application_preflight(plan, role, ready)
         if 'application_service' in session.current_policy:
             code = ("from agri_research_agent.shared.runtime_context import establish_application_service_context; "
                 f"establish_application_service_context(service_id={session.contract['service_id']!r},"
@@ -432,6 +431,39 @@ class HostBackend:
                 "print('APPLICATION_SERVICE_CONTEXT=PASS')")
             self.engine._docker('exec', session.container_id, 'python', '-B', '-c', code)
         require(session.http() == session.smoke() == 'PASS', 'APPLICATION_ACCEPTANCE_FAILED')
+
+    def _application_preflight(self, plan, role, ready):
+        session = self.sessions[role]
+        arguments = ['exec', session.container_id, 'python', '-B',
+            '/app/04_scripts/runtime/spread_runtime_preflight.py', '--identity-kind', 'oci_container']
+        probe = self.engine._docker(*arguments, check=False)
+        # This official CLI emits its structured failure on stdout. Preserve
+        # both streams before rejecting; an empty stderr is not the root cause.
+        evidence = self.output / (role + '-application-preflight.json')
+        self.engine._write_new(evidence, self.engine._canonical(dict(
+            argv=['docker', *arguments], container_id=session.container_id,
+            image_id=plan[role]['image_id'], exit_code=probe.returncode,
+            stdout_sha256=hashlib.sha256(probe.stdout).hexdigest(),
+            stderr_sha256=hashlib.sha256(probe.stderr).hexdigest(),
+            stdout=ready._redact_log_text(probe.stdout.decode('utf-8')),
+            stderr=ready._redact_log_text(probe.stderr.decode('utf-8')))))
+        if probe.returncode:
+            # The historical main intentionally reports only error_type. Call
+            # its SAME readonly function to retain the traceback for diagnosis;
+            # never treat a diagnostic success as acceptance of the failed CLI.
+            code = ("import runpy; m=runpy.run_path('/app/04_scripts/runtime/spread_runtime_preflight.py'); "
+                "m['readonly_preflight'](m['parser']().parse_args(['--identity-kind','oci_container']))")
+            diagnostic_args = ['exec', session.container_id, 'python', '-B', '-c', code]
+            diagnostic = self.engine._docker(*diagnostic_args, check=False)
+            self.engine._write_new(self.output / (role + '-application-preflight-diagnostic.json'),
+                self.engine._canonical(dict(argv=['docker', *diagnostic_args],
+                    container_id=session.container_id, image_id=plan[role]['image_id'],
+                    exit_code=diagnostic.returncode, purpose='READONLY_DIAGNOSIS_NOT_ACCEPTANCE',
+                    stdout_sha256=hashlib.sha256(diagnostic.stdout).hexdigest(),
+                    stderr_sha256=hashlib.sha256(diagnostic.stderr).hexdigest(),
+                    stdout=ready._redact_log_text(diagnostic.stdout.decode('utf-8')),
+                    stderr=ready._redact_log_text(diagnostic.stderr.decode('utf-8')))))
+        require(probe.returncode == 0, 'APPLICATION_RUNTIME_PREFLIGHT_FAILED: ' + str(evidence))
 
     def _post_start(self, plan, role):
         session = self.sessions[role]
