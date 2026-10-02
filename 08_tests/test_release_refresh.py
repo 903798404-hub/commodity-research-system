@@ -184,6 +184,55 @@ def test_probe_failure_never_issues_pass_or_replaces_old(refresh, monkeypatch):
     assert refresh.old.read_bytes() == original and not (refresh.path/'new.json').exists()
 
 
+def test_new_signed_record_survives_later_plan_failure_without_publishing_plan(refresh):
+    """Real producer/verifier and preparation entry; Docker remains unit transport."""
+    import contextlib
+    execution = load('09_deploy/spread_release/high_risk_execution.py', 'refresh_failed_plan_execution')
+    plans = load('08_tests/test_high_risk_execution.py', 'refresh_failed_plan_fixture')
+    refresh.payload['expires_at'] = (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+    old_reference = refresh.old_record()
+    old_bytes = refresh.old.read_bytes()
+    old_folder = refresh.path/'old-plan'
+    old_folder.mkdir()
+    old_plan = old_folder/'deployment_plan.json'
+    execution.seal_plan(plans.plan(), old_plan)
+    old_files = {p: p.read_bytes() for p in old_folder.iterdir() if p.is_file()}
+    destination = refresh.path/'deployment_plan.json'
+    events = []
+
+    class Backend:
+        def lock(self, value):
+            return contextlib.nullcontext()
+
+        def refresh_plan_inputs(self, value, **kwargs):
+            result = refresh.ensure(old_reference)
+            events.append('new_signed_record')
+            value = dict(value)
+            value['release_request'] = result['reference']
+            return value
+
+        def preconditions(self, value):
+            reference = value['release_request']
+            raw = Path(reference['path']).read_bytes()
+            assert hashlib.sha256(raw).hexdigest() == reference['sha256']
+            payload = refresh.record.verify_record(raw, refresh.trust)
+            assert payload['record_id'] != refresh.payload['record_id']
+            events.append('verified_new_record_before_assessment_failure')
+            raise ValueError('controlled downstream assessment failure')
+
+    with pytest.raises(ValueError, match='controlled downstream assessment failure'):
+        execution.prepare_plan(plans.plan(), destination, Backend(),
+            candidate_key=refresh.path/'candidate.pem')
+    assert events == ['new_signed_record', 'verified_new_record_before_assessment_failure']
+    assert len(refresh.calls) == 1
+    assert refresh.old.read_bytes() == old_bytes
+    assert all(path.read_bytes() == raw for path, raw in old_files.items())
+    assert not destination.exists()
+    assert not destination.with_name('deployment_plan.manifest.json').exists()
+    # Diagnostic signed output is retained, not deleted or promoted to a plan.
+    refresh.record.verify_record((refresh.path/'new.json').read_bytes(), refresh.trust)
+
+
 def test_impossible_budget_stops_before_any_validation(refresh):
     with pytest.raises(refresh.pre.PreReleaseError, match='TIME_BUDGET_UNSATISFIABLE'):
         refresh.ensure(refresh.old_record(), minimum_remaining_seconds=86400)
