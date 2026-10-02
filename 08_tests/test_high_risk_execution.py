@@ -93,6 +93,38 @@ def test_network_observation_uses_existing_strict_single_inspect_adapter(monkeyp
     assert calls == [('network', 'inspect', 'fixture-net')]
 
 
+@pytest.mark.parametrize('fault', ['none', 'root', 'wrong_cache', 'empty', 'command_failure'])
+def test_hosted_baseline_cache_initialized_by_real_nonroot_command_before_preservation(tmp_path, monkeypatch, fault):
+    from types import SimpleNamespace
+    fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '_test_baseline_font_cache_' + fault)
+    observation = dict(uid=65532, gid=65532, cache='/runtime/logs/matplotlib',
+        files={'fontlist-v3.11.0.json': 'a'*64})
+    if fault == 'root': observation['uid'] = 0
+    if fault == 'wrong_cache': observation['cache'] = '/production/logs'
+    if fault == 'empty': observation['files'] = {}
+    calls = []
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        if fault == 'command_failure': raise RuntimeError('actual command failed')
+        return json.dumps(observation)
+    monkeypatch.setattr(fixture, 'run', run)
+    backend = SimpleNamespace(host=SimpleNamespace(_json=json.loads))
+    if fault == 'none':
+        record = json.loads(fixture.initialize_baseline_font_cache(tmp_path, backend, 'b'*64).read_bytes())
+        assert record['observation'] == observation and record['exit_code'] == 0
+        assert record['phase'] == 'BEFORE_SOURCE_ACCEPTANCE_AND_PRESERVATION'
+    else:
+        with pytest.raises(RuntimeError if fault == 'command_failure' else AssertionError):
+            fixture.initialize_baseline_font_cache(tmp_path, backend, 'b'*64)
+        assert not list(tmp_path.iterdir())
+    assert calls[0][0][:6] == ('docker', 'exec', 'b'*64, 'python', '-B', '-c')
+    assert 'matplotlib.font_manager' in calls[0][0][-1] and calls[0][1] == dict(timeout=120)
+    source = (ROOT / '08_tests/shared/high_risk_execution_docker_e2e.py').read_text(encoding='utf-8')
+    assert source.index('    initialize_baseline_font_cache(work, backend,') < source.index('    backend.accept(seed,')
+    assert source.index('    backend.accept(seed,') < source.index('    evidence, recovery_policy, fresh, sandbox, network = rehearsal(')
+
+
 def plan():
     ref = dict(path='/protected/evidence.json', sha256='1' * 64)
     asset = dict(commit='2' * 40, tree='3' * 40, image_id='sha256:' + '4' * 64)

@@ -210,6 +210,26 @@ def instance(work, name, source, evidence, record, host, engine, allocation, sou
     return save(role_dir, 'instance.json', document), policy
 
 
+def initialize_baseline_font_cache(work, backend, cid):
+    """Finish the source's real lazy cache before recording preservation.
+
+    This executes in the authorized non-root source, not the host or sandbox.
+    No cache bytes or later preservation observation are fabricated.
+    """
+    code = ("import hashlib,json,os,pathlib; import matplotlib.font_manager; "
+        "import matplotlib; p=pathlib.Path(matplotlib.get_cachedir()); "
+        "print(json.dumps(dict(uid=os.geteuid(),gid=os.getegid(),cache=str(p),"
+        "files={f.name:hashlib.sha256(f.read_bytes()).hexdigest() "
+        "for f in sorted(p.glob('fontlist-*.json'))})))")
+    argv = ['docker', 'exec', cid, 'python', '-B', '-c', code]
+    observed = backend.host._json(run(*argv, timeout=120).encode())
+    assert observed['uid'] == observed['gid'] == 65532
+    assert observed['cache'] == '/runtime/logs/matplotlib' and observed['files']
+    return save(work, 'baseline-font-cache-initialization.json', dict(
+        container_id=cid, argv=argv, observation=observed,
+        phase='BEFORE_SOURCE_ACCEPTANCE_AND_PRESERVATION', exit_code=0))
+
+
 def rehearsal(work, backend, baseline_policy_path, cid, sources, values, production_key):
     host, engine, pre = backend.host, backend.engine, backend.pre
     module = load(backend.host.SOURCE_ROOT, '09_deploy/runtime_identity/recovery_namespace.py', '_execution_rehearsal')
@@ -297,6 +317,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
     backend.create(seed, 'primary_rollback')
     backend.authorize(seed, 'primary_rollback')
     backend.start(seed, 'primary_rollback')
+    initialize_baseline_font_cache(work, backend, backend.sessions['primary_rollback'].container_id)
     backend.accept(seed, 'primary_rollback')
     baseline = backend.sessions['primary_rollback']
     cid = baseline.container_id
