@@ -121,7 +121,7 @@ def test_high_risk_browser_setup_uses_executor_interpreter_and_root_browser_cach
     assert 'sudo "$python_bin" -I -m playwright install --with-deps chromium' in setup['run']
     assert 'p.chromium.launch(headless=True)' in setup['run']
     assert 'DEPENDENCY_PREFLIGHT_NOT_APPLICATION_ACCEPTANCE' in setup['run']
-    assert 'sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B' in execute['run']
+    assert 'sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B' in execute['run']
 
 
 def test_short_lived_docker_evidence_consumed_before_long_executor_without_interpreter_drift():

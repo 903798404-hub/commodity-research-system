@@ -103,7 +103,11 @@ def collect_routine_acceptance(source, tool, work, evidence, key_path):
     its historical base equals its target, not the HIGH_RISK forward target.
     The unmodified Routine risk verifier must independently accept that delta.
     """
-    routine = load(tool, '04_scripts/runtime/routine_release.py', '_mixed_routine_collector')
+    # A historical acceptance is collected by that application's matching
+    # formal collector/validator/issuer, then consumed by the NEW tool below.
+    # Mixing the current collector with the historical candidate-only Compose
+    # incorrectly applies today's production-secret declaration adapter.
+    routine = load(source, '04_scripts/runtime/routine_release.py', '_mixed_routine_collector')
     engine = load(source, '04_scripts/runtime/validate_target_runtime.py', '_mixed_old_engine')
     host = load(source, '09_deploy/runtime_identity/host_authorization.py', '_mixed_old_host')
     _, manifest, binding = engine.source_contract(source, PROJECT, CONTRACT)
@@ -158,7 +162,8 @@ def collect_routine_acceptance(source, tool, work, evidence, key_path):
         path = save(work, 'routine-acceptance.json', record)
         routine.validate_acceptance(record, commit=binding['commit'], tree=binding['tree'], image_id=image_id)
         assert record['result'] == 'PASS' and session.container_id is None
-        save(work, 'collector-identity.json', dict(collector=str(tool/'04_scripts/runtime/routine_release.py'),
+        save(work, 'collector-identity.json', dict(collector=str(source/'04_scripts/runtime/routine_release.py'),
+            consumer_tool=identity(tool),
             application=identity(source), image_id=image_id, base_commit=binding['commit'],
             evidence_class='HOSTED_SYNTHETIC_ROUTINE_COLLECTOR', record=ref(path)))
         return path
