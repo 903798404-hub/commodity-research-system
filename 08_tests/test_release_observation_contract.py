@@ -14,6 +14,40 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize('status', ['created', 'running', 'removing'])
+def test_formal_readiness_adapter_accepts_public_docker_state_without_internal_removal_flag(monkeypatch, status):
+    # Public State shape observed on Docker 28.0.4 in Run 36956786691.
+    import subprocess
+    ready = load('09_deploy/spread_release/wait_for_service_ready.py', 'public_state_readiness')
+    raw = dict(Id='a'*64, Name='/isolated', Image='sha256:'+'b'*64,
+        Config=dict(Image='sha256:'+'b'*64), RestartCount=0,
+        State=dict(Status=status, Running=status == 'running', Paused=False, Restarting=False,
+                   OOMKilled=False, Dead=False, Pid=0, ExitCode=0, Error='',
+                   StartedAt='2026-10-02T02:56:37.130161368Z', FinishedAt='0001-01-01T00:00:00Z'))
+    monkeypatch.setattr(ready.subprocess, 'run', lambda command, **kwargs:
+        subprocess.CompletedProcess(command, 0, json.dumps([raw]), ''))
+    observed = ready.DockerCurlRuntime().inspect('a'*64)
+    assert observed['running'] is (status == 'running')
+    assert observed['removal_in_progress'] is (status == 'removing')
+    if status == 'removing':
+        assert ready._container_failure(observed, raw['Image'], 0)[0] == 'container_terminal_state'
+
+
+@pytest.mark.parametrize('mutation', ['missing-running', 'bad-dead', 'bad-restarting',
+    'missing-status', 'unknown-status', 'bad-removal', 'contradictory-removal'])
+def test_readiness_public_state_remains_strict(mutation):
+    observer = load('09_deploy/runtime_identity/runtime_observation.py', 'strict_public_state')
+    raw = dict(Config={}, RestartCount=0, State=dict(Status='running', Running=True, Dead=False, Restarting=False))
+    if mutation == 'missing-running': del raw['State']['Running']
+    elif mutation == 'bad-dead': raw['State']['Dead'] = 0
+    elif mutation == 'bad-restarting': raw['State']['Restarting'] = 'false'
+    elif mutation == 'missing-status': del raw['State']['Status']
+    elif mutation == 'unknown-status': raw['State']['Status'] = 'unknown'
+    elif mutation == 'bad-removal': raw['State']['RemovalInProgress'] = None
+    else: raw['State'].update(Status='removing', RemovalInProgress=False)
+    with pytest.raises(observer.ObservationError): observer.readiness_projection(raw)
+
+
 def load(path, name):
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
     module = importlib.util.module_from_spec(spec)

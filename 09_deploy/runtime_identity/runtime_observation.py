@@ -206,16 +206,24 @@ def readiness_projection(container: Mapping) -> dict:
     if type(state) is not dict or type(config) is not dict:
         raise ObservationError("readiness observation missing configuration/state")
     flags = {}
-    for field in ("Running", "Dead", "Restarting", "RemovalInProgress"):
+    for field in ("Running", "Dead", "Restarting"):
         if type(state.get(field)) is not bool:
-            raise ObservationError("readiness state requires explicit booleans")
+            raise ObservationError("readiness state requires explicit booleans: " + field)
         flags[field] = state[field]
+    status = state.get("Status")
+    if type(status) is not str or status not in {"created", "running", "paused", "restarting", "removing", "exited", "dead"}:
+        raise ObservationError("readiness state requires a known Docker status")
+    # Docker's public inspect State does not expose the engine-internal removal
+    # flag. Derive it from the explicit public status, never default to success.
+    removing = state.get("RemovalInProgress", status == "removing")
+    if type(removing) is not bool or (status == "removing" and removing is not True):
+        raise ObservationError("readiness removal state is malformed or inconsistent")
     count = container.get("RestartCount")
     if type(count) is not int or count < 0:
         raise ObservationError("readiness restart count requires a nonnegative integer")
     return dict(exists=True, container_id=container.get("Id"),
         container_name=str(container.get("Name") or "").lstrip("/"), image_id=container.get("Image"),
         config_image=config.get("Image"), status=state.get("Status"), running=flags["Running"],
-        dead=flags["Dead"], restarting=flags["Restarting"], removal_in_progress=flags["RemovalInProgress"],
+        dead=flags["Dead"], restarting=flags["Restarting"], removal_in_progress=removing,
         restart_count=count, created_at=container.get("Created"), started_at=state.get("StartedAt"),
         finished_at=state.get("FinishedAt"), exit_code=state.get("ExitCode"), error=state.get("Error"))
