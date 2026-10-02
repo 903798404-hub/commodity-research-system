@@ -75,10 +75,14 @@ def semantic_http_port(network_ports, service_ports, container_port, role):
             and exposure.get('protocol', 'tcp') == 'tcp', error)
     published = str(exposure.get('published', ''))
     require(published.isdecimal() and 1 <= int(published) <= 65535, error)
-    ipv4, ipv6 = (('127.0.0.1', '::1') if role == 'candidate_validation'
-                  else ('0.0.0.0', '::'))
     configured_ip = exposure.get('host_ip')
-    allowed_config_ips = (ipv4,) if role == 'candidate_validation' else (None, '', ipv4)
+    # HTTP visibility follows the exact approved Compose exposure, not the
+    # signing role. Explicit loopback stays isolated; unspecified/public
+    # declarations retain the existing wildcard-only observation rule.
+    loopback = role == 'candidate_validation' or configured_ip == '127.0.0.1'
+    ipv4, ipv6 = (('127.0.0.1', '::1') if loopback
+                  else ('0.0.0.0', '::'))
+    allowed_config_ips = ('127.0.0.1',) if role == 'candidate_validation' else (None, '', '0.0.0.0', '127.0.0.1')
     require(configured_ip in allowed_config_ips, error)
     key = f'{container_port}/tcp'
     require(isinstance(network_ports, dict) and all(

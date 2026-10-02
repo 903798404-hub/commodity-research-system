@@ -440,6 +440,28 @@ def test_semantic_port_rejects_extra_or_malformed_exposure(mutation):
         routine.semantic_http_port(raw, configured, 8501, 'production')
 
 
+@pytest.mark.parametrize('bindings,valid', [
+    ([('127.0.0.1', '18571')], True),
+    ([('127.0.0.1', '18571'), ('::1', '18571')], True),
+    ([('0.0.0.0', '18571')], False),
+    ([('127.0.0.1', '18571'), ('::', '18571')], False),
+    ([('127.0.0.1', '18572')], False),
+    ([], False),
+])
+def test_production_role_explicit_loopback_requires_exact_observed_exposure(bindings, valid):
+    raw = {'8501/tcp': [dict(HostIp=ip, HostPort=port) for ip, port in bindings]}
+    engine = SimpleNamespace(inspect_one=lambda kind, cid: {'NetworkSettings': {'Ports': raw}})
+    session = routine.DockerSession({}, engine, None, {}, dict(project_id='test', service_id='service'))
+    session.container_id, session.role = 'isolated-production-role', 'production'
+    session.spec = dict(container_port=8501)
+    session.compose = lambda *args: SimpleNamespace(stdout=b'{"services":{"service":{"ports":[{"target":8501,"published":"18571","host_ip":"127.0.0.1","protocol":"tcp"}]}}}')
+    if valid:
+        assert session.url() == 'http://127.0.0.1:18571'
+    else:
+        with pytest.raises(routine.RoutineError, match='HTTP_PORT_NOT_BOUND'):
+            session.url()
+
+
 def test_cli_build_once_and_existing_image_no_rebuild(tmp_path,monkeypatch):
     import json
     request=dict(source_root=str(tmp_path),project_id='service',target_commit='a'*40,target_tree='b'*40,
