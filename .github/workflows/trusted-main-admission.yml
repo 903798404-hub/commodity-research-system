@@ -81,6 +81,7 @@ jobs:
         fetch-depth: 0
         persist-credentials: false
     - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      id: host-python312
       with:
         python-version: '3.12'
     - name: Install development dependencies
@@ -179,16 +180,6 @@ jobs:
         output.write_text(json.dumps(evidence, sort_keys=True) + '\n', encoding='utf-8')
         output.chmod(0o644)
         PY
-    - name: Execute same-entry HIGH_RISK success and fresh rollback with synthetic trust
-      if: needs.plan.outputs.spread_runtime_docker == 'true'
-      working-directory: candidate
-      run: |
-        set -euo pipefail
-        source_root="/root/market-data-spread-hosted-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-        python_bin="$(command -v python)"
-        sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
-          "$source_root/08_tests/shared/high_risk_execution_docker_e2e.py" \
-          --output "$RUNNER_TEMP/platform-results/linux/high-risk-execution-docker-evidence.json"
     - name: Validate host release timestamps on current Python
       if: needs.plan.outputs.spread_runtime_docker == 'true'
       working-directory: candidate
@@ -236,6 +227,16 @@ jobs:
           --base '${{ needs.plan.outputs.base_commit }}' --expected-python 3.10.12 \
           --docker-evidence "$RUNNER_TEMP/platform-results/linux/release-canonicalization-docker-evidence.json" \
           --output "$RUNNER_TEMP/platform-results/linux/host-release-python31012.json"
+    - name: Execute same-entry HIGH_RISK success and fresh rollback with synthetic trust
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      working-directory: candidate
+      run: |
+        set -euo pipefail
+        source_root="/root/market-data-spread-hosted-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        python_bin='${{ steps.host-python312.outputs.python-path }}'
+        sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
+          "$source_root/08_tests/shared/high_risk_execution_docker_e2e.py" \
+          --output "$RUNNER_TEMP/platform-results/linux/high-risk-execution-docker-evidence.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:

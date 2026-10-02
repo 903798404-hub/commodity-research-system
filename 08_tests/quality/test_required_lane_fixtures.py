@@ -124,6 +124,28 @@ def test_high_risk_browser_setup_uses_executor_interpreter_and_root_browser_cach
     assert 'sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B' in execute['run']
 
 
+def test_short_lived_docker_evidence_consumed_before_long_executor_without_interpreter_drift():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8'))
+    steps = workflow['jobs']['linux']['steps']
+    named = {step.get('name'): step for step in steps if 'name' in step}
+    execute = named['Execute same-entry HIGH_RISK success and fresh rollback with synthetic trust']
+    current = named['Validate host release timestamps on current Python']
+    legacy = named['Validate host release timestamps on actual Python 3.10.12']
+    assert steps.index(current) < steps.index(legacy) < steps.index(execute)
+    original = next(step for step in steps if step.get('id') == 'host-python312')
+    assert original['with']['python-version'] == '3.12'
+    assert "python_bin='${{ steps.host-python312.outputs.python-path }}'" in execute['run']
+    assert 'command -v python' not in execute['run']
+    assert current['if'] == legacy['if'] == execute['if']
+    service = named['Execute required real Docker application service identity evidence']
+    legacy_setup = next(step for step in steps if step.get('id') == 'host-python310')
+    assert steps.index(service) < steps.index(legacy_setup) < steps.index(legacy)
+    assert legacy_setup['with']['python-version'] == '3.10.12'
+    for step in (current, legacy):
+        assert '--docker-evidence' in step['run'] and 'host_release_timestamp_compatibility.py' in step['run']
+
+
 def test_fixture_identity_is_deterministic_and_missing_or_changed_input_rejected(tmp_path):
     module = _module()
     first, second = tmp_path / 'base-fixtures', tmp_path / 'candidate-fixtures'
