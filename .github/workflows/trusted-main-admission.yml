@@ -246,7 +246,7 @@ jobs:
         set -euo pipefail
         source_root="/root/market-data-spread-hosted-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         python_bin='${{ steps.host-python312.outputs.python-path }}'
-        sudo RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
+        sudo RUNNER_ENVIRONMENT=github-hosted GITHUB_RUN_ID="$GITHUB_RUN_ID" "$python_bin" -I -B \
           "$source_root/08_tests/shared/high_risk_execution_docker_e2e.py" \
           --output "$RUNNER_TEMP/platform-results/linux/high-risk-execution-docker-evidence.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

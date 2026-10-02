@@ -239,6 +239,129 @@ def test_impossible_budget_stops_before_any_validation(refresh):
     assert refresh.calls == []
 
 
+@pytest.fixture
+def plan_acceptance(refresh, monkeypatch):
+    execution = load('09_deploy/spread_release/high_risk_execution.py', 'plan_acceptance_execution')
+    host = load('09_deploy/runtime_identity/host_authorization.py', 'plan_acceptance_host')
+    routine = load('04_scripts/runtime/routine_release.py', 'plan_acceptance_routine')
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.pre, backend.host = refresh.pre, host
+    backend.engine = refresh.pre._load(refresh.pre.ENGINE, 'engine')
+    binding = refresh.evidence['binding']
+    asset = dict(commit=binding['commit'], tree=binding['tree'], image_id=refresh.evidence['image_id'])
+    ref = refresh.old_record()
+    policy = dict(schema_version='host-runtime-policy/5', candidate_record=ref,
+        approved_commit=asset['commit'], approved_tree=asset['tree'], image_id=asset['image_id'],
+        approved_source_root=str(refresh.pre.ROOT), project_id=binding['project_id'],
+        runtime_manifest_sha256='a'*64, runtime_manifest_path='/app/runtime.json', source_root='/app')
+    # Host ownership and source checkout are a unit-test boundary; parsing,
+    # content hashes, family dispatch and both record verifiers remain real.
+    monkeypatch.setattr(host, '_protected_path', lambda path, **kw: path)
+    monkeypatch.setattr(host, '_require_linux_root', lambda: None)
+    monkeypatch.setattr(host, 'validate_policy', lambda *a: None)
+    checks = []
+    monkeypatch.setattr(routine, 'require_routine', lambda *a: checks.append(a))
+    manifest = dict(schema_version='runtime-manifest/3')
+    routine_engine = SimpleNamespace(_project=lambda *a: dict(runtime_contract='runtime.json'),
+        source_contract=lambda *a: ({}, manifest, dict(source_sha256={'runtime.json': 'a'*64})),
+        validate_source_compose=lambda *a: checks.append('compose'))
+    contract_loader = host._contract_module
+    monkeypatch.setattr(host, '_contract_module', lambda path, name:
+        routine if path.name == 'routine_release.py' else refresh.pre
+        if path.name == 'pre_release_runtime.py' else routine_engine
+        if path.name == 'validate_target_runtime.py' else contract_loader(path, name))
+    def legacy(**changes):
+        record = dict(schema_version='routine-candidate-acceptance/1', **asset,
+            project_id=binding['project_id'], base_commit='b'*40, release_id='old-release',
+            validated_at=(datetime.now(timezone.utc)-timedelta(days=10)).isoformat(),
+            result='PASS', runtime_preflight='PASS', health='PASS', application_smoke='PASS',
+            candidate_cleanup='PASS', ui_acceptance_mode='AUTOMATED')
+        record.update(changes)
+        refresh.old.write_text(json.dumps(record), encoding='utf-8')
+        policy['candidate_record'] = dict(path=str(refresh.old), sha256=hashlib.sha256(refresh.old.read_bytes()).hexdigest())
+        return record
+    return SimpleNamespace(backend=backend, policy=policy, asset=asset, legacy=legacy,
+                           checks=checks, execution=execution)
+
+
+def test_plan_routine_rollback_uses_original_host_dispatcher_and_verifier(plan_acceptance, refresh):
+    p = plan_acceptance
+    p.legacy()
+    original = refresh.old.read_bytes()
+    result = p.backend.resolve_acceptance(p.policy, 'primary_rollback', p.asset)
+    assert result['trust_source'] == 'protected-file' and result['signature_verified'] is False
+    assert result['expires_at'] is None and result['reference'] == p.policy['candidate_record']
+    assert len(p.checks) == 2 and p.checks[-1] == 'compose'
+    assert refresh.old.read_bytes() == original and refresh.calls == []
+
+
+@pytest.mark.parametrize('role', ['target', 'primary_rollback'])
+def test_plan_signed_acceptance_uses_real_signature_verifier(plan_acceptance, role):
+    p = plan_acceptance
+    assert p.backend.resolve_acceptance(p.policy, role, p.asset)['signature_verified'] is True
+    assert p.checks == []
+
+
+@pytest.mark.parametrize('change', [
+    {'schema_version': 'routine-candidate-acceptance/2'},
+    {'signature': 'forged'}, {'payload': {}}, {'algorithm': 'ed25519'}, {'key_id': 'forged'},
+    {'commit': 'f'*40}, {'tree': 'f'*40}, {'image_id': 'sha256:'+'f'*64},
+    {'result': 'FAIL'}, {'candidate_cleanup': 'FAIL'},
+])
+def test_plan_wrong_family_and_invalid_legacy_rejected(plan_acceptance, change):
+    p = plan_acceptance
+    p.legacy(**change)
+    with pytest.raises(ValueError):
+        p.backend.resolve_acceptance(p.policy, 'primary_rollback', p.asset)
+
+
+def test_plan_routine_target_rejected_before_legacy_verifier(plan_acceptance):
+    p = plan_acceptance
+    p.legacy()
+    with pytest.raises(ValueError, match='SIGNED_TARGET_REQUIRED'):
+        p.backend.resolve_acceptance(p.policy, 'target', p.asset)
+    assert p.checks == []
+
+
+def test_plan_tampered_signed_input_does_not_fall_back(plan_acceptance, refresh):
+    p = plan_acceptance
+    document = json.loads(refresh.old.read_bytes())
+    document['payload']['record_id'] = 'f'*32
+    refresh.old.write_text(json.dumps(document), encoding='utf-8')
+    p.policy['candidate_record']['sha256'] = hashlib.sha256(refresh.old.read_bytes()).hexdigest()
+    with pytest.raises(ValueError):
+        p.backend.resolve_acceptance(p.policy, 'primary_rollback', p.asset, allow_expired=True)
+    assert p.checks == []
+
+
+def test_plan_changed_schema_cannot_disguise_signed_envelope(plan_acceptance, refresh):
+    p = plan_acceptance
+    document = json.loads(refresh.old.read_bytes())
+    document['schema_version'] = 'routine-candidate-acceptance/1'
+    refresh.old.write_text(json.dumps(document), encoding='utf-8')
+    p.policy['candidate_record']['sha256'] = hashlib.sha256(refresh.old.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match='CONFLICTING_ACCEPTANCE_FAMILY'):
+        p.backend.resolve_acceptance(p.policy, 'primary_rollback', p.asset)
+    assert p.checks == []
+
+
+@pytest.mark.parametrize('problem', ['hash', 'missing', 'protection'])
+def test_plan_requires_original_protected_file_reference(plan_acceptance, refresh, monkeypatch, problem):
+    p = plan_acceptance
+    p.legacy()
+    if problem == 'hash':
+        p.policy['candidate_record']['sha256'] = 'f'*64
+    elif problem == 'missing':
+        p.policy['candidate_record']['path'] = str(refresh.path/'missing.json')
+    else:
+        def denied(*a, **kw):
+            raise PermissionError('unprotected source')
+        monkeypatch.setattr(p.backend.host, '_protected_path', denied)
+    with pytest.raises((ValueError, OSError)):
+        p.backend.resolve_acceptance(p.policy, 'primary_rollback', p.asset)
+    assert p.checks == []
+
+
 def test_remaining_budget_failure_after_one_real_production_attempt_stops(refresh, monkeypatch):
     """Controlled test clock, not changed host time or rewritten signed payload."""
     refresh.payload['expires_at'] = (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
@@ -284,7 +407,12 @@ def test_prestop_window_uses_real_signed_record_and_exact_boundary(refresh, monk
     backend = execution.HostBackend.__new__(execution.HostBackend)
     backend.pre = refresh.pre
     backend.host = refresh.pre._load(refresh.pre.HOST, 'host')
-    backend.read = lambda ref_: {'policy': {'kind':'policy'}} if ref_['kind'] == 'spec' else {'candidate_record': ref}
+    backend.engine = refresh.pre._load(refresh.pre.ENGINE, 'engine')
+    backend.host.validate_policy = lambda *args: None
+    policy = dict(candidate_record=ref, approved_commit=asset['commit'], approved_tree=asset['tree'],
+                  image_id=asset['image_id'], approved_source_root=str(refresh.pre.ROOT),
+                  project_id=refresh.evidence['binding']['project_id'])
+    backend.read = lambda ref_: {'policy': {'kind':'policy'}} if ref_['kind'] == 'spec' else policy
     monkeypatch.setattr(execution, 'record_consumption_windows', lambda plan: dict(target=seconds, primary_rollback=seconds))
 
     class Clock(datetime):

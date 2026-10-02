@@ -148,7 +148,7 @@ def sealed(tmp_path, value=None):
     return path
 
 
-@pytest.mark.parametrize('scenario', ['reuse', 'refresh', 'review_blocked', 'probe_failure'])
+@pytest.mark.parametrize('scenario', ['reuse', 'refresh', 'review_blocked', 'probe_failure', 'wrong_rollback', 'routine'])
 def test_preparation_produces_new_reference_chain_without_editing_old_plan(monkeypatch, scenario):
     from pathlib import PurePosixPath
     from types import SimpleNamespace
@@ -177,6 +177,8 @@ def test_preparation_produces_new_reference_chain_without_editing_old_plan(monke
         instance = dict(source_root='/source', policy=pref, transport=transport,
             application_smoke=dict(kind='dom', path='/', selectors={'body': 1}))
         value['instances'][role] = put('/old/' + role + '-instance.json', instance)
+        if role == 'primary_rollback':
+            value['source_policy'] = pref
     original_objects = copy.deepcopy(objects)
     original_plan = copy.deepcopy(value)
 
@@ -190,7 +192,7 @@ def test_preparation_produces_new_reference_chain_without_editing_old_plan(monke
         assert ref == old_record
         if scenario == 'probe_failure':
             raise ValueError('candidate engine did not complete successfully')
-        if scenario == 'reuse':
+        if scenario in {'reuse', 'routine'}:
             return dict(reference=ref, action='REUSED', validation_attempts=0)
         return dict(reference=dict(path=str(kwargs['destination']).replace('\\', '/'), sha256='a'*64),
                     action='REVALIDATED', validation_attempts=1)
@@ -208,17 +210,29 @@ def test_preparation_produces_new_reference_chain_without_editing_old_plan(monke
         classify_release=lambda *a: {}, reviewed_release_state=reviewed,
         ensure_candidate_record=ensure, _write_new=write, VALIDATION_TIMEOUT_SECONDS=3900)
     backend.read = lambda ref: copy.deepcopy(objects[ref['path']])
+    # This test isolates immutable-reference production. The real resolver and
+    # its signature/protected-source gates have separate integration tests.
+    checked = []
+    def resolve(policy, role, asset, **kw):
+        assert not calls  # all input validation precedes every image validation
+        checked.append(role)
+        if role == 'primary_rollback' and scenario == 'wrong_rollback':
+            raise ValueError('UNSUPPORTED_ACCEPTANCE_FAMILY')
+        return dict(family='routine-candidate-acceptance/1' if role == 'primary_rollback'
+            and scenario == 'routine' else 'candidate-validation-record/1',
+            reference=policy['candidate_record'], trust_source='protected-file')
+    backend.resolve_acceptance = resolve
     args = dict(candidate_key=Path('/test/key.pem'), remaining_seconds=dict(target=60, primary_rollback=240))
-    if scenario in {'review_blocked', 'probe_failure'}:
+    if scenario in {'review_blocked', 'probe_failure', 'wrong_rollback'}:
         with pytest.raises(ValueError):
             backend.refresh_plan_inputs(value, **args)
         assert not writes
-        assert len(calls) == (0 if scenario == 'review_blocked' else 1)
+        assert len(calls) == (1 if scenario == 'probe_failure' else 0)
     else:
         updated = backend.refresh_plan_inputs(value, **args)
-        assert len(calls) == 2
-        assert [call['minimum_remaining_seconds'] for call in calls] == [4140, 60]
-        if scenario == 'reuse':
+        assert checked == ['target', 'primary_rollback']
+        assert [call['minimum_remaining_seconds'] for call in calls] == ([60] if scenario == 'routine' else [4140, 60])
+        if scenario in {'reuse', 'routine'}:
             assert updated == value and set(writes) == {'/prepared/candidate-refresh-result.json'}
         else:
             updated_request = writes[updated['release_request']['path']]

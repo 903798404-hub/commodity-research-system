@@ -96,6 +96,89 @@ def validate(source, work, key_path, trust, *, ttl_seconds=86400):
     return evidence, path
 
 
+def collect_routine_acceptance(source, tool, work, evidence, key_path):
+    """Collect the legacy family through real candidate IO, never copied PASS.
+
+    This is a no-code-change rerelease of the exact synthetic old application;
+    its historical base equals its target, not the HIGH_RISK forward target.
+    The unmodified Routine risk verifier must independently accept that delta.
+    """
+    routine = load(tool, '04_scripts/runtime/routine_release.py', '_mixed_routine_collector')
+    engine = load(source, '04_scripts/runtime/validate_target_runtime.py', '_mixed_old_engine')
+    host = load(source, '09_deploy/runtime_identity/host_authorization.py', '_mixed_old_host')
+    _, manifest, binding = engine.source_contract(source, PROJECT, CONTRACT)
+    routine.require_routine(source, binding['commit'], binding['commit'], PROJECT)
+    image_id = evidence['image_id']
+    image = engine.inspect_one('image', image_id)
+    uid, gid = engine._numeric_user(image)
+    manifest.update(_numeric_uid=uid, _container_user=image['Config']['User'], _runtime_contract=CONTRACT)
+    scope = host.create_candidate_scope(engine._runtime_bindings(manifest, uid, gid))
+    grants = directory(work / 'grants', 0o755)
+    manifest['_grant_dir'] = grants
+    session = None
+    extraction = None
+    namespace = 'routine-candidate-' + uuid.uuid4().hex
+    try:
+        identity_root = next(item['container_path'] for item in manifest['runtime_roots']
+                             if item['role'] == manifest['identity_root_role'])
+        identity_source = next(Path(item['source']) for item in scope['mounts'] if item['target'] == identity_root)
+        marker = save(identity_source, '.market-data-runtime.json', dict(schema_version=1,
+            runtime_id='target-validation', module_id=manifest['module_id'],
+            classification='candidate-validation', created_at=datetime.now(timezone.utc).isoformat()))
+        os.chmod(marker, 0o444)
+        engine._seed_candidate_runtime_inputs(source, manifest, binding, scope, host)
+        document = routine.candidate_compose_document(engine, manifest, image_id,
+            scope['mounts'], grants, uuid.uuid4().hex, namespace, 18573, 8501)
+        compose = save(work, 'compose.json', document)
+        env = work / 'compose.env'
+        write(env, b'')
+        argv = ['docker', 'compose', '--project-directory', str(work), '--env-file', str(env), '-f', str(compose)]
+        rendered = host._json(run(*argv, 'config', '--format', 'json').encode())
+        # Unstarted throwaway instance supplies immutable image bytes and a
+        # policy template. The collector creates and authorizes a NEW instance.
+        run(*argv, 'create', '--no-build')
+        extraction = run(*argv, 'ps', '-q', '--all', manifest['service_id'])
+        container = engine.inspect_one('container', extraction)
+        release = host.copy_container_bytes(extraction, '/app/RELEASE.json')
+        policy = engine._policy(manifest, binding, image_id, image, container, scope, compose,
+            env, host._digest(rendered), hashlib.sha256((source / CONTRACT).read_bytes()).hexdigest(),
+            hashlib.sha256(marker.read_bytes()).hexdigest(), hashlib.sha256(release).hexdigest(), host)
+        template = save(work, 'policy-template.json', policy)
+        run('docker', 'rm', extraction)
+        extraction = None
+        request = dict(candidate=dict(compose=str(compose), environment=str(env), project_directory=str(work),
+            policy_template=str(template), policy_output=str(work/'instance-policy.json'),
+            writable_root=scope['candidate_host_root'], grant_directory=str(grants),
+            key_path=str(key_path), container_port=8501),
+            application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stAppViewContainer"]': 1}))
+        session = routine.DockerSession(request, engine, host, binding, manifest)
+        exact = routine.image_identity(engine, image_id, binding, manifest['service_id'])
+        record = routine.candidate_acceptance(session, exact, base_commit=binding['commit'],
+            ci_run=os.environ['GITHUB_RUN_ID'])
+        path = save(work, 'routine-acceptance.json', record)
+        routine.validate_acceptance(record, commit=binding['commit'], tree=binding['tree'], image_id=image_id)
+        assert record['result'] == 'PASS' and session.container_id is None
+        save(work, 'collector-identity.json', dict(collector=str(tool/'04_scripts/runtime/routine_release.py'),
+            application=identity(source), image_id=image_id, base_commit=binding['commit'],
+            evidence_class='HOSTED_SYNTHETIC_ROUTINE_COLLECTOR', record=ref(path)))
+        return path
+    finally:
+        if extraction:
+            run('docker', 'rm', '-f', extraction)
+        if session is not None and session.container_id:
+            session.cleanup()
+        if engine._docker('network', 'inspect', namespace+'_default', check=False).returncode == 0:
+            run('docker', 'network', 'rm', namespace+'_default')
+        candidate_root = Path(scope['candidate_host_root'])
+        assert (candidate_root.is_absolute() and not candidate_root.is_symlink()
+                and candidate_root.parent.resolve() == Path(host.CANDIDATE_SCOPE_PARENT).resolve()
+                and candidate_root.name.startswith('candidate-'+scope['candidate_scope']['scope_id']+'-'))
+        shutil.rmtree(candidate_root)
+        descriptor = Path(scope['candidate_scope']['descriptor_path'])
+        for path in (descriptor, descriptor.with_name(descriptor.name+'.consumed'), grants/'grant.json'):
+            path.unlink(missing_ok=True)
+
+
 def seed_formal_runtime_inputs(manifest, sources, target_source):
     """Keep the existing FORMAL pre-capture state; never retag sealed fixtures.
 
@@ -376,12 +459,20 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
     # Expired target input is revalidated against the existing image before any
     # stop; later cases consume the fresh record without repeating its build.
     original_record_bytes = target_record.read_bytes()
+    original_rollback_bytes = old_record.read_bytes()
     plan = execution.prepare_plan(plan, plan_path, preparation, candidate_key=candidate_key_path)
     assert target_record.read_bytes() == original_record_bytes
+    assert old_record.read_bytes() == original_rollback_bytes
     prepared_request = preparation.read(plan['release_request'])
     refreshed_record = prepared_request['candidate_record']
     assert preparation.host.docker_image_inspect(asset_target['image_id'])['Id'] == asset_target['image_id']
     refresh_outcomes = json.loads((preparation.output / 'candidate-refresh-result.json').read_bytes())
+    if json.loads(original_rollback_bytes)['schema_version'] == 'routine-candidate-acceptance/1':
+        assert refresh_outcomes['primary_rollback'] == dict(reference=ref(old_record), action='REUSED',
+            family='routine-candidate-acceptance/1', trust_source='protected-file',
+            signature_verified=False, validation_attempts=0)
+        rollback_policy = preparation.read(preparation.read(plan['instances']['primary_rollback'])['policy'])
+        assert rollback_policy['candidate_record'] == ref(old_record)
     audits = list(preparation.output.rglob('image-validation-execution.json'))
     if refresh_outcomes['target']['action'] == 'REVALIDATED':
         assert len(audits) == 1
@@ -529,6 +620,8 @@ def main():
         run('git', '-C', str(tool), 'push', 'origin', 'HEAD:refs/heads/main')
         candidate_key_path = keys['candidate_validation'][2]
         old_evidence, old_record = validate(old_source, work, candidate_key_path, trust)
+        routine_record = collect_routine_acceptance(old_source, tool,
+            directory(work/'routine-collector', 0o700), old_evidence, candidate_key_path)
         target_evidence, target_record = validate(target_source, work, candidate_key_path, trust, ttl_seconds=1)
         expired_bytes = target_record.read_bytes()
         expired = json.loads(expired_bytes)['payload']
@@ -549,7 +642,8 @@ def main():
             scope = directory(work / name, 0o700)
             key_id, _, key_path = keys['production']
             receipt['paths'].append(case(scope, tool, old_source, target_source, old_evidence, target_evidence,
-                old_record, target_record, key_id, key_path, injection=injected, candidate_key_path=keys['candidate_validation'][2]))
+                routine_record if injected != 'AUTHORIZATION' else old_record,
+                target_record, key_id, key_path, injection=injected, candidate_key_path=keys['candidate_validation'][2]))
             target_record = Path(receipt['paths'][-1]['candidate_record']['path'])
         assert (work / 'target-source-signed-record.json').read_bytes() == expired_bytes
         receipt['status'] = 'PASS'
@@ -564,7 +658,7 @@ def main():
         public_evidence = args.output.with_suffix('')
         public_evidence.mkdir(mode=0o755)
         receipt['evidence_index'] = []
-        for scope_name in ('success', 'failure', 'authorization'):
+        for scope_name in ('success', 'failure', 'authorization', 'routine-collector'):
             scope = work / scope_name
             if not scope.exists():
                 continue

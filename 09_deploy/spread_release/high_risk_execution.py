@@ -279,6 +279,70 @@ class HostBackend:
         require(hashlib.sha256(raw).hexdigest() == ref['sha256'], 'REFERENCED_INPUT_CHANGED')
         return self.host._json(raw)
 
+    def resolve_acceptance(self, policy, role, asset, *, allow_expired=False):
+        """Verify the original protected reference by role and record family.
+
+        This is a read-only projection, not a replacement record or grant.
+        Only preparation may inspect an authenticated expired signed payload;
+        the existing refresh producer still owns any actual revalidation.
+        """
+        require(role in {'target', 'primary_rollback'}, 'UNKNOWN_ACCEPTANCE_ROLE')
+        self.host.validate_policy(policy, 'production')
+        require('recovery' not in policy, 'REHEARSAL_POLICY_CANNOT_DEPLOY_OR_RESTORE')
+        require((policy['approved_commit'], policy['approved_tree'], policy['image_id']) ==
+                (asset['commit'], asset['tree'], asset['image_id']), 'INSTANCE_POLICY_IDENTITY')
+        ref = policy['candidate_record']
+        raw = self.pre._risk_file(ref, self.host)
+        document = self.host._json(raw)
+        require(type(document) is dict, 'ACCEPTANCE_OBJECT_REQUIRED')
+        family = document.get('schema_version')
+        require(family in {'candidate-validation-record/1', 'routine-candidate-acceptance/1'},
+                'UNSUPPORTED_ACCEPTANCE_FAMILY')
+        if family == 'routine-candidate-acceptance/1':
+            require(role == 'primary_rollback', 'SIGNED_TARGET_REQUIRED')
+            require(not ({'payload', 'signature', 'algorithm', 'key_id'} & document.keys()),
+                    'CONFLICTING_ACCEPTANCE_FAMILY')
+            # Reuse the existing recovery-first host dispatcher. Recovery is
+            # explicitly forbidden above; it must take its Routine branch,
+            # including protected source, risk, identity and manifest checks.
+            verified, _ = self.host._validated_candidate_record(policy)
+            require(verified == document, 'ACCEPTANCE_CHANGED_DURING_VALIDATION')
+            result = dict(family=family, reference=ref, signature_verified=False,
+                          trust_source='protected-file', expires_at=None)
+        else:
+            parser = self.pre._load(self.pre.RECORD, '_plan_acceptance_record')
+            trust = self.host._json((ROOT / self.pre.TRUST).read_bytes())
+            try:
+                payload = parser.verify_record(raw, trust)
+            except parser.CandidateValidationRecordExpired as exc:
+                if not allow_expired:
+                    raise
+                payload = exc.payload
+            source = self.host._protected_path(Path(policy['approved_source_root']), directory=True)
+            require(self.pre.require_source(self.host, self.engine, source_root=source) ==
+                    (asset['commit'], asset['tree']), 'APPLICATION_SOURCE_CHANGED')
+            project = self.engine._project(source, policy['project_id'])
+            _, _, binding = self.engine.source_contract(source, policy['project_id'], project['runtime_contract'])
+            require(payload['evidence']['binding'] == binding and
+                    payload['evidence']['image_id'] == asset['image_id'], 'ACCEPTANCE_FIXED_ASSET_MISMATCH')
+            result = dict(family=family, reference=ref, signature_verified=True,
+                          trust_source='candidate-validation-signature',
+                          expires_at=parser._time(payload['expires_at'], 'record expiry time'))
+        require(self.pre._risk_file(ref, self.host) == raw, 'ACCEPTANCE_CHANGED_DURING_VALIDATION')
+        return result
+
+    def require_historical_reference(self, plan, acceptance):
+        """Legacy acceptance must be the current source policy's exact fact."""
+        if acceptance['family'] == 'routine-candidate-acceptance/1':
+            baseline = self.read(plan['source_policy'])
+            self.host.validate_policy(baseline, 'production')
+            asset = plan['source']
+            require('recovery' not in baseline and
+                    (baseline['approved_commit'], baseline['approved_tree'], baseline['image_id']) ==
+                    (asset['commit'], asset['tree'], asset['image_id']), 'CURRENT_POLICY_IDENTITY_CHANGED')
+            require(baseline['candidate_record'] == acceptance['reference'],
+                    'HISTORICAL_ACCEPTANCE_REFERENCE_CHANGED')
+
     def refresh_plan_inputs(self, plan, *, candidate_key, remaining_seconds, revalidate=False):
         """Preparation only: produce new immutable references, never a grant.
 
@@ -306,6 +370,7 @@ class HostBackend:
                 'HUMAN_RISK_REVIEW_REQUIRED_BEFORE_REVALIDATION')
         specs = {}
         policies = {}
+        acceptances = {}
         for role in ('target', 'primary_rollback'):
             spec = self.read(plan['instances'][role])
             c.validate_against_schema(spec, schema['$defs']['highRiskInstanceSpec'], root_schema=schema)
@@ -321,6 +386,10 @@ class HostBackend:
                 require(request['target_source_root'] == spec['source_root'] and
                         request['candidate_record'] == policy['candidate_record'], 'TARGET_RECORD_REFERENCE_DIFFERS')
             specs[role], policies[role] = spec, policy
+            # Validate BOTH supplied inputs before either role can invoke an
+            # expensive image validator. Expiry alone is handled later.
+            acceptances[role] = self.resolve_acceptance(policy, role, asset, allow_expired=True)
+            self.require_historical_reference(plan, acceptances[role])
 
         def save(name, value):
             path = self.output / name
@@ -337,6 +406,12 @@ class HostBackend:
         # most one revalidation; final consumers recheck without retrying.
         for role in ('primary_rollback', 'target'):
             spec, policy = specs[role], policies[role]
+            acceptance = acceptances[role]
+            if acceptance['family'] == 'routine-candidate-acceptance/1':
+                outcomes[role] = dict(reference=acceptance['reference'], action='REUSED',
+                    family=acceptance['family'], trust_source=acceptance['trust_source'],
+                    signature_verified=False, validation_attempts=0)
+                continue
             budget = remaining_seconds[role]
             if role == 'primary_rollback':
                 budget += self.pre.VALIDATION_TIMEOUT_SECONDS
@@ -386,19 +461,14 @@ class HostBackend:
 
     def before_stop(self, plan):
         """Read-only recheck after any human wait; never refresh after stop."""
-        record = self.pre._load(self.pre.RECORD, '_pre_stop_record')
-        trust = self.host._json((ROOT / self.pre.TRUST).read_bytes())
         expirations = []
         for role, seconds in record_consumption_windows(plan).items():
             spec = self.read(plan['instances'][role])
             policy = self.read(spec['policy'])
-            raw = self.pre._risk_file(policy['candidate_record'], self.host)
-            payload = record.verify_record(raw, trust)
-            asset = plan[role]
-            evidence = payload['evidence']
-            require((evidence['binding']['commit'], evidence['binding']['tree'], evidence['image_id']) ==
-                    (asset['commit'], asset['tree'], asset['image_id']), 'PRE_STOP_RECORD_IDENTITY')
-            expirations.append((role, seconds, record._time(payload['expires_at'], 'record expiry time')))
+            acceptance = self.resolve_acceptance(policy, role, plan[role])
+            self.require_historical_reference(plan, acceptance)
+            if acceptance['expires_at'] is not None:
+                expirations.append((role, seconds, acceptance['expires_at']))
         # Measure after all signature/file reads; their cost is not free time.
         now = datetime.now(timezone.utc)
         for role, seconds, expires_at in expirations:
@@ -483,6 +553,7 @@ class HostBackend:
         require((policy['approved_commit'], policy['approved_tree'], policy['image_id']) ==
                 (asset['commit'], asset['tree'], asset['image_id']), 'INSTANCE_POLICY_IDENTITY')
         require(policy['approved_source_root'] == str(source), 'ISSUER_SOURCE_BINDING')
+        self.resolve_acceptance(policy, role, asset)
         # This is the existing production acceptance consumer, not a new
         # Routine rollback-assets record bound to a HIGH_RISK forward delta.
         issuer._validated_candidate_record(policy)
