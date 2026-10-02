@@ -251,7 +251,7 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
     run(*command, 'create', '--no-build')
     fresh = run(*command, 'ps', '-q', '--all', old['service_id'])
     network = policy['recovery']['network']
-    policy['recovery']['expected_network_id'] = host._json(run('docker', 'network', 'inspect', network).encode())[0]['Id']
+    policy['recovery']['expected_network_id'] = backend.network_observation(network)['Id']
     observed = host.normalize_observation(host.docker_inspect(fresh), host.docker_image_inspect(old['image_id']), host.copy_container_json(fresh))
     policy.update(actual_config_sha256=observed['actual_config_sha256'], compose_sources=[ref(compose)],
         compose_project_directory=str(source), rendered_compose_sha256=host._digest(host._json(run(*command, 'config', '--format', 'json').encode())))

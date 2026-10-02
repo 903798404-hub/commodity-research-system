@@ -517,6 +517,11 @@ class HostBackend:
             for role, session in self.sessions.items()}
         self.engine._write_new(self.output / 'execution-result.json', self.engine._canonical(result))
 
+    def network_observation(self, network_name, *, expected_id=None):
+        return self.engine._interpret('inspect_object',
+            self.engine._docker('network', 'inspect', network_name).stdout,
+            'Docker network inspect', expected_id=expected_id)
+
     def cleanup_temporary(self, plan):
         # The exact rehearsal scope was successfully consumed while the source
         # was still running. Do not call retained() after the switch and pretend
@@ -542,7 +547,8 @@ class HostBackend:
         self.host._protected_path(grant_directory, directory=True)
         require({p.name for p in grant_directory.iterdir()} == {'grant.json'}, 'UNDECLARED_TEMPORARY_GRANT_CONTENT')
         network_name = policy['recovery']['network']
-        network = self.host._json(self.engine._docker('network', 'inspect', network_name).stdout)[0]
+        network = self.network_observation(network_name,
+            expected_id=policy['recovery']['expected_network_id'])
         require(network['Id'] == policy['recovery']['expected_network_id'] and
                 set(network.get('Containers', {})) <= {rehearsal}, 'TEMPORARY_NETWORK_CHANGED_OR_SHARED')
         ids = self.engine._docker('ps', '-aq', '--no-trunc').stdout.decode().split()

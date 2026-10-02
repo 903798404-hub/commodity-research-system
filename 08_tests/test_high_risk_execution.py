@@ -65,6 +65,34 @@ def test_hosted_formal_runtime_fixture_rejects_input_hash_mismatch(tmp_path):
             **{'capture-snapshots': snapshot, 'history': tmp_path}), source)
 
 
+@pytest.mark.parametrize('raw,valid', [
+    (b'[{"Id":"network-id","Containers":{}}]', True),
+    (b'{"Id":"network-id"}', False),
+    (b'[]', False),
+    (b'[{"Id":"network-id"},{"Id":"other"}]', False),
+    (b'[{"Id":"network-id","Id":"other"}]', False),
+    (b'[{"Id":"wrong-network"}]', False),
+    (b'[{"Id":"network-id","invalid":NaN}]', False),
+])
+def test_network_observation_uses_existing_strict_single_inspect_adapter(monkeypatch, raw, valid):
+    from types import SimpleNamespace
+    engine = execution.load(ROOT, '04_scripts/runtime/validate_target_runtime.py',
+        '_test_network_execution_engine')
+    calls = []
+    def docker(*args):
+        calls.append(args)
+        return SimpleNamespace(stdout=raw)
+    monkeypatch.setattr(engine, '_docker', docker)
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.engine = engine
+    if valid:
+        assert backend.network_observation('fixture-net', expected_id='network-id')['Containers'] == {}
+    else:
+        with pytest.raises(engine.ValidationError):
+            backend.network_observation('fixture-net', expected_id='network-id')
+    assert calls == [('network', 'inspect', 'fixture-net')]
+
+
 def plan():
     ref = dict(path='/protected/evidence.json', sha256='1' * 64)
     asset = dict(commit='2' * 40, tree='3' * 40, image_id='sha256:' + '4' * 64)
