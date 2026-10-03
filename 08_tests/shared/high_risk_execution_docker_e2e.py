@@ -307,9 +307,9 @@ def instance(work, name, source, evidence, record, host, engine, allocation, sou
     env_values = dict(values, SPREAD_IMAGE=evidence['image_id'], SPREAD_GRANT_ROOT=str(grants))
     application_service = 'market-data-service' in manifest['secret_references']
     if application_service:
-        credential = allocation / 'secrets' / (name + '-service.json')
-        write(credential, b'', 0o440)
-        os.chown(credential, 0, 65532)
+        # Missing dedicated parent is intentionally allocated only by the
+        # formal prepare_plan entry; no fixture mkdir/chmod supplies its PASS.
+        credential = allocation / ('credential-' + name) / 'service.json'
         env_values['SPREAD_SERVICE_CREDENTIAL_FILE'] = str(credential)
     env = role_dir / 'runtime.env'
     write(env, ''.join(f'{k}={v}\n' for k, v in env_values.items()).encode())
@@ -592,6 +592,67 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         assert refresh_outcomes['target']['action'] == 'REUSED' and not audits
     negatives = {}
     if injection == 'NONE':
+        credential_receipt = json.loads((preparation.output/'credential-preparation.json').read_bytes())
+        credential_identity = credential_receipt['target']
+        credential_parent = Path(credential_identity['parent']['path'])
+        assert credential_identity['parent_created'] is True and credential_identity['credential_issued'] is False
+        assert credential_parent.stat().st_uid == credential_parent.stat().st_gid == 0
+        assert credential_parent.stat().st_mode & 0o777 == 0o700
+        negative_cases = [('credential-0755', None), ('browser-package', None),
+                          ('browser-binary', '/nonexistent-hosted-browser-cache'),
+                          ('browser-launch', str(work/'broken-browser-cache'))]
+        # Real launch failure, not a helper returning false: Playwright finds
+        # its expected binary but the executable actually exits unsuccessfully.
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            original_browser = Path(pw.chromium.executable_path)
+        # Use actually installed names, including the headless-shell binary;
+        # do not guess a Playwright revision or confuse missing with launch failure.
+        browser_cache = original_browser.parents[2]
+        binaries = [p for p in browser_cache.rglob('*') if p.is_file() and
+                    p.name in {'chrome', 'headless_shell', 'chrome-headless-shell'}]
+        assert original_browser in binaries and len(binaries) >= 2
+        for binary in binaries:
+            broken_browser = work/'broken-browser-cache'/binary.relative_to(browser_cache)
+            broken_browser.parent.mkdir(parents=True,exist_ok=True)
+            write(broken_browser,b'#!/bin/sh\nexit 17\n',0o755)
+        # An actual isolated interpreter without third-party packages reproduces
+        # ModuleNotFoundError. Only this negative fault selects it; it runs the
+        # SAME official helper, never a mock verdict or loose parser.
+        import subprocess
+        subprocess.run([sys.executable,'-I','-m','venv','--without-pip',str(work/'no-browser-package')],check=True)
+        isolated_python = work/'no-browser-package'/'bin'/'python'
+        def actual_missing_package(url):
+            args=[str(isolated_python),'-I','-B','-c',
+                  "import runpy,sys; runpy.run_path(sys.argv[1])['browser_runner_preflight'](sys.argv[2])",
+                  str(tool/'04_scripts/runtime/routine_release.py'),url]
+            probe=subprocess.run(args,capture_output=True,check=False)
+            save(work,'missing-browser-package-process.json',dict(argv=args,exit_code=probe.returncode,
+                 stdout=probe.stdout.decode(),stderr=probe.stderr.decode(),actual_interpreter=str(isolated_python)))
+            assert probe.returncode!=0 and b"No module named 'playwright'" in probe.stderr
+            raise execution.ExecutionError('BROWSER_PACKAGE_UNAVAILABLE: '+str(work/'missing-browser-package-process.json'))
+        for name, browser_path in negative_cases:
+            negative_backend = execution.HostBackend(directory(work/('prestop-'+name),0o700))
+            previous_cache = os.environ.get('PLAYWRIGHT_BROWSERS_PATH')
+            if name == 'credential-0755':credential_parent.chmod(0o755)
+            if browser_path:os.environ['PLAYWRIGHT_BROWSERS_PATH']=browser_path
+            if name == 'browser-package':negative_backend.routine.browser_runner_preflight=actual_missing_package
+            try:
+                rejected = execution.execute_verified_plan(plan_path,negative_backend)
+                assert rejected['result']=='FAIL' and rejected['source']=='PRESERVED_NOT_STOPPED'
+                assert 'stop_source' not in rejected['steps'] and not any(s.startswith('target_') for s in rejected['steps'])
+                assert backend.host.docker_inspect(cid)['State']['Running']
+                assert backend.host.docker_inspect(cid)['State']['StartedAt']==running['State']['StartedAt']
+                if name=='credential-0755':assert 'SERVICE_CREDENTIAL_PARENT_NOT_ROOT_PRIVATE' in rejected['failure']
+                if name=='browser-binary':assert 'BROWSER_BINARY_MISSING' in rejected['failure']
+                if name=='browser-launch':
+                    assert 'Executable doesn\'t exist' not in rejected['failure']
+                    assert 'exitCode=17' in rejected['failure'] or 'TargetClosedError' in rejected['failure']
+                negatives[name]=dict(status='PASS',result=ref(negative_backend.output/'execution-result.json'),source_container=cid,actual_stop_called=False)
+            finally:
+                if name == 'credential-0755':credential_parent.chmod(0o700) # restore ONLY disposable fault injection
+                if previous_cache is None:os.environ.pop('PLAYWRIGHT_BROWSERS_PATH',None)
+                else:os.environ['PLAYWRIGHT_BROWSERS_PATH']=previous_cache
         for name in ('missing', 'tamper', 'missing_observation', 'wrong_image'):
             scope = directory(work / ('negative-' + name), 0o700)
             other_path = scope / 'deployment_plan.json'
@@ -648,12 +709,45 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 raise
             finally:
                 session.spec['key_path'] = original_key
-    backend_type = {'NONE': execution.HostBackend, 'POST_START': InjectedFailure, 'AUTHORIZATION': AuthorizationFailure}[injection]
+    class DirectoryDrift(execution.HostBackend):
+        def authorize(self,current_plan,role):
+            if role == 'target':
+                parent = Path(self.sessions[role].credential_preparation['parent']['path'])
+                parent.chmod(0o755) # deliberate disposable drift after pre-stop
+                try:
+                    return super().authorize(current_plan,role)
+                finally:
+                    parent.chmod(0o700)
+            return super().authorize(current_plan,role)
+    class RecoveryTimeout(InjectedFailure):
+        def accept(self,current_plan,role):
+            if role == 'primary_rollback':
+                # Complete the actual official accept/HTTP/DOM first, then let
+                # the original 180s signal timer expire. Restored old service
+                # MUST stay running and failed resources MUST be retained.
+                super(InjectedFailure,self).accept(current_plan,role)
+                time.sleep(current_plan['policy']['rollback_timeout_seconds']+1)
+            return super().accept(current_plan,role)
+    backend_type = {'NONE': execution.HostBackend, 'POST_START': InjectedFailure, 'AUTHORIZATION': AuthorizationFailure,
+                    'DIRECTORY_DRIFT':DirectoryDrift,'ROLLBACK_TIMEOUT':RecoveryTimeout}[injection]
     actual_backend = backend_type(directory(work / 'execution-receipts', 0o700))
     try:
         result = execution.execute_verified_plan(plan_path, actual_backend)
         if injection != 'NONE':
-            assert result['result'] == 'FAIL' and result['rollback'] == 'PASS'
+            assert result['result'] == 'FAIL'
+            if injection=='ROLLBACK_TIMEOUT':
+                assert result['rollback']=='FAIL' and 'ROLLBACK_TIMEOUT' in result['rollback_failure']
+                assert result['resources']=='RETAINED_FOR_RECOVERY' and 'temporary_cleanup' not in result
+                assert sandbox.exists() and actual_backend.sessions['primary_rollback'].health()=='PASS'
+                restored = actual_backend.host.docker_inspect(actual_backend.sessions['primary_rollback'].container_id)
+                assert restored['State']['Running'] and restored['Image']==asset_old['image_id']
+                save(work,'timeout-retained-old-runtime.json',dict(container_id=restored['Id'],image_id=restored['Image'],
+                    state=restored['State'],restart_count=restored['RestartCount'],health='PASS',
+                    sandbox_exists=sandbox.exists(),executor_cleanup_called=False,
+                    rollback_timeout_seconds=plan['policy']['rollback_timeout_seconds'],
+                    captured_at=datetime.now(timezone.utc).isoformat(),monotonic_ns=time.monotonic_ns(),
+                    scope='Before disposable fixture teardown; real executor retained restored old service'))
+            else:assert result['rollback']=='PASS'
             assert actual_backend.sessions['primary_rollback'].container_id != cid
             assert (actual_backend.envelopes['primary_rollback']['payload']['grant_id'] !=
                     backend.envelopes['primary_rollback']['payload']['grant_id'])
@@ -665,17 +759,34 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 identity(tool)['commit'] if deployment_path else asset_old['commit'])
         else:
             assert result['result'] == 'SUCCESS' and result['target'] == 'PASS'
-        if injection == 'AUTHORIZATION':
+        if injection in {'AUTHORIZATION','DIRECTORY_DRIFT'}:
             assert 'target_start' not in result['steps']
-            assert json.loads((work / 'unauthorized-instance-state.json').read_bytes())['started'] is False
-        assert not sandbox.exists()
+            if injection=='AUTHORIZATION':assert json.loads((work / 'unauthorized-instance-state.json').read_bytes())['started'] is False
+        if injection!='ROLLBACK_TIMEOUT':assert not sandbox.exists()
+        if injection != 'NONE':
+            milestones={p['phase']:p for p in result['acceptance_timeline'] if p['role']=='primary_rollback' and 'at' in p}
+            assert milestones['HTTP_HEALTH_RESTORED']['monotonic_ns'] < milestones['COMPLETE_ACCEPTANCE']['monotonic_ns']
+        if injection == 'NONE':
+            prepared = actual_backend.sessions['target'].credential_preparation
+            parent = Path(prepared['parent']['path'])
+            state = parent.lstat()
+            assert (state.st_dev,state.st_ino,state.st_uid,state.st_gid,state.st_mode & 0o777) == (
+                prepared['parent']['device'],prepared['parent']['inode'],0,0,0o700)
+            actual_mounts = actual_backend.host._mounts(actual_backend.host.docker_inspect(
+                actual_backend.sessions['target'].container_id))
+            service_mount = [m for m in actual_mounts if m['target']=='/run/secrets/market-data-service.json']
+            assert len(service_mount)==1 and service_mount[0]['read_only'] is True
+            assert Path(service_mount[0]['source']).parent == parent
+            negatives['same-prepared-directory-issued']=dict(status='PASS',parent=prepared['parent'],
+                policy_sha256=prepared['policy_sha256'],fresh_container=actual_backend.sessions['target'].container_id)
         return dict(status='PASS', case=work.name, path=injection,
                     tool=identity(tool), old=asset_old, target=asset_target,
                     plan=ref(plan_path), result=ref(actual_backend.output / 'execution-result.json'),
                     candidate_record=refreshed_record,
                     refresh_outcomes=ref(preparation.output / 'candidate-refresh-result.json'),
                     image_validation_execution=[ref(path) for path in audits],
-                    negative_probes=negatives, temporary_resource_cleanup='PASS', production_acceptance='NOT_EXECUTED')
+                    negative_probes=negatives, temporary_resource_cleanup='RETAINED_AFTER_TIMEOUT' if injection=='ROLLBACK_TIMEOUT' else 'PASS',
+                    acceptance_timeline=result['acceptance_timeline'], production_acceptance='NOT_EXECUTED')
     finally:
         # Preserve evidence first. Cleanup names only instances created here.
         for candidate in {cid, fresh, *(s.container_id for s in actual_backend.sessions.values())} - {None}:
@@ -689,8 +800,8 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 run('docker', 'network', 'rm', candidate)
         # Never remove application images. Fixture service credentials are
         # temporary and not evidence; retain all nonsecret formal receipts.
-        for credential in (allocation / 'secrets').glob('*-service.json'):
-            credential.unlink()
+        credential = allocation/'credential-target'/'service.json'
+        if credential.exists():credential.unlink()
 
 
 def main():
@@ -752,7 +863,8 @@ def main():
             old_image=old_evidence['image_id'], target_image=target_evidence['image_id'])
         receipt['paths'] = []
         for name, injected in (('success', 'NONE'), ('failure', 'POST_START'),
-                               ('authorization', 'AUTHORIZATION'), ('aged-authorization', 'AUTHORIZATION')):
+                               ('authorization', 'AUTHORIZATION'), ('aged-authorization', 'AUTHORIZATION'),
+                               ('directory-drift','DIRECTORY_DRIFT'),('rollback-timeout','ROLLBACK_TIMEOUT')):
             scope = directory(work / name, 0o700)
             key_id, _, key_path = keys['production']
             receipt['paths'].append(case(scope, tool, old_source, target_source, old_evidence, target_evidence,
@@ -773,7 +885,7 @@ def main():
         public_evidence = args.output.with_suffix('')
         public_evidence.mkdir(mode=0o755)
         receipt['evidence_index'] = []
-        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'routine-collector'):
+        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'directory-drift','rollback-timeout', 'routine-collector'):
             scope = work / scope_name
             if not scope.exists():
                 continue

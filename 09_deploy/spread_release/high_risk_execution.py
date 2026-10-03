@@ -15,6 +15,7 @@ import inspect
 import json
 import os
 import shutil
+import stat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
@@ -47,6 +48,62 @@ class ExecutionError(ValueError):
 def require(condition, message):
     if not condition:
         raise ExecutionError(message)
+
+
+def credential_preparation(issuer, policy, user, *, prepare=False, expected=None):
+    """Prepare only the bound empty file; the unchanged issuer signs after create.
+
+    A dedicated parent is required. Never repair an existing unsafe directory,
+    follow a symlink, or change a broad runtime directory's permissions.
+    """
+    if expected is not None:
+        require(issuer._digest(policy) == expected['policy_sha256'], 'SERVICE_CREDENTIAL_POLICY_CHANGED')
+    if 'application_service' not in policy:
+        return None
+    mounts = [m for m in policy['mounts'] if m['target'] == '/run/secrets/market-data-service.json']
+    require(len(mounts) == 1 and mounts[0]['read_only'] is True, 'SERVICE_CREDENTIAL_MOUNT_REQUIRED')
+    source = Path(mounts[0]['source'])
+    root = issuer._protected_path(Path(policy['production_storage_root']), directory=True)
+    parent = source.parent
+    require(source.is_absolute() and parent != root and parent.is_relative_to(root),
+            'DEDICATED_CREDENTIAL_PARENT_REQUIRED')
+    # Resolve the already existing allocation boundary before creating one leaf.
+    issuer._protected_path(parent.parent, directory=True)
+    created = False
+    if prepare and not parent.exists() and not parent.is_symlink():
+        parent.mkdir(mode=0o700)
+        created = True
+    issuer._protected_path(parent, directory=True)
+    state = parent.lstat()
+    require(stat.S_ISDIR(state.st_mode) and state.st_uid == state.st_gid == 0 and
+            stat.S_IMODE(state.st_mode) == 0o700, 'SERVICE_CREDENTIAL_PARENT_NOT_ROOT_PRIVATE')
+    parent_identity = dict(path=str(parent), device=state.st_dev, inode=state.st_ino,
+                           uid=state.st_uid, gid=state.st_gid, mode=stat.S_IMODE(state.st_mode))
+    if expected is not None:
+        require(parent_identity == expected['parent'], 'SERVICE_CREDENTIAL_PARENT_CHANGED')
+    if prepare and not source.exists() and not source.is_symlink():
+        require(isinstance(user, str) and user.count(':') == 1, 'NUMERIC_APPLICATION_USER_REQUIRED')
+        uid, gid = (int(v) for v in user.split(':'))
+        require(uid > 0 and gid > 0, 'NONROOT_APPLICATION_USER_REQUIRED')
+        fd = os.open(source, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            os.fchown(fd, 0, gid)
+            os.fchmod(fd, 0o440)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        issuer._fsync_directory(parent)
+    issuer._application_service_credential_path(source, policy)
+    issuer._application_service_secret_identity(source, user, policy)
+    file_state = source.lstat()
+    require(stat.S_ISREG(file_state.st_mode) and file_state.st_size == 0,
+            'SERVICE_CREDENTIAL_PLACEHOLDER_NOT_FRESH')
+    file_identity = dict(path=str(source), device=file_state.st_dev, inode=file_state.st_ino,
+                         uid=file_state.st_uid, gid=file_state.st_gid, mode=stat.S_IMODE(file_state.st_mode))
+    if expected is not None:
+        require(file_identity == expected['file'], 'SERVICE_CREDENTIAL_FILE_CHANGED')
+    return dict(parent=parent_identity, file=file_identity, parent_created=created,
+                policy_sha256=issuer._digest(policy), credential_issued=False)
 
 
 def validate_issuer_api(issuer, *, application_service=False):
@@ -147,6 +204,7 @@ def prepare_plan(plan, path, backend, *, candidate_key, revalidate=False):
     with backend.lock(plan):
         updated = backend.refresh_plan_inputs(plan, candidate_key=candidate_key,
             remaining_seconds=record_consumption_windows(plan), revalidate=revalidate)
+        backend.prepare_execution_conditions(updated)
         backend.preconditions(updated)
         backend.consume_recovery(updated)
         backend.rollback_assets(updated)
@@ -184,11 +242,23 @@ def execute_verified_plan(path, backend, *, monotonic=time.monotonic, sleep=time
     plan = verify_plan(path)
     lease = EvidenceLease()
     result = dict(result='FAIL', target='NOT_EXECUTED', rollback='NOT_EXECUTED',
-                  plan_sha256=hashlib.sha256(path.read_bytes()).hexdigest(), steps=[])
+                  plan_sha256=hashlib.sha256(path.read_bytes()).hexdigest(), steps=[], timeline=[])
     stopped = False
     def step(name, call):
         result['steps'].append(name)
-        return call()
+        item = dict(step=name, started_at=datetime.now(timezone.utc).isoformat(),
+                    started_monotonic_ns=time.monotonic_ns(), status='STARTED')
+        result['timeline'].append(item)
+        try:
+            value = call()
+            item['status'] = 'PASS'
+            return value
+        except BaseException as exc:
+            item.update(status='FAIL', error_type=type(exc).__name__, error=str(exc))
+            raise
+        finally:
+            item.update(finished_at=datetime.now(timezone.utc).isoformat(),
+                        finished_monotonic_ns=time.monotonic_ns())
     with backend.lock(plan):
         try:
             step('preconditions', lambda: backend.preconditions(plan))
@@ -277,6 +347,31 @@ class HostBackend:
         self.sessions = {}
         self.envelopes = {}
         self.cleanup_scope = None
+        self.acceptance_timeline = []
+
+    def prepare_execution_conditions(self, plan):
+        """Existing plan preparation allocates secrets while source stays online."""
+        observations = {}
+        for role in ('target', 'primary_rollback'):
+            spec = self.read(plan['instances'][role])
+            policy = self.read(spec['policy'])
+            self.host.validate_policy(policy, 'production')
+            if 'application_service' not in policy:
+                continue
+            require((policy['approved_commit'], policy['approved_tree'], policy['image_id']) ==
+                    (plan[role]['commit'], plan[role]['tree'], plan[role]['image_id']), 'INSTANCE_POLICY_IDENTITY')
+            source = self.host._protected_path(Path(spec['source_root']), directory=True)
+            require(self.pre.require_source(self.host, self.engine, source_root=source) ==
+                    (plan[role]['commit'], plan[role]['tree']), 'APPLICATION_SOURCE_CHANGED')
+            require(policy['approved_source_root'] == str(source), 'ISSUER_SOURCE_BINDING')
+            issuer = self.load_application(source,
+                '09_deploy/runtime_identity/host_authorization.py', '_credential_preparation_' + role)
+            validate_issuer_api(issuer, application_service=True)
+            issuer.require_protected_authority_source()
+            require(issuer.TRUST_CONFIG_PATH.read_bytes() == self.host.TRUST_CONFIG_PATH.read_bytes(), 'TRUST_DOMAIN_DIFFERS')
+            user = self.host.docker_image_inspect(policy['image_id'])['Config']['User']
+            observations[role] = credential_preparation(issuer, policy, user, prepare=True)
+        self.engine._write_new(self.output / 'credential-preparation.json', self.engine._canonical(observations))
 
     def read(self, ref):
         raw = self.host._protected_path(Path(ref['path']), private=True).read_bytes()
@@ -473,6 +568,11 @@ class HostBackend:
 
     def before_stop(self, plan):
         """Read-only recheck after any human wait; never refresh after stop."""
+        for session in self.sessions.values():
+            if 'application_service' in session.prepared_policy:
+                credential_preparation(session.host, session.prepared_policy,
+                    session.prepared_user, expected=session.credential_preparation)
+        self._browser_preflight(plan, 'immediately-before-stop')
         expirations = []
         for role, seconds in record_consumption_windows(plan).items():
             spec = self.read(plan['instances'][role])
@@ -530,6 +630,33 @@ class HostBackend:
         self.host.compare_observed_config(current_observed, source_policy['actual_config_sha256'])
         for role in ('target', 'primary_rollback'):
             self._prepare_session(plan, role)
+        self._browser_preflight(plan, 'preconditions')
+
+    def _browser_preflight(self, plan, phase):
+        session = self.sessions['primary_rollback']
+        previous = session.container_id
+        session.container_id = plan['source_container_id']
+        try:
+            source_url = session.url()
+        finally:
+            session.container_id = previous
+        observations = []
+        checked = {}
+        for role in ('target', 'primary_rollback'):
+            smoke = self.sessions[role].request['application_smoke']
+            path = smoke['path']
+            require(isinstance(path, str) and path.startswith(('/', '?')) and not path.startswith('//')
+                    and '\\' not in path and smoke['kind'] in ('dom', 'soybean-fixed-months'),
+                    'SMOKE_MUST_USE_ACTUAL_CONTAINER_PORT')
+            url = source_url + path
+            # Same interpreter/library/binary as DockerSession.smoke, not a
+            # maintainer browser receipt treated as executor capability.
+            if url not in checked:
+                checked[url] = self.routine.browser_runner_preflight(url)
+            observation = checked[url]
+            observations.append(dict(role=role, **observation))
+        self.engine._write_new(self.output / ('browser-preflight-' + phase + '.json'),
+            self.engine._canonical(observations))
 
     def _prepare_session(self, plan, role):
         asset = plan[role]
@@ -560,6 +687,8 @@ class HostBackend:
         validate_issuer_api(issuer, application_service='application_service' in policy)
         require('recovery' not in policy, 'REHEARSAL_POLICY_CANNOT_DEPLOY_OR_RESTORE')
         issuer.validate_policy(policy, 'production')
+        session_user = self.host.docker_image_inspect(asset['image_id'])['Config']['User']
+        credential_observation = credential_preparation(issuer, policy, session_user)
         from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
         key = issuer._load_private_key(spec['transport']['key_path'])
         public = base64.b64encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode('ascii')
@@ -598,6 +727,9 @@ class HostBackend:
         require(not (Path(session.spec['grant_directory']) / 'grant.json').exists(), 'FRESH_GRANT_DIRECTORY_REQUIRED')
         require(not Path(session.spec['policy_output']).exists(), 'FRESH_POLICY_OUTPUT_REQUIRED')
         self.sessions[role] = session
+        session.prepared_policy = policy
+        session.prepared_user = session_user
+        session.credential_preparation = credential_observation
 
     def consume_recovery(self, plan):
         request = self.read(plan['release_request'])
@@ -642,6 +774,8 @@ class HostBackend:
 
     def authorize(self, plan, role):
         session = self.sessions[role]
+        credential_preparation(session.host, session.prepared_policy, session.prepared_user,
+                               expected=session.credential_preparation)
         session.prepare_authorization(self._image, 'production')
         report = session.host.revalidate_production(session.container_id,
             expected_policy_path=Path(session.spec['policy_output']))
@@ -657,23 +791,52 @@ class HostBackend:
         session.assert_data_readonly()
         self.engine._docker('start', session.container_id, timeout=plan['policy']['start_timeout_seconds'])
 
+    @contextlib.contextmanager
+    def acceptance_stage(self, role, phase):
+        observation = dict(role=role, phase=phase, started_at=datetime.now(timezone.utc).isoformat(),
+                           started_monotonic_ns=time.monotonic_ns())
+        self.acceptance_timeline.append(observation)
+        try:
+            yield
+            observation['status'] = 'PASS'
+        except Exception as exc:
+            observation.update(status='FAIL', failure_type=type(exc).__name__, failure=str(exc))
+            raise
+        finally:
+            observation.update(finished_at=datetime.now(timezone.utc).isoformat(),
+                               finished_monotonic_ns=time.monotonic_ns())
+
     def accept(self, plan, role):
         session = self.sessions[role]
-        self._post_start(plan, role)
-        require(session.preflight() == 'PASS', 'RUNTIME_PREFLIGHT_FAILED')
+        with self.acceptance_stage(role, 'POST_START_IDENTITY'):
+            self._post_start(plan, role)
+        with self.acceptance_stage(role, 'RUNTIME_PREFLIGHT'):
+            require(session.preflight() == 'PASS', 'RUNTIME_PREFLIGHT_FAILED')
         ready = load(ROOT, '09_deploy/spread_release/wait_for_service_ready.py', '_high_risk_readiness')
-        ready.wait_for_service_ready(runtime=ready.DockerCurlRuntime(), container=session.container_id,
-            health_url=session.url() + plan['policy']['readiness']['health_endpoint_path'],
-            expected_image_id=plan[role]['image_id'], initial_restart_count=0,
-            policy=plan['policy']['readiness'])
-        self._application_preflight(plan, role, ready)
+        with self.acceptance_stage(role, 'HTTP_READINESS'):
+            ready.wait_for_service_ready(runtime=ready.DockerCurlRuntime(), container=session.container_id,
+                health_url=session.url() + plan['policy']['readiness']['health_endpoint_path'],
+                expected_image_id=plan[role]['image_id'], initial_restart_count=0,
+                policy=plan['policy']['readiness'])
+        # First formal confirmed HTTP health, not an inferred earliest public
+        # restoration time. Independent polling may establish an earlier sample.
+        self.acceptance_timeline.append(dict(role=role, phase='HTTP_HEALTH_RESTORED',
+            at=datetime.now(timezone.utc).isoformat(), monotonic_ns=time.monotonic_ns()))
+        with self.acceptance_stage(role, 'APPLICATION_READABILITY_AND_APPTEST'):
+            self._application_preflight(plan, role, ready)
         if 'application_service' in session.current_policy:
             code = ("from agri_research_agent.shared.runtime_context import establish_application_service_context; "
                 f"establish_application_service_context(service_id={session.contract['service_id']!r},"
                 f"module_id={session.contract['module_id']!r},runtime_root='/runtime'); "
                 "print('APPLICATION_SERVICE_CONTEXT=PASS')")
-            self.engine._docker('exec', session.container_id, 'python', '-B', '-c', code)
-        require(session.http() == session.smoke() == 'PASS', 'APPLICATION_ACCEPTANCE_FAILED')
+            with self.acceptance_stage(role, 'APPLICATION_SERVICE_CONTEXT'):
+                self.engine._docker('exec', session.container_id, 'python', '-B', '-c', code)
+        with self.acceptance_stage(role, 'HTTP_APPLICATION'):
+            require(session.http() == 'PASS', 'APPLICATION_ACCEPTANCE_FAILED')
+        with self.acceptance_stage(role, 'BROWSER_SMOKE'):
+            require(session.smoke() == 'PASS', 'APPLICATION_ACCEPTANCE_FAILED')
+        self.acceptance_timeline.append(dict(role=role, phase='COMPLETE_ACCEPTANCE',
+            at=datetime.now(timezone.utc).isoformat(), monotonic_ns=time.monotonic_ns()))
 
     def _application_preflight(self, plan, role, ready):
         session = self.sessions[role]
@@ -749,6 +912,7 @@ class HostBackend:
                 timeout=plan['policy']['stop_timeout_seconds'] + 10)
 
     def record(self, result):
+        result['acceptance_timeline'] = self.acceptance_timeline
         result['instances'] = {role: dict(container_id=session.container_id,
             application_commit=session.binding['commit'], image_id=session.current_policy['image_id']
             if session.current_policy else None,

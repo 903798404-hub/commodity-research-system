@@ -265,6 +265,7 @@ class Backend:
         yield
 
     def preconditions(self, plan): self.hit('preconditions')
+    def prepare_execution_conditions(self, plan): self.hit('execution_conditions')
     def consume_recovery(self, plan): self.hit('consume')
     def rollback_assets(self, plan): self.hit('assets')
     def before_stop(self, plan): self.hit('record_window')
@@ -318,7 +319,7 @@ def test_prepare_entry_seals_only_after_live_consumers_and_never_executes(tmp_pa
     else:
         actual = execution.prepare_plan(plan(), destination, backend, candidate_key=Path('/test/key.pem'))
         assert execution.verify_plan(destination) == actual
-        assert backend.calls == ['lock', 'refresh', 'preconditions', 'consume', 'assets', 'record_window']
+        assert backend.calls == ['lock', 'refresh', 'execution_conditions', 'preconditions', 'consume', 'assets', 'record_window']
     assert 'stop_source' not in backend.calls and 'cleanup' not in backend.calls
     assert not any(call.startswith(('create_', 'authorize_', 'start_')) for call in backend.calls)
 
@@ -364,7 +365,7 @@ def test_existing_plan_cli_calls_preparation_not_execution(tmp_path, monkeypatch
     assert cli.main(['--high-risk-input', str(input_path), '--output', str(output),
                      '--revalidate-existing-image']) == 0
     assert execution.verify_plan(output) == plan()
-    assert backend.calls == ['lock', 'refresh', 'preconditions', 'consume', 'assets', 'record_window']
+    assert backend.calls == ['lock', 'refresh', 'execution_conditions', 'preconditions', 'consume', 'assets', 'record_window']
     assert json.loads(capsys.readouterr().out)['production_authorized'] is False
 
 

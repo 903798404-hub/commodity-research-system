@@ -354,6 +354,26 @@ def check_dom_tables(tables, empty_sessions=()):
     return 'PASS'
 
 
+def browser_runner_preflight(url):
+    """Actual host launch and allowed service navigation; never install here."""
+    import importlib.metadata
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        executable = Path(p.chromium.executable_path)
+        require(executable.is_file(), 'BROWSER_BINARY_MISSING')
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            response = page.goto(url, wait_until='domcontentloaded', timeout=15000)
+            require(response is not None and response.status == 200, 'BROWSER_ACCESS_PATH_UNAVAILABLE')
+            return dict(status='PASS', interpreter=sys.executable, python_version=sys.version,
+                        playwright_version=importlib.metadata.version('playwright'),
+                        chromium_executable=str(executable), chromium_version=browser.version,
+                        access_url=url, actual_launch=True, application_smoke_not_substituted=True)
+        finally:
+            browser.close()
+
+
 def browser_smoke(url, empty_sessions, selectors=None):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
