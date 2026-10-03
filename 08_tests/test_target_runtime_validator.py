@@ -153,6 +153,11 @@ def test_existing_admission_routes_spread_runtime_changes_to_real_docker():
         return {"changed_paths": [{"path": name} for name in changed]}
     assert module.requires_spread_runtime_docker(report(["03_src/agri_research_agent/shared/production_identity.py"]), ROOT)
     assert module.requires_spread_runtime_docker(report(["09_deploy/spread_runtime/Dockerfile.spread-runtime"]), ROOT)
+    for source in ("04_scripts/runtime/routine_release.py",
+                   "09_deploy/spread_release/high_risk_execution.py",
+                   "08_tests/shared/high_risk_execution_docker_e2e.py",
+                   "08_tests/test_release_stabilize.py"):
+        assert module.requires_spread_runtime_docker(report([source]), ROOT)
     assert not module.requires_spread_runtime_docker(report(["07_docs/unrelated.md"]), ROOT)
 
 

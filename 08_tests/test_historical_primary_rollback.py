@@ -144,6 +144,7 @@ def test_current_tool_adapter_threads_context_without_mutating_issuer_globals():
 
 def test_execution_receipt_distinguishes_tool_issuer_from_old_application(tmp_path):
     backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.acceptance_timeline = []
     backend.output = tmp_path
     backend.engine = SimpleNamespace(_canonical=lambda value: json.dumps(value).encode(),
         _write_new=lambda path, raw: path.write_bytes(raw))

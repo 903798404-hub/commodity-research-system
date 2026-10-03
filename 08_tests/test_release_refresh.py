@@ -211,6 +211,11 @@ def test_new_signed_record_survives_later_plan_failure_without_publishing_plan(r
             value['release_request'] = result['reference']
             return value
 
+        def prepare_execution_conditions(self, value):
+            # Unit transport only; real root-owned preparation is covered by
+            # the permanent same-entry Hosted Docker lane, not this verdict.
+            events.append('prepared_execution_conditions')
+
         def preconditions(self, value):
             reference = value['release_request']
             raw = Path(reference['path']).read_bytes()
@@ -223,7 +228,8 @@ def test_new_signed_record_survives_later_plan_failure_without_publishing_plan(r
     with pytest.raises(ValueError, match='controlled downstream assessment failure'):
         execution.prepare_plan(plans.plan(), destination, Backend(),
             candidate_key=refresh.path/'candidate.pem')
-    assert events == ['new_signed_record', 'verified_new_record_before_assessment_failure']
+    assert events == ['new_signed_record', 'prepared_execution_conditions',
+                      'verified_new_record_before_assessment_failure']
     assert len(refresh.calls) == 1
     assert refresh.old.read_bytes() == old_bytes
     assert all(path.read_bytes() == raw for path, raw in old_files.items())
@@ -405,6 +411,11 @@ def test_prestop_window_uses_real_signed_record_and_exact_boundary(refresh, monk
     plan = dict(target=asset, primary_rollback=asset,
         instances=dict(target={'kind':'spec'}, primary_rollback={'kind':'spec'}))
     backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.sessions = {}
+    capability_checks = []
+    # This unit owns only the REAL signed-record time boundary. Actual browser
+    # launch and pre-stop order are required by the separate real Docker lane.
+    backend._browser_preflight = lambda plan, phase: capability_checks.append(phase)
     backend.pre = refresh.pre
     backend.host = refresh.pre._load(refresh.pre.HOST, 'host')
     backend.engine = refresh.pre._load(refresh.pre.ENGINE, 'engine')
@@ -428,3 +439,4 @@ def test_prestop_window_uses_real_signed_record_and_exact_boundary(refresh, monk
         with pytest.raises(execution.ExecutionError, match='WINDOW_INSUFFICIENT_REPREPARE_BEFORE_STOP'):
             backend.before_stop(plan)
     assert refresh.calls == []
+    assert capability_checks == ['immediately-before-stop']
