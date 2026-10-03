@@ -414,6 +414,18 @@ class HostBackend:
             require(hashlib.sha256(self.host.copy_container_bytes(current['Id'], path)).hexdigest() == policy[field] ==
                     grant[field], 'CURRENT_REPLACEMENT_BOUND_FILE_CHANGED')
 
+    def _accept_retained_instance(self, plan, destination):
+        """A new acceptance attempt, not another write into the failed attempt."""
+        self.host._protected_path(destination.parent, directory=True)
+        destination.mkdir(mode=0o700)
+        attempt = HostBackend(destination)
+        # Reuse only the actually retained instance and its original envelope.
+        # No create, new authorization or mutation of the original timeline.
+        attempt.sessions['primary_rollback'] = self.sessions['primary_rollback']
+        attempt.envelopes['primary_rollback'] = self.envelopes['primary_rollback']
+        HostBackend.accept(attempt, plan, 'primary_rollback')
+        return attempt.acceptance_timeline
+
     def collect_retained_replacement(self, plan_path, result_path, release_path, destination):
         """Separate current facts; existing acceptance/recovery consumers, no grant.
 
@@ -437,15 +449,12 @@ class HostBackend:
                           if m['target'] not in {'/run/market-data-grants', '/runtime/logs'} and
                           not m['target'].startswith('/run/secrets/')})
         before = {s: preservation.tree_identity(self.host, s) for s in sources}
-        timeline_begin = len(self.acceptance_timeline)
         # This is the official base implementation, not a fault injector or a
         # copied PASS. Every real IO gate is rerun for the retained instance.
-        HostBackend.accept(self, plan, 'primary_rollback')
+        supplemental_timeline = self._accept_retained_instance(plan, destination)
         after = {s: preservation.tree_identity(self.host, s) for s in sources}
         require(before == after, 'SUPPLEMENTAL_ACCEPTANCE_CHANGED_DATA')
         current = self.host.docker_inspect(session.container_id)
-        self.host._protected_path(destination.parent, directory=True)
-        destination.mkdir(mode=0o700)
         def save(name, value):
             path = destination / name
             raw = self.engine._canonical(value)
@@ -455,7 +464,7 @@ class HostBackend:
             hostname=current['Config']['Hostname'], created_at=current['Created'], started_at=current['State']['StartedAt']))
         grant = save('grant-evidence.json', self.envelopes['primary_rollback'])
         probes = {}
-        values = dict(preflight=self.acceptance_timeline[timeline_begin:], health=current['State'],
+        values = dict(preflight=supplemental_timeline, health=current['State'],
             consumer=dict(url=session.url(), http=session.http(), smoke=session.smoke()),
             data_unchanged=dict(before=before, after=after, scope=sources, whole_database_invariance_claimed=False))
         require(values['consumer']['http'] == values['consumer']['smoke'] == 'PASS', 'SUPPLEMENTAL_CONSUMER_FAILED')

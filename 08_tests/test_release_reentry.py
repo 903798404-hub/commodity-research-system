@@ -77,3 +77,55 @@ def test_no_legacy_private_observer_or_issuer_secret_helper_in_actual_transport(
     engine = execution.load(execution.ROOT, '04_scripts/runtime/validate_target_runtime.py', '_reentry_transport_audit')
     assert 'declared_secret_targets' not in engine.validate_linux.__code__.co_names
     assert '_observe' not in execution.validate_issuer_api.__code__.co_names
+
+
+@pytest.mark.parametrize('acceptance_fails', [False, True])
+def test_supplemental_acceptance_has_new_evidence_namespace_not_new_instance(monkeypatch, tmp_path,
+                                                                          acceptance_fails):
+    original = tmp_path / 'failed-attempt'
+    original.mkdir()
+    evidence = original / 'primary_rollback-application-preflight.json'
+    evidence.write_bytes(b'{"status":"FAIL","original":true}')
+    original_bytes = evidence.read_bytes()
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.output = original
+    backend.host = SimpleNamespace(_protected_path=lambda path, **kw: path)
+    session, envelope = object(), {'payload': {'container_id': 'retained-B'}}
+    backend.sessions = {'primary_rollback': session}
+    backend.envelopes = {'primary_rollback': envelope}
+    backend.acceptance_timeline = [{'status': 'FAIL', 'phase': 'ORIGINAL_TIMEOUT'}]
+    original_timeline = copy.deepcopy(backend.acceptance_timeline)
+    calls = []
+
+    def initialize(attempt, output):
+        attempt.output = output
+        attempt.sessions, attempt.envelopes, attempt.acceptance_timeline = {}, {}, []
+
+    def accept(attempt, plan, role):
+        calls.append((attempt, plan, role))
+        assert attempt is not backend
+        assert attempt.sessions[role] is session and attempt.envelopes[role] is envelope
+        # Exercise the actual exclusive-file requirement that failed on Linux.
+        with (attempt.output / evidence.name).open('xb') as stream:
+            stream.write(b'{"status":"NEW_ATTEMPT"}')
+        if acceptance_fails:
+            raise execution.ExecutionError('SUPPLEMENTAL_REAL_GATE_FAILED')
+        attempt.acceptance_timeline.append({'phase': 'COMPLETE_ACCEPTANCE', 'status': 'PASS'})
+
+    monkeypatch.setattr(execution.HostBackend, '__init__', initialize)
+    monkeypatch.setattr(execution.HostBackend, 'accept', accept)
+    destination, plan = tmp_path / 'supplemental-attempt', {'identity': 'same-plan'}
+    if acceptance_fails:
+        with pytest.raises(execution.ExecutionError, match='SUPPLEMENTAL_REAL_GATE_FAILED'):
+            backend._accept_retained_instance(plan, destination)
+    else:
+        timeline = backend._accept_retained_instance(plan, destination)
+        assert timeline == [{'phase': 'COMPLETE_ACCEPTANCE', 'status': 'PASS'}]
+    assert len(calls) == 1 and calls[0][1:] == (plan, 'primary_rollback')
+    assert evidence.read_bytes() == original_bytes
+    assert backend.acceptance_timeline == original_timeline
+    assert backend.output == original and backend.sessions['primary_rollback'] is session
+    # A repeated attempt cannot overwrite supplemental evidence either.
+    with pytest.raises(FileExistsError):
+        backend._accept_retained_instance(plan, destination)
+    assert len(calls) == 1
