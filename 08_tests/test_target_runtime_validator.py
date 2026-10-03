@@ -75,12 +75,35 @@ def test_current_tool_resolves_real_legacy_compose_secrets_without_old_helper():
                    secrets={'tankan-secret': dict(file='/protected/tankan.env')})
     manifest['_secret_declarations'] = engine._interpret('declared_secret_targets', manifest, compose)
     assert manifest['_secret_declarations'] == {'tankan-secret': '/run/secrets/tankan.env'}
-    engine._candidate_issuer_api(legacy, manifest)
+    assert engine._candidate_issuer_api(legacy, manifest) == 'directory_scope'
+    assert engine._candidate_secret_transport(manifest, 'directory_scope') == {}
+    assert manifest['_secret_declarations'] == {'tankan-secret': '/run/secrets/tankan.env'}
+    # Compare the actual old pure binding function, not a forgiving scope mock.
+    old_engine = ModuleType('actual_original_engine')
+    old_engine.__file__ = str(ENGINE)
+    exec(compile(subprocess.check_output(['git', 'show',
+        '88df880127bea4308ee752a37a59884b9198b2ce:04_scripts/runtime/validate_target_runtime.py'], cwd=ROOT),
+        old_engine.__file__, 'exec'), old_engine.__dict__)
+    scope_contract = dict(identity_root_role='identity',
+        runtime_roots=[dict(role='identity', container_path='/runtime')],
+        required_mounts=[dict(container_path='/runtime', read_only=True)],
+        _secret_declarations=engine._candidate_secret_transport(manifest, 'directory_scope'))
+    assert engine._runtime_bindings(scope_contract, 65532, 65532) == old_engine._runtime_bindings(scope_contract, 65532, 65532)
     with pytest.raises(engine.ValidationError, match='UNSUPPORTED_APPLICATION_ISSUER_API: issue_execution_grant'):
         engine._candidate_issuer_api(legacy, manifest, external_trust=True)
     manifest['_secret_declarations']['service-credential'] = '/run/secrets/market-data-service.json'
     with pytest.raises(engine.ValidationError, match='UNSUPPORTED_APPLICATION_ISSUER_API: issue_application_service_credential'):
         engine._candidate_issuer_api(legacy, manifest)
+    with pytest.raises(engine.ValidationError, match='file credential scope'):
+        engine._candidate_secret_transport(manifest, 'directory_scope')
+
+
+def test_modern_file_secret_transport_is_exact_and_unknown_abi_rejects():
+    engine = load_engine()
+    manifest = {'_secret_declarations': {'service': '/run/secrets/market-data-service.json'}}
+    assert engine._candidate_secret_transport(manifest, 'file_scope') == manifest['_secret_declarations']
+    with pytest.raises(engine.ValidationError, match='candidate scope'):
+        engine._candidate_secret_transport(manifest, 'unknown')
 
 
 def test_legacy_grant_call_omits_only_unused_new_keyword():

@@ -132,6 +132,31 @@ def _candidate_issuer_api(host, contract, *, external_trust=False):
             inspect.signature(method).bind(*args, **kwargs)
         except (TypeError, ValueError) as exc:
             raise ValidationError('UNSUPPORTED_APPLICATION_ISSUER_API: ' + name) from exc
+    # The original embedded-trust issuer supports directory-only candidate
+    # scopes. Its source Compose secrets are validated statically, never
+    # transported into an offline candidate. The newer signing ABI accompanies
+    # file scopes and application-service credentials. This is an explicit
+    # supported ABI choice, not recovery from a resolver/issuer exception.
+    parameters = inspect.signature(host.issue_execution_grant).parameters
+    required = {'container_id', 'expected_policy_path', 'key_path', 'grant_path',
+                'grant_dir', 'role', 'ttl_seconds'}
+    if (not required <= set(parameters) or
+            set(parameters) - required - {'external_candidate_trust_path', 'primary_rollback_context'} or
+            any(item.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                for item in parameters.values())):
+        raise ValidationError('UNSUPPORTED_APPLICATION_ISSUER_API: ambiguous signing ABI')
+    return 'file_scope' if 'external_candidate_trust_path' in parameters else 'directory_scope'
+
+
+def _candidate_secret_transport(contract, issuer_abi):
+    source = contract['_secret_declarations']
+    if issuer_abi == 'file_scope':
+        return dict(source)
+    if issuer_abi == 'directory_scope':
+        if '/run/secrets/market-data-service.json' in source.values():
+            raise ValidationError('UNSUPPORTED_APPLICATION_ISSUER_API: file credential scope')
+        return {}  # Original static-only secret contract, not production secrets.
+    raise ValidationError('UNSUPPORTED_APPLICATION_ISSUER_API: candidate scope')
 
 
 def _issue_candidate_grant(host, *args, external_candidate_trust_path=None, **kwargs):
@@ -1155,7 +1180,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
             _ephemeral_candidate_identity(work, contract)
         source_compose = validate_source_compose(root, contract)
         contract["_secret_declarations"] = _interpret('declared_secret_targets', contract, source_compose)
-        _candidate_issuer_api(host, contract, external_trust=ephemeral_candidate_trust)
+        issuer_abi = _candidate_issuer_api(host, contract, external_trust=ephemeral_candidate_trust)
+        contract['_source_secret_declarations'] = dict(contract['_secret_declarations'])
+        contract['_secret_declarations'] = _candidate_secret_transport(contract, issuer_abi)
         lifecycle_modules = _packaging_lifecycle_modules(contract)
         if existing_image_id is None:
             context = work / "context"
