@@ -140,3 +140,22 @@ def test_current_tool_adapter_threads_context_without_mutating_issuer_globals():
     assert adapter.issue_execution_grant('fresh', role='production') == 'original-result'
     assert calls == [{'role': 'production', 'primary_rollback_context': context}]
     assert host.issue_execution_grant is consumer
+
+
+def test_hosted_clock_reaches_original_review_parser_but_not_grant_clock(chain):
+    fixture = execution.load(execution.ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py', '_test_uniform_review_clock')
+    original = fixture.install_review_clock()
+    try:
+        fixture.REVIEW_CLOCK_ADVANCE = timedelta(hours=48)
+        policy = execution.load(execution.ROOT, '04_scripts/runtime/release_reversibility.py', '_clocked_original_parser')
+        now_review = routine_review_for(chain.risk)
+        with pytest.raises(ValueError, match='INVALID_RISK_REVIEW_TIME'):
+            policy.apply_review(chain.risk, now_review, chain.risk['target'])
+        # Historical event-time validation still invokes the identical parser.
+        policy.apply_review(chain.risk, now_review, chain.risk['target'],
+                            now=datetime.fromisoformat(now_review['timestamp']))
+        assert policy.datetime.now(timezone.utc) - datetime.now(timezone.utc) > timedelta(hours=47)
+        grant = execution.load(execution.ROOT, '09_deploy/runtime_identity/host_authorization.py', '_unclocked_signer')
+        assert grant.datetime is datetime
+    finally:
+        fixture.importlib.util.spec_from_file_location = original

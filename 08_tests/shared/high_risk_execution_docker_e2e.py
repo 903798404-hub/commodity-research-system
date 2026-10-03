@@ -13,6 +13,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
+import importlib.machinery
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,31 @@ PROJECT = 'spread-production-runtime-wiring'
 CONTRACT = '02_configs/runtime_contracts/spread-production-runtime.json'
 OLD = '88df880127bea4308ee752a37a59884b9198b2ce'
 TARGET = '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00'
+REVIEW_CLOCK_ADVANCE = timedelta(0)
+
+
+class ReviewClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime.now(tz) + REVIEW_CLOCK_ADVANCE
+
+
+class ReviewClockLoader(importlib.machinery.SourceFileLoader):
+    def exec_module(self, module):
+        super().exec_module(module)
+        # Test clock only: the ORIGINAL Review parser and every check still
+        # execute. No issuer, signer, grant, Docker or system clock is patched.
+        module.datetime = ReviewClock
+
+
+def install_review_clock():
+    original = importlib.util.spec_from_file_location
+    def selected(name, location, *args, **kwargs):
+        if location is not None and Path(location).name == 'release_reversibility.py':
+            kwargs['loader'] = ReviewClockLoader(name, str(location))
+        return original(name, location, *args, **kwargs)
+    importlib.util.spec_from_file_location = selected
+    return original
 
 
 def load(root, relative, name):
@@ -407,6 +433,8 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
 
 def case(work, tool, old_source, target_source, old_evidence, target_evidence, old_record, target_record,
          production_key_id, production_key, *, injection='NONE', candidate_key_path=None):
+    global REVIEW_CLOCK_ADVANCE
+    REVIEW_CLOCK_ADVANCE = timedelta(0)
     execution = load(tool, '09_deploy/spread_release/high_risk_execution.py', '_execution_entry_' + work.name)
     backend = execution.HostBackend(directory(work / 'baseline-receipts', 0o700))
     allocation, sources, values = runtime_inputs(work, old_source, target_source, backend.host)
@@ -462,15 +490,14 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         else:
             raise AssertionError('Old Review unexpectedly fresh at the controlled current clock')
 
-    def current_review_clock(selected):
-        original = selected.pre.apply_maintainer_review
-        review_policy = load(tool, '04_scripts/runtime/release_reversibility.py', '_current_controlled_review_policy')
-        def apply(risk, review, main):
-            if deployment_path is None:
-                return original(risk, review, main)
-            return review_policy.apply_review(risk, review, main, now=aged_now)
-        selected.pre.apply_maintainer_review = apply
     evidence, recovery_policy, fresh, sandbox, network = rehearsal(work, backend, baseline_path, cid, sources, values, production_key)
+    REVIEW_CLOCK_ADVANCE = timedelta(hours=48) if deployment_path else timedelta(0)
+    aged_now = ReviewClock.now(timezone.utc)
+    if deployment_path:
+        save(work, 'review-clock.json', dict(scope='ALL_ORIGINAL_AND_CURRENT_REVIEW_PARSERS_ONLY',
+            advance_hours=48, original_review=record['maintainer_risk_review']['timestamp'],
+            original_acceptance=record['validated_at'], current_review_clock=aged_now.isoformat(),
+            execution_grant_clock='REAL_UTC_UNCHANGED', docker_clock='REAL_UTC_UNCHANGED'))
     target_spec, _ = instance(work, 'target', target_source, target_evidence, target_record, backend.host, backend.engine,
         allocation, sources, values, production_key_id, production_key)
     rollback_spec, _ = instance(work, 'rollback', old_source, old_evidence, old_record, backend.host, backend.engine,
@@ -518,7 +545,6 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 'start_failure', 'acceptance_failure', 'runtime_identity_failure', 'health_failure_threshold', 'observation_ended_unhealthy']))
     plan_path = work / 'deployment_plan.json'
     preparation = execution.HostBackend(directory(work / 'preparation-receipts', 0o700))
-    current_review_clock(preparation)
     # SAME safe preparation entry used by create_deployment_plan --high-risk-input.
     # Expired target input is revalidated against the existing image before any
     # stop; later cases consume the fresh record without repeating its build.
@@ -571,7 +597,6 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 execution.seal_plan(bad, other_path)
             try:
                 negative_backend = execution.HostBackend(directory(scope / 'receipt', 0o700))
-                current_review_clock(negative_backend)
                 rejected = execution.execute_verified_plan(other_path, negative_backend)
                 assert name == 'wrong_image' and rejected['result'] == 'FAIL'
                 assert rejected['source'] == 'PRESERVED_NOT_STOPPED'
@@ -608,7 +633,6 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 session.spec['key_path'] = original_key
     backend_type = {'NONE': execution.HostBackend, 'POST_START': InjectedFailure, 'AUTHORIZATION': AuthorizationFailure}[injection]
     actual_backend = backend_type(directory(work / 'execution-receipts', 0o700))
-    current_review_clock(actual_backend)
     try:
         result = execution.execute_verified_plan(plan_path, actual_backend)
         if injection != 'NONE':
@@ -661,6 +685,7 @@ def main():
     paths = []
     receipt = dict(status='STARTED', candidate=candidate, evidence_class='HOSTED_SYNTHETIC_TRUST_NOT_PRODUCTION_CUTOVER',
                    production_acceptance='NOT_EXECUTED', application_target_rebuilt=False)
+    original_review_loader = install_review_clock()
     try:
         for role in ('production', 'candidate_validation'):
             key = Ed25519PrivateKey.generate()
@@ -718,6 +743,7 @@ def main():
         receipt.update(status='FAIL', failure_type=type(exc).__name__, failure=str(exc)[-1800:])
         raise
     finally:
+        importlib.util.spec_from_file_location = original_review_loader
         for path in paths:
             path.unlink()
         receipt['temporary_private_keys_removed'] = all(not path.exists() for path in paths)
