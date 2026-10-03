@@ -659,6 +659,10 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                     backend.envelopes['primary_rollback']['payload']['grant_id'])
             assert (actual_backend.envelopes['primary_rollback']['payload']['grant_id'] !=
                     json.loads(Path(evidence['grant']['path']).read_bytes())['payload']['grant_id'])
+            rollback_instance = result['instances']['primary_rollback']
+            assert rollback_instance['application_commit'] == asset_old['commit']
+            assert rollback_instance['issuer_source_commit'] == (
+                identity(tool)['commit'] if deployment_path else asset_old['commit'])
         else:
             assert result['result'] == 'SUCCESS' and result['target'] == 'PASS'
         if injection == 'AUTHORIZATION':

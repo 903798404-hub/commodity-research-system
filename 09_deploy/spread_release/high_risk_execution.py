@@ -587,6 +587,7 @@ class HostBackend:
                 policy['compose_project_directory'] == spec['transport']['project_directory'], 'TRANSPORT_CONFIG_CHANGED')
         session = self.routine.DockerSession(request, self.engine, issuer, binding, manifest)
         session.role, session.spec = 'production', spec['transport']
+        session.issuer_source_commit = plan['tool']['commit'] if historical else asset['commit']
         rendered = issuer._json(session.compose(session.spec, 'config', '--format', 'json').stdout)
         require(set(rendered['services']) == {manifest['service_id']}, 'NON_TARGET_SERVICE_FORBIDDEN')
         service = rendered['services'][manifest['service_id']]
@@ -754,7 +755,7 @@ class HostBackend:
             grant_id=self.envelopes.get(role, {}).get('payload', {}).get('grant_id'),
             policy_path=session.spec['policy_output'],
             issuer_module=session.host.__name__, issuer_file=session.host.__file__,
-            issuer_source_commit=session.binding['commit'],
+            issuer_source_commit=session.issuer_source_commit,
             transport_file=self.routine.__file__, observation_source_root=str(ROOT))
             for role, session in self.sessions.items()}
         self.engine._write_new(self.output / 'execution-result.json', self.engine._canonical(result))

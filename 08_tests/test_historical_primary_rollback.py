@@ -142,6 +142,25 @@ def test_current_tool_adapter_threads_context_without_mutating_issuer_globals():
     assert host.issue_execution_grant is consumer
 
 
+def test_execution_receipt_distinguishes_tool_issuer_from_old_application(tmp_path):
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.output = tmp_path
+    backend.engine = SimpleNamespace(_canonical=lambda value: json.dumps(value).encode(),
+        _write_new=lambda path, raw: path.write_bytes(raw))
+    backend.routine = SimpleNamespace(__file__='current/transport.py')
+    backend.envelopes = {}
+    backend.sessions = {'primary_rollback': SimpleNamespace(container_id='fresh-container',
+        binding={'commit': 'old-application'}, current_policy={'image_id': 'exact-old-image'},
+        spec={'policy_output': 'fresh-policy'},
+        host=SimpleNamespace(__name__='current-issuer', __file__='current/host_authorization.py'),
+        issuer_source_commit='current-tool')}
+    result = {}
+    backend.record(result)
+    recorded = json.loads((tmp_path / 'execution-result.json').read_bytes())['instances']['primary_rollback']
+    assert recorded['application_commit'] == 'old-application'
+    assert recorded['issuer_source_commit'] == 'current-tool'
+
+
 def test_hosted_clock_reaches_original_review_parser_but_not_grant_clock(chain):
     fixture = execution.load(execution.ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py', '_test_uniform_review_clock')
     original = fixture.install_review_clock()
