@@ -837,12 +837,14 @@ def validate_candidate_mounts(manifest: Mapping, mounts: list[dict], policy: Map
     _validate_mount_sources({'mounts': mounts, 'container_id': container_id}, policy, grant_dir, check_expiry=not live)
 
 
-def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
+def _validated_candidate_record(policy: Mapping, *, primary_rollback_context=None) -> tuple[dict, dict]:
     """Bind an authenticated validation fact to this exact Approved source."""
     from types import SimpleNamespace
     # Routine collector JSON is protected by the same administrator-owned file
     # boundary, but does not need an additional evidence-signing hierarchy.
     if 'recovery' in policy:
+        if primary_rollback_context is not None:
+            raise HostAuthorizationError('historical acceptance cannot authorize recovery rehearsal')
         return _recovery_call('baseline', policy)
     record_binding = policy["candidate_record"]
     raw = _protected_path(Path(record_binding["path"]), private=True).read_bytes()
@@ -858,7 +860,10 @@ def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
             _protected_path=_protected_path), engine, source_root=source)
         if identity != (policy["approved_commit"], policy["approved_tree"]):
             raise HostAuthorizationError("Approved source Commit/Tree differs")
-        routine.verify_routine_record(record, policy, source)
+        if primary_rollback_context is None:
+            routine.verify_routine_record(record, policy, source)
+        else:
+            primary_rollback_context.verify(record, policy, source)
         project = engine._project(source, policy["project_id"])
         _, manifest, binding = engine.source_contract(source, policy["project_id"], project["runtime_contract"])
         if (manifest["schema_version"] != _manifest_version(policy["schema_version"])
@@ -867,6 +872,8 @@ def _validated_candidate_record(policy: Mapping) -> tuple[dict, dict]:
             raise HostAuthorizationError("routine source contract differs from policy")
         engine.validate_source_compose(source, manifest)
         return record, manifest
+    if primary_rollback_context is not None:
+        raise HostAuthorizationError('historical context requires the original Routine primary rollback fact')
     if policy["approved_source_root"] != str(SOURCE_ROOT):
         raise HostAuthorizationError("signer must run from the exact Approved source")
     for relative in ("04_scripts/runtime/pre_release_runtime.py", "04_scripts/runtime/validate_target_runtime.py",
@@ -1038,8 +1045,15 @@ def _candidate_secret_mounts(manifest: Mapping, policy: Mapping, rendered: Mappi
     return mounts
 
 
+def _acceptance_for_instance(policy, context):
+    # Preserve the ordinary issuer ABI and strict current-time semantics.
+    if context is None:
+        return _validated_candidate_record(policy)
+    return _validated_candidate_record(policy, primary_rollback_context=context)
+
+
 def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping,
-                           *, recovery_phase: str = 'pre_start') -> str:
+                           *, recovery_phase: str = 'pre_start', primary_rollback_context=None) -> str:
     labels = container["Config"].get("Labels") or {}
     paths = labels.get("com.docker.compose.project.config_files", "").split(",")
     if paths != [item["path"] for item in policy["compose_sources"]] or labels.get("com.docker.compose.project.working_dir") != policy["compose_project_directory"] or labels.get("com.docker.compose.service") != policy["service_id"]:
@@ -1079,7 +1093,7 @@ def _render_actual_compose(container: Mapping, policy: Mapping, image: Mapping,
         raise HostAuthorizationError("rendered mounts must be explicit bind contracts")
     expected_mounts = _observe("compose_mounts", volumes)
     if policy["schema_version"] in _PRODUCTION_POLICIES:
-        _, manifest = _validated_candidate_record(policy)
+        _, manifest = _acceptance_for_instance(policy, primary_rollback_context)
         expected_mounts = sorted([*expected_mounts, *_production_compose_bridge(rendered, policy, manifest)], key=lambda m: m["target"])
     elif policy["schema_version"] in _CANDIDATE_POLICIES and service.get("secrets"):
         manifest = _json(copy_container_bytes(container["Id"], policy["runtime_manifest_path"]))
@@ -1189,7 +1203,7 @@ def _validate_v3_runtime(manifest: Mapping, observed: Mapping, policy: Mapping, 
             raise HostAuthorizationError("candidate readonly seed identity differs")
 
 
-def revalidate_production(container_id: str, *, expected_policy_path: str | Path) -> dict:
+def revalidate_production(container_id: str, *, expected_policy_path: str | Path, primary_rollback_context=None) -> dict:
     """Read-only pre-approval validation; never sign a grant or start a container."""
     _require_linux_root()
     require_protected_authority_source()
@@ -1197,7 +1211,7 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
     validate_policy(policy, "production")
     if policy["schema_version"] not in _PRODUCTION_POLICIES:
         raise HostAuthorizationError("pre-release validation requires production policy/3")
-    record, source_manifest = _validated_candidate_record(policy)
+    record, source_manifest = _acceptance_for_instance(policy, primary_rollback_context)
     observed = observe_and_validate(container_id, policy, role="production")
     grants = [m for m in observed["mounts"] if m["target"] == policy["grant_container_directory"]]
     if len(grants) != 1 or grants[0]["read_only"] is not True:
@@ -1206,7 +1220,8 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
     _validate_mount_sources(observed, policy, grant_dir)
     container = docker_inspect(container_id)
     image = docker_image_inspect(policy["image_id"])
-    rendered = _render_actual_compose(container, policy, image)
+    rendered = (_render_actual_compose(container, policy, image) if primary_rollback_context is None else
+                _render_actual_compose(container, policy, image, primary_rollback_context=primary_rollback_context))
     recovery_network = (_recovery_call('validate_instance', container, policy, 'pre_start')
                         if 'recovery' in policy else None)
     manifest_raw = copy_container_bytes(container_id, policy["runtime_manifest_path"])
@@ -1237,9 +1252,11 @@ def revalidate_production(container_id: str, *, expected_policy_path: str | Path
     if observe_and_validate(container_id, policy, role="production") != observed:
         raise HostAuthorizationError("production instance changed during pre-release validation")
     _validate_mount_sources(observed, policy, grant_dir)
-    if _render_actual_compose(docker_inspect(container_id), policy, docker_image_inspect(policy["image_id"])) != rendered:
+    if (_render_actual_compose(docker_inspect(container_id), policy, docker_image_inspect(policy["image_id"]))
+            if primary_rollback_context is None else _render_actual_compose(docker_inspect(container_id), policy,
+            docker_image_inspect(policy["image_id"]), primary_rollback_context=primary_rollback_context)) != rendered:
         raise HostAuthorizationError("production Compose changed during pre-release validation")
-    if (_load_policy(expected_policy_path) != policy or _validated_candidate_record(policy) != (record, source_manifest)
+    if (_load_policy(expected_policy_path) != policy or _acceptance_for_instance(policy, primary_rollback_context) != (record, source_manifest)
             or TRUST_CONFIG_PATH.read_bytes() != trust_raw
             or copy_container_bytes(container_id, policy["runtime_manifest_path"]) != manifest_raw
             or copy_container_bytes(container_id, marker_path) != marker_raw
@@ -1393,7 +1410,7 @@ def _validate_application_service_credential(container_id: str, policy: Mapping,
         raise HostAuthorizationError("application service credential injection differs from approved source")
 
 
-def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900, external_candidate_trust_path: str | Path | None = None) -> dict:
+def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path, key_path: str | Path, grant_path: str | Path, grant_dir: str | Path, role: str, ttl_seconds: int = 900, external_candidate_trust_path: str | Path | None = None, primary_rollback_context=None) -> dict:
     """Observe a fresh container, sign a bounded grant, and leave it unstarted."""
     _require_linux_root()
     require_protected_authority_source()
@@ -1408,7 +1425,9 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     if not destination.is_absolute() or destination.parent != grant_dir or destination.exists() or destination.is_symlink():
         raise HostAuthorizationError("grant path must be new and inside its protected directory")
     policy_version = policy["schema_version"]
-    candidate_record = _validated_candidate_record(policy) if policy_version in _PRODUCTION_POLICIES else None
+    if primary_rollback_context is not None and role != 'production':
+        raise HostAuthorizationError('historical context cannot authorize a candidate instance')
+    candidate_record = _acceptance_for_instance(policy, primary_rollback_context) if policy_version in _PRODUCTION_POLICIES else None
     if policy_version in _CANDIDATE_POLICIES and role == "candidate_validation":
         # Consumption deliberately precedes every fallible Docker observation.
         # A failed attempt is not replayable with a mutated scope.
@@ -1426,7 +1445,8 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
         _protected_path(Path(policy["candidate_host_root"]), directory=True, temporary=True)
     container = docker_inspect(container_id)
     image = docker_image_inspect(policy["image_id"])
-    rendered_digest = _render_actual_compose(container, policy, image)
+    rendered_digest = (_render_actual_compose(container, policy, image) if primary_rollback_context is None else
+        _render_actual_compose(container, policy, image, primary_rollback_context=primary_rollback_context))
     marker_path = policy["runtime_root"] + "/.market-data-runtime.json"
     manifest_raw = copy_container_bytes(container_id, policy["runtime_manifest_path"])
     marker_raw = copy_container_bytes(container_id, marker_path)
@@ -1526,7 +1546,8 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     _validate_mount_sources(observed, policy, grant_dir)
     final_container = docker_inspect(container_id)
     final_image = docker_image_inspect(policy["image_id"])
-    if _render_actual_compose(final_container, policy, final_image) != rendered_digest:
+    if (_render_actual_compose(final_container, policy, final_image) if primary_rollback_context is None else
+        _render_actual_compose(final_container, policy, final_image, primary_rollback_context=primary_rollback_context)) != rendered_digest:
         raise HostAuthorizationError("Compose deployment changed before grant sealing")
     if (copy_container_bytes(container_id, policy["runtime_manifest_path"]) != manifest_raw
             or copy_container_bytes(container_id, marker_path) != marker_raw
@@ -1538,7 +1559,7 @@ def issue_execution_grant(container_id: str, *, expected_policy_path: str | Path
     if (_load_policy(expected_policy_path) != policy or TRUST_CONFIG_PATH.read_bytes() != trust_raw
             or (external_enabled and Path(external_candidate_trust_path).read_bytes() != external_raw)):
         raise HostAuthorizationError("host approval or trust changed before grant sealing")
-    if policy_version in _PRODUCTION_POLICIES and _validated_candidate_record(policy) != candidate_record:
+    if policy_version in _PRODUCTION_POLICIES and _acceptance_for_instance(policy, primary_rollback_context) != candidate_record:
         raise HostAuthorizationError("candidate record changed before grant sealing")
     if policy_version in _PRODUCTION_POLICIES and _secret_state(observed) != secret_state:
         raise HostAuthorizationError("secret file changed before grant sealing")

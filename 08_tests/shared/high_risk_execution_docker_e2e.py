@@ -96,12 +96,11 @@ def validate(source, work, key_path, trust, *, ttl_seconds=86400):
     return evidence, path
 
 
-def collect_routine_acceptance(source, tool, work, evidence, key_path):
+def collect_routine_acceptance(source, tool, work, evidence, key_path, base_source):
     """Collect the legacy family through real candidate IO, never copied PASS.
 
-    This is a no-code-change rerelease of the exact synthetic old application;
-    its historical base equals its target, not the HIGH_RISK forward target.
-    The unmodified Routine risk verifier must independently accept that delta.
+    The original c8 -> 88 delta uses the existing reviewed-Routine contract.
+    Approval is explicitly synthetic, never a real Maintainer authorization.
     """
     # A historical acceptance is collected by that application's matching
     # formal collector/validator/issuer, then consumed by the NEW tool below.
@@ -111,7 +110,24 @@ def collect_routine_acceptance(source, tool, work, evidence, key_path):
     engine = load(source, '04_scripts/runtime/validate_target_runtime.py', '_mixed_old_engine')
     host = load(source, '09_deploy/runtime_identity/host_authorization.py', '_mixed_old_host')
     _, manifest, binding = engine.source_contract(source, PROJECT, CONTRACT)
-    routine.require_routine(source, binding['commit'], binding['commit'], PROJECT)
+    base = identity(base_source)
+    run('git', '-C', str(source), 'fetch', str(base_source), base['commit'])
+    remote = work / 'original-main.git'
+    run('git', 'init', '--bare', str(remote))
+    run('git', '-C', str(source), 'remote', 'set-url', 'origin', str(remote))
+    run('git', '-C', str(source), 'push', 'origin', 'HEAD:refs/heads/main')
+    pre = load(source, '04_scripts/runtime/pre_release_runtime.py', '_original_review_pre')
+    review_policy = load(source, '04_scripts/runtime/release_reversibility.py', '_original_review_policy')
+    risk = pre.classify_release(source, base['commit'], binding['commit'], PROJECT)
+    review = dict(reviewer='SYNTHETIC_TEST_MAINTAINER_NOT_PRODUCTION_APPROVAL',
+        timestamp=datetime.now(timezone.utc).isoformat(), base=risk['base'], target=risk['target'],
+        authoritative_main=identity(source), machine_findings=review_policy.machine_findings(risk),
+        machine_classification=review_policy.machine_classification(risk),
+        machine_destructive_evidence=risk['MACHINE_DESTRUCTIVE_EVIDENCE'],
+        reviewed_diff_identity=review_policy.reviewed_diff_identity(risk),
+        semantic_delta={name: 'NO' for name in review_policy.ROUTINE_SEMANTIC_FACTS},
+        maintainer_classification='ROUTINE_STATELESS', reason='Synthetic reproduction of original reviewed Routine delta')
+    resolved = routine.require_routine(source, base['commit'], binding['commit'], PROJECT, review)
     image_id = evidence['image_id']
     image = engine.inspect_one('image', image_id)
     uid, gid = engine._numeric_user(image)
@@ -157,14 +173,14 @@ def collect_routine_acceptance(source, tool, work, evidence, key_path):
             application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stAppViewContainer"]': 1}))
         session = routine.DockerSession(request, engine, host, binding, manifest)
         exact = routine.image_identity(engine, image_id, binding, manifest['service_id'])
-        record = routine.candidate_acceptance(session, exact, base_commit=binding['commit'],
-            ci_run=os.environ['GITHUB_RUN_ID'])
+        record = routine.candidate_acceptance(session, exact, base_commit=base['commit'],
+            ci_run=os.environ['GITHUB_RUN_ID'], risk_resolution=resolved, maintainer_risk_review=review)
         path = save(work, 'routine-acceptance.json', record)
         routine.validate_acceptance(record, commit=binding['commit'], tree=binding['tree'], image_id=image_id)
         assert record['result'] == 'PASS' and session.container_id is None
         save(work, 'collector-identity.json', dict(collector=str(source/'04_scripts/runtime/routine_release.py'),
             consumer_tool=identity(tool),
-            application=identity(source), image_id=image_id, base_commit=binding['commit'],
+            application=identity(source), image_id=image_id, base_commit=base['commit'],
             evidence_class='HOSTED_SYNTHETIC_ROUTINE_COLLECTOR', record=ref(path)))
         return path
     finally:
@@ -413,6 +429,47 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
     baseline_policy['actual_config_sha256'] = backend.host.normalize_observation(running,
         backend.host.docker_image_inspect(running['Image']), backend.host.copy_container_json(cid))['actual_config_sha256']
     baseline_path = save(work, 'baseline-running-policy.json', baseline_policy)
+    deployment_path = None
+    aged_now = datetime.now(timezone.utc) + timedelta(hours=48)
+    if json.loads(old_record.read_bytes())['schema_version'] == 'routine-candidate-acceptance/1':
+        # The running baseline was created/authorized/started/accepted above by
+        # the formal executor, with a fresh production-domain test grant. Use
+        # the existing manual finalizer to collect that exact actual instance.
+        old_routine = load(old_source, '04_scripts/runtime/routine_release.py', '_original_deployment_collector')
+        baseline.spec['policy_output'] = str(baseline_path)
+        baseline.request['production'] = baseline.spec
+        record = json.loads(old_record.read_bytes())
+        image = old_routine.image_identity(backend.engine, asset_old['image_id'], baseline.binding,
+                                          baseline.contract['service_id'])
+        checkpoint = dict(schema_version='routine-deployment-result/1', **image, ci_run=record['ci_run'],
+            ui_acceptance_mode='MANUAL', stage='production', result=old_routine.WAITING,
+            candidate_acceptance='PASS', deployed_at=running['Created'],
+            previous_release=dict(commit=record['base_commit']), instance=baseline.checkpoint(),
+            runtime_preflight=baseline.preflight(), production_health=baseline.health(), http=baseline.http())
+        deployed = old_routine.finish_manual(baseline, image, checkpoint, stage='production',
+            decision='PASS', operator='SYNTHETIC_TEST_MAINTAINER_NOT_PRODUCTION_APPROVAL', ci_run=record['ci_run'])
+        assert deployed['result'] == 'PASS' and deployed['production_smoke'] == 'PASS'
+        deployment_path = save(work, 'original-accepted-deployment.json', deployed)
+        # Control ONLY current Review evaluation. Original timestamps, Docker
+        # clocks and fresh execution-grant issuance/expiry use real UTC time.
+        original_policy = load(old_source, '04_scripts/runtime/release_reversibility.py', '_aged_original_review_policy')
+        original_pre = load(old_source, '04_scripts/runtime/pre_release_runtime.py', '_aged_original_pre')
+        original_risk = original_pre.classify_release(old_source, record['base_commit'], record['commit'], PROJECT)
+        try:
+            original_policy.apply_review(original_risk, record['maintainer_risk_review'], identity(old_source), now=aged_now)
+        except ValueError as exc:
+            assert str(exc) == 'INVALID_RISK_REVIEW_TIME'
+        else:
+            raise AssertionError('Old Review unexpectedly fresh at the controlled current clock')
+
+    def current_review_clock(selected):
+        original = selected.pre.apply_maintainer_review
+        review_policy = load(tool, '04_scripts/runtime/release_reversibility.py', '_current_controlled_review_policy')
+        def apply(risk, review, main):
+            if deployment_path is None:
+                return original(risk, review, main)
+            return review_policy.apply_review(risk, review, main, now=aged_now)
+        selected.pre.apply_maintainer_review = apply
     evidence, recovery_policy, fresh, sandbox, network = rehearsal(work, backend, baseline_path, cid, sources, values, production_key)
     target_spec, _ = instance(work, 'target', target_source, target_evidence, target_record, backend.host, backend.engine,
         allocation, sources, values, production_key_id, production_key)
@@ -421,7 +478,8 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
     artifact = dict(commit=asset_old['commit'], tree=asset_old['tree'], image_id=asset_old['image_id'])
     old_asset = dict(artifact, image_location='LOCAL_IMAGE_ONLY', registry_digest=None,
         release=ref(save(work, 'source-release.json', dict(git_commit=asset_old['commit'], git_tree=asset_old['tree'],
-            image_id=asset_old['image_id'], release_id=backend.host.copy_container_json(cid)['release_id']))),
+            image_id=asset_old['image_id'], release_id=backend.host.copy_container_json(cid)['release_id'],
+            **({'accepted_deployment': ref(deployment_path)} if deployment_path else {})))),
         runtime_config=ref(save(work, 'source-config.json', dict(artifact=artifact,
             namespace=dict(compose_project=running['Config']['Labels']['com.docker.compose.project'], container_name='spread-dashboard', host_ports=[18571]),
             compose=ref(Path(baseline.spec['compose'])), environment=ref(Path(baseline.spec['environment']))))),
@@ -437,7 +495,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
     risk = backend.pre.classify_release(tool, base['commit'], target['commit'], PROJECT)
     review_module = load(tool, '04_scripts/runtime/release_reversibility.py', '_execution_fixture_review')
     review = dict(reviewer='SYNTHETIC_TEST_MAINTAINER_NOT_PRODUCTION_APPROVAL',
-        timestamp=datetime.now(timezone.utc).isoformat(), base=base, target=target,
+        timestamp=(aged_now if deployment_path else datetime.now(timezone.utc)).isoformat(), base=base, target=target,
         authoritative_main=identity(tool), machine_findings=review_module.machine_findings(risk),
         maintainer_classification='HIGH_RISK', reason='Isolated Hosted fixture only; no human/production approval claimed')
     request = dict(schema_version='production-release-request/1', project_id=PROJECT, current=old_asset, previous=old_asset,
@@ -460,6 +518,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 'start_failure', 'acceptance_failure', 'runtime_identity_failure', 'health_failure_threshold', 'observation_ended_unhealthy']))
     plan_path = work / 'deployment_plan.json'
     preparation = execution.HostBackend(directory(work / 'preparation-receipts', 0o700))
+    current_review_clock(preparation)
     # SAME safe preparation entry used by create_deployment_plan --high-risk-input.
     # Expired target input is revalidated against the existing image before any
     # stop; later cases consume the fresh record without repeating its build.
@@ -511,8 +570,9 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 bad['target']['image_id'] = bad['candidate_image_id'] = 'sha256:' + '0' * 64
                 execution.seal_plan(bad, other_path)
             try:
-                rejected = execution.execute_verified_plan(other_path,
-                    execution.HostBackend(directory(scope / 'receipt', 0o700)))
+                negative_backend = execution.HostBackend(directory(scope / 'receipt', 0o700))
+                current_review_clock(negative_backend)
+                rejected = execution.execute_verified_plan(other_path, negative_backend)
                 assert name == 'wrong_image' and rejected['result'] == 'FAIL'
                 assert rejected['source'] == 'PRESERVED_NOT_STOPPED'
             except execution.ExecutionError:
@@ -548,6 +608,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 session.spec['key_path'] = original_key
     backend_type = {'NONE': execution.HostBackend, 'POST_START': InjectedFailure, 'AUTHORIZATION': AuthorizationFailure}[injection]
     actual_backend = backend_type(directory(work / 'execution-receipts', 0o700))
+    current_review_clock(actual_backend)
     try:
         result = execution.execute_verified_plan(plan_path, actual_backend)
         if injection != 'NONE':
@@ -613,6 +674,7 @@ def main():
         trust = dict(schema_version='production-runtime-trust/1', keys=public, revoked_key_ids=[], revoked_grant_ids=[])
         project = 'hosted-high-risk-' + uuid.uuid4().hex
         old_source = clone(work, 'old-source', OLD, trust, project)
+        original_base = clone(work, 'original-base', 'c8d83d60c5b9a1e99148beecbaa13b68045d65fa', trust, project)
         target_source = clone(work, 'target-source', TARGET, trust, project)
         tool = clone(work, 'tool-source', candidate['commit'], trust)
         for source in (old_source, target_source):
@@ -626,7 +688,7 @@ def main():
         candidate_key_path = keys['candidate_validation'][2]
         old_evidence, old_record = validate(old_source, work, candidate_key_path, trust)
         routine_record = collect_routine_acceptance(old_source, tool,
-            directory(work/'routine-collector', 0o700), old_evidence, candidate_key_path)
+            directory(work/'routine-collector', 0o700), old_evidence, candidate_key_path, original_base)
         target_evidence, target_record = validate(target_source, work, candidate_key_path, trust, ttl_seconds=1)
         expired_bytes = target_record.read_bytes()
         expired = json.loads(expired_bytes)['payload']

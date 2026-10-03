@@ -270,6 +270,10 @@ class HostBackend:
         self.engine = load(ROOT, '04_scripts/runtime/validate_target_runtime.py', '_high_risk_engine')
         self.pre = load(ROOT, '04_scripts/runtime/pre_release_runtime.py', '_high_risk_pre')
         self.routine = load(ROOT, '04_scripts/runtime/routine_release.py', '_high_risk_transport')
+        self.contract_module = contract()
+        self.tool_root = ROOT
+        self.load_application = load
+        self.validate_plan_intent = lambda plan: validate_intent(plan, self.contract_module)
         self.sessions = {}
         self.envelopes = {}
         self.cleanup_scope = None
@@ -279,7 +283,14 @@ class HostBackend:
         require(hashlib.sha256(raw).hexdigest() == ref['sha256'], 'REFERENCED_INPUT_CHANGED')
         return self.host._json(raw)
 
-    def resolve_acceptance(self, policy, role, asset, *, allow_expired=False):
+    def historical_consumer(self, plan, role, policy):
+        if (role == 'primary_rollback' and plan is not None and plan.get('schema_version') == VERSION and
+                self.read(policy['candidate_record']).get('schema_version') == 'routine-candidate-acceptance/1'):
+            module = load(ROOT, '04_scripts/runtime/historical_primary_rollback.py', '_primary_rollback_consumer')
+            return module.issuer_for(module.PrimaryRollbackContext(self, plan))
+        return None
+
+    def resolve_acceptance(self, policy, role, asset, *, allow_expired=False, plan=None):
         """Verify the original protected reference by role and record family.
 
         This is a read-only projection, not a replacement record or grant.
@@ -305,7 +316,8 @@ class HostBackend:
             # Reuse the existing recovery-first host dispatcher. Recovery is
             # explicitly forbidden above; it must take its Routine branch,
             # including protected source, risk, identity and manifest checks.
-            verified, _ = self.host._validated_candidate_record(policy)
+            consumer = self.historical_consumer(plan, role, policy) or self.host
+            verified, _ = consumer._validated_candidate_record(policy)
             require(verified == document, 'ACCEPTANCE_CHANGED_DURING_VALIDATION')
             result = dict(family=family, reference=ref, signature_verified=False,
                           trust_source='protected-file', expires_at=None)
@@ -388,7 +400,7 @@ class HostBackend:
             specs[role], policies[role] = spec, policy
             # Validate BOTH supplied inputs before either role can invoke an
             # expensive image validator. Expiry alone is handled later.
-            acceptances[role] = self.resolve_acceptance(policy, role, asset, allow_expired=True)
+            acceptances[role] = self.resolve_acceptance(policy, role, asset, allow_expired=True, plan=plan)
             self.require_historical_reference(plan, acceptances[role])
 
         def save(name, value):
@@ -465,7 +477,7 @@ class HostBackend:
         for role, seconds in record_consumption_windows(plan).items():
             spec = self.read(plan['instances'][role])
             policy = self.read(spec['policy'])
-            acceptance = self.resolve_acceptance(policy, role, plan[role])
+            acceptance = self.resolve_acceptance(policy, role, plan[role], plan=plan)
             self.require_historical_reference(plan, acceptance)
             if acceptance['expires_at'] is not None:
                 expirations.append((role, seconds, acceptance['expires_at']))
@@ -527,12 +539,17 @@ class HostBackend:
         source = self.host._protected_path(Path(spec['source_root']), directory=True)
         require(self.pre.require_source(self.host, self.engine, source_root=source) ==
                 (asset['commit'], asset['tree']), 'APPLICATION_SOURCE_CHANGED')
-        issuer = load(source, '09_deploy/runtime_identity/host_authorization.py', '_high_risk_issuer_' + role)
+        spec_policy = self.read(spec['policy'])
+        historical = self.historical_consumer(plan, role, spec_policy)
+        issuer = historical or load(source, '09_deploy/runtime_identity/host_authorization.py', '_high_risk_issuer_' + role)
         self.engine._write_new(self.output / ('issuer-loading-' + role + '.json'), self.engine._canonical(dict(
             tool_root=str(ROOT), issuer_kind='module', issuer_module=issuer.__name__,
-            issuer_file=issuer.__file__, issuer_source_commit=asset['commit'], issuer_source_tree=asset['tree'],
+            issuer_file=issuer.__file__, issuer_source_commit=plan['tool']['commit'] if historical else asset['commit'],
+            issuer_source_tree=plan['tool']['tree'] if historical else asset['tree'],
+            application_commit=asset['commit'], application_tree=asset['tree'],
+            acceptance_consumption='PROTECTED_HISTORICAL_PRIMARY_ROLLBACK' if historical else 'CURRENT_APPLICATION_BOUND',
             transport_file=self.routine.__file__, observation_file=str(ROOT / '09_deploy/runtime_identity/runtime_observation.py'))))
-        require(Path(issuer.__file__).resolve() == source / '09_deploy/runtime_identity/host_authorization.py',
+        require(Path(issuer.__file__).resolve() == (ROOT if historical else source) / '09_deploy/runtime_identity/host_authorization.py',
                 'APPLICATION_ISSUER_LOADING_SOURCE_CHANGED')
         validate_issuer_api(issuer)
         issuer.require_protected_authority_source()
@@ -553,7 +570,7 @@ class HostBackend:
         require((policy['approved_commit'], policy['approved_tree'], policy['image_id']) ==
                 (asset['commit'], asset['tree'], asset['image_id']), 'INSTANCE_POLICY_IDENTITY')
         require(policy['approved_source_root'] == str(source), 'ISSUER_SOURCE_BINDING')
-        self.resolve_acceptance(policy, role, asset)
+        self.resolve_acceptance(policy, role, asset, plan=plan)
         # This is the existing production acceptance consumer, not a new
         # Routine rollback-assets record bound to a HIGH_RISK forward delta.
         issuer._validated_candidate_record(policy)
