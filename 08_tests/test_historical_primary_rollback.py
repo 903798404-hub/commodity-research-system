@@ -155,7 +155,17 @@ def test_hosted_clock_reaches_original_review_parser_but_not_grant_clock(chain):
         policy.apply_review(chain.risk, now_review, chain.risk['target'],
                             now=datetime.fromisoformat(now_review['timestamp']))
         assert policy.datetime.now(timezone.utc) - datetime.now(timezone.utc) > timedelta(hours=47)
+        # Exercise the actual trusted source-byte reader which bypasses
+        # loader.exec_module (the original Hosted failure's exact call path).
+        pre = execution.load(execution.ROOT, '04_scripts/runtime/pre_release_runtime.py', '_clocked_pre')
+        trusted_policy = pre._load('04_scripts/runtime/release_reversibility.py', '_clocked_trusted_parser')
+        assert trusted_policy.datetime is fixture.ReviewClock
+        current_review = copy.deepcopy(now_review)
+        current_review['timestamp'] = fixture.ReviewClock.now(timezone.utc).isoformat()
+        pre.apply_maintainer_review(chain.risk, current_review, chain.risk['target'])
+        with pytest.raises(ValueError, match='INVALID_RISK_REVIEW_TIME'):
+            pre.apply_maintainer_review(chain.risk, now_review, chain.risk['target'])
         grant = execution.load(execution.ROOT, '09_deploy/runtime_identity/host_authorization.py', '_unclocked_signer')
         assert grant.datetime is datetime
     finally:
-        fixture.importlib.util.spec_from_file_location = original
+        original()

@@ -21,6 +21,7 @@ import shutil
 import sys
 import time
 import uuid
+from types import ModuleType
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
@@ -50,12 +51,28 @@ class ReviewClockLoader(importlib.machinery.SourceFileLoader):
 
 def install_review_clock():
     original = importlib.util.spec_from_file_location
+    original_profile = sys.getprofile()
     def selected(name, location, *args, **kwargs):
         if location is not None and Path(location).name == 'release_reversibility.py':
             kwargs['loader'] = ReviewClockLoader(name, str(location))
         return original(name, location, *args, **kwargs)
     importlib.util.spec_from_file_location = selected
-    return original
+    def loaded_module(frame, event, value):
+        # Trusted host readers deliberately exec checked source bytes instead
+        # of calling loader.exec_module. Observe their returned Review module
+        # too; do not replace a parser, its checks, its return value or any
+        # non-Review clock. The original source has already executed.
+        if event == 'return' and isinstance(value, ModuleType):
+            path = getattr(value, '__file__', None)
+            if path is not None and Path(path).name == 'release_reversibility.py':
+                value.datetime = ReviewClock
+        if original_profile is not None:
+            original_profile(frame, event, value)
+    sys.setprofile(loaded_module)
+    def restore():
+        sys.setprofile(original_profile)
+        importlib.util.spec_from_file_location = original
+    return restore
 
 
 def load(root, relative, name):
@@ -648,7 +665,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
             assert 'target_start' not in result['steps']
             assert json.loads((work / 'unauthorized-instance-state.json').read_bytes())['started'] is False
         assert not sandbox.exists()
-        return dict(status='PASS', path=injection,
+        return dict(status='PASS', case=work.name, path=injection,
                     tool=identity(tool), old=asset_old, target=asset_target,
                     plan=ref(plan_path), result=ref(actual_backend.output / 'execution-result.json'),
                     candidate_record=refreshed_record,
@@ -730,11 +747,12 @@ def main():
         receipt['synthetic_assets'] = dict(tool=identity(tool), old=identity(old_source), target=identity(target_source),
             old_image=old_evidence['image_id'], target_image=target_evidence['image_id'])
         receipt['paths'] = []
-        for name, injected in (('success', 'NONE'), ('failure', 'POST_START'), ('authorization', 'AUTHORIZATION')):
+        for name, injected in (('success', 'NONE'), ('failure', 'POST_START'),
+                               ('authorization', 'AUTHORIZATION'), ('aged-authorization', 'AUTHORIZATION')):
             scope = directory(work / name, 0o700)
             key_id, _, key_path = keys['production']
             receipt['paths'].append(case(scope, tool, old_source, target_source, old_evidence, target_evidence,
-                routine_record if injected != 'AUTHORIZATION' else old_record,
+                old_record if name == 'authorization' else routine_record,
                 target_record, key_id, key_path, injection=injected, candidate_key_path=keys['candidate_validation'][2]))
             target_record = Path(receipt['paths'][-1]['candidate_record']['path'])
         assert (work / 'target-source-signed-record.json').read_bytes() == expired_bytes
@@ -743,7 +761,7 @@ def main():
         receipt.update(status='FAIL', failure_type=type(exc).__name__, failure=str(exc)[-1800:])
         raise
     finally:
-        importlib.util.spec_from_file_location = original_review_loader
+        original_review_loader()
         for path in paths:
             path.unlink()
         receipt['temporary_private_keys_removed'] = all(not path.exists() for path in paths)
@@ -751,7 +769,7 @@ def main():
         public_evidence = args.output.with_suffix('')
         public_evidence.mkdir(mode=0o755)
         receipt['evidence_index'] = []
-        for scope_name in ('success', 'failure', 'authorization', 'routine-collector'):
+        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'routine-collector'):
             scope = work / scope_name
             if not scope.exists():
                 continue
