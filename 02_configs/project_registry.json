@@ -1404,7 +1404,8 @@
         "09_deploy/spread_release/high_risk_execution.py",
         "09_deploy/runtime_identity/host_authorization.py",
         "08_tests/shared/high_risk_execution_docker_e2e.py",
-        "04_scripts/runtime/说明.md"
+        "04_scripts/runtime/说明.md",
+        "08_tests/test_project_registry.py"
       ],
       "forbidden_paths": [
         "03_src", "05_apps", "01_data", "06_outputs", "10_logs",

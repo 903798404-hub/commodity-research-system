@@ -1485,7 +1485,24 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
     assert by_id['release-refresh'] == RELEASE_REFRESH_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure', 'release-refresh'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure', 'release-refresh', 'rollback-evidence-lifecycle'}
+
+
+def test_historical_rollback_registration_preserves_exact_consumer_and_production_boundaries():
+    _, project = registry.select_project(ROOT, 'rollback-evidence-lifecycle')
+    assert project['change_class'] == 'shared' and project['runtime_target'] == 'library_only'
+    assert project['owned_paths'] == ['04_scripts/runtime/historical_primary_rollback.py',
+                                      '08_tests/test_historical_primary_rollback.py']
+    assert set(project['shared_dependencies']) == {
+        '09_deploy/spread_release/high_risk_execution.py', '09_deploy/runtime_identity/host_authorization.py',
+        '08_tests/shared/high_risk_execution_docker_e2e.py', '04_scripts/runtime/说明.md',
+        '08_tests/test_project_registry.py'}
+    assert project['forbidden_paths'] == ['03_src', '05_apps', '01_data', '06_outputs', '10_logs',
+        '02_configs/production_runtime_trust.json', '02_configs/runtime_contracts',
+        '09_deploy/runtime_identity/production_authorization.schema.json',
+        '09_deploy/runtime_identity/candidate_validation_record.py']
+    assert '08_tests/test_historical_primary_rollback.py' in project['required_tests']
+    assert project['future_owned_paths'] == project['future_required_tests'] == []
 
 
 def test_production_infrastructure_registration_has_only_exact_new_ownership():
