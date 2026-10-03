@@ -775,6 +775,15 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                     rollback_timeout_seconds=plan['policy']['rollback_timeout_seconds'],
                     captured_at=datetime.now(timezone.utc).isoformat(),monotonic_ns=time.monotonic_ns(),
                     scope='Before disposable fixture teardown; real executor retained restored old service'))
+                timeout_bytes = (actual_backend.output / 'execution-result.json').read_bytes()
+                supplemental = actual_backend.collect_retained_replacement(plan_path,
+                    actual_backend.output / 'execution-result.json', Path(old_asset['release']['path']),
+                    work / 'independent-post-timeout-acceptance')
+                assert (actual_backend.output / 'execution-result.json').read_bytes() == timeout_bytes
+                assert json.loads(timeout_bytes)['rollback'] == 'FAIL'
+                save(work, 'original-timeout-preserved.json', dict(status='PASS',
+                    original=ref(actual_backend.output / 'execution-result.json'),
+                    independent_current_acceptance=supplemental, original_failure_unchanged=True))
             else:assert result['rollback']=='PASS'
             assert actual_backend.sessions['primary_rollback'].container_id != cid
             assert (actual_backend.envelopes['primary_rollback']['payload']['grant_id'] !=
