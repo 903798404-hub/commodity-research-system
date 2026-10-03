@@ -426,6 +426,28 @@ class HostBackend:
         HostBackend.accept(attempt, plan, 'primary_rollback')
         return attempt.acceptance_timeline
 
+    def _retained_preservation_sources(self, session):
+        # Resolve the one declared logging role from the SAME bound manifest.
+        # Do not guess /runtime/logs: the spread contract uses /runtime/10_logs.
+        logging = [item for item in session.contract['runtime_roots'] if item['role'] == 'logs']
+        require(len(logging) == 1 and logging[0]['access'] == 'rw', 'DECLARED_LOG_ROOT_REQUIRED')
+        target = logging[0]['container_path']
+        mounts = session.current_policy['mounts']
+        declared = [m for m in mounts if m['target'] == target]
+        require(len(declared) == 1 and declared[0]['read_only'] is False, 'DECLARED_LOG_MOUNT_REQUIRED')
+        sources = sorted({m['source'] for m in mounts
+            if m['target'] not in {session.current_policy['grant_container_directory'], target} and
+               not m['target'].startswith('/run/secrets/')})
+        return sources, dict(target=target, source=declared[0]['source'],
+                             invariance_claimed=False, reason='Declared writable logging role')
+
+    def _record_retained_preservation(self, destination, before, after, sources, excluded_log):
+        self.engine._write_new(destination / 'source-preservation.json', self.engine._canonical(dict(
+            before=before, after=after, scope=sources, excluded_log=excluded_log,
+            whole_database_invariance_claimed=False,
+            changed_sources=[s for s in sources if before[s] != after[s]])))
+        require(before == after, 'SUPPLEMENTAL_ACCEPTANCE_CHANGED_DATA')
+
     def collect_retained_replacement(self, plan_path, result_path, release_path, destination):
         """Separate current facts; existing acceptance/recovery consumers, no grant.
 
@@ -445,15 +467,15 @@ class HostBackend:
         require(result['instances']['primary_rollback']['container_id'] == session.container_id,
                 'RETAINED_INSTANCE_IDENTITY_CHANGED')
         preservation = load(ROOT, '09_deploy/runtime_identity/recovery_namespace.py', '_retained_current_preservation')
-        sources = sorted({m['source'] for m in session.current_policy['mounts']
-                          if m['target'] not in {'/run/market-data-grants', '/runtime/logs'} and
-                          not m['target'].startswith('/run/secrets/')})
+        sources, excluded_log = self._retained_preservation_sources(session)
         before = {s: preservation.tree_identity(self.host, s) for s in sources}
         # This is the official base implementation, not a fault injector or a
         # copied PASS. Every real IO gate is rerun for the retained instance.
         supplemental_timeline = self._accept_retained_instance(plan, destination)
         after = {s: preservation.tree_identity(self.host, s) for s in sources}
-        require(before == after, 'SUPPLEMENTAL_ACCEPTANCE_CHANGED_DATA')
+        # Preserve both complete observations even when the invariance gate
+        # rejects. A failed receipt must identify the actual source differences.
+        self._record_retained_preservation(destination, before, after, sources, excluded_log)
         current = self.host.docker_inspect(session.container_id)
         def save(name, value):
             path = destination / name
@@ -466,7 +488,8 @@ class HostBackend:
         probes = {}
         values = dict(preflight=supplemental_timeline, health=current['State'],
             consumer=dict(url=session.url(), http=session.http(), smoke=session.smoke()),
-            data_unchanged=dict(before=before, after=after, scope=sources, whole_database_invariance_claimed=False))
+            data_unchanged=dict(before=before, after=after, scope=sources, excluded_log=excluded_log,
+                                whole_database_invariance_claimed=False))
         require(values['consumer']['http'] == values['consumer']['smoke'] == 'PASS', 'SUPPLEMENTAL_CONSUMER_FAILED')
         asset = plan['primary_rollback']
         for name, value in values.items():

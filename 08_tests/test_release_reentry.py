@@ -129,3 +129,58 @@ def test_supplemental_acceptance_has_new_evidence_namespace_not_new_instance(mon
     with pytest.raises(FileExistsError):
         backend._accept_retained_instance(plan, destination)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('fault', [None, 'missing_role', 'wrong_mount', 'readonly_log', 'business_alias'])
+def test_retained_preservation_uses_declared_log_role_not_writable_store_bypass(fault):
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    session = SimpleNamespace(contract={'runtime_roots': [
+        dict(role='logs', access='rw', container_path='/runtime/10_logs')]},
+        current_policy=dict(grant_container_directory='/run/market-data-grants', mounts=[
+            dict(source='/stores/logs', target='/runtime/10_logs', read_only=False),
+            dict(source='/stores/manual-cnf', target='/runtime/import-profit/operational/cnf', read_only=False),
+            dict(source='/stores/results', target='/runtime/import-profit/operational/am-results', read_only=False),
+            dict(source='/stores/snapshots', target='/runtime/capture-snapshots', read_only=False),
+            dict(source='/stores/snapshots', target='/runtime/import-profit/snapshots', read_only=True),
+            dict(source='/stores/data', target='/runtime/01_data', read_only=True),
+            dict(source='/stores/grants', target='/run/market-data-grants', read_only=True),
+            dict(source='/stores/secrets/tankan.env', target='/run/secrets/tankan.env', read_only=True)]))
+    if fault == 'missing_role':
+        session.contract['runtime_roots'] = []
+    elif fault == 'wrong_mount':
+        session.current_policy['mounts'][0]['target'] = '/runtime/logs'
+    elif fault == 'readonly_log':
+        session.current_policy['mounts'][0]['read_only'] = True
+    elif fault == 'business_alias':
+        session.current_policy['mounts'].append(dict(source='/stores/logs', target='/runtime/06_outputs', read_only=False))
+    if fault in {'missing_role', 'wrong_mount', 'readonly_log'}:
+        with pytest.raises(execution.ExecutionError, match='DECLARED_LOG_'):
+            backend._retained_preservation_sources(session)
+    else:
+        sources, log = backend._retained_preservation_sources(session)
+        assert set(sources) == {'/stores/manual-cnf', '/stores/results', '/stores/snapshots', '/stores/data'} | (
+            {'/stores/logs'} if fault == 'business_alias' else set())
+        assert log == dict(target='/runtime/10_logs', source='/stores/logs', invariance_claimed=False,
+                           reason='Declared writable logging role')
+
+
+@pytest.mark.parametrize('changed', [False, True])
+def test_retained_business_data_gate_preserves_failure_observations(tmp_path, changed):
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.engine = execution.load(execution.ROOT, '04_scripts/runtime/validate_target_runtime.py',
+                                    '_retained_observation_writer')
+    before = {'/stores/manual-cnf': {'quote.json': {'sha256': '1' * 64, 'st_mtime_ns': 1}}}
+    after = copy.deepcopy(before)
+    if changed:
+        after['/stores/manual-cnf']['quote.json']['sha256'] = '2' * 64
+    log = dict(target='/runtime/10_logs', source='/stores/logs', invariance_claimed=False)
+    if changed:
+        with pytest.raises(execution.ExecutionError, match='SUPPLEMENTAL_ACCEPTANCE_CHANGED_DATA'):
+            backend._record_retained_preservation(tmp_path, before, after, list(before), log)
+    else:
+        backend._record_retained_preservation(tmp_path, before, after, list(before), log)
+    observation = json.loads((tmp_path / 'source-preservation.json').read_bytes())
+    assert observation['before'] == before and observation['after'] == after
+    assert observation['changed_sources'] == (list(before) if changed else [])
+    assert observation['scope'] == list(before) and observation['excluded_log'] == log
+    assert observation['whole_database_invariance_claimed'] is False
