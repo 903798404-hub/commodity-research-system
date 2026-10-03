@@ -46,6 +46,8 @@ class PrimaryRollbackContext:
                            'current retained deployment')
         previous = b.verify_execution_plan(association['execution_plan'])
         result = b.read(association['execution_result'])
+        require(result.get('plan_sha256') == association['execution_plan']['sha256'],
+                'REPLACEMENT_EXECUTION_PLAN_BINDING')
         require(previous['primary_rollback'] == asset and previous['source'] == asset and
                 previous['source_container_id'] != p['source_container_id'], 'REPLACEMENT_PLAN_ASSET_BINDING')
         # The protected original executor must have reached a real fresh rollback.

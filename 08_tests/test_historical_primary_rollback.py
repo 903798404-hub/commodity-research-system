@@ -158,7 +158,7 @@ def replacement(chain):
         dict(transport=dict(policy_output=policy_ref['path'])))
     prior = chain.put(prior['path'], original_plan)
     now = datetime.now(timezone.utc)
-    result = dict(result='FAIL', rollback='PASS', instances=dict(primary_rollback=dict(
+    result = dict(result='FAIL', rollback='PASS', plan_sha256=prior['sha256'], instances=dict(primary_rollback=dict(
         container_id=p['source_container_id'], image_id=p['source']['image_id'], application_commit=p['source']['commit'],
         policy_path=policy_ref['path'], grant_id='actual-new-grant')),
         timeline=[dict(step=s, status='PASS') for s in ('preconditions', 'recovery_evidence_before_stop', 'rollback_assets',
@@ -196,7 +196,8 @@ def test_proven_fresh_rollback_associates_B_without_rewriting_A(replacement):
 @pytest.mark.parametrize('fault', ['no_proof', 'extra_field', 'unsealed_plan', 'wrong_previous_asset',
     'unstarted', 'wrong_current_cid', 'wrong_current_policy', 'grant_reused', 'wrong_observed_image',
     'wrong_observed_target', 'wrong_history', 'changed_acceptance_ref', 'sandbox_as_deployment',
-    'changed_current_config', 'timeout_without_independent_acceptance', 'timeout_rewritten_as_success'])
+    'changed_current_config', 'timeout_without_independent_acceptance', 'timeout_rewritten_as_success',
+    'wrong_execution_plan_hash'])
 def test_unproven_same_image_replacement_and_bad_links_reject(replacement, fault):
     x, c = replacement, replacement.chain
     if fault == 'no_proof': del x.release['current_deployment']
@@ -204,6 +205,7 @@ def test_unproven_same_image_replacement_and_bad_links_reject(replacement, fault
     if fault == 'unsealed_plan':
         def rejected(*a): raise ValueError('manifest missing')
         c.backend.verify_execution_plan = rejected
+    if fault == 'wrong_execution_plan_hash': x.result['plan_sha256'] = '0'*64
     if fault == 'wrong_previous_asset': x.prior['primary_rollback']['image_id'] = 'sha256:'+'0'*64
     if fault == 'unstarted': x.result['timeline'][-1]['status'] = 'FAIL'
     if fault == 'wrong_current_cid': x.result['instances']['primary_rollback']['container_id'] = '0'*64
