@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -103,6 +104,54 @@ def _interpret(name, *args, **kwargs):
         return getattr(module, name)(*args, **kwargs)
     except module.ObservationError as exc:
         raise ValidationError(str(exc)) from exc
+
+
+def _candidate_issuer_api(host, contract, *, external_trust=False):
+    """Check the application-pinned signing ABI before allocating a candidate.
+
+    Pure declaration interpretation belongs to this independently versioned
+    tool. Authority and grant format continue to belong to the application
+    issuer; an old issuer is never upgraded by replacing its module.
+    """
+    grant_keywords = dict(expected_policy_path=Path('/unused'), key_path=Path('/unused'),
+        grant_path=Path('/unused'), grant_dir=Path('/unused'), role='candidate_validation', ttl_seconds=900)
+    if external_trust:
+        grant_keywords['external_candidate_trust_path'] = Path('/unused')
+    calls = dict(create_candidate_scope=(([],), {}),
+        normalize_observation=(({}, {}, {}), {}), validate_observation=(({}, {}), {'role': 'candidate_validation'}),
+        _validate_runtime_mounts=(({}, [], {}), {}), _validate_v3_runtime=(({}, {}, {}, 'unused'), {}),
+        _mounts=(({},), {}), issue_execution_grant=(('unused',), grant_keywords))
+    if '/run/secrets/market-data-service.json' in contract['_secret_declarations'].values():
+        calls['issue_application_service_credential'] = (('unused',), dict(
+            expected_policy_path=Path('/unused'), credential_path=Path('/unused'), role='candidate_validation'))
+    for name, (args, kwargs) in calls.items():
+        method = vars(host).get(name)
+        if not callable(method):
+            raise ValidationError('UNSUPPORTED_APPLICATION_ISSUER_API: ' + name)
+        try:
+            inspect.signature(method).bind(*args, **kwargs)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError('UNSUPPORTED_APPLICATION_ISSUER_API: ' + name) from exc
+
+
+def _issue_candidate_grant(host, *args, external_candidate_trust_path=None, **kwargs):
+    # Legacy consumers only support embedded candidate trust. Omit an unused
+    # new keyword, not a missing validation. Requested external trust requires
+    # the explicitly checked newer ABI.
+    if external_candidate_trust_path is not None:
+        kwargs['external_candidate_trust_path'] = external_candidate_trust_path
+    return host.issue_execution_grant(*args, **kwargs)
+
+
+def _packaging_lifecycle_modules(contract):
+    names = ('lifecycle', 'lifecycle_events', 'lifecycle_reconciler', 'lifecycle_store')
+    declared = {item['path'] for item in contract['source_inputs']}
+    present = [name for name in names if '03_src/agri_research_agent/import_profit/' + name + '.py' in declared]
+    if present and len(present) != len(names):
+        raise ValidationError('partial lifecycle packaging declaration is unsupported')
+    # A legacy application has no such modules or signed packaging claim.
+    # Its own complete image import graph and all 13 required probes still run.
+    return present
 
 
 def repository_root() -> Path:
@@ -1105,7 +1154,9 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         if ephemeral_candidate_trust:
             _ephemeral_candidate_identity(work, contract)
         source_compose = validate_source_compose(root, contract)
-        contract["_secret_declarations"] = host.declared_secret_targets(contract, source_compose)
+        contract["_secret_declarations"] = _interpret('declared_secret_targets', contract, source_compose)
+        _candidate_issuer_api(host, contract, external_trust=ephemeral_candidate_trust)
+        lifecycle_modules = _packaging_lifecycle_modules(contract)
         if existing_image_id is None:
             context = work / "context"
             create_archive_context(root, context, binding)
@@ -1197,7 +1248,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 credential = next(item["source"] for item in scope["mounts"] if item["target"] == "/run/secrets/market-data-service.json")
                 host.issue_application_service_credential(container_id, expected_policy_path=policy_path,
                     credential_path=credential, role="candidate_validation")
-            host.issue_execution_grant(container_id, expected_policy_path=policy_path,
+            _issue_candidate_grant(host, container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
                                        grant_dir=grant_dir, role="candidate_validation", ttl_seconds=900,
                                        external_candidate_trust_path=external_trust)
@@ -1215,7 +1266,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     label="application-service-context")
             probes["runtime_identity"] = "PASS"
             lifecycle_imports = {}
-            for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store"):
+            for name in lifecycle_modules:
                 module = "agri_research_agent.import_profit." + name
                 _exec(container_id, _python_module_probe_argv(module), label="image-import:" + module)
                 lifecycle_imports[name] = "PASS"
@@ -1266,7 +1317,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 final_container, image, _strict_json(release_raw, "RELEASE")), policy, container_id)
             if set(probes) != REQUIRED_PROBES or any(value != "PASS" for value in probes.values()):
                 raise ValidationError("required probe set was not actually completed")
-            return {
+            evidence = {
                 "schema_version": EVIDENCE_SCHEMA, "binding": binding,
                 "TARGET_RUNTIME_STATIC_VALIDATION": "PASS",
                 "TARGET_RUNTIME_CONTAINER_VALIDATION": "PASS", "image_id": image_id,
@@ -1302,6 +1353,12 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             }
+            if not lifecycle_modules:
+                # The existing strict record contract makes this additional
+                # modern packaging claim optional. Never invent PASS for
+                # nonexistent modules or change the signed record schema.
+                del evidence['spread_runtime_packaging']
+            return evidence
         finally:
             if container_id:
                 _docker("rm", "-f", container_id, check=False, timeout=120)

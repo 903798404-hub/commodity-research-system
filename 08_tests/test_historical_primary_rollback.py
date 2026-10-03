@@ -142,6 +142,118 @@ def test_current_tool_adapter_threads_context_without_mutating_issuer_globals():
     assert host.issue_execution_grant is consumer
 
 
+@pytest.fixture
+def replacement(chain):
+    p, b = chain.plan, chain.backend
+    original_plan = copy.deepcopy(p)
+    original_objects = copy.deepcopy(chain.objects)
+    request = chain.read(p['release_request'])
+    release = chain.read(request['current']['release'])
+    prior = chain.put('/protected/first-sealed-plan.json', original_plan)
+    b.verify_execution_plan = lambda reference: chain.read(reference)
+    p['source_container_id'] = 'd' * 64
+    issued = copy.deepcopy(chain.policy)
+    policy_ref = chain.put('/protected/restored-issued-policy.json', issued)
+    original_plan['instances']['primary_rollback'] = chain.put('/protected/first-spec.json',
+        dict(transport=dict(policy_output=policy_ref['path'])))
+    prior = chain.put(prior['path'], original_plan)
+    now = datetime.now(timezone.utc)
+    result = dict(result='FAIL', rollback='PASS', instances=dict(primary_rollback=dict(
+        container_id=p['source_container_id'], image_id=p['source']['image_id'], application_commit=p['source']['commit'],
+        policy_path=policy_ref['path'], grant_id='actual-new-grant')),
+        timeline=[dict(step=s, status='PASS') for s in ('preconditions', 'recovery_evidence_before_stop', 'rollback_assets',
+            'record_window_before_stop', 'rollback_create', 'rollback_authorize', 'rollback_start')])
+    result_ref = chain.put('/protected/first-failed-result.json', result)
+    obs = dict(schema_version='production-recovery-observation/1', result='PASS', method='fresh-recovery',
+        observed_at=now.isoformat(), base={k:p['source'][k] for k in ('commit','tree')},
+        target={k:p['target'][k] for k in ('commit','tree')}, old_image_id=p['source']['image_id'],
+        evidence=dict(instance=chain.put('/protected/current-instance.json', dict(container_id=p['source_container_id'])),
+            grant=chain.put('/protected/current-grant.json', dict(payload=dict(grant_id='actual-new-grant')))))
+    observation_ref = chain.put('/protected/post-rollback-observation.json', obs)
+    association = dict(execution_plan=prior, execution_result=result_ref, observation=observation_ref, policy=policy_ref)
+    release['current_deployment'] = chain.put('/protected/current-deployment.json', association)
+    request['current']['release'] = chain.put('/protected/new-retained-release.json', release)
+    p['release_request'] = chain.put('/protected/second-request.json', request)
+    p['source_policy'] = policy_ref
+    b.pre._risk_fields = runtime._risk_fields
+    b.pre.verify_recovery_observation = lambda *a: None  # Real verifier/crypto covered by owner Docker lane.
+    observed_calls = []
+    b.verify_current_instance = lambda *a: observed_calls.append(a)
+    return SimpleNamespace(chain=chain, original_objects=original_objects, association=association, release=release,
+        request=request, prior=original_plan, result=result, obs=obs, observed_calls=observed_calls)
+
+
+def test_proven_fresh_rollback_associates_B_without_rewriting_A(replacement):
+    x, c = replacement, replacement.chain
+    before = copy.deepcopy(c.objects)
+    history.PrimaryRollbackContext(c.backend, c.plan).verify(c.record, c.policy, Path('/source'))
+    assert c.objects == before
+    assert len(x.observed_calls) == 1 and x.observed_calls[0][0]['source_container_id'] == 'd'*64
+    for name, raw in x.original_objects.items():
+        assert c.objects[name] == raw
+
+
+@pytest.mark.parametrize('fault', ['no_proof', 'extra_field', 'unsealed_plan', 'wrong_previous_asset',
+    'unstarted', 'wrong_current_cid', 'wrong_current_policy', 'grant_reused', 'wrong_observed_image',
+    'wrong_observed_target', 'wrong_history', 'changed_acceptance_ref', 'sandbox_as_deployment',
+    'changed_current_config', 'timeout_without_independent_acceptance', 'timeout_rewritten_as_success'])
+def test_unproven_same_image_replacement_and_bad_links_reject(replacement, fault):
+    x, c = replacement, replacement.chain
+    if fault == 'no_proof': del x.release['current_deployment']
+    if fault == 'extra_field': x.association['current'] = True
+    if fault == 'unsealed_plan':
+        def rejected(*a): raise ValueError('manifest missing')
+        c.backend.verify_execution_plan = rejected
+    if fault == 'wrong_previous_asset': x.prior['primary_rollback']['image_id'] = 'sha256:'+'0'*64
+    if fault == 'unstarted': x.result['timeline'][-1]['status'] = 'FAIL'
+    if fault == 'wrong_current_cid': x.result['instances']['primary_rollback']['container_id'] = '0'*64
+    if fault == 'wrong_current_policy': x.result['instances']['primary_rollback']['policy_path'] = '/wrong'
+    if fault == 'grant_reused': x.result['instances']['primary_rollback']['grant_id'] = 'old-A-grant'
+    if fault == 'wrong_observed_image': x.obs['old_image_id'] = 'sha256:'+'0'*64
+    if fault == 'wrong_observed_target': x.obs['target']['commit'] = '0'*40
+    if fault == 'wrong_history':
+        prior_request = c.read(x.prior['release_request'])
+        old_release = c.read(prior_request['current']['release'])
+        old_release['accepted_deployment'] = c.put('/protected/other-deployment.json', {})
+        prior_request['current']['release'] = c.put('/protected/other-release.json', old_release)
+        x.prior['release_request'] = c.put('/protected/other-request.json', prior_request)
+    if fault == 'changed_acceptance_ref':
+        old_policy = c.read(x.prior['source_policy'])
+        old_policy['candidate_record'] = c.put('/protected/other-acceptance.json', {})
+        x.prior['source_policy'] = c.put('/protected/wrong-original-policy.json', old_policy)
+    if fault == 'sandbox_as_deployment': x.obs['recovery_policy'] = dict(path='/sandbox', sha256='0'*64)
+    if fault == 'changed_current_config':
+        def rejected(*a): raise ValueError('CURRENT_REPLACEMENT_RUNTIME_CHANGED')
+        c.backend.verify_current_instance = rejected
+    if fault == 'timeout_without_independent_acceptance':
+        x.result['rollback'] = 'FAIL'
+        x.result['timeline'].append(dict(step='rollback_accept', status='FAIL', finished_at=x.obs['observed_at']))
+    if fault == 'timeout_rewritten_as_success': x.result['result'] = 'SUCCESS'
+    x.association['execution_plan'] = c.put(x.association['execution_plan']['path'], x.prior)
+    x.association['execution_result'] = c.put(x.association['execution_result']['path'], x.result)
+    x.association['observation'] = c.put(x.association['observation']['path'], x.obs)
+    if fault != 'no_proof': x.release['current_deployment'] = c.put('/protected/current-deployment.json', x.association)
+    x.request['current']['release'] = c.put('/protected/new-retained-release.json', x.release)
+    c.plan['release_request'] = c.put('/protected/second-request.json', x.request)
+    with pytest.raises(ValueError):
+        history.PrimaryRollbackContext(c.backend, c.plan).verify(c.record, c.policy, Path('/source'))
+
+
+def test_post_incident_new_acceptance_is_not_timeout_rewrite(replacement):
+    x, c = replacement, replacement.chain
+    x.result['rollback'] = 'FAIL'
+    x.result['timeline'].append(dict(step='rollback_accept', status='FAIL', finished_at=(
+        datetime.fromisoformat(x.obs['observed_at'])-timedelta(seconds=1)).isoformat()))
+    x.association['execution_result'] = c.put('/protected/original-timeout.json', x.result)
+    timeout_bytes = c.objects['/protected/original-timeout.json']
+    x.release['current_deployment'] = c.put('/protected/separate-current-acceptance.json', x.association)
+    x.request['current']['release'] = c.put('/protected/new-retained-release.json', x.release)
+    c.plan['release_request'] = c.put('/protected/second-request.json', x.request)
+    history.PrimaryRollbackContext(c.backend, c.plan).verify(c.record, c.policy, Path('/source'))
+    assert c.objects['/protected/original-timeout.json'] == timeout_bytes
+    assert c.read(x.association['execution_result'])['rollback'] == 'FAIL'
+
+
 def test_execution_receipt_distinguishes_tool_issuer_from_old_application(tmp_path):
     backend = execution.HostBackend.__new__(execution.HostBackend)
     backend.acceptance_timeline = []

@@ -60,6 +60,70 @@ def load_engine():
     return module
 
 
+def test_current_tool_resolves_real_legacy_compose_secrets_without_old_helper():
+    """The original application issuer really has neither newer helper nor ABI."""
+    from types import ModuleType
+    engine = load_engine()
+    raw = subprocess.check_output(['git', 'show',
+        '88df880127bea4308ee752a37a59884b9198b2ce:09_deploy/runtime_identity/host_authorization.py'], cwd=ROOT)
+    legacy = ModuleType('actual_original_issuer')
+    legacy.__file__ = str(ROOT / '09_deploy/runtime_identity/host_authorization.py')
+    exec(compile(raw, legacy.__file__, 'exec'), legacy.__dict__)
+    assert 'declared_secret_targets' not in vars(legacy)
+    manifest = dict(service_id='spread-dashboard', secret_references=['tankan-secret'])
+    compose = dict(services={'spread-dashboard': dict(secrets=[dict(source='tankan-secret', target='/run/secrets/tankan.env')])},
+                   secrets={'tankan-secret': dict(file='/protected/tankan.env')})
+    manifest['_secret_declarations'] = engine._interpret('declared_secret_targets', manifest, compose)
+    assert manifest['_secret_declarations'] == {'tankan-secret': '/run/secrets/tankan.env'}
+    engine._candidate_issuer_api(legacy, manifest)
+    with pytest.raises(engine.ValidationError, match='UNSUPPORTED_APPLICATION_ISSUER_API: issue_execution_grant'):
+        engine._candidate_issuer_api(legacy, manifest, external_trust=True)
+    manifest['_secret_declarations']['service-credential'] = '/run/secrets/market-data-service.json'
+    with pytest.raises(engine.ValidationError, match='UNSUPPORTED_APPLICATION_ISSUER_API: issue_application_service_credential'):
+        engine._candidate_issuer_api(legacy, manifest)
+
+
+def test_legacy_grant_call_omits_only_unused_new_keyword():
+    from types import SimpleNamespace
+    engine = load_engine()
+    seen = []
+    def old(container_id, *, role):
+        seen.append((container_id, role))
+        return 'actual-issuer-result'
+    assert engine._issue_candidate_grant(SimpleNamespace(issue_execution_grant=old), 'container',
+        role='candidate_validation') == 'actual-issuer-result'
+    assert seen == [('container', 'candidate_validation')]
+    with pytest.raises(TypeError):
+        engine._issue_candidate_grant(SimpleNamespace(issue_execution_grant=old), 'container',
+            role='candidate_validation', external_candidate_trust_path=Path('/requested'))
+
+
+@pytest.mark.parametrize('fault', ['missing_secret', 'extra_secret', 'wrong_target', 'wrong_type'])
+def test_current_secret_resolver_never_hides_legacy_errors(fault):
+    engine = load_engine()
+    manifest = dict(service_id='demo', secret_references=['credential'])
+    compose = dict(services={'demo': dict(secrets=[dict(source='credential', target='/run/secrets/credential.json')])},
+                   secrets={'credential': dict(file='/protected/credential.json')})
+    if fault == 'missing_secret': compose['secrets'].clear()
+    if fault == 'extra_secret': compose['secrets']['other'] = dict(file='/other')
+    if fault == 'wrong_target': compose['services']['demo']['secrets'][0]['target'] = '/app/RELEASE.json'
+    if fault == 'wrong_type': compose['secrets']['credential'] = dict(external=True)
+    with pytest.raises(engine.ValidationError):
+        engine._interpret('declared_secret_targets', manifest, compose)
+
+
+def test_packaging_obligations_are_application_manifest_bound_not_tool_version():
+    engine = load_engine()
+    legacy = json.loads(subprocess.check_output(['git','show',
+        '88df880127bea4308ee752a37a59884b9198b2ce:02_configs/runtime_contracts/spread-production-runtime.json'], cwd=ROOT))
+    assert engine._packaging_lifecycle_modules(legacy) == []
+    modern = json.loads((ROOT / '02_configs/runtime_contracts/spread-production-runtime.json').read_bytes())
+    assert len(engine._packaging_lifecycle_modules(modern)) == 4
+    modern['source_inputs'] = [item for item in modern['source_inputs'] if not item['path'].endswith('/lifecycle_store.py')]
+    with pytest.raises(engine.ValidationError, match='partial lifecycle'):
+        engine._packaging_lifecycle_modules(modern)
+
+
 @pytest.mark.parametrize('command', [('docker', 'build', '.'), ('docker', 'buildx', 'build', '.')])
 def test_existing_image_transport_rejects_build_before_spawning_process(monkeypatch, command):
     engine = load_engine()

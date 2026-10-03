@@ -385,6 +385,106 @@ class HostBackend:
             return module.issuer_for(module.PrimaryRollbackContext(self, plan))
         return None
 
+    def verify_execution_plan(self, reference):
+        self.read(reference)
+        value = verify_plan(Path(reference['path']))
+        require(self.read(reference) == value, 'REPLACEMENT_PLAN_CHANGED')
+        return value
+
+    def verify_current_instance(self, plan, policy, witnessed, envelope):
+        grant = envelope['payload']
+        current = self.host.docker_inspect(plan['source_container_id'])
+        raw = self.host.copy_container_bytes(current['Id'])
+        release = self.host._json(raw)
+        observed = self.host.normalize_observation(current, self.host.docker_image_inspect(current['Image']), release)
+        require(current['State']['Running'] and current['RestartCount'] == 0 and
+            current['Id'] == witnessed['container_id'] and current['Image'] == witnessed['image_id'] and
+            current['Created'] == witnessed['created_at'] and current['State']['StartedAt'] == witnessed['started_at'] and
+            current['Config']['Hostname'] == witnessed['hostname'] == grant['hostname_nonce'],
+            'CURRENT_REPLACEMENT_INSTANCE_CHANGED')
+        require(release['git_commit'] == plan['source']['commit'] and release['git_tree'] == plan['source']['tree'] and
+            hashlib.sha256(raw).hexdigest() == policy['release_sha256'] == grant['release_sha256'] and
+            observed['mounts'] == policy['mounts'] and self.host._digest(observed['mounts']) == grant['mount_contract_sha256'] and
+            grant['actual_config_sha256'] == policy['actual_config_sha256'], 'CURRENT_REPLACEMENT_RUNTIME_CHANGED')
+        self.host.compare_observed_config(observed, policy['actual_config_sha256'])
+        require(self.host._json(self.host.copy_container_bytes(current['Id'], '/run/market-data-grants/grant.json')) ==
+                envelope, 'CURRENT_REPLACEMENT_GRANT_CHANGED')
+        for field, path in (('runtime_manifest_sha256', policy['runtime_manifest_path']),
+                            ('runtime_marker_sha256', policy['runtime_root'] + '/.market-data-runtime.json')):
+            require(hashlib.sha256(self.host.copy_container_bytes(current['Id'], path)).hexdigest() == policy[field] ==
+                    grant[field], 'CURRENT_REPLACEMENT_BOUND_FILE_CHANGED')
+
+    def collect_retained_replacement(self, plan_path, result_path, release_path, destination):
+        """Separate current facts; existing acceptance/recovery consumers, no grant.
+
+        The original failed/timeout receipt stays immutable. Registration is
+        within the actual instance's original fresh grant window. Expired or
+        unsupported evidence is rejected, never renewed in place.
+        """
+        plan = verify_plan(plan_path)
+        def reference(path):
+            raw = self.host._protected_path(path, private=True).read_bytes()
+            return dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest())
+        result_ref = reference(result_path)
+        result = self.read(result_ref)
+        require(result.get('result') == 'FAIL' and result.get('rollback') in ('PASS', 'FAIL'),
+                'NO_RESTORED_INSTANCE_TO_REGISTER')
+        session = self.sessions['primary_rollback']
+        require(result['instances']['primary_rollback']['container_id'] == session.container_id,
+                'RETAINED_INSTANCE_IDENTITY_CHANGED')
+        preservation = load(ROOT, '09_deploy/runtime_identity/recovery_namespace.py', '_retained_current_preservation')
+        sources = sorted({m['source'] for m in session.current_policy['mounts']
+                          if m['target'] not in {'/run/market-data-grants', '/runtime/logs'} and
+                          not m['target'].startswith('/run/secrets/')})
+        before = {s: preservation.tree_identity(self.host, s) for s in sources}
+        timeline_begin = len(self.acceptance_timeline)
+        # This is the official base implementation, not a fault injector or a
+        # copied PASS. Every real IO gate is rerun for the retained instance.
+        HostBackend.accept(self, plan, 'primary_rollback')
+        after = {s: preservation.tree_identity(self.host, s) for s in sources}
+        require(before == after, 'SUPPLEMENTAL_ACCEPTANCE_CHANGED_DATA')
+        current = self.host.docker_inspect(session.container_id)
+        self.host._protected_path(destination.parent, directory=True)
+        destination.mkdir(mode=0o700)
+        def save(name, value):
+            path = destination / name
+            raw = self.engine._canonical(value)
+            self.engine._write_new(path, raw)
+            return dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest())
+        instance = save('instance.json', dict(container_id=current['Id'], image_id=current['Image'],
+            hostname=current['Config']['Hostname'], created_at=current['Created'], started_at=current['State']['StartedAt']))
+        grant = save('grant-evidence.json', self.envelopes['primary_rollback'])
+        probes = {}
+        values = dict(preflight=self.acceptance_timeline[timeline_begin:], health=current['State'],
+            consumer=dict(url=session.url(), http=session.http(), smoke=session.smoke()),
+            data_unchanged=dict(before=before, after=after, scope=sources, whole_database_invariance_claimed=False))
+        require(values['consumer']['http'] == values['consumer']['smoke'] == 'PASS', 'SUPPLEMENTAL_CONSUMER_FAILED')
+        asset = plan['primary_rollback']
+        for name, value in values.items():
+            raw = save(name + '-raw.json', value)
+            probes[name] = save(name + '-probe.json', dict(container_id=current['Id'], commit=asset['commit'],
+                tree=asset['tree'], image_id=asset['image_id'], exit_code=0, status='PASS', raw=raw))
+        request = self.read(plan['release_request'])
+        observation = dict(schema_version='production-recovery-observation/1',
+            base={k: asset[k] for k in ('commit', 'tree')}, target={k: plan['target'][k] for k in ('commit', 'tree')},
+            old_image_id=asset['image_id'], runtime_config_sha256=request['current']['runtime_config']['sha256'],
+            data_schema_sha256=request['current']['data_schema']['sha256'], method='fresh-recovery',
+            observed_at=datetime.now(timezone.utc).isoformat(), result='PASS', evidence=dict(instance=instance, grant=grant, **probes))
+        self.pre.verify_recovery_observation(observation, self.host)
+        policy = reference(Path(session.spec['policy_output']))
+        association = save('current-deployment.json', dict(execution_plan=reference(plan_path),
+            execution_result=result_ref, observation=save('acceptance-observation.json', observation), policy=policy))
+        release = self.read(reference(release_path))
+        require('accepted_deployment' in release, 'ORIGINAL_DEPLOYMENT_REQUIRED')
+        release['current_deployment'] = association
+        current_plan = copy.deepcopy(plan)
+        current_plan.update(source_container_id=current['Id'], source_policy=policy)
+        history = load(ROOT, '04_scripts/runtime/historical_primary_rollback.py', '_retained_registration_verifier')
+        history.PrimaryRollbackContext(self, current_plan).verify_current(release,
+            self.read(release['accepted_deployment']), self.read(policy), asset)
+        require(self.read(result_ref) == result, 'ORIGINAL_EXECUTION_RESULT_CHANGED')
+        return save('retained-release.json', release)
+
     def resolve_acceptance(self, policy, role, asset, *, allow_expired=False, plan=None):
         """Verify the original protected reference by role and record family.
 
@@ -604,6 +704,10 @@ class HostBackend:
         return locked()
 
     def preconditions(self, plan):
+        request = self.read(plan['release_request'])
+        if request['recovery_evidence'] is not None:
+            self.pre.require_live_recovery_dependencies(self.read(request['recovery_evidence']), self.host,
+                source_container_id=plan['source_container_id'])
         require(self.pre.require_source(self.host, self.engine) ==
                 (plan['tool']['commit'], plan['tool']['tree']), 'TOOL_IDENTITY_CHANGED')
         self.host._protected_path(self.output, directory=True)
@@ -735,6 +839,7 @@ class HostBackend:
         request = self.read(plan['release_request'])
         require(request['recovery_evidence'] is not None, 'RECOVERY_EVIDENCE_MISSING')
         recovery = self.read(request['recovery_evidence'])
+        self.pre.require_live_recovery_dependencies(recovery, self.host, source_container_id=plan['source_container_id'])
         self.pre.verify_recovery_observation(recovery, self.host)
         if 'recovery_policy' in recovery:
             policy = self.read(recovery['recovery_policy'])

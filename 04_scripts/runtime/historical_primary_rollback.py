@@ -7,6 +7,7 @@ grant or CLI field enables historical validation.
 from __future__ import annotations
 
 import copy
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,72 @@ class PrimaryRollbackContext:
     def __init__(self, backend, plan):
         self.backend = backend
         self.plan = copy.deepcopy(plan)
+
+    def verify_current(self, release, deployment, baseline, asset):
+        """Separate historical A from a witnessed, freshly authorized B.
+
+        A retained release may add a hash-bound reference to existing sealed
+        execution and recovery observations. No historical record, signature,
+        expiry policy or authorization is rewritten by this association.
+        """
+        b, p = self.backend, self.plan
+        original = deployment['instance']
+        if (original.get('container_id') == p['source_container_id'] and
+                original.get('spec', {}).get('policy_output') == p['source_policy']['path']):
+            require('current_deployment' not in release, 'UNNEEDED_REPLACEMENT_REFERENCE')
+            return
+        require(type(release.get('current_deployment')) is dict, 'HISTORICAL_DEPLOYED_INSTANCE_BINDING')
+        association = b.read(release['current_deployment'])
+        b.pre._risk_fields(association, ('execution_plan', 'execution_result', 'observation', 'policy'),
+                           'current retained deployment')
+        previous = b.verify_execution_plan(association['execution_plan'])
+        result = b.read(association['execution_result'])
+        require(previous['primary_rollback'] == asset and previous['source'] == asset and
+                previous['source_container_id'] != p['source_container_id'], 'REPLACEMENT_PLAN_ASSET_BINDING')
+        # The protected original executor must have reached a real fresh rollback.
+        # Its failure/timeout is not changed to success by subsequent acceptance.
+        required = ('preconditions', 'recovery_evidence_before_stop', 'rollback_assets',
+                    'record_window_before_stop', 'rollback_create', 'rollback_authorize', 'rollback_start')
+        timeline = {step['step']: step for step in result.get('timeline', [])}
+        require(all(timeline.get(name, {}).get('status') == 'PASS' for name in required) and
+                result.get('result') == 'FAIL' and result.get('rollback') in ('PASS', 'FAIL'),
+                'REPLACEMENT_EXECUTION_NOT_PROVEN')
+        previous_request = b.read(previous['release_request'])
+        previous_release = b.read(previous_request['current']['release'])
+        require(previous_release.get('accepted_deployment') == release['accepted_deployment'],
+                'REPLACEMENT_HISTORICAL_ASSET_CHANGED')
+        instance = result.get('instances', {}).get('primary_rollback', {})
+        require(instance.get('container_id') == p['source_container_id'] and
+                instance.get('application_commit') == asset['commit'] and instance.get('image_id') == asset['image_id'] and
+                instance.get('policy_path') == association['policy']['path'], 'REPLACEMENT_EXECUTOR_INSTANCE_BINDING')
+        observed = b.read(association['observation'])
+        b.pre.verify_recovery_observation(observed, b.host)
+        require(observed.get('schema_version') == 'production-recovery-observation/1' and
+                observed.get('result') == 'PASS' and observed.get('method') == 'fresh-recovery' and
+                'recovery_policy' not in observed and observed['base'] ==
+                {'commit': asset['commit'], 'tree': asset['tree']} and
+                observed['target'] == {'commit': previous['target']['commit'], 'tree': previous['target']['tree']} and
+                observed['old_image_id'] == asset['image_id'], 'REPLACEMENT_ACCEPTANCE_ASSET_BINDING')
+        witnessed = b.read(observed['evidence']['instance'])
+        issued_policy = b.read(association['policy'])
+        envelope = b.read(observed['evidence']['grant'])
+        grant = envelope['payload']
+        previous_spec = b.read(previous['instances']['primary_rollback'])
+        require(previous_spec['transport']['policy_output'] == association['policy']['path'] and
+                issued_policy == baseline and grant['grant_id'] == instance.get('grant_id') and
+                witnessed['container_id'] == p['source_container_id'], 'REPLACEMENT_POLICY_OR_GRANT_CHANGED')
+        require(issued_policy['candidate_record'] == b.read(previous['source_policy'])['candidate_record'],
+                'REPLACEMENT_ACCEPTANCE_REFERENCE_CHANGED')
+        if result['rollback'] == 'FAIL':
+            failed = timeline.get('rollback_accept', {})
+            require(failed.get('status') == 'FAIL' and b.pre._docker_timestamp_nanoseconds(
+                observed['observed_at'], 'supplemental acceptance') > b.pre._docker_timestamp_nanoseconds(
+                failed['finished_at'], 'original rollback failure'), 'INDEPENDENT_POST_INCIDENT_ACCEPTANCE_REQUIRED')
+        # No old container has to remain live; B itself must be observed now.
+        b.verify_current_instance(p, baseline, witnessed, envelope)
+        require(all(b.read(association[k]) == value for k, value in (
+            ('execution_result', result), ('observation', observed), ('policy', issued_policy))) and
+            b.read(release['current_deployment']) == association, 'REPLACEMENT_PROVENANCE_CHANGED')
 
     def verify(self, record, policy, source):
         b, p = self.backend, self.plan
@@ -76,9 +143,11 @@ class PrimaryRollbackContext:
                 deployment.get('previous_release', {}).get('commit') == record.get('base_commit'),
                 'HISTORICAL_DEPLOYMENT_ACCEPTANCE_BINDING')
         instance = deployment.get('instance', {})
-        require(instance.get('container_id') == p['source_container_id'] and
-                instance.get('spec', {}).get('policy_output') == p['source_policy']['path'],
-                'HISTORICAL_DEPLOYED_INSTANCE_BINDING')
+        # Historical container/policy binding remains the original deployment's
+        # own fact. A different current instance needs a separate formal chain.
+        require(type(instance.get('container_id')) is str and re.fullmatch('[0-9a-f]{64}', instance['container_id']) and
+                isinstance(instance.get('spec', {}).get('policy_output'), str), 'HISTORICAL_DEPLOYED_INSTANCE_BINDING')
+        self.verify_current(release, deployment, baseline, asset)
         routine = b.load_application(source, '04_scripts/runtime/routine_release.py', '_historical_routine_fact')
         routine.validate_acceptance(record, commit=asset['commit'], tree=asset['tree'], image_id=asset['image_id'])
         event = b.pre._docker_timestamp_nanoseconds(record['validated_at'], 'historical acceptance')

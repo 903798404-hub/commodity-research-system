@@ -911,12 +911,41 @@ def _docker_timestamp_nanoseconds(value: object, label: str) -> int:
     return result
 
 
+def require_live_recovery_dependencies(recovery: dict, host, *, source_container_id: str | None = None) -> None:
+    """Stale capability evidence is history, not a current recovery rehearsal.
+
+    No refresh-on-security-error fallback. Only explicit missing resources or
+    a different baseline require a new rehearsal; all other errors propagate.
+    """
+    if 'recovery_policy' not in recovery:
+        return
+    policy = host._json(_risk_file(recovery['recovery_policy'], host))
+    host.validate_policy(policy, 'production')
+    contract = policy['recovery']
+    if source_container_id is not None and contract['production_container_id'] != source_container_id:
+        raise PreReleaseError('NEW_RECOVERY_REHEARSAL_REQUIRED: BASELINE_INSTANCE_CHANGED')
+    for container_id in (contract['production_container_id'],
+                         host._json(_risk_file(recovery['evidence']['instance'], host))['container_id']):
+        try:
+            host.docker_inspect(container_id)
+        except host.HostAuthorizationError as exc:
+            if str(exc).startswith('Error response from daemon: No such container:'):
+                raise PreReleaseError('NEW_RECOVERY_REHEARSAL_REQUIRED: LIVE_CONTAINER_MISSING') from exc
+            raise
+    if 'sandbox' in contract:
+        path = Path(contract['sandbox']['root'])
+        if not path.exists() and not path.is_symlink():
+            raise PreReleaseError('NEW_RECOVERY_REHEARSAL_REQUIRED: SANDBOX_MISSING')
+        host._protected_path(path, directory=True)
+
+
 def verify_recovery_observation(recovery: dict, host, *, targeted_roots: list | None = None) -> None:
     """Verify sealed runtime observations, including fresh grant at actual start.
 
     This is retrospective evidence verification, not permission to start now.
     Protected collector provenance remains required for Docker/HTTP observations.
     """
+    require_live_recovery_dependencies(recovery, host)
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     observations = {name: host._json(_risk_file(ref, host)) for name, ref in recovery["evidence"].items()}
     envelope = observations["grant"]

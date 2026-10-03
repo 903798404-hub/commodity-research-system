@@ -1431,6 +1431,51 @@
         "Current-tool issuer with unchanged old application/image and grant/trust contracts"],
       "boundary_notes": "Explicit user-authorized historical primary rollback consumption and narrow issuer loading adjustment. Current Routine and HIGH_RISK Review freshness remain unchanged; no caller historical boolean or policy/schema field. Current protected plan and retained deployment chain are required at each consumption. No production connection, retained image rebuild, main integration, business mutation, trust, grant/record schema or Application Service Identity change. Existing ownership and required tests preserved. Hosted synthetic clocks affect only Review evaluation, not raw records, host clock or execution grant time. DRAFT_PENDING_PRODUCTION."
     }
+    ,{
+      "project_id": "release-reentry",
+      "change_class": "shared",
+      "status": "ready",
+      "runtime_target": "library_only",
+      "owned_paths": ["08_tests/test_release_reentry.py"],
+      "future_owned_paths": [],
+      "shared_dependencies": [
+        "04_scripts/runtime/historical_primary_rollback.py",
+        "04_scripts/runtime/pre_release_runtime.py",
+        "04_scripts/runtime/validate_target_runtime.py",
+        "09_deploy/spread_release/high_risk_execution.py",
+        "08_tests/shared/high_risk_execution_docker_e2e.py",
+        "08_tests/test_historical_primary_rollback.py",
+        "08_tests/test_target_runtime_validator.py",
+        "08_tests/test_project_registry.py",
+        "04_scripts/runtime/说明.md"
+      ],
+      "forbidden_paths": [
+        "03_src", "05_apps", "01_data", "06_outputs", "10_logs",
+        "02_configs/production_runtime_trust.json", "02_configs/runtime_contracts",
+        "09_deploy/runtime_identity/production_authorization.schema.json",
+        "09_deploy/runtime_identity/candidate_validation_record.py"
+      ],
+      "required_tests": [
+        "08_tests/test_release_reentry.py", "08_tests/test_historical_primary_rollback.py",
+        "08_tests/test_target_runtime_validator.py", "08_tests/test_high_risk_execution.py",
+        "08_tests/test_pre_release_runtime.py", "08_tests/test_routine_release.py",
+        "08_tests/test_host_runtime_authorization.py", "08_tests/test_candidate_validation_record.py",
+        "08_tests/test_release_refresh.py", "08_tests/test_recovery_sandbox.py",
+        "08_tests/test_runtime_release_contract_repair.py", "08_tests/test_spread_runtime_contract.py",
+        "08_tests/shared/test_host_release_timestamps.py", "08_tests/shared/test_production_identity.py",
+        "08_tests/shared/test_production_grant.py", "08_tests/shared/test_application_service_identity.py",
+        "08_tests/pipelines/test_application_runtime_readability.py",
+        "08_tests/pipelines/test_full_daily_windows_wrapper.py", "08_tests/test_project_registry.py",
+        "08_tests/test_quality_controls.py", "08_tests/test_documentation_contract.py"
+      ],
+      "future_required_tests": [],
+      "capabilities": [
+        "Separate original Routine deployment and protected current fresh-rollback observation",
+        "Application-pinned issuer ABI with current-tool pure secret interpretation",
+        "Same-entry two-release Hosted cycle, bounded refresh and new live recovery evidence"
+      ],
+      "boundary_notes": "Explicit GOAL RELEASE-REENTRY shared tooling scope. Existing owners/tests retained. Only retained-release references and protected existing execution/recovery observation consumption change; no new signature protocol, identity, grant/record schema, approval or production trust. Original incidents and acceptance bytes preserved. Current instance requires actual fresh authorization, configuration and independent formal acceptance, not same-image equivalence. No production connection, retained image rebuild, main integration, browser reinstall or business/data/draft mutation. DRAFT_PENDING_PRODUCTION."
+    }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"
 }

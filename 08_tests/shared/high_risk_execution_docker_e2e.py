@@ -303,13 +303,13 @@ def runtime_inputs(work, old_source, target_source, host):
 def instance(work, name, source, evidence, record, host, engine, allocation, sources, values, key_id, key_path):
     manifest = json.loads((source / CONTRACT).read_bytes())
     role_dir = directory(work / name, 0o700)
-    grants = directory(allocation / (name + '-grants'))
+    grants = directory(allocation / (work.name + '-' + name + '-grants'))
     env_values = dict(values, SPREAD_IMAGE=evidence['image_id'], SPREAD_GRANT_ROOT=str(grants))
     application_service = 'market-data-service' in manifest['secret_references']
     if application_service:
         # Missing dedicated parent is intentionally allocated only by the
         # formal prepare_plan entry; no fixture mkdir/chmod supplies its PASS.
-        credential = allocation / ('credential-' + name) / 'service.json'
+        credential = allocation / ('credential-' + work.name + '-' + name) / 'service.json'
         env_values['SPREAD_SERVICE_CREDENTIAL_FILE'] = str(credential)
     env = role_dir / 'runtime.env'
     write(env, ''.join(f'{k}={v}\n' for k, v in env_values.items()).encode())
@@ -449,34 +449,47 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
 
 
 def case(work, tool, old_source, target_source, old_evidence, target_evidence, old_record, target_record,
-         production_key_id, production_key, *, injection='NONE', candidate_key_path=None):
+         production_key_id, production_key, *, injection='NONE', candidate_key_path=None, existing=None):
     global REVIEW_CLOCK_ADVANCE
     REVIEW_CLOCK_ADVANCE = timedelta(0)
     execution = load(tool, '09_deploy/spread_release/high_risk_execution.py', '_execution_entry_' + work.name)
     backend = execution.HostBackend(directory(work / 'baseline-receipts', 0o700))
-    allocation, sources, values = runtime_inputs(work, old_source, target_source, backend.host)
+    allocation, sources, values = (runtime_inputs(work, old_source, target_source, backend.host) if existing is None
+                                  else (existing['allocation'], existing['sources'], existing['values']))
     asset_old = dict(identity(old_source), image_id=old_evidence['image_id'])
     asset_target = dict(identity(target_source), image_id=target_evidence['image_id'])
-    baseline_spec, _ = instance(work, 'baseline', old_source, old_evidence, old_record, backend.host, backend.engine,
-        allocation, sources, values, production_key_id, production_key)
-    seed = dict(primary_rollback=asset_old, instances=dict(primary_rollback=ref(baseline_spec)), project_id=PROJECT,
-                policy=dict(start_timeout_seconds=60, readiness=execution.contract().DEFAULT_READINESS_POLICY))
-    backend._prepare_session(seed, 'primary_rollback')
-    backend.create(seed, 'primary_rollback')
-    backend.authorize(seed, 'primary_rollback')
-    backend.start(seed, 'primary_rollback')
-    initialize_baseline_font_cache(work, backend, backend.sessions['primary_rollback'].container_id)
-    backend.accept(seed, 'primary_rollback')
-    baseline = backend.sessions['primary_rollback']
+    if existing is None:
+        baseline_spec, _ = instance(work, 'baseline', old_source, old_evidence, old_record, backend.host, backend.engine,
+            allocation, sources, values, production_key_id, production_key)
+        seed = dict(primary_rollback=asset_old, instances=dict(primary_rollback=ref(baseline_spec)), project_id=PROJECT,
+                    policy=dict(start_timeout_seconds=60, readiness=execution.contract().DEFAULT_READINESS_POLICY))
+        backend._prepare_session(seed, 'primary_rollback')
+        backend.create(seed, 'primary_rollback')
+        backend.authorize(seed, 'primary_rollback')
+        backend.start(seed, 'primary_rollback')
+        initialize_baseline_font_cache(work, backend, backend.sessions['primary_rollback'].container_id)
+        backend.accept(seed, 'primary_rollback')
+        baseline = backend.sessions['primary_rollback']
+    else:
+        baseline = existing['baseline']
+        backend.sessions['primary_rollback'] = baseline
+        backend.envelopes['primary_rollback'] = existing['envelope']
     cid = baseline.container_id
     running = backend.host.docker_inspect(cid)
     baseline_policy = copy.deepcopy(baseline.current_policy)
-    baseline_policy['actual_config_sha256'] = backend.host.normalize_observation(running,
-        backend.host.docker_image_inspect(running['Image']), backend.host.copy_container_json(cid))['actual_config_sha256']
-    baseline_path = save(work, 'baseline-running-policy.json', baseline_policy)
+    if existing is None:
+        baseline_policy['actual_config_sha256'] = backend.host.normalize_observation(running,
+            backend.host.docker_image_inspect(running['Image']), backend.host.copy_container_json(cid))['actual_config_sha256']
+        baseline_path = save(work, 'baseline-running-policy.json', baseline_policy)
+    else:
+        baseline_path = Path(baseline.spec['policy_output'])
+        assert json.loads(baseline_path.read_bytes()) == baseline_policy
     deployment_path = None
     aged_now = datetime.now(timezone.utc) + timedelta(hours=48)
-    if json.loads(old_record.read_bytes())['schema_version'] == 'routine-candidate-acceptance/1':
+    if existing is not None:
+        deployment_path = existing['deployment_path']
+        record = json.loads(old_record.read_bytes())
+    elif json.loads(old_record.read_bytes())['schema_version'] == 'routine-candidate-acceptance/1':
         # The running baseline was created/authorized/started/accepted above by
         # the formal executor, with a fresh production-domain test grant. Use
         # the existing manual finalizer to collect that exact actual instance.
@@ -530,6 +543,20 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         data_schema=ref(save(work, 'source-schema.json', dict(schema_identity='HOSTED_SYNTHETIC_DATA_ONLY', assets=[]))),
         procedure=ref(save(work, 'source-procedure.json', dict(artifact=artifact, fresh_instance_required=True,
             fresh_grant_required=True, steps=['same verified-plan executor', 'fresh old production instance', 'accept restored UI']))))
+    if existing is not None:
+        old_asset['release'] = existing['retained_release']
+        stale = existing['old_recovery']
+        stale_before = json.dumps(stale, sort_keys=True)
+        try:
+            backend.pre.require_live_recovery_dependencies(stale, backend.host, source_container_id=cid)
+        except backend.pre.PreReleaseError as exc:
+            assert str(exc) == 'NEW_RECOVERY_REHEARSAL_REQUIRED: BASELINE_INSTANCE_CHANGED'
+        else:
+            raise AssertionError('Original A recovery incorrectly admitted for B')
+        assert json.dumps(stale, sort_keys=True) == stale_before
+        save(work, 'stale-recovery-rejected.json', dict(status='PASS', reason='BASELINE_INSTANCE_CHANGED',
+            original_resources_recreated=False, original_record_unchanged=True,
+            new_rehearsal=ref(save(work, 'new-rehearsal-evidence.json', evidence))))
     base, target = identity(old_source), identity(target_source)
     recovery_record = dict(schema_version='production-recovery-observation/1', base=base, target=target,
         old_image_id=asset_old['image_id'], runtime_config_sha256=old_asset['runtime_config']['sha256'],
@@ -729,7 +756,8 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 time.sleep(current_plan['policy']['rollback_timeout_seconds']+1)
             return super().accept(current_plan,role)
     backend_type = {'NONE': execution.HostBackend, 'POST_START': InjectedFailure, 'AUTHORIZATION': AuthorizationFailure,
-                    'DIRECTORY_DRIFT':DirectoryDrift,'ROLLBACK_TIMEOUT':RecoveryTimeout}[injection]
+                    'DIRECTORY_DRIFT':DirectoryDrift,'ROLLBACK_TIMEOUT':RecoveryTimeout,
+                    'REENTRY_SUCCESS':InjectedFailure,'REENTRY_FAILURE':InjectedFailure}[injection]
     actual_backend = backend_type(directory(work / 'execution-receipts', 0o700))
     try:
         result = execution.execute_verified_plan(plan_path, actual_backend)
@@ -779,6 +807,59 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
             assert Path(service_mount[0]['source']).parent == parent
             negatives['same-prepared-directory-issued']=dict(status='PASS',parent=prepared['parent'],
                 policy_sha256=prepared['policy_sha256'],fresh_container=actual_backend.sessions['target'].container_id)
+        second = None
+        if injection in {'REENTRY_SUCCESS', 'REENTRY_FAILURE'}:
+            original_result = (actual_backend.output / 'execution-result.json').read_bytes()
+            original_deployment = deployment_path.read_bytes()
+            old_bytes = old_record.read_bytes()
+            retained = actual_backend.collect_retained_replacement(plan_path,
+                actual_backend.output / 'execution-result.json', Path(old_asset['release']['path']), work / 'current-B')
+            restored_session = actual_backend.sessions['primary_rollback']
+            restored_grant_path = Path(restored_session.spec['grant_directory']) / 'grant.json'
+            restored_grant_bytes = restored_grant_path.read_bytes()
+            try:
+                # Disposable test trust only. Execute the real OLD in-container
+                # consumer with A's real signed grant, not a verifier mock.
+                restored_grant_path.write_bytes(backend.engine._canonical(backend.envelopes['primary_rollback']))
+                try:
+                    restored_session.preflight()
+                except Exception as exc:
+                    error = str(exc)
+                    assert any(term in error.lower() for term in ('hostname', 'nonce', 'instance'))
+                    save(work, 'old-A-grant-on-B-rejected.json', dict(status='PASS', error=error,
+                        original_A=cid, actual_B=restored_session.container_id,
+                        different_grant_id=backend.envelopes['primary_rollback']['payload']['grant_id'] !=
+                            actual_backend.envelopes['primary_rollback']['payload']['grant_id']))
+                else:
+                    raise AssertionError('Old application accepted A grant on B')
+            finally:
+                restored_grant_path.write_bytes(restored_grant_bytes)
+            assert restored_session.preflight() == 'PASS'
+            # Same precise old image is revalidated by the NEW tool against the
+            # actual OLD issuer/consumer; no build or substituted module.
+            legacy_record = work / 'legacy-image-new-tool-record.json'
+            legacy_payload = preparation.pre.validate_candidate(PROJECT, legacy_record, candidate_key_path,
+                existing_image_id=asset_old['image_id'], application_source_root=old_source)
+            assert legacy_payload['evidence']['image_id'] == asset_old['image_id']
+            assert 'spread_runtime_packaging' not in legacy_payload['evidence']
+            expiring_path = work / 'second-expired-target-record.json'
+            short = preparation.pre.validate_candidate(PROJECT, expiring_path, candidate_key_path, ttl_seconds=1,
+                existing_image_id=asset_target['image_id'], application_source_root=target_source)
+            time.sleep(max(0, (datetime.fromisoformat(short['expires_at'])-datetime.now(timezone.utc)).total_seconds()) + 0.1)
+            expiring_bytes = expiring_path.read_bytes()
+            successor = dict(baseline=actual_backend.sessions['primary_rollback'],
+                envelope=actual_backend.envelopes['primary_rollback'], allocation=allocation, sources=sources, values=values,
+                deployment_path=deployment_path, retained_release=retained, old_recovery=recovery_record)
+            second = case(directory(work / 'second-release', 0o700), tool, old_source, target_source,
+                old_evidence, target_evidence, old_record, expiring_path, production_key_id, production_key,
+                injection='NONE' if injection=='REENTRY_SUCCESS' else 'POST_START',
+                candidate_key_path=candidate_key_path, existing=successor)
+            assert expiring_path.read_bytes() == expiring_bytes
+            assert deployment_path.read_bytes() == original_deployment and old_record.read_bytes() == old_bytes
+            assert (actual_backend.output / 'execution-result.json').read_bytes() == original_result
+            second.update(original_A=cid, restored_B=successor['baseline'].container_id,
+                current_deployment=retained, legacy_same_image_revalidation=ref(legacy_record),
+                original_receipts_unchanged=True, second_refresh=ref(work/'second-release/preparation-receipts/candidate-refresh-result.json'))
         return dict(status='PASS', case=work.name, path=injection,
                     tool=identity(tool), old=asset_old, target=asset_target,
                     plan=ref(plan_path), result=ref(actual_backend.output / 'execution-result.json'),
@@ -786,7 +867,8 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                     refresh_outcomes=ref(preparation.output / 'candidate-refresh-result.json'),
                     image_validation_execution=[ref(path) for path in audits],
                     negative_probes=negatives, temporary_resource_cleanup='RETAINED_AFTER_TIMEOUT' if injection=='ROLLBACK_TIMEOUT' else 'PASS',
-                    acceptance_timeline=result['acceptance_timeline'], production_acceptance='NOT_EXECUTED')
+                    acceptance_timeline=result['acceptance_timeline'], second_release=second,
+                    production_acceptance='NOT_EXECUTED')
     finally:
         # Preserve evidence first. Cleanup names only instances created here.
         for candidate in {cid, fresh, *(s.container_id for s in actual_backend.sessions.values())} - {None}:
@@ -800,7 +882,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 run('docker', 'network', 'rm', candidate)
         # Never remove application images. Fixture service credentials are
         # temporary and not evidence; retain all nonsecret formal receipts.
-        credential = allocation/'credential-target'/'service.json'
+        credential = allocation/('credential-'+work.name+'-target')/'service.json'
         if credential.exists():credential.unlink()
 
 
@@ -864,7 +946,8 @@ def main():
         receipt['paths'] = []
         for name, injected in (('success', 'NONE'), ('failure', 'POST_START'),
                                ('authorization', 'AUTHORIZATION'), ('aged-authorization', 'AUTHORIZATION'),
-                               ('directory-drift','DIRECTORY_DRIFT'),('rollback-timeout','ROLLBACK_TIMEOUT')):
+                               ('directory-drift','DIRECTORY_DRIFT'),('rollback-timeout','ROLLBACK_TIMEOUT'),
+                               ('reentry-success','REENTRY_SUCCESS'),('reentry-failure','REENTRY_FAILURE')):
             scope = directory(work / name, 0o700)
             key_id, _, key_path = keys['production']
             receipt['paths'].append(case(scope, tool, old_source, target_source, old_evidence, target_evidence,
@@ -885,7 +968,8 @@ def main():
         public_evidence = args.output.with_suffix('')
         public_evidence.mkdir(mode=0o755)
         receipt['evidence_index'] = []
-        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'directory-drift','rollback-timeout', 'routine-collector'):
+        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'directory-drift','rollback-timeout',
+                           'reentry-success','reentry-failure','routine-collector'):
             scope = work / scope_name
             if not scope.exists():
                 continue
