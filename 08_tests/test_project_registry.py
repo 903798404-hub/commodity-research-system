@@ -634,6 +634,7 @@ def test_release_reentry_registration_keeps_existing_owners_and_production_bound
     assert project['runtime_target'] == 'library_only' and project['change_class'] == 'shared'
     assert project['owned_paths'] == ['08_tests/test_release_reentry.py']
     assert set(project['shared_dependencies']) == {
+        '.github/workflows/trusted-main-admission.yml',
         '04_scripts/runtime/historical_primary_rollback.py', '04_scripts/runtime/pre_release_runtime.py',
         '04_scripts/runtime/validate_target_runtime.py', '09_deploy/spread_release/high_risk_execution.py',
         '08_tests/shared/high_risk_execution_docker_e2e.py', '08_tests/test_historical_primary_rollback.py',
