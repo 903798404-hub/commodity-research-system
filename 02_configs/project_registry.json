@@ -1439,6 +1439,7 @@
       "owned_paths": ["08_tests/test_release_reentry.py"],
       "future_owned_paths": [],
       "shared_dependencies": [
+        ".github/workflows/trusted-main-admission.yml",
         "04_scripts/runtime/historical_primary_rollback.py",
         "04_scripts/runtime/pre_release_runtime.py",
         "04_scripts/runtime/validate_target_runtime.py",

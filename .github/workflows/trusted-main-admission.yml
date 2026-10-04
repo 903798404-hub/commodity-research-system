@@ -70,7 +70,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.linux == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # Includes both same-entry reentry cycles; runtime/grant deadlines stay unchanged.
+    timeout-minutes: 180
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false

@@ -65,6 +65,13 @@ def test_hosted_two_release_cycle_uses_original_app_and_same_formal_entries():
     assert 'application_source_root=old_source' in source and 'existing_image_id=asset_old' in source
 
 
+def test_hosted_owner_budget_is_bounded_for_both_reentry_cycles():
+    import yaml
+    workflow = yaml.safe_load((execution.ROOT / '.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8'))
+    assert workflow['jobs']['linux']['timeout-minutes'] == 180
+    assert workflow['jobs']['linux']['runs-on'] == 'ubuntu-24.04'
+
+
 def test_formal_issuer_api_is_checked_before_candidate_create(monkeypatch, tmp_path):
     engine = execution.load(execution.ROOT, '04_scripts/runtime/validate_target_runtime.py', '_reentry_engine_api')
     fake = SimpleNamespace()
