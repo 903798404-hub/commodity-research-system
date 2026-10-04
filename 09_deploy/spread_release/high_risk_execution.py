@@ -386,10 +386,24 @@ class HostBackend:
         return None
 
     def verify_execution_plan(self, reference):
-        self.read(reference)
-        value = verify_plan(Path(reference['path']))
-        require(self.read(reference) == value, 'REPLACEMENT_PLAN_CHANGED')
+        # A sealed nonsecret artifact is not a 0600 private authorization file.
+        # Its existing producer publishes readonly plan + manifest. Keep both
+        # protected-path checks and the formal seal/schema verifier; do not
+        # relax read() for policies, grants or other private records.
+        path = self.host._protected_path(Path(reference['path']))
+        c = contract()
+        self.host._protected_path(c.artifact_manifest_path(path, 'deployment_plan'))
+        raw = path.read_bytes()
+        require(hashlib.sha256(raw).hexdigest() == reference['sha256'], 'REFERENCED_INPUT_CHANGED')
+        value = verify_plan(path)
+        require(path.read_bytes() == raw and self.host._json(raw) == value, 'REPLACEMENT_PLAN_CHANGED')
         return value
+
+    def execution_plan_reference(self, path):
+        path = self.host._protected_path(path)
+        reference = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        self.verify_execution_plan(reference)
+        return reference
 
     def verify_current_instance(self, plan, policy, witnessed, envelope):
         grant = envelope['payload']
@@ -504,7 +518,7 @@ class HostBackend:
             observed_at=datetime.now(timezone.utc).isoformat(), result='PASS', evidence=dict(instance=instance, grant=grant, **probes))
         self.pre.verify_recovery_observation(observation, self.host)
         policy = reference(Path(session.spec['policy_output']))
-        association = save('current-deployment.json', dict(execution_plan=reference(plan_path),
+        association = save('current-deployment.json', dict(execution_plan=self.execution_plan_reference(plan_path),
             execution_result=result_ref, observation=save('acceptance-observation.json', observation), policy=policy))
         release = self.read(reference(release_path))
         require('accepted_deployment' in release, 'ORIGINAL_DEPLOYMENT_REQUIRED')

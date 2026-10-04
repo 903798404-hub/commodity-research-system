@@ -184,3 +184,51 @@ def test_retained_business_data_gate_preserves_failure_observations(tmp_path, ch
     assert observation['changed_sources'] == (list(before) if changed else [])
     assert observation['scope'] == list(before) and observation['excluded_log'] == log
     assert observation['whole_database_invariance_claimed'] is False
+
+
+@pytest.mark.parametrize('fault', [None, 'wrong_hash', 'missing_manifest', 'changed_plan', 'unprotected'])
+def test_retained_sealed_plan_uses_formal_artifact_reader_not_private_record_mode(tmp_path, fault):
+    import hashlib
+    from test_high_risk_execution import sealed, plan
+    path = sealed(tmp_path)
+    original = path.read_bytes()
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    protected_calls = []
+    def protected(value, **kwargs):
+        protected_calls.append((value, kwargs))
+        assert not kwargs.get('private')
+        if fault == 'unprotected':
+            raise ValueError('unprotected ancestor')
+        return value
+    backend.host = SimpleNamespace(_protected_path=protected, _json=json.loads)
+    reference = dict(path=str(path), sha256=hashlib.sha256(original).hexdigest())
+    if fault == 'wrong_hash':
+        reference['sha256'] = '0' * 64
+    elif fault == 'missing_manifest':
+        path.with_name('deployment_plan.manifest.json').unlink()
+    elif fault == 'changed_plan':
+        path.chmod(0o600)
+        path.write_bytes(original + b' ')
+        reference['sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if fault:
+        with pytest.raises((execution.ExecutionError, ValueError)):
+            backend.verify_execution_plan(reference)
+    else:
+        assert backend.execution_plan_reference(path) == reference
+        assert backend.verify_execution_plan(reference) == plan()
+        assert path.read_bytes() == original
+        assert any(value.name == 'deployment_plan.manifest.json' for value, _ in protected_calls)
+
+
+def test_private_authorization_reader_is_not_relaxed_for_sealed_plan_compatibility(tmp_path):
+    path = tmp_path / 'private-policy.json'
+    path.write_bytes(b'{}')
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    calls = []
+    def protected(value, **kwargs):
+        calls.append(kwargs)
+        raise ValueError('private authorization file must have mode 0600')
+    backend.host = SimpleNamespace(_protected_path=protected)
+    with pytest.raises(ValueError, match='mode 0600'):
+        backend.read(dict(path=str(path), sha256='0' * 64))
+    assert calls == [{'private': True}]
