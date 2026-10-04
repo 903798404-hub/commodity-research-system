@@ -16,6 +16,87 @@ sys.modules[spec.name] = execution
 spec.loader.exec_module(execution)
 
 
+def recovery_requirement_backend(tmp_path):
+    from types import SimpleNamespace
+    backend = execution.HostBackend.__new__(execution.HostBackend)
+    backend.host = SimpleNamespace(_protected_path=lambda path, **kwargs: path,
+                                   _json=json.loads)
+    backend.cleanup_scope = None
+    request_path = tmp_path / 'request.json'
+    request_path.write_text(json.dumps(dict(recovery_evidence=None)), encoding='utf-8')
+    reference = lambda path: dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    plan = dict(release_request=reference(request_path), tool=dict(commit='a'*40, tree='b'*40),
+                target=dict(image_id='sha256:'+'c'*64))
+    assessment = dict(request_sha256=plan['release_request']['sha256'], governance_identity=plan['tool'],
+        candidate_image_id=plan['target']['image_id'], PRODUCTION_RELEASE_PREFLIGHT='PASS',
+        production_authorized=False, MACHINE_DESTRUCTIVE_EVIDENCE=False,
+        STATE_CHANGE_CLASS='ADDITIVE_REVERSIBLE', FINAL_RELEASE_TREATMENT='ADDITIVE_REVERSIBLE',
+        FULL_ROLLBACK_REHEARSAL_REQUIRED=False, TARGETED_RECOVERY_VALIDATION_REQUIRED=False)
+    assessment_path = tmp_path / 'assessment.json'
+    return backend, plan, assessment, assessment_path, reference
+
+
+def test_additive_without_recovery_uses_bound_assessment(tmp_path):
+    backend, plan, assessment, path, reference = recovery_requirement_backend(tmp_path)
+    path.write_text(json.dumps(assessment), encoding='utf-8')
+    backend.release_assessment = reference(path)
+    backend.consume_recovery(plan)
+    assert backend.cleanup_scope is None
+
+
+@pytest.mark.parametrize('field,value', [
+    ('request_sha256', '0'*64), ('governance_identity', dict(commit='d'*40, tree='b'*40)),
+    ('candidate_image_id', 'sha256:'+'d'*64), ('PRODUCTION_RELEASE_PREFLIGHT', 'FAIL'),
+    ('production_authorized', True), ('MACHINE_DESTRUCTIVE_EVIDENCE', True),
+    ('STATE_CHANGE_CLASS', 'UNKNOWN'), ('STATE_CHANGE_CLASS', 'IRREVERSIBLE_OR_DESTRUCTIVE'),
+    ('FINAL_RELEASE_TREATMENT', 'HIGH_RISK'), ('FULL_ROLLBACK_REHEARSAL_REQUIRED', True),
+    ('TARGETED_RECOVERY_VALIDATION_REQUIRED', True), ('FULL_ROLLBACK_REHEARSAL_REQUIRED', 0),
+    ('TARGETED_RECOVERY_VALIDATION_REQUIRED', None),
+])
+def test_missing_recovery_rejects_unsafe_or_differently_bound_assessment(tmp_path, field, value):
+    backend, plan, assessment, path, reference = recovery_requirement_backend(tmp_path)
+    assessment[field] = value
+    path.write_text(json.dumps(assessment), encoding='utf-8')
+    backend.release_assessment = reference(path)
+    with pytest.raises(execution.ExecutionError, match='RECOVERY_'):
+        backend.consume_recovery(plan)
+
+
+@pytest.mark.parametrize('fault', ['unassessed', 'changed-report', 'changed-request', 'missing-requirement'])
+def test_missing_recovery_requires_unchanged_assessment_inputs(tmp_path, fault):
+    backend, plan, assessment, path, reference = recovery_requirement_backend(tmp_path)
+    if fault == 'missing-requirement':
+        del assessment['FULL_ROLLBACK_REHEARSAL_REQUIRED']
+    path.write_text(json.dumps(assessment), encoding='utf-8')
+    if fault != 'unassessed':
+        backend.release_assessment = reference(path)
+    if fault == 'changed-report':
+        path.write_bytes(path.read_bytes() + b' ')
+    if fault == 'changed-request':
+        request_path = Path(plan['release_request']['path'])
+        request_path.write_bytes(request_path.read_bytes() + b' ')
+    with pytest.raises(execution.ExecutionError):
+        backend.consume_recovery(plan)
+
+
+def test_supplied_optional_recovery_is_still_verified(tmp_path):
+    from types import SimpleNamespace
+    backend, plan, assessment, path, reference = recovery_requirement_backend(tmp_path)
+    record = tmp_path / 'recovery.json'
+    record.write_text('{}', encoding='utf-8')
+    request = Path(plan['release_request']['path'])
+    request.write_text(json.dumps(dict(recovery_evidence=reference(record))), encoding='utf-8')
+    plan['release_request'] = reference(request)
+    calls = []
+    def reject_recovery(value, host):
+        calls.append(value)
+        raise ValueError('invalid actual recovery')
+    backend.pre = SimpleNamespace(verify_recovery_observation=reject_recovery)
+    with pytest.raises(ValueError, match='invalid actual recovery'):
+        backend.consume_recovery(plan)
+    assert calls == [{}]
+
+
 def test_hosted_formal_runtime_fixture_preserves_candidate_snapshot_and_empty_formal_store(tmp_path):
     fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
         '_test_formal_execution_inputs')

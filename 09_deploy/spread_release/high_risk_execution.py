@@ -348,6 +348,7 @@ class HostBackend:
         self.envelopes = {}
         self.cleanup_scope = None
         self.acceptance_timeline = []
+        self.release_assessment = None
 
     def prepare_execution_conditions(self, plan):
         """Existing plan preparation allocates secrets while source stays online."""
@@ -631,6 +632,9 @@ class HostBackend:
         for role in ('target', 'primary_rollback'):
             self._prepare_session(plan, role)
         self._browser_preflight(plan, 'preconditions')
+        assessment_path = self.output / 'pre-stop-assessment.json'
+        self.release_assessment = dict(path=str(assessment_path),
+            sha256=hashlib.sha256(assessment_path.read_bytes()).hexdigest())
 
     def _browser_preflight(self, plan, phase):
         session = self.sessions['primary_rollback']
@@ -733,7 +737,25 @@ class HostBackend:
 
     def consume_recovery(self, plan):
         request = self.read(plan['release_request'])
-        require(request['recovery_evidence'] is not None, 'RECOVERY_EVIDENCE_MISSING')
+        if request['recovery_evidence'] is None:
+            # Only the existing protected assessment may establish that recovery
+            # is optional. Missing, changed or differently bound reports fail.
+            reference = getattr(self, 'release_assessment', None)
+            require(reference is not None, 'RECOVERY_REQUIREMENTS_NOT_ASSESSED')
+            assessment = self.read(reference)
+            require(assessment.get('request_sha256') == plan['release_request']['sha256']
+                    and assessment.get('governance_identity') == plan['tool']
+                    and assessment.get('candidate_image_id') == plan['target']['image_id'],
+                    'RECOVERY_ASSESSMENT_IDENTITY_CHANGED')
+            require(assessment.get('PRODUCTION_RELEASE_PREFLIGHT') == 'PASS'
+                    and assessment.get('production_authorized') is False
+                    and assessment.get('MACHINE_DESTRUCTIVE_EVIDENCE') is False
+                    and assessment.get('STATE_CHANGE_CLASS') == 'ADDITIVE_REVERSIBLE'
+                    and assessment.get('FINAL_RELEASE_TREATMENT') == 'ADDITIVE_REVERSIBLE'
+                    and assessment.get('FULL_ROLLBACK_REHEARSAL_REQUIRED') is False
+                    and assessment.get('TARGETED_RECOVERY_VALIDATION_REQUIRED') is False,
+                    'RECOVERY_EVIDENCE_MISSING')
+            return
         recovery = self.read(request['recovery_evidence'])
         self.pre.verify_recovery_observation(recovery, self.host)
         if 'recovery_policy' in recovery:

@@ -682,6 +682,41 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 assert name in {'missing', 'tamper'}
             assert backend.host.docker_inspect(cid)['State']['Running']
             negatives[name] = 'PASS'
+        # The real assessor and the same plan producer accept reviewed additive
+        # state without a rehearsal. Keep the strict full-recovery case below.
+        additive_scope = directory(work / 'additive-no-recovery', 0o700)
+        additive_request = copy.deepcopy(prepared_request)
+        additive_request['recovery_evidence'] = None
+        additive_request['maintainer_risk_review']['maintainer_classification'] = 'ADDITIVE_REVERSIBLE'
+        additive_request['maintainer_risk_review']['timestamp'] = datetime.now(timezone.utc).isoformat()
+        additive_request['maintainer_risk_review']['reason'] = (
+            'Synthetic additive compatibility test only; no production approval')
+        additive_intent = copy.deepcopy(plan)
+        additive_intent['release_request'] = ref(save(additive_scope, 'request.json', additive_request))
+        additive_path = additive_scope / 'deployment_plan.json'
+        additive_preparation = execution.HostBackend(directory(additive_scope / 'preparation', 0o700))
+        additive_plan = execution.prepare_plan(additive_intent, additive_path, additive_preparation,
+                                               candidate_key=candidate_key_path)
+        additive_report = additive_preparation.read(additive_preparation.release_assessment)
+        assert additive_report['STATE_CHANGE_CLASS'] == 'ADDITIVE_REVERSIBLE'
+        assert additive_report['PRODUCTION_RELEASE_PREFLIGHT'] == 'PASS'
+        assert additive_report['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+        assert additive_preparation.cleanup_scope is None
+        assert additive_preparation.read(additive_plan['release_request'])['recovery_evidence'] is None
+        class StopBeforeAdditiveMutation(execution.HostBackend):
+            def before_stop(self, current_plan):
+                super().before_stop(current_plan)
+                raise execution.ExecutionError('SYNTHETIC_STOP_BEFORE_MUTATION')
+        additive_backend = StopBeforeAdditiveMutation(directory(additive_scope / 'execution', 0o700))
+        additive_result = execution.execute_verified_plan(additive_path, additive_backend)
+        assert additive_result['result'] == 'FAIL' and additive_result['source'] == 'PRESERVED_NOT_STOPPED'
+        assert additive_result['failure'] == 'ExecutionError: SYNTHETIC_STOP_BEFORE_MUTATION'
+        assert 'recovery_evidence_before_stop' in additive_result['steps']
+        assert 'rollback_assets' in additive_result['steps'] and 'stop_source' not in additive_result['steps']
+        assert backend.host.docker_inspect(cid)['State']['StartedAt'] == running['State']['StartedAt']
+        negatives['additive-without-recovery'] = dict(status='PASS', plan=ref(additive_path),
+            assessment=additive_preparation.release_assessment,
+            result=ref(additive_backend.output / 'execution-result.json'), actual_stop_called=False)
     # This subclass ONLY injects a real Docker stop after the target started.
     # The actual grant, startup, verifier, health and rollback implementations
     # are untouched; no helper PASS or mock transport supplies acceptance.

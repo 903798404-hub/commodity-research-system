@@ -34,6 +34,31 @@ record = importlib.util.module_from_spec(RECORD_SPEC)
 RECORD_SPEC.loader.exec_module(record)
 
 
+@pytest.mark.parametrize('seed', ['0', '1', '2', '3', '4'])
+def test_runtime_delta_diagnostic_is_stable_across_hash_seeds(seed):
+    script = """import copy, importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('reversibility', root / '04_scripts/runtime/release_reversibility.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+old = json.loads((root / '02_configs/runtime_contracts/spread-production-runtime.json').read_bytes())
+new = copy.deepcopy(old)
+new['candidate_runtime_inputs'] = []
+new['secret_references'] = []
+try:
+    module._mount_delta(old, new)
+except module.Unproven as exc:
+    print(str(exc))
+else:
+    raise AssertionError('Changed runtime inputs were accepted')
+"""
+    result = subprocess.run([sys.executable, '-B', '-c', script, str(ROOT)],
+                            env={**os.environ, 'PYTHONHASHSEED': seed},
+                            capture_output=True, text=True, check=True, timeout=20)
+    assert result.stdout.strip() == 'RUNTIME_IDENTITY_OR_LIFECYCLE_CHANGED:candidate_runtime_inputs'
+
+
 def test_cli_rejects_caller_evidence_and_identity_inputs(tmp_path):
     for option in ("--evidence", "--image-id", "--container-id", "--probe", "--source-binding"):
         with pytest.raises(SystemExit):

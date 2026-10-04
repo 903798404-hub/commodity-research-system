@@ -199,7 +199,7 @@ def destructive_findings(before, after, contract_path, findings):
 
 def _mount_delta(old, new):
     """Preserve all old definitions; new roots must be disjoint except identity."""
-    for key in old.keys() | new.keys():
+    for key in sorted(old.keys() | new.keys()):
         if key not in {'runtime_roots', 'required_mounts', 'required_environment',
                        'environment_bindings', 'source_inputs', 'forbidden_environment'}:
             require(old.get(key) == new.get(key), 'RUNTIME_IDENTITY_OR_LIFECYCLE_CHANGED:' + key)
