@@ -138,6 +138,31 @@ def _docker(*args: str, input_bytes: bytes | None = None,
     return _run(("docker", *args), input_bytes=input_bytes, check=check, timeout=timeout)
 
 
+def _candidate_secret_declarations(root: Path, host, contract: Mapping[str, Any],
+                                   rendered: Mapping[str, Any], *, existing_image_id: str | None):
+    declare = getattr(host, "declared_secret_targets", None)
+    if callable(declare):
+        return declare(contract, rendered)
+    # Retained pre-service-credential images used their source-bound validator's
+    # secret-free candidate contract. Never apply that ABI to a new build or a
+    # service credential, and rerun the original Compose checks before using it.
+    declarations = _interpret("declared_secret_targets", contract, rendered)
+    if (existing_image_id is None or len(declarations) > 1
+            or set(declarations.values()) - {"/run/secrets/tankan.env"}):
+        raise ValidationError("legacy candidate secret ABI requires an existing provider-only image")
+    legacy = _load(_exact_source(root, _ENGINE_PATH), "_retained_candidate_compose_validator")
+    legacy.validate_source_compose(root, contract)
+    return {}
+
+
+def _issue_candidate_grant(host, container_id: str, *, external_trust, **options):
+    # The optional external trust argument was added after retained releases.
+    # Absence uses their unchanged fixed key; a supplied trust is never dropped.
+    if external_trust is not None:
+        options["external_candidate_trust_path"] = external_trust
+    return host.issue_execution_grant(container_id, **options)
+
+
 def _git(root: Path, *args: str, binary: bool = False):
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env["GIT_NO_REPLACE_OBJECTS"] = "1"
@@ -1046,11 +1071,11 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
         policy_path.write_bytes(_canonical(policy))
         os.chmod(policy_path, 0o600)
         try:
-            host.issue_execution_grant(container_id, expected_policy_path=policy_path,
+            _issue_candidate_grant(host, container_id, expected_policy_path=policy_path,
                                        key_path=_candidate_signing_key(contract, root),
                                        grant_path=grant_dir / "grant.json", grant_dir=grant_dir,
                                        role="candidate_validation", ttl_seconds=900,
-                                       external_candidate_trust_path=external_trust)
+                                       external_trust=external_trust)
         except host.HostAuthorizationError as exc:
             expected = ("runtime manifest/marker differs" if mutation == "manifest"
                         else "RELEASE bytes differ")
@@ -1105,7 +1130,8 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
         if ephemeral_candidate_trust:
             _ephemeral_candidate_identity(work, contract)
         source_compose = validate_source_compose(root, contract)
-        contract["_secret_declarations"] = host.declared_secret_targets(contract, source_compose)
+        contract["_secret_declarations"] = _candidate_secret_declarations(
+            root, host, contract, source_compose, existing_image_id=existing_image_id)
         if existing_image_id is None:
             context = work / "context"
             create_archive_context(root, context, binding)
@@ -1197,10 +1223,10 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                 credential = next(item["source"] for item in scope["mounts"] if item["target"] == "/run/secrets/market-data-service.json")
                 host.issue_application_service_credential(container_id, expected_policy_path=policy_path,
                     credential_path=credential, role="candidate_validation")
-            host.issue_execution_grant(container_id, expected_policy_path=policy_path,
+            _issue_candidate_grant(host, container_id, expected_policy_path=policy_path,
                                        key_path=key_path, grant_path=grant_dir / "grant.json",
                                        grant_dir=grant_dir, role="candidate_validation", ttl_seconds=900,
-                                       external_candidate_trust_path=external_trust)
+                                       external_trust=external_trust)
             if ephemeral_candidate_trust:
                 key_path.unlink()
             _docker("start", container_id, timeout=120)

@@ -60,6 +60,81 @@ def load_engine():
     return module
 
 
+def test_candidate_secret_abi_keeps_current_declared_credentials(monkeypatch):
+    engine = load_engine()
+    declarations = {"service": "/run/secrets/market-data-service.json"}
+    host = SimpleNamespace(declared_secret_targets=lambda contract, rendered: declarations)
+    monkeypatch.setattr(engine, "_load", lambda *a: pytest.fail("current ABI must not load a legacy validator"))
+    assert engine._candidate_secret_declarations(ROOT, host, {}, {}, existing_image_id=None) == declarations
+
+
+def test_retained_provider_only_image_reuses_original_compose_validation(tmp_path, monkeypatch):
+    engine = load_engine()
+    seen = []
+    contract, rendered = {"old": "contract"}, {"old": "compose"}
+    monkeypatch.setattr(engine, "_interpret", lambda *a: {"tankan": "/run/secrets/tankan.env"})
+    monkeypatch.setattr(engine, "_exact_source", lambda root, path: root / path)
+    def original(root, actual):
+        assert root == tmp_path and actual is contract
+        seen.append(actual)
+    monkeypatch.setattr(engine, "_load", lambda *a: SimpleNamespace(validate_source_compose=original))
+    assert engine._candidate_secret_declarations(tmp_path, SimpleNamespace(), contract, rendered,
+        existing_image_id="sha256:" + "a" * 64) == {}
+    assert seen == [contract]
+
+
+@pytest.mark.parametrize("image,declarations", [
+    (None, {"tankan": "/run/secrets/tankan.env"}),
+    ("sha256:" + "a" * 64, {"service": "/run/secrets/market-data-service.json"}),
+    ("sha256:" + "a" * 64, {"unknown": "/run/secrets/unknown.json"}),
+    ("sha256:" + "a" * 64, {"one": "/run/secrets/tankan.env", "two": "/run/secrets/tankan.env"}),
+])
+def test_legacy_candidate_abi_cannot_drop_new_credentials_or_enable_build(monkeypatch, image, declarations):
+    engine = load_engine()
+    monkeypatch.setattr(engine, "_interpret", lambda *a: declarations)
+    monkeypatch.setattr(engine, "_load", lambda *a: pytest.fail("invalid legacy ABI must stop first"))
+    with pytest.raises(engine.ValidationError, match="existing provider-only image"):
+        engine._candidate_secret_declarations(ROOT, SimpleNamespace(), {}, {}, existing_image_id=image)
+
+
+def test_retained_candidate_abi_preserves_original_compose_rejection(monkeypatch):
+    engine = load_engine()
+    monkeypatch.setattr(engine, "_interpret", lambda *a: {})
+    monkeypatch.setattr(engine, "_exact_source", lambda root, path: root / path)
+    def original(*a):
+        raise RuntimeError("original compose rejected")
+    monkeypatch.setattr(engine, "_load", lambda *a: SimpleNamespace(validate_source_compose=original))
+    with pytest.raises(RuntimeError, match="original compose rejected"):
+        engine._candidate_secret_declarations(ROOT, SimpleNamespace(), {}, {},
+            existing_image_id="sha256:" + "a" * 64)
+
+
+def test_candidate_grant_omits_absent_optional_trust_for_original_issuer():
+    engine = load_engine()
+    seen = []
+    def original(container_id, *, role, key_path):
+        seen.append((container_id, role, key_path))
+        return "issued"
+    host = SimpleNamespace(issue_execution_grant=original)
+    assert engine._issue_candidate_grant(host, "created", external_trust=None,
+        role="candidate_validation", key_path="fixed-key") == "issued"
+    assert seen == [("created", "candidate_validation", "fixed-key")]
+    with pytest.raises(TypeError, match="external_candidate_trust_path"):
+        engine._issue_candidate_grant(host, "created", external_trust="supplied",
+            role="candidate_validation", key_path="fixed-key")
+    assert len(seen) == 1
+
+
+def test_candidate_grant_never_discards_supplied_external_trust():
+    engine = load_engine()
+    seen = []
+    host = SimpleNamespace(issue_execution_grant=lambda cid, **kw: seen.append((cid, kw)))
+    engine._issue_candidate_grant(host, "created", external_trust="bound-public-trust",
+        role="candidate_validation")
+    assert seen == [("created", {"role": "candidate_validation",
+        "external_candidate_trust_path": "bound-public-trust"})]
+
+
 @pytest.mark.parametrize('command', [('docker', 'build', '.'), ('docker', 'buildx', 'build', '.')])
 def test_existing_image_transport_rejects_build_before_spawning_process(monkeypatch, command):
     engine = load_engine()
