@@ -165,7 +165,9 @@
     "TMPDIR",
     "IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE",
     "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
-    "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT"
+    "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT",
+    "SOYBEAN_MARGIN_ALLOW_SAVE",
+    "SOYBEAN_MARGIN_STORAGE_ROOT"
   ],
   "secret_references": [
     "tankan-reader",
@@ -1528,6 +1530,38 @@
     {
       "path": "03_src/agri_research_agent/import_profit/operational_runtime.py",
       "role": "initialization"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/charts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/model.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/public_inputs.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/soybean_margin_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/soybean_margin_assets/tables.css",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [
@@ -1632,6 +1666,17 @@
       "kind": "runtime_path",
       "role": "am-results",
       "relative_path": ""
+    },
+    {
+      "name": "SOYBEAN_MARGIN_ALLOW_SAVE",
+      "kind": "literal",
+      "value": "1"
+    },
+    {
+      "name": "SOYBEAN_MARGIN_STORAGE_ROOT",
+      "kind": "runtime_path",
+      "role": "manual-cnf",
+      "relative_path": ""
     }
   ],
   "forbidden_environment": [
@@ -1655,7 +1700,7 @@
     },
     {
       "source_path": "08_tests/fixtures/spread_runtime/domestic_spread_database.parquet",
-      "sha256": "c66f6e2ae9fc2c4f9c5c8e43b7a1781aa6a4693fe56270f74e5cb94e23f134f4",
+      "sha256": "ee5d8144c12f6d84a61ebc6b7228afe068ff7d610eabb2f5914abb9af877a218",
       "role": "data",
       "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/data/consumer-artifacts/domestic-spread/historical_spread_database.parquet"
     },
@@ -1718,6 +1763,30 @@
       "sha256": "52783a7e445da746efb479c64d02d3019d26d7f66bd878cd3c125e30ce0b7f99",
       "role": "snapshots",
       "relative_path": "releases/2026-08-31-PM/quotes.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_public_current.json",
+      "sha256": "2469e4f8c82c5786c541f2219daade9a79d721438cfd5c44abc7db4faf651761",
+      "role": "data",
+      "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/data/public-market-data/tankan/current.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_public_manifest.json",
+      "sha256": "805eb6b64d2c558185851c6442bd56cb754b40783734ca8567b23372a87331e6",
+      "role": "data",
+      "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/data/public-market-data/tankan/releases/candidate-fixture-soybean-market-20260817/manifest.json"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_public_fx.parquet",
+      "sha256": "2b1b9b60164f3801279ef727255d9723d3129e0a28087792b8a83bc1a2614b6e",
+      "role": "data",
+      "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/data/public-market-data/tankan/releases/candidate-fixture-soybean-market-20260817/fx.parquet"
+    },
+    {
+      "source_path": "08_tests/fixtures/spread_runtime/soybean_public_market.parquet",
+      "sha256": "a5dd1d38ad120350e376704159c2238dfa9745585bfc71e0cc5204dc52f8c8a7",
+      "role": "data",
+      "relative_path": "public-data-server-store/releases/candidate-fixture-public-20260831/data/public-market-data/tankan/releases/candidate-fixture-soybean-market-20260817/market.parquet"
     }
   ]
 }

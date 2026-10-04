@@ -1,0 +1,12 @@
+/* Adapted from quanyong-master/platform/api/templates/soybean_margin.html. */
+body{background:#f8fafc;color:#0f172a;font-family:Inter,"Microsoft YaHei",Arial,sans-serif;margin:0;-webkit-font-smoothing:antialiased}
+.panel{background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 1px 2px #00000008}
+header{padding:16px 20px;background:#f8fafc;font-size:17px;font-weight:700;border-bottom:1px solid #e2e8f0;display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap}
+header small{font-size:12px;font-weight:400;color:#64748b}
+.scroll{overflow-x:auto}.terminal-table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;white-space:nowrap}
+.terminal-table th{background:#bd2c25;color:#fff;font-weight:600;font-size:13px;letter-spacing:.3px;padding:10px;border:1px solid #a82520}
+.terminal-table td{border:1px solid #e2e8f0;padding:10px 8px;font-size:13px;text-align:center;height:20px}
+.terminal-table td:first-child{font-weight:700;background:#f8fafc}.terminal-table td:nth-child(2){background:#fff8f8;font-weight:600}
+.terminal-table tr:hover{background:#f1f5f9}.missing{color:#94a3b8}.positive,.negative{color:white;font-weight:700;padding:3px 7px;border-radius:4px}.positive{background:#dc2626}.negative{background:#059669}
+footer{padding:12px 16px;font-size:12px;line-height:1.7;color:#64748b;background:#f8fafc}
+::-webkit-scrollbar{height:5px;width:5px}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}

@@ -1,0 +1,36 @@
+{
+  "canonical_manifest_sha256": "6d7e434fe4a6afb3d4dedeb425dce2579e40a1d7f7213b021ca6bb961c77b0fd",
+  "files": {
+    "fx.parquet": {
+      "sha256": "2b1b9b60164f3801279ef727255d9723d3129e0a28087792b8a83bc1a2614b6e",
+      "size_bytes": 9756
+    },
+    "market.parquet": {
+      "sha256": "a5dd1d38ad120350e376704159c2238dfa9745585bfc71e0cc5204dc52f8c8a7",
+      "size_bytes": 9875
+    }
+  },
+  "fx": {
+    "collision_count": 0,
+    "max_date": "2026-08-17",
+    "min_date": "2026-08-17",
+    "quality_status": "PASS",
+    "row_count": 13,
+    "source_max_date": "2026-08-17",
+    "stable_key_duplicates": 0
+  },
+  "market": {
+    "collision_count": 0,
+    "max_date": "2026-08-17",
+    "min_date": "2026-08-17",
+    "quality_status": "PASS",
+    "row_count": 4,
+    "source_max_date": "2026-08-17",
+    "stable_key_duplicates": 0
+  },
+  "promoted_at": "2026-10-04T08:49:26.117063+00:00",
+  "quality_status": "PASS",
+  "release_id": "candidate-fixture-soybean-market-20260817",
+  "schema_version": "tankan-goal-a-current/1",
+  "source": "tankan"
+}

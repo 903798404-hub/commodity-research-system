@@ -165,11 +165,25 @@ def load_formal_preflight_snapshot(snapshot_root: Path):
     return max(snapshots, key=lambda item: (item.business_date, item.session.value), default=None)
 
 
+def initialize_replacement_page(args) -> None:
+    """Read the deployed replacement and published prices, without saving CNF."""
+    script = (
+        "from soybean_margin_page import render_soybean_margin_page\n"
+        f"render_soybean_margin_page({str(args.soybean_runtime_root)!r})\n"
+    )
+    app = AppTest.from_string(script, default_timeout=60).run(timeout=60)
+    if app.exception or app.error or app.warning:
+        raise ValueError("soybean replacement page initialization failed")
+
+
 def readonly_preflight(args) -> dict[str, object]:
     """Read actual mounted consumers without capture, writes, secrets or network."""
     context = initialize_preflight_identity(args)
     from agri_research_agent.import_profit.operational_runtime import configured_operational_write
     configured_operational_write()  # Verify capability without generating business data.
+    if os.environ.get('SOYBEAN_MARGIN_ALLOW_SAVE') == '1':
+        from agri_research_agent.soybean_margin.runtime import validate_cnf_write
+        validate_cnf_write(Path(os.environ['SOYBEAN_MARGIN_STORAGE_ROOT']) / 'cnf.sqlite3')
     snapshot_root = Path(args.snapshot_root).resolve(strict=True)
     if context.runtime_root not in snapshot_root.parents:
         raise ValueError("snapshot root escapes the identity runtime")
@@ -199,6 +213,7 @@ def readonly_preflight(args) -> dict[str, object]:
     else:
         snapshot = load_formal_preflight_snapshot(snapshot_root)
     initialize_strict_page(args, snapshot_root, cache)
+    initialize_replacement_page(args)
     safe_identity = validate_embedded_deployment_identity(args.verified_execution_identity)
     return {
         "schema_version": "spread-runtime-preflight/1",

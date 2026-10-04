@@ -52,13 +52,13 @@ def test_route_environment_is_resolved_only_when_route_is_called(
     monkeypatch.setenv("IMPORT_PROFIT_CONFIG_PATH", "CONFIG")
     monkeypatch.setattr(
         workspace,
-        "render_import_profit_runtime_page",
+        "render_soybean_margin_page",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
 
     workspace.render_import_profit_route()
     assert calls == [
-        (("RUNTIME",), {"config_path": Path("CONFIG")})
+        (("RUNTIME",), {})
     ]
 
     calls.clear()
@@ -75,14 +75,12 @@ def test_unconfigured_route_passes_none_and_main_app_degrades_safely(
     monkeypatch.delenv("IMPORT_PROFIT_CONFIG_PATH", raising=False)
     monkeypatch.setattr(
         workspace,
-        "render_import_profit_runtime_page",
+        "render_soybean_margin_page",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
     workspace.render_import_profit_route()
     assert calls[0][0] == (None,)
-    assert calls[0][1]["config_path"] == (
-        ROOT / "02_configs" / "import_profit_soybean.yaml"
-    )
+    assert calls[0][1] == {}
 
     app = AppTest.from_file(
         str(ROOT / "05_apps" / "streamlit_app.py"),
@@ -101,8 +99,8 @@ def test_module_source_has_no_runtime_read_or_deployment_side_effect():
         ROOT / "05_apps" / "streamlit_app.py"
     ).read_text(encoding="utf-8")
     import_line = (
-        "from import_profit_runtime_page import "
-        "render_import_profit_runtime_page"
+        "from soybean_margin_page import "
+        "render_soybean_margin_page"
     )
     assert import_line in source
     assert "bootstrap_import_profit_runtime" not in source

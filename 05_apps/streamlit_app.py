@@ -45,7 +45,7 @@ if str(APPS_DIR) not in sys.path:
 from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import get_external_app_url, render_home
-from import_profit_runtime_page import render_import_profit_runtime_page
+from soybean_margin_page import render_soybean_margin_page
 from international_spread_page import render_international_spread_page
 from navigation import (
     IMPORT_PROFIT_ROUTE_ID,
@@ -372,19 +372,9 @@ def render_usda_page() -> None:
 def render_import_profit_route() -> None:
     """Resolve environment configuration only after this route is selected."""
 
-    runtime_root = os.getenv("IMPORT_PROFIT_RUNTIME_ROOT", "").strip()
-    configured_path = os.getenv(
-        "IMPORT_PROFIT_CONFIG_PATH", ""
-    ).strip()
-    config_path = (
-        Path(configured_path)
-        if configured_path
-        else CONFIG_DIR / "import_profit_soybean.yaml"
-    )
-    render_import_profit_runtime_page(
-        runtime_root or None,
-        config_path=config_path,
-    )
+    runtime_root = (os.getenv("SOYBEAN_MARGIN_HISTORY_ROOT", "").strip()
+                    or os.getenv("IMPORT_PROFIT_RUNTIME_ROOT", "").strip())
+    render_soybean_margin_page(runtime_root or None)
 
 
 def apply_workspace_navigation_request() -> None:

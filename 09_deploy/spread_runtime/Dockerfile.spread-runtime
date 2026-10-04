@@ -99,6 +99,9 @@ RUN python -c 'import json,re,sys; commit,tree,release_id,build_time,source=sys.
 
 ENV PYTHONPATH=/app/03_src
 COPY ["03_src/agri_research_agent/import_profit/operational_runtime.py", "/app/03_src/agri_research_agent/import_profit/"]
+COPY ["03_src/agri_research_agent/soybean_margin/__init__.py", "03_src/agri_research_agent/soybean_margin/charts.py", "03_src/agri_research_agent/soybean_margin/model.py", "03_src/agri_research_agent/soybean_margin/public_inputs.py", "03_src/agri_research_agent/soybean_margin/runtime.py", "03_src/agri_research_agent/soybean_margin/store.py", "/app/03_src/agri_research_agent/soybean_margin/"]
+COPY ["05_apps/soybean_margin_page.py", "/app/05_apps/"]
+COPY ["05_apps/soybean_margin_assets/tables.css", "/app/05_apps/soybean_margin_assets/"]
 USER 65532:65532
 EXPOSE 8501
 CMD ["streamlit", "run", "05_apps/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]

@@ -58,8 +58,8 @@ def runtime_project_module_closure(manifest):
     assert result["complete"], result["unresolved"]
     assert {
         "05_apps/streamlit_app.py",
-        "05_apps/import_profit_intraday_runtime_page.py",
-        "05_apps/import_profit_intraday_page.py",
+        "05_apps/soybean_margin_page.py",
+        "03_src/agri_research_agent/soybean_margin/runtime.py",
         "04_scripts/runtime/spread_runtime_preflight.py",
         "03_src/agri_research_agent/market_data/activated_runtime.py",
     } <= set(result["active_paths"])
@@ -87,8 +87,8 @@ def test_spread_runtime_project_import_closure_is_packaged():
 def test_spread_runtime_import_closure_rejects_lifecycle_omission(omission):
     manifest = contract()
     required = runtime_project_module_closure(manifest)
-    lifecycle = "03_src/agri_research_agent/import_profit/lifecycle.py"
-    assert lifecycle in required  # Recursive soybean_intraday import, not a string-only inventory.
+    lifecycle = "03_src/agri_research_agent/soybean_margin/store.py"
+    assert lifecycle in required  # Actual replacement state consumer, not a string-only inventory.
     packaged = {item["path"] for item in manifest["source_inputs"]}
     packaged.add("03_src/agri_research_agent/shared/runtime_manifest.py")
     copied = copied_runtime_inputs(manifest)
@@ -153,7 +153,7 @@ def mounted_inputs(tmp_path):
         target = roles[item["role"]] / item["relative_path"]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
-    assert len(m["candidate_runtime_inputs"]) == 13
+    assert len(m["candidate_runtime_inputs"]) == 17
     return roles
 
 
@@ -174,6 +174,7 @@ def test_exact_seed_files_initialize_real_consumers_and_strict_page(mounted_inpu
     before = {p: p.read_bytes() for key in ("history", "snapshots", "cnf")
               for p in paths[key].rglob("*") if p.is_file()}
     preflight.initialize_strict_page(args, paths["snapshots"], paths["cnf"] / "historical_cnf_cache.parquet")
+    preflight.initialize_replacement_page(args)
     assert all(p.read_bytes() == raw for p, raw in before.items())
     assert not any(paths["capture-snapshots"].iterdir())
 
