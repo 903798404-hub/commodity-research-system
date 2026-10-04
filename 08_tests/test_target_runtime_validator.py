@@ -135,6 +135,25 @@ def test_candidate_grant_never_discards_supplied_external_trust():
         "external_candidate_trust_path": "bound-public-trust"})]
 
 
+def test_current_image_keeps_all_declared_lifecycle_probes():
+    engine = load_engine()
+    contract = json.loads((ROOT / "02_configs/runtime_contracts/spread-production-runtime.json").read_text())
+    assert engine._lifecycle_probe_names(contract) == (
+        "lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store")
+
+
+def test_pre_lifecycle_image_uses_its_own_source_contract():
+    engine = load_engine()
+    assert engine._lifecycle_probe_names({"source_inputs": [
+        {"path": "03_src/agri_research_agent/import_profit/soybean.py"}]}) == ()
+
+
+def test_declared_lifecycle_module_cannot_be_omitted_from_probes():
+    engine = load_engine()
+    assert engine._lifecycle_probe_names({"source_inputs": [
+        {"path": "03_src/agri_research_agent/import_profit/lifecycle_store.py"}]}) == ("lifecycle_store",)
+
+
 @pytest.mark.parametrize('command', [('docker', 'build', '.'), ('docker', 'buildx', 'build', '.')])
 def test_existing_image_transport_rejects_build_before_spawning_process(monkeypatch, command):
     engine = load_engine()

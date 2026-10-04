@@ -163,6 +163,14 @@ def _issue_candidate_grant(host, container_id: str, *, external_trust, **options
     return host.issue_execution_grant(container_id, **options)
 
 
+def _lifecycle_probe_names(contract: Mapping[str, Any]) -> tuple[str, ...]:
+    # Image/source byte binding and import closure are checked independently.
+    # Additional probes apply only to modules declared by that image's source.
+    declared = {item["path"] for item in contract["source_inputs"]}
+    return tuple(name for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store")
+                 if "03_src/agri_research_agent/import_profit/" + name + ".py" in declared)
+
+
 def _git(root: Path, *args: str, binary: bool = False):
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env["GIT_NO_REPLACE_OBJECTS"] = "1"
@@ -1241,7 +1249,7 @@ def validate_linux(root: Path, project: Mapping[str, Any], contract: dict[str, A
                     label="application-service-context")
             probes["runtime_identity"] = "PASS"
             lifecycle_imports = {}
-            for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store"):
+            for name in _lifecycle_probe_names(contract):
                 module = "agri_research_agent.import_profit." + name
                 _exec(container_id, _python_module_probe_argv(module), label="image-import:" + module)
                 lifecycle_imports[name] = "PASS"
