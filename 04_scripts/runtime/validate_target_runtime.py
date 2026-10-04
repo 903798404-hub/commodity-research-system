@@ -1120,7 +1120,7 @@ def _actual_host_rejection(root: Path, host, contract: dict[str, Any],
         policy_path.write_bytes(_canonical(policy))
         os.chmod(policy_path, 0o600)
         try:
-            host.issue_execution_grant(container_id, expected_policy_path=policy_path,
+            _issue_candidate_grant(host, container_id, expected_policy_path=policy_path,
                                        key_path=_candidate_signing_key(contract, root),
                                        grant_path=grant_dir / "grant.json", grant_dir=grant_dir,
                                        role="candidate_validation", ttl_seconds=900,

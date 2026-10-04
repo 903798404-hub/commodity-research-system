@@ -121,6 +121,45 @@ def test_legacy_grant_call_omits_only_unused_new_keyword():
             role='candidate_validation', external_candidate_trust_path=Path('/requested'))
 
 
+def test_original_legacy_signer_reproduces_none_keyword_and_adapter_enters_real_validator(tmp_path):
+    """Actual old Python ABI, not a permissive signer stub or Docker verdict."""
+    from types import ModuleType
+    engine = load_engine()
+    raw = subprocess.check_output(['git', 'show',
+        '88df880127bea4308ee752a37a59884b9198b2ce:09_deploy/runtime_identity/host_authorization.py'], cwd=ROOT)
+    legacy = ModuleType('actual_legacy_signer_negative_probe')
+    legacy.__file__ = str(ROOT / '09_deploy/runtime_identity/host_authorization.py')
+    exec(compile(raw, legacy.__file__, 'exec'), legacy.__dict__)
+    arguments = dict(expected_policy_path=tmp_path / 'missing-policy.json',
+        key_path=tmp_path / 'missing-key.pem', grant_path=tmp_path / 'grant.json',
+        grant_dir=tmp_path, role='candidate_validation', ttl_seconds=900)
+    # The original Hosted failure: even None is an unsupported Python keyword.
+    with pytest.raises(TypeError, match='external_candidate_trust_path'):
+        legacy.issue_execution_grant('unallocated', **arguments, external_candidate_trust_path=None)
+    # This is deliberately invalid local input. The actual legacy validator,
+    # rather than argument binding or a fake success, must now reject it.
+    with pytest.raises(legacy.HostAuthorizationError):
+        engine._issue_candidate_grant(legacy, 'unallocated', **arguments,
+            external_candidate_trust_path=None)
+    assert not list(tmp_path.iterdir())
+
+
+def test_all_candidate_signing_sites_share_adapter_including_actual_negative_probe():
+    import ast
+    source = ast.parse(ENGINE.read_text(encoding='utf-8'))
+    direct = []
+    for function in source.body:
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for call in ast.walk(function):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == 'issue_execution_grant':
+                direct.append(function.name)
+    assert direct == ['_issue_candidate_grant']
+    engine = load_engine()
+    assert '_issue_candidate_grant' in engine._actual_host_rejection.__code__.co_names
+    assert '_issue_candidate_grant' in engine.validate_linux.__code__.co_names
+
+
 @pytest.mark.parametrize('fault', ['missing_secret', 'extra_secret', 'wrong_target', 'wrong_type'])
 def test_current_secret_resolver_never_hides_legacy_errors(fault):
     engine = load_engine()
