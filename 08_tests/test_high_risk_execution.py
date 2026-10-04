@@ -40,7 +40,7 @@ def test_hosted_formal_runtime_fixture_preserves_candidate_snapshot_and_empty_fo
     result = fixture.seed_formal_runtime_inputs(manifest, sources, source)
     assert result['snapshot_state'] == 'FORMAL_PRE_CAPTURE_EMPTY'
     assert result['capture_executed'] is result['sealed_candidate_snapshot_retagged'] is False
-    assert len(result['inputs']) == 11
+    assert len(result['inputs']) == 15
     assert not any(sources['snapshots'].iterdir())
     assert all(path.read_bytes() == raw for path, raw in originals.items())
     preflight = execution.load(ROOT, '04_scripts/runtime/spread_runtime_preflight.py',

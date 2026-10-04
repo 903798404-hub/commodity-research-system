@@ -135,7 +135,7 @@ def test_final_image_import_closure_detects_missing_module(monkeypatch):
     assert complete["missing_from_final_image"] == []
     original = engine._copy_bytes
     def missing(container, path):
-        if path.endswith("/import_profit/lifecycle.py"):
+        if path.endswith("/soybean_margin/store.py"):
             raise engine.ValidationError("module absent")
         return original(container, path)
     monkeypatch.setattr(engine, "_copy_bytes", missing)
