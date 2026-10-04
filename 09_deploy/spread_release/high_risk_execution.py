@@ -751,7 +751,7 @@ class HostBackend:
                     and assessment.get('production_authorized') is False
                     and assessment.get('MACHINE_DESTRUCTIVE_EVIDENCE') is False
                     and assessment.get('STATE_CHANGE_CLASS') == 'ADDITIVE_REVERSIBLE'
-                    and assessment.get('FINAL_RELEASE_TREATMENT') == 'ADDITIVE_REVERSIBLE'
+                    and assessment.get('FINAL_RELEASE_TREATMENT') in ('ADDITIVE_REVERSIBLE', 'STATEFUL_OR_INFRA')
                     and assessment.get('FULL_ROLLBACK_REHEARSAL_REQUIRED') is False
                     and assessment.get('TARGETED_RECOVERY_VALIDATION_REQUIRED') is False,
                     'RECOVERY_EVIDENCE_MISSING')

@@ -36,8 +36,10 @@ def recovery_requirement_backend(tmp_path):
     return backend, plan, assessment, assessment_path, reference
 
 
-def test_additive_without_recovery_uses_bound_assessment(tmp_path):
+@pytest.mark.parametrize('treatment', ['ADDITIVE_REVERSIBLE', 'STATEFUL_OR_INFRA'])
+def test_additive_without_recovery_uses_bound_assessment(tmp_path, treatment):
     backend, plan, assessment, path, reference = recovery_requirement_backend(tmp_path)
+    assessment['FINAL_RELEASE_TREATMENT'] = treatment
     path.write_text(json.dumps(assessment), encoding='utf-8')
     backend.release_assessment = reference(path)
     backend.consume_recovery(plan)
