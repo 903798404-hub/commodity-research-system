@@ -203,7 +203,9 @@ def _validate_packaging(value: object, evidence: dict) -> None:
         _fail("import closure has missing modules")
     if any(closure[name] < closure["required_module_count"] for name in counts):
         _fail("import closure counts disagree")
-    if value["lifecycle_imports"] != {name: "PASS" for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store")}:
+    lifecycle = {name: "PASS" for name in ("lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store")
+                 if "03_src/agri_research_agent/import_profit/" + name + ".py" in binding["source_sha256"]}
+    if value["lifecycle_imports"] != lifecycle:
         _fail("lifecycle import claims incomplete or failed")
     readonly = value["readonly_initialization"]
     if readonly is None:

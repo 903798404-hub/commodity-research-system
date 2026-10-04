@@ -143,6 +143,21 @@ def _execute_validation(project: dict, output: Path, *, existing_image_id: str |
             stream.write(json.dumps(receipt, sort_keys=True).encode('utf-8'))
 
 
+def _application_record_evidence(evidence, record, application_record, *, existing_image_id):
+    # Validate every actual probe, including supplemental packaging, BEFORE
+    # projecting the original schema of a retained pre-packaging application.
+    # Raw engine evidence stays immutable in its exclusively allocated folder.
+    record._validate_evidence(evidence)
+    if hasattr(application_record, "_PACKAGING_FIELDS"):
+        return evidence
+    if (existing_image_id is None or
+            application_record._EVIDENCE_FIELDS != record._EVIDENCE_FIELDS):
+        raise PreReleaseError("unsupported retained application record schema")
+    projected = {key: value for key, value in evidence.items() if key in record._EVIDENCE_FIELDS}
+    application_record._validate_evidence(projected)
+    return projected
+
+
 def validate_candidate(project_id: str, destination: Path, key_path: Path,
                        *, ttl_seconds: int = 86400, existing_image_id: str | None = None,
                        application_source_root: Path | None = None) -> dict:
@@ -186,6 +201,8 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
     if (binding["commit"], binding["tree"]) != application_before:
         raise PreReleaseError("candidate identity changed before validation")
     record = _load(RECORD, "_pre_release_record")
+    application_record = (record if source == ROOT else
+        engine._load(engine._exact_source(source, RECORD), "_retained_application_record"))
     # Root-private, uniquely allocated evidence location: the CLI never imports
     # an externally supplied evidence file and does not expose this path as input.
     folder = Path(tempfile.mkdtemp(prefix="candidate-validation-", dir=destination.parent))
@@ -207,6 +224,8 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
         raise PreReleaseError("candidate evidence binding differs")
     if existing_image_id is not None and evidence.get("image_id") != existing_image_id:
         raise PreReleaseError("candidate evidence image differs from fixed image")
+    evidence = _application_record_evidence(evidence, record, application_record,
+                                            existing_image_id=existing_image_id)
     now = datetime.now(timezone.utc)
     payload = {"record_id": os.urandom(16).hex(), "purpose": "target-runtime-validation",
                "authorization_role": "candidate_validation", "issued_at": now.isoformat(),
@@ -219,6 +238,7 @@ def validate_candidate(project_id: str, destination: Path, key_path: Path,
     envelope["signature"] = base64.b64encode(key.sign(record.canonical(envelope))).decode("ascii")
     raw = record.canonical(envelope)
     record.verify_record(raw, trust, now=now)
+    application_record.verify_record(raw, trust, now=now)
     if require_source(host, engine) != before or (ROOT / TRUST).read_bytes() != trust_raw:
         raise PreReleaseError("candidate source changed during validation")
     if existing_image_id is not None and require_source(host, engine, source_root=source) != application_before:

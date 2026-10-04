@@ -39,7 +39,8 @@ def packaging(e):
         private_key_persisted=None, private_key_visible_to_container=False, public_key_fingerprint=None,
         grant_binding=grant, import_closure=dict(required_module_count=143, manifest_module_count=278,
         dockerfile_module_count=278, missing_from_manifest=[], missing_from_dockerfile=[], missing_from_final_image=[]),
-        lifecycle_imports={name:'PASS' for name in ('lifecycle','lifecycle_events','lifecycle_reconciler','lifecycle_store')},
+        lifecycle_imports={name:'PASS' for name in ('lifecycle','lifecycle_events','lifecycle_reconciler','lifecycle_store')
+            if '03_src/agri_research_agent/import_profit/'+name+'.py' in b['source_sha256']},
         readonly_initialization=readonly, readonly_exit_code=0, initialize_strict_page='PASS', app_test='PASS',
         probe_stages=copy.deepcopy(e['probes']), timestamp=fixtures.NOW.isoformat(),
         service_credential_mounts={name:'PASS' for name in record._SECRET_PROBES})
@@ -49,10 +50,54 @@ def signed_packaging():
     key = Ed25519PrivateKey.generate()
     item = fixtures.envelope(key, validator_version='target-runtime-validator/2')
     e = item['payload']['evidence']
+    for name in ('lifecycle','lifecycle_events','lifecycle_reconciler','lifecycle_store'):
+        e['binding']['source_sha256']['03_src/agri_research_agent/import_profit/'+name+'.py'] = 'a'*64
     e['spread_runtime_packaging'] = packaging(e)
     item['payload']['evidence_sha256'] = hashlib.sha256(record.canonical(e)).hexdigest()
     fixtures.resign(item,key)
     return key,item
+
+
+def test_retained_source_packaging_does_not_claim_unavailable_lifecycle_modules():
+    key = Ed25519PrivateKey.generate()
+    item = fixtures.envelope(key, validator_version='target-runtime-validator/2')
+    e = item['payload']['evidence']
+    e['spread_runtime_packaging'] = packaging(e)
+    assert e['spread_runtime_packaging']['lifecycle_imports'] == {}
+    item['payload']['evidence_sha256'] = hashlib.sha256(record.canonical(e)).hexdigest()
+    fixtures.resign(item,key)
+    record.verify_record(fixtures.raw(item),fixtures.trust(key),now=fixtures.NOW)
+    e['spread_runtime_packaging']['lifecycle_imports']['lifecycle'] = 'PASS'
+    item['payload']['evidence_sha256'] = hashlib.sha256(record.canonical(e)).hexdigest()
+    fixtures.resign(item,key)
+    with pytest.raises(record.CandidateValidationRecordError,match='lifecycle'):
+        record.verify_record(fixtures.raw(item),fixtures.trust(key),now=fixtures.NOW)
+
+
+def test_retained_record_projection_validates_full_evidence_first():
+    from types import SimpleNamespace
+    pre = load('04_scripts/runtime/pre_release_runtime.py','repair_record_projection')
+    _,item = signed_packaging()
+    e=item['payload']['evidence'];original=copy.deepcopy(e)
+    legacy=SimpleNamespace(_EVIDENCE_FIELDS=record._EVIDENCE_FIELDS,
+        _validate_evidence=record._validate_evidence)
+    projected=pre._application_record_evidence(e,record,legacy,existing_image_id=e['image_id'])
+    assert projected=={k:v for k,v in e.items() if k!='spread_runtime_packaging'}
+    assert e==original
+    e['spread_runtime_packaging']['app_test']='FAIL'
+    with pytest.raises(record.CandidateValidationRecordError):
+        pre._application_record_evidence(e,record,legacy,existing_image_id=e['image_id'])
+
+
+def test_record_projection_cannot_apply_to_new_build_or_unknown_schema():
+    from types import SimpleNamespace
+    pre = load('04_scripts/runtime/pre_release_runtime.py','repair_projection_guard')
+    _,item=signed_packaging();e=item['payload']['evidence']
+    for image,fields in ((None,record._EVIDENCE_FIELDS),(e['image_id'],frozenset({'binding'}))):
+        legacy=SimpleNamespace(_EVIDENCE_FIELDS=fields)
+        with pytest.raises(pre.PreReleaseError,match='unsupported retained'):
+            pre._application_record_evidence(e,record,legacy,existing_image_id=image)
+    assert pre._application_record_evidence(e,record,record,existing_image_id=None) is e
 
 
 def test_packaging_is_a_signed_strict_claim_and_legacy_records_remain_valid():
