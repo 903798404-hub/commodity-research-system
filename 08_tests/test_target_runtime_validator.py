@@ -262,6 +262,50 @@ def load_ci_router():
     return module
 
 
+@pytest.mark.parametrize('path', ['04_scripts/runtime/说明.md', '09_deploy/runtime_identity/说明.md'])
+def test_ci_tooling_documentation_uses_both_committed_runtime_inventories(monkeypatch, path):
+    module = load_ci_router()
+    calls = []
+    raw = (ROOT / module.RUNTIME_CONTRACT).read_bytes()
+    def blob(repo, commit, name):
+        calls.append((commit, name))
+        return raw
+    monkeypatch.setattr(module.admission, 'blob', blob)
+    report = {'changed_paths': [{'path': path}],
+              'trusted_main': {'commit': 'base'}, 'candidate': {'commit': 'candidate'}}
+    assert not module.requires_spread_release_e2e(report, ROOT)
+    assert calls == [('base', module.RUNTIME_CONTRACT), ('candidate', module.RUNTIME_CONTRACT)]
+    assert not module.requires_spread_runtime_docker(report, ROOT)
+    report['changed_paths'].append({'path': '09_deploy/spread_release/high_risk_execution.py'})
+    assert module.requires_spread_release_e2e(report, ROOT)
+
+
+@pytest.mark.parametrize('change', ['base-packaged', 'candidate-packaged', 'missing-identity',
+                                  'invalid-json', 'empty-inputs', 'invalid-input'])
+def test_ci_markdown_suffix_cannot_hide_runtime_inputs_or_unknown_inventory(monkeypatch, change):
+    module = load_ci_router()
+    path = '09_deploy/runtime_identity/说明.md'
+    manifest = json.loads((ROOT / module.RUNTIME_CONTRACT).read_text(encoding='utf-8'))
+    def blob(repo, commit, name):
+        import copy
+        value = copy.deepcopy(manifest)
+        if change == commit + '-packaged':
+            value['source_inputs'].append({'path': path, 'role': 'resource'})
+        elif change == 'invalid-json':
+            return b'{'
+        elif change == 'empty-inputs':
+            value['source_inputs'] = []
+        elif change == 'invalid-input':
+            value['source_inputs'].append({'path': path, 'role': None})
+        return json.dumps(value).encode()
+    monkeypatch.setattr(module.admission, 'blob', blob)
+    report = {'changed_paths': [{'path': path}],
+              'trusted_main': {'commit': 'base'}, 'candidate': {'commit': 'candidate'}}
+    if change == 'missing-identity':
+        report.pop('trusted_main')
+    assert module.requires_spread_release_e2e(report, ROOT)
+
+
 @pytest.mark.parametrize('path,expected', [
     ('05_apps/soybean_margin_page.py', False),
     ('05_apps/soybean_margin_assets/tables.css', False),

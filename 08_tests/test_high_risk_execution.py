@@ -16,6 +16,104 @@ sys.modules[spec.name] = execution
 spec.loader.exec_module(execution)
 
 
+def private_output_host(monkeypatch, output, *, mode=0o700, uid=0, gid=0):
+    """Portable directory contract fixture, not Linux/root-owned evidence."""
+    from types import SimpleNamespace
+    calls = []
+    real_lstat = Path.lstat
+    def lstat(path, *args, **kwargs):
+        value = real_lstat(path, *args, **kwargs)
+        if path == output:
+            return SimpleNamespace(st_uid=uid, st_gid=gid, st_mode=execution.stat.S_IFDIR | mode)
+        return value
+    monkeypatch.setattr(Path, 'lstat', lstat)
+    def protected(path, **kwargs):
+        calls.append(('protected', path, kwargs))
+        if not path.is_dir() or path.resolve(strict=True) != path:
+            raise ValueError('protected path missing or aliased')
+        return path
+    return SimpleNamespace(_require_linux_root=lambda: calls.append(('root',)),
+                           _protected_path=protected), calls
+
+
+@pytest.mark.parametrize('existing', [False, True])
+def test_execution_cli_output_prepares_only_one_private_leaf(monkeypatch, tmp_path, existing):
+    output = tmp_path / 'attempt'
+    if existing:
+        output.mkdir()
+    host, calls = private_output_host(monkeypatch, output)
+    created = []
+    real_mkdir = Path.mkdir
+    def mkdir(path, *args, **kwargs):
+        created.append((path, args, kwargs))
+        return real_mkdir(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'mkdir', mkdir)
+    execution.prepare_execution_output(host, output)
+    assert calls == [('root',), ('protected', output.parent, {'directory': True}),
+                     ('protected', output, {'directory': True})]
+    assert created == ([] if existing else [(output, (), {'mode': 0o700})])
+    assert output.is_dir() and list(output.iterdir()) == []
+
+
+@pytest.mark.parametrize('mode,uid,gid', [(0o755, 0, 0), (0o700, 1000, 0), (0o700, 0, 1000)])
+def test_execution_output_rejects_unsafe_ownership_and_permissions_without_repair(monkeypatch, tmp_path, mode, uid, gid):
+    output = tmp_path / 'attempt'
+    output.mkdir()
+    host, _ = private_output_host(monkeypatch, output, mode=mode, uid=uid, gid=gid)
+    with pytest.raises(execution.ExecutionError, match='NOT_ROOT_PRIVATE'):
+        execution.prepare_execution_output(host, output)
+    assert output.is_dir() and not any(output.iterdir())
+
+
+def test_execution_output_preserves_previous_attempt_and_refuses_missing_parent(monkeypatch, tmp_path):
+    output = tmp_path / 'attempt'
+    output.mkdir()
+    prior = output / 'execution-result.json'
+    prior.write_bytes(b'old sealed evidence')
+    host, _ = private_output_host(monkeypatch, output)
+    with pytest.raises(execution.ExecutionError, match='NOT_EMPTY'):
+        execution.prepare_execution_output(host, output)
+    assert prior.read_bytes() == b'old sealed evidence'
+    missing = tmp_path / 'missing-parent' / 'new-attempt'
+    with pytest.raises(ValueError, match='protected path missing'):
+        execution.prepare_execution_output(host, missing)
+    assert not missing.parent.exists()
+    with pytest.raises(execution.ExecutionError, match='MUST_BE_ABSOLUTE'):
+        execution.prepare_execution_output(host, Path('relative-attempt'))
+
+
+def test_execution_cli_rejects_invalid_plan_before_allocating_output(monkeypatch, tmp_path):
+    output = tmp_path / 'attempt'
+    def reject(path):
+        raise execution.ExecutionError('INVALID_SEALED_PLAN')
+    monkeypatch.setattr(execution, 'verify_plan', reject)
+    monkeypatch.setattr(execution, 'HostBackend', lambda path: pytest.fail('backend started before plan validation'))
+    with pytest.raises(execution.ExecutionError, match='INVALID_SEALED_PLAN'):
+        execution.main(['--plan', str(tmp_path/'plan.json'), '--output', str(output)])
+    assert not output.exists()
+
+
+def test_execution_cli_prepares_output_before_execution_and_never_executes_rejected_directory(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    output = tmp_path / 'attempt'
+    host, _ = private_output_host(monkeypatch, output)
+    events = []
+    monkeypatch.setattr(execution, 'verify_plan', lambda path: events.append('verified'))
+    backend = SimpleNamespace(host=host)
+    monkeypatch.setattr(execution, 'HostBackend', lambda path: backend)
+    def execute(path, observed):
+        assert observed is backend and output.is_dir() and not any(output.iterdir())
+        events.append('executed')
+        return {'result': 'SUCCESS'}
+    monkeypatch.setattr(execution, 'execute_verified_plan', execute)
+    assert execution.main(['--plan', str(tmp_path/'plan.json'), '--output', str(output)]) == 0
+    assert events == ['verified', 'executed']
+    (output/'old-result.json').write_text('retained', encoding='utf-8')
+    with pytest.raises(execution.ExecutionError, match='NOT_EMPTY'):
+        execution.main(['--plan', str(tmp_path/'plan.json'), '--output', str(output)])
+    assert events == ['verified', 'executed', 'verified']
+
+
 @pytest.mark.parametrize('advance_hours', [0, 48])
 def test_hosted_additive_review_uses_review_clock_without_changing_record_clock(monkeypatch, advance_hours):
     from datetime import datetime, timedelta, timezone

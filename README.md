@@ -73,7 +73,7 @@ py -3.12 -m venv .venv-py312
 ```
 
 运行时直接依赖维护在 `requirements.in`，生产锁为 `requirements.txt`；测试工具维护
-在 `requirements-dev.in`，开发锁为 `requirements-dev.txt`。两个前端统一使用 Node
+在 `requirements-dev.in`，开发锁为 `requirements-dev.txt`。本地和生产使用上述带 hash 的锁文件。Hosted Python 测试当前安装固定直接依赖的 `.in` 文件，传递依赖未受同等 hash 锁定；CI 按实际平台环境执行并记录 base/candidate 对照，不能称为生产锁环境的复现。依赖声明、CI 安装或镜像输入变化仍执行相应验证。两个前端统一使用 Node
 24、Corepack 管理的 pnpm 10.12.1，并必须执行 `pnpm install --frozen-lockfile`。
 缺少 Node、Corepack 或正式 pnpm 时，环境预检会失败且不会自动安装工具。
 
@@ -89,13 +89,8 @@ pnpm --dir 05_apps/oil_world_dashboard dev --host 127.0.0.1 --port 5175
 
 三个正式服务使用各自独立 Compose/project；以[系统边界](07_docs/01_系统架构与项目边界.md)为准，不能用根 Compose 顺带操作其他服务。服务器保留一个 `market-data` 正式项目目录。
 
-新开发先读根 `AGENTS.md`，使用 [Project Registry](02_configs/project_registry.json) 的 project_id。
-普通 Business：START / RESUME → development → push feature → trusted-main-admission-v1 PASS → human approval → exact fast-forward main。
-正式测试、Scope 和身份以 hosted Admission 为准；Completion 和独立 integration 不再是普通业务强制前置。
-仅接纳获批且获得 successful check 的同一个 Commit/Tree，新 commit 必须重新获得 hosted PASS。
-shared/governance/protected/production-control-plane、FULL DAILY、Production Wrapper、Runtime、
-deployment 和 production data/write path 保留原严格 Completion/integration lane。
-精确 GitHub check/provider/artifact 与 fresh main 回查见开发规范第 6 节。
-local main 仅为 clean origin/main 镜像；生产 FULL DAILY 只认显式 Approved 与 detached control-plane/tool-repo。
+新开发先读根 [`AGENTS.md`](AGENTS.md)，流程和 CI 以[标准开发与生产发布规范](07_docs/03_标准开发与生产发布规范.md)为准，逐步操作见[检查清单](07_docs/04_开发与发布检查清单.md)。Business 使用专项测试；Shared/Infra 加影响及消费者测试；Governance/CI 加治理和平台验证。Completion 是可选工具，不要求额外 integration 分支。
 
-`spread-dashboard` 的发布规则以 [`07_docs/03_标准开发与生产发布规范.md`](07_docs/03_标准开发与生产发布规范.md) 为准。`09_deploy/spread_release/` 当前仍是候选实现，真实 Docker Compose 门槛通过前不得用于生产部署；任何正式切换都不得使用根 Compose 隐式命名、`latest`、`new` 或 `up --build`。
+`trusted-main-admission-v1` 必须验证待接纳的同一 Commit/Tree；Maintainer 审查通过后普通 fast-forward 接纳。local main 保持 clean origin/main 镜像。main != production；发布、FULL DAILY 和生产写入各按授权及实际合同执行。
+
+`spread-dashboard` 已具备同镜像重验、HIGH_RISK 计划准备和正式执行入口；适用边界见[运行工具说明](04_scripts/runtime/说明.md)。工具接纳、应用镜像身份与每次生产授权分别核验。正式切换不得使用根 Compose 隐式命名、`latest`、`new` 或 `up --build`。

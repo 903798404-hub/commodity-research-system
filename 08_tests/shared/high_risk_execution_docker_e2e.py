@@ -848,6 +848,39 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         if credential.exists():credential.unlink()
 
 
+def verify_execution_output_allocation(work):
+    """Exercise real Linux/root path protection before costly Docker cases."""
+    execution = load(ROOT, '09_deploy/spread_release/high_risk_execution.py', '_hosted_cli_output_execution')
+    host = load(ROOT, '09_deploy/runtime_identity/host_authorization.py', '_hosted_cli_output_host')
+    output = work / 'cli-output'
+    execution.prepare_execution_output(host, output)
+    state = output.lstat()
+    assert state.st_uid == state.st_gid == 0 and (state.st_mode & 0o777) == 0o700
+    execution.prepare_execution_output(host, output)  # Caller-prepared empty leaf remains valid.
+    prior = output / 'execution-result.json'
+    prior.write_bytes(b'previous-attempt-evidence')
+    rejected = []
+    def reject(label, path):
+        try:
+            execution.prepare_execution_output(host, path)
+        except (execution.ExecutionError, host.HostAuthorizationError, FileNotFoundError):
+            rejected.append(label)
+        else:
+            raise AssertionError('Unsafe execution output accepted: ' + label)
+    reject('previous-attempt', output)
+    assert prior.read_bytes() == b'previous-attempt-evidence'
+    unsafe = directory(work / 'public-output', 0o755)
+    reject('public-directory', unsafe)
+    alias = work / 'symlink-output'
+    alias.symlink_to(output, target_is_directory=True)
+    reject('symlink', alias)
+    reject('missing-parent', work / 'missing' / 'output')
+    assert not (work / 'missing').exists()
+    reject('relative', Path('relative-execution-output'))
+    return dict(result='PASS', uid=state.st_uid, gid=state.st_gid, mode=oct(state.st_mode & 0o777),
+                rejected=rejected, previous_evidence_preserved=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
@@ -863,6 +896,7 @@ def main():
                    production_acceptance='NOT_EXECUTED', application_target_rebuilt=False)
     original_review_loader = install_review_clock()
     try:
+        receipt['execution_output_allocation'] = verify_execution_output_allocation(work)
         for role in ('production', 'candidate_validation'):
             key = Ed25519PrivateKey.generate()
             key_id = 'hosted-execution-' + role.replace('_', '-') + '-' + uuid.uuid4().hex

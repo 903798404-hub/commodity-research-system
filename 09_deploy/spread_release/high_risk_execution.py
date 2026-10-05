@@ -1010,12 +1010,35 @@ class HostBackend:
         # and service credentials are deliberately retained, never overwritten.
 
 
+def prepare_execution_output(host, output):
+    """Allocate one private evidence directory under an existing protected parent.
+
+    Never repair permissions, follow aliases or overwrite an earlier attempt.
+    Root ownership of the parent makes the mkdir/check sequence root-controlled.
+    """
+    host._require_linux_root()
+    require(output.is_absolute(), 'EXECUTION_OUTPUT_MUST_BE_ABSOLUTE')
+    host._protected_path(output.parent, directory=True)
+    if not output.exists() and not output.is_symlink():
+        output.mkdir(mode=0o700)
+    host._protected_path(output, directory=True)
+    state = output.lstat()
+    require(state.st_uid == state.st_gid == 0 and stat.S_IMODE(state.st_mode) == 0o700,
+            'EXECUTION_OUTPUT_NOT_ROOT_PRIVATE')
+    require(not any(output.iterdir()), 'EXECUTION_OUTPUT_NOT_EMPTY')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
-    result = execute_verified_plan(args.plan, HostBackend(args.output))
+    # Validate the sealed intent before creating evidence, and prepare output
+    # before the execution entry can acquire a lock or stop the source.
+    verify_plan(args.plan)
+    backend = HostBackend(args.output)
+    prepare_execution_output(backend.host, args.output)
+    result = execute_verified_plan(args.plan, backend)
     print(json.dumps(result, sort_keys=True))
     return 0 if result['result'] == 'SUCCESS' else 2
 

@@ -2,7 +2,7 @@
 
 本文件只补充 USDA 数据/UI 保护；最高开发治理为[根 AGENTS](../../AGENTS.md)，
 标准开发/发布唯一规则见[根规范](../../07_docs/03_标准开发与生产发布规范.md)。
-使用 Project Registry 的 `usda`；独立 feature worktree；普通 business 无强制 integration，local main 保持 clean mirror。
+使用 Project Registry 的 `usda`；feature/fix branch 在独立开发检出中开发，并行或共享可编辑检出时使用独立 worktree；普通 business 无强制 integration，local main 保持 clean mirror。
 
 ## 代码基线
 

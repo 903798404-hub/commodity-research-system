@@ -31,6 +31,30 @@ def test_current_documentation_layers_exist_and_are_distinct() -> None:
     assert "不证明任何候选或发布工具已经通过真实生产门槛" in read(MANUAL)
 
 
+def test_readme_does_not_reintroduce_obsolete_integration_or_draft_authority():
+    body = read(ROOT / 'README.md')
+    assert '保留原严格 Completion/integration lane' not in body
+    assert '当前仍是候选实现' not in body
+    targets = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', body)
+    assert '07_docs/03_标准开发与生产发布规范.md' in targets
+    assert '07_docs/04_开发与发布检查清单.md' in targets
+    assert '传递依赖未受同等 hash 锁定' in body
+
+
+def test_index_covers_runtime_and_current_soybean_contracts():
+    body = read(INDEX)
+    targets = {unquote(target) for target in re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', body)}
+    for path in (DOCS/'projects/application-service-write-identity/服务写入身份合同.md',
+                 DOCS/'projects/production-runtime-v2/生产执行身份合同.md',
+                 DOCS/'projects/production-runtime-v2/目标RuntimeDeployabilityGate.md',
+                 DOCS/'projects/public-intraday-runtime/运行合同.md',
+                 DOCS/'projects/大豆榨利新版说明.md'):
+        assert path.relative_to(DOCS).as_posix() in targets
+    guide = read(DOCS/'projects/大豆榨利新版说明.md')
+    assert '](进口商品利润研究框架契约.md)' in guide
+    assert '0.795' not in guide  # Formula has one current authority.
+
+
 def test_manual_covers_all_required_operational_stages() -> None:
     manual = read(MANUAL)
     for stage in ('选择任务流程', '环境预检与任务范围', '开发、测试与 GitHub 接纳',

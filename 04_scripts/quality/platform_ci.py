@@ -46,9 +46,37 @@ RELEASE_CONTROL_FILES = {
 RUNTIME_CONTRACT = '02_configs/runtime_contracts/spread-production-runtime.json'
 
 
+def unpackaged_markdown(report, repo):
+    """Exclude documentation only after both committed inventories prove it.
+
+    A Markdown suffix alone cannot exempt a file packaged by either revision.
+    Missing identity or unreadable inventories retain the strict default.
+    """
+    markdown = {item['path'] for item in report['changed_paths']
+                if item['path'].endswith('.md')}
+    if not markdown:
+        return set()
+    try:
+        packaged = set()
+        for identity in ('trusted_main', 'candidate'):
+            manifest = json.loads(admission.blob(repo, report[identity]['commit'], RUNTIME_CONTRACT))
+            inputs = manifest['source_inputs']
+            if not isinstance(inputs, list) or not inputs:
+                return set()
+            for item in inputs:
+                if (not isinstance(item, dict) or set(item) != {'path', 'role'}
+                        or not isinstance(item['path'], str) or not item['path']
+                        or not isinstance(item['role'], str) or not item['role']):
+                    return set()
+                packaged.add(item['path'])
+        return markdown - packaged
+    except (KeyError, ValueError, TypeError, subprocess.CalledProcessError):
+        return set()
+
+
 def requires_spread_release_e2e(report, repo):
     """Replay lifecycle changes; persistence and runtime roots stay strict."""
-    changed = {item['path'] for item in report['changed_paths']}
+    changed = {item['path'] for item in report['changed_paths']} - unpackaged_markdown(report, repo)
     if any(path in RELEASE_CONTROL_FILES or path.startswith(RELEASE_CONTROL_PREFIXES)
            or (path.startswith('02_configs/runtime_contracts/') and path != RUNTIME_CONTRACT)
            or path.startswith('08_tests/shared/')

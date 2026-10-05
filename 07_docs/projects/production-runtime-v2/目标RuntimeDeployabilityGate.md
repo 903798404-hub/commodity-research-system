@@ -1,20 +1,14 @@
 # Target Runtime Deployability Gate
 
-`02_configs/runtime_contracts/spread-production-runtime.json` 是完整 spread dashboard 的
-源码合同，项目身份为 `spread-production-runtime-wiring`。初始合同由获准的 shared
-infrastructure owner 创建；它引用既有 tracked 文件，保留完整 Streamlit 入口、页面依赖和
-配置资源，禁止 CNF 保存及固定历史业务日期，声明只读历史/结果/快照输入与独立可写日志。
-`07_docs` 仅有 core path 常量，没有应用读取方，不作为运行输入。初始化命令实际解析
-Current 数据位置并加载 Domestic Spread 数据；空目录或空数据不能计为初始化成功。
-CNF store 沿用已验证历史 release 的默认路径，禁止环境变量覆盖该路径；页面历史 CNF
-cache 单独绑定只读 cnf root。source inputs 穷举现有配置、源码、脚本、页面与 Streamlit
-打包文件，包含未激活脚本不授予其执行权限；这些文件变化仍须使候选绑定失效。
+## 当前适用范围
 
-该文件可解析、路径存在不代表当前镜像可部署。初始 candidate inputs 为空，现有 root
-Dockerfile/Compose 的目录 COPY、grant 缺失、旧挂载、用户权限和 RELEASE 命名仍须在
-后续独立生产接线项目中满足目标合同。先由独立治理提交转移 manifest ownership 并登记
-真实 production_container 项目，再开发接线并执行 Linux 候选验证；不能用此源码合同
-替代 Target Runtime Gate、Production Approval、正式数据验收或真实 AM/PM 时间证据。
+`02_configs/runtime_contracts/spread-production-runtime.json` 是 spread dashboard 的源码合同；其实际 source_inputs、环境绑定、挂载及版本为核验依据。现行大豆页面使用已发布只读行情与独立 SQLite CNF 状态，正式保存由 application-service credential 和运行上下文控制；不得将初期只读 CNF 验证方案当作现行页面禁写规则。
+
+Registry ownership 提供责任和影响映射，不是开发 hard authorization，也不要求先做独立治理 main transition。修改 manifest 与相关接线可在同一明确 candidate 审查；不能取得生产批准或绕过真实 Linux 镜像/权限验证。初期空 candidate inputs、旧 COPY/grant/用户权限不足描述仅是历史开发阶段，不代表当前运行事实。
+
+开发与 main 接纳以根规范的 required hosted CI 为准；Completion 是可选入口，调用时仍消费完整目标验证证据。生产另行核验 Approved Commit/Tree/Image、Manifest、实际挂载和 fresh grant。source_inputs 中保留未激活脚本不授予执行权限；归档和文档不成为运行输入。
+
+## 验证接口
 
 `runtime_target=production_container` 的项目必须在 code closure 前，由候选源码自身的
 `04_scripts/runtime/validate_target_runtime.py` 生成 `target-runtime-evidence/1`。Completion
@@ -140,6 +134,6 @@ secret 文件必须 root 控制、无 world access，并允许容器显式 numer
 owner-write 位不等于业务可写。检查 inode、权限、大小、时间及内容摘要在前后观察间不漂移，
 报告只保存整体 identity hash，不暴露凭据内容。
 
-本阶段仍须完成完整 Scope/Completion、独立 integration 和实际 Linux 候选验证。
+本次 candidate 须完成适用 required / impact / platform CI 和实际 Linux 候选验证；main 与生产分别审查，独立 integration 不是通用前置。
 上述候选实现与专项测试不代表 Production Approval，
 不允许因此启动 production grant、自动 capture、FULL DAILY 接入或 Notification activation。

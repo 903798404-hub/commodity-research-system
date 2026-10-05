@@ -44,7 +44,7 @@ Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负�
 
 ## 主流开发路径
 
-统一流程：main → feature/fix branch → implementation → automated tests → required CI → main。使用独立 worktree；可选 start_project.py --project <id> --branch feat/<name> --worktree <path> --create，直接创建 feature/fix branch 同样合法。Registry 只用于 metadata、planning、impact/test mapping 和责任登记，不是普通开发的 hard authorization；缺 owner 不阻止项目启动。PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO；ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO；REGISTRY_IS_HARD_AUTHORIZATION = NO；STAGED_GOVERNANCE_MIGRATION_REQUIRED = NO。
+统一流程：main → feature/fix branch → implementation → automated tests → required CI → main。串行开发可在现有独立开发检出中直接建立分支；并行任务或共享可编辑检出时使用独立 worktree，main 镜像不承载开发。可选 start_project.py --project <id> --branch feat/<name> --worktree <path> --create，直接创建 feature/fix branch 同样合法。Registry 只用于 metadata、planning、impact/test mapping 和责任登记，不是普通开发的 hard authorization；缺 owner 不阻止项目启动。PROJECT_EXISTENCE_APPROVAL_REQUIRED = NO；ORDINARY_BUSINESS_NEEDS_HUMAN_APPROVAL = NO；REGISTRY_IS_HARD_AUTHORIZATION = NO；STAGED_GOVERNANCE_MIGRATION_REQUIRED = NO。
 
 Business 跑 scoped required tests；Shared/Infra 加 impact/consumer tests；Governance/CI 加治理及平台测试，MAINTAINER_REVIEW_REQUIRED = YES。Repository Maintainer/Admin 审查 main 接纳，不能覆盖 CI 失败。trusted、future、impact、candidate changed/added 与平台测试必须全部 required 全绿；Windows 专项使用 windows-2022。full regression 暂用 exact base/candidate node 对照，不得新增 failure/skip 或删除 base tests；既有 failure/skip 的节点与数量动态报告为技术债，不计 PASS；main 全绿后删除此过渡 ratchet。trusted-main-admission-v1 是 main required check，不使用 Ruleset bypass。可选 complete_project.py --candidate-record <记录> 若调用仍执行全部 required tests 与签名容器门禁，不是普通 main 前置条件。
 
