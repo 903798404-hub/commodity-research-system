@@ -165,7 +165,7 @@ def normalize_observation(container: Mapping, image: Mapping, release: Mapping) 
 def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
                             policy_raw_sha256: str, actual_raw_sha256: str,
                             platform: Mapping | None = None) -> dict:
-    """Keep raw evidence; only one proven Docker default has semantic equivalence."""
+    """Keep raw evidence; normalize only exact observed Docker transitions."""
     if _digest(policy_payload) != policy_raw_sha256 or _digest(actual_payload) != actual_raw_sha256:
         raise HostAuthorizationError("config payload does not reproduce raw hash")
     evidence = dict(policy_raw_sha256=policy_raw_sha256, actual_raw_sha256=actual_raw_sha256,
@@ -177,6 +177,16 @@ def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
     if not platform or version not in {"26.1.3", "28.0.4"} or platform.get("CgroupVersion") != "2":
         raise HostAuthorizationError("config mismatch: unsupported Docker/cgroup compatibility evidence")
     left, right = _json(_canonical(policy_payload)), _json(_canonical(actual_payload))
+    dns_fields = ('Dns', 'DnsOptions', 'DnsSearch')
+    before, after = left.get('host_config', {}), right.get('host_config', {})
+    dns_restore = (version == '26.1.3' and before.get('OomKillDisable') is False
+                   and after.get('OomKillDisable') is None
+                   and 'OomKillDisable' in after
+                   and all(k in before and before[k] is None and k in after
+                           and type(after[k]) is list and not after[k] for k in dns_fields))
+    if dns_restore:
+        for key in dns_fields:
+            after[key] = None
     if version == "28.0.4":
         before, after = left.get("host_config", {}), right.get("host_config", {})
         if ("OomKillDisable" not in before or "OomKillDisable" not in after
@@ -188,8 +198,13 @@ def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
             raise HostAuthorizationError("config mismatch: OomKillDisable is not false/null")
         host["OomKillDisable"] = False
     if _canonical(left) != _canonical(right):
-        raise HostAuthorizationError("config mismatch outside OomKillDisable false/null")
-    evidence["compatibility_rule"] = "OOM_KILL_DISABLE_FALSE_NULL_EQUIVALENCE"
+        raise HostAuthorizationError("config mismatch outside exact supported defaults")
+    evidence["compatibility_rule"] = ("DOCKER26_RESTORE_OOM_DNS_DEFAULTS" if dns_restore
+                                      else "OOM_KILL_DISABLE_FALSE_NULL_EQUIVALENCE")
+    if dns_restore:
+        evidence.update(matched_platform='Docker 26.1.3 / cgroup 2',
+                        normalized_fields=['HostConfig.OomKillDisable',
+                                           *('HostConfig.' + k for k in dns_fields)])
     if version == "28.0.4":
         evidence.update(matched_platform="Docker 28.0.4 / cgroup 2",
                         normalized_field="HostConfig.OomKillDisable")
@@ -197,7 +212,7 @@ def compare_config_payloads(policy_payload: Mapping, actual_payload: Mapping, *,
 
 
 def compare_observed_config(observed: Mapping, policy_raw_sha256: str) -> dict:
-    """Reconstruct only the opposite default; the sealed raw digest proves every byte."""
+    """Reconstruct bounded defaults; the sealed raw digest proves every byte."""
     actual = {k: observed.get(k) for k in ("config", "host_config", "path", "args")}
     actual_hash = observed["actual_config_sha256"]
     if _digest(actual) != actual_hash:
@@ -210,16 +225,28 @@ def compare_observed_config(observed: Mapping, policy_raw_sha256: str) -> dict:
     if "OomKillDisable" not in host or not (host["OomKillDisable"] is False or host["OomKillDisable"] is None):
         raise HostAuthorizationError("actual container config differs from approval")
     host["OomKillDisable"] = None if host["OomKillDisable"] is False else False
+    dns_restore = False
     if _digest(reconstructed) != policy_raw_sha256:
-        raise HostAuthorizationError("reconstructed config does not reproduce sealed raw hash")
+        # Docker 26.1.3 restores three unset DNS slices as empty arrays. Require
+        # the exact simultaneous false->null OOM transition observed on host.
+        dns_fields = ('Dns', 'DnsOptions', 'DnsSearch')
+        if (actual['host_config']['OomKillDisable'] is None and
+                all(k in host and type(host[k]) is list and not host[k] for k in dns_fields)):
+            for key in dns_fields:
+                host[key] = None
+            dns_restore = _digest(reconstructed) == policy_raw_sha256
+        if not dns_restore:
+            raise HostAuthorizationError("reconstructed config does not reproduce sealed raw hash")
     info = _json(_run_docker(["info", "--format", "json"]))
     platform = {key: info.get(key) for key in ("ServerVersion", "CgroupVersion", "CgroupDriver")}
-    if platform.get("ServerVersion") == "28.0.4":
+    if dns_restore and (platform.get('ServerVersion') != '26.1.3' or platform.get('CgroupVersion') != '2'):
+        raise HostAuthorizationError('DNS restore requires Docker 26.1.3 / cgroup 2')
+    if dns_restore or platform.get("ServerVersion") == "28.0.4":
         state = observed.get("state", {})
         if (state.get("Status") != "running" or state.get("Running") is not True
                 or not isinstance(observed.get("container_id"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", observed["container_id"])):
-            raise HostAuthorizationError("28.0.4 compatibility requires the bound running instance")
+            raise HostAuthorizationError("default compatibility requires the bound running instance")
     return compare_config_payloads(reconstructed, actual, policy_raw_sha256=policy_raw_sha256,
                                    actual_raw_sha256=actual_hash, platform=platform)
 
