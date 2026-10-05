@@ -255,6 +255,76 @@ def test_existing_admission_routes_spread_runtime_changes_to_real_docker():
     assert not module.requires_spread_runtime_docker(report(["07_docs/unrelated.md"]), ROOT)
 
 
+def load_ci_router():
+    spec = importlib.util.spec_from_file_location('platform_ci_depth_test', ROOT / '04_scripts/quality/platform_ci.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize('path,expected', [
+    ('05_apps/soybean_margin_page.py', False),
+    ('05_apps/soybean_margin_assets/tables.css', False),
+    ('03_src/agri_research_agent/soybean_margin/model.py', False),
+    ('03_src/agri_research_agent/soybean_margin/store.py', True),
+    ('03_src/agri_research_agent/soybean_margin/runtime.py', True),
+    ('03_src/agri_research_agent/import_profit/operational_runtime.py', True),
+    ('07_docs/04_开发与发布检查清单.md', False),
+    ('09_deploy/spread_release/high_risk_execution.py', True),
+    ('04_scripts/runtime/routine_release.py', True),
+    ('04_scripts/quality/platform_ci.py', True),
+    ('04_scripts/quality/main_admission.py', True),
+    ('03_src/agri_research_agent/shared/production_identity.py', True),
+    ('08_tests/shared/high_risk_execution_docker_e2e.py', True),
+    ('08_tests/test_release_stabilize.py', True),
+    ('.github/workflows/trusted-main-admission.yml', True),
+    ('Dockerfile', True), ('requirements.txt', True), ('requirements-dev.in', True),
+    ('02_configs/production_runtime_trust.json', True),
+    ('02_configs/runtime_contracts/public-intraday-runtime.json', True),
+])
+def test_ci_image_and_lifecycle_depth_follow_changed_behavior(path, expected):
+    module = load_ci_router()
+    report = {'changed_paths': [{'path': path}]}
+    assert module.requires_spread_release_e2e(report, ROOT) is expected
+    if path.startswith(('05_apps/', '03_src/agri_research_agent/soybean_margin/')):
+        assert module.requires_spread_runtime_docker(report, ROOT)
+
+
+@pytest.mark.parametrize('change,expected', [
+    ('formatting-only', False), ('write-permission', True), ('entrypoint', True),
+    ('input-added', True), ('input-removed', True), ('invalid-input', True),
+    ('missing-contract', True), ('invalid-json', True),
+])
+def test_ci_runtime_contract_formatting_cannot_hide_permission_or_path_changes(monkeypatch, change, expected):
+    import copy
+    module = load_ci_router()
+    before = json.loads((ROOT / module.RUNTIME_CONTRACT).read_text(encoding='utf-8'))
+    after = copy.deepcopy(before)
+    if change == 'write-permission':
+        after['runtime_roots'][0]['access'] = 'rw'
+    elif change == 'entrypoint':
+        after['entrypoint'].append('--new-argument')
+    elif change == 'input-added':
+        after['source_inputs'].append({'path': 'new.py', 'sha256': 'a' * 64})
+    elif change == 'input-removed':
+        after['source_inputs'].pop()
+    elif change == 'invalid-input':
+        after['source_inputs'][0]['access'] = 'rw'
+    def blob(repo, commit, path):
+        assert path == module.RUNTIME_CONTRACT
+        if commit == 'candidate' and change == 'missing-contract':
+            raise subprocess.CalledProcessError(128, ['git', 'show'])
+        if commit == 'candidate' and change == 'invalid-json':
+            return b'{'
+        return json.dumps(before if commit == 'base' else after, indent=None if commit == 'base' else 2).encode()
+    monkeypatch.setattr(module.admission, 'blob', blob)
+    report = {'changed_paths': [{'path': module.RUNTIME_CONTRACT}],
+              'trusted_main': {'commit': 'base'}, 'candidate': {'commit': 'candidate'}}
+    assert module.requires_spread_release_e2e(report, ROOT) is expected
+    # Formatting-only changes still require a real application image check.
+    assert module.requires_spread_runtime_docker(report, ROOT)
+
+
 def binding():
     return {"project_id": "demo", "commit": "a" * 40, "tree": "b" * 40,
             "source_sha256": {"runtime.json": "c" * 64},

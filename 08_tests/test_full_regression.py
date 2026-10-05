@@ -202,10 +202,33 @@ def test_full_lane_includes_windows_even_without_direct_windows_impact(tmp_path,
     import json
     ci=full.ci
     policy={'files':{'08_tests/test_windows.py':{'test_windows':{'kind':'WINDOWS_REQUIRED_TEST'}}}}
-    report=dict(final_result='PLANNED',lane=lane,test_plan=['08_tests/test_logic.py'],trusted_main={},candidate={})
+    report=dict(final_result='PLANNED',lane=lane,test_plan=['08_tests/test_logic.py'],
+                trusted_main={},candidate={},changed_paths=[{'path':'03_src/logic.py'}])
+    manifest = tmp_path / ci.RUNTIME_CONTRACT
+    manifest.parent.mkdir(parents=True)
+    manifest.write_bytes((ROOT / ci.RUNTIME_CONTRACT).read_bytes())
     monkeypatch.setattr(ci.admission,'admit',lambda *a,**k:copy.deepcopy(report))
     monkeypatch.setattr(ci.admission,'tree',lambda *a:{ci.POLICY:{},'08_tests/test_logic.py':{},'08_tests/test_windows.py':{}})
     monkeypatch.setattr(ci.admission,'blob',lambda repo,commit,path:json.dumps(policy).encode() if path==ci.POLICY else b'def test_logic(): pass')
     monkeypatch.setattr(ci.platforms,'plan',lambda required,*a,**k:{'selected':required})
     result=ci.make_plan(tmp_path,'base','candidate',tmp_path/'out')
     assert ('08_tests/test_windows.py' in result['selected']) == (lane!='business')
+
+
+def test_release_replay_always_requires_real_image_acceptance(tmp_path, monkeypatch):
+    import json
+    ci = full.ci
+    policy = {'files': {}}
+    report = dict(final_result='PLANNED', lane='governance', test_plan=['08_tests/test_logic.py'],
+                  trusted_main={}, candidate={}, changed_paths=[{'path':'04_scripts/quality/platform_ci.py'}])
+    monkeypatch.setattr(ci.admission, 'admit', lambda *a, **k: copy.deepcopy(report))
+    monkeypatch.setattr(ci.admission, 'tree', lambda *a: {ci.POLICY:{}, '08_tests/test_logic.py':{}})
+    monkeypatch.setattr(ci.admission, 'blob', lambda repo, commit, path:
+                        json.dumps(policy).encode() if path == ci.POLICY else b'def test_logic(): pass')
+    monkeypatch.setattr(ci.platforms, 'plan', lambda required, *a, **k: {'selected':required})
+    # A newly covered release control may not be in the old image-source map.
+    monkeypatch.setattr(ci, 'requires_spread_runtime_docker', lambda *a: False)
+    result = ci.make_plan(tmp_path, 'base', 'candidate', tmp_path / 'out')
+    assert result['spread_release_e2e'] is True
+    assert result['spread_runtime_docker'] is True
+    assert result['plan_sha256'] == ci.platforms.digest({k:v for k,v in result.items() if k!='plan_sha256'})

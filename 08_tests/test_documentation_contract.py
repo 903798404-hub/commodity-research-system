@@ -33,11 +33,14 @@ def test_current_documentation_layers_exist_and_are_distinct() -> None:
 
 def test_manual_covers_all_required_operational_stages() -> None:
     manual = read(MANUAL)
-    for number in range(1, 27):
-        assert re.search(rf"^## {number}\. ", manual, flags=re.MULTILINE), number
-
-    for marker in ("**目标**", "**输入**", "**入口与关键检查**", "**输出**", "**停止**", "**禁止**"):
-        assert manual.count(marker) >= 25, marker
+    for stage in ('选择任务流程', '环境预检与任务范围', '开发、测试与 GitHub 接纳',
+                  '发布准备与只读基线', '候选与页面验收', '正式部署与最终验收',
+                  '回滚、清理与生产基线', '完成记录与失败处理'):
+        assert re.search(rf'^## \d+\. {re.escape(stage)}$', manual, flags=re.MULTILINE), stage
+    for marker in ('ROUTINE_STATELESS', 'ADDITIVE_REVERSIBLE', 'UNKNOWN 不自动 PASS',
+                   '数据更新', '停止条件', '只切换目标服务', 'fresh grant',
+                   '同一 Image ID', '最终 UI/business acceptance', '上一可用回滚版本'):
+        assert marker in manual, marker
 
 
 def test_documented_toolchain_and_service_contract_match_repository_sources() -> None:
@@ -65,8 +68,8 @@ def test_current_docs_preserve_release_safety_and_baseline_semantics() -> None:
     for forbidden in ("docker system prune", "docker image prune -a", "docker volume prune", "docker compose down"):
         assert forbidden in spec
         assert forbidden in manual
-    assert "2026-07-26" in manual
-    assert "仅是当日参考实例，非永久常量" in manual
+    assert '核验 fresh main' in manual
+    assert '某日 SHA 不能成为永久规范常量' in manual
     assert "oil_world/RELEASE.json" not in "\n".join((read(INDEX), spec, manual))
 
 
@@ -90,12 +93,18 @@ def test_release_treatments_and_runtime_details_have_one_policy_source() -> None
 
 
 def test_business_fast_lane_and_strict_lane_are_consistent_at_all_entrypoints():
-    for path in (ROOT/'AGENTS.md', SPEC, MANUAL, FEATURE_TEMPLATE):
+    for path in (ROOT/'AGENTS.md', SPEC):
         body=read(path)
         for marker in ('main → feature/fix branch → implementation → automated tests → required CI → main',
                        'scoped required tests','impact/consumer tests','windows-2022',
                        'MAINTAINER_REVIEW_REQUIRED = YES','main != production'):
             assert marker in body,(path,marker)
+        assert 'GOVERNANCE_ROOT_APPROVAL_REQUIRED' not in body
+    for path in (MANUAL, FEATURE_TEMPLATE):
+        body = read(path)
+        assert '(03_标准开发与生产发布规范.md)' in body or '(../03_标准开发与生产发布规范.md)' in body
+        assert 'main != production' in body and '生产单独授权' in body
+        assert 'required CI' in body or 'hosted CI' in body
         assert 'GOVERNANCE_ROOT_APPROVAL_REQUIRED' not in body
 
 
@@ -197,7 +206,7 @@ def test_governance_v2_active_docs_and_update_entry():
 
 
 def test_governance_transition_is_separate_from_business_and_release():
-    for path in (ROOT/'AGENTS.md',SPEC,MANUAL,FEATURE_TEMPLATE,DOCS/'templates/GovernanceTransition.md'):
+    for path in (ROOT/'AGENTS.md',SPEC):
         body=read(path)
         for marker in ('Repository Maintainer/Admin','MAINTAINER_REVIEW_REQUIRED = YES',
                        'REGISTRY_IS_HARD_AUTHORIZATION = NO','STAGED_GOVERNANCE_MIGRATION_REQUIRED = NO',
@@ -206,3 +215,13 @@ def test_governance_transition_is_separate_from_business_and_release():
             assert marker in body,(path,marker)
         assert 'GOVERNANCE_ROOT_APPROVAL_REQUIRED' not in body
         assert 'Always allow' not in body
+    for path in (MANUAL, FEATURE_TEMPLATE, DOCS/'templates/GovernanceTransition.md'):
+        body = read(path)
+        assert '03_标准开发与生产发布规范.md)' in body
+        assert '生产单独授权' in body and 'main != production' in body
+        assert 'GOVERNANCE_ROOT_APPROVAL_REQUIRED' not in body and 'Always allow' not in body
+    review = read(DOCS/'templates/GovernanceTransition.md')
+    for marker in ('MAINTAINER_REVIEW_REQUIRED = YES', 'Repository Maintainer/Admin',
+                   'authoritative base Commit/Tree', 'candidate Commit/Tree',
+                   'required coverage', '生产未触碰', '接纳决定', '审查不覆盖失败'):
+        assert marker in review, marker

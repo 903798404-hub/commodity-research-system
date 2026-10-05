@@ -137,8 +137,10 @@ def test_short_lived_docker_evidence_consumed_before_long_executor_without_inter
     assert original['with']['python-version'] == '3.12'
     assert "python_bin='${{ steps.host-python312.outputs.python-path }}'" in execute['run']
     assert 'command -v python' not in execute['run']
-    assert current['if'] == legacy['if'] == execute['if']
+    assert current['if'] == legacy['if'] == "needs.plan.outputs.spread_runtime_docker == 'true'"
+    assert execute['if'] == "needs.plan.outputs.spread_release_e2e == 'true'"
     service = named['Execute required real Docker application service identity evidence']
+    assert service['if'] == current['if']
     legacy_setup = next(step for step in steps if step.get('id') == 'host-python310')
     assert steps.index(service) < steps.index(legacy_setup) < steps.index(legacy)
     assert legacy_setup['with']['python-version'] == '3.10.12'

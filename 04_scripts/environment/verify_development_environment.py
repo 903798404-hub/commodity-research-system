@@ -203,17 +203,26 @@ def check_local_node_tools() -> list[Check]:
     return checks
 
 
-def run_checks(root: Path, *, allow_candidate: bool) -> list[Check]:
-    return check_python(root, allow_candidate=allow_candidate) + check_python_contract(root) + check_frontend_contract(root) + check_local_node_tools()
+def run_checks(root: Path, *, allow_candidate: bool, scope: str = 'all') -> list[Check]:
+    if scope not in {'python', 'frontend', 'all'}:
+        raise ValueError('Unknown development environment scope')
+    checks: list[Check] = []
+    if scope in {'python', 'all'}:
+        checks += check_python(root, allow_candidate=allow_candidate) + check_python_contract(root)
+    if scope in {'frontend', 'all'}:
+        checks += check_frontend_contract(root) + check_local_node_tools()
+    return checks
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2], help="repository root (default: inferred)")
     parser.add_argument("--allow-candidate", action="store_true", help="accept .venv-py312-candidate only during one-time migration validation")
+    parser.add_argument('--scope', choices=('python', 'frontend', 'all'), default='all',
+                        help='check only the task toolchain; default preserves full preflight')
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    checks = run_checks(root, allow_candidate=args.allow_candidate)
+    checks = run_checks(root, allow_candidate=args.allow_candidate, scope=args.scope)
     for check in checks:
         print(f"{check.status:4} | {check.subject}: actual={check.actual}; required={check.required}; advice={check.advice}")
     return 0 if all(check.status != "FAIL" for check in checks) else 1

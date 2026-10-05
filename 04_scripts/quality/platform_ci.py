@@ -23,6 +23,60 @@ else:
 
 POLICY = '04_scripts/quality/test_platforms.json'
 
+# Image acceptance covers application packaging. Lifecycle fault injection is
+# required when the release machinery, runtime permissions, or build contract
+# changes; application presentation alone does not change those mechanisms.
+RELEASE_CONTROL_PREFIXES = ('09_deploy/', '04_scripts/runtime/', '04_scripts/quality/',
+                            '03_src/agri_research_agent/shared/')
+RELEASE_CONTROL_FILES = {
+    '.github/workflows/trusted-main-admission.yml',
+    '04_scripts/quality/platform_ci.py', 'Dockerfile', '.dockerignore',
+    'docker-compose.yml', '.streamlit/config.toml',
+    '02_configs/production_runtime_trust.json',
+    '02_configs/runtime_manifest.schema.json',
+    '03_src/agri_research_agent/core/paths.py',
+    '03_src/agri_research_agent/market_data/activated_runtime.py',
+    '03_src/agri_research_agent/soybean_margin/store.py',
+    '03_src/agri_research_agent/soybean_margin/runtime.py',
+    '03_src/agri_research_agent/import_profit/operational_runtime.py',
+    '03_src/agri_research_agent/import_profit/runtime_store.py',
+    'requirements.in', 'requirements.txt',
+    'requirements-dev.in', 'requirements-dev.txt',
+}
+RUNTIME_CONTRACT = '02_configs/runtime_contracts/spread-production-runtime.json'
+
+
+def requires_spread_release_e2e(report, repo):
+    """Replay lifecycle changes; persistence and runtime roots stay strict."""
+    changed = {item['path'] for item in report['changed_paths']}
+    if any(path in RELEASE_CONTROL_FILES or path.startswith(RELEASE_CONTROL_PREFIXES)
+           or (path.startswith('02_configs/runtime_contracts/') and path != RUNTIME_CONTRACT)
+           or path.startswith('08_tests/shared/')
+           or path.startswith(('08_tests/test_release_', '08_tests/test_high_risk_',
+                                '08_tests/test_routine_', '08_tests/test_pre_release_',
+                                '08_tests/test_target_runtime_', '08_tests/test_spread_runtime_'))
+           for path in changed):
+        return True
+    if RUNTIME_CONTRACT not in changed:
+        return False
+    # Only JSON formatting can avoid lifecycle replay. The current contract
+    # uses path/role source inventories, not per-source content hash fields.
+    # Missing, malformed, or any semantic contract change stays strict.
+    try:
+        before = json.loads(admission.blob(repo, report['trusted_main']['commit'], RUNTIME_CONTRACT))
+        after = json.loads(admission.blob(repo, report['candidate']['commit'], RUNTIME_CONTRACT))
+        for value in (before, after):
+            if not isinstance(value, dict):
+                return True
+            inputs = value.get('source_inputs')
+            if not isinstance(inputs, list) or not inputs or any(
+                    not isinstance(item, dict) or set(item) != {'path', 'role'}
+                    for item in inputs):
+                return True
+        return before != after
+    except (KeyError, ValueError, TypeError, subprocess.CalledProcessError):
+        return True
+
 
 def requires_spread_runtime_docker(report, repo):
     """Route runtime-source changes from the existing admission diff to Linux Docker."""
@@ -85,7 +139,8 @@ def make_plan(repo, base, candidate, output):
     sources = {p:admission.blob(repo,candidate,p) for p in required}
     trusted = {p:admission.blob(repo,base,p) if p in old else sources[p] for p in required}
     plan = platforms.plan(required,trusted,sources,policy,base=report['trusted_main'],candidate=report['candidate'])
-    plan['spread_runtime_docker'] = requires_spread_runtime_docker(report, repo)
+    plan['spread_release_e2e'] = requires_spread_release_e2e(report, repo)
+    plan['spread_runtime_docker'] = requires_spread_runtime_docker(report, repo) or plan['spread_release_e2e']
     plan['plan_sha256'] = platforms.digest({k: v for k, v in plan.items() if k != 'plan_sha256'})
     save(output/'plan.json',plan)
     return plan
@@ -187,6 +242,7 @@ def main():
                 f.write('full='+str(requires_full(report)).lower()+'\n')
                 f.write('base_commit='+plan['base']['commit']+'\n')
                 f.write('spread_runtime_docker='+str(plan['spread_runtime_docker']).lower()+'\n')
+                f.write('spread_release_e2e='+str(plan['spread_release_e2e']).lower()+'\n')
         return 0
     if a.action=='run': return execute(a.platform,a.plan,a.output)
     return finish(a.plan,a.receipts,a.output,json.loads(os.environ['PLATFORM_JOB_RESULTS']))

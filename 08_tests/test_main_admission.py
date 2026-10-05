@@ -306,7 +306,12 @@ def test_workflow_shadow_permissions_and_trust_source():
     assert workflow["permissions"] == {"contents":"read"}
     triggers = workflow.get("on", workflow.get(True))
     assert "pull_request_target" not in triggers
-    assert set(triggers) == {"pull_request", "push", "workflow_dispatch"}
+    assert set(triggers) == {"pull_request", "workflow_dispatch"}
+    assert triggers['pull_request']['branches'] == ['main']
+    assert workflow['concurrency'] == {
+        'group': 'admission-${{ github.head_ref || github.ref_name }}',
+        'cancel-in-progress': True,
+    }
     jobs = workflow["jobs"]
     assert jobs["final"]["name"] == "trusted-main-admission-v1"
     assert "always()" in jobs["final"]["if"]
@@ -331,6 +336,11 @@ def test_workflow_shadow_permissions_and_trust_source():
     assert '/git/ref/heads/main' in fresh_main['run']
     for lane in ('linux', 'windows'):
         assert 'MAIN_READ_TOKEN' not in str(jobs[lane])
+    for lane in ('plan', 'linux', 'windows', 'full'):
+        setup = next(s for s in jobs[lane]['steps'] if s.get('with', {}).get('python-version') == '3.12')
+        assert setup['with']['cache'] == 'pip'
+        assert setup['with']['cache-dependency-path'].splitlines() == [
+            'candidate/requirements-dev.in', 'candidate/requirements-dev.txt']
 
 
 def test_exact_new_asset_registration():

@@ -77,3 +77,37 @@ def test_preflight_rejects_a_codex_fallback_pnpm(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(environment.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="v24.0.0", stderr=""))
     checks = environment.check_local_node_tools()
     assert any(check.subject == "pnpm executable" and check.status == "FAIL" for check in checks)
+
+
+@pytest.mark.parametrize('scope,expected', [
+    ('python', ['python', 'python-contract']),
+    ('frontend', ['frontend-contract', 'node']),
+    ('all', ['python', 'python-contract', 'frontend-contract', 'node']),
+])
+def test_task_preflight_requires_only_its_actual_toolchain(monkeypatch, scope, expected):
+    called = []
+    def check(name):
+        def run(*args, **kwargs):
+            called.append(name)
+            # Node is unavailable: Python-only work must still succeed, while
+            # a frontend or combined task must report the real missing tool.
+            return [SimpleNamespace(subject=name, status='FAIL' if name == 'node' else 'PASS')]
+        return run
+    for attribute, name in [('check_python', 'python'), ('check_python_contract', 'python-contract'),
+                            ('check_frontend_contract', 'frontend-contract'), ('check_local_node_tools', 'node')]:
+        monkeypatch.setattr(environment, attribute, check(name))
+    result = environment.run_checks(REPO_ROOT, allow_candidate=False, scope=scope)
+    assert called == expected
+    assert any(item.status == 'FAIL' for item in result) == (scope != 'python')
+    called.clear()
+    environment.run_checks(REPO_ROOT, allow_candidate=False)
+    assert called == ['python', 'python-contract', 'frontend-contract', 'node']
+
+
+def test_preflight_cli_preserves_failure_and_rejects_unknown_scope(monkeypatch):
+    monkeypatch.setattr(environment, 'run_checks', lambda root, **kw: [
+        environment.Check('FAIL', 'missing', 'absent', 'required', 'restore dependency')])
+    assert environment.main(['--root', str(REPO_ROOT), '--scope', 'frontend']) == 1
+    with pytest.raises(SystemExit) as raised:
+        environment.main(['--scope', 'unknown'])
+    assert raised.value.code == 2
