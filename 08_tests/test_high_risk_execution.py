@@ -16,6 +16,47 @@ sys.modules[spec.name] = execution
 spec.loader.exec_module(execution)
 
 
+@pytest.mark.parametrize('advance_hours', [0, 48])
+def test_hosted_additive_review_uses_review_clock_without_changing_record_clock(monkeypatch, advance_hours):
+    from datetime import datetime, timedelta, timezone
+    fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py', '_test_hosted_review_clock')
+    monkeypatch.setattr(fixture, 'REVIEW_CLOCK_ADVANCE', timedelta(hours=advance_hours))
+    risk = dict(RELEASE_RISK_CLASS='STATEFUL_OR_INFRA', MACHINE_DESTRUCTIVE_EVIDENCE=False,
+                MACHINE_STATE_CHANGE_CLASS='NEEDS_MAINTAINER_RISK_REVIEW',
+                DESTRUCTIVE_FINDINGS=[], findings=[], REVERSIBILITY_EVIDENCE={},
+                base={'commit':'a'*40,'tree':'b'*40}, target={'commit':'c'*40,'tree':'d'*40})
+    main = dict(commit='e'*40, tree='f'*40)
+    original_profile = sys.getprofile()
+    original_loader = importlib.util.spec_from_file_location
+    restore = fixture.install_review_clock()
+    try:
+        policy = fixture.load(ROOT, '04_scripts/runtime/release_reversibility.py', '_test_actual_review_clock_policy')
+        record = fixture.load(ROOT, '09_deploy/runtime_identity/candidate_validation_record.py', '_test_unshifted_record_clock')
+        request = dict(recovery_evidence={'path':'isolated-test-evidence','sha256':'0'*64},
+            maintainer_risk_review=dict(reviewer='SYNTHETIC_TEST_NOT_PRODUCTION_APPROVAL',
+                timestamp=datetime.now(timezone.utc).isoformat(), base=risk['base'], target=risk['target'],
+                authoritative_main=main, machine_findings=policy.machine_findings(risk),
+                maintainer_classification='HIGH_RISK', reason='original synthetic review'))
+        original = copy.deepcopy(request)
+        if advance_hours:
+            with pytest.raises(policy.Unproven, match='INVALID_RISK_REVIEW_TIME'):
+                policy.apply_review(risk, request['maintainer_risk_review'], main)
+        additive = fixture.additive_request_without_recovery(request)
+        resolved = policy.apply_review(risk, additive['maintainer_risk_review'], main)
+        assert resolved['STATE_CHANGE_CLASS'] == 'ADDITIVE_REVERSIBLE'
+        assert resolved['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+        assert resolved['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is False
+        assert additive['recovery_evidence'] is None and request == original
+        assert record.datetime is datetime
+        assert abs((record.datetime.now(timezone.utc)-datetime.now(timezone.utc)).total_seconds()) < 2
+        assert abs((datetime.fromisoformat(additive['maintainer_risk_review']['timestamp'])
+                    -datetime.now(timezone.utc)-timedelta(hours=advance_hours)).total_seconds()) < 2
+    finally:
+        restore()
+    assert sys.getprofile() is original_profile
+    assert importlib.util.spec_from_file_location is original_loader
+
+
 def recovery_requirement_backend(tmp_path):
     from types import SimpleNamespace
     backend = execution.HostBackend.__new__(execution.HostBackend)

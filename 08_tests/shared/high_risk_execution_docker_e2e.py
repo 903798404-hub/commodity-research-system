@@ -96,6 +96,17 @@ def ref(path):
     return dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
+def additive_request_without_recovery(request):
+    """Fresh synthetic review uses the same clock as the real review parser."""
+    result = copy.deepcopy(request)
+    result['recovery_evidence'] = None
+    review = result['maintainer_risk_review']
+    review['maintainer_classification'] = 'ADDITIVE_REVERSIBLE'
+    review['timestamp'] = ReviewClock.now(timezone.utc).isoformat()
+    review['reason'] = 'Synthetic additive compatibility test only; no production approval'
+    return result
+
+
 def save(root, name, value):
     path = root / name
     write(path, json.dumps(value, sort_keys=True, separators=(',', ':')).encode())
@@ -685,12 +696,7 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         # The real assessor and the same plan producer accept reviewed additive
         # state without a rehearsal. Keep the strict full-recovery case below.
         additive_scope = directory(work / 'additive-no-recovery', 0o700)
-        additive_request = copy.deepcopy(prepared_request)
-        additive_request['recovery_evidence'] = None
-        additive_request['maintainer_risk_review']['maintainer_classification'] = 'ADDITIVE_REVERSIBLE'
-        additive_request['maintainer_risk_review']['timestamp'] = datetime.now(timezone.utc).isoformat()
-        additive_request['maintainer_risk_review']['reason'] = (
-            'Synthetic additive compatibility test only; no production approval')
+        additive_request = additive_request_without_recovery(prepared_request)
         additive_intent = copy.deepcopy(plan)
         additive_intent['release_request'] = ref(save(additive_scope, 'request.json', additive_request))
         additive_path = additive_scope / 'deployment_plan.json'
