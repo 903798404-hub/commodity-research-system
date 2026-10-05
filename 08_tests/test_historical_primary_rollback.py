@@ -91,6 +91,17 @@ def test_aged_fact_accepted_without_rewriting_old_bytes_and_current_routine_stil
         review_policy.apply_review(chain.risk, chain.record['maintainer_risk_review'], chain.risk['target'])
 
 
+def test_optional_recovery_does_not_authorize_historical_rollback(chain):
+    request = chain.read(chain.plan['release_request'])
+    request['maintainer_risk_review']['maintainer_classification'] = 'ADDITIVE_REVERSIBLE'
+    resolved = review_policy.apply_review(chain.risk, request['maintainer_risk_review'], chain.plan['tool'])
+    assert resolved['FULL_ROLLBACK_REHEARSAL_REQUIRED'] is False
+    assert resolved['TARGETED_RECOVERY_VALIDATION_REQUIRED'] is False
+    chain.plan['release_request'] = chain.put('/protected/request.json', request)
+    with pytest.raises(history.HistoricalContextNotProven, match='CURRENT_HIGH_RISK_REVIEW_REQUIRED'):
+        history.PrimaryRollbackContext(chain.backend, chain.plan).verify(chain.record, chain.policy, Path('/source'))
+
+
 @pytest.mark.parametrize('fault', ['expired_then', 'expired_one_nanosecond', 'tampered_bytes', 'unproven_event', 'wrong_instance',
     'wrong_policy', 'wrong_image', 'wrong_ci', 'time_reversed', 'unset_start', 'current_review_expired',
     'current_main_changed', 'asset_not_retained', 'recovery_policy', 'signed_family'])

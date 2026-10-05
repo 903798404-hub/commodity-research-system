@@ -693,8 +693,10 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
                 assert name in {'missing', 'tamper'}
             assert backend.host.docker_inspect(cid)['State']['Running']
             negatives[name] = 'PASS'
-        # The real assessor and the same plan producer accept reviewed additive
-        # state without a rehearsal. Keep the strict full-recovery case below.
+    if json.loads(original_rollback_bytes)['schema_version'] == 'candidate-validation-record/1':
+        # Optional recovery is exercised with the actual signed rollback record.
+        # Historical Routine facts require current HIGH_RISK review and cannot
+        # supply an additive scenario's rollback authority. Keep those cases strict.
         additive_scope = directory(work / 'additive-no-recovery', 0o700)
         additive_request = additive_request_without_recovery(prepared_request)
         additive_intent = copy.deepcopy(plan)
@@ -722,7 +724,8 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         assert backend.host.docker_inspect(cid)['State']['StartedAt'] == running['State']['StartedAt']
         negatives['additive-without-recovery'] = dict(status='PASS', plan=ref(additive_path),
             assessment=additive_preparation.release_assessment,
-            result=ref(additive_backend.output / 'execution-result.json'), actual_stop_called=False)
+            result=ref(additive_backend.output / 'execution-result.json'), actual_stop_called=False,
+            primary_rollback_family='candidate-validation-record/1')
     # This subclass ONLY injects a real Docker stop after the target started.
     # The actual grant, startup, verifier, health and rollback implementations
     # are untouched; no helper PASS or mock transport supplies acceptance.
@@ -912,6 +915,9 @@ def main():
                 old_record if name == 'authorization' else routine_record,
                 target_record, key_id, key_path, injection=injected, candidate_key_path=keys['candidate_validation'][2]))
             target_record = Path(receipt['paths'][-1]['candidate_record']['path'])
+        additive_paths = [path for path in receipt['paths']
+                          if 'additive-without-recovery' in path['negative_probes']]
+        assert len(additive_paths) == 1 and additive_paths[0]['case'] == 'authorization'
         assert (work / 'target-source-signed-record.json').read_bytes() == expired_bytes
         receipt['status'] = 'PASS'
     except Exception as exc:
