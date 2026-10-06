@@ -1,4 +1,4 @@
-"""Full debt comparison never weakens required/platform results."""
+"""All-green main validation and historical diagnosis retain strict identity."""
 import copy
 import importlib.util
 from pathlib import Path
@@ -15,7 +15,7 @@ def fixture(base=None, candidate=None):
     base = base or {'08_tests/test_example.py::test_good': 'passed'}
     candidate = candidate if candidate is not None else dict(base)
     identities = {s: dict(commit=c * 40, tree=t * 40) for s, c, t in [('base', 'a', 'b'), ('candidate', 'c', 'd')]}
-    plan = full.seal(dict(identities=identities, plans={s: {'lanes': {'linux': [{'selector': '08_tests/test_example.py'}]}} for s in identities}))
+    plan = full.seal(dict(identities=identities, required_plan_sha256='e'*64, plans={s: {'lanes': {'linux': [{'selector': '08_tests/test_example.py'}]}} for s in identities}))
     receipts = {}
     for side, tests in [('base', base), ('candidate', candidate)]:
         receipts[side] = full.seal(dict(schema_version='full-regression-result/1', side=side,
@@ -232,3 +232,114 @@ def test_release_replay_always_requires_real_image_acceptance(tmp_path, monkeypa
     assert result['spread_release_e2e'] is True
     assert result['spread_runtime_docker'] is True
     assert result['plan_sha256'] == ci.platforms.digest({k:v for k,v in result.items() if k!='plan_sha256'})
+
+
+def test_all_green_main_validation_needs_only_candidate_receipt():
+    p, r = fixture()
+    result = full.validate_candidate(p,r['candidate'],run_id='123',attempt='1',job_result='success')
+    assert result['result']=='PASS' and result['policy']=='ALL_GREEN'
+    assert result['required_plan_sha256']==p['required_plan_sha256']
+    assert result['test_counts']==dict(passed=1,failed=0,skipped=0)
+    assert result['receipt_sha256']==r['candidate']['sha256']
+
+
+@pytest.mark.parametrize('outcome',['failed','skipped'])
+def test_all_green_rejects_even_preexisting_debt(outcome):
+    tests={'08_tests/test_example.py::test_good':outcome}
+    p,r=fixture(tests,tests)
+    assert compare(p,r)['result']=='PASS'  # Historical diagnosis, never the main gate.
+    assert full.validate_candidate(p,r['candidate'],run_id='123',attempt='1',job_result='success')['result']=='FAIL'
+
+
+@pytest.mark.parametrize('status',['failure','cancelled','skipped',None])
+def test_all_green_cannot_use_unsuccessful_job(status):
+    p,r=fixture()
+    with pytest.raises(ValueError,match='JOB_OR_RECEIPT_MISSING'):
+        full.validate_candidate(p,r['candidate'],run_id='123',attempt='1',job_result=status)
+
+
+@pytest.mark.parametrize('field,value',[
+    ('identity',{'commit':'f'*40,'tree':'a'*40}),('plan_sha256','old'),
+    ('workflow_run_id','old'),('workflow_run_attempt','0'),('side','base')])
+def test_all_green_cannot_reuse_wrong_identity_or_run(field,value):
+    p,r=fixture();receipt=r['candidate'];receipt[field]=value
+    receipt=full.seal({k:v for k,v in receipt.items() if k!='sha256'})
+    with pytest.raises(ValueError,match='IDENTITY_MISMATCH'):
+        full.validate_candidate(p,receipt,run_id='123',attempt='1',job_result='success')
+
+
+@pytest.mark.parametrize('field,value',[
+    ('exit_code',2),('session_finished',False),('collection_errors',['import failed']),
+    ('mutated',True),('collected_nodes',[]),('tests',{}),('collected_nodes',['unreported'])])
+def test_all_green_rejects_incomplete_collection_or_source_mutation(field,value):
+    p,r=fixture();receipt=r['candidate'];receipt[field]=value
+    receipt=full.seal({k:v for k,v in receipt.items() if k!='sha256'})
+    with pytest.raises(ValueError,match='COLLECTION_OR_INFRASTRUCTURE'):
+        full.validate_candidate(p,receipt,run_id='123',attempt='1',job_result='success')
+
+
+def test_all_green_rejects_missing_import_only_file_and_parameter_cases():
+    p,r=fixture();receipt=r['candidate']
+    p['plans']['candidate']['lanes']['linux'].append({'selector':'08_tests/test_import_only.py'})
+    p=full.seal({k:v for k,v in p.items() if k!='sha256'})
+    receipt['plan_sha256']=p['sha256'];receipt=full.seal({k:v for k,v in receipt.items() if k!='sha256'})
+    with pytest.raises(ValueError,match='REQUIRED_COLLECTION_MISSING'):
+        full.validate_candidate(p,receipt,run_id='123',attempt='1',job_result='success')
+    receipt['collected_files'].append('08_tests/test_import_only.py')
+    receipt=full.seal({k:v for k,v in receipt.items() if k!='sha256'})
+    assert full.validate_candidate(p,receipt,run_id='123',attempt='1',job_result='success')['result']=='PASS'
+    p['plans']['candidate']['lanes']['linux'][0]={'selector':'08_tests/test_example.py::test_good','minimum_cases':2}
+    p=full.seal({k:v for k,v in p.items() if k!='sha256'})
+    receipt['plan_sha256']=p['sha256'];receipt=full.seal({k:v for k,v in receipt.items() if k!='sha256'})
+    with pytest.raises(ValueError,match='REQUIRED_COLLECTION_MISSING'):
+        full.validate_candidate(p,receipt,run_id='123',attempt='1',job_result='success')
+
+
+@pytest.mark.parametrize('change',['file','function','parameter_cases','class_method','unittest_method'])
+def test_full_plan_preserves_base_test_declarations_without_executing_base(tmp_path,monkeypatch,change):
+    import json
+    ci=full.ci;identity=dict(base=dict(commit='a'*40,tree='b'*40),candidate=dict(commit='c'*40,tree='d'*40))
+    before=b"raise RuntimeError('base must not execute')\nimport pytest\n@pytest.mark.parametrize('x',[1,2])\ndef test_case(x):pass\nclass TestSuite:\n def test_method(self):pass\nclass CatalogChecks(unittest.TestCase):\n def test_unit(self):pass\n"
+    after={'file':None,'function':b'def test_other():pass\n','parameter_cases':before.replace(b'[1,2]',b'[1]'),'class_method':before.replace(b'test_method',b'helper'),'unittest_method':before.replace(b'test_unit',b'helper')}[change]
+    policy={'schema_version':'required-test-platforms/1','files':{}}
+    def tree(repo,commit):return {} if commit==identity['candidate']['commit'] and after is None else {'08_tests/test_example.py':{'kind':'blob'}}
+    def blob(repo,commit,path):
+        if path==ci.POLICY:return json.dumps(policy).encode()
+        return before if commit==identity['base']['commit'] else after
+    monkeypatch.setattr(ci.admission,'tree',tree);monkeypatch.setattr(ci.admission,'blob',blob)
+    required={**identity,'plan_sha256':'e'*64,'lanes':{'windows':[]}}
+    # Candidate needs a nonempty plan before the explicit removal comparison.
+    if change=='file':
+        def tree(repo,commit):return {'08_tests/test_other.py':{'kind':'blob'}} if commit==identity['candidate']['commit'] else {'08_tests/test_example.py':{'kind':'blob'}}
+        monkeypatch.setattr(ci.admission,'tree',tree)
+        original=blob
+        monkeypatch.setattr(ci.admission,'blob',lambda repo,commit,path:b'def test_other():pass\n' if path=='08_tests/test_other.py' else original(repo,commit,path))
+    with pytest.raises(ValueError,match='FULL_TEST_(FILE|DECLARATION)_REMOVED'):
+        full.make_plan(tmp_path,required,tmp_path/'plan.json')
+
+
+@pytest.mark.parametrize('field,value', [
+    ('result', 'FAIL'), ('policy', 'NO_NEW_REGRESSION'),
+    ('base', {'commit': 'old'}), ('candidate', {'commit': 'old'}),
+    ('required_plan_sha256', 'other-plan'),
+    ('workflow_run_id', 'previous-run'), ('workflow_run_attempt', '0'),
+])
+def test_final_aggregate_rejects_untrusted_full_summary(tmp_path, monkeypatch, field, value):
+    ci = full.ci
+    p, receipts = fixture()
+    summary = full.validate_candidate(p, receipts['candidate'], run_id='123', attempt='1', job_result='success')
+    source = b'def test_good(): pass\n'
+    path = '08_tests/test_example.py'
+    plan = ci.platforms.plan([path], {path: source}, {path: source},
+        {'schema_version': 'required-test-platforms/1', 'files': {}},
+        base=p['identities']['base'], candidate=p['identities']['candidate'])
+    summary['required_plan_sha256'] = plan['plan_sha256']
+    summary[field] = value
+    ci.save(tmp_path/'plan.json', plan)
+    ci.save(tmp_path/'admission/main-admission.json', {'lane': 'governance'})
+    ci.save(tmp_path/'final/full-regression.json', summary)
+    monkeypatch.setenv('GITHUB_RUN_ID', '123')
+    monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '1')
+    with pytest.raises(ValueError, match='FULL_REGRESSION_REQUIRED'):
+        ci.finish(tmp_path/'plan.json', tmp_path/'receipts', tmp_path/'final/main-admission.json', {'linux':'success'})
+    assert not (tmp_path/'final/main-admission.json').exists()

@@ -73,7 +73,7 @@ py -3.12 -m venv .venv-py312
 ```
 
 运行时直接依赖维护在 `requirements.in`，生产锁为 `requirements.txt`；测试工具维护
-在 `requirements-dev.in`，开发锁为 `requirements-dev.txt`。本地和生产使用上述带 hash 的锁文件。Hosted Python 测试当前安装固定直接依赖的 `.in` 文件，传递依赖未受同等 hash 锁定；CI 按实际平台环境执行并记录 base/candidate 对照，不能称为生产锁环境的复现。依赖声明、CI 安装或镜像输入变化仍执行相应验证。两个前端统一使用 Node
+在 `requirements-dev.in`，开发锁为 `requirements-dev.txt`。本地和生产使用上述带 hash 的锁文件。Hosted Python 测试按平台安装 `04_scripts/quality/locks/` 的完整 `.txt` 依赖闭包，使用 `--require-hashes` 和 `pip check`；Strict/Governance 的候选全量回归仅执行一次并要求 ALL_GREEN。系统包、字体和 runner 仍按实测记录，不宣称为生产环境的复现。依赖声明、CI 安装或镜像输入变化仍执行相应验证。两个前端统一使用 Node
 24、Corepack 管理的 pnpm 10.12.1，并必须执行 `pnpm install --frozen-lockfile`。
 缺少 Node、Corepack 或正式 pnpm 时，环境预检会失败且不会自动安装工具。
 

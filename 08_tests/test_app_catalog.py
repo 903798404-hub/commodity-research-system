@@ -54,6 +54,8 @@ DOCUMENTED_LOCAL_PATHS = (
     "docker-compose.yml",
     "04_scripts/update_basis_data.py",
     "04_scripts/server_update_spreads.py",
+    "04_scripts/automation/run_production_data_delta_windows.py",
+    "04_scripts/runtime/routine_release.py",
     "07_docs/00_文档索引与适用范围.md",
     "07_docs/01_系统架构与项目边界.md",
     "07_docs/02_数据与输出规范.md",
@@ -159,10 +161,18 @@ class ApplicationCatalogTests(unittest.TestCase):
 
     def test_update_commands_reference_existing_scripts(self) -> None:
         apps = {app["app_id"]: app for app in self.applications}
-        for command in apps["main_dashboard"]["update_command"].values():
-            script = re.search(r"python\s+(/app/\S+\.py)", command)
-            self.assertIsNotNone(script)
-            self.assertTrue((ROOT / script.group(1).removeprefix("/app/")).is_file())
+        main = apps["main_dashboard"]["update_command"]
+        self.assertEqual(set(main), {"basis", "spreads"})
+        self.assertIn("07_docs/06_日常运行与数据更新手册.md section 2", main["basis"])
+        self.assertIn("verify approved host/runtime identity", main["basis"])
+        self.assertTrue(HANDBOOK_PATH.is_file())
+        script = re.search(r"(04_scripts/\S+\.py)", main["spreads"])
+        self.assertIsNotNone(script)
+        self.assertTrue((ROOT / script.group(1)).is_file())
+        self.assertEqual(script.group(1), "04_scripts/automation/run_production_data_delta_windows.py")
+        self.assertIn("--domain akshare", main["spreads"])
+        self.assertIn("authorized publication adds --publish", main["spreads"])
+        self.assertNotIn("server_update_spreads.py", main["spreads"])
 
         oil_root = ROOT / apps["oil_world_dashboard"]["project_path"]
         for command in apps["oil_world_dashboard"]["update_command"].values():

@@ -326,11 +326,17 @@ def test_workflow_shadow_permissions_and_trust_source():
     assert "platform_ci.py plan" in raw
     assert jobs["windows"]["runs-on"] == "windows-2022"
     assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows", "full"}
-    assert jobs['full']['strategy']['matrix']['side'] == ['base', 'candidate']
-    assert jobs['full']['strategy']['fail-fast'] is False
-    comparison = next(s for s in jobs['final']['steps'] if s.get('name') == 'Compare exact base and candidate full regression')
-    assert comparison['env']['FULL_JOB_RESULT'] == '${{ needs.full.result }}'
-    assert 'full_regression.py compare' in comparison['run']
+    assert jobs['full']['name'] == 'full-regression-candidate'
+    assert 'strategy' not in jobs['full']
+    validation = next(s for s in jobs['final']['steps'] if s.get('name') == 'Require all-green candidate full regression')
+    assert validation['env']['FULL_JOB_RESULT'] == '${{ needs.full.result }}'
+    assert 'full_regression.py validate' in validation['run']
+    assert 'full-base' not in raw and 'matrix.side' not in raw
+    assert '--side candidate --strict-green' in str(jobs['full'])
+    for name, job in jobs.items():
+        for step in job['steps']:
+            if step.get('uses', '').startswith('actions/upload-artifact@'):
+                assert step['with']['retention-days'] == (90 if name == 'final' else 14)
     fresh_main = next(s for s in jobs['final']['steps'] if s.get('name') == 'Require plan and fresh main')
     assert fresh_main['env']['MAIN_READ_TOKEN'] == '${{ github.token }}'
     assert '/git/ref/heads/main' in fresh_main['run']
@@ -339,7 +345,7 @@ def test_workflow_shadow_permissions_and_trust_source():
     for lane in ('plan', 'linux', 'windows', 'full'):
         setup = next(s for s in jobs[lane]['steps'] if s.get('with', {}).get('python-version') == '3.12')
         assert setup['with']['cache'] == 'pip'
-        prefix = 'executor' if lane == 'full' else 'candidate'
+        prefix = 'candidate'
         profile = 'windows-py312' if lane == 'windows' else 'linux-py312'
         assert setup['with']['cache-dependency-path'] == f'{prefix}/04_scripts/quality/locks/{profile}.txt'
 

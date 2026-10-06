@@ -184,7 +184,7 @@ def make_plan(repo, base, candidate, output):
                     raise ValueError('REQUIRED_PLATFORM_POLICY_REDUCTION_OR_RECLASSIFICATION')
     required = report['test_plan']
     if requires_full(report):
-        # Full comparison routes Windows-only cases to the hard platform job.
+        # Full regression routes Windows-only cases to the hard platform job.
         # Include them even when this diff has no direct Windows module impact.
         required = sorted(set(required) | {path for path, rules in policy['files'].items()
             if any(rule['kind'] == 'WINDOWS_REQUIRED_TEST' for rule in rules.values())})
@@ -256,11 +256,12 @@ def finish(plan_path, receipts_root, output, jobs):
     report=read(plan_path.parent/'admission/main-admission.json')
     if requires_full(report):
         full = read(output.parent / 'full-regression.json')
-        expected = dict(result='PASS', base=plan['base'], candidate=plan['candidate'],
+        expected = dict(result='PASS', policy='ALL_GREEN', base=plan['base'], candidate=plan['candidate'],
+                        required_plan_sha256=plan['plan_sha256'],
                         workflow_run_id=os.environ['GITHUB_RUN_ID'], workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'])
         if any(full.get(k) != v for k, v in expected.items()):
             raise ValueError('FULL_REGRESSION_REQUIRED')
-        report['checks']['full_regression_comparison'] = full
+        report['checks']['full_regression_validation'] = full
     report['final_result']=result['result']
     report['failure_codes']=result['failure_codes']
     report['checks'].update(TECHNICAL_VALIDATION=result['result'],MAIN_ENTRY=result['result'],

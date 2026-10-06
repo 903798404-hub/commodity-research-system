@@ -12,7 +12,7 @@
 | candidate Commit/Tree | |
 | required coverage / 新增回归测试 | |
 | hosted Linux / 必需 Windows run 与结果 | |
-| 同次 full 对照：新增 failure / skip / 删除节点 | |
+| 同次 candidate full ALL_GREEN：收集完整、failed/skip 均为0；测试声明保护 | |
 | 镜像检查 / 发布演练路由与实际结果 | |
 | 生产未触碰的核验 | |
 | 已知限制与回退方式 | |

@@ -4,13 +4,12 @@ status_values:
   - pending_verification
   - retired
 server_project_root: /home/ubuntu/market-data
-
 applications:
   - app_id: main_dashboard
     display_name: 主工作台
     status: production
     project_path: .
-    server_project_path: /home/ubuntu/market-data
+    server_project_path: /var/lib/market-data/runtime-validation/soybean-margin-replacement-3ca80ee-20261004-b01/source
     application_type: streamlit_dashboard
     production_url: http://124.222.106.25:8501/
     container_name: spread-dashboard
@@ -18,7 +17,7 @@ applications:
     container_port: 8501
     healthcheck:
       type: http
-      path: /
+      path: /_stcore/health
       expected_status: 200
       container_healthcheck: not_configured
     data_inputs:
@@ -29,6 +28,82 @@ applications:
       - type: repository_runtime_path
         path: 01_data/manual/榨利表/油脂油料价格.sql
     runtime_data:
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/snapshots
+        container_path: /runtime/capture-snapshots
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/cnf
+        container_path: /runtime/import-profit/cnf
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/outputs
+        container_path: /runtime/06_outputs
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/history
+        container_path: /runtime/import-profit/history
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/results
+        container_path: /runtime/import-profit/results
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/logs
+        container_path: /runtime/10_logs
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/identity-domestic-ui-88df-b01
+        container_path: /runtime
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/01_data
+        container_path: /runtime/01_data
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/operational-b12-b03/cnf
+        container_path: /runtime/import-profit/operational/cnf
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/weather/current
+        container_path: /runtime/weather
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/snapshots
+        container_path: /runtime/import-profit/snapshots
+        type: bind
+        access: reverify_from_current_inspect
+      - host_path: /var/lib/market-data/production-runtime/spread-e42a61e-20260908-b01/operational-b12-b03/am-results
+        container_path: /runtime/import-profit/operational/am-results
+        type: bind
+        access: reverify_from_current_inspect
+    release_data: []
+    logs:
+      - /home/ubuntu/market-data/10_logs/cron_update_spreads.log
+      - /home/ubuntu/market-data/10_logs/server_update_spreads_YYYYMMDD.log
+      - docker logs spread-dashboard
+    update_method:
+      basis: streaming_basis_price_sql_near_contract_median_then_atomic_update
+      spreads: approved_windows_control_clone; candidate_then_explicit_atomic_publication; scheduling_is_not_changed_by_catalog
+    update_command:
+      basis: See 07_docs/06_日常运行与数据更新手册.md section 2; verify approved host/runtime identity before invocation
+      spreads: 04_scripts/automation/run_production_data_delta_windows.py --config <private-config> --domain akshare; authorized
+        publication adds --publish
+    deploy_method: isolated_verified_source_build_once; exact_image_candidate; deploy_same_image_only_target_service
+    source_revision_policy: build_from_an_explicit_verified_full_git_sha
+    retention_policy:
+      data: keep_current_production_files; keep_the_sealed_basis_history_baseline_and_external_backup
+      images: keep_current_image_and_one_verified_rollback_image
+      logs: system_logs_14_days; application_and_docker_logs_pending_separate_confirmation
+    dependencies:
+      - Python dependencies from requirements.txt
+      - persistent bind mounts for 01_data, 06_outputs and 10_logs
+      - AkShare availability for automatic spread updates
+    notes:
+      - The container has no configured Docker healthcheck; use HTTP, update_status.json and logs.
+      - Basis data updates and code deployment are separate operations.
+    legacy_server_project_path: /home/ubuntu/market-data
+    observed_compose_files: /var/lib/market-data/runtime-validation/soybean-margin-replacement-3ca80ee-20261004-b01/release-review-b01/target/compose.json
+    legacy_runtime_data:
       - repository_path: 01_data/historical_spread_database.xlsx
         server_path: /home/ubuntu/market-data/01_data/historical_spread_database.xlsx
       - repository_path: 01_data/historical_spread_database.parquet
@@ -41,36 +116,17 @@ applications:
         server_path: /home/ubuntu/market-data/01_data/database/basis/history/basis_quotes_before_20260601.identity.json
       - repository_path: 01_data/update_status.json
         server_path: /home/ubuntu/market-data/01_data/update_status.json
-    release_data: []
-    logs:
-      - /home/ubuntu/market-data/10_logs/cron_update_spreads.log
-      - /home/ubuntu/market-data/10_logs/server_update_spreads_YYYYMMDD.log
-      - docker logs spread-dashboard
-    update_method:
-      basis: streaming_basis_price_sql_near_contract_median_then_atomic_update
-      spreads: automatic_weekdays_16_30_cst_and_manual_retry
-    update_command:
-      basis: docker exec spread-dashboard python /app/04_scripts/update_basis_data.py
-      spreads: docker exec spread-dashboard python /app/04_scripts/server_update_spreads.py --update-from-akshare
-    deploy_method: root_compose_build_and_replace_only_spread_dashboard
-    source_revision_policy: build_from_an_explicit_verified_full_git_sha
-    retention_policy:
-      data: keep_current_production_files; keep_the_sealed_basis_history_baseline_and_external_backup
-      images: keep_current_image_and_one_verified_rollback_image
-      logs: fixed_retention_period_pending_confirmation
-    dependencies:
-      - Python dependencies from requirements.txt
-      - persistent bind mounts for 01_data, 06_outputs and 10_logs
-      - AkShare availability for automatic spread updates
-    notes:
-      - The container has no configured Docker healthcheck; use HTTP, update_status.json and logs.
-      - Basis data updates and code deployment are separate operations.
-
+    legacy_recovery_update_command:
+      spreads: 04_scripts/server_update_spreads.py --update-from-akshare; explicit_recovery_authorization_only
+    code_release_entrypoints:
+      routine: 04_scripts/runtime/routine_release.py
+      stateful_or_high_risk: 04_scripts/runtime/说明.md; 09_deploy/runtime_identity/说明.md
+      legacy_recovery: 09_deploy/spread_release/deploy_spread_release.sh; explicit_path_selection_only
   - app_id: usda_dashboard
     display_name: USDA平衡表
     status: production
     project_path: 11_独立应用/USDA平衡表
-    server_project_path: /home/ubuntu/market-data/11_独立应用/USDA平衡表
+    server_project_path: /home/ubuntu/market-data-runtime/usda-releases/usda-20260813-c51ae40f109c-m03/source/09_deploy/usda_release
     application_type: vite_react_static_nginx_with_read_only_runtime_bundle_mount
     production_url: http://124.222.106.25:8080/
     container_name: usda-dashboard
@@ -108,7 +164,7 @@ applications:
     retention_policy:
       data: keep_current_and_configured_previous_processed_snapshots; never_delete_the_only_raw_source
       images: keep_current_image_and_one_verified_rollback_image
-      logs: docker_log_retention_period_pending_confirmation
+      logs: system_logs_14_days; application_and_docker_logs_pending_separate_confirmation
     dependencies:
       - Node.js and pnpm lockfile environment
       - one valid source dataset for the configured report month
@@ -118,12 +174,18 @@ applications:
       - Automated production data acquisition is pending verification; do not assume fetch:usda is scheduled.
       - The container has no configured Docker healthcheck.
       - Ordinary monthly data updates do not rebuild or restart the USDA container.
-
+    legacy_server_project_path: /home/ubuntu/market-data/11_独立应用/USDA平衡表
+    observed_compose_files: /home/ubuntu/market-data-runtime/usda-releases/usda-20260813-c51ae40f109c-m03/source/09_deploy/usda_release/compose.production.yml
+    code_release_entrypoints:
+      candidate: 09_deploy/usda_release/run_usda_candidate.py
+      compose_wrapper: 09_deploy/usda_release/usda_compose.sh
+      operations: 07_docs/06_日常运行与数据更新手册.md section 4
+      one_command_code_release: not_implemented; no claim of automatic deployment
   - app_id: oil_world_dashboard
     display_name: Oil World平衡表
     status: production
     project_path: 11_独立应用/OilWorld平衡表
-    server_project_path: /home/ubuntu/market-data/11_独立应用/OilWorld平衡表
+    server_project_path: /home/ubuntu/market-data-runtime/oil-world/deploy
     application_type: vite_react_static_nginx_with_read_only_release_mount
     production_url: http://124.222.106.25:8081/oil-world/
     container_name: oil-world-dashboard
@@ -138,13 +200,13 @@ applications:
     data_inputs:
       - type: external_raw_root
         path_setting: OILWORLD_RAW_DATA_ROOT
-        layout: "{raw_root}/{YYYY-MM}/"
+        layout: '{raw_root}/{YYYY-MM}/'
       - type: repository_config
         path: 11_独立应用/OilWorld平衡表/02_configs/release_2026-06.json
       - type: repository_audit_mapping
         path: 11_独立应用/OilWorld平衡表/07_docs/报表映射审计/
     runtime_data:
-      - host_path: pending_verification; supplied_by_OIL_WORLD_DATA_ROOT
+      - host_path: /home/ubuntu/market-data-runtime/oil-world/data/current
         container_path: /usr/share/nginx/html/oil-world/data/oil_world
         access: read_only
     release_data:
@@ -158,18 +220,60 @@ applications:
     update_command:
       validate: python 04_scripts/update_oil_world.py --release YYYY-MM --validate-only
       publish: python 04_scripts/update_oil_world.py --release YYYY-MM
-    deploy_method: oil_world_compose_for_frontend; release_data_hot_update_uses_read_only_mount
+    deploy_method: dedicated_isolated_candidate; deploy_same_frontend_image; separate_read_only_runtime_data_delivery
     source_revision_policy: build_from_an_explicit_verified_full_git_sha
     retention_policy:
       data: keep_all_releases_and_comparisons_referenced_by_releases_json; never_delete_the_only_raw_source
       images: keep_current_image_and_one_verified_rollback_image
-      logs: docker_log_retention_period_pending_confirmation
+      logs: system_logs_14_days; application_and_docker_logs_pending_separate_confirmation
     dependencies:
       - OILWORLD_RAW_DATA_ROOT or ignored local_paths.json for local release generation
       - Python and openpyxl for release generation
       - Node.js and pnpm for frontend tests and builds
       - read-only production release-data mount
     notes:
-      - "Presentation URL: http://124.222.106.25:8081/oil-world/presentation"
-      - Brazil Soybeans and Argentina Sunflowerseed use Jan-Dec calendar-year scope and must not be compared with crop-year series.
-      - Repository Compose defaults to a loopback host bind; the next deployment must verify how the confirmed public endpoint is exposed.
+      - 'Presentation URL: http://124.222.106.25:8081/oil-world/presentation'
+      - Brazil Soybeans and Argentina Sunflowerseed use Jan-Dec calendar-year scope and must not be compared with crop-year
+        series.
+      - Repository Compose defaults to a loopback host bind; the next deployment must verify how the confirmed public endpoint
+        is exposed.
+    legacy_server_project_path: /home/ubuntu/market-data/11_独立应用/OilWorld平衡表
+    observed_compose_files: /home/ubuntu/market-data-releases/oil-world/7ab1bacbd03323bb83079bab4dca1a38edf6f747-build-minimal/09_deploy/oil_world_release/compose.production.yml
+    code_release_entrypoints:
+      candidate: 09_deploy/oil_world_release/prepare_oil_world_candidate.py
+      deploy: 09_deploy/oil_world_release/deploy_oil_world_release.py
+      rollback: 09_deploy/oil_world_release/rollback_oil_world_release.py
+      operations: 07_docs/06_日常运行与数据更新手册.md section 5
+server_project_root_role: legacy_host_runtime; not a build or development source
+instance_observation:
+  verified_at_utc: '2026-10-06T14:12:01Z'
+  scope: container identity and mounts unchanged in read-only audit; reverify before execution
+  source: Docker inspect and sealed release metadata; not a deployment authorization
+shared_retention_policy:
+  system_journal_and_rotated_log_days: 14
+  system_log_persistent_configuration: not_applied_by_policy_change
+  application_and_docker_logs: retention_pending_separate_confirmation
+  ci_diagnostic_artifact_days: 14
+  ci_final_admission_artifact_days: 90
+  required_release_evidence: archive_outside_git_before_artifact_expiry; preserve_all_required_recovery_dependencies
+  cleanup: separate_authorized_task; exact_object_inventory; no_automatic_prune_or_timer
+resource_lifecycle:
+  states:
+    - pending_validation
+    - awaiting_ui_acceptance
+    - active_production
+    - retained_rollback
+    - retained_failure
+    - archived
+    - cleanup_eligible
+    - removed
+  record_fields:
+    - object_id_or_path
+    - release_identity
+    - state
+    - consumer_references
+    - recovery_source
+    - observed_at
+  cleanup_eligibility: not_current; no_container_or_required_fact_reference; not_unique_rollback_or_backup; incident_closed;
+    exact_scope_authorized
+  implementation: completion_record_checklist; not_an_installed_server_cleanup_service

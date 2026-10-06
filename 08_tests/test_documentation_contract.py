@@ -38,7 +38,8 @@ def test_readme_does_not_reintroduce_obsolete_integration_or_draft_authority():
     targets = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', body)
     assert '07_docs/03_标准开发与生产发布规范.md' in targets
     assert '07_docs/04_开发与发布检查清单.md' in targets
-    assert '传递依赖未受同等 hash 锁定' in body
+    assert '完整 `.txt` 依赖闭包' in body
+    assert '传递依赖未受同等 hash 锁定' not in body
 
 
 def test_index_covers_runtime_and_current_soybean_contracts():
@@ -249,3 +250,48 @@ def test_governance_transition_is_separate_from_business_and_release():
                    'authoritative base Commit/Tree', 'candidate Commit/Tree',
                    'required coverage', '生产未触碰', '接纳决定', '审查不覆盖失败'):
         assert marker in review, marker
+
+
+def test_catalog_routes_updates_and_releases_to_current_contracts():
+    import yaml
+    catalog = yaml.safe_load(read(ROOT/'02_configs/app_catalog.yaml'))
+    apps = {a['app_id']:a for a in catalog['applications']}
+    main = apps['main_dashboard']
+    assert 'run_production_data_delta_windows.py' in main['update_command']['spreads']
+    assert '--domain akshare' in main['update_command']['spreads'] and '--publish' in main['update_command']['spreads']
+    assert 'server_update_spreads.py' not in main['update_command']['spreads']
+    assert 'explicit_recovery_authorization_only' in main['legacy_recovery_update_command']['spreads']
+    assert main['code_release_entrypoints']['routine']=='04_scripts/runtime/routine_release.py'
+    assert 'build_once' in main['deploy_method'] and 'deploy_same_image' in main['deploy_method']
+    assert 'root_compose_build' not in read(ROOT/'02_configs/app_catalog.yaml')
+    assert 'Legacy/Recovery' in read(DOCS/'06_日常运行与数据更新手册.md')
+    for app in apps.values():
+        assert app['observed_compose_files'].startswith('/')
+        assert app['server_project_path']!=app['legacy_server_project_path']
+    assert catalog['instance_observation']['verified_at_utc']
+    assert '待' not in apps['oil_world_dashboard']['runtime_data'][0]['host_path']
+
+
+def test_full_policy_is_current_in_review_templates_and_runtime_guide():
+    template = read(DOCS/'templates/GovernanceTransition.md')
+    tooling = read(ROOT/'04_scripts/runtime/说明.md')
+    for body in (template, tooling, read(MANUAL)):
+        assert 'candidate' in body and 'ALL_GREEN' in body
+    assert '同次 full 对照：新增 failure' not in template
+    assert '只能由新精确 SHA 的完整成对结果证明消除' not in tooling
+
+
+def test_log_scope_and_recovery_preservation_do_not_create_cleanup_side_effects():
+    import yaml
+    catalog = yaml.safe_load(read(ROOT/'02_configs/app_catalog.yaml'))
+    policy = catalog['shared_retention_policy']
+    assert policy['system_journal_and_rotated_log_days']==14
+    assert policy['system_log_persistent_configuration']=='not_applied_by_policy_change'
+    assert policy['application_and_docker_logs']=='retention_pending_separate_confirmation'
+    assert 'archive_outside_git' in policy['required_release_evidence']
+    assert 'no_automatic_prune_or_timer' in policy['cleanup']
+    for state in ['active_production','retained_rollback','awaiting_ui_acceptance','retained_failure','archived','cleanup_eligible']:
+        assert state in catalog['resource_lifecycle']['states']
+    assert '完整依赖闭包' in read(SPEC)
+    assert '唯一备份' in read(DOCS/'02_数据与输出规范.md')
+    assert '不授权删近期排查证据' in read(DOCS/'02_数据与输出规范.md')

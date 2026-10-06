@@ -1,11 +1,8 @@
-"""Same-run full repository regression comparison; required lanes stay all-green.
-
-No failure allowlist. A completed base result is the only debt baseline.
-This executor is used outside both exact checkouts, including an older base.
-"""
+"""All-green candidate full regression; paired comparison is diagnostic only."""
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 from pathlib import Path
@@ -31,6 +28,28 @@ def verify(value):
         raise ValueError('FULL_ARTIFACT_DIGEST_MISMATCH')
 
 
+def declared_tests(source):
+    """Compare declared test identities without importing or executing base code."""
+    result = {}
+    def visit(body, prefix=''):
+        for node in body:
+            if isinstance(node, ast.ClassDef):
+                visit(node.body, prefix + node.name + '::')
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('test_'):
+                count = 1
+                for dec in node.decorator_list:
+                    if (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)
+                            and dec.func.attr == 'parametrize' and len(dec.args) > 1
+                            and isinstance(dec.args[1], (ast.List, ast.Tuple))):
+                        count *= len(dec.args[1].elts)
+                name = prefix + node.name
+                if name in result:
+                    raise ValueError('FULL_DUPLICATE_TEST_DECLARATION')
+                result[name] = count
+    visit(ast.parse(source).body)
+    return result
+
+
 def make_plan(repo, required, output):
     """Keep every base/candidate test file and route Windows tests to hard CI."""
     identities = {'base': required['base'], 'candidate': required['candidate']}
@@ -48,6 +67,15 @@ def make_plan(repo, required, output):
     # Routing changes must not conceal a removed Linux node.
     if plans['base']['policy_sha256'] != plans['candidate']['policy_sha256']:
         raise ValueError('FULL_PLATFORM_POLICY_CHANGED_REQUIRES_SEPARATE_REVIEW')
+    old = plans['base']['candidate_test_sha256']
+    new = plans['candidate']['candidate_test_sha256']
+    for path in old:
+        if path not in new:
+            raise ValueError('FULL_TEST_FILE_REMOVED: ' + path)
+        before = declared_tests(ci.admission.blob(repo, identities['base']['commit'], path))
+        after = declared_tests(ci.admission.blob(repo, identities['candidate']['commit'], path))
+        if any(name not in after or after[name] < count for name, count in before.items()):
+            raise ValueError('FULL_TEST_DECLARATION_REMOVED: ' + path)
     value = seal(dict(schema_version='full-regression-plan/1', identities=identities,
                       required_plan_sha256=required['plan_sha256'], plans=plans))
     ci.save(output, value)
@@ -100,7 +128,7 @@ class Collection(ci.Collector):
         self.session_finished = True
 
 
-def execute(plan, side, output):
+def execute(plan, side, output, *, strict_green=False):
     verify(plan)
     if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted' or os.environ.get('RUNNER_OS') != 'Linux':
         raise ValueError('FULL_GITHUB_HOSTED_LINUX_REQUIRED')
@@ -139,8 +167,10 @@ def execute(plan, side, output):
                       collected_files=sorted(collector.collected_files),
                       collected_nodes=sorted(collector.nodes), tests=collector.results))
     ci.save(output / 'result.json', value)
-    # Test failures are compared later; infrastructure/collection failures never become debt.
-    return 0 if completed(value) else 1
+    # Historical paired diagnosis can retain completed failures. Main CI requires
+    # every candidate test to pass, including setup/teardown and no skips.
+    green = value['exit_code'] == 0 and all(v == 'passed' for v in value['tests'].values())
+    return 0 if completed(value) and (not strict_green or green) else 1
 
 
 def completed(receipt):
@@ -150,6 +180,42 @@ def completed(receipt):
             and bool(nodes) and len(nodes) == len(set(nodes)) and set(nodes) == set(tests)
             and all(v in {'passed', 'failed', 'skipped'} for v in tests.values())
             and (receipt['exit_code'] == 1) == ('failed' in tests.values()))
+
+
+def validate_candidate(plan, receipt, *, run_id, attempt, job_result):
+    """Accept only the complete, same-run, all-green candidate result."""
+    verify(plan)
+    if job_result != 'success':
+        raise ValueError('FULL_REQUIRED_JOB_OR_RECEIPT_MISSING')
+    verify(receipt)
+    expected = dict(schema_version='full-regression-result/1', side='candidate',
+                    identity=plan['identities']['candidate'], plan_sha256=plan['sha256'],
+                    workflow_run_id=run_id, workflow_run_attempt=attempt)
+    if any(receipt.get(k) != v for k, v in expected.items()):
+        raise ValueError('FULL_RECEIPT_IDENTITY_MISMATCH')
+    if not completed(receipt):
+        raise ValueError('FULL_COLLECTION_OR_INFRASTRUCTURE_FAILURE')
+    obligations = plan['plans']['candidate']['lanes']['linux']
+    for node in receipt['collected_nodes']:
+        if not any(node == t['selector'] or node.startswith(t['selector'] + '::') or
+                   node.startswith(t['selector'] + '[') for t in obligations):
+            raise ValueError('FULL_UNPLANNED_NODE')
+    for obligation in obligations:
+        selector = obligation['selector']
+        if selector.split('::')[0] not in receipt['collected_files']:
+            raise ValueError('FULL_REQUIRED_COLLECTION_MISSING')
+        count = sum(n == selector or n.startswith(selector + '::') or
+                    n.startswith(selector + '[') for n in receipt['collected_nodes'])
+        if '::' in selector and count < obligation.get('minimum_cases', 1):
+            raise ValueError('FULL_REQUIRED_COLLECTION_MISSING')
+    counts = {state: list(receipt['tests'].values()).count(state)
+              for state in ('passed', 'failed', 'skipped')}
+    return dict(result='PASS' if receipt['exit_code'] == 0 and not (counts['failed'] or counts['skipped']) else 'FAIL',
+                policy='ALL_GREEN', base=plan['identities']['base'],
+                candidate=plan['identities']['candidate'], plan_sha256=plan['sha256'],
+                required_plan_sha256=plan['required_plan_sha256'],
+                workflow_run_id=run_id, workflow_run_attempt=attempt,
+                receipt_sha256=receipt['sha256'], test_counts=counts)
 
 
 def compare(plan, receipts, *, run_id, attempt, job_result):
@@ -204,17 +270,25 @@ def compare(plan, receipts, *, run_id, attempt, job_result):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['plan', 'run', 'compare'])
+    parser.add_argument('action', choices=['plan', 'run', 'validate', 'compare'])
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--side', choices=['base', 'candidate'])
     parser.add_argument('--receipts', type=Path)
+    parser.add_argument('--strict-green', action='store_true')
     args = parser.parse_args()
     if args.action == 'plan':
         make_plan(Path.cwd(), ci.read(args.plan), args.output)
         return 0
     if args.action == 'run':
-        return execute(ci.read(args.plan), args.side, args.output)
+        return execute(ci.read(args.plan), args.side, args.output, strict_green=args.strict_green)
+    if args.action == 'validate':
+        result = validate_candidate(ci.read(args.plan), ci.read(args.receipts / 'candidate' / 'result.json'),
+                                    run_id=os.environ['GITHUB_RUN_ID'], attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+                                    job_result=os.environ['FULL_JOB_RESULT'])
+        ci.save(args.output, result)
+        print(json.dumps(result['test_counts'], indent=2))
+        return 0 if result['result'] == 'PASS' else 1
     result = compare(ci.read(args.plan), {s: ci.read(args.receipts / s / 'result.json') for s in ('base', 'candidate')},
                      run_id=os.environ['GITHUB_RUN_ID'], attempt=os.environ['GITHUB_RUN_ATTEMPT'],
                      job_result=os.environ['FULL_JOB_RESULT'])
