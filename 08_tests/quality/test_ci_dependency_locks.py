@@ -85,7 +85,8 @@ def test_every_ci_install_uses_an_existing_hashed_lock_and_checks_dependencies()
             _entries(ROOT / relative)
             installed.append(match[1])
     assert len(installed) == 7
-    assert "executor/04_scripts/quality/locks/linux-py312.txt" in installed
+    assert installed.count("candidate/04_scripts/quality/locks/linux-py312.txt") == 3
+    assert not any(path.startswith("executor/") for path in installed)
     assert {Path(p).name for p in installed} == {p.name for p in LOCKS.glob("*.txt")}
 
 

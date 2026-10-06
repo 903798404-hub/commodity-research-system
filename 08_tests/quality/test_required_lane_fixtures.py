@@ -82,7 +82,8 @@ def test_final_aggregation_uses_only_its_runtime_dependency() -> None:
         "python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/aggregate-py312.txt" in final_job
     )
     assert "requirements-dev.in" not in final_job
-    assert "Compare exact base and candidate full regression" in final_job
+    assert "Require all-green candidate full regression" in final_job
+    assert "full_regression.py validate" in final_job
     assert "Aggregate actual required platform jobs" in final_job
 
 
@@ -104,7 +105,9 @@ def test_both_lanes_use_same_existing_preparation():
     workflow = (ROOT / '.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8')
     assert workflow.count('--prepare-checkout-directories') == 2
     full_job = workflow.split('  full:\n', 1)[1]
-    assert '../executor/04_scripts/quality/required_lane_fixtures.py --source-root .' in full_job
+    assert '04_scripts/quality/required_lane_fixtures.py --source-root .' in full_job
+    assert workflow.count('04_scripts/quality/required_lane_fixtures.py --source-root .') == 2
+    assert 'working-directory: candidate' in full_job
     assert full_job.index('--prepare-checkout-directories') < full_job.index('Execute complete full regression')
 
 
@@ -148,7 +151,7 @@ def test_short_lived_docker_evidence_consumed_before_long_executor_without_inter
         assert '--docker-evidence' in step['run'] and 'host_release_timestamp_compatibility.py' in step['run']
         assert "--base '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00'" in step['run']
         assert 'needs.plan.outputs.base_commit' not in step['run']
-    assert 'needs.plan.outputs.base_commit' in workflow['jobs']['full']['steps'][1]['with']['ref']
+    assert workflow['jobs']['full']['steps'][1]['with']['ref'] == '${{ github.event.pull_request.head.sha || github.sha }}'
 
 
 def test_fixture_identity_is_deterministic_and_missing_or_changed_input_rejected(tmp_path):
