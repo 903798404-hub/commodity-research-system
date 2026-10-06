@@ -45,7 +45,7 @@ RELEASE_CONTROL_FILES = {
 }
 RUNTIME_CONTRACT = '02_configs/runtime_contracts/spread-production-runtime.json'
 # These inputs belong to local bootstrap, Windows/final aggregation, or test
-# mapping. Linux host/browser locks, all release fixtures and unknown paths
+# mapping/collection and their audited tests. Linux host/browser locks, all release fixtures and unknown paths
 # deliberately remain strict. Consumer boundaries are regression-tested.
 NON_RELEASE_CI_FILES = {
     'requirements-dev.in', 'requirements-dev.txt',
@@ -54,6 +54,21 @@ NON_RELEASE_CI_FILES = {
     '04_scripts/quality/locks/aggregate-py312.in',
     '04_scripts/quality/locks/aggregate-py312.txt',
     '08_tests/shared/test_module_test_map.py',
+    '04_scripts/quality/full_regression.py',
+    '04_scripts/quality/platform_test_plan.py',
+    '04_scripts/quality/required_lane_fixtures.py',
+    '08_tests/test_full_regression.py', '08_tests/test_main_admission.py',
+    '08_tests/test_documentation_contract.py',
+    '08_tests/quality/test_release_ci_routing.py',
+    '08_tests/quality/test_required_lane_fixtures.py',
+    '08_tests/quality/test_ci_dependency_locks.py',
+}
+CI_WIRING_FILES = {'.github/workflows/trusted-main-admission.yml',
+                   '04_scripts/quality/platform_ci.py'}
+RELEASE_CASE_PROFILES = {
+    'ci-wiring': ('success', 'failure'),
+    'full': ('success', 'failure', 'authorization', 'aged-authorization',
+             'directory-drift', 'rollback-timeout'),
 }
 
 
@@ -99,10 +114,16 @@ def unpackaged_markdown(report, repo):
     return unpackaged_inputs(report, repo, markdown)
 
 
-def requires_spread_release_e2e(report, repo):
-    """Replay lifecycle changes; persistence and runtime roots stay strict."""
+def release_replay_changes(report, repo):
+    """Exclude only audited nonconsumers proved by both committed inventories."""
     changed = {item['path'] for item in report['changed_paths']} - unpackaged_markdown(report, repo)
     changed -= unpackaged_inputs(report, repo, changed & NON_RELEASE_CI_FILES)
+    return changed
+
+
+def spread_release_profile(report, repo):
+    """CI wiring replays the real success/rollback path; release changes stay full."""
+    changed = release_replay_changes(report, repo)
     if any(path in RELEASE_CONTROL_FILES or path.startswith(RELEASE_CONTROL_PREFIXES)
            or (path.startswith('02_configs/runtime_contracts/') and path != RUNTIME_CONTRACT)
            or path.startswith('08_tests/shared/')
@@ -110,9 +131,11 @@ def requires_spread_release_e2e(report, repo):
                                 '08_tests/test_routine_', '08_tests/test_pre_release_',
                                 '08_tests/test_target_runtime_', '08_tests/test_spread_runtime_'))
            for path in changed):
-        return True
+        if changed <= CI_WIRING_FILES and unpackaged_inputs(report, repo, changed) == changed:
+            return 'ci-wiring'
+        return 'full'
     if RUNTIME_CONTRACT not in changed:
-        return False
+        return 'none'
     # Only JSON formatting can avoid lifecycle replay. The current contract
     # uses path/role source inventories, not per-source content hash fields.
     # Missing, malformed, or any semantic contract change stays strict.
@@ -121,15 +144,19 @@ def requires_spread_release_e2e(report, repo):
         after = json.loads(admission.blob(repo, report['candidate']['commit'], RUNTIME_CONTRACT))
         for value in (before, after):
             if not isinstance(value, dict):
-                return True
+                return 'full'
             inputs = value.get('source_inputs')
             if not isinstance(inputs, list) or not inputs or any(
                     not isinstance(item, dict) or set(item) != {'path', 'role'}
                     for item in inputs):
-                return True
-        return before != after
+                return 'full'
+        return 'full' if before != after else 'none'
     except (KeyError, ValueError, TypeError, subprocess.CalledProcessError):
-        return True
+        return 'full'
+
+
+def requires_spread_release_e2e(report, repo):
+    return spread_release_profile(report, repo) != 'none'
 
 
 def requires_spread_runtime_docker(report, repo):
@@ -193,7 +220,8 @@ def make_plan(repo, base, candidate, output):
     sources = {p:admission.blob(repo,candidate,p) for p in required}
     trusted = {p:admission.blob(repo,base,p) if p in old else sources[p] for p in required}
     plan = platforms.plan(required,trusted,sources,policy,base=report['trusted_main'],candidate=report['candidate'])
-    plan['spread_release_e2e'] = requires_spread_release_e2e(report, repo)
+    plan['spread_release_profile'] = spread_release_profile(report, repo)
+    plan['spread_release_e2e'] = plan['spread_release_profile'] != 'none'
     plan['spread_runtime_docker'] = requires_spread_runtime_docker(report, repo) or plan['spread_release_e2e']
     plan['plan_sha256'] = platforms.digest({k: v for k, v in plan.items() if k != 'plan_sha256'})
     save(output/'plan.json',plan)
@@ -254,6 +282,9 @@ def finish(plan_path, receipts_root, output, jobs):
     result=platforms.aggregate(plan,receipts,workflow_run_id=os.environ['GITHUB_RUN_ID'],
                                workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],job_results=jobs)
     report=read(plan_path.parent/'admission/main-admission.json')
+    if plan.get('spread_release_e2e') and result['result'] == 'PASS':
+        report['checks']['spread_release_validation'] = validate_release_replay(
+            plan, receipts_root, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
     if requires_full(report):
         full = read(output.parent / 'full-regression.json')
         expected = dict(result='PASS', policy='ALL_GREEN', base=plan['base'], candidate=plan['candidate'],
@@ -282,6 +313,52 @@ def finish(plan_path, receipts_root, output, jobs):
     return 0 if result['result']=='PASS' else 1
 
 
+def validate_release_replay(plan, receipts_root, run_id, attempt):
+    """Require the actual declared replay; missing/partial/wrong-scope evidence fails."""
+    profile = plan.get('spread_release_profile')
+    if profile not in RELEASE_CASE_PROFILES:
+        raise ValueError('RELEASE_REPLAY_PROFILE_REQUIRED')
+    expected = RELEASE_CASE_PROFILES[profile]
+    path = receipts_root / 'linux/high-risk-execution-docker-evidence.json'
+    evidence = read(path)
+    required = dict(status='PASS', candidate=plan['candidate'], case_profile=profile,
+                    required_cases=list(expected), workflow_run_id=str(run_id),
+                    workflow_run_attempt=str(attempt), temporary_private_keys_removed=True,
+                    production_acceptance='NOT_EXECUTED')
+    if any(evidence.get(k) != v for k, v in required.items()):
+        raise ValueError('RELEASE_REPLAY_IDENTITY_OR_RESULT_MISMATCH')
+    cases = evidence.get('paths', [])
+    injections = dict(success='NONE', failure='POST_START', authorization='AUTHORIZATION',
+                      **{'aged-authorization': 'AUTHORIZATION', 'directory-drift': 'DIRECTORY_DRIFT',
+                         'rollback-timeout': 'ROLLBACK_TIMEOUT'})
+    if (len(cases) != len(expected) or {p.get('case') for p in cases} != set(expected)
+            or any(p.get('status') != 'PASS' or p.get('path') != injections.get(p.get('case')) for p in cases)):
+        raise ValueError('RELEASE_REPLAY_CASES_INCOMPLETE')
+    if evidence.get('expired_record', {}).get('original_verifier_rejected') is not True:
+        raise ValueError('RELEASE_REPLAY_EXPIRY_PROBE_REQUIRED')
+    allocation = evidence.get('execution_output_allocation', {})
+    if (allocation.get('result') != 'PASS' or allocation.get('uid') != 0 or allocation.get('gid') != 0
+            or allocation.get('mode') != '0o700' or allocation.get('previous_evidence_preserved') is not True
+            or set(allocation.get('rejected', [])) != {'previous-attempt', 'public-directory', 'symlink', 'missing-parent', 'relative'}):
+        raise ValueError('RELEASE_REPLAY_ALLOCATION_REQUIRED')
+    index = evidence.get('evidence_index', [])
+    seen = set()
+    for item in index:
+        relative = item.get('artifact_path', '')
+        parts = relative.split('/')
+        if not relative or relative in seen or any(p in {'', '.', '..'} for p in parts) or '\\' in relative or ':' in relative:
+            raise ValueError('RELEASE_REPLAY_EVIDENCE_PATH_INVALID')
+        seen.add(relative)
+        raw = (receipts_root / 'linux/high-risk-execution-docker-evidence' / relative).read_bytes()
+        if admission.digest(raw) != item.get('sha256'):
+            raise ValueError('RELEASE_REPLAY_EVIDENCE_DIGEST_MISMATCH')
+    if not index:
+        raise ValueError('RELEASE_REPLAY_EVIDENCE_REQUIRED')
+    return dict(result='PASS', profile=profile, cases=list(expected), indexed_evidence_verified=len(index),
+                candidate=plan['candidate'], workflow_run_id=str(run_id), workflow_run_attempt=str(attempt),
+                receipt_sha256=admission.digest(path.read_bytes()), production_authorized=False)
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('action',choices=['plan','run','aggregate'])
     p.add_argument('--base');p.add_argument('--candidate');p.add_argument('--platform',choices=['linux','windows'])
@@ -298,6 +375,7 @@ def main():
                 f.write('base_commit='+plan['base']['commit']+'\n')
                 f.write('spread_runtime_docker='+str(plan['spread_runtime_docker']).lower()+'\n')
                 f.write('spread_release_e2e='+str(plan['spread_release_e2e']).lower()+'\n')
+                f.write('spread_release_profile='+plan['spread_release_profile']+'\n')
         return 0
     if a.action=='run': return execute(a.platform,a.plan,a.output)
     return finish(a.plan,a.receipts,a.output,json.loads(os.environ['PLATFORM_JOB_RESULTS']))

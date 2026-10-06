@@ -27,6 +27,7 @@ jobs:
       base_commit: ${{ steps.plan.outputs.base_commit }}
       spread_runtime_docker: ${{ steps.plan.outputs.spread_runtime_docker }}
       spread_release_e2e: ${{ steps.plan.outputs.spread_release_e2e }}
+      spread_release_profile: ${{ steps.plan.outputs.spread_release_profile }}
     steps:
     - name: Use exact Git bytes
       run: git config --global core.autocrlf false
@@ -255,8 +256,9 @@ jobs:
         set -euo pipefail
         source_root="/root/market-data-spread-hosted-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         python_bin='${{ steps.host-python312.outputs.python-path }}'
-        sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
+        sudo GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" RUNNER_ENVIRONMENT=github-hosted "$python_bin" -I -B \
           "$source_root/08_tests/shared/high_risk_execution_docker_e2e.py" \
+          --case-profile '${{ needs.plan.outputs.spread_release_profile }}' \
           --output "$RUNNER_TEMP/platform-results/linux/high-risk-execution-docker-evidence.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()

@@ -33,6 +33,12 @@ CONTRACT = '02_configs/runtime_contracts/spread-production-runtime.json'
 OLD = '88df880127bea4308ee752a37a59884b9198b2ce'
 TARGET = '0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00'
 REVIEW_CLOCK_ADVANCE = timedelta(0)
+CASE_PROFILES = {
+    'ci-wiring': (('success', 'NONE'), ('failure', 'POST_START')),
+    'full': (('success', 'NONE'), ('failure', 'POST_START'),
+             ('authorization', 'AUTHORIZATION'), ('aged-authorization', 'AUTHORIZATION'),
+             ('directory-drift', 'DIRECTORY_DRIFT'), ('rollback-timeout', 'ROLLBACK_TIMEOUT')),
+}
 
 
 class ReviewClock(datetime):
@@ -884,6 +890,7 @@ def verify_execution_output_allocation(work):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--case-profile', choices=tuple(CASE_PROFILES), default='full')
     args = parser.parse_args()
     assert sys.platform == 'linux' and os.geteuid() == 0 and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
     work = directory(Path('/root') / ('hosted-high-risk-execution-' + uuid.uuid4().hex), 0o700)
@@ -893,7 +900,9 @@ def main():
     key_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     paths = []
     receipt = dict(status='STARTED', candidate=candidate, evidence_class='HOSTED_SYNTHETIC_TRUST_NOT_PRODUCTION_CUTOVER',
-                   production_acceptance='NOT_EXECUTED', application_target_rebuilt=False)
+                   production_acceptance='NOT_EXECUTED', application_target_rebuilt=False,
+                   case_profile=args.case_profile, required_cases=[name for name, _ in CASE_PROFILES[args.case_profile]],
+                   workflow_run_id=os.environ['GITHUB_RUN_ID'], workflow_run_attempt=os.environ['GITHUB_RUN_ATTEMPT'])
     original_review_loader = install_review_clock()
     try:
         receipt['execution_output_allocation'] = verify_execution_output_allocation(work)
@@ -940,9 +949,7 @@ def main():
         receipt['synthetic_assets'] = dict(tool=identity(tool), old=identity(old_source), target=identity(target_source),
             old_image=old_evidence['image_id'], target_image=target_evidence['image_id'])
         receipt['paths'] = []
-        for name, injected in (('success', 'NONE'), ('failure', 'POST_START'),
-                               ('authorization', 'AUTHORIZATION'), ('aged-authorization', 'AUTHORIZATION'),
-                               ('directory-drift','DIRECTORY_DRIFT'),('rollback-timeout','ROLLBACK_TIMEOUT')):
+        for name, injected in CASE_PROFILES[args.case_profile]:
             scope = directory(work / name, 0o700)
             key_id, _, key_path = keys['production']
             receipt['paths'].append(case(scope, tool, old_source, target_source, old_evidence, target_evidence,
@@ -951,7 +958,10 @@ def main():
             target_record = Path(receipt['paths'][-1]['candidate_record']['path'])
         additive_paths = [path for path in receipt['paths']
                           if 'additive-without-recovery' in path['negative_probes']]
-        assert len(additive_paths) == 1 and additive_paths[0]['case'] == 'authorization'
+        if args.case_profile == 'full':
+            assert len(additive_paths) == 1 and additive_paths[0]['case'] == 'authorization'
+        else:
+            assert not additive_paths
         assert (work / 'target-source-signed-record.json').read_bytes() == expired_bytes
         receipt['status'] = 'PASS'
     except Exception as exc:
