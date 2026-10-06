@@ -1128,7 +1128,17 @@ def test_rejects_missing_spread_service_and_writable_weather_mount(tmp_path: Pat
     with pytest.raises(ContractError, match="spread-dashboard"):
         prepare_candidate(options, runner=missing_runner)
 
-    options, mount_runner = _options(tmp_path / "writable", compose=_formal_compose(weather_read_only=False))
+    # Location validation precedes the mount-mode check; use an existing source.
+    weather_source = tmp_path / "formal-weather-runtime"
+    weather_source.mkdir()
+    writable_weather = _formal_compose(weather_read_only=False)
+    writable_mount = next(
+        mount
+        for mount in writable_weather["services"]["spread-dashboard"]["volumes"]
+        if mount["target"] == "/app/runtime/weather"
+    )
+    writable_mount["source"] = str(weather_source.resolve())
+    options, mount_runner = _options(tmp_path / "writable", compose=writable_weather)
     with pytest.raises(ContractError, match="read-only"):
         prepare_candidate(options, runner=mount_runner)
 
@@ -1138,6 +1148,7 @@ def test_rejects_missing_spread_service_and_writable_weather_mount(tmp_path: Pat
         for mount in missing_read_only["services"]["spread-dashboard"]["volumes"]
         if mount["target"] == "/app/runtime/weather"
     )
+    weather_mount["source"] = str(weather_source.resolve())
     weather_mount.pop("read_only")
     options, omitted_runner = _options(tmp_path / "omitted", compose=missing_read_only)
     with pytest.raises(ContractError, match="read-only"):
