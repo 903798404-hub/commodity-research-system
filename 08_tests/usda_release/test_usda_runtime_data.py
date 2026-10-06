@@ -428,6 +428,8 @@ def test_legacy_pointer_is_fixed_across_promote_and_rollback(tmp_path: Path) -> 
     release_a = package(tmp_path / "a", source_data(tmp_path / "a", "2026-07", "2026-06"))
     release_b = package(tmp_path / "b", source_data(tmp_path / "b", "2026-08", "2026-07"))
     shutil.copytree(release_a, root / "releases" / release_a.name)
+    # An installed release has normalized permissions; the package is still private.
+    runtime.prepare_formal_release_permissions(root / "releases" / release_a.name)
     manifest_a = runtime.validate_runtime_release(release_a, app_contract_version=1, supported_data_schema_version=1)
     write_json(root / "current.json", runtime.current_pointer(manifest_a, updated_at="2026-08-13T00:00:00Z"))
     (root / "current").write_text(release_a.name + "\n", encoding="utf-8")

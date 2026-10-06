@@ -188,7 +188,10 @@ class ApplicationCatalogTests(unittest.TestCase):
             self.assertNotIn(app["production_url"], self.handbook)
         self.assertIn("02_configs/app_catalog.yaml", self.handbook)
         self.assertIn("03_标准开发与生产发布规范.md", self.handbook)
-        self.assertIn("06_日常运行与数据更新手册.md", self.workflow)
+        # The document index owns cross-topic navigation after the handbook audit.
+        self.assertIn("00_文档索引与适用范围.md", self.workflow)
+        index = (ROOT / "07_docs/00_文档索引与适用范围.md").read_text(encoding="utf-8")
+        self.assertIn("06_日常运行与数据更新手册.md", index)
 
 
 if __name__ == "__main__":

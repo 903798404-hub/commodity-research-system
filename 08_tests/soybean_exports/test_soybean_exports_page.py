@@ -106,7 +106,12 @@ render_soybean_exports_page(json.loads({serialized!r}))
     return AppTest.from_string(script, default_timeout=30).run()
 
 
-def test_formal_workspace_has_two_first_level_tabs_and_preserves_crop_content() -> None:
+def test_formal_workspace_has_two_first_level_tabs_and_preserves_crop_content(monkeypatch) -> None:
+    import soybean_crop_progress_page as page
+    resolver = page.resolve_processed_crop_paths
+    monkeypatch.setattr(page, "resolve_processed_crop_paths", lambda config: resolver(
+        config, processed_dir=PROJECT_ROOT / "08_tests/fixtures/summary/soybean_crop_progress"
+    ))
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
     app.session_state["selected_workspace_page"] = "美豆种植生长"
     app.run(timeout=30)

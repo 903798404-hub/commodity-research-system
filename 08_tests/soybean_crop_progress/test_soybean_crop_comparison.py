@@ -26,7 +26,7 @@ DISPLAY_CONFIG_FILE = (
     PROJECT_ROOT / "02_configs" / "soybean_crop_progress_display.yaml"
 )
 PROCESSED_DIR = (
-    PROJECT_ROOT / "01_data" / "processed" / "soybean_crop_progress"
+    PROJECT_ROOT / "08_tests" / "fixtures" / "summary" / "soybean_crop_progress"
 )
 PROGRESS_FILE = PROCESSED_DIR / "soybeans_crop_progress_weekly_2021_2026.parquet"
 CONDITION_FILE = PROCESSED_DIR / "soybeans_crop_condition_weekly_2021_2026.parquet"

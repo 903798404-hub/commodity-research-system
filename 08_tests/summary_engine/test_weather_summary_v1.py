@@ -18,7 +18,7 @@ from agri_research_agent.weather.crop_weather import load_weather_config
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WEATHER_ROOT = ROOT / "01_data" / "processed" / "weather"
+WEATHER_ROOT = ROOT / "08_tests" / "fixtures" / "summary" / "weather"
 CASES = (
     ("USA", "soybean/us/soybean_weather_us.parquet", "soybean_weather_us.yaml", "soybean/us/soybean_weather_us_30y_normal.parquet", "weighted"),
     ("BRA", "soybean/br/soybean_weather_br.parquet", "soybean_weather_br.yaml", "soybean/br/soybean_weather_br_30y_normal.parquet", "weighted"),
@@ -135,7 +135,8 @@ def test_classification_words_are_bold_but_numbers_are_not() -> None:
     _, canada = _summary(CASES[3])
     assert "**显著偏多** +75.5%" in canada.detail_text
     assert "**偏多** +34.3%" in canada.detail_text
-    assert "**一致显著偏湿**" in canada.detail_text
+    # +34.3% is moderate, so two wet models do not both imply significant wetness.
+    assert "**方向一致偏湿**" in canada.detail_text
     assert "**偏低**" in canada.detail_text
     assert "**+75.5%**" not in canada.detail_text
     assert "**-2.7℃**" not in canada.detail_text
@@ -147,7 +148,8 @@ def test_canada_current_facts_generate_research_comprehensive_text() -> None:
     comprehensive = canada.facts["weather_render"]["comprehensive"]
     assert "过去一周降雨**接近正常**" in comprehensive
     assert "未来两周EC/GFS均显示降雨**偏多**" in comprehensive
-    assert "第二周两模型**一致显著偏湿**" in comprehensive
+    assert "呈**方向一致偏湿**" in comprehensive
+    assert "第二周两模型**一致显著偏湿**" not in comprehensive
     assert "未来两周最高气温整体**偏低**，EC冷信号更强" in comprehensive
     assert "萨斯喀彻温（55%）" in comprehensive
     assert "近7日土墒走弱" in comprehensive
@@ -162,6 +164,8 @@ def test_canada_current_facts_generate_research_comprehensive_text() -> None:
         (_week(-45, -35), _week(-65, -70), "降雨连续偏少"),
         (_week(45, 35), _week(45, -35), "第二周**模型方向分歧**"),
         (_week(45, -35), _week(5, 5), "未来第一周**模型方向分歧**"),
+        (_week(45, 35), _week(75.5, 70), "第二周两模型**一致显著偏湿**"),
+        (_week(45, 35), _week(75.5, 34.3), "呈**方向一致偏湿**"),
     ),
 )
 def test_rainfall_scenarios_generate_distinct_comprehensive_text(first, second, expected) -> None:

@@ -421,14 +421,14 @@ def test_sealed_manifest_integrity_failure_remains_fail_closed(
         load_international_spread_reference_records(catalog, tmp_path)
 
 
-def test_real_reference_payload_matches_all_sealed_latest_dates() -> None:
-    root = (
-        os.getenv("INTERNATIONAL_SPREAD_LEGACY_REFERENCE_ROOT", "").strip()
-        or os.getenv("SPREAD_REFERENCE_DATA_ROOT", "").strip()
-    )
-    if not root:
-        pytest.skip("SPREAD_REFERENCE_DATA_ROOT is required for read-only integration")
-    catalog = load_three_oil_v1()
+def test_real_reference_payload_matches_all_sealed_latest_dates(tmp_path) -> None:
+    from three_oil_reference_fixture import reference_pair
+    # Preserve the historical node identity; this is now a sealed offline fixture.
+    root = os.getenv("INTERNATIONAL_SPREAD_LEGACY_REFERENCE_ROOT", "").strip()
+    if root:
+        catalog = load_three_oil_v1()
+    else:
+        catalog, root, _public = reference_pair(tmp_path)
     records = load_international_spread_reference_records(catalog, root)
 
     for oil in ("palm", "soy", "rape"):
@@ -495,15 +495,15 @@ def test_columnar_payload_exactly_matches_generic_public_current_payload() -> No
             ) == generic_values
 
 
-def test_real_legacy_and_public_current_match_on_every_common_observation() -> None:
-    legacy_root = (
-        os.getenv("INTERNATIONAL_SPREAD_LEGACY_REFERENCE_ROOT", "").strip()
-        or os.getenv("SPREAD_REFERENCE_DATA_ROOT", "").strip()
-    )
-    runtime_root = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
-    if not legacy_root or not runtime_root:
-        pytest.skip("legacy and Public Current roots are required for parity")
-    catalog = load_three_oil_v1()
+def test_real_legacy_and_public_current_match_on_every_common_observation(tmp_path) -> None:
+    from three_oil_reference_fixture import reference_pair
+    legacy_root = os.getenv("INTERNATIONAL_SPREAD_LEGACY_REFERENCE_ROOT", "").strip()
+    if legacy_root:
+        runtime_root = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
+        assert runtime_root, "explicit legacy parity also requires a Public Current root"
+        catalog = load_three_oil_v1()
+    else:
+        catalog, legacy_root, runtime_root = reference_pair(tmp_path)
     legacy = load_international_spread_reference_records(catalog, legacy_root)
     current = load_international_spread_public_current(
         catalog,

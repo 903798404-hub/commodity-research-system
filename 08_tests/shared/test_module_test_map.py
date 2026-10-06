@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import yaml
 
@@ -44,7 +45,7 @@ def test_module_test_map_schema_and_required_modules() -> None:
     for module_id, module in payload["modules"].items():
         assert isinstance(module_id, str)
         assert module_id == module_id.strip()
-        assert "." in module_id
+        assert re.fullmatch(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*", module_id)
         assert isinstance(module, dict)
         assert REQUIRED_FIELDS <= set(module)
         assert set(module) <= REQUIRED_FIELDS | OPTIONAL_FIELDS

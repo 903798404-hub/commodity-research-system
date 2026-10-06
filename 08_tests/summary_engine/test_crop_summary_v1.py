@@ -13,7 +13,7 @@ from summary_panel import _crop_comprehensive_markdown, _crop_short_markdown
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "01_data" / "processed" / "soybean_crop_progress"
+DATA_DIR = PROJECT_ROOT / "08_tests" / "fixtures" / "summary" / "soybean_crop_progress"
 DISPLAY_CONFIG = load_display_config(
     PROJECT_ROOT / "02_configs" / "soybean_crop_progress_display.yaml"
 )

@@ -186,7 +186,14 @@ def test_adapter_accepts_india_crop_records(crop: str) -> None:
     assert len(validate_weather_records(record)) == 1
 
 
-def test_india_crop_weather_routes_render_from_the_formal_workspace_entry() -> None:
+def test_india_crop_weather_routes_render_from_the_formal_workspace_entry(monkeypatch) -> None:
+    import crop_weather_page
+    fixture_root = PROJECT_ROOT / "08_tests/fixtures/summary/weather"
+    def selected_fixture(files):
+        paths = list(fixture_root.rglob(files["config"].stem + ".parquet"))
+        assert len(paths) == 1
+        return paths[0], "固定离线测试样本"
+    monkeypatch.setattr(crop_weather_page, "_data_path", selected_fixture)
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30).run()
     app.session_state["selected_workspace_page"] = "印度作物天气"
     app.run(timeout=30)

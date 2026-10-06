@@ -40,11 +40,11 @@ jobs:
       with:
         python-version: '3.12'
         cache: pip
-        cache-dependency-path: |
-          candidate/requirements-dev.in
-          candidate/requirements-dev.txt
+        cache-dependency-path: candidate/04_scripts/quality/locks/linux-py312.txt
     - name: Install development dependencies
-      run: python -I -m pip install -r candidate/requirements-dev.in
+      run: |
+        python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/linux-py312.txt
+        python -I -m pip check
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         ref: main
@@ -86,11 +86,11 @@ jobs:
       with:
         python-version: '3.12'
         cache: pip
-        cache-dependency-path: |
-          candidate/requirements-dev.in
-          candidate/requirements-dev.txt
+        cache-dependency-path: candidate/04_scripts/quality/locks/linux-py312.txt
     - name: Install development dependencies
-      run: python -I -m pip install -r candidate/requirements-dev.in
+      run: |
+        python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/linux-py312.txt
+        python -I -m pip check
     - uses: actions/download-artifact@v4
       with:
         name: platform-plan
@@ -172,7 +172,8 @@ jobs:
       run: |
         set -euo pipefail
         python_bin="$(command -v python)"
-        "$python_bin" -I -m pip install playwright==1.55.0
+        "$python_bin" -I -m pip install --require-hashes -r 04_scripts/quality/locks/browser-py312.txt
+        "$python_bin" -I -m pip check
         sudo "$python_bin" -I -m playwright install --with-deps chromium
         sudo HOST_BROWSER_EVIDENCE="$RUNNER_TEMP/platform-results/linux/host-browser.json" "$python_bin" -I -B - <<'PY'
         import importlib.metadata, json, os, sys
@@ -233,8 +234,9 @@ jobs:
     - name: Install narrow host-tool compatibility dependencies
       if: needs.plan.outputs.spread_runtime_docker == 'true'
       run: |
-        '${{ steps.host-python310.outputs.python-path }}' -I -m pip install \
-          pytest==9.1.1 cryptography==50.0.0 PyYAML==6.0.3 jsonschema==4.26.0
+        '${{ steps.host-python310.outputs.python-path }}' -I -m pip install --require-hashes \
+          -r candidate/04_scripts/quality/locks/host-tools-py310.txt
+        '${{ steps.host-python310.outputs.python-path }}' -I -m pip check
     - name: Validate host release timestamps on actual Python 3.10.12
       if: needs.plan.outputs.spread_runtime_docker == 'true'
       working-directory: candidate
@@ -280,11 +282,11 @@ jobs:
       with:
         python-version: '3.12'
         cache: pip
-        cache-dependency-path: |
-          candidate/requirements-dev.in
-          candidate/requirements-dev.txt
+        cache-dependency-path: candidate/04_scripts/quality/locks/windows-py312.txt
     - name: Install development dependencies
-      run: python -I -m pip install -r candidate/requirements-dev.in
+      run: |
+        python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/windows-py312.txt
+        python -I -m pip check
     - uses: actions/download-artifact@v4
       with:
         name: platform-plan
@@ -322,7 +324,9 @@ jobs:
       with:
         python-version: '3.12'
     - name: Install aggregation dependency
-      run: python -I -m pip install PyYAML==6.0.3 jsonschema==4.26.0
+      run: |
+        python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/aggregate-py312.txt
+        python -I -m pip check
     - uses: actions/download-artifact@v4
       with:
         name: platform-plan
@@ -423,11 +427,11 @@ jobs:
       with:
         python-version: '3.12'
         cache: pip
-        cache-dependency-path: |
-          candidate/requirements-dev.in
-          candidate/requirements-dev.txt
+        cache-dependency-path: executor/04_scripts/quality/locks/linux-py312.txt
     - name: Install development dependencies
-      run: python -I -m pip install -r candidate/requirements-dev.in
+      run: |
+        python -I -m pip install --require-hashes -r executor/04_scripts/quality/locks/linux-py312.txt
+        python -I -m pip check
     - uses: actions/download-artifact@v4
       with:
         name: platform-plan

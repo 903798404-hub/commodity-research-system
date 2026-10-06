@@ -296,7 +296,17 @@ def test_research_overview_does_not_restore_paused_summary_modules() -> None:
     assert visible.strip() != "研究快览 / 最新变化"
 
 
-def test_weather_overview_loads_all_groups_and_countries() -> None:
+def _fixture_weather_summary(_root, config):
+    from agri_research_agent.summary_engine.weather_cache import load_weather_summary_cached
+    fixture_root = Path(__file__).resolve().parents[1] / "fixtures/summary/weather"
+    data = list(fixture_root.rglob(config.stem + ".parquet"))
+    normal = list(fixture_root.rglob(config.stem + "_30y_normal.parquet"))
+    assert len(data) == 1 and len(normal) <= 1
+    return load_weather_summary_cached(data[0], config, normal[0] if normal else None)
+
+
+def test_weather_overview_loads_all_groups_and_countries(monkeypatch) -> None:
+    monkeypatch.setattr(research_overview_page, "load_weather_current_summary_cached", _fixture_weather_summary)
     groups, warnings = research_overview_page.load_weather_overview_summaries()
     assert {name: len(items) for name, items in groups.items()} == {
         "大豆天气": 3,
@@ -309,7 +319,7 @@ def test_weather_overview_loads_all_groups_and_countries() -> None:
 
 def test_one_missing_country_does_not_hide_other_weather(monkeypatch) -> None:
     original = research_overview_page.WEATHER_OVERVIEW_SOURCES
-    original_loader = research_overview_page.load_weather_current_summary_cached
+    original_loader = _fixture_weather_summary
     monkeypatch.setattr(
         research_overview_page,
         "WEATHER_OVERVIEW_SOURCES",

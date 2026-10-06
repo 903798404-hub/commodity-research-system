@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "purpose": "Frozen public weather/NASS development samples for offline contract tests; not current production data",
+  "weather_window": "June observations and forecasts, all available historical years",
+  "crop_columns": "Six public comparison fields; source metadata and raw snapshots excluded",
+  "files": [
+    {
+      "path": "weather/cotton/ind/cotton_weather_ind.parquet",
+      "rows": 13164,
+      "size_bytes": 47179,
+      "sha256": "4e911a3c03848a68ec8560239d38719c637244916881981e437eb532f8c6be8d",
+      "source_sha256": "058ef19aabb8dd48c6d81307b54aa055a5abeb7f0b94764920ab046910eb93b0"
+    },
+    {
+      "path": "weather/palm_oil/idn/palm_oil_weather_idn.parquet",
+      "rows": 15365,
+      "size_bytes": 41382,
+      "sha256": "02f8d1693cf5068f1bb3675fceee9a7845bcf31d98a56563383b1b01af4ad77b",
+      "source_sha256": "2279112b1a84e2d01b953c20961fc967b8f40b17f340394e193faddb4f76d9e7"
+    },
+    {
+      "path": "weather/palm_oil/mys/palm_oil_weather_mys.parquet",
+      "rows": 21950,
+      "size_bytes": 50192,
+      "sha256": "c34e72d6d88286f2cd7248ff3b6aae511a451cc86510676ea57e8927c6ee6fa3",
+      "source_sha256": "e9c171f341d4cf4d32cc97cf95c9f6249ecf926c40de8da62e0e05429e66f337"
+    },
+    {
+      "path": "weather/rapeseed/aus/rapeseed_weather_aus.parquet",
+      "rows": 35143,
+      "size_bytes": 72273,
+      "sha256": "61132218bd16738c0b52d591a5ee30749f03fe988ad58ffea2e0adfaf54ebd2f",
+      "source_sha256": "3e542e7ba8d6b9af3605b32155a453fc619e42468e6b603ab4f3cd6e6a054d02"
+    },
+    {
+      "path": "weather/rapeseed/can/rapeseed_weather_can.parquet",
+      "rows": 9495,
+      "size_bytes": 99306,
+      "sha256": "4c2d1deb03b9ed757fb8a9b0555a2ad16d3655cf9c2dc84d86957f2c032cdfe4",
+      "source_sha256": "5bf45687953fe40621c4e8dc6445b38dad6328e2e617b7ab90bdbd6f77070d17"
+    },
+    {
+      "path": "weather/rapeseed/can/rapeseed_weather_can_30y_normal.parquet",
+      "rows": 2190,
+      "size_bytes": 31089,
+      "sha256": "e6fb975b614c18c5a08f079aadab8636e37c0a4a671f97c01d7f529135fcebfe",
+      "source_sha256": "769bc0cd9e9f8e3b83b371cbe7a843c37c699d6d5e145b061b4d8d2298c1cf0e"
+    },
+    {
+      "path": "weather/rapeseed/eu/rapeseed_weather_eu.parquet",
+      "rows": 20386,
+      "size_bytes": 66373,
+      "sha256": "7d546131896831ec1eaf368154c0e23de15f51d1614e0a196fdeae270870b474",
+      "source_sha256": "8007f499c4d5ac4fd1a5c74fefec1cf609a3f99f4754f8fa3196e2991292a8d4"
+    },
+    {
+      "path": "weather/rapeseed/rus/rapeseed_weather_rus.parquet",
+      "rows": 28750,
+      "size_bytes": 68883,
+      "sha256": "ddc1652e5ea3f726f6f13ae4afb4d7a77f73e57fc11572e067c824ea6c474269",
+      "source_sha256": "907a83b087ffc6be61df30c64d04f8074092a8dc7d72d3b928f1528b136d4dd2"
+    },
+    {
+      "path": "weather/rapeseed/ukr/rapeseed_weather_ukr.parquet",
+      "rows": 3104,
+      "size_bytes": 43615,
+      "sha256": "11024f21b3759d9ab6e03ab9eb5f88ea40b6c05b7d780050a80b097b63174e6e",
+      "source_sha256": "cc36df349b3bbbd89d907c2074de1d183bb22e2433ae7cef4f907632debf0afa"
+    },
+    {
+      "path": "weather/soybean/ar/soybean_weather_ar.parquet",
+      "rows": 12896,
+      "size_bytes": 59398,
+      "sha256": "37f4a2de61461da77d1724dde10b4ea6615e7ddaef5587381a663886fce120fd",
+      "source_sha256": "07e55f6c1a4271e2942c08bb4ba33e512fce48b989497c2a3a04c9d2e51b69e2"
+    },
+    {
+      "path": "weather/soybean/ar/soybean_weather_ar_30y_normal.parquet",
+      "rows": 2920,
+      "size_bytes": 33253,
+      "sha256": "9e9443aa8ca1fb509d8ba4eac8edae75d38e97dca9c1c4f3244737fba1e8f3da",
+      "source_sha256": "d5aa65b9960a2146fab5ad7d03a69d95772c79990092a31c48b8c8d8abdd18e9"
+    },
+    {
+      "path": "weather/soybean/br/soybean_weather_br.parquet",
+      "rows": 29016,
+      "size_bytes": 120096,
+      "sha256": "a030b22059d7b6d13935b02cb1bbcf49dd4a1a3dcbc1a29c3414ed898bfcc3f8",
+      "source_sha256": "e11101b35afc8208d837ee2646f9b030e18b92a84476011303e1582f1e420450"
+    },
+    {
+      "path": "weather/soybean/br/soybean_weather_br_30y_normal.parquet",
+      "rows": 6570,
+      "size_bytes": 62823,
+      "sha256": "fbb90440ff9420b169d1d8260826ca0c66cb1077438dfdccc80e3355d2187915",
+      "source_sha256": "f66acbbec315561626e6959fd85e18abb2a6afacbabf0c8ff9bf38a1e40d5dfb"
+    },
+    {
+      "path": "weather/soybean/us/soybean_weather_us.parquet",
+      "rows": 48375,
+      "size_bytes": 175127,
+      "sha256": "2e94f653b6f98e639e88b9431443fa62c7243ea32fdf122f439d79438eca4870",
+      "source_sha256": "c2701f2233b925a887739e114d1f82ac6a293b0a0077d2fc67abe5c219db56a8"
+    },
+    {
+      "path": "weather/soybean/us/soybean_weather_us_30y_normal.parquet",
+      "rows": 10950,
+      "size_bytes": 100439,
+      "sha256": "91d68890b12af3aad7d3abf4aad8cfd86843892b6e69613bb061b3244e7ceb6e",
+      "source_sha256": "d756834808e9001396134ce3e00e883f8691b0d120be5a5396ca3649ae52e29d"
+    },
+    {
+      "path": "weather/sugarcane/ind/sugarcane_weather_ind.parquet",
+      "rows": 6582,
+      "size_bytes": 36445,
+      "sha256": "7a8c87563bb4079d3aa4cb95b1616e6d2e368bedf30e81c78acfaca7d756482f",
+      "source_sha256": "464737d39d04d64062f5b2e0bd9a9efbffa7903cc525d72a853de5b4f8e2a3c1"
+    },
+    {
+      "path": "soybean_crop_progress/soybeans_crop_condition_weekly_2021_2026.parquet",
+      "rows": 20520,
+      "size_bytes": 27187,
+      "sha256": "e34b76fcdff59eea26a33e738f68f729e1bc6fd8634c9a7bdda6cdb692e3044c",
+      "source_sha256": "bbcb3074a13951183d6c238c51453dc8448939cfdfc3c618f7eaad07fcebecd7"
+    },
+    {
+      "path": "soybean_crop_progress/soybeans_crop_progress_weekly_2021_2026.parquet",
+      "rows": 11460,
+      "size_bytes": 22519,
+      "sha256": "4fc479db6041f78a229fb9e77b119105956a8d4b06fc881eac2633e03ef132d1",
+      "source_sha256": "a467317fdbfc1f00fa7546618e475d7f725fdfda73724af9f115d012a6fa79d2"
+    }
+  ]
+}

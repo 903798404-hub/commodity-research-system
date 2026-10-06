@@ -79,7 +79,7 @@ def test_final_aggregation_uses_only_its_runtime_dependency() -> None:
     final_job = workflow.split("  final:\n", 1)[1].split("  full:\n", 1)[0]
 
     assert (
-        "python -I -m pip install PyYAML==6.0.3 jsonschema==4.26.0" in final_job
+        "python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/aggregate-py312.txt" in final_job
     )
     assert "requirements-dev.in" not in final_job
     assert "Compare exact base and candidate full regression" in final_job
@@ -117,7 +117,7 @@ def test_high_risk_browser_setup_uses_executor_interpreter_and_root_browser_cach
     assert steps.index(setup) < steps.index(execute)
     assert setup['if'] == execute['if']
     assert 'python_bin="$(command -v python)"' in setup['run']
-    assert '"$python_bin" -I -m pip install playwright==1.55.0' in setup['run']
+    assert '"$python_bin" -I -m pip install --require-hashes -r 04_scripts/quality/locks/browser-py312.txt' in setup['run']
     assert 'sudo "$python_bin" -I -m playwright install --with-deps chromium' in setup['run']
     assert 'p.chromium.launch(headless=True)' in setup['run']
     assert 'DEPENDENCY_PREFLIGHT_NOT_APPLICATION_ACCEPTANCE' in setup['run']

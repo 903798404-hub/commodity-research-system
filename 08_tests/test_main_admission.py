@@ -339,8 +339,9 @@ def test_workflow_shadow_permissions_and_trust_source():
     for lane in ('plan', 'linux', 'windows', 'full'):
         setup = next(s for s in jobs[lane]['steps'] if s.get('with', {}).get('python-version') == '3.12')
         assert setup['with']['cache'] == 'pip'
-        assert setup['with']['cache-dependency-path'].splitlines() == [
-            'candidate/requirements-dev.in', 'candidate/requirements-dev.txt']
+        prefix = 'executor' if lane == 'full' else 'candidate'
+        profile = 'windows-py312' if lane == 'windows' else 'linux-py312'
+        assert setup['with']['cache-dependency-path'] == f'{prefix}/04_scripts/quality/locks/{profile}.txt'
 
 
 def test_exact_new_asset_registration():

@@ -208,16 +208,33 @@ def test_weather_failure_reports_reach_daily_without_swallowing_exception(tmp_pa
 
 
 def test_saved_real_germany_run_read_only_replay(tmp_path):
+    """Replay saved evidence if supplied, otherwise an explicitly synthetic fixture.
+
+    The historical node name is retained for full-regression comparison. The
+    default branch is not evidence that the September production run was replayed.
+    """
     source = os.environ.get("MISSING_POLICY_SAVED_WEATHER_ROOT")
     if not source:
-        pytest.skip("optional saved production evidence; no live provider access")
-    root = Path(source).resolve(strict=True)
-    rid = "full-daily-20260904T064312.933627Z-da3fbbc1-lutou-weather"
-    current_id = json.loads((root / "current.json").read_text(encoding="utf-8"))["release_id"]
-    previous = root / "releases" / current_id / "observations.parquet"
-    candidate = root / "candidates" / rid
-    following = root / "canonical-candidates" / rid
-    paths = [previous, candidate / "standard.parquet", following / "observations.parquet", root / "current.json"]
+        synthetic = tmp_path / "synthetic"
+        synthetic.mkdir()
+        _catalog, candidate, following = weather_fixture(synthetic)
+        previous = tmp_path / "previous.parquet"
+        previous.write_bytes((following / "observations.parquet").read_bytes())
+        paths = [previous, candidate / "standard.parquet", following / "observations.parquet"]
+        evidence_kind = "SYNTHETIC_OFFLINE_REPLAY"
+    else:
+        root = Path(source).resolve(strict=True)
+        rid = "full-daily-20260904T064312.933627Z-da3fbbc1-lutou-weather"
+        current_id = json.loads((root / "current.json").read_text(encoding="utf-8"))["release_id"]
+        previous = root / "releases" / current_id / "observations.parquet"
+        candidate = root / "candidates" / rid
+        following = root / "canonical-candidates" / rid
+        paths = [previous, candidate / "standard.parquet", following / "observations.parquet", root / "current.json"]
+        evidence_kind = "EXTERNAL_SAVED_RUN_REPLAY"
+    if os.name != "nt":
+        for path in paths:
+            if not source:
+                path.chmod(0o444)
     def hashes():
         result = {}
         for path in paths:
@@ -235,4 +252,4 @@ def test_saved_real_germany_run_read_only_replay(tmp_path):
     assert report["summary"]["coverage"] == {"PRESENT": 455, "MISSING": 2, "ERROR": 0}
     assert set(report["identity_coverage"]["missing"]) == GERMANY
     assert all(item["promotion_allowed"] for item in reports.values())
-    print(json.dumps({key: value["summary"] for key, value in reports.items()}))
+    print(json.dumps(dict(evidence_kind=evidence_kind, summaries={key: value["summary"] for key, value in reports.items()})))
