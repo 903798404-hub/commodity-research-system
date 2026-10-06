@@ -30,9 +30,8 @@ def test_platform_locks_preserve_all_existing_development_pins_and_archive_hashe
     windows = _entries(LOCKS / "windows-py312.txt")
     linux = _entries(LOCKS / "linux-py312.txt")
     runtime = _entries(ROOT / "requirements.txt")
-    missing_runtime = {"cryptography", "pymysql"}
-    assert windows == existing | {k: runtime[k] for k in missing_runtime}
-    assert set(linux) == (set(existing) - {"mini-racer"}) | {"akracer", "py-mini-racer"} | missing_runtime
+    assert windows == existing
+    assert set(linux) == (set(existing) - {"mini-racer"}) | {"akracer", "py-mini-racer"}
     assert {k: linux[k] for k in existing if k != "mini-racer"} == {k: v for k, v in existing.items() if k != "mini-racer"}
     for name in ("akracer", "py-mini-racer", "cryptography", "pymysql"):
         assert linux[name] == runtime[name]
@@ -48,8 +47,10 @@ def _direct_requirements(path):
 
 
 def test_platform_locks_cover_current_direct_inputs_including_selected_extras():
-    for platform, system in (("linux", "Linux"), ("windows", "Windows")):
-        entries = _entries(LOCKS / f"{platform}-py312.txt")
+    for path, system in ((LOCKS / "linux-py312.txt", "Linux"),
+                         (LOCKS / "windows-py312.txt", "Windows"),
+                         (ROOT / "requirements-dev.txt", "Windows")):
+        entries = _entries(path)
         environment = default_environment()
         environment.update(platform_system=system, sys_platform="linux" if system == "Linux" else "win32",
                            python_version="3.12", python_full_version="3.12.10", extra="")
@@ -57,8 +58,8 @@ def test_platform_locks_cover_current_direct_inputs_including_selected_extras():
             if requirement.marker and not requirement.marker.evaluate(environment):
                 continue
             name = canonicalize_name(requirement.name)
-            assert name in entries, (platform, str(requirement))
-            assert entries[name][0] in requirement.specifier, (platform, str(requirement), entries[name][0])
+            assert name in entries, (path.name, str(requirement))
+            assert entries[name][0] in requirement.specifier, (path.name, str(requirement), entries[name][0])
             if name == "psycopg" and "binary" in requirement.extras:
                 assert entries["psycopg-binary"][0] == entries[name][0]
 

@@ -44,17 +44,26 @@ RELEASE_CONTROL_FILES = {
     'requirements-dev.in', 'requirements-dev.txt',
 }
 RUNTIME_CONTRACT = '02_configs/runtime_contracts/spread-production-runtime.json'
+# These inputs belong to local bootstrap, Windows/final aggregation, or test
+# mapping. Linux host/browser locks, all release fixtures and unknown paths
+# deliberately remain strict. Consumer boundaries are regression-tested.
+NON_RELEASE_CI_FILES = {
+    'requirements-dev.in', 'requirements-dev.txt',
+    '04_scripts/quality/locks/windows-py312.in',
+    '04_scripts/quality/locks/windows-py312.txt',
+    '04_scripts/quality/locks/aggregate-py312.in',
+    '04_scripts/quality/locks/aggregate-py312.txt',
+    '08_tests/shared/test_module_test_map.py',
+}
 
 
-def unpackaged_markdown(report, repo):
-    """Exclude documentation only after both committed inventories prove it.
+def unpackaged_inputs(report, repo, candidates):
+    """Exclude selected files only after both committed inventories prove it.
 
-    A Markdown suffix alone cannot exempt a file packaged by either revision.
-    Missing identity or unreadable inventories retain the strict default.
+    Packaged sources and build inputs override an exemption. Missing identity,
+    incomplete declarations or unreadable inventories retain the strict default.
     """
-    markdown = {item['path'] for item in report['changed_paths']
-                if item['path'].endswith('.md')}
-    if not markdown:
+    if not candidates:
         return set()
     try:
         packaged = set()
@@ -69,14 +78,31 @@ def unpackaged_markdown(report, repo):
                         or not isinstance(item['role'], str) or not item['role']):
                     return set()
                 packaged.add(item['path'])
-        return markdown - packaged
+            build = manifest['build']
+            for field in ('dockerfile', 'dockerignore'):
+                if not isinstance(build[field], str) or not build[field]:
+                    return set()
+                packaged.add(build[field])
+            for field in ('dependency_contracts', 'compose_sources'):
+                if (not isinstance(build[field], list) or not build[field]
+                        or any(not isinstance(path, str) or not path for path in build[field])):
+                    return set()
+                packaged.update(build[field])
+        return candidates - packaged
     except (KeyError, ValueError, TypeError, subprocess.CalledProcessError):
         return set()
+
+
+def unpackaged_markdown(report, repo):
+    markdown = {item['path'] for item in report['changed_paths']
+                if item['path'].endswith('.md')}
+    return unpackaged_inputs(report, repo, markdown)
 
 
 def requires_spread_release_e2e(report, repo):
     """Replay lifecycle changes; persistence and runtime roots stay strict."""
     changed = {item['path'] for item in report['changed_paths']} - unpackaged_markdown(report, repo)
+    changed -= unpackaged_inputs(report, repo, changed & NON_RELEASE_CI_FILES)
     if any(path in RELEASE_CONTROL_FILES or path.startswith(RELEASE_CONTROL_PREFIXES)
            or (path.startswith('02_configs/runtime_contracts/') and path != RUNTIME_CONTRACT)
            or path.startswith('08_tests/shared/')
