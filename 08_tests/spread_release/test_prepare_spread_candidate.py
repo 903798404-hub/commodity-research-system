@@ -495,6 +495,8 @@ def _options(
         ),
         encoding="utf-8",
     )
+    # The real POSIX parser requires a private production environment file.
+    environment.chmod(0o600)
     release_id = f"spread-20260725-{commit[:12]}-b01"
     options = CandidateOptions(
         mode=mode,

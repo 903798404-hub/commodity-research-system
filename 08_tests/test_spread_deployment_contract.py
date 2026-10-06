@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -111,6 +112,23 @@ USDA_IMAGE_ID = "sha256:" + "5" * 64
 OIL_WORLD_IMAGE_ID = "sha256:" + "6" * 64
 USDA_IMAGE_REF = f"market-data-usda-dashboard:{GIT_COMMIT}"
 OIL_WORLD_IMAGE_REF = f"market-data-oil-world-dashboard:{GIT_COMMIT}"
+
+
+def _tamper_sealed_text(
+    tmp_root: Path, path: Path, text: str, *, encoding: str = "utf-8"
+) -> None:
+    """Inject a content fault into test-owned evidence, preserving its mode."""
+    assert path.resolve().is_relative_to(tmp_root.resolve())
+    assert not path.is_symlink() and path.is_file()
+    original_mode = stat.S_IMODE(path.stat().st_mode)
+    try:
+        if os.name != "nt":
+            path.chmod(original_mode | stat.S_IWUSR)
+        path.write_text(text, encoding=encoding)
+    finally:
+        if os.name != "nt":
+            path.chmod(original_mode)
+    assert stat.S_IMODE(path.stat().st_mode) == original_mode
 
 
 class FakeGitRunner:
@@ -1739,7 +1757,12 @@ def test_deployment_result_bundle_rejects_member_and_identity_tampering(
         bundle["image_id"] = "sha256:" + "f" * 64
     else:
         bundle[tamper] = OLD_GIT_COMMIT
-    bundle_path.write_text(json.dumps(bundle, sort_keys=True) + "\n", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        bundle_path,
+        json.dumps(bundle, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ContractError, match=message):
         validate_deployment_result_bundle(bundle_path, manifest, plan)
@@ -1766,7 +1789,12 @@ def test_deployment_result_bundle_rejects_uncontrolled_member_filename(
     bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     bundle["members"][0]["target_file"] = filename
-    bundle_path.write_text(json.dumps(bundle, sort_keys=True) + "\n", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        bundle_path,
+        json.dumps(bundle, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ContractError, match="must be one of"):
         validate_deployment_result_bundle(bundle_path, manifest, plan)
@@ -1781,13 +1809,18 @@ def test_deployment_result_bundle_rejects_malformed_or_incomplete_json(
     write_result(result_path, build_deployment_result(tmp_path, manifest, plan))
     bundle_path = write_deployment_result_bundle(result_path, manifest, plan)
 
-    bundle_path.write_text("{not-json", encoding="utf-8")
+    _tamper_sealed_text(tmp_path, bundle_path, "{not-json", encoding="utf-8")
     with pytest.raises(ContractError, match="cannot load deployment result bundle"):
         validate_deployment_result_bundle(bundle_path, manifest, plan)
 
     bundle = create_deployment_result_bundle(result_path, manifest, plan)
     bundle.pop("members")
-    bundle_path.write_text(json.dumps(bundle, sort_keys=True) + "\n", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        bundle_path,
+        json.dumps(bundle, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     with pytest.raises(ContractError, match="members is required"):
         validate_deployment_result_bundle(bundle_path, manifest, plan)
 
@@ -1887,7 +1920,9 @@ def test_deployment_runtime_git_tamper_in_json_or_manifest_is_rejected(
     artifact_manifest_path = tmp_path / "deployment_result.manifest.json"
 
     result["runtime_git_commit"] = OLD_GIT_COMMIT
-    result_path.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        result_path,
         json.dumps(result, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -1895,7 +1930,9 @@ def test_deployment_runtime_git_tamper_in_json_or_manifest_is_rejected(
         load_deployment_result(result_path, manifest, plan)
 
     result["runtime_git_commit"] = GIT_COMMIT
-    result_path.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        result_path,
         json.dumps(result, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -1907,7 +1944,9 @@ def test_deployment_runtime_git_tamper_in_json_or_manifest_is_rejected(
     ).hexdigest()
     artifact_manifest["target_size_bytes"] = result_path.stat().st_size
     artifact_manifest["runtime_git_commit"] = OLD_GIT_COMMIT
-    artifact_manifest_path.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        artifact_manifest_path,
         json.dumps(artifact_manifest, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -2225,7 +2264,12 @@ def test_candidate_result_content_tamper_is_rejected_before_read(
 ) -> None:
     manifest, runtime, _ = build_manifest(tmp_path)
     path = write_candidate_result_fixture(tmp_path, manifest, runtime)
-    path.write_text(path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        path,
+        path.read_text(encoding="utf-8") + " ",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
         load_candidate_result(path, manifest)
@@ -2239,7 +2283,9 @@ def test_artifact_manifest_hash_and_identity_tamper_are_rejected(
     artifact_manifest = tmp_path / "candidate_result.manifest.json"
     sealed = json.loads(artifact_manifest.read_text(encoding="utf-8"))
     sealed["target_sha256"] = "f" * 64
-    artifact_manifest.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        artifact_manifest,
         json.dumps(sealed, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -2248,7 +2294,9 @@ def test_artifact_manifest_hash_and_identity_tamper_are_rejected(
 
     sealed["target_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
     sealed["git_tree"] = OLD_GIT_COMMIT
-    artifact_manifest.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        artifact_manifest,
         json.dumps(sealed, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -2268,11 +2316,19 @@ def test_formal_container_evidence_is_independently_sealed_by_manifest(
     result["formal_containers"]["after"]["captured_at"] = (
         "2026-07-17T08:00:03Z"
     )
-    path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        path,
+        json.dumps(result, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     sealed["target_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
     sealed["target_size_bytes"] = path.stat().st_size
-    artifact_manifest_path.write_text(
-        json.dumps(sealed, sort_keys=True) + "\n", encoding="utf-8"
+    _tamper_sealed_text(
+        tmp_path,
+        artifact_manifest_path,
+        json.dumps(sealed, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
     with pytest.raises(ContractError, match="formal evidence SHA-256 mismatch"):
@@ -2288,12 +2344,22 @@ def test_candidate_runtime_git_tamper_in_json_or_manifest_is_rejected(
 
     result = json.loads(path.read_text(encoding="utf-8"))
     result["identity"]["runtime_git_commit"] = OLD_GIT_COMMIT
-    path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        path,
+        json.dumps(result, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     with pytest.raises(ContractError, match="artifact SHA-256 mismatch"):
         load_candidate_result(path, manifest)
 
     result["identity"]["runtime_git_commit"] = GIT_COMMIT
-    path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    _tamper_sealed_text(
+        tmp_path,
+        path,
+        json.dumps(result, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     artifact_manifest = json.loads(
         artifact_manifest_path.read_text(encoding="utf-8")
     )
@@ -2302,7 +2368,9 @@ def test_candidate_runtime_git_tamper_in_json_or_manifest_is_rejected(
     ).hexdigest()
     artifact_manifest["target_size_bytes"] = path.stat().st_size
     artifact_manifest["runtime_git_commit"] = OLD_GIT_COMMIT
-    artifact_manifest_path.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        artifact_manifest_path,
         json.dumps(artifact_manifest, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -2456,7 +2524,9 @@ def test_deployment_plan_path_tamper_is_rejected_by_manifest(
     tampered["production_compose_file"] = str(
         (tmp_path / "attacker" / "docker-compose.yml").resolve()
     )
-    path.write_text(
+    _tamper_sealed_text(
+        tmp_path,
+        path,
         json.dumps(tampered, sort_keys=True) + "\n",
         encoding="utf-8",
     )
