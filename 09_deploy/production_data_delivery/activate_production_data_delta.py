@@ -8,6 +8,7 @@ accepts AkShare/public-package artifacts.
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
 from datetime import date, datetime, timezone
 import hashlib
@@ -20,6 +21,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import uuid
 
 
@@ -52,8 +54,19 @@ CROP_STATUS = "01_data/update_status/soybean_crop_progress.json"
 FAS_STABLE = "01_data/processed/soybean_export_sales/soybean_export_sales_weekly.parquet"
 FAS_MANIFEST = "01_data/processed/soybean_export_sales/soybean_export_sales_weekly.manifest.json"
 FAS_STATUS = "01_data/update_status/soybean_export_sales.json"
+CANOLA_STABLE = "01_data/processed/canada_canola/canola_weekly.json"
+CANOLA_SOURCES = "01_data/processed/canada_canola/source_evidence.json"
+CANOLA_STATUS = "01_data/update_status/canada_canola.json"
 
 DOMAIN_CONTRACTS = {
+    "canada_canola": {
+        "payloads": {"canola_weekly.json": CANOLA_STABLE,
+                     "source_evidence.json": CANOLA_SOURCES},
+        "baseline": (CANOLA_STABLE, CANOLA_SOURCES, CANOLA_STATUS),
+        "domain_dir": "01_data/processed/canada_canola",
+        "status_path": CANOLA_STATUS,
+        "metadata": ("record_count", "latest_dates", "revision_keys"),
+    },
     "soybean_crop_progress": {
         "payloads": {
             "soybeans_crop_progress_weekly.parquet": CROP_PROGRESS,
@@ -172,7 +185,7 @@ def _parquet_identity(value: object) -> dict[str, object]:
 def contract_for_domain(domain: str) -> dict[str, object]:
     """Return a copy of the pure fixed-path contract used by local producers."""
     require(domain in DOMAIN_CONTRACTS,
-            "delta domain is not crop progress or FAS export sales")
+            "delta domain is not supported")
     item = DOMAIN_CONTRACTS[domain]
     return {
         "domain": domain,
@@ -195,7 +208,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
             "delta_id is invalid")
     _timestamp(root["generated_at_utc"], "generated_at_utc")
     require(root["domain"] in DOMAIN_CONTRACTS,
-            "delta domain is not crop progress or FAS export sales")
+            "delta domain is not supported")
     contract = DOMAIN_CONTRACTS[root["domain"]]
 
     producer = _exact(root["producer"], {"commit", "tree", "origin"}, "producer")
@@ -222,6 +235,9 @@ def validate_delta_document(value: object) -> dict[str, object]:
             "crop stable baseline must be a complete pair")
     require((files.get(FAS_STABLE) is None) == (files.get(FAS_MANIFEST) is None),
             "FAS stable baseline must include its manifest")
+    if root["domain"] == "canada_canola":
+        require(len({files[path] is None for path in contract["baseline"]}) == 1,
+                "canola baseline must include data, evidence and status together")
 
     metadata = root["domain_metadata"]
     require(type(metadata) is dict and set(metadata) == set(contract["metadata"]),
@@ -259,6 +275,18 @@ def validate_delta_document(value: object) -> dict[str, object]:
         require(type(metadata["source_manifest_sha256"]) is str
                 and HEX64.fullmatch(metadata["source_manifest_sha256"]),
                 "crop source manifest identity is invalid")
+    elif root["domain"] == "canada_canola":
+        require(type(metadata["record_count"]) is int and metadata["record_count"] > 0,
+                "canola record count is invalid")
+        require(type(metadata["latest_dates"]) is dict and metadata["latest_dates"],
+                "canola latest dates are invalid")
+        for key, value in metadata["latest_dates"].items():
+            require(type(key) is str and re.fullmatch(
+                r"(?:SK|AB|MB)/(?:PLANTED|HARVESTED|GOOD_EXCELLENT|PRE_EMERGING|SEEDLING|ROSETTE|BOLTING|FLOWERING|PODDED|RIPE)", key),
+                "canola latest date key is invalid")
+            require(type(value) is str and date.fromisoformat(value).isoformat() == value,
+                    "canola latest date is invalid")
+        _canola_revision_keys(metadata["revision_keys"])
     else:
         require(type(metadata["batch_id"]) is str and RUN_ID.fullmatch(metadata["batch_id"]),
                 "FAS batch_id is invalid")
@@ -286,8 +314,104 @@ def validate_delta_document(value: object) -> dict[str, object]:
     require(type(payloads) is dict and set(payloads) == set(contract["payloads"]),
             "delta payload file set is invalid")
     for identity in payloads.values():
-        _parquet_identity(identity)
+        if root["domain"] == "canada_canola":
+            _file_identity(identity)
+        else:
+            _parquet_identity(identity)
     return root
+
+
+def _canola_revision_keys(value: object) -> list[str]:
+    require(type(value) is list and all(type(key) is str for key in value)
+            and len(value) == len(set(value)), "canola revision keys are invalid")
+    for key in value:
+        require(re.fullmatch(
+            r"(?:SK|AB|MB)/(?:PLANTED|HARVESTED|GOOD_EXCELLENT|PRE_EMERGING|SEEDLING|ROSETTE|BOLTING|FLOWERING|PODDED|RIPE)/[0-9]{4}-[0-9]{2}-[0-9]{2}", key),
+            "canola revision key is invalid")
+        require(date.fromisoformat(key.rsplit("/", 1)[1]).isoformat() == key.rsplit("/", 1)[1],
+                "canola revision key date is invalid")
+    return value
+
+
+def _canola_observations(candidate_path: Path, baseline_path: Path | None,
+                         evidence: dict, revision_keys: list[str]) -> dict:
+    """Use image business validators; preserve history and verify archived bytes.
+
+    Official tables remain manually reviewed. Source bytes and locators are
+    evidence, not an assertion that a generic PDF parser extracted each value.
+    """
+    from agri_research_agent.pipelines.canada_canola import (
+        RECORD_FIELDS, check_source_url, import_workbook, load_bundle,
+    )
+    candidate = load_bundle(candidate_path)
+    baseline = load_bundle(baseline_path) if baseline_path is not None else None
+    def key(row):
+        return "/".join(row[field] for field in ("province", "metric", "date"))
+    old = {key(row): row for row in baseline["records"]} if baseline else {}
+    new = {key(row): row for row in candidate["records"]}
+    require(old.keys() <= new.keys(), "canola history deletion is forbidden")
+    require(baseline is None or candidate["import_notes"] == baseline["import_notes"],
+            "canola historical import notes changed")
+    revised = {item for item in old if old[item] != new[item]}
+    require(revised == set(_canola_revision_keys(revision_keys)),
+            "canola history revision requires its exact explicit keys")
+    changed = [new[item] for item in sorted(new.keys() - old.keys() | revised)]
+    _exact(evidence, {"schema_version", "sources"}, "canola source evidence")
+    require(evidence["schema_version"] == "canada-canola-source-evidence/1"
+            and type(evidence["sources"]) is list, "canola source evidence schema invalid")
+    reports, workbooks = {}, {}
+    total_bytes = 0
+    for item in evidence["sources"]:
+        _exact(item, {"kind", "sha256", "bytes_base64", "province", "source_url", "retrieved_at"},
+               "canola source")
+        require(item["kind"] in {"workbook", "report"}
+                and type(item["sha256"]) is str and HEX64.fullmatch(item["sha256"])
+                and type(item["bytes_base64"]) is str and len(item["bytes_base64"]) <= 28_000_000,
+                "canola source identity invalid")
+        raw = base64.b64decode(item["bytes_base64"], validate=True)
+        total_bytes += len(raw)
+        require(raw and len(raw) <= 20_000_000 and total_bytes <= 100_000_000
+                and sha256_bytes(raw) == item["sha256"], "canola source byte identity mismatch")
+        if item["kind"] == "report":
+            check_source_url(item["province"], item["source_url"])
+            _timestamp(item["retrieved_at"], "canola source retrieval")
+            source_key = (item["province"], item["source_url"], item["sha256"], item["retrieved_at"])
+            require(source_key not in reports, "duplicate canola report evidence")
+            reports[source_key] = item
+        else:
+            require(baseline is None and item["province"] is None and item["source_url"] is None
+                    and item["retrieved_at"] is None and item["sha256"] not in workbooks,
+                    "workbook evidence is only valid for first historical import")
+            with tempfile.TemporaryDirectory(prefix="canola-source-") as temporary:
+                path = Path(temporary) / "source.xlsx"
+                path.write_bytes(raw)
+                workbooks[item["sha256"]] = {key(row): row for row in import_workbook(path)["records"]}
+    required_reports, required_workbooks = set(), set()
+    for row in changed:
+        if row["date_basis"] == "report_cutoff":
+            source_key = (row["province"], row["source_url"], row["source_sha256"], row["retrieved_at"])
+            require(source_key in reports, "canola observation lacks archived official source")
+            required_reports.add(source_key)
+        else:
+            require(baseline is None and row["source_sha256"] in workbooks,
+                    "canola workbook data requires first-import evidence")
+            expected = workbooks[row["source_sha256"]].get(key(row))
+            require(expected is not None and all(row[field] == expected[field]
+                    for field in RECORD_FIELDS - {"retrieved_at"}), "canola workbook observation mismatch")
+            required_workbooks.add(row["source_sha256"])
+    require(set(reports) == required_reports and set(workbooks) == required_workbooks,
+            "canola source evidence contains unused or missing sources")
+    for digest, rows in workbooks.items():
+        actual = {key(row) for row in changed if row["date_basis"] == "workbook_date"
+                  and row["source_sha256"] == digest}
+        require(actual == set(rows), "canola first import omitted historical workbook records")
+    latest = {}
+    for row in candidate["records"]:
+        group = row["province"] + "/" + row["metric"]
+        latest[group] = max(latest.get(group, ""), row["date"])
+    return {"business_changed": bool(changed), "added": len(new.keys() - old.keys()),
+            "revised": len(revised), "unchanged": len(old) - len(revised),
+            "record_count": len(new), "latest_dates": latest}
 
 
 def _absolute(path: str | Path) -> Path:
@@ -803,6 +927,13 @@ def _status_document(domain: str, delta: dict[str, object], identities: dict[str
                      semantic: dict[str, object]) -> dict[str, object]:
     metadata = delta["domain_metadata"]
     status = "initialized" if initialized else "updated"
+    if domain == "canada_canola":
+        return {"schema_version": "canada-canola-publish-status/1", "status": status,
+                "published": True, "published_at_utc": published_at,
+                "delta_id": delta["delta_id"], "git_head": delta["producer"]["commit"],
+                "stable_sha256": identities[CANOLA_STABLE]["sha256"],
+                "record_count": semantic["record_count"], "latest_dates": semantic["latest_dates"],
+                "added": semantic["added"], "revised": semantic["revised"]}
     if domain == "soybean_export_sales":
         stable = identities[FAS_STABLE]
         last_success = {
@@ -949,6 +1080,10 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
                 "no-change producer status differs from semantic validation")
         require(delta["run"]["business_status"] != "updated" or semantic_changed is True,
                 "updated producer status differs from semantic validation")
+        if delta["domain"] == "canada_canola":
+            require((delta["run"]["business_status"] == "initialized")
+                    == (delta["baseline"]["files"][CANOLA_STABLE] is None),
+                    "canola initialization status differs from formal baseline")
         if delta["run"]["business_status"] == "no_change" or all(existing_payloads[target] is not None
                and existing_payloads[target]["sha256"] == delta["payloads"][name]["sha256"]
                for name, target in contract["payloads"].items()):
@@ -1282,7 +1417,16 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
     sys.path.insert(0, "/app/03_src")
     import pandas as pd
     observations = {}
-    if domain == "soybean_export_sales":
+    if domain == "canada_canola":
+        baseline = (Path("/allocation") / CANOLA_STABLE
+                    if delta["baseline"]["files"][CANOLA_STABLE] is not None else None)
+        observations = _canola_observations(
+            candidate / "canola_weekly.json", baseline,
+            read_json(candidate / "source_evidence.json"), delta["domain_metadata"]["revision_keys"])
+        require(observations["record_count"] == delta["domain_metadata"]["record_count"]
+                and observations["latest_dates"] == delta["domain_metadata"]["latest_dates"],
+                "canola candidate metadata mismatch")
+    elif domain == "soybean_export_sales":
         from agri_research_agent.soybean_exports.fas import (FAS_KEY, FAS_STABLE_COLUMNS,
                                                              _business_equal, validate_fas_stable)
         name = "soybean_export_sales_weekly.parquet"
@@ -1335,11 +1479,12 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         path = candidate / name
         require(sha256_file(path) == identity["sha256"] and path.stat().st_size == identity["size_bytes"],
                 "worker payload byte identity mismatch")
-        require(_schema_fingerprint(path) == identity["parquet_schema_sha256"],
-                "worker Parquet schema identity mismatch")
-        import pyarrow.parquet as pq
-        require(pq.read_metadata(path).num_rows == identity["row_count"],
-                "worker Parquet row count mismatch")
+        if domain != "canada_canola":
+            require(_schema_fingerprint(path) == identity["parquet_schema_sha256"],
+                    "worker Parquet schema identity mismatch")
+            import pyarrow.parquet as pq
+            require(pq.read_metadata(path).num_rows == identity["row_count"],
+                    "worker Parquet row count mismatch")
     observations = _safe_worker_value(observations, pd)
     return {"schema_version": "production-data-delta-worker/1", "status": "PASS",
             "domain": domain, "image": {"commit": expected_commit, "tree": expected_tree},

@@ -4,13 +4,14 @@
 Commit/Tree 的独立、干净、detached Git clone 运行现有业务入口，服务器只验证和发布数据。
 producer 的 Commit/Tree 与校验镜像的 Commit/Tree 分别固定，不要求两者相同。
 
-## 三个入口
+## 四个入口
 
 | domain | 原业务入口 | 正式消费者通道 |
 | --- | --- | --- |
 | `akshare` | `04_scripts/server_update_spreads.py --update-from-akshare` | 现有 public package 的 `domestic-spread` artifact |
 | `soybean_crop_progress` | `04_scripts/soybean_crop_progress/update_soybeans_crop_weekly.py --dry-run` | Crop 两个 stable Parquet 配对发布 |
 | `soybean_export_sales` | `04_scripts/soybean_exports/run_fas_export_sales.py --candidate-only` | FAS stable Parquet、主机生成的 manifest/status |
+| `canada_canola` | `04_scripts/canada_canola/update_canola.py` 人工准备；同一 Windows 正式入口交付 | Canola stable JSON、来源字节证据、主机生成 status |
 
 Windows 正式入口为 `04_scripts/automation/run_production_data_delta_windows.py`：
 该入口的 provider 子环境固定 `NO_PROXY=*`，不继承 Windows 用户代理或 CA
@@ -88,6 +89,43 @@ reconciliation manifest SHA 和完整 expected Current。调用者须批准此 e
 这是生产数据发布操作，仍须独立授权；代码进入 main 本身不触发晋升。
 
 ## 配置、基线与凭据
+
+### 加拿大人工交付
+
+加拿大使用同一 `run_production_data_delta_windows.py --domain canada_canola` 入口。
+默认仅生成候选，显式 `--publish` 才上传、主机复验及原子发布；不抓取 provider、不安装依赖、
+不构建或拉取镜像、不重启网站、不注册定时任务。其他三个域的配置和日常调度保持原合同。
+
+独立配置版本为 `canada-canola-delivery-config/1`，封闭字段：
+`schema_version`、`approved_commit`、`approved_tree`、`origin`、`python`、`runtime_root`、
+`baseline_root`、`baseline_manifest_sha256`、`candidate_path`、`candidate_sha256`、
+`source_root`、`workbook_path`、`workbook_sha256`、`revision_keys`、`ssh_target`、
+`publisher`、`publisher_sha256`、`image_id`、`remote_allocation`、`policy`、`policy_sha256`。
+policy 两个映射只含 canada_canola；镜像必须为完整 sha256 ID。生产 producer 使用干净独立
+detached Approved clone 与固定 Python `-I -B`，不能从 feature worktree 执行正式交付。
+
+`baseline_root/baseline_manifest.json` 使用 `canada-canola-production-baseline/1`，
+只含 `schema_version`、`source_root`、`files`。source_root 必须等于实际服务器 allocation；
+files 精确包含 `01_data/processed/canada_canola/canola_weekly.json`、同目录
+`source_evidence.json` 和 `01_data/update_status/canada_canola.json`，值为文件 SHA/大小或 null。
+首次上线前只读确认三项全部不存在才能记录 null；已有基线三项必须完整，并逐字节取回核验。
+本地 Preview 不是生产基线。每次发布均重新取得实际服务器快照，主机发布锁内再次检查。
+
+固定上传仅含 `delta_contract.json`、`canola_weekly.json`、`source_evidence.json`。
+后者为封闭 `canada-canola-source-evidence/1` JSON，包含 schema_version 和 sources 数组。
+每项固定 kind、sha256、bytes_base64、province、source_url、retrieved_at；首次 workbook 项
+后三项为 null，report 项必须匹配官方 HTTPS、省份和抓取时间。单来源最多20MB，合计最多100MB。
+原文只作为归档证据，官方表格数值仍由 Codex 人工核对，不声称通用 PDF 自动解析。
+
+正式 producer 和主机固定镜像校验器都重新检查实际来源字节、封闭数据结构、日期、单位及唯一键。
+首次历史导入在临时目录重新读取同 SHA 原 Excel，逐条核对原始日期/值/单元格，并拒绝漏历史。
+后续新记录必须有归档官方报告；禁止删除历史。修订必须通过 revision_keys 精确列出
+`省份/指标/日期`，实际修订集合必须全等；空列表表示只能追加。正常重复检查产生 NO_CHANGE，
+不改稳定数据或网站。原 Excel 只读；原始来源、配置、候选及回执不提交 Git。
+
+主机沿用现有 stage-upload → receive → validate → publish / rollback，固定 approved
+producer、受保护 policy、源 clone 和镜像身份。三项稳定文件及 status 仅写加拿大域；发布失败
+恢复原域/status，备份不可变。配置和源码进入 main 不启用政策或授予数据发布权限。
 
 配置采用 `production-data-producer-config/1`，由 `validate_config` 拒绝未知字段。
 配置必须固定 approved commit/tree、canonical origin、已有 Python、外部 runtime root、
