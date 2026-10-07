@@ -48,6 +48,8 @@ Windows 本地没有 Docker、Podman 或 WSL 属于正常状态；本地不负�
 
 Business 跑 scoped required tests；Shared/Infra 加 impact/consumer tests；Governance/CI 加治理及平台测试，MAINTAINER_REVIEW_REQUIRED = YES。Repository Maintainer/Admin 审查 main 接纳，不能覆盖 CI 失败。trusted、future、impact、candidate changed/added 与平台测试必须全部 required 全绿；Windows 专项使用 windows-2022。Strict/Governance 的 full regression 执行 exact candidate 一次，ALL_GREEN 要求零失败、零 skip、完整收集及同次 run/attempt 证据；不再重复执行 base full 或容忍既有失败。必需测试与平台保护不减少，历史 paired comparison 仅供诊断。trusted-main-admission-v1 是 main required check，不使用 Ruleset bypass。可选 complete_project.py --candidate-record <记录> 若调用仍执行全部 required tests 与签名容器门禁，不是普通 main 前置条件。
 
+本地迭代默认运行相关测试；完整回归及发布演练的适用范围见[标准规范](07_docs/03_标准开发与生产发布规范.md)的 Full Regression Policy 与“CI 触发与验证深度”。演练按密封计划选择 none / ci-wiring / full；不因每次本地编辑重复整仓回归。新提交或 main 移动仍须取得精确候选证据。
+
 START / RESUME 会 fetch 并写 local Git metadata，不是纯 read-only。开发启动不依赖无关 local main checkout 是否 clean、mirror；只有同步 main 镜像时才核验。runtime_target=none 不要求 runtime root、marker 或 production evidence。普通已授权任务不重复要求 commit/push 许可。执行 git fetch origin 与 git ls-remote origin refs/heads/main 核对 fresh main；聊天历史 SHA 不是执行权威。
 
 ## 生产发布风险

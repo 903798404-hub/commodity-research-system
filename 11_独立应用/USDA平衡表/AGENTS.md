@@ -24,7 +24,7 @@
 
 ## 测试与部署
 
-不在此复制发布流程。普通业务按根 Business Fast Lane，专项验证和 hosted Admission PASS 后等待精确对象批准；Scope Gate `--project usda` 可作本地反馈。生产另行授权后依根规范进行 release、可信检出、候选和同一 Image ID 切换；不得在正式目录构建或直接覆盖代码。
+不在此复制发布流程。已授权的普通业务按根 Business Fast Lane，专项验证和 hosted Admission PASS 后按任务授权接纳 main，不另设普通业务批准；Governance / CI 仍须 Repository Maintainer/Admin 审查；Scope Gate `--project usda` 可作本地反馈。生产另行授权后依根规范进行 release、可信检出、候选和同一 Image ID 切换；不得在正式目录构建或直接覆盖代码。
 
 - 修改 USDA 后必须运行前端测试、TypeScript 检查和生产构建。
 - 涉及 Dockerfile、docker-compose.yml、依赖、字体或部署配置时，必须重建对应镜像。

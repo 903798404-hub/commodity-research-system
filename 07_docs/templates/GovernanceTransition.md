@@ -13,7 +13,8 @@
 | required coverage / 新增回归测试 | |
 | hosted Linux / 必需 Windows run 与结果 | |
 | 同次 candidate full ALL_GREEN：收集完整、failed/skip 均为0；测试声明保护 | |
-| 镜像检查 / 发布演练路由与实际结果 | |
+| 镜像检查与计划演练档位 / 要求路径（按规范 none / ci-wiring / full） | |
+| 实际完成的演练档位 / 路径 / 同次证据及原始索引哈希 | |
 | 生产未触碰的核验 | |
 | 已知限制与回退方式 | |
 | Repository Maintainer/Admin 接纳决定、操作者、时间、精确对象 | |
