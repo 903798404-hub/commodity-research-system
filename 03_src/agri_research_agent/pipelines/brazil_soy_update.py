@@ -173,7 +173,10 @@ def merge_observations(baseline: dict, updates: list[dict], *, allow_revisions: 
         old = rows.get(key(item))
         if old is None:
             stats["added"] += 1
-        elif all(old[k] == item[k] for k in FINGERPRINT_FIELDS):
+        elif old["value"] == item["value"] and (item["reference"] is None or item["reference"] == old["reference"]):
+            # A new report repeats the prior week with a new file SHA and no
+            # reference columns. Keep the original verified record and its
+            # official references instead of manufacturing a history revision.
             stats["unchanged"] += 1
             continue
         else:
@@ -184,9 +187,6 @@ def merge_observations(baseline: dict, updates: list[dict], *, allow_revisions: 
     if not stats["added"] and not stats["revised"]:
         return baseline, stats
     return validate_bundle({**baseline, "generated_at": utc_now(), "records": list(rows.values())}), stats
-
-
-FINGERPRINT_FIELDS = ("value", "source_url", "source_sha256", "source_locator", "date_basis", "published_at", "reference")
 
 
 def prepare_update(context: RuntimeContext, baseline: Path, observations: Path, *, allow_revisions=False) -> Path:

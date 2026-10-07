@@ -146,6 +146,22 @@ def test_candidate_identity_baseline_drift_and_backup(tmp_path):
     assert len(backups) == 1 and soy.sha256_file(backups[0]) == initial
 
 
+def test_weekly_overlap_preserves_original_source_and_official_references():
+    reference = {"last_season": 2, "five_season_mean": 3, "locator": "C90,F90"}
+    previous = observation("2026-09-25", 3.9, reference=reference,
+                           published_at="2026-09-28", date_basis="report_cutoff")
+    baseline = bundle(previous)
+    repeated = {**previous, "source_sha256": "b" * 64, "reference": None,
+                "published_at": "2026-10-05", "source_locator": "D90"}
+    latest = observation(published_at="2026-10-05", date_basis="report_cutoff", source_sha256="b" * 64)
+    merged, stats = update.merge_observations(baseline, [repeated, latest])
+    assert stats == dict(added=1, revised=0, unchanged=1)
+    assert merged["records"][0] == previous
+    changed_reference = {**previous, "reference": {**reference, "five_season_mean": 4}}
+    with pytest.raises(ValueError, match="revision"):
+        update.merge_observations(baseline, [changed_reference])
+
+
 def test_prepare_update_requires_matching_archived_bytes(tmp_path):
     ctx = context(tmp_path)
     baseline, updates = tmp_path / "base.json", tmp_path / "updates.json"
