@@ -79,7 +79,7 @@ def test_manual_canola_configuration_is_closed_and_pins_all_publication_inputs(t
     module = host()
     candidate = write(tmp_path / "candidate.json", {})
     config = {"schema_version": producer.CONFIG_SCHEMA, "approved_commit": "a" * 40,
-              "approved_tree": "b" * 40, "origin": producer.delivery.ORIGIN, "python": sys.executable,
+              "approved_tree": "b" * 40, "origin": producer.delivery.ORIGIN, "python": str(Path(sys.executable).resolve()),
               "runtime_root": str(tmp_path / "runs"), "baseline_root": str(tmp_path / "baseline"),
               "baseline_manifest_sha256": "c" * 64, "candidate_path": str(candidate),
               "candidate_sha256": module.sha256_file(candidate), "source_root": str(tmp_path / "sources"),
