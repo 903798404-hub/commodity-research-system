@@ -62,7 +62,7 @@ def load_module():
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--domain", choices=("akshare", "soybean_crop_progress", "soybean_export_sales"), required=True)
+    parser.add_argument("--domain", choices=("akshare", "soybean_crop_progress", "soybean_export_sales", "canada_canola"), required=True)
     parser.add_argument(
         "--end-date",
         help="AkShare business end date in strict YYYY-MM-DD form; defaults to today",
@@ -95,9 +95,24 @@ def main(argv=None) -> int:
         config = json.loads(raw.decode("utf-8"), object_pairs_hook=closed_pairs)
         _bootstrap(config)
         module = load_module()
-        module.validate_config(config)
+        if args.domain != "canada_canola":
+            module.validate_config(config)
         module.verify_clean_detached_clone(ROOT, config)
         sys.path.insert(0, str(ROOT / "03_src"))
+        if args.domain == "canada_canola":
+            if any(value is not None for value in (
+                args.end_date, args.run_root, args.historical_reconciliation_manifest,
+                args.promote_candidate, args.promotion_evidence, args.promotion_evidence_sha256,
+                args.expected_current_id, args.expected_current_artifact_sha256,
+                args.expected_current_manifest_sha256,
+            )):
+                raise ValueError("canola delivery only accepts its pinned configuration and publication mode")
+            from agri_research_agent.automation.production_data_delta_canola import run_canola
+            result = run_canola(config, publish=args.publish)
+            if args.config.read_bytes() != raw:
+                raise ValueError("configuration changed during canola delivery")
+            print(json.dumps({"PRODUCTION_DATA_DELTA": result["status"], **result}, sort_keys=True))
+            return 0
         if args.domain != "akshare" and args.end_date is not None:
             raise ValueError("--end-date is only valid with --domain akshare")
         if args.historical_reconciliation_manifest is not None and (
