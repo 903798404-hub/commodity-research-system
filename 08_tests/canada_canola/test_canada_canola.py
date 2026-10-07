@@ -214,6 +214,7 @@ def test_real_workspace_route_renders_canada_and_switches_province(tmp_path, mon
     stable.parent.mkdir(parents=True)
     atomic_write_json(stable, bundle(observation(), observation(value=9, province="SK"),
                                     observation(value=40, province="AB"),
+                                    observation("2020-05-26", 70, province="SK", metric="PLANTED"),
                                     *(observation(f"{y}-09-08", 20, province="SK") for y in range(2021, 2026))))
     monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(root))
     apps = str(ROOT / "05_apps")
@@ -226,10 +227,22 @@ def test_real_workspace_route_renders_canada_and_switches_province(tmp_path, mon
     assert app.title[0].value == "加拿大菜籽种植与生长"
     assert app.radio[0].options == ["萨省（55%）", "阿尔伯塔省（28%）", "曼省（16%）"]
     assert set(app.multiselect[0].value) == {2022, 2023, 2024}
+    # The shared selector includes years found in a different metric as well.
+    assert "2020" in app.multiselect[0].options
+    assert len(app.radio) == 1
+    figures = [json.loads(chart.proto.spec) for chart in app.get("plotly_chart")]
+    assert len(figures) == 3
+    assert next(trace for trace in figures[1]["data"] if trace["name"] == "2026年（当年）")["customdata"] == ["2026-09-08"]
+    assert not any(trace["name"] == "2026年（当年）" for trace in figures[0]["data"])
+    app.multiselect[0].set_value([2020, 2022]).run()
+    assert not app.exception
+    planting = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert any(trace["name"] == "2020年" for trace in planting["data"])
     styles = app.dataframe[0].proto.arrow_data.styler.styles
     assert "background-color" in styles and "#E5EFFB" in styles
     app.radio[0].set_value("MB").run()
     assert not app.exception
+    assert len(app.get("plotly_chart")) == 3
     assert app.dataframe[0].value.iloc[1]["最新"] == "15.0"
     assert app.expander[0].label == "生长阶段" and not app.expander[0].proto.expanded
     audit = app.dataframe[-1].value

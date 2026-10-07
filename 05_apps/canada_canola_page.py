@@ -78,12 +78,39 @@ def render_canada_canola_page() -> None:
     st.caption("数值单位为%；变化和差异为百分点。均值括号内为有效年份数/5；正负表示高低，不直接代表单产或价格方向。")
 
     st.subheader("历史进度对比")
-    metric = st.radio("对比指标", list(METRICS), index=1, format_func=METRICS.get, horizontal=True)
-    historical_years = sorted(set(frame.loc[(frame["province"] == province) & (frame["metric"] == metric), "year"])
+    historical_years = sorted(set(frame.loc[(frame["province"] == province) & frame["metric"].isin(METRICS), "year"])
                               - {year, year - 1}, reverse=True)
     extra = st.multiselect("其他历史年份（2022年起默认显示）", historical_years,
                            default=[y for y in historical_years if 2022 <= y < year])
-    st.plotly_chart(seasonal_figure(frame, province, metric, year, extra), width="stretch")
+    st.html("""<style>
+        @media (max-width: 900px) {
+            .st-key-canola-history-charts [data-testid="stHorizontalBlock"] {
+                flex-direction: column;
+            }
+            .st-key-canola-history-charts [data-testid="stColumn"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+            }
+        }
+    </style>""")
+    with st.container(key="canola-history-charts"):
+        for column, (metric, name) in zip(st.columns(3, gap="small"), METRICS.items()):
+            with column:
+                st.markdown(f"#### {name}")
+                current = compare_metric(frame, province, metric, year)["current"]
+                if current:
+                    st.caption(f"最新观测：{current['date']:%Y-%m-%d} · {current['value']:.1f}%")
+                else:
+                    st.caption(f"{year}年暂无有效观测；下图仅展示已有历史。")
+                figure = seasonal_figure(frame, province, metric, year, extra)
+                figure.update_layout(
+                    height=300, margin=dict(l=8, r=8, t=45, b=10),
+                    legend=dict(orientation="h", x=0, xanchor="left", y=1.1,
+                                yanchor="bottom", font=dict(size=10)),
+                    xaxis=dict(title=None, nticks=5, tickfont=dict(size=10)),
+                    yaxis=dict(tickfont=dict(size=10)),
+                )
+                st.plotly_chart(figure, width="stretch", key=f"canola-history-{metric}")
     st.caption(MATCHING_NOTE)
 
     with st.expander("生长阶段", expanded=False):
