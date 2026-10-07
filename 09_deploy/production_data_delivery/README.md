@@ -165,6 +165,9 @@ files精确列出`01_data/processed/brazil_soy/soy_weekly.json`、同域`source_
 首次重新读取原始Excel，拒绝历史遗漏和篡改；后续禁止历史删除，修订集合必须与
 `作物季起年/作物季末年/地区/指标/日期`的revision_keys全等。全国阶段不能写成州级数据。
 原始表单元格或嵌入图表由Codex核对，官方参考值不冒充历史记录。
+年度面积参考可选写入同一soy_weekly.json的area_reference，不增加正式发布路径。更新该参考时来源kind为area_report；
+publisher重读归档Soja面积列并核对27个UF与BRASIL、参考季及来源身份，拒绝删参考、倒退参考或多余来源。
+仅面积参考改变也属于业务数据更新；周度更新保持原参考，重复参考及观测为NO_CHANGE，仍不构建镜像或重启网站。
 
 服务器复用原受保护publisher的receive/validate/publish/rollback：独立域备份、基线CAS和原子交换，
 主机生成巴西status。普通重复为NO_CHANGE，稳定数据及网站不变。首次代码和政策启用按独立发布验收。
