@@ -218,3 +218,6 @@ def test_real_workspace_route_renders_canada_and_switches_province(tmp_path, mon
     assert not app.exception
     assert app.dataframe[0].value.iloc[1]["最新"] == "15.0"
     assert app.expander[0].label == "生长阶段" and not app.expander[0].proto.expanded
+    audit = app.dataframe[-1].value
+    assert audit.iloc[0]["发布日期"] == "未核实"
+    assert audit.iloc[0]["来源链接"] == SOURCE_URLS["MB"]

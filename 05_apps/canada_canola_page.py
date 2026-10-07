@@ -102,10 +102,12 @@ def render_canada_canola_page() -> None:
             current = item["current"]
             audit.append({"指标": name, "当年日期": current["date"].strftime("%Y-%m-%d"),
                           "日期依据": "历史文件日期" if current["date_basis"] == "workbook_date" else "报告统计截止日",
-                          "发布日期": current["published_at"] or "未核实",
+                          "发布日期": "未核实" if pd.isna(current["published_at"]) else current["published_at"],
                           "去年取数日期": item["last_year"]["date"].strftime("%Y-%m-%d") if item["last_year"] else "—",
                           "均值取数日期": "、".join(x["date"].strftime("%Y-%m-%d") for x in item["samples"]),
+                          "来源链接": current["source_url"],
                           "原始位置": current["source_locator"], "来源SHA256": current["source_sha256"]})
-        st.dataframe(pd.DataFrame(audit), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame(audit), hide_index=True, width="stretch",
+                     column_config={"来源链接": st.column_config.LinkColumn(display_text="查看来源")})
         for note in bundle["import_notes"]:
             st.caption(note)
