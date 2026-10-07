@@ -199,7 +199,7 @@ def test_page_metric_tabs_show_all_states_and_growth_remains_national(tmp_path, 
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ["播种进度", "收割进度", "生长进度"]
     assert len(app.get("plotly_chart")) == 13
-    assert [item.value for item in app.markdown if item.value.startswith("#### ")] == [f"#### {name}" for name in soy.REGIONS.values()]
+    assert [item.value for item in app.markdown if item.value.startswith("#### ")] == [f"#### {'全国汇总' if region == 'BR' else name}" for region, name in soy.REGIONS.items()]
     assert [item.label for item in app.expander] == ["来源与取数说明"]
     assert not any(item.label == "历史曲线地区" for item in app.selectbox)
     assert app.multiselect[0].value == ["2025/2026"]

@@ -75,14 +75,22 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> 
         for offset in range(0, len(regions), 3):
             for column, region in zip(st.columns(3, gap="small"), regions[offset:offset + 3]):
                 with column:
-                    st.markdown(f"#### {REGIONS[region]}")
+                    st.markdown(f"#### {'全国汇总' if region == 'BR' else REGIONS[region]}")
                     current = compare_metric(frame, region, metric, season)["current"]
                     if current:
                         st.caption(f"最近观测：{current['date']:%Y-%m-%d} · {current['value']:.1f}%")
                     else:
                         st.caption("本季暂无已核实观测")
-                    st.plotly_chart(seasonal_figure(frame, region, metric, season, extra),
-                                    width="stretch", key=f"brazil-history-{metric}-{region}")
+                    figure = seasonal_figure(frame, region, metric, season, extra)
+                    for trace in figure.data:
+                        if trace.name == "前五季同期均值":
+                            trace.name = "五季均值"
+                        else:
+                            trace.name = trace.name[2:4] + "/" + trace.name[7:9] + (" 当前" if "当前季" in trace.name else "")
+                    figure.update_layout(height=320, margin=dict(l=8, r=8, t=85, b=10),
+                        legend=dict(y=1.02, entrywidth=0.48, entrywidthmode="fraction"),
+                        xaxis=dict(nticks=4))
+                    st.plotly_chart(figure, width="stretch", key=f"brazil-history-{metric}-{region}")
 
 
 def _growth_tab(frame: pd.DataFrame, season: str) -> None:
