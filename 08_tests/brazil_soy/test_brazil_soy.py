@@ -189,6 +189,7 @@ def test_region_overview_preserves_zero_and_excludes_stale_values():
 
 def test_page_metric_tabs_show_all_states_and_growth_remains_national(tmp_path, monkeypatch):
     sys.path.insert(0, str(ROOT / "05_apps"))
+    monkeypatch.setattr(importlib.import_module("brazil_soy_page"), "current_season", lambda: "2026/2027")
     monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(tmp_path))
     data = bundle(observation(), observation(region="MT", value=14.36),
         observation(value=64.1, metric="EMERGENCE"), observation(value=35.9, metric="VEGETATIVE"),
