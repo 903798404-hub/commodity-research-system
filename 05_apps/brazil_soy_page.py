@@ -57,7 +57,7 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> 
     st.subheader(label)
     dates = frame.loc[(frame["season"] == season) & (frame["metric"] == metric), "date"]
     if dates.empty:
-        st.info(f"{season}季暂无已核实的{label}；可展开历史曲线查看往季。")
+        st.info(f"{season}季暂无已核实的{label}；下方曲线可查看往季。")
     else:
         st.caption(f"数据截至：{dates.max():%Y-%m-%d} · 全国与主要12州")
     overview = regional_comparison_table(frame, metric, season)
@@ -68,10 +68,21 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> 
     st.caption("全国汇总直接采用 CONAB 主要12州合计口径，现代报告覆盖约96%种植面积。最新列只展示本期观测；日期较早的州不沿用旧值。")
     st.caption("数值为%；较上季、较均值为百分点。较均值红色表示高于、蓝色表示低于，不能直接判断单产或价格方向。")
     st.caption(MATCHING_NOTE + "表格官方参考均值与图中的历史计算均值分开标示。")
-    with st.expander("历史曲线对比"):
-        region = st.selectbox("历史曲线地区", list(REGIONS), format_func=REGIONS.get, key=f"brazil-region-{metric}")
-        extra = _history_years(frame, season, f"brazil-years-{metric}")
-        st.plotly_chart(seasonal_figure(frame, region, metric, season, extra), width="stretch", key=f"brazil-history-{metric}")
+    st.subheader("全国与各州历史对比")
+    extra = _history_years(frame, season, f"brazil-years-{metric}")
+    with st.container(key="brazil-history-charts"):
+        regions = list(REGIONS)
+        for offset in range(0, len(regions), 3):
+            for column, region in zip(st.columns(3, gap="small"), regions[offset:offset + 3]):
+                with column:
+                    st.markdown(f"#### {REGIONS[region]}")
+                    current = compare_metric(frame, region, metric, season)["current"]
+                    if current:
+                        st.caption(f"最近观测：{current['date']:%Y-%m-%d} · {current['value']:.1f}%")
+                    else:
+                        st.caption("本季暂无已核实观测")
+                    st.plotly_chart(seasonal_figure(frame, region, metric, season, extra),
+                                    width="stretch", key=f"brazil-history-{metric}-{region}")
 
 
 def _growth_tab(frame: pd.DataFrame, season: str) -> None:
@@ -91,12 +102,12 @@ def _growth_tab(frame: pd.DataFrame, season: str) -> None:
     _table(stage_table)
     st.caption("各阶段不补零、不强制合计100%；阶段占比不能当作累计完成率或优良率。")
     st.caption(MATCHING_NOTE)
-    with st.expander("全国阶段历史曲线"):
-        available = set(stages.loc[stages["season"] == season, "metric"])
-        preferred = "VEGETATIVE" if "VEGETATIVE" in available else "FLOWERING"
-        stage = st.selectbox("全国阶段历史对比", list(STAGES), format_func=STAGES.get, index=list(STAGES).index(preferred))
-        extra = _history_years(frame, season, "brazil-years-growth")
-        st.plotly_chart(seasonal_figure(frame, "BR", stage, season, extra), width="stretch", key="brazil-national-stage")
+    st.subheader("全国阶段历史曲线")
+    available = set(stages.loc[stages["season"] == season, "metric"])
+    preferred = "VEGETATIVE" if "VEGETATIVE" in available else "FLOWERING"
+    stage = st.selectbox("全国阶段历史对比", list(STAGES), format_func=STAGES.get, index=list(STAGES).index(preferred))
+    extra = _history_years(frame, season, "brazil-years-growth")
+    st.plotly_chart(seasonal_figure(frame, "BR", stage, season, extra), width="stretch", key="brazil-national-stage")
 
 
 def render_brazil_soy_page() -> None:
@@ -114,13 +125,23 @@ def render_brazil_soy_page() -> None:
         return
     seasons = sorted(set(frame["season"]) | {current_season()}, reverse=True)
     season = st.selectbox("作物季", seasons, index=seasons.index(current_season()))
-    planting, harvest, growth = st.tabs(["播种进度", "收割进度", "生长进度"])
-    with planting:
-        _progress_tab(frame, "PLANTED", METRICS["PLANTED"], season)
-    with harvest:
-        _progress_tab(frame, "HARVESTED", METRICS["HARVESTED"], season)
-    with growth:
-        _growth_tab(frame, season)
+    st.html("""<style>
+        @media (max-width: 900px) {
+            .st-key-brazil-history-charts [data-testid="stHorizontalBlock"] { flex-direction: column; }
+            .st-key-brazil-history-charts [data-testid="stColumn"] { width: 100% !important; flex: 1 1 100% !important; }
+        }
+    </style>""")
+    planting, harvest, growth = st.tabs(["播种进度", "收割进度", "生长进度"],
+                                      key="brazil-metric-tabs", on_change="rerun")
+    if planting.open:
+        with planting:
+            _progress_tab(frame, "PLANTED", METRICS["PLANTED"], season)
+    if harvest.open:
+        with harvest:
+            _progress_tab(frame, "HARVESTED", METRICS["HARVESTED"], season)
+    if growth.open:
+        with growth:
+            _growth_tab(frame, season)
 
     with st.expander("来源与取数说明"):
         st.markdown(f"[查看 CONAB 官方周报]({SOURCE_URL})")

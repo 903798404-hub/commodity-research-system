@@ -198,17 +198,32 @@ def test_page_metric_tabs_show_all_states_and_growth_remains_national(tmp_path, 
     app = AppTest.from_string("from brazil_soy_page import render_brazil_soy_page\nrender_brazil_soy_page()", default_timeout=30).run()
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ["播种进度", "收割进度", "生长进度"]
-    assert len(app.get("plotly_chart")) == 3
+    assert len(app.get("plotly_chart")) == 13
+    assert [item.value for item in app.markdown if item.value.startswith("#### ")] == [f"#### {name}" for name in soy.REGIONS.values()]
+    assert [item.label for item in app.expander] == ["来源与取数说明"]
+    assert not any(item.label == "历史曲线地区" for item in app.selectbox)
+    assert app.multiselect[0].value == ["2025/2026"]
     assert app.selectbox[0].value == "2026/2027"
     planting = app.dataframe[0].value.copy()
     assert len(planting) == 13 and planting.iloc[0]["最新"] == "9.4"
     assert planting.loc[planting["地区"] == soy.REGIONS["MT"], "最新"].iloc[0] == "14.4"
-    assert len(app.dataframe[1].value) == 13
-    national = app.dataframe[2].value.copy()
-    next(item for item in app.selectbox if item.key == "brazil-region-PLANTED").set_value("MT").run()
+    app.session_state["brazil-metric-tabs"] = "收割进度"
+    app.run()
     assert not app.exception
+    assert len(app.get("plotly_chart")) == 13
+    assert len(app.dataframe[0].value) == 13 and set(app.dataframe[0].value["最新"]) == {"—"}
+    app.session_state["brazil-metric-tabs"] = "生长进度"
+    app.run()
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 1
+    assert len(app.dataframe[0].value) == len(soy.STAGES)
+    assert set(app.dataframe[0].value["最新"]) == {"64.1", "35.9", "—"}
+    assert not any(item.value.startswith("#### ") for item in app.markdown)
+    assert [item.label for item in app.expander] == ["来源与取数说明"]
+    app.session_state["brazil-metric-tabs"] = "播种进度"
+    app.run()
+    assert not app.exception and len(app.get("plotly_chart")) == 13
     assert app.dataframe[0].value.equals(planting)
-    assert app.dataframe[2].value.equals(national)
 
 
 def make_official(path):
