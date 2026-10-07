@@ -100,8 +100,13 @@ def source_evidence(config: dict, candidate: dict, baseline: dict | None) -> tup
         if delivery.sha256_file(raw) == info["sha256"]:
             reports[(info["source_url"], info["sha256"], info["retrieved_at"], info["published_at"])] = (raw, metadata)
     sources, seen, inventory = [], set(), {}
-    for row in changed:
-        if row["date_basis"] == "workbook_date":
+    area = candidate.get("area_reference")
+    area_changed = area != (baseline.get("area_reference") if baseline else None)
+    inputs = [(row, "workbook" if row["date_basis"] == "workbook_date" else "report") for row in changed]
+    if area_changed and area:
+        inputs.append((area, "area_report"))
+    for row, kind in inputs:
+        if kind == "workbook":
             source_key = ("workbook", row["source_sha256"])
             if source_key in seen:
                 continue
@@ -116,7 +121,7 @@ def source_evidence(config: dict, candidate: dict, baseline: dict | None) -> tup
             delivery.require(source_key in reports, "Brazil official observation lacks archive")
             raw, metadata = reports[source_key]
             inventory[str(metadata)] = delivery._identity(metadata)
-            entry = {"kind": "report", "sha256": row["source_sha256"], "source_url": row["source_url"],
+            entry = {"kind": kind, "sha256": row["source_sha256"], "source_url": row["source_url"],
                      "retrieved_at": row["retrieved_at"], "published_at": row["published_at"]}
         content = delivery._unlinked(raw).read_bytes()
         delivery.require(delivery.hashlib.sha256(content).hexdigest() == entry["sha256"], "Brazil source changed while reading")

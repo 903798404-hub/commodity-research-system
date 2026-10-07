@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "03_src"))
 from agri_research_agent.pipelines.brazil_soy import load_bundle, sha256_file, utc_now
 from agri_research_agent.pipelines.brazil_soy_update import (
     activate_local, candidate_from_workbook, fetch_report, latest_dates, parse_progress, prepare_update,
+    prepare_area_reference,
 )
 from agri_research_agent.shared.atomic_storage import atomic_write_json
 from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
@@ -29,6 +30,9 @@ def main(argv=None) -> int:
     fetch.add_argument("--published-at", required=True)
     parse = sub.add_parser("parse-progress")
     parse.add_argument("--source", type=Path, required=True)
+    area = sub.add_parser("prepare-area-reference")
+    area.add_argument("--source", type=Path, required=True)
+    area.add_argument("--baseline", type=Path, required=True)
     update = sub.add_parser("prepare-update")
     update.add_argument("--baseline", type=Path, required=True)
     update.add_argument("--observations", type=Path, required=True)
@@ -57,6 +61,8 @@ def main(argv=None) -> int:
                 path = candidate_from_workbook(context, args.workbook)
             elif args.command == "fetch-report":
                 path = fetch_report(context, args.url, args.published_at)
+            elif args.command == "prepare-area-reference":
+                path = prepare_area_reference(context, args.baseline, args.source)
             elif args.command == "parse-progress":
                 source_root = (context.runtime_root / "raw/brazil_soy").resolve()
                 if source_root not in args.source.resolve().parents:

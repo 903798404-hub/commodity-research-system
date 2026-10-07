@@ -444,7 +444,7 @@ def _brazil_revision_keys(value: object) -> list[str]:
 
 
 def _brazil_observations(candidate_path: Path, baseline_path: Path | None, evidence: dict, revision_keys: list[str]) -> dict:
-    from agri_research_agent.pipelines.brazil_soy import FIELDS, check_source_url, import_workbook, load_bundle
+    from agri_research_agent.pipelines.brazil_soy import FIELDS, check_source_url, import_workbook, load_bundle, parse_area_reference
     candidate = load_bundle(candidate_path)
     baseline = load_bundle(baseline_path) if baseline_path is not None else None
     def key(row):
@@ -456,26 +456,33 @@ def _brazil_observations(candidate_path: Path, baseline_path: Path | None, evide
     revised = {item for item in old if old[item] != new[item]}
     require(revised == set(_brazil_revision_keys(revision_keys)), "Brazil revision requires exact explicit keys")
     changed = [new[item] for item in sorted(new.keys() - old.keys() | revised)]
+    area = candidate.get("area_reference")
+    previous_area = baseline.get("area_reference") if baseline else None
+    require(not previous_area or area is not None, "Brazil area reference deletion is forbidden")
+    require(not previous_area or (area["season"], area["published_at"]) >=
+            (previous_area["season"], previous_area["published_at"]), "Brazil area reference cannot move backwards")
+    area_changed = area != previous_area
     _exact(evidence, {"schema_version", "sources"}, "Brazil source evidence")
     require(evidence["schema_version"] == "brazil-soy-source-evidence/1" and type(evidence["sources"]) is list,
             "Brazil source evidence schema invalid")
-    reports, workbooks, total_bytes = {}, {}, 0
+    reports, area_reports, workbooks, total_bytes = {}, {}, {}, 0
     for item in evidence["sources"]:
         _exact(item, {"kind", "sha256", "bytes_base64", "source_url", "retrieved_at", "published_at"}, "Brazil source")
-        require(item["kind"] in {"workbook", "report"} and type(item["sha256"]) is str and HEX64.fullmatch(item["sha256"])
+        require(item["kind"] in {"workbook", "report", "area_report"} and type(item["sha256"]) is str and HEX64.fullmatch(item["sha256"])
                 and type(item["bytes_base64"]) is str and len(item["bytes_base64"]) <= 28_000_000, "Brazil source identity invalid")
         raw = base64.b64decode(item["bytes_base64"], validate=True)
         total_bytes += len(raw)
         require(raw and len(raw) <= 20_000_000 and total_bytes <= 100_000_000 and sha256_bytes(raw) == item["sha256"],
                 "Brazil source byte identity mismatch")
-        if item["kind"] == "report":
+        if item["kind"] in {"report", "area_report"}:
             check_source_url(item["source_url"])
             _timestamp(item["retrieved_at"], "Brazil retrieval")
             require(type(item["published_at"]) is str and date.fromisoformat(item["published_at"]) <= date.today(),
                     "Brazil report publication invalid")
             source_key = (item["source_url"], item["sha256"], item["retrieved_at"], item["published_at"])
-            require(source_key not in reports, "duplicate Brazil source evidence")
-            reports[source_key] = item
+            collection = reports if item["kind"] == "report" else area_reports
+            require(source_key not in collection, "duplicate Brazil source evidence")
+            collection[source_key] = item
         else:
             require(baseline is None and item["source_url"] is None and item["retrieved_at"] is None
                     and item["published_at"] is None and item["sha256"] not in workbooks,
@@ -485,6 +492,15 @@ def _brazil_observations(candidate_path: Path, baseline_path: Path | None, evide
                 path.write_bytes(raw)
                 workbooks[item["sha256"]] = {key(row): row for row in import_workbook(path)["records"]}
     required_reports, required_workbooks = set(), set()
+    required_area = set()
+    if area_changed and area:
+        import io
+        area_key = (area["source_url"], area["source_sha256"], area["retrieved_at"], area["published_at"])
+        require(area_key in area_reports, "Brazil area reference lacks archived official report")
+        source = area_reports[area_key]
+        expected = parse_area_reference(io.BytesIO(base64.b64decode(source["bytes_base64"], validate=True)), source)
+        require(expected == area, "Brazil area reference differs from archived source")
+        required_area.add(area_key)
     for row in changed:
         if row["date_basis"] == "report_cutoff":
             source_key = (row["source_url"], row["source_sha256"], row["retrieved_at"], row["published_at"])
@@ -497,6 +513,7 @@ def _brazil_observations(candidate_path: Path, baseline_path: Path | None, evide
                     "Brazil historical workbook observation mismatch")
             required_workbooks.add(row["source_sha256"])
     require(set(reports) == required_reports and set(workbooks) == required_workbooks, "Brazil evidence contains missing or unused sources")
+    require(set(area_reports) == required_area, "Brazil area evidence contains missing or unused sources")
     for digest, rows in workbooks.items():
         actual = {key(row) for row in changed if row["date_basis"] == "workbook_date" and row["source_sha256"] == digest}
         require(actual == set(rows), "Brazil first import omitted historical records")
@@ -504,7 +521,7 @@ def _brazil_observations(candidate_path: Path, baseline_path: Path | None, evide
     for row in candidate["records"]:
         group = "/".join(row[field] for field in ("season", "region", "metric"))
         latest[group] = max(latest.get(group, ""), row["date"])
-    return {"business_changed": bool(changed), "added": len(new.keys() - old.keys()), "revised": len(revised),
+    return {"business_changed": bool(changed) or area_changed, "added": len(new.keys() - old.keys()), "revised": len(revised),
             "unchanged": len(old) - len(revised), "record_count": len(new), "latest_dates": latest}
 
 

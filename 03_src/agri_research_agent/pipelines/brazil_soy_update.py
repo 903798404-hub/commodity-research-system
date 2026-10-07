@@ -57,6 +57,29 @@ def candidate_from_workbook(context: RuntimeContext, path: Path) -> Path:
     return candidate
 
 
+def prepare_area_reference(context: RuntimeContext, baseline: Path, source: Path) -> Path:
+    from .brazil_soy import parse_area_reference
+    local_write(context, source)
+    source_root = (context.runtime_root / "raw/brazil_soy").resolve()
+    if source_root not in source.resolve().parents:
+        raise ValueError("area source must be in this local report archive")
+    identity = sha256_file(baseline)
+    bundle = load_bundle(baseline)
+    info = strict_json(source)
+    report = source.parent / "report.bin"
+    if sha256_file(report) != info["sha256"]:
+        raise ValueError("archived area report identity mismatch")
+    with report.open("rb") as handle:
+        reference = parse_area_reference(handle, info)
+    previous = bundle.get("area_reference")
+    if previous and (reference["season"], reference["published_at"]) < (previous["season"], previous["published_at"]):
+        raise ValueError("area reference cannot move backwards")
+    if sha256_file(baseline) != identity:
+        raise ValueError("baseline changed while preparing area reference")
+    return save_candidate(context, {**bundle, "generated_at": utc_now(), "area_reference": reference},
+                          identity, {"area_reference_changed": previous != reference})
+
+
 def fetch_report(context: RuntimeContext, url: str, published_at: str) -> Path:
     """Archive one explicitly requested report; validate every redirect before requesting it."""
     from datetime import date

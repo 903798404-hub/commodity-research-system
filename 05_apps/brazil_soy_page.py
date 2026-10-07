@@ -10,7 +10,7 @@ import streamlit as st
 from agri_research_agent.pipelines.brazil_soy import (
     METRICS, REGIONS, SOURCE_URL, STAGES, STABLE_RELATIVE_PATH, compare_metric,
     comparison_table, current_season, load_bundle, observations_frame, regional_comparison_table,
-    seasonal_figure, sha256_file,
+    seasonal_figure, sha256_file, area_share,
 )
 from agri_research_agent.shared.chart_style import difference_cell_style
 
@@ -53,7 +53,7 @@ def _history_years(frame: pd.DataFrame, season: str, key: str) -> list[str]:
         default=[s for s in history if "2022/2023" <= s < season], key=key)
 
 
-def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> None:
+def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str, area_reference: dict | None) -> None:
     st.subheader(label)
     dates = frame.loc[(frame["season"] == season) & (frame["metric"] == metric), "date"]
     if dates.empty:
@@ -69,13 +69,23 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> 
     st.caption("数值为%；较上季、较均值为百分点。较均值红色表示高于、蓝色表示低于，不能直接判断单产或价格方向。")
     st.caption(MATCHING_NOTE + "表格官方参考均值与图中的历史计算均值分开标示。")
     st.subheader("全国与各州历史对比")
+    if area_reference:
+        st.caption(f"标题面积占比：CONAB {area_reference['season']}季各州种植面积 ÷ 巴西全国种植面积；"
+                   f"面积表发布于{area_reference['published_at']}。全国覆盖率采用周报约96%口径；面积参考不随历史季切换，不用于重算进度。")
     extra = _history_years(frame, season, f"brazil-years-{metric}")
     with st.container(key="brazil-history-charts"):
         regions = list(REGIONS)
         for offset in range(0, len(regions), 3):
             for column, region in zip(st.columns(3, gap="small"), regions[offset:offset + 3]):
                 with column:
-                    st.markdown(f"#### {'全国汇总' if region == 'BR' else REGIONS[region]}")
+                    title = '全国汇总' if region == 'BR' else REGIONS[region]
+                    if region == 'BR':
+                        title += " :gray[（面积覆盖约96%）]"
+                    elif area_reference:
+                        title += f" :gray[（面积占比{area_share(area_reference, region):.1f}%）]"
+                    else:
+                        title += " :gray[（面积占比待核实）]"
+                    st.markdown(f"#### {title}")
                     current = compare_metric(frame, region, metric, season)["current"]
                     if current:
                         st.caption(f"最近观测：{current['date']:%Y-%m-%d} · {current['value']:.1f}%")
@@ -134,7 +144,9 @@ def render_brazil_soy_page() -> None:
     seasons = sorted(set(frame["season"]) | {current_season()}, reverse=True)
     season = st.selectbox("作物季", seasons, index=seasons.index(current_season()))
     st.html("""<style>
-        @media (max-width: 900px) {
+        .st-key-brazil-history-charts h4 { font-size: 1.05rem; }
+        .st-key-brazil-history-charts h4 span { font-size: 0.85rem; font-weight: 400; }
+        @media (max-width: 1100px) {
             .st-key-brazil-history-charts [data-testid="stHorizontalBlock"] { flex-direction: column; }
             .st-key-brazil-history-charts [data-testid="stColumn"] { width: 100% !important; flex: 1 1 100% !important; }
         }
@@ -143,16 +155,20 @@ def render_brazil_soy_page() -> None:
                                       key="brazil-metric-tabs", on_change="rerun")
     if planting.open:
         with planting:
-            _progress_tab(frame, "PLANTED", METRICS["PLANTED"], season)
+            _progress_tab(frame, "PLANTED", METRICS["PLANTED"], season, bundle.get("area_reference"))
     if harvest.open:
         with harvest:
-            _progress_tab(frame, "HARVESTED", METRICS["HARVESTED"], season)
+            _progress_tab(frame, "HARVESTED", METRICS["HARVESTED"], season, bundle.get("area_reference"))
     if growth.open:
         with growth:
             _growth_tab(frame, season)
 
     with st.expander("来源与取数说明"):
         st.markdown(f"[查看 CONAB 官方周报]({SOURCE_URL})")
+        if bundle.get("area_reference"):
+            reference = bundle["area_reference"]
+            st.markdown(f"[查看{reference['season']}季面积来源]({reference['source_url']})")
+            st.caption(f"面积参考仅作州规模说明；{reference['source_locator']}；文件SHA256：{reference['source_sha256']}")
         audit = []
         for metric, label in (METRICS | STAGES).items():
             for region in (REGIONS if metric in METRICS else {"BR": REGIONS["BR"]}):

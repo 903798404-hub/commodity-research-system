@@ -78,8 +78,11 @@ def seasonal_date(day: date) -> date:
 
 def validate_bundle(bundle: dict, *, today: date | None = None) -> dict:
     today = today or date.today()
-    if not isinstance(bundle, dict) or set(bundle) != {"schema_version", "generated_at", "records", "import_notes"}:
+    required = {"schema_version", "generated_at", "records", "import_notes"}
+    if not isinstance(bundle, dict) or not required <= set(bundle) <= required | {"area_reference"}:
         raise ValueError("invalid Brazil bundle fields")
+    if "area_reference" in bundle:
+        validate_area_reference(bundle["area_reference"], today=today)
     if bundle["schema_version"] != SCHEMA or not isinstance(bundle["records"], list) or not bundle["records"]:
         raise ValueError("unsupported or empty Brazil bundle")
     if not isinstance(bundle["generated_at"], str) or datetime.fromisoformat(bundle["generated_at"]).utcoffset() is None:
@@ -135,6 +138,73 @@ def validate_bundle(bundle: dict, *, today: date | None = None) -> dict:
 
 def load_bundle(path: Path) -> dict:
     return validate_bundle(strict_json(path))
+
+
+def validate_area_reference(reference: dict, *, today: date | None = None) -> dict:
+    """An annual area reference is separate from progress observations and weights."""
+    fields = {"season", "unit", "national_area", "state_areas", "source_url", "source_sha256",
+              "published_at", "retrieved_at", "source_locator"}
+    if not isinstance(reference, dict) or set(reference) != fields:
+        raise ValueError("invalid area reference fields")
+    season_start(reference["season"])
+    check_source_url(reference["source_url"])
+    if (reference["unit"] != "thousand_hectares" or not isinstance(reference["source_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", reference["source_sha256"])
+            or not isinstance(reference["source_locator"], str) or not reference["source_locator"].strip()):
+        raise ValueError("invalid area reference source or unit")
+    published = date.fromisoformat(reference["published_at"])
+    if (reference["published_at"] != published.isoformat() or published > (today or date.today())
+            or datetime.fromisoformat(reference["retrieved_at"]).utcoffset() is None):
+        raise ValueError("invalid area reference timestamp")
+    national = reference["national_area"]
+    areas = reference["state_areas"]
+    if (type(national) not in (int, float) or not math.isfinite(national) or national <= 0
+            or not isinstance(areas, dict) or set(areas) != set(STATES)
+            or any(type(x) not in (int, float) or not math.isfinite(x) or x < 0 for x in areas.values())
+            or sum(areas.values()) > national + 1e-6):
+        raise ValueError("invalid national/state area denominator")
+    return reference
+
+
+def parse_area_reference(stream, source: dict) -> dict:
+    """Read CONAB's annual Soja area column; fail closed on a changed layout."""
+    wb = load_workbook(stream, read_only=True, data_only=False, keep_links=False)
+    try:
+        ws = wb["Soja"]
+        rows = list(ws.values)
+    finally:
+        wb.close()
+    if (rows[4][0] != "REGIÃO/UF" or rows[4][1] != "ÁREA (Em mil ha)"
+            or not isinstance(rows[5][2], str) or not rows[5][2].startswith("Safra ")):
+        raise ValueError("CONAB annual area sheet layout changed")
+    season = normalize_season("20" + rows[5][2].removeprefix("Safra "))
+    all_states, national = {}, None
+    for row in rows[8:]:
+        name, value = row[0], row[2]
+        if name == "BRASIL":
+            if national is not None:
+                raise ValueError("duplicate national area")
+            national = value
+        elif isinstance(name, str) and re.fullmatch(r"[A-Z]{2}", name):
+            if name in all_states:
+                raise ValueError("duplicate state area")
+            all_states[name] = value
+    uf = set("AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split())
+    if (set(all_states) != uf or type(national) not in (int, float) or not math.isfinite(national)
+            or any(type(x) not in (int, float) or not math.isfinite(x) or x < 0 for x in all_states.values())
+            or not math.isclose(sum(all_states.values()), national, rel_tol=0, abs_tol=0.15)):
+        raise ValueError("CONAB area UF sum does not reconcile with Brazil")
+    return validate_area_reference({"season": season, "unit": "thousand_hectares", "national_area": national,
+        "state_areas": {state: all_states[state] for state in STATES},
+        **{key: source[key] for key in ("source_url", "retrieved_at", "published_at")},
+        "source_sha256": source["sha256"], "source_locator": "Soja!A:C; ÁREA (Em mil ha); Safra " + rows[5][2][6:]})
+
+
+def area_share(reference: dict, region: str) -> float:
+    """Use the full Brazil denominator, never renormalize monitored states."""
+    validate_area_reference(reference)
+    numerator = sum(reference["state_areas"].values()) if region == "BR" else reference["state_areas"][region]
+    return numerator / reference["national_area"] * 100
 
 
 def observation(season: str, region: str, metric: str, day: date, value: float, *,
