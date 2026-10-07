@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 USDA_PAGE_TITLE = "USDA平衡表"
 SOYBEAN_CROP_PAGE_TITLE = "美豆种植生长"
+CANADA_CANOLA_PAGE_TITLE = "加拿大菜籽种植与生长"
 SOYBEAN_WEATHER_PAGE_TITLE = "大豆天气"
 RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
@@ -95,6 +96,10 @@ NAVIGATION_GROUPS = (
                 "跟踪美国大豆从田间生长到出口执行的周度变化",
                 detail_label="包含",
                 detail_text="种植进度 · 生长状况 · 出口销售 · 出口装船",
+            ),
+            NavigationItem(
+                "canada_canola", CANADA_CANOLA_PAGE_TITLE, CANADA_CANOLA_PAGE_TITLE,
+                "leaf", "比较加拿大三省菜籽播种、收割与优良率的历史同期差异",
             ),
         ),
     ),
