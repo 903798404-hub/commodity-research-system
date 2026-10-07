@@ -8,6 +8,7 @@ from dataclasses import dataclass
 USDA_PAGE_TITLE = "USDA平衡表"
 SOYBEAN_CROP_PAGE_TITLE = "美豆种植生长"
 CANADA_CANOLA_PAGE_TITLE = "加拿大菜籽种植与生长"
+BRAZIL_SOY_PAGE_TITLE = "巴西大豆种植与生长"
 SOYBEAN_WEATHER_PAGE_TITLE = "大豆天气"
 RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
@@ -100,6 +101,10 @@ NAVIGATION_GROUPS = (
             NavigationItem(
                 "canada_canola", CANADA_CANOLA_PAGE_TITLE, CANADA_CANOLA_PAGE_TITLE,
                 "leaf", "比较加拿大三省菜籽播种、收割与优良率的历史同期差异",
+            ),
+            NavigationItem(
+                "brazil_soy", BRAZIL_SOY_PAGE_TITLE, BRAZIL_SOY_PAGE_TITLE,
+                "leaf", "比较巴西大豆全国和主要州播种、收割及全国生长阶段",
             ),
         ),
     ),

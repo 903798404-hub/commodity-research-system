@@ -48,6 +48,7 @@ from home import get_external_app_url, render_home
 from soybean_margin_page import render_soybean_margin_page
 from international_spread_page import render_international_spread_page
 from navigation import (
+    BRAZIL_SOY_PAGE_TITLE,
     CANADA_CANOLA_PAGE_TITLE,
     IMPORT_PROFIT_ROUTE_ID,
     INTERNATIONAL_SPREAD_PAGE_TITLE,
@@ -63,6 +64,7 @@ from navigation import (
 )
 from soybean_weekly_page import render_soybean_weekly_page
 from canada_canola_page import render_canada_canola_page
+from brazil_soy_page import render_brazil_soy_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
 from research_overview_page import render_research_overview
@@ -414,6 +416,8 @@ def render_selected_workspace_page(selected_page: str) -> None:
         render_soybean_weekly_page()
     elif selected_page == CANADA_CANOLA_PAGE_TITLE:
         render_canada_canola_page()
+    elif selected_page == BRAZIL_SOY_PAGE_TITLE:
+        render_brazil_soy_page()
     elif selected_page in WEATHER_PAGE_ROUTES:
         render_weather_research_page(WEATHER_PAGE_ROUTES[selected_page])
     elif selected_page == USDA_PAGE_TITLE:

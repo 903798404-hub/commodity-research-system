@@ -146,6 +146,30 @@ AkShare 更新持有与 FULL DAILY 相同的本机 `filelock.FileLock`，覆盖�
 及源最大日期，只替换国内价差 artifact；只写旧根目录 Parquet 不算页面数据激活。
 旧生产价表基线与页面正在读取的 public package 是独立输入，不能相互冒充。
 
+## 巴西大豆人工交付
+
+巴西使用同一正式Windows入口，`--domain brazil_soy --config <Git外获批配置>`；默认只准备候选，
+`--publish`显式交付。不注册定时任务，数据更新不build、不pull、不重启网站。
+配置为封闭`brazil-soy-delivery-config/1`，字段与加拿大人工交付一致，但policy/policy_sha256只允许brazil_soy。
+固定approved_commit/tree、origin、已有python、独立runtime_root、baseline_root及manifest SHA、
+candidate_path及SHA、source_root、首次workbook_path/SHA（后续null）、精确revision_keys、SSH目标、
+publisher路径/SHA、精确validation image ID、remote_allocation、逐域policy路径及SHA。
+没有独立获批的巴西policy、producer及镜像时不得发布；加拿大政策和生产数据不改变。
+
+基线manifest为`brazil-soy-production-baseline/1`，封闭字段schema_version/source_root/files；
+files精确列出`01_data/processed/brazil_soy/soy_weekly.json`、同域`source_evidence.json`和
+`01_data/update_status/brazil_soy.json`，全部存在或全部明确null。每次从服务器实际基线重新核对身份。
+上传只含delta_contract.json、soy_weekly.json、source_evidence.json；来源证据schema为
+`brazil-soy-source-evidence/1`，每来源字段kind/sha256/bytes_base64/source_url/retrieved_at/published_at。
+首次workbook项后三项null；报告项必须与归档CONAB字节及观测完全一致。
+首次重新读取原始Excel，拒绝历史遗漏和篡改；后续禁止历史删除，修订集合必须与
+`作物季起年/作物季末年/地区/指标/日期`的revision_keys全等。全国阶段不能写成州级数据。
+原始表单元格或嵌入图表由Codex核对，官方参考值不冒充历史记录。
+
+服务器复用原受保护publisher的receive/validate/publish/rollback：独立域备份、基线CAS和原子交换，
+主机生成巴西status。普通重复为NO_CHANGE，稳定数据及网站不变。首次代码和政策启用按独立发布验收。
+用户可简述“更新巴西种植生长，先读取开发和发布文件”，细则见[巴西专项契约](../../07_docs/projects/巴西大豆种植生长契约.md)。
+
 ## Crop 与 FAS 主机发布
 
 上传合同见 `delta_contract.schema.json` 和 `activate_production_data_delta.py` 的严格验证器。

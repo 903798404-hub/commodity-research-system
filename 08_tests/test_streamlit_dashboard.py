@@ -93,6 +93,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         "国内现货（基差与一口价）",
         "美豆周度跟踪",
         "加拿大菜籽种植与生长",
+        "巴西大豆种植与生长",
         "大豆天气",
         "菜籽天气",
         "棕榈油天气",
@@ -126,7 +127,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 14
+    assert cards_markup.count('class="agri-card"') == 15
     assert cards_markup.count('class="agri-card-keyword"') == 20
     assert cards_markup.count('class="agri-card-detail-label"') == 5
     assert "?home_target=" not in cards_markup
@@ -176,6 +177,7 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
     assert [(item.label, item.target, item.external_env) for item in groups["周度跟踪"]] == [
         ("美豆周度跟踪", workspace.SOYBEAN_CROP_PAGE_TITLE, None),
         ("加拿大菜籽种植与生长", workspace.CANADA_CANOLA_PAGE_TITLE, None),
+        ("巴西大豆种植与生长", workspace.BRAZIL_SOY_PAGE_TITLE, None),
     ]
     assert [item.label for item in groups["天气研究"]] == [
         "大豆天气", "菜籽天气", "棕榈油天气", "印度作物天气"

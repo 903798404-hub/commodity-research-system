@@ -872,6 +872,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/pipelines/brazil_soy.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/shared/chart_style.py",
       "role": "runtime_configuration"
     },
@@ -1489,6 +1493,10 @@
     },
     {
       "path": "05_apps/canada_canola_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/brazil_soy_page.py",
       "role": "runtime_configuration"
     },
     {

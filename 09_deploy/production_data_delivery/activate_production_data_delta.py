@@ -57,8 +57,17 @@ FAS_STATUS = "01_data/update_status/soybean_export_sales.json"
 CANOLA_STABLE = "01_data/processed/canada_canola/canola_weekly.json"
 CANOLA_SOURCES = "01_data/processed/canada_canola/source_evidence.json"
 CANOLA_STATUS = "01_data/update_status/canada_canola.json"
+BRAZIL_STABLE = "01_data/processed/brazil_soy/soy_weekly.json"
+BRAZIL_SOURCES = "01_data/processed/brazil_soy/source_evidence.json"
+BRAZIL_STATUS = "01_data/update_status/brazil_soy.json"
 
 DOMAIN_CONTRACTS = {
+    "brazil_soy": {
+        "payloads": {"soy_weekly.json": BRAZIL_STABLE, "source_evidence.json": BRAZIL_SOURCES},
+        "baseline": (BRAZIL_STABLE, BRAZIL_SOURCES, BRAZIL_STATUS),
+        "domain_dir": "01_data/processed/brazil_soy", "status_path": BRAZIL_STATUS,
+        "metadata": ("record_count", "latest_dates", "revision_keys"),
+    },
     "canada_canola": {
         "payloads": {"canola_weekly.json": CANOLA_STABLE,
                      "source_evidence.json": CANOLA_SOURCES},
@@ -235,7 +244,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
             "crop stable baseline must be a complete pair")
     require((files.get(FAS_STABLE) is None) == (files.get(FAS_MANIFEST) is None),
             "FAS stable baseline must include its manifest")
-    if root["domain"] == "canada_canola":
+    if root["domain"] in {"canada_canola", "brazil_soy"}:
         require(len({files[path] is None for path in contract["baseline"]}) == 1,
                 "canola baseline must include data, evidence and status together")
 
@@ -275,6 +284,13 @@ def validate_delta_document(value: object) -> dict[str, object]:
         require(type(metadata["source_manifest_sha256"]) is str
                 and HEX64.fullmatch(metadata["source_manifest_sha256"]),
                 "crop source manifest identity is invalid")
+    elif root["domain"] == "brazil_soy":
+        require(type(metadata["record_count"]) is int and metadata["record_count"] > 0,
+                "Brazil record count is invalid")
+        require(type(metadata["latest_dates"]) is dict and metadata["latest_dates"], "Brazil latest dates invalid")
+        for key, value in metadata["latest_dates"].items():
+            _brazil_revision_keys([key + "/" + value])
+        _brazil_revision_keys(metadata["revision_keys"])
     elif root["domain"] == "canada_canola":
         require(type(metadata["record_count"]) is int and metadata["record_count"] > 0,
                 "canola record count is invalid")
@@ -314,7 +330,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
     require(type(payloads) is dict and set(payloads) == set(contract["payloads"]),
             "delta payload file set is invalid")
     for identity in payloads.values():
-        if root["domain"] == "canada_canola":
+        if root["domain"] in {"canada_canola", "brazil_soy"}:
             _file_identity(identity)
         else:
             _parquet_identity(identity)
@@ -412,6 +428,84 @@ def _canola_observations(candidate_path: Path, baseline_path: Path | None,
     return {"business_changed": bool(changed), "added": len(new.keys() - old.keys()),
             "revised": len(revised), "unchanged": len(old) - len(revised),
             "record_count": len(new), "latest_dates": latest}
+
+
+def _brazil_revision_keys(value: object) -> list[str]:
+    require(type(value) is list and all(type(key) is str for key in value)
+            and len(value) == len(set(value)), "Brazil revision keys are invalid")
+    for key in value:
+        match = re.fullmatch(r"(20[0-9]{2})/(20[0-9]{2})/(BR|TO|MA|PI|BA|MT|MS|GO|MG|SP|PR|SC|RS)/(PLANTED|HARVESTED|EMERGENCE|VEGETATIVE|FLOWERING|GRAIN_FILLING|MATURING|STAGE_HARVEST)/([0-9]{4}-[0-9]{2}-[0-9]{2})", key)
+        require(match is not None, "Brazil revision key is invalid")
+        start, end, region, metric, day = match.groups()
+        require(int(end) == int(start) + 1 and date(int(start), 9, 1) <= date.fromisoformat(day) <= date(int(end), 8, 31),
+                "Brazil revision key season/date invalid")
+        require(metric in {"PLANTED", "HARVESTED"} or region == "BR", "Brazil growth is national only")
+    return value
+
+
+def _brazil_observations(candidate_path: Path, baseline_path: Path | None, evidence: dict, revision_keys: list[str]) -> dict:
+    from agri_research_agent.pipelines.brazil_soy import FIELDS, check_source_url, import_workbook, load_bundle
+    candidate = load_bundle(candidate_path)
+    baseline = load_bundle(baseline_path) if baseline_path is not None else None
+    def key(row):
+        return "/".join(row[field] for field in ("season", "region", "metric", "date"))
+    old = {key(row): row for row in baseline["records"]} if baseline else {}
+    new = {key(row): row for row in candidate["records"]}
+    require(old.keys() <= new.keys(), "Brazil history deletion is forbidden")
+    require(baseline is None or candidate["import_notes"] == baseline["import_notes"], "Brazil historical notes changed")
+    revised = {item for item in old if old[item] != new[item]}
+    require(revised == set(_brazil_revision_keys(revision_keys)), "Brazil revision requires exact explicit keys")
+    changed = [new[item] for item in sorted(new.keys() - old.keys() | revised)]
+    _exact(evidence, {"schema_version", "sources"}, "Brazil source evidence")
+    require(evidence["schema_version"] == "brazil-soy-source-evidence/1" and type(evidence["sources"]) is list,
+            "Brazil source evidence schema invalid")
+    reports, workbooks, total_bytes = {}, {}, 0
+    for item in evidence["sources"]:
+        _exact(item, {"kind", "sha256", "bytes_base64", "source_url", "retrieved_at", "published_at"}, "Brazil source")
+        require(item["kind"] in {"workbook", "report"} and type(item["sha256"]) is str and HEX64.fullmatch(item["sha256"])
+                and type(item["bytes_base64"]) is str and len(item["bytes_base64"]) <= 28_000_000, "Brazil source identity invalid")
+        raw = base64.b64decode(item["bytes_base64"], validate=True)
+        total_bytes += len(raw)
+        require(raw and len(raw) <= 20_000_000 and total_bytes <= 100_000_000 and sha256_bytes(raw) == item["sha256"],
+                "Brazil source byte identity mismatch")
+        if item["kind"] == "report":
+            check_source_url(item["source_url"])
+            _timestamp(item["retrieved_at"], "Brazil retrieval")
+            require(type(item["published_at"]) is str and date.fromisoformat(item["published_at"]) <= date.today(),
+                    "Brazil report publication invalid")
+            source_key = (item["source_url"], item["sha256"], item["retrieved_at"], item["published_at"])
+            require(source_key not in reports, "duplicate Brazil source evidence")
+            reports[source_key] = item
+        else:
+            require(baseline is None and item["source_url"] is None and item["retrieved_at"] is None
+                    and item["published_at"] is None and item["sha256"] not in workbooks,
+                    "Brazil workbook evidence only valid for first import")
+            with tempfile.TemporaryDirectory(prefix="brazil-source-") as temporary:
+                path = Path(temporary) / "source.xlsm"
+                path.write_bytes(raw)
+                workbooks[item["sha256"]] = {key(row): row for row in import_workbook(path)["records"]}
+    required_reports, required_workbooks = set(), set()
+    for row in changed:
+        if row["date_basis"] == "report_cutoff":
+            source_key = (row["source_url"], row["source_sha256"], row["retrieved_at"], row["published_at"])
+            require(source_key in reports, "Brazil observation lacks archived official report")
+            required_reports.add(source_key)
+        else:
+            require(baseline is None and row["source_sha256"] in workbooks, "Brazil workbook requires first-import evidence")
+            expected = workbooks[row["source_sha256"]].get(key(row))
+            require(expected is not None and all(row[field] == expected[field] for field in FIELDS - {"retrieved_at"}),
+                    "Brazil historical workbook observation mismatch")
+            required_workbooks.add(row["source_sha256"])
+    require(set(reports) == required_reports and set(workbooks) == required_workbooks, "Brazil evidence contains missing or unused sources")
+    for digest, rows in workbooks.items():
+        actual = {key(row) for row in changed if row["date_basis"] == "workbook_date" and row["source_sha256"] == digest}
+        require(actual == set(rows), "Brazil first import omitted historical records")
+    latest = {}
+    for row in candidate["records"]:
+        group = "/".join(row[field] for field in ("season", "region", "metric"))
+        latest[group] = max(latest.get(group, ""), row["date"])
+    return {"business_changed": bool(changed), "added": len(new.keys() - old.keys()), "revised": len(revised),
+            "unchanged": len(old) - len(revised), "record_count": len(new), "latest_dates": latest}
 
 
 def _absolute(path: str | Path) -> Path:
@@ -927,6 +1021,11 @@ def _status_document(domain: str, delta: dict[str, object], identities: dict[str
                      semantic: dict[str, object]) -> dict[str, object]:
     metadata = delta["domain_metadata"]
     status = "initialized" if initialized else "updated"
+    if domain == "brazil_soy":
+        return {"schema_version": "brazil-soy-publish-status/1", "status": status, "published": True,
+                "published_at_utc": published_at, "delta_id": delta["delta_id"], "git_head": delta["producer"]["commit"],
+                "stable_sha256": identities[BRAZIL_STABLE]["sha256"], "record_count": semantic["record_count"],
+                "latest_dates": semantic["latest_dates"], "added": semantic["added"], "revised": semantic["revised"]}
     if domain == "canada_canola":
         return {"schema_version": "canada-canola-publish-status/1", "status": status,
                 "published": True, "published_at_utc": published_at,
@@ -1084,6 +1183,9 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             require((delta["run"]["business_status"] == "initialized")
                     == (delta["baseline"]["files"][CANOLA_STABLE] is None),
                     "canola initialization status differs from formal baseline")
+        if delta["domain"] == "brazil_soy":
+            require((delta["run"]["business_status"] == "initialized") == (delta["baseline"]["files"][BRAZIL_STABLE] is None),
+                    "Brazil initialization differs from formal baseline")
         if delta["run"]["business_status"] == "no_change" or all(existing_payloads[target] is not None
                and existing_payloads[target]["sha256"] == delta["payloads"][name]["sha256"]
                for name, target in contract["payloads"].items()):
@@ -1417,7 +1519,13 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
     sys.path.insert(0, "/app/03_src")
     import pandas as pd
     observations = {}
-    if domain == "canada_canola":
+    if domain == "brazil_soy":
+        baseline = Path("/allocation") / BRAZIL_STABLE if delta["baseline"]["files"][BRAZIL_STABLE] is not None else None
+        observations = _brazil_observations(candidate / "soy_weekly.json", baseline,
+            read_json(candidate / "source_evidence.json"), delta["domain_metadata"]["revision_keys"])
+        require(observations["record_count"] == delta["domain_metadata"]["record_count"]
+                and observations["latest_dates"] == delta["domain_metadata"]["latest_dates"], "Brazil candidate metadata mismatch")
+    elif domain == "canada_canola":
         baseline = (Path("/allocation") / CANOLA_STABLE
                     if delta["baseline"]["files"][CANOLA_STABLE] is not None else None)
         observations = _canola_observations(
@@ -1479,7 +1587,7 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         path = candidate / name
         require(sha256_file(path) == identity["sha256"] and path.stat().st_size == identity["size_bytes"],
                 "worker payload byte identity mismatch")
-        if domain != "canada_canola":
+        if domain not in {"canada_canola", "brazil_soy"}:
             require(_schema_fingerprint(path) == identity["parquet_schema_sha256"],
                     "worker Parquet schema identity mismatch")
             import pyarrow.parquet as pq

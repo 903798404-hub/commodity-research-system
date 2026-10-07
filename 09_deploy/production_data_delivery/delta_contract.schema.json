@@ -20,7 +20,7 @@
     "status": {"const": "CANDIDATE"},
     "delta_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
     "generated_at_utc": {"type": "string", "minLength": 1},
-    "domain": {"enum": ["soybean_crop_progress", "soybean_export_sales", "canada_canola"]},
+    "domain": {"enum": ["soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy"]},
     "producer": {
       "type": "object",
       "additionalProperties": false,
@@ -301,6 +301,114 @@
             ],
             "properties": {
               "canola_weekly.json": {
+                "$ref": "#/$defs/fileIdentity"
+              },
+              "source_evidence.json": {
+                "$ref": "#/$defs/fileIdentity"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain": {
+            "const": "brazil_soy"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "baseline": {
+            "properties": {
+              "files": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "01_data/processed/brazil_soy/soy_weekly.json",
+                  "01_data/processed/brazil_soy/source_evidence.json",
+                  "01_data/update_status/brazil_soy.json"
+                ],
+                "properties": {
+                  "01_data/processed/brazil_soy/soy_weekly.json": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "$ref": "#/$defs/fileIdentity"
+                      }
+                    ]
+                  },
+                  "01_data/processed/brazil_soy/source_evidence.json": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "$ref": "#/$defs/fileIdentity"
+                      }
+                    ]
+                  },
+                  "01_data/update_status/brazil_soy.json": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "$ref": "#/$defs/fileIdentity"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "domain_metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "record_count",
+              "latest_dates",
+              "revision_keys"
+            ],
+            "properties": {
+              "record_count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "latest_dates": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": false,
+                "patternProperties": {
+                  "^20[0-9]{2}/20[0-9]{2}/(BR|TO|MA|PI|BA|MT|MS|GO|MG|SP|PR|SC|RS)/(PLANTED|HARVESTED|EMERGENCE|VEGETATIVE|FLOWERING|GRAIN_FILLING|MATURING|STAGE_HARVEST)$": {
+                    "type": "string",
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                  }
+                }
+              },
+              "revision_keys": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^20[0-9]{2}/20[0-9]{2}/(BR|TO|MA|PI|BA|MT|MS|GO|MG|SP|PR|SC|RS)/(PLANTED|HARVESTED|EMERGENCE|VEGETATIVE|FLOWERING|GRAIN_FILLING|MATURING|STAGE_HARVEST)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                }
+              }
+            }
+          },
+          "payloads": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "soy_weekly.json",
+              "source_evidence.json"
+            ],
+            "properties": {
+              "soy_weekly.json": {
                 "$ref": "#/$defs/fileIdentity"
               },
               "source_evidence.json": {
