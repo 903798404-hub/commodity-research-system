@@ -8,6 +8,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from agri_research_agent.shared.chart_style import difference_cell_style
+
 from agri_research_agent.pipelines.canada_canola import (
     METRICS, PROVINCES, SOURCE_URLS, STAGES, STABLE_RELATIVE_PATH,
     compare_metric, comparison_table, load_bundle, observations_frame,
@@ -39,13 +41,7 @@ def _table(table: pd.DataFrame) -> None:
     compact["历史同期均值（%）"] = [f"{value}（{samples}）" if value != "—" else "—"
                                      for value, samples in zip(compact["历史同期均值（%）"], table["有效样本"])]
     compact.columns = ["指标", "日期", "最新", "较上次", "去年同期", "同期均值", "较均值"]
-    def mean_difference(value: str) -> str:
-        if value == "—" or float(value) == 0:
-            return ""
-        return ("color: #A6342B; background-color: #FCE8E6; font-weight: bold;"
-                if float(value) > 0 else
-                "color: #174C91; background-color: #E5EFFB; font-weight: bold;")
-    st.dataframe(compact.style.map(mean_difference, subset=["较均值"]), hide_index=True, width="stretch",
+    st.dataframe(compact.style.map(difference_cell_style, subset=["较均值"]), hide_index=True, width="stretch",
                  column_config={name: st.column_config.TextColumn(width="small") for name in compact.columns})
 
 

@@ -872,6 +872,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/shared/chart_style.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/pipelines/import_profit_daily.py",
       "role": "runtime_configuration"
     },

@@ -26,12 +26,12 @@ from agri_research_agent.market_data.public_current import (
 from agri_research_agent.market_data.activated_runtime import resolve_public_data_root
 from agri_research_agent.research_data.canonical_spreads import CanonicalSpreadError
 from agri_research_agent.research_data.three_oil_v1 import load_three_oil_v1
+from agri_research_agent.shared.chart_style import CURRENT_YEAR_COLOR
 
 
 PAGE_TITLE = "国际价差"
 OIL_OPTIONS = {"棕榈油": "palm", "豆油": "soy", "菜油": "rape"}
 PUBLIC_RUNTIME_ROOT_ENV = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
-CURRENT_YEAR_COLOR = "#C1493F"
 MONTH_TICKS = [datetime(2000, month, 1) for month in range(1, 13)]
 MONTH_LABELS = [f"{month}月" for month in range(1, 13)]
 GRID_COLUMN_COUNT = 3
