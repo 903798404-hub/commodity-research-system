@@ -5,6 +5,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from openpyxl import Workbook
 from streamlit.testing.v1 import AppTest
@@ -171,7 +172,22 @@ def test_prepare_update_requires_matching_archived_bytes(tmp_path):
         update.prepare_update(ctx, baseline, updates)
 
 
-def test_page_two_progress_charts_and_growth_remains_national(tmp_path, monkeypatch):
+def test_region_overview_preserves_zero_and_excludes_stale_values():
+    frame = soy.observations_frame(bundle(observation(), observation(region="MT", value=14.36),
+        observation(region="TO", value=0), observation("2026-09-25", 3, region="PR")))
+    table = soy.regional_comparison_table(frame, "PLANTED", "2026/2027").set_index("地区")
+    assert len(table) == 13
+    assert table.loc[soy.REGIONS["BR"], "最新"] == 9.4
+    assert table.loc[soy.REGIONS["MT"], "最新"] == 14.36
+    assert table.loc[soy.REGIONS["TO"], "最新"] == 0
+    assert pd.isna(table.loc[soy.REGIONS["PR"], "最新"])
+    assert table.loc[soy.REGIONS["PR"], "日期"] == "2026-09-25"
+    assert soy.regional_comparison_table(frame, "HARVESTED", "2026/2027")["最新"].isna().all()
+    with pytest.raises(ValueError, match="planting and harvest"):
+        soy.regional_comparison_table(frame, "VEGETATIVE", "2026/2027")
+
+
+def test_page_metric_tabs_show_all_states_and_growth_remains_national(tmp_path, monkeypatch):
     sys.path.insert(0, str(ROOT / "05_apps"))
     monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(tmp_path))
     data = bundle(observation(), observation(region="MT", value=14.36),
@@ -181,13 +197,18 @@ def test_page_two_progress_charts_and_growth_remains_national(tmp_path, monkeypa
     atomic_write_json(tmp_path / soy.STABLE_RELATIVE_PATH, data)
     app = AppTest.from_string("from brazil_soy_page import render_brazil_soy_page\nrender_brazil_soy_page()", default_timeout=30).run()
     assert not app.exception
+    assert [tab.label for tab in app.tabs] == ["播种进度", "收割进度", "生长进度"]
     assert len(app.get("plotly_chart")) == 3
-    assert app.selectbox[1].value == "2026/2027"
-    national = app.dataframe[1].value.copy()
-    app.selectbox[0].set_value("MT").run()
+    assert app.selectbox[0].value == "2026/2027"
+    planting = app.dataframe[0].value.copy()
+    assert len(planting) == 13 and planting.iloc[0]["最新"] == "9.4"
+    assert planting.loc[planting["地区"] == soy.REGIONS["MT"], "最新"].iloc[0] == "14.4"
+    assert len(app.dataframe[1].value) == 13
+    national = app.dataframe[2].value.copy()
+    next(item for item in app.selectbox if item.key == "brazil-region-PLANTED").set_value("MT").run()
     assert not app.exception
-    assert app.dataframe[1].value.equals(national)
-    assert app.dataframe[0].value.iloc[0]["最新"] == "14.4"
+    assert app.dataframe[0].value.equals(planting)
+    assert app.dataframe[2].value.equals(national)
 
 
 def make_official(path):

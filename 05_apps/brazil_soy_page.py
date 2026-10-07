@@ -9,7 +9,8 @@ import streamlit as st
 
 from agri_research_agent.pipelines.brazil_soy import (
     METRICS, REGIONS, SOURCE_URL, STAGES, STABLE_RELATIVE_PATH, compare_metric,
-    comparison_table, current_season, load_bundle, observations_frame, seasonal_figure, sha256_file,
+    comparison_table, current_season, load_bundle, observations_frame, regional_comparison_table,
+    seasonal_figure, sha256_file,
 )
 from agri_research_agent.shared.chart_style import difference_cell_style
 
@@ -32,15 +33,67 @@ def read_data(path: str, identity: str) -> dict:
 
 def _table(table: pd.DataFrame) -> None:
     display = table.copy()
-    for column in ("最新", "较上次", "上季同期", "同期均值", "较均值"):
-        display[column] = display[column].map(lambda x: "—" if pd.isna(x) else f"{x:+.1f}" if column in {"较上次", "较均值"} else f"{x:.1f}")
-    st.dataframe(display.style.map(difference_cell_style, subset=["较均值"]), hide_index=True, width="stretch",
+    for column in ("最新", "较上次", "上季同期", "较上季", "同期均值", "较均值"):
+        if column in display:
+            display[column] = display[column].map(lambda x: "—" if pd.isna(x) else f"{x:+.1f}" if column in {"较上次", "较上季", "较均值"} else f"{x:.1f}")
+    styled = display.style.map(difference_cell_style, subset=[c for c in ("较上季", "较均值") if c in display])
+    if "地区" in display:
+        styled = styled.apply(lambda row: ["font-weight:700;" if row.name == 0 else "" for _ in row], axis=1)
+    st.dataframe(styled, hide_index=True, width="stretch", height=len(display) * 35 + 38,
                  column_config={column: st.column_config.TextColumn(width="small") for column in display.columns})
+
+
+def _history_years(frame: pd.DataFrame, season: str, key: str) -> list[str]:
+    history = sorted(set(frame["season"]) - {season}, reverse=True)
+    return st.multiselect("历史作物季（2022/2023起默认显示）", history,
+        default=[s for s in history if "2022/2023" <= s < season], key=key)
+
+
+def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> None:
+    st.subheader(label)
+    dates = frame.loc[(frame["season"] == season) & (frame["metric"] == metric), "date"]
+    if dates.empty:
+        st.info(f"{season}季暂无已核实的{label}；可展开历史曲线查看往季。")
+    else:
+        st.caption(f"数据截至：{dates.max():%Y-%m-%d} · 全国与主要12州")
+    _table(regional_comparison_table(frame, metric, season))
+    st.caption("全国汇总直接采用 CONAB 主要12州合计口径，现代报告覆盖约96%种植面积。最新列只展示本期观测；日期较早的州不沿用旧值。")
+    st.caption("数值为%；较上次、较上季、较均值为百分点。较均值红色表示高于、蓝色表示低于，不能直接判断单产或价格方向。")
+    st.caption(MATCHING_NOTE + "表格官方参考均值与图中的历史计算均值分开标示。")
+    with st.expander("历史曲线对比"):
+        region = st.selectbox("历史曲线地区", list(REGIONS), format_func=REGIONS.get, key=f"brazil-region-{metric}")
+        extra = _history_years(frame, season, f"brazil-years-{metric}")
+        st.plotly_chart(seasonal_figure(frame, region, metric, season, extra), width="stretch", key=f"brazil-history-{metric}")
+
+
+def _growth_tab(frame: pd.DataFrame, season: str) -> None:
+    st.subheader("全国生长进度")
+    st.caption("此处仅为全国数据。官方阶段按已播面积加权，表示已播作物所处阶段；收割表示已收割部分。")
+    stages = frame.loc[(frame["region"] == "BR") & frame["metric"].isin(STAGES)]
+    dates = stages.loc[stages["season"] == season, "date"]
+    if dates.empty:
+        st.info(f"{season}季暂无已核实的全国生长阶段数据；不使用旧季数值代替。")
+    else:
+        st.caption(f"全国阶段数据截至：{dates.max():%Y-%m-%d}")
+    stage_table = comparison_table(frame, "BR", season, stages=True)
+    if not dates.empty:
+        stale = stage_table["日期"] != dates.max().strftime("%Y-%m-%d")
+        stage_table.loc[stale, ["最新", "较上次", "上季同期", "同期均值", "较均值"]] = None
+        stage_table.loc[stale, "日期"] = "—"
+    _table(stage_table)
+    st.caption("各阶段不补零、不强制合计100%；阶段占比不能当作累计完成率或优良率。")
+    st.caption(MATCHING_NOTE)
+    with st.expander("全国阶段历史曲线"):
+        available = set(stages.loc[stages["season"] == season, "metric"])
+        preferred = "VEGETATIVE" if "VEGETATIVE" in available else "FLOWERING"
+        stage = st.selectbox("全国阶段历史对比", list(STAGES), format_func=STAGES.get, index=list(STAGES).index(preferred))
+        extra = _history_years(frame, season, "brazil-years-growth")
+        st.plotly_chart(seasonal_figure(frame, "BR", stage, season, extra), width="stretch", key="brazil-national-stage")
 
 
 def render_brazil_soy_page() -> None:
     st.title("巴西大豆种植与生长")
-    st.caption("播种与收割查看全国和主要12州；生长阶段仅为全国数据。按作物季比较历史进度。")
+    st.caption("播种、收割分别查看全国及主要12州的同期对比；生长阶段仅为全国数据。按作物季比较历史进度。")
     path = data_path()
     if not path.is_file():
         st.info("巴西历史数据尚未导入。")
@@ -51,68 +104,26 @@ def render_brazil_soy_page() -> None:
     except (ValueError, OSError, KeyError) as exc:
         st.error(f"巴西数据暂不可读：{exc}")
         return
-    with st.container(key="brazil-controls"):
-        region_col, season_col = st.columns([2, 1])
-        with region_col:
-            region = st.selectbox("地区（播种 / 收割）", list(REGIONS), format_func=REGIONS.get)
-        with season_col:
-            seasons = sorted(set(frame["season"]) | {current_season()}, reverse=True)
-            season = st.selectbox("作物季", seasons, index=seasons.index(current_season()))
-    st.subheader("最新进度与历史同期")
-    _table(comparison_table(frame, region, season))
-    st.caption("数值为%；较上次、较均值为百分点。红色高于均值、蓝色低于均值，不能直接判断单产或价格方向。官方参考均值与图中的历史计算均值分开标示。")
-    for metric, label in METRICS.items():
-        item = compare_metric(frame, region, metric, season)
-        if not item["current"]:
-            st.caption(f"{label}：{season}季暂无有效观测。")
-        elif item["previous_days"] is not None and item["previous_days"] != 7:
-            st.caption(f"{label}较上次变化间隔{item['previous_days']}天。")
-    history = sorted(set(frame["season"]) - {season}, reverse=True)
-    extra = st.multiselect("历史作物季（2022/2023起默认显示）", history,
-        default=[s for s in history if "2022/2023" <= s < season])
-    st.html("""<style>@media(max-width:900px){
-        .st-key-brazil-history-charts [data-testid="stHorizontalBlock"]{flex-direction:column;}
-        .st-key-brazil-history-charts [data-testid="stColumn"]{width:100%!important;flex:1 1 100%!important;}
-        }</style>""")
-    with st.container(key="brazil-history-charts"):
-        for column, (metric, label) in zip(st.columns(2, gap="small"), METRICS.items()):
-            with column:
-                st.markdown(f"#### {label}")
-                latest = compare_metric(frame, region, metric, season)["current"]
-                st.caption(f"最新观测：{latest['date']:%Y-%m-%d} · {latest['value']:.1f}%" if latest else f"{season}季暂无观测，显示已有历史。")
-                st.plotly_chart(seasonal_figure(frame, region, metric, season, extra), width="stretch", key=f"brazil-history-{metric}")
-    st.caption(MATCHING_NOTE)
-
-    st.subheader("全国生长进度")
-    st.caption("此处始终为全国数据，不随州选择改变。官方阶段按已播面积加权，表示已播作物所处阶段；收割表示已收割部分。")
-    stages = frame.loc[(frame["region"] == "BR") & frame["metric"].isin(STAGES)]
-    dates = stages.loc[stages["season"] == season, "date"]
-    if dates.empty:
-        st.info(f"{season}季暂无已核实的全国生长阶段数据；不使用旧季数值代替。")
-    else:
-        latest_date = dates.max()
-        st.caption(f"全国阶段数据截至：{latest_date:%Y-%m-%d}")
-    stage_table = comparison_table(frame, "BR", season, stages=True)
-    # A stage missing at the latest common cutoff must not borrow a stale earlier stage value.
-    if not dates.empty:
-        stale = stage_table["日期"] != dates.max().strftime("%Y-%m-%d")
-        stage_table.loc[stale, ["最新", "较上次", "上季同期", "同期均值", "较均值"]] = None
-        stage_table.loc[stale, "日期"] = "—"
-    _table(stage_table)
-    available = set(stages.loc[stages["season"] == season, "metric"])
-    preferred = "VEGETATIVE" if "VEGETATIVE" in available else "FLOWERING"
-    stage = st.selectbox("全国阶段历史对比", list(STAGES), format_func=STAGES.get, index=list(STAGES).index(preferred))
-    st.plotly_chart(seasonal_figure(frame, "BR", stage, season, extra), width="stretch", key="brazil-national-stage")
-    st.caption("各阶段不补零、不强制合计100%；阶段占比不能当作累计完成率或优良率。生长曲线为单个阶段的历史比较。")
+    seasons = sorted(set(frame["season"]) | {current_season()}, reverse=True)
+    season = st.selectbox("作物季", seasons, index=seasons.index(current_season()))
+    planting, harvest, growth = st.tabs(["播种进度", "收割进度", "生长进度"])
+    with planting:
+        _progress_tab(frame, "PLANTED", METRICS["PLANTED"], season)
+    with harvest:
+        _progress_tab(frame, "HARVESTED", METRICS["HARVESTED"], season)
+    with growth:
+        _growth_tab(frame, season)
 
     with st.expander("来源与取数说明"):
         st.markdown(f"[查看 CONAB 官方周报]({SOURCE_URL})")
         audit = []
         for metric, label in (METRICS | STAGES).items():
-            item = compare_metric(frame, "BR" if metric in STAGES else region, metric, season)
-            current = item["current"]
-            if current:
-                audit.append({"指标": label, "作物季": season, "数据日期": current["date"].strftime("%Y-%m-%d"),
+            for region in (REGIONS if metric in METRICS else {"BR": REGIONS["BR"]}):
+                item = compare_metric(frame, region, metric, season)
+                current = item["current"]
+                if not current:
+                    continue
+                audit.append({"指标": label, "地区": REGIONS[region], "作物季": season, "数据日期": current["date"].strftime("%Y-%m-%d"),
                     "日期依据": "历史文件日期" if current["date_basis"] == "workbook_date" else "报告统计截止日",
                     "发布日期": current["published_at"] or "未逐期核实", "来源链接": current["source_url"],
                     "原始位置": current["source_locator"], "文件SHA256": current["source_sha256"],

@@ -277,6 +277,29 @@ def comparison_table(frame: pd.DataFrame, region: str, season: str, *, stages: b
     return pd.DataFrame(rows)
 
 
+def regional_comparison_table(frame: pd.DataFrame, metric: str, season: str) -> pd.DataFrame:
+    """Show all regions at one report cutoff; never carry stale state values forward."""
+    if metric not in METRICS:
+        raise ValueError("regional comparison accepts planting and harvest only")
+    dates = frame.loc[(frame["season"] == season) & (frame["metric"] == metric), "date"]
+    cutoff = dates.max() if not dates.empty else None
+    rows = []
+    for region, name in REGIONS.items():
+        comparison = compare_metric(frame, region, metric, season)
+        current, last, mean = comparison["current"], comparison["last_season"], comparison["mean"]
+        fresh = current is not None and current["date"] == cutoff
+        rows.append({"地区": name, "日期": current["date"].strftime("%Y-%m-%d") if current else "—",
+            "最新": current["value"] if fresh else None,
+            "较上次": comparison["previous_change"] if fresh else None,
+            "上季同期": last["value"] if fresh and last else None,
+            "较上季": current["value"] - last["value"] if fresh and last else None,
+            "同期均值": mean if fresh else None,
+            "较均值": current["value"] - mean if fresh and mean is not None else None,
+            "均值依据": ("官方五季" if comparison["reference_label"] == "官方五季均值"
+                         else f"{len(comparison['samples'])}/5季") if fresh else "—"})
+    return pd.DataFrame(rows)
+
+
 def seasonal_figure(frame: pd.DataFrame, region: str, metric: str, season: str, extra: list[str]):
     import plotly.graph_objects as go
     series = frame.loc[(frame["region"] == region) & (frame["metric"] == metric)]
