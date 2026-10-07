@@ -33,6 +33,9 @@ def read_data(path: str, identity: str) -> dict:
 
 def _table(table: pd.DataFrame) -> None:
     display = table.copy()
+    if "地区" in display:
+        display = display[["地区", "最新", "上季同期", "同期均值", "较上季", "较均值", "均值依据"]]
+        display.loc[display.index[0], "地区"] = "全国汇总"
     for column in ("最新", "较上次", "上季同期", "较上季", "同期均值", "较均值"):
         if column in display:
             display[column] = display[column].map(lambda x: "—" if pd.isna(x) else f"{x:+.1f}" if column in {"较上次", "较上季", "较均值"} else f"{x:.1f}")
@@ -40,7 +43,8 @@ def _table(table: pd.DataFrame) -> None:
     if "地区" in display:
         styled = styled.apply(lambda row: ["font-weight:700;" if row.name == 0 else "" for _ in row], axis=1)
     st.dataframe(styled, hide_index=True, width="stretch", height=len(display) * 35 + 38,
-                 column_config={column: st.column_config.TextColumn(width="small") for column in display.columns})
+                 column_config={column: st.column_config.TextColumn(width="medium" if column == "地区" else "small")
+                                for column in display.columns})
 
 
 def _history_years(frame: pd.DataFrame, season: str, key: str) -> list[str]:
@@ -56,9 +60,13 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str) -> 
         st.info(f"{season}季暂无已核实的{label}；可展开历史曲线查看往季。")
     else:
         st.caption(f"数据截至：{dates.max():%Y-%m-%d} · 全国与主要12州")
-    _table(regional_comparison_table(frame, metric, season))
+    overview = regional_comparison_table(frame, metric, season)
+    _table(overview)
+    stale = overview.loc[overview["最新"].isna() & (overview["日期"] != "—")]
+    if not stale.empty:
+        st.caption("本期缺报，最新列留空：" + "；".join(f"{row['地区']}最近观测为{row['日期']}" for _, row in stale.iterrows()))
     st.caption("全国汇总直接采用 CONAB 主要12州合计口径，现代报告覆盖约96%种植面积。最新列只展示本期观测；日期较早的州不沿用旧值。")
-    st.caption("数值为%；较上次、较上季、较均值为百分点。较均值红色表示高于、蓝色表示低于，不能直接判断单产或价格方向。")
+    st.caption("数值为%；较上季、较均值为百分点。较均值红色表示高于、蓝色表示低于，不能直接判断单产或价格方向。")
     st.caption(MATCHING_NOTE + "表格官方参考均值与图中的历史计算均值分开标示。")
     with st.expander("历史曲线对比"):
         region = st.selectbox("历史曲线地区", list(REGIONS), format_func=REGIONS.get, key=f"brazil-region-{metric}")
