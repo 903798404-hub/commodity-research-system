@@ -868,6 +868,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/pipelines/canada_canola.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/pipelines/import_profit_daily.py",
       "role": "runtime_configuration"
     },
@@ -1477,6 +1481,10 @@
     },
     {
       "path": "05_apps/international_spread_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/canada_canola_page.py",
       "role": "runtime_configuration"
     },
     {

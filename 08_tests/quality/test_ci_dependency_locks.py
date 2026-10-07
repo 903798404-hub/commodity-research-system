@@ -11,6 +11,18 @@ ROOT = Path(__file__).resolve().parents[2]
 LOCKS = ROOT / "04_scripts/quality/locks"
 
 
+def test_windows_installs_and_tests_use_isolated_environment():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/trusted-main-admission.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["windows"]["steps"]
+    create = next(i for i, step in enumerate(steps) if "-m venv" in step.get("run", ""))
+    install = next(i for i, step in enumerate(steps) if "-m pip install" in step.get("run", ""))
+    execute = next(i for i, step in enumerate(steps) if "--platform windows" in step.get("run", ""))
+    assert create < install < execute
+    assert '--system-site-packages' not in steps[create]["run"]
+    assert 'windows-ci-venv/Scripts' in steps[create]["run"] and 'GITHUB_PATH' in steps[create]["run"]
+    assert 'sys.prefix != sys.base_prefix' in steps[install]["run"]
+
+
 def _entries(path):
     text = path.read_text(encoding="utf-8")
     matches = list(re.finditer(r"(?m)^([a-zA-Z0-9_.-]+)==([^ ;\\]+).*?$", text))

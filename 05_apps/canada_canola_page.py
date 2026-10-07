@@ -39,7 +39,13 @@ def _table(table: pd.DataFrame) -> None:
     compact["历史同期均值（%）"] = [f"{value}（{samples}）" if value != "—" else "—"
                                      for value, samples in zip(compact["历史同期均值（%）"], table["有效样本"])]
     compact.columns = ["指标", "日期", "最新", "较上次", "去年同期", "同期均值", "较均值"]
-    st.dataframe(compact, hide_index=True, width="stretch",
+    def mean_difference(value: str) -> str:
+        if value == "—" or float(value) == 0:
+            return ""
+        return ("color: #A6342B; background-color: #FCE8E6; font-weight: bold;"
+                if float(value) > 0 else
+                "color: #174C91; background-color: #E5EFFB; font-weight: bold;")
+    st.dataframe(compact.style.map(mean_difference, subset=["较均值"]), hide_index=True, width="stretch",
                  column_config={name: st.column_config.TextColumn(width="small") for name in compact.columns})
 
 
@@ -79,7 +85,8 @@ def render_canada_canola_page() -> None:
     metric = st.radio("对比指标", list(METRICS), index=1, format_func=METRICS.get, horizontal=True)
     historical_years = sorted(set(frame.loc[(frame["province"] == province) & (frame["metric"] == metric), "year"])
                               - {year, year - 1}, reverse=True)
-    extra = st.multiselect("其他历史年份（可选）", historical_years, default=[])
+    extra = st.multiselect("其他历史年份（2022年起默认显示）", historical_years,
+                           default=[y for y in historical_years if 2022 <= y < year])
     st.plotly_chart(seasonal_figure(frame, province, metric, year, extra), width="stretch")
     st.caption(MATCHING_NOTE)
 

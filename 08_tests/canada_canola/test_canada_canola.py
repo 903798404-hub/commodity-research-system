@@ -93,11 +93,21 @@ def test_chart_has_no_forecast_or_extrapolated_current_points():
     frame = observations_frame(bundle(observation("2026-09-08", 15), observation("2025-09-02", 20),
                                      observation("2025-09-16", 60)))
     figure = seasonal_figure(frame, "MB", "HARVESTED", 2026, [])
-    trace = next(x for x in figure.data if x.name == "2026年")
+    trace = next(x for x in figure.data if x.name == "2026年（当年）")
     assert len(trace.x) == 1
     assert trace.customdata[0] == "2026-09-08"
     mean = next(x for x in figure.data if x.name == "前五年同期均值")
     assert list(mean.customdata) == [1, 1]
+
+
+def test_history_colors_stay_stable_and_current_is_drawn_on_top():
+    frame = observations_frame(bundle(*(observation(f"{y}-09-08", 15) for y in range(2021, 2027))))
+    first = seasonal_figure(frame, "MB", "HARVESTED", 2026, [2022, 2023, 2024])
+    second = seasonal_figure(frame, "MB", "HARVESTED", 2026, [2021, 2022, 2023, 2024])
+    assert {x.name: x.line.color for x in first.data}.items() <= {x.name: x.line.color for x in second.data}.items()
+    assert first.data[-1].name == "2026年（当年）"
+    assert first.data[-1].opacity == 1
+    assert all(x.opacity < 1 for x in first.data if x.name.endswith("年"))
 
 
 def test_merge_is_idempotent_and_revision_requires_explicit_choice():
@@ -203,7 +213,8 @@ def test_real_workspace_route_renders_canada_and_switches_province(tmp_path, mon
     stable = root / STABLE_RELATIVE_PATH
     stable.parent.mkdir(parents=True)
     atomic_write_json(stable, bundle(observation(), observation(value=9, province="SK"),
-                                    observation(value=40, province="AB")))
+                                    observation(value=40, province="AB"),
+                                    *(observation(f"{y}-09-08", 20, province="SK") for y in range(2021, 2026))))
     monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(root))
     apps = str(ROOT / "05_apps")
     if apps not in sys.path:
@@ -214,6 +225,9 @@ def test_real_workspace_route_renders_canada_and_switches_province(tmp_path, mon
     assert not app.exception
     assert app.title[0].value == "加拿大菜籽种植与生长"
     assert app.radio[0].options == ["萨省（55%）", "阿尔伯塔省（28%）", "曼省（16%）"]
+    assert set(app.multiselect[0].value) == {2022, 2023, 2024}
+    styles = app.dataframe[0].proto.arrow_data.styler.styles
+    assert "background-color" in styles and "#E5EFFB" in styles
     app.radio[0].set_value("MB").run()
     assert not app.exception
     assert app.dataframe[0].value.iloc[1]["最新"] == "15.0"

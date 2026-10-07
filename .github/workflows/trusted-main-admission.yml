@@ -287,8 +287,13 @@ jobs:
         python-version: '3.12'
         cache: pip
         cache-dependency-path: candidate/04_scripts/quality/locks/windows-py312.txt
+    - name: Create isolated Windows test environment
+      run: |
+        python -I -m venv "$RUNNER_TEMP/windows-ci-venv"
+        echo "$RUNNER_TEMP/windows-ci-venv/Scripts" >> "$GITHUB_PATH"
     - name: Install development dependencies
       run: |
+        python -I -c "import sys; assert sys.prefix != sys.base_prefix, 'CI dependencies require a virtual environment'"
         python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/windows-py312.txt
         python -I -m pip check
     - uses: actions/download-artifact@v4

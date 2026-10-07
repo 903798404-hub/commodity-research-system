@@ -300,17 +300,28 @@ def seasonal_figure(frame: pd.DataFrame, province: str, metric: str, year: int, 
     figure = go.Figure()
     series = frame.loc[(frame["province"] == province) & (frame["metric"] == metric)]
     axis = lambda stamp: stamp.replace(year=2000)
+    # International spread uses Streamlit's categorical palette and this current-year red.
+    # Anchor colors to calendar years so selecting another history never recolors a year.
+    palette = ("#0068C9", "#83C9FF", "#FF2B2B", "#FFABAB", "#29B09D",
+               "#7DEFA1", "#FF8700", "#FFD16A", "#6D3FC0", "#D5DAE5")
+    current_trace = None
     for y in sorted(set(extra_years) | {year - 1, year}):
         rows = series.loc[series["year"] == y]
         if rows.empty:
             continue
         current = y == year
-        figure.add_trace(go.Scatter(x=[axis(x) for x in rows["date"]], y=rows["value"],
-            name=f"{y}年", mode="lines+markers", connectgaps=False,
-            line={"color": "#2457A7" if current else "#667085" if y == year - 1 else "#B6C1CE",
-                  "width": 3 if current else 1.5}, marker={"size": 6 if current else 3},
+        trace = go.Scatter(x=[axis(x) for x in rows["date"]], y=rows["value"],
+            name=f"{y}年" + ("（当年）" if current else ""),
+            mode="lines+markers" if current else "lines", connectgaps=False,
+            opacity=1 if current else 0.55,
+            line={"color": "#C1493F" if current else palette[(y - 2021) % len(palette)],
+                  "width": 3.4 if current else 2}, marker={"size": 6},
             customdata=rows["date"].dt.strftime("%Y-%m-%d"),
-            hovertemplate="%{customdata}<br>%{y:.1f}%<extra>%{fullData.name}</extra>"))
+            hovertemplate="%{customdata}<br>%{y:.1f}%<extra>%{fullData.name}</extra>")
+        if current:
+            current_trace = trace
+        else:
+            figure.add_trace(trace)
     # Weekly anchors stop at the historical season's bounds; each point has its own sample count.
     history = series.loc[series["year"].between(year - 5, year - 1)]
     anchors = sorted({axis(x).normalize() for x in history["date"]})
@@ -322,10 +333,12 @@ def seasonal_figure(frame: pd.DataFrame, province: str, metric: str, year: int, 
         counts.append(len(samples))
     if anchors:
         figure.add_trace(go.Scatter(x=anchors, y=means, name="前五年同期均值", mode="lines",
-            line={"color": "#D69A32", "width": 2, "dash": "dash"}, connectgaps=False,
+            line={"color": "#667085", "width": 2, "dash": "dash"}, connectgaps=False,
             customdata=counts, hovertemplate="%{x|%m-%d}<br>%{y:.1f}%<br>有效样本 %{customdata}/5<extra></extra>"))
+    if current_trace is not None:
+        figure.add_trace(current_trace)
     figure.update_layout(height=420, margin=dict(l=15, r=15, t=15, b=15),
         template="plotly_white", legend=dict(orientation="h", y=1.12),
-        xaxis=dict(title="季节日期", tickformat="%m-%d"),
-        yaxis=dict(title="%", range=[0, 100]), hovermode="closest")
+        xaxis=dict(title="季节日期", tickformat="%m-%d", gridcolor="#E1E5E9"),
+        yaxis=dict(title="%", range=[0, 100], gridcolor="#E1E5E9"), hovermode="closest")
     return figure
