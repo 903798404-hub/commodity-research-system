@@ -1453,7 +1453,9 @@
         "04_scripts/automation/run_production_data_delta_windows.py",
         "09_deploy/production_data_delivery/activate_production_data_delta.py",
         "09_deploy/production_data_delivery/delta_contract.schema.json",
-        "09_deploy/production_data_delivery/README.md"
+        "09_deploy/production_data_delivery/README.md",
+        "09_deploy/spread_runtime/Dockerfile.spread-runtime",
+        "02_configs/runtime_contracts/spread-production-runtime.json"
       ],
       "forbidden_paths": ["09_deploy/runtime_identity", "02_configs/production_runtime_trust.json"],
       "required_tests": [
@@ -1462,7 +1464,8 @@
         "08_tests/test_production_data_delta.py", "08_tests/test_production_data_delta_activation.py",
         "08_tests/canada_canola/test_delivery.py", "08_tests/brazil_soy/test_brazil_soy_delivery.py",
         "08_tests/test_streamlit_dashboard.py", "08_tests/canada_canola/test_canada_canola.py",
-        "08_tests/canada_canola/test_canada_canola_fetch.py"
+        "08_tests/canada_canola/test_canada_canola_fetch.py",
+        "08_tests/test_spread_runtime_contract.py"
       ],
       "capabilities": ["Source-backed CGC canola export monitoring and manually triggered evidence-bound data delivery"],
       "boundary_notes": "Existing workbench integration; route ID and crop consumer retained. Raw StatCan ZIP remains read-only. No oil, prices, sales commitments or invented destination data. Manual execution uses an independent approved clean detached control clone, owned producer runtime, exact server baseline and protected host publisher. Shared publisher impact tests are additive; other domain contracts remain unchanged. No web-request acquisition or scheduler installation. Registration and main admission do not authorize deployment, production data writes, policy installation or runtime activation. Release must preserve the latest soybean and main-page open-interest changes rather than replace them with the earlier preview baseline."

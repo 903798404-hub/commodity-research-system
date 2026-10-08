@@ -1508,9 +1508,14 @@ def test_canola_exports_registration_preserves_manual_delivery_and_consumer_boun
         '08_tests/canada_canola/test_delivery.py', '08_tests/brazil_soy/test_brazil_soy_delivery.py',
         '08_tests/test_streamlit_dashboard.py', '08_tests/canada_canola/test_canada_canola.py',
         '08_tests/canada_canola/test_canada_canola_fetch.py',
+        '08_tests/test_spread_runtime_contract.py',
     } == set(project['required_tests'])
     assert '03_src/agri_research_agent/shared/runtime_context.py' in project['shared_dependencies']
     assert '09_deploy/production_data_delivery/activate_production_data_delta.py' in project['shared_dependencies']
+    assert {
+        '09_deploy/spread_runtime/Dockerfile.spread-runtime',
+        '02_configs/runtime_contracts/spread-production-runtime.json',
+    } <= set(project['shared_dependencies'])
     assert 'No web-request acquisition or scheduler installation' in project['boundary_notes']
     assert 'do not authorize deployment' in project['boundary_notes']
 

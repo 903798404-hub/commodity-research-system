@@ -6,7 +6,9 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -134,8 +136,57 @@ def test_image_copies_exact_code_inputs_and_excludes_candidate_fixtures():
     assert copied == expected
     assert not copied & {x["source_path"] for x in m["candidate_runtime_inputs"]}
     assert "USER 65532:65532" in text
-    assert ".git" in (ROOT / ".dockerignore").read_text().splitlines()
+    assert ".git" in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert '"application":"spread-production-runtime-wiring"' in text
+
+
+@pytest.mark.parametrize("omission", [
+    None,
+    "03_src/agri_research_agent/canola_exports/data.py",
+    "03_src/agri_research_agent/canola_exports/delivery.py",
+    "03_src/agri_research_agent/canola_exports/update.py",
+    "05_apps/canada_canola_weekly_page.py",
+    "05_apps/canola_exports_page.py",
+])
+def test_canola_page_and_offline_worker_import_from_image_inputs_only(tmp_path, omission):
+    manifest = contract()
+    copied = copied_runtime_inputs(manifest)
+    required = {
+        "03_src/agri_research_agent/canola_exports/__init__.py",
+        "03_src/agri_research_agent/canola_exports/data.py",
+        "03_src/agri_research_agent/canola_exports/delivery.py",
+        "03_src/agri_research_agent/canola_exports/update.py",
+        "05_apps/canada_canola_weekly_page.py",
+        "05_apps/canola_exports_page.py",
+    }
+    assert_runtime_import_closure(required, {x["path"] for x in manifest["source_inputs"]}, copied)
+    for name in copied - {omission}:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    # Import in a fresh interpreter, without the test runner's source paths.
+    code = """
+from pathlib import Path
+import sys
+root = Path(sys.argv[1]).resolve()
+sys.path[:0] = [str(root / '03_src'), str(root / '05_apps')]
+import canada_canola_weekly_page
+from agri_research_agent.canola_exports import delivery
+assert callable(delivery.decode_evidence)
+for name, module in list(sys.modules.items()):
+    if name.startswith('agri_research_agent') or name in {
+        'canada_canola_weekly_page', 'canada_canola_page', 'canola_exports_page'}:
+        assert Path(module.__file__).resolve().is_relative_to(root), name
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(tmp_path)], cwd=tmp_path,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    if omission is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0
+        assert "ModuleNotFoundError" in result.stderr or "ImportError" in result.stderr
 
 
 @pytest.fixture
