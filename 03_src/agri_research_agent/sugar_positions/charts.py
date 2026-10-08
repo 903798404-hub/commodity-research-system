@@ -1,9 +1,22 @@
 """Native Plotly charts with explicit units, zero baseline, and visible gaps."""
+from datetime import date
+
 import plotly.graph_objects as go
 
 PALETTE = ("#356FA3", "#B08A32", "#C77B48", "#737F42", "#AE6D87")
 DASHES = ("solid", "dash", "dot", "dashdot", "longdash")
 SEAT_PALETTE = ("#2563EB", "#E59622", "#7C3AED", "#0D9488", "#DC4F86")
+
+
+def chinese_date(value):
+    if not value:
+        return "无"
+    day = date.fromisoformat(str(value)[:10])
+    return f"{day.year}年{day.month}月{day.day}日"
+
+
+def chinese_date_axis(figure):
+    figure.update_xaxes(tickformat="%Y年<br>%-m月%-d日", hoverformat="%Y年%-m月%-d日")
 
 
 def trend(rows, title, labels, *, direct_labels=False):
@@ -18,8 +31,9 @@ def trend(rows, title, labels, *, direct_labels=False):
             line=dict(color=color, dash="solid" if direct_labels else DASHES[index % 5],
                 width=3 if direct_labels else 2),
             marker=dict(color=color, size=5),
-            customdata=[[r["long"], r["short"], r.get("previous_date"), r.get("net_change")] for r in data],
-            hovertemplate="%{x}<br>净持仓 %{y:,.0f} 手<br>多仓 %{customdata[0]:,.0f}"
+            customdata=[[r["long"], r["short"], chinese_date(r.get("previous_date")),
+                r.get("net_change"), chinese_date(r["report_date"])] for r in data],
+            hovertemplate="%{customdata[4]}<br>净持仓 %{y:,.0f} 手<br>多仓 %{customdata[0]:,.0f}"
                 "<br>空仓 %{customdata[1]:,.0f}<br>净变化 %{customdata[3]:+,.0f}"
                 "<br>比较日期 %{customdata[2]}<extra>%{fullData.name}</extra>"))
         if direct_labels and data:
@@ -35,6 +49,7 @@ def trend(rows, title, labels, *, direct_labels=False):
         hovermode="x unified" if direct_labels else "closest")
     figure.add_hline(y=0, line_width=1.5 if direct_labels else 1, line_color="#5C6368")
     figure.update_yaxes(rangemode="tozero", gridcolor="#E8EBED")
+    chinese_date_axis(figure)
     if direct_labels:
         known = [r["net"] for r in rows if r["group"] in labels and r["net"] is not None]
         lower, upper = min([0] + known), max([0] + known)
@@ -60,12 +75,13 @@ def movements(rows, title):
     figure = go.Figure(go.Bar(x=[r["report_date"] for r in known],
         y=[r["net_change"] for r in known],
         marker_color=["#BC4749" if r["net_change"] > 0 else "#278568" if r["net_change"] < 0 else "#7A838B" for r in known],
-        customdata=[[r["previous_date"]] for r in known],
-        hovertemplate="%{x}<br>净变化 %{y:+,.0f} 手<br>比较日期 %{customdata[0]}<extra></extra>"))
+        customdata=[[chinese_date(r["previous_date"]), chinese_date(r["report_date"])] for r in known],
+        hovertemplate="%{customdata[1]}<br>净变化 %{y:+,.0f} 手<br>比较日期 %{customdata[0]}<extra></extra>"))
     figure.update_layout(title=title, height=280, template="plotly_white",
         font=dict(family="Microsoft YaHei, sans-serif", color="#263238"),
         yaxis_title="净持仓变化（手）", margin=dict(l=40, r=25, t=60, b=35),
         annotations=[dict(text="红：向多变化 · 绿：向空变化", x=1, y=1.15,
             xref="paper", yref="paper", showarrow=False, xanchor="right")])
     figure.add_hline(y=0, line_width=1, line_color="#5C6368")
+    chinese_date_axis(figure)
     return figure

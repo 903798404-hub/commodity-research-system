@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from agri_research_agent.sugar_positions.charts import movements, trend
+from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
 from agri_research_agent.sugar_positions.model import (
     GROUPS, MARKETS, domestic_metrics, foreign_metrics, load_members, positioning_signal,
 )
@@ -20,11 +20,28 @@ def fmt(value, signed=False):
     return "未披露" if value is None else format(value, "+," if signed else ",")
 
 
+def chinese_time(value):
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+    moment = moment.astimezone(ZoneInfo("Asia/Shanghai"))
+    return f"{chinese_date(moment.date())} {moment.hour:02}时{moment.minute:02}分{moment.second:02}秒（北京时间）"
+
+
+def display_attempt(value):
+    if isinstance(value, list):
+        return [display_attempt(item) for item in value]
+    if isinstance(value, dict):
+        return {key: chinese_time(item) if key in ("attempted_at", "retrieved_at") and item
+            else display_attempt(item) for key, item in value.items()}
+    return value
+
+
 def detail(rows):
     return pd.DataFrame([{
-        "日期": r["report_date"], "对象": r.get("label", GROUPS.get(r["group"], r["group"])),
+        "日期": chinese_date(r["report_date"]), "对象": r.get("label", GROUPS.get(r["group"], r["group"])),
         "多仓（手）": fmt(r["long"]), "空仓（手）": fmt(r["short"]), "净持仓（手）": fmt(r["net"], True),
-        "净变化（手）": fmt(r["net_change"], True), "比较日期": r["previous_date"] or "无",
+        "净变化（手）": fmt(r["net_change"], True), "比较日期": chinese_date(r["previous_date"]),
         "持仓情绪": positioning_signal(r["net"], r["net_change"]),
         "披露情况": r.get("coverage", "分类持仓已披露"),
     } for r in rows]).convert_dtypes()
@@ -68,7 +85,7 @@ def render_sugar_positions_page(project_root: Path):
             st.metric("净持仓（手）", fmt(row["net"]),
                 delta=fmt(row["net_change"], True) if row["net_change"] is not None else None,
                 delta_color="inverse")
-            st.caption(f"截至 {row['report_date']} · 对比 {row['previous_date'] or '无'}")
+            st.caption(f"截至 {chinese_date(row['report_date'])} · 对比 {chinese_date(row['previous_date'])}")
     st.caption("红：向多 · 绿：向空 ｜ 外盘基金纯期货 · 国内SR前20名")
     foreign_tab, domestic_tab, source_tab = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with foreign_tab:
@@ -89,7 +106,7 @@ def render_sugar_positions_page(project_root: Path):
             c.metric("总持仓量", fmt(latest["open_interest"]))
             if latest["open_interest"] and latest["net"] is not None:
                 st.caption(f"净持仓占总持仓量 {latest['net'] / latest['open_interest']:+.1%} · 用比例辅助观察倾向强弱。")
-            st.caption(f"持仓截至 {latest['report_date']} · 比较日期 {latest['previous_date'] or '无'} · "
+            st.caption(f"持仓截至 {chinese_date(latest['report_date'])} · 比较日期 {chinese_date(latest['previous_date'])} · "
                 "各到期月份汇总；每周公布，持仓日期与公布日期不同。")
             if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
                 st.warning("这份周报距今超过14天，请核对最新发布状态。")
@@ -110,7 +127,8 @@ def render_sugar_positions_page(project_root: Path):
             scope = st.selectbox("国内统计范围", scopes, format_func=lambda s: "SR 品种总排名" if s == "SR" else s)
             account = "代客"
             data = [r for r in domestic_metrics(snapshot["domestic"], members, account=account) if r["scope"] == scope]
-            day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True))
+            day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True),
+                format_func=chinese_date)
             current = {r["group"]: r for r in data if r["report_date"] == day}
             st.markdown(f"**排名持仓情绪：{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
             st.caption("国内反映公开排名与会员代客持仓倾向，不能直接识别基金资金；产业套保也会影响净持仓。")
@@ -118,7 +136,7 @@ def render_sugar_positions_page(project_root: Path):
             a.metric("前20名净持仓", fmt(current["top20"]["net"]))
             b.metric("较上一保存交易日变化", fmt(current["top20"]["net_change"], True))
             c.metric("五家合计净持仓", fmt(current["fixed5"]["net"]))
-            st.caption(f"持仓截至 {day} · 比较日期 {current['top20']['previous_date'] or '无'} · "
+            st.caption(f"持仓截至 {chinese_date(day)} · 比较日期 {chinese_date(current['top20']['previous_date'])} · "
                 f"{current['fixed5']['coverage']}。")
             st.caption("前20名多头和空头名单可不同；净变化按两份排名汇总之差计算，包含名单变化。")
             st.subheader("五家固定席位")
@@ -152,7 +170,10 @@ def render_sugar_positions_page(project_root: Path):
             "[ICE COT](https://www.ice.com/report/122) · "
             "[郑商所持仓排名](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         for source_id, metadata in snapshot["sources"].items():
-            st.markdown(f"**{source_id}** · 采集时间 {metadata['retrieved_at']} · [原始来源]({metadata['url']})")
+            source_label = (f"郑商所 · {chinese_date(datetime.strptime(source_id[5:], '%Y%m%d').date())}"
+                if source_id.startswith("czce_") else source_id)
+            st.markdown(f"**{source_label}** · 采集时间 {chinese_time(metadata['retrieved_at'])} · [原始来源]({metadata['url']})")
         st.caption("当前为本地预览。公开展示前需确认相关数据展示授权，页面不会自动请求外部数据。")
         with st.expander("最近一次采集结果"):
-            st.json(json.loads(attempt_file.read_text(encoding="utf-8")) if attempt_file.is_file() else snapshot["attempts"])
+            st.json(display_attempt(json.loads(attempt_file.read_text(encoding="utf-8"))
+                if attempt_file.is_file() else snapshot["attempts"]))
