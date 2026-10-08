@@ -12,6 +12,7 @@ from agri_research_agent.sugar_positions.model import (
     GROUPS, MARKETS, domestic_metrics, foreign_metrics, load_members, positioning_signal,
 )
 from agri_research_agent.sugar_positions.storage import preview_root, read_snapshot
+from agri_research_agent.positions.workspace import validate_domain
 
 REPORT_LABELS = {"纯期货": "futures_only", "期货＋期权": "combined"}
 
@@ -47,12 +48,12 @@ def detail(rows):
     } for r in rows]).convert_dtypes()
 
 
-def render_sugar_positions_page(project_root: Path):
+def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_mode=True):
     st.title("白糖资金情绪")
     members = load_members(project_root / "02_configs" / "sugar_positions.json")
-    root = preview_root(project_root)
+    root = Path(data_root) if data_root is not None else preview_root(project_root)
     try:
-        snapshot = read_snapshot(root)
+        snapshot = validate_domain(read_snapshot(root), project_root, "sugar")
     except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
         st.error(f"数据校验未通过：{exc}")
         return
@@ -173,7 +174,8 @@ def render_sugar_positions_page(project_root: Path):
             source_label = (f"郑商所 · {chinese_date(datetime.strptime(source_id[5:], '%Y%m%d').date())}"
                 if source_id.startswith("czce_") else source_id)
             st.markdown(f"**{source_label}** · 采集时间 {chinese_time(metadata['retrieved_at'])} · [原始来源]({metadata['url']})")
-        st.caption("当前为本地预览。公开展示前需确认相关数据展示授权，页面不会自动请求外部数据。")
+        st.caption("当前为本地预览。公开展示前需确认相关数据展示授权。" if preview_mode
+                   else "页面展示已保存报告；刷新页面不会触发数据采集。")
         with st.expander("最近一次采集结果"):
             st.json(display_attempt(json.loads(attempt_file.read_text(encoding="utf-8"))
                 if attempt_file.is_file() else snapshot["attempts"]))
