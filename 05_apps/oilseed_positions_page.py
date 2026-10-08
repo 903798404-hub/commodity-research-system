@@ -63,7 +63,7 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
     for variety, label in spec["domestic"].items():
         scope = spec.get("default_scopes",{}).get(variety,variety)
         data = [r for r in domestic if r["scope"] == scope and r["group"] == "top20"]
-        overview.append((label + (f" {scope}" if scope != variety else " · 品种汇总") + " · 前20名", data[-1] if data else None))
+        overview.append((label + (f" {scope} · 主力参考" if scope != variety else " · 品种汇总") + " · 前20名", data[-1] if data else None))
     st.subheader("资金情绪速览")
     for offset in range(0, len(overview), 3):
         for column, (label, row) in zip(st.columns(3), overview[offset:offset+3]):
@@ -80,6 +80,8 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 st.caption(f"截至 {chinese_date(row['report_date'])} · 对比 {chinese_date(row['previous_date'])}")
                 if row.get("aggregation") == METHOD:
                     st.caption(f"全合约已披露汇总 · {len(row['constituent_contracts'])}个合约 · 东方财富排名")
+                elif "主力参考" in label:
+                    st.caption("单合约排名 · " + ("东方财富" if row.get("source_provider") == "eastmoney" else "按原始来源披露") + " · 不代表品种汇总")
     st.caption("红：向多 · 绿：向空 ｜ 净持仓与变化反映多空倾向。各市场日期不同，手数不合并。")
     outside, inside, sources = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with outside:
@@ -119,9 +121,12 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                     frame = frame.rename(columns={c: c.replace("（手）", "（Delta等价手）") for c in frame.columns})
                 st.dataframe(frame, hide_index=True, width="stretch")
     with inside:
-        scopes = list(spec["domestic"]) + sorted({r["scope"] for r in domestic} - set(spec["domestic"]))
+        references = {v for k, v in spec.get("default_scopes", {}).items() if k != v}
+        scopes = list(dict.fromkeys([*spec.get("default_scopes", {}).values(), *spec["domestic"],
+            *sorted({r["scope"] for r in domestic} - set(spec["domestic"]))]))
         scope = st.selectbox("国内统计范围", scopes, key=f"domestic_scope_{domain}",
-            format_func=lambda v: f"{spec['domestic'][v]} {v} · 品种汇总" if v in spec["domestic"] else f"{v} · 合约参考")
+            format_func=lambda v: f"{spec['domestic'][v]} {v} · 品种汇总" if v in spec["domestic"]
+                else f"{v} · 已核对主力参考" if v in references else f"{v} · 合约参考")
         data = [r for r in domestic if r["scope"] == scope]
         if not data:
             st.info(f"{spec['domestic'][scope]}品种汇总数据待接入。" if scope in spec["domestic"] else "此合约暂无已验证排名数据。")
@@ -130,6 +135,11 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
             observed_summary = any(r.get("aggregation") == METHOD for r in data)
             if scope not in spec["domestic"]:
                 st.caption("当前为单合约参考，不代表品种汇总，也未自动跟踪主力。")
+                if scope in references:
+                    check = spec["reference_check"]
+                    st.caption(f"主力核对 {chinese_date(check['checked_on'])} · 行情交易日 {chinese_date(check['quote_trade_date'])}（夜盘）；持仓以排名报告日期为准。")
+                    if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(check["checked_on"])).days > 7:
+                        st.warning("主力核对已超过7天，请复核换月；当前仍展示已保存的合约参考。")
             day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True), format_func=chinese_date)
             current = {r["group"]: r for r in data if r["report_date"] == day}
             if observed_summary:
@@ -160,8 +170,11 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
         st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。两侧均披露才计算净仓；五家完整才计算合计。")
         st.write("仅比较相邻已保存的同口径报告；缺仓或间隔超过10天时不计算净变化。合约排名不冒充品种总排名。")
         if domain != "rapeseed":
-            st.markdown("国内默认展示全合约已披露持仓汇总：逐合约读取多空排名，按同一席位合并后重新排名。该结果涵盖来源当日公开的合约排名，未上榜持仓不可见，不能视作席位完整仓位。净变化比较相同来源、相同合约范围的两份已保存报告。")
-            st.markdown("当前通过登录浏览器读取[东方财富多空持仓排名](https://qhweb.eastmoney.com/lhb/dkcc/dce/m)，自行计算汇总，不采用净持仓页的估算数值。服务器自动采集尚未接通；新浪历史只作为单合约参考。")
+            check = spec["reference_check"]
+            st.markdown(f"国内默认显示已核对主力合约参考：{'、'.join(spec['default_scopes'].values())}。{chinese_date(check['checked_on'])}核对新浪连续行情及实际合约持仓量；行情交易日为{chinese_date(check['quote_trade_date'])}夜盘。配置暂不自动换月，历史按实际合约独立比较，不拼接为主力连续持仓。")
+            st.markdown("品种汇总可在国内统计范围中选择：逐合约读取多空排名，按同一席位合并后重新排名。未上榜持仓不可见，不能视作席位完整仓位。净变化比较相同来源、相同合约范围的两份已保存报告。")
+            st.markdown("已有排名通过登录浏览器读取[东方财富多空持仓排名](https://qhweb.eastmoney.com/lhb/dkcc/dce/m)，不采用净持仓页的估算数值。联网采集尝试新浪单合约排名；请求失败或尚未发布时保留原报告，不能以行情日期代替持仓日期。服务器自动采集尚未接通。")
+            st.markdown("其他接口：[Tushare fut_holding](https://tushare.pro/document/2?doc_id=139)（至少2000积分）和[RQData会员排名](https://www.ricequant.com/doc/rqdata/python/futures-mod)（需账户权限）支持合约或品种查询；尚未取得授权数据，M/Y/P品种汇总覆盖及账户分类仍需样本核验。")
         st.markdown("[CFTC](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · [Euronext](https://live.euronext.com/en/products/commodities/commitments_of_traders) · [郑商所](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         with st.expander("原始来源与采集时间"):
             for source_id, metadata in snapshot.get("sources", {}).items():
