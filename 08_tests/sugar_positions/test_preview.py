@@ -68,7 +68,6 @@ def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     assert any("部分席位" in w.value for w in at.warning)
     at.radio[0].set_value("期货＋期权").run()
     at.selectbox[1].set_value("SR701").run()
-    at.radio[1].set_value("自营").run()
     assert not at.exception
     assert any(m.label == "五家合计净持仓" and m.value == "未披露" for m in at.metric)
 

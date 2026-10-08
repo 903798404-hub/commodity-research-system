@@ -108,7 +108,7 @@ def render_sugar_positions_page(project_root: Path):
             st.info("国内持仓尚未采集。")
         else:
             scope = st.selectbox("国内统计范围", scopes, format_func=lambda s: "SR 品种总排名" if s == "SR" else s)
-            account = st.radio("五家固定席位账户类型", ["代客", "自营", "未区分"], horizontal=True)
+            account = "代客"
             data = [r for r in domestic_metrics(snapshot["domestic"], members, account=account) if r["scope"] == scope]
             day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True))
             current = {r["group"]: r for r in data if r["report_date"] == day}
@@ -145,7 +145,7 @@ def render_sugar_positions_page(project_root: Path):
         st.subheader("统计口径与来源")
         st.write("净持仓＝多仓－空仓。外盘为分类交易者、各到期月份汇总；国内为排名披露范围。")
         st.write("净持仓体现多空倾向，净变化体现倾向增强或减弱，不等于资金流入流出。各市场合约规格和截至日期不同，手数不直接比较资金规模。")
-        st.write("国内会员持仓包含客户持仓；代客、自营分别展示。未区分表示原始报告未标记账户类型。")
+        st.write("五家固定席位默认展示代客持仓；原始数据保留账户类型。")
         st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。未上榜的一侧保持空值；五家均完整时才计算合计。")
         st.write("比较日期来自上一条已保存的同口径数据；间隔超过10天或任一侧缺失时不计算变化。")
         st.markdown("[CFTC COT](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · "
