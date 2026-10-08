@@ -63,7 +63,7 @@ def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
     at = app(tmp_path).run(timeout=30)
     assert not at.exception
-    assert len(at.get("plotly_chart")) == 7
+    assert len(at.get("plotly_chart")) == 6
     assert len(at.dataframe) >= 4
     assert any("部分席位" in w.value for w in at.warning)
     at.radio[0].set_value("期货＋期权").run()

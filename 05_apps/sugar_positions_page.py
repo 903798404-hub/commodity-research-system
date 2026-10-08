@@ -32,9 +32,6 @@ def detail(rows):
 
 def render_sugar_positions_page(project_root: Path):
     st.title("白糖资金情绪")
-    st.caption("外盘按周观察基金持仓，国内按日观察会员排名与五家固定席位。单位：手。")
-    st.caption("各市场每手合约规格不同，手数不直接用于比较内外盘持仓规模。")
-    st.caption("观察两件事：净持仓体现多空倾向，净变化体现倾向增强或减弱。持仓变化不等于资金流入流出。")
     members = load_members(project_root / "02_configs" / "sugar_positions.json")
     root = preview_root(project_root)
     try:
@@ -62,7 +59,7 @@ def render_sugar_positions_page(project_root: Path):
     overview.append(("郑糖 · 前20名", domestic_default[-1] if domestic_default else None))
     st.subheader("资金情绪速览")
     for column, (label, row) in zip(st.columns(3), overview):
-        with column:
+        with column, st.container(border=True):
             st.markdown(f"**{label}**")
             if row is None:
                 st.caption("暂无已验证数据")
@@ -70,9 +67,9 @@ def render_sugar_positions_page(project_root: Path):
             st.markdown(positioning_signal(row["net"], row["net_change"]))
             st.metric("净持仓（手）", fmt(row["net"]),
                 delta=fmt(row["net_change"], True) if row["net_change"] is not None else None,
-                delta_color="off")
-            st.caption(f"箭头为净变化（手） · 持仓日期 {row['report_date']} · 比较 {row['previous_date'] or '无'}")
-    st.caption("速览固定为外盘管理基金纯期货、国内SR前20名；下方筛选仅影响详情。各市场日期与统计人群不同。")
+                delta_color="inverse")
+            st.caption(f"截至 {row['report_date']} · 对比 {row['previous_date'] or '无'}")
+    st.caption("红：向多 · 绿：向空 ｜ 外盘基金纯期货 · 国内SR前20名")
     foreign_tab, domestic_tab, source_tab = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with foreign_tab:
         kind = REPORT_LABELS[st.radio("外盘口径", list(REPORT_LABELS), horizontal=True)]
@@ -132,10 +129,10 @@ def render_sugar_positions_page(project_root: Path):
                 "多仓（手）", "空仓（手）", "披露情况"]], hide_index=True, width="stretch")
             history = [r for r in data if r["report_date"] <= day]
             if len({r["report_date"] for r in history}) >= 8:
-                st.plotly_chart(trend(history, "前20名与前5名多空差", {
-                    "top20": "前20名", "top5": "前5名"}), width="stretch", key="domestic_top_trend")
                 st.plotly_chart(trend(history, f"五家固定席位 · {account}净持仓", {
-                    m["id"]: m["label"] for m in members}), width="stretch", key="domestic_fixed_trend")
+                    m["id"]: m["label"] for m in members}, direct_labels=True),
+                    width="stretch", key="domestic_fixed_trend")
+                st.caption("零线上方偏多，下方偏空；点击席位名可隐藏曲线。")
                 st.plotly_chart(movements([r for r in history if r["group"] == "top20"],
                     "前20名净持仓变化"), width="stretch", key="domestic_changes")
             with st.expander("历史净持仓与比较日期"):
@@ -147,6 +144,7 @@ def render_sugar_positions_page(project_root: Path):
     with source_tab:
         st.subheader("统计口径与来源")
         st.write("净持仓＝多仓－空仓。外盘为分类交易者、各到期月份汇总；国内为排名披露范围。")
+        st.write("净持仓体现多空倾向，净变化体现倾向增强或减弱，不等于资金流入流出。各市场合约规格和截至日期不同，手数不直接比较资金规模。")
         st.write("国内会员持仓包含客户持仓；代客、自营分别展示。未区分表示原始报告未标记账户类型。")
         st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。未上榜的一侧保持空值；五家均完整时才计算合计。")
         st.write("比较日期来自上一条已保存的同口径数据；间隔超过10天或任一侧缺失时不计算变化。")
