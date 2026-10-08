@@ -15,6 +15,23 @@ modules:
       - 08_tests/test_streamlit_dashboard.py
     dependents: []
     full_regression_when_changed: false
+  sugar_positions:
+    code_paths:
+      - 03_src/agri_research_agent/sugar_positions/__init__.py
+      - 03_src/agri_research_agent/sugar_positions/model.py
+      - 03_src/agri_research_agent/sugar_positions/sources.py
+      - 03_src/agri_research_agent/sugar_positions/storage.py
+      - 03_src/agri_research_agent/sugar_positions/charts.py
+      - 04_scripts/sugar_positions/update_sugar_positions.py
+      - 05_apps/sugar_positions_page.py
+      - 05_apps/sugar_positions_preview.py
+      - 02_configs/sugar_positions.json
+    direct_tests:
+      - 08_tests/sugar_positions/test_positions.py
+      - 08_tests/sugar_positions/test_preview.py
+    impact_tests: [08_tests/shared/test_module_test_map.py]
+    dependents: []
+    full_regression_when_changed: false
   domains.spreads:
     code_paths:
       - 03_src/agri_research_agent/domains/spreads/models.py

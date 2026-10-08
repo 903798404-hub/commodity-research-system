@@ -1,0 +1,160 @@
+"""Read-only positioning dashboard; all collection happens through a separate CLI."""
+from datetime import date, datetime
+import json
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import streamlit as st
+
+from agri_research_agent.sugar_positions.charts import movements, trend
+from agri_research_agent.sugar_positions.model import (
+    GROUPS, MARKETS, domestic_metrics, foreign_metrics, load_members, positioning_signal,
+)
+from agri_research_agent.sugar_positions.storage import preview_root, read_snapshot
+
+REPORT_LABELS = {"纯期货": "futures_only", "期货＋期权": "combined"}
+
+
+def fmt(value, signed=False):
+    return "未披露" if value is None else format(value, "+," if signed else ",")
+
+
+def detail(rows):
+    return pd.DataFrame([{
+        "日期": r["report_date"], "对象": r.get("label", GROUPS.get(r["group"], r["group"])),
+        "多仓（手）": fmt(r["long"]), "空仓（手）": fmt(r["short"]), "净持仓（手）": fmt(r["net"], True),
+        "净变化（手）": fmt(r["net_change"], True), "比较日期": r["previous_date"] or "无",
+        "持仓情绪": positioning_signal(r["net"], r["net_change"]),
+        "披露情况": r.get("coverage", "分类持仓已披露"),
+    } for r in rows]).convert_dtypes()
+
+
+def render_sugar_positions_page(project_root: Path):
+    st.title("白糖资金情绪")
+    st.caption("外盘按周观察基金持仓，国内按日观察会员排名与五家固定席位。单位：手。")
+    st.caption("各市场每手合约规格不同，手数不直接用于比较内外盘持仓规模。")
+    st.caption("观察两件事：净持仓体现多空倾向，净变化体现倾向增强或减弱。持仓变化不等于资金流入流出。")
+    members = load_members(project_root / "02_configs" / "sugar_positions.json")
+    root = preview_root(project_root)
+    try:
+        snapshot = read_snapshot(root)
+    except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
+        st.error(f"数据校验未通过：{exc}")
+        return
+    attempt_file = root / "last_attempt.json"
+    if attempt_file.is_file():
+        attempt = json.loads(attempt_file.read_text(encoding="utf-8"))
+        failures = [a for a in attempt["attempts"] if a["status"] == "failed"]
+        if failures:
+            st.warning(f"最近一次采集有 {len(failures)} 个来源请求失败，相关来源保留上一份已验证数据。")
+    if not snapshot["foreign"] and not snapshot["domestic"]:
+        st.info("尚未采集持仓数据。运行独立白糖采集脚本后，此页面会读取已验证快照。")
+        return
+    all_foreign = foreign_metrics(snapshot["foreign"])
+    overview = []
+    for market, label in MARKETS.items():
+        rows = [r for r in all_foreign if r["market"] == market
+            and r["report_type"] == "futures_only" and r["group"] == "managed_money"]
+        overview.append((label + " · 基金", rows[-1] if rows else None))
+    domestic_default = [r for r in domestic_metrics(snapshot["domestic"], members)
+        if r["scope"] == "SR" and r["group"] == "top20"]
+    overview.append(("郑糖 · 前20名", domestic_default[-1] if domestic_default else None))
+    st.subheader("资金情绪速览")
+    for column, (label, row) in zip(st.columns(3), overview):
+        with column:
+            st.markdown(f"**{label}**")
+            if row is None:
+                st.caption("暂无已验证数据")
+                continue
+            st.markdown(positioning_signal(row["net"], row["net_change"]))
+            st.metric("净持仓（手）", fmt(row["net"]),
+                delta=fmt(row["net_change"], True) if row["net_change"] is not None else None,
+                delta_color="off")
+            st.caption(f"箭头为净变化（手） · 持仓日期 {row['report_date']} · 比较 {row['previous_date'] or '无'}")
+    st.caption("速览固定为外盘管理基金纯期货、国内SR前20名；下方筛选仅影响详情。各市场日期与统计人群不同。")
+    foreign_tab, domestic_tab, source_tab = st.tabs(["外盘基金", "国内持仓", "数据来源"])
+    with foreign_tab:
+        kind = REPORT_LABELS[st.radio("外盘口径", list(REPORT_LABELS), horizontal=True)]
+        group_label = st.selectbox("交易者分类", list(GROUPS.values()))
+        group = next(key for key, label in GROUPS.items() if label == group_label)
+        for market, label in MARKETS.items():
+            data = [r for r in all_foreign if r["market"] == market and r["report_type"] == kind and r["group"] == group]
+            st.subheader(label)
+            if not data:
+                st.info("此口径暂无已验证数据。")
+                continue
+            latest = data[-1]
+            st.markdown(f"**持仓情绪：{positioning_signal(latest['net'], latest['net_change'])}**")
+            a, b, c = st.columns(3)
+            a.metric(f"{group_label}净持仓", fmt(latest["net"]))
+            b.metric("较上一报告变化", fmt(latest["net_change"], True))
+            c.metric("总持仓量", fmt(latest["open_interest"]))
+            if latest["open_interest"] and latest["net"] is not None:
+                st.caption(f"净持仓占总持仓量 {latest['net'] / latest['open_interest']:+.1%} · 用比例辅助观察倾向强弱。")
+            st.caption(f"持仓截至 {latest['report_date']} · 比较日期 {latest['previous_date'] or '无'} · "
+                "各到期月份汇总；每周公布，持仓日期与公布日期不同。")
+            if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
+                st.warning("这份周报距今超过14天，请核对最新发布状态。")
+            if len(data) >= 8:
+                st.plotly_chart(trend(data, f"{label} · {group_label}净持仓", {group: group_label}),
+                    width="stretch", key=f"foreign_trend_{market}")
+                st.plotly_chart(movements(data[-26:], "近26份报告净持仓变化"),
+                    width="stretch", key=f"foreign_changes_{market}")
+            else:
+                st.caption("已保存报告不足8期，先展示数值明细。")
+            with st.expander(f"{label}持仓明细"):
+                st.dataframe(detail(data).iloc[::-1], hide_index=True, width="stretch")
+    with domestic_tab:
+        scopes = sorted({r["scope"] for r in snapshot["domestic"]}, key=lambda s: (s != "SR", s))
+        if not scopes:
+            st.info("国内持仓尚未采集。")
+        else:
+            scope = st.selectbox("国内统计范围", scopes, format_func=lambda s: "SR 品种总排名" if s == "SR" else s)
+            account = st.radio("五家固定席位账户类型", ["代客", "自营", "未区分"], horizontal=True)
+            data = [r for r in domestic_metrics(snapshot["domestic"], members, account=account) if r["scope"] == scope]
+            day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True))
+            current = {r["group"]: r for r in data if r["report_date"] == day}
+            st.markdown(f"**排名持仓情绪：{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
+            st.caption("国内反映公开排名与会员代客持仓倾向，不能直接识别基金资金；产业套保也会影响净持仓。")
+            a, b, c = st.columns(3)
+            a.metric("前20名净持仓", fmt(current["top20"]["net"]))
+            b.metric("较上一保存交易日变化", fmt(current["top20"]["net_change"], True))
+            c.metric("五家合计净持仓", fmt(current["fixed5"]["net"]))
+            st.caption(f"持仓截至 {day} · 比较日期 {current['top20']['previous_date'] or '无'} · "
+                f"{current['fixed5']['coverage']}。")
+            st.caption("前20名多头和空头名单可不同；净变化按两份排名汇总之差计算，包含名单变化。")
+            st.subheader("五家固定席位")
+            fixed = [current[m["id"]] for m in members]
+            if current["fixed5"]["net"] is None:
+                st.warning("部分席位未进入某一侧公开排名，无法计算准确的五家合计。未披露不代表零仓位。")
+            st.dataframe(detail(fixed)[["对象", "持仓情绪", "净持仓（手）", "净变化（手）",
+                "多仓（手）", "空仓（手）", "披露情况"]], hide_index=True, width="stretch")
+            history = [r for r in data if r["report_date"] <= day]
+            if len({r["report_date"] for r in history}) >= 8:
+                st.plotly_chart(trend(history, "前20名与前5名多空差", {
+                    "top20": "前20名", "top5": "前5名"}), width="stretch", key="domestic_top_trend")
+                st.plotly_chart(trend(history, f"五家固定席位 · {account}净持仓", {
+                    m["id"]: m["label"] for m in members}), width="stretch", key="domestic_fixed_trend")
+                st.plotly_chart(movements([r for r in history if r["group"] == "top20"],
+                    "前20名净持仓变化"), width="stretch", key="domestic_changes")
+            with st.expander("历史净持仓与比较日期"):
+                st.dataframe(detail(history).iloc[::-1], hide_index=True, width="stretch")
+            with st.expander("交易所原始排名"):
+                raw = [r for r in snapshot["domestic"] if r["scope"] == scope and r["report_date"] == day]
+                st.dataframe(pd.DataFrame(raw)[["side", "rank", "raw_member", "positions", "reported_change"]],
+                    hide_index=True, width="stretch")
+    with source_tab:
+        st.subheader("统计口径与来源")
+        st.write("净持仓＝多仓－空仓。外盘为分类交易者、各到期月份汇总；国内为排名披露范围。")
+        st.write("国内会员持仓包含客户持仓；代客、自营分别展示。未区分表示原始报告未标记账户类型。")
+        st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。未上榜的一侧保持空值；五家均完整时才计算合计。")
+        st.write("比较日期来自上一条已保存的同口径数据；间隔超过10天或任一侧缺失时不计算变化。")
+        st.markdown("[CFTC COT](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · "
+            "[ICE COT](https://www.ice.com/report/122) · "
+            "[郑商所持仓排名](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
+        for source_id, metadata in snapshot["sources"].items():
+            st.markdown(f"**{source_id}** · 采集时间 {metadata['retrieved_at']} · [原始来源]({metadata['url']})")
+        st.caption("当前为本地预览。公开展示前需确认相关数据展示授权，页面不会自动请求外部数据。")
+        with st.expander("最近一次采集结果"):
+            st.json(json.loads(attempt_file.read_text(encoding="utf-8")) if attempt_file.is_file() else snapshot["attempts"])

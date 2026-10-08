@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "report_types": ["futures_only", "combined"],
+  "members": [
+    {"id": "goldman", "label": "高盛", "aliases": ["高盛期货", "乾坤期货"]},
+    {"id": "jpmorgan", "label": "摩根大通", "aliases": ["摩根大通", "摩根大通期货"]},
+    {"id": "yongan", "label": "永安", "aliases": ["永安期货", "永安"]},
+    {"id": "guotai", "label": "国泰君安", "aliases": ["国泰君安", "国泰君安期货"]},
+    {"id": "orient", "label": "东证", "aliases": ["东证期货", "东证"]}
+  ]
+}
