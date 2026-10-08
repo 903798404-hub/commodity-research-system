@@ -7,8 +7,9 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from agri_research_agent.oilseed_positions.model import config, metrics
+from agri_research_agent.oilseed_positions.aggregation import domestic_metrics, METHOD
 from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
-from agri_research_agent.sugar_positions.model import domestic_metrics, load_members, positioning_signal
+from agri_research_agent.sugar_positions.model import load_members, positioning_signal
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 from sugar_positions_page import chinese_time, detail, display_attempt
@@ -52,7 +53,7 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
         st.caption("数据接通后才展示资金情绪。总持仓量不能代替基金净持仓。")
     foreign = metrics(snapshot["foreign"])
     members = load_members(project_root / "02_configs/sugar_positions.json")
-    account = "代客" if domain == "rapeseed" else "未区分"
+    account = "代客"
     domestic = domestic_metrics(snapshot["domestic"], members, account=account)
     overview = []
     for market, item in spec["foreign"].items():
@@ -77,6 +78,8 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                     delta=fmt(row["net_change"], True) if row["net_change"] is not None else None,
                     delta_color="inverse")
                 st.caption(f"截至 {chinese_date(row['report_date'])} · 对比 {chinese_date(row['previous_date'])}")
+                if row.get("aggregation") == METHOD:
+                    st.caption(f"全合约已披露汇总 · {len(row['constituent_contracts'])}个合约 · 东方财富排名")
     st.caption("红：向多 · 绿：向空 ｜ 净持仓与变化反映多空倾向。各市场日期不同，手数不合并。")
     outside, inside, sources = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with outside:
@@ -124,24 +127,30 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
             st.info(f"{spec['domestic'][scope]}品种汇总数据待接入。" if scope in spec["domestic"] else "此合约暂无已验证排名数据。")
             st.caption("接入经过核验的品种汇总排名后，再展示净持仓、变化和五家固定席位。")
         else:
+            observed_summary = any(r.get("aggregation") == METHOD for r in data)
             if scope not in spec["domestic"]:
                 st.caption("当前为单合约参考，不代表品种汇总，也未自动跟踪主力。")
             day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True), format_func=chinese_date)
             current = {r["group"]: r for r in data if r["report_date"] == day}
+            if observed_summary:
+                st.caption("全合约已披露持仓汇总：按席位合并后重新排名；未上榜部分不属于已披露持仓。")
+                st.caption("覆盖合约：" + "、".join(current['top20']['constituent_contracts']))
             st.markdown(f"**{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
             a, b, c = st.columns(3)
-            a.metric("前20名净持仓", fmt(current["top20"]["net"]))
+            a.metric("前20名已披露净持仓" if observed_summary else "前20名净持仓", fmt(current["top20"]["net"]))
             b.metric("较上一保存交易日变化", fmt(current["top20"]["net_change"], True))
-            c.metric("五家合计净持仓", fmt(current["fixed5"]["net"]))
+            c.metric("五家合计已披露净持仓" if observed_summary else "五家合计净持仓", fmt(current["fixed5"]["net"]))
             st.caption(f"截至 {chinese_date(day)} · 对比 {chinese_date(current['top20']['previous_date'])} · {current['fixed5']['coverage']}")
-            st.caption("公开排名的多空名单可不同，净变化包含名单变化。" + ("当前来源未区分账户类型。" if account == "未区分" else "固定席位展示代客持仓。"))
+            st.caption("公开排名的多空名单可不同，净变化包含名单变化。" + ("当前来源未区分账户类型。" if current["fixed5"]["account"] == "未区分" else "固定席位展示代客持仓。"))
+            if observed_summary and current['top20'].get('excluded_contracts'):
+                st.caption("未混入旧报告：" + "、".join(f"{r['scope']}（{chinese_date(r['report_date'])}）" for r in current['top20']['excluded_contracts']))
             st.subheader("五家固定席位")
             if current["fixed5"]["net"] is None:
-                st.warning("部分席位缺少一侧披露，无法计算准确合计；未披露不代表零仓位。")
+                st.warning("部分席位缺少一侧披露，无法计算合计；未披露不代表零仓位。")
             st.dataframe(detail([current[m["id"]] for m in members])[["对象", "持仓情绪", "净持仓（手）", "净变化（手）", "披露情况"]], hide_index=True, width="stretch")
             history = [r for r in data if r["report_date"] <= day]
             if len({r["report_date"] for r in history}) >= 2:
-                st.plotly_chart(trend(history, f"五家固定席位 · {account}净持仓", {m["id"]: m["label"] for m in members}, direct_labels=True), width="stretch", key="fixed_trend")
+                st.plotly_chart(trend(history, "五家固定席位 · 已披露净持仓" if observed_summary else f"五家固定席位 · {current['fixed5']['account']}净持仓", {m["id"]: m["label"] for m in members}, direct_labels=True), width="stretch", key="fixed_trend")
                 st.plotly_chart(movements([r for r in history if r["group"] == "top20"], "前20名净持仓变化"), width="stretch", key="domestic_changes")
             with st.expander("历史净持仓与比较日期"):
                 st.dataframe(detail(history).iloc[::-1], hide_index=True, width="stretch")
@@ -151,12 +160,13 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
         st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。两侧均披露才计算净仓；五家完整才计算合计。")
         st.write("仅比较相邻已保存的同口径报告；缺仓或间隔超过10天时不计算净变化。合约排名不冒充品种总排名。")
         if domain != "rapeseed":
-            st.markdown("国内默认展示品种汇总。汇总来源尚待接入；已保存的[新浪成交持仓](https://vip.stock.finance.sina.com.cn/q/view/vFutures_Positions_cjcc.php)仅作为单合约参考，不替代汇总，不自动拼接主力，也不将各合约前20名相加冒充品种前20名。")
+            st.markdown("国内默认展示全合约已披露持仓汇总：逐合约读取多空排名，按同一席位合并后重新排名。该结果涵盖来源当日公开的合约排名，未上榜持仓不可见，不能视作席位完整仓位。净变化比较相同来源、相同合约范围的两份已保存报告。")
+            st.markdown("当前通过登录浏览器读取[东方财富多空持仓排名](https://qhweb.eastmoney.com/lhb/dkcc/dce/m)，自行计算汇总，不采用净持仓页的估算数值。服务器自动采集尚未接通；新浪历史只作为单合约参考。")
         st.markdown("[CFTC](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · [Euronext](https://live.euronext.com/en/products/commodities/commitments_of_traders) · [郑商所](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         with st.expander("原始来源与采集时间"):
             for source_id, metadata in snapshot.get("sources", {}).items():
-                if source_id.startswith(("czce_", "euronext_", "sina_")):
-                    provider = "郑商所" if source_id.startswith("czce_") else "新浪 · " + source_id.split("_")[1] if source_id.startswith("sina_") else "Euronext"
+                if source_id.startswith(("czce_", "euronext_", "sina_", "browser_contracts_")):
+                    provider = "东方财富 · 全合约读取" if source_id.startswith("browser_contracts_") else "郑商所" if source_id.startswith("czce_") else "新浪 · " + source_id.split("_")[1] if source_id.startswith("sina_") else "Euronext"
                     label = provider + " · " + chinese_date(datetime.strptime(source_id.rsplit("_",1)[1], "%Y%m%d").date())
                 else:
                     label = source_id
