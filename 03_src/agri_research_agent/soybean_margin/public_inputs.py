@@ -2,10 +2,74 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 
 from agri_research_agent.data_sources.tankan.domestic_spread import full_contract_code
+from agri_research_agent.pipelines.tankan_goal_a import load_current_files
 from .model import ORIGINS, KEY, FIELDS, contracts, number
+
+
+MARKET_COLUMNS = (
+    "business_date", "exchange", "product", "contract_code", "price",
+    "currency", "price_unit", "is_usable",
+)
+FX_COLUMNS = (
+    "quote_date", "tenor_months", "rate", "base_currency", "quote_currency",
+    "rate_unit", "is_usable",
+)
+DOMESTIC_COLUMNS = (
+    "date", "status", "season",
+    "leg1_instrument", "leg1_month", "leg1_price",
+    "leg2_instrument", "leg2_month", "leg2_price",
+)
+MAX_VIEW_ROWS = 1_000_000
+MAX_VIEW_BYTES = 64 * 1024 * 1024
+
+
+def _read_view(path: Path, columns, predicate=None) -> pa.Table:
+    dataset = ds.dataset(path, format="parquet")
+    scanner = dataset.scanner(
+        columns=list(columns), filter=predicate, batch_size=4096,
+        batch_readahead=0, fragment_readahead=0, use_threads=False,
+    )
+    batches = []
+    rows = size = 0
+    for batch in scanner.to_batches():
+        rows += batch.num_rows
+        size += batch.nbytes
+        if rows > MAX_VIEW_ROWS or size > MAX_VIEW_BYTES:
+            raise ValueError("Public soybean input exceeds the bounded page read limit")
+        batches.append(batch)
+    return pa.Table.from_batches(batches, schema=scanner.projected_schema)
+
+
+def read_public_tables(root: Path, domestic_path: Path):
+    """Select business rows before pandas conversion, after whole-file authentication."""
+    current = load_current_files(root / "public-market-data" / "tankan")
+    if current is None:
+        raise ValueError("Public market data is not published")
+    market = _read_view(
+        current.directory / "market.parquet", MARKET_COLUMNS,
+        (ds.field("exchange") == "CBOT") & (ds.field("product") == "SOYBEAN"),
+    )
+    fx = _read_view(current.directory / "fx.parquet", FX_COLUMNS)
+    names = pq.read_schema(domestic_path).names
+    if not set(DOMESTIC_COLUMNS).issubset(names):
+        raise ValueError("Domestic soybean input fields are incomplete")
+    columns = [*DOMESTIC_COLUMNS,
+               *(name for name in ("leg1_contract", "leg2_contract") if name in names)]
+    domestic = _read_view(
+        domestic_path, columns,
+        (ds.field("status") == "success") & (
+            ds.field("leg1_instrument").isin(["M", "Y"])
+            | ds.field("leg2_instrument").isin(["M", "Y"])
+        ),
+    )
+    return market.to_pandas(), fx.to_pandas(), domestic.to_pandas(), current.release_id
 
 
 def _unique(rows, keys, value, label):

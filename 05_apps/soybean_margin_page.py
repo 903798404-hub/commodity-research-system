@@ -16,9 +16,8 @@ from agri_research_agent.soybean_margin.model import (
     ORIGINS, FIELDS, KEY, daily_rows, history_matrix, read_history, resolve_history,
     number, read_chart_history, overlay_cnf, calculate,
 )
-from agri_research_agent.soybean_margin.public_inputs import apply_public_inputs
+from agri_research_agent.soybean_margin.public_inputs import apply_public_inputs, read_public_tables
 from agri_research_agent.market_data.activated_runtime import resolve_public_data_root, resolve_domestic_spread_path
-from agri_research_agent.pipelines.tankan_goal_a import load_current
 from agri_research_agent.soybean_margin.model import digest
 from agri_research_agent.soybean_margin.charts import build_margin_charts, _pm_seasonal_figure
 from agri_research_agent.soybean_margin.store import load, save, read_all
@@ -28,30 +27,26 @@ TITLE = "日度进口大豆盘面净榨利"
 SOURCE_DIR = Path(__file__).parent / "soybean_margin_assets"
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2)
 def _history(path: str, identity: str):
     del identity
     return read_history(Path(path))
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2)
 def _chart_history(path: str, identity: str):
     del identity
     return read_chart_history(Path(path))
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2)
 def _public_tables(root: str, domestic_path: str, identity: str):
-    current = load_current(Path(root) / "public-market-data" / "tankan")
-    if current is None:
-        raise ValueError("公共行情尚未发布")
-    domestic = pd.read_parquet(domestic_path)
+    result = read_public_tables(Path(root), Path(domestic_path))
     if identity != digest(Path(root) / "public-market-data" / "tankan" / "current.json") + digest(Path(domestic_path)):
         raise ValueError("公共行情在读取时发生变化，请重新读取")
-    return current.market.to_pandas(), current.fx.to_pandas(), domestic, current.release_id
+    return result
 
 
-@st.cache_data(show_spinner=False)
 def _public_rows(history_path: str, history_identity: str, root: str, domestic_path: str,
                  public_identity: str, day: date, manual_path: str, manual_identity: str):
     market, fx, domestic, _ = _public_tables(root, domestic_path, public_identity)
@@ -127,8 +122,7 @@ def render_soybean_margin_page(history_root: str | Path | None):
             domestic_path = Path(os.getenv("SOYBEAN_MARGIN_DOMESTIC_PATH", "")) if os.getenv("SOYBEAN_MARGIN_DOMESTIC_PATH") else resolve_domestic_spread_path(public_root / "consumer-artifacts" / "domestic-spread")
             public_identity = digest(public_root / "public-market-data" / "tankan" / "current.json") + digest(domestic_path)
             if st.button("重新读取已更新行情", key="soy-margin-refresh"):
-                _public_tables.clear()
-                _public_rows.clear()
+                _public_tables.clear(str(public_root), str(domestic_path), public_identity)
             manual_path = os.getenv("SOYBEAN_MARGIN_LEGACY_CNF_PATH") or os.getenv("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH") or ""
             manual_identity = digest(Path(manual_path)) if manual_path and Path(manual_path).is_file() else ""
             data, source_dates = _public_rows(str(path), identity, str(public_root),

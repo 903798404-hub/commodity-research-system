@@ -106,6 +106,13 @@ class RunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CurrentReleaseFiles:
+    release_id: str
+    directory: Path
+    manifest: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
 class CurrentRelease:
     release_id: str
     directory: Path
@@ -394,7 +401,8 @@ def canonicalize_fx(source: pa.Table) -> tuple[pa.Table, dict[str, object]]:
     }
 
 
-def load_current(public_root: str | Path) -> CurrentRelease | None:
+def load_current_files(public_root: str | Path) -> CurrentReleaseFiles | None:
+    """Authenticate Current files and their full schemas without materializing rows."""
     root = Path(public_root)
     pointer = root / "current.json"
     if not pointer.exists():
@@ -412,11 +420,22 @@ def load_current(public_root: str | Path) -> CurrentRelease | None:
         raise TankanGoalAError("Current manifest identity mismatch")
     manifest = _read_json(manifest_path)
     _verify_release_manifest(directory, manifest)
+    if (pq.read_schema(directory / "market.parquet") != MARKET_CANONICAL_SCHEMA
+            or pq.read_schema(directory / "fx.parquet") != FX_CANONICAL_SCHEMA):
+        raise TankanGoalAError("Current schema mismatch")
+    return CurrentReleaseFiles(release_id, directory, manifest)
+
+
+def load_current(public_root: str | Path) -> CurrentRelease | None:
+    current = load_current_files(public_root)
+    if current is None:
+        return None
+    directory = current.directory
     market = pq.read_table(directory / "market.parquet")
     fx = pq.read_table(directory / "fx.parquet")
     if market.schema != MARKET_CANONICAL_SCHEMA or fx.schema != FX_CANONICAL_SCHEMA:
         raise TankanGoalAError("Current schema mismatch")
-    return CurrentRelease(release_id, directory, manifest, market, fx)
+    return CurrentRelease(current.release_id, directory, current.manifest, market, fx)
 
 
 def _extract(
