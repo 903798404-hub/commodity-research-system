@@ -99,8 +99,9 @@ NAVIGATION_GROUPS = (
                 detail_text="种植进度 · 生长状况 · 出口销售 · 出口装船",
             ),
             NavigationItem(
-                "canada_canola", CANADA_CANOLA_PAGE_TITLE, CANADA_CANOLA_PAGE_TITLE,
-                "leaf", "比较加拿大三省菜籽播种、收割与优良率的历史同期差异",
+                "canada_canola", "加拿大菜籽周度跟踪", CANADA_CANOLA_PAGE_TITLE,
+                "leaf", "跟踪加拿大菜籽生长与出口执行的历史同期变化",
+                detail_label="包含", detail_text="种植进度 · 生长状况 · 周度出口",
             ),
             NavigationItem(
                 "brazil_soy", BRAZIL_SOY_PAGE_TITLE, BRAZIL_SOY_PAGE_TITLE,

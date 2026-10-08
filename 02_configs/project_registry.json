@@ -1430,6 +1430,33 @@
         "Same primary rollback consumer in preparation, pre-stop and fresh-instance signing",
         "Current-tool issuer with unchanged old application/image and grant/trust contracts"],
       "boundary_notes": "Explicit user-authorized historical primary rollback consumption and narrow issuer loading adjustment. Current Routine and HIGH_RISK Review freshness remain unchanged; no caller historical boolean or policy/schema field. Current protected plan and retained deployment chain are required at each consumption. No production connection, retained image rebuild, main integration, business mutation, trust, grant/record schema or Application Service Identity change. Existing ownership and required tests preserved. Hosted synthetic clocks affect only Review evaluation, not raw records, host clock or execution grant time. DRAFT_PENDING_PRODUCTION."
+    },
+    {
+      "project_id": "canola-weekly-exports",
+      "change_class": "business",
+      "status": "ready",
+      "runtime_target": "none",
+      "owned_paths": [
+        "03_src/agri_research_agent/canola_exports",
+        "04_scripts/canola_exports",
+        "05_apps/canola_exports_page.py",
+        "05_apps/canada_canola_weekly_page.py",
+        "08_tests/canola_exports",
+        "07_docs/projects/加拿大菜籽出口周度更新契约.md"
+      ],
+      "shared_dependencies": [
+        "05_apps/navigation.py", "05_apps/streamlit_app.py",
+        "05_apps/canada_canola_page.py", "03_src/agri_research_agent/shared/atomic_storage.py",
+        "03_src/agri_research_agent/shared/runtime_context.py", "03_src/agri_research_agent/shared/chart_style.py"
+      ],
+      "forbidden_paths": ["09_deploy", "02_configs/production_runtime_trust.json"],
+      "required_tests": [
+        "08_tests/canola_exports/test_exports.py", "08_tests/canola_exports/test_page.py",
+        "08_tests/test_streamlit_dashboard.py", "08_tests/canada_canola/test_canada_canola.py",
+        "08_tests/canada_canola/test_canada_canola_fetch.py"
+      ],
+      "capabilities": ["Source-backed CGC canola export monitoring and isolated data-only update candidates"],
+      "boundary_notes": "Existing workbench integration; route ID and crop consumer retained. Raw StatCan ZIP remains read-only. No oil, prices, sales commitments or invented destination data. This registration does not authorize production deployment or data writes; protected production delivery and schedule activation are pending separate approval and validation."
     }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"
