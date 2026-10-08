@@ -26,7 +26,7 @@ def test_soybean_page_shows_foreign_positions_and_domestic_gap_with_chinese_date
     assert not app.exception
     assert len(app.metric) == 9
     assert any("2026年9月29日" in item.value for item in app.caption)
-    assert any("尚未接通" in item.value for item in app.info)
+    assert any("汇总数据待接入" in item.value for item in app.info)
     app.radio[0].set_value("期货＋期权").run(timeout=20)
     assert not app.exception and any("此口径暂无" in item.value for item in app.info)
 
