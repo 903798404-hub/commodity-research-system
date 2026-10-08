@@ -49,7 +49,7 @@ def collect(source, spec, *, markets, start_year, start_day, end_day, euro_start
                 lambda: source.dce(end_day, varieties, seed_contract)))
         elif not sina_contracts:
             attempts.append(dict(source_id="dce", status="pending",
-                error="品种汇总来源待接入；未以单合约或各合约排名相加替代"))
+                error="全合约已披露汇总可由import_contract_rankings导入；服务器自动采集尚待接通，未以单合约替代"))
         for contract in sina_contracts:
             if contract[:-4] not in varieties:
                 raise ValueError("备用来源合约超出板块范围")
