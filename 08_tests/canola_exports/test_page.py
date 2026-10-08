@@ -31,6 +31,23 @@ def test_three_seasonal_figures_have_real_dates_gaps_and_styles():
         assert current.customdata[-1] == "2026-09-05"
     assert figures[0].data[-1].y[0] == 0.7
     assert "2" in figures[1].layout.annotations[0].text
+    assert figures[0].data[-1].x[0] == "1999-08-08"
+    assert figures[0].data[-1].x[2] is None
+    assert figures[0].layout.xaxis.tickformat == "%m/%d"
+    assert "第" not in figures[1].layout.annotations[0].text
+
+
+def test_date_axis_preserves_leap_days_and_gaps_without_invented_dates():
+    assert page.seasonal_date("2024-02-29") == "2000-02-29"
+    assert page.seasonal_date("2026-09-27") == "1999-09-27"
+    assert page.seasonal_date(None) is None
+    value = bundle(("2026-2027", source()))
+    value["records"][2]["date_quality"] = "non_monotonic_source_date"
+    figures = page.build_figures(data.page_payload(value))
+    for figure in figures:
+        assert figure.data[0].x[2] is None
+        assert figure.data[0].y[2] is None
+        assert not figure.data[0].connectgaps
 
 
 def test_observation_never_invents_sales_or_missing_comparisons():
@@ -38,6 +55,8 @@ def test_observation_never_invents_sales_or_missing_comparisons():
     assert "累计" in text
     assert "同比" not in text
     assert "价格" not in text
+    assert "第" not in text
+    assert "2026-08-15" in text
 
 
 def test_dashboard_four_metrics_three_charts_and_failure_notice(tmp_path, monkeypatch):
@@ -54,6 +73,8 @@ def test_dashboard_four_metrics_three_charts_and_failure_notice(tmp_path, monkey
     assert len(app.get("plotly_chart")) == 3
     assert len(app.warning) == 1
     assert app.metric[0].value == "0.70 万吨"
+    assert any("数据截至" in caption.value for caption in app.caption)
+    assert all("第 5 周" not in caption.value for caption in app.caption)
     app.multiselect[0].set_value([]).run()
     assert not app.exception
 

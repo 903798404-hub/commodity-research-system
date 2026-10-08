@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -38,6 +39,14 @@ def percent(value: float | None) -> str:
     return "暂无可比值" if value is None else f"{value:+.1f}%"
 
 
+def seasonal_date(value: str | None) -> str | None:
+    if value is None:
+        return None
+    actual = date.fromisoformat(value)
+    # A leap-year August-to-July axis preserves every reported month/day.
+    return actual.replace(year=1999 if actual.month >= 8 else 2000).isoformat()
+
+
 def build_figures(payload: dict) -> list[go.Figure]:
     figures = []
     for metric, title in CHARTS:
@@ -48,23 +57,24 @@ def build_figures(payload: dict) -> list[go.Figure]:
             previous = year == payload["previous_year"]
             color = CURRENT_YEAR_COLOR if current else "#0068C9" if previous else historical_year_color(int(year[:4]))
             figure.add_trace(go.Scatter(
-                x=[p["grain_week"] for p in track],
-                y=[None if p[metric] is None else p[metric] / 10000 for p in track],
+                x=[None if p.get("date_quality") else seasonal_date(p["week_ending"]) for p in track],
+                y=[None if p[metric] is None or p.get("date_quality") else p[metric] / 10000 for p in track],
                 customdata=[f"{p['week_ending']}（源日期待复核）" if p.get("date_quality") else p["week_ending"] for p in track], name=year.replace("-", "/"),
                 mode="lines", connectgaps=False, opacity=1 if current or previous else 0.65,
                 line={"color": color, "width": 3.4 if current else 2, "dash": "dash" if previous else "solid"},
-                hovertemplate="%{fullData.name}<br>第 %{x} 周 · %{customdata}<br>%{y:,.2f} 万公吨<extra></extra>",
+                hovertemplate="%{fullData.name}<br>截止 %{customdata}<br>%{y:,.2f} 万公吨<extra></extra>",
             ))
         latest = payload["latest"]
         if metric == "cumulative_mt" and payload["rank"] is not None:
             figure.add_annotation(x=0, y=1.24, xref="paper", yref="paper", showarrow=False,
-                                  xanchor="left", text=f"第 {latest['grain_week']} 周 · 同比 {percent(payload['cumulative_yoy'])}"
+                                  xanchor="left", text=f"截至 {latest['week_ending']} · 同比 {percent(payload['cumulative_yoy'])}"
                                   f" · 同期排名 {payload['rank']}/{payload['rank_samples']}")
         figure.update_layout(template="plotly_white", height=390,
                              margin={"l": 16, "r": 16, "t": 92, "b": 35},
                              legend={"orientation": "h", "x": 0, "y": 1.14, "font": {"size": 11}},
                              hovermode="x unified", font={"size": 12},
-                             xaxis={"title": "CGC 作物周", "range": [1, 53], "dtick": 4, "gridcolor": GRID_COLOR},
+                             xaxis={"title": "周截止日期 · 月/日", "type": "date", "range": ["1999-08-01", "2000-07-31"],
+                                    "dtick": "M1", "tickformat": "%m/%d", "gridcolor": GRID_COLOR},
                              yaxis={"title": "万公吨", "rangemode": "tozero", "gridcolor": GRID_COLOR})
         figures.append(figure)
     return figures
@@ -72,8 +82,8 @@ def build_figures(payload: dict) -> list[go.Figure]:
 
 def observation(payload: dict) -> str:
     latest = payload["latest"]
-    text = (f"截至 {latest['week_ending']}，{payload['current_year'].replace('-', '/')} 第 {latest['grain_week']} 周"
-            f"出口 {amount(latest['weekly_mt'])}，作物年累计 {amount(latest['cumulative_mt'])}。")
+    text = (f"截至 {latest['week_ending']}，当周出口 {amount(latest['weekly_mt'])}，"
+            f"{payload['current_year'].replace('-', '/')} 作物年累计 {amount(latest['cumulative_mt'])}。")
     for name, key in (("累计出口", "cumulative_yoy"), ("近四周出口", "four_week_yoy")):
         value = payload[key]
         if value is not None:
@@ -106,7 +116,7 @@ def render_canola_exports_page() -> None:
         st.error(f"菜籽出口数据暂不可读：{exc}")
         return
     latest = default["latest"]
-    st.caption(f"{default['current_year'].replace('-', '/')} · 第 {latest['grain_week']} 周 · 截止 {latest['week_ending']}"
+    st.caption(f"{default['current_year'].replace('-', '/')} · 数据截至 {latest['week_ending']}"
                " · CGC 报告体系出口，非海关全口径")
     status_path = root / STATUS
     if status_path.is_file():
@@ -131,6 +141,8 @@ def render_canola_exports_page() -> None:
     if not years:
         st.info("未选择对比作物年度。")
     else:
+        if any(p.get("date_quality") for track in payload["tracks"].values() for p in track):
+            st.caption("部分历史记录的官方源日期待复核，图中留空；原值保留在数据与来源中。")
         for (metric, title), figure in zip(CHARTS, build_figures(payload)):
             st.subheader(title)
             st.plotly_chart(figure, width="stretch", key=f"canola-export-{metric}")
