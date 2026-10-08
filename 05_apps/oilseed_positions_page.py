@@ -131,7 +131,7 @@ def render_oilseed_positions_page(project_root, domain):
             b.metric("较上一保存交易日变化", fmt(current["top20"]["net_change"], True))
             c.metric("五家合计净持仓", fmt(current["fixed5"]["net"]))
             st.caption(f"截至 {chinese_date(day)} · 对比 {chinese_date(current['top20']['previous_date'])} · {current['fixed5']['coverage']}")
-            st.caption("公开排名的多空名单可不同，净变化包含名单变化。" + ("交易所未区分账户类型。" if account == "未区分" else "固定席位展示代客持仓。"))
+            st.caption("公开排名的多空名单可不同，净变化包含名单变化。" + ("当前来源未区分账户类型。" if account == "未区分" else "固定席位展示代客持仓。"))
             st.subheader("五家固定席位")
             if current["fixed5"]["net"] is None:
                 st.warning("部分席位缺少一侧披露，无法计算准确合计；未披露不代表零仓位。")
