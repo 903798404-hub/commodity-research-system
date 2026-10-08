@@ -75,9 +75,6 @@ def daily_html(rows, region, day):
     result += "".join(f"<th>{escape(label)}</th>" for label in labels) + "</tr></thead><tbody>"
     for row in rows:
         fx = _cell(row[FIELDS[2]])
-        if day >= CUTOVER:
-            tenor = (row["shipment_year"] - day.year) * 12 + row["shipment_month"] - day.month
-            fx += f'<small>{"即期" if tenor < 3 else str(tenor)+"M远期"}</small>'
         values = [escape(row["shipment_period"]), _cell(row[FIELDS[0]]), _cell(row["usd_cost"]),
                   escape(row["cbot_contract"]), _cell(row[FIELDS[1]]), fx,
                   escape(row["domestic_contract"]), _cell(row[FIELDS[3]]), _cell(row[FIELDS[4]]),
@@ -133,8 +130,9 @@ def render_soybean_margin_page(history_root: str | Path | None):
             data, source_dates = _public_rows(str(path), identity, str(public_root),
                 str(domestic_path), public_identity, day, manual_path, manual_identity)
             market_tables = True
-            dates_text = " · ".join(f"{label}：{value.isoformat() if value else '暂无'}" for label,value in source_dates.items())
-            st.caption(f"{'历史区间' if day >= CUTOVER else ''}已读取公共数据库发布数据 · {dates_text}。")
+            if day < CUTOVER:
+                dates_text = " · ".join(f"{label}：{value.isoformat() if value else '暂无'}" for label,value in source_dates.items())
+                st.caption(f"已读取公共数据库发布数据 · {dates_text}。")
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
             if day < CUTOVER:
                 st.error(f"公共行情读取或校验失败：{type(exc).__name__}。当前不能确认新行情。")
@@ -151,11 +149,9 @@ def render_soybean_margin_page(history_root: str | Path | None):
     if day >= CUTOVER:
         market_tables = True
         snapshot = snapshots.get(day)
-        st.caption("CBOT：用户提供截图的最新报价，未提供报价时间时标为时间未知；Databento Historical补充缺失合约的08:59–09:00分钟收盘价。国内：AkShare/新浪具体M/Y合约；汇率：CFETS在岸USD/CNY买卖报价均值。1–2M即期，3M及以上按船期期限匹配远期，非标准期限内插；缺失值留空。")
         if snapshot:
-            st.caption(f"实际采集时间：{snapshot['captured_at']} · CBOT状态：{snapshot['sources']['cbot'].get('status', 'missing')}。")
-            if snapshot["errors"]:
-                st.caption("缺失来源：" + " · ".join(f"{name}: {value}" for name, value in snapshot["errors"].items()))
+            captured_at = datetime.fromisoformat(snapshot["captured_at"]).astimezone(ZoneInfo("Asia/Shanghai"))
+            st.caption(f"实际采集时间：{captured_at:%Y-%m-%d %H:%M:%S}")
         else:
             st.info("所选日期尚无API行情快照。可录入CNF，行情和榨利保留空值。")
     last = max(data.business_date)
