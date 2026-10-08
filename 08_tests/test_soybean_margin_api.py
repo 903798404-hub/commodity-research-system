@@ -36,15 +36,15 @@ def test_curve_matches_shipment_tenor_and_midpoint_without_extrapolation():
     assert inputs.select_fx({"0": 7., "3": None, "6": 6.94}, 3)[0] is None
 
 
-@pytest.mark.parametrize("missing_six_month", [False, True])
-def test_numeric_fx_table_preserves_shipment_curve_and_missing_values(missing_six_month):
+@pytest.mark.parametrize("missing_twelve_month", [False, True])
+def test_numeric_fx_table_preserves_shipment_curve_and_missing_values(missing_twelve_month):
     from pathlib import Path
     import runpy
     from bs4 import BeautifulSoup
 
     value = snapshot()
-    if missing_six_month:
-        value["fx_curve"]["6"] = None
+    if missing_twelve_month:
+        value["fx_curve"]["12"] = None
     merged = inputs.apply_api_inputs(history(), {DAY: value}, DAY)
     original = merged.copy(deep=True)
     rows = daily_rows(merged, DAY, "brazil")
@@ -52,8 +52,8 @@ def test_numeric_fx_table_preserves_shipment_curve_and_missing_values(missing_si
     table = BeautifulSoup(render(rows, "巴西", DAY), "html.parser")
     fx_cells = [row.select("td")[5].get_text(strip=True) for row in table.select("tr.profit-row")]
     expected = ["6.97", "6.96", "6.95", "6.94", "6.93", "6.92", "6.91", "6.90", "6.89", "6.88", "7.00", "7.00"]
-    if missing_six_month:
-        expected[3] = "—"
+    if missing_twelve_month:
+        expected[7:10] = ["—"] * 3
     assert fx_cells == expected
     pd.testing.assert_frame_equal(merged, original)
 
