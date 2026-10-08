@@ -19,6 +19,106 @@ sys.path.insert(0, str(ROOT / "05_apps"))
 from soybean_margin_page import daily_html, _overlay_manual
 
 
+@pytest.fixture
+def cached_page(tmp_path, monkeypatch):
+    import soybean_margin_page as page
+    for cached in (page._prepared_data, page._history_tables, page._chart_models, page._chart_figures):
+        cached.clear()
+    frame = source()
+    monkeypatch.setattr(page, "_history", lambda *args: frame.copy(deep=True))
+    monkeypatch.setattr(page, "_chart_history", lambda *args: frame.copy(deep=True))
+    args = (str(tmp_path / "history.parquet"), "history-v1", "", "", "",
+            date(2026, 6, 25), "", "", "{}", "[]")
+    yield page, args, frame
+    for cached in (page._prepared_data, page._history_tables, page._chart_models, page._chart_figures):
+        cached.clear()
+
+
+def test_calculation_cache_hits_and_returned_mutation_cannot_poison_other_sessions(cached_page, monkeypatch):
+    page, args, frame = cached_page
+    calls = []
+    original = page.apply_api_inputs
+    def counted(*values):
+        calls.append(1)
+        return original(*values)
+    monkeypatch.setattr(page, "apply_api_inputs", counted)
+    first, _ = page._prepared_data(*args)
+    first.loc[0, FIELDS[0]] = 999.
+    second, _ = page._prepared_data(*args)
+    assert calls == [1]
+    assert second.loc[0, FIELDS[0]] == 0.
+    assert frame.loc[0, FIELDS[0]] == 0.
+
+
+@pytest.mark.parametrize("cnf", [125., 0., None])
+def test_saved_cnf_content_invalidates_calculations_history_and_charts(cached_page, cnf):
+    page, args, _ = cached_page
+    original, _ = page._prepared_data(*args)
+    before = page._chart_models(args, "brazil")
+    quotes = [dict(business_date=args[5], origin="brazil", shipment_year=2026,
+                   shipment_month=9, cnf_cents_per_bushel=cnf)]
+    changed = args[:-1] + (page._cache_json(quotes),)
+    refreshed, _ = page._prepared_data(*changed)
+    row = daily_rows(refreshed, args[5], "brazil")[8]
+    assert row[FIELDS[0]] == cnf
+    assert row["net_margin"] == calculate(cnf, 1000., 7., 3000., 8000.)["net_margin"]
+    history = page._history_tables(changed, "brazil")[0]
+    assert number(history.iloc[0]["9月"]) == cnf
+    models = page._chart_models(changed, "brazil")
+    points = [p for chart in models for s in chart.series for p in s.points]
+    if cnf is None:
+        assert not points
+    else:
+        assert all(p.net_crush_margin_cny_per_tonne == row["net_margin"] for p in points)
+    assert original.loc[0, FIELDS[0]] == 0.
+    assert before == page._chart_models(args, "brazil")
+
+
+def test_history_content_identity_and_year_selection_invalidate_chart_cache(cached_page, monkeypatch):
+    page, args, frame = cached_page
+    first = page._chart_models(args, "brazil")
+    frame.loc[0, FIELDS[1]] = 1100.
+    changed = args[:1] + ("history-v2",) + args[2:]
+    second = page._chart_models(changed, "brazil")
+    assert first != second
+    calls = []
+    original = page._pm_seasonal_figure
+    def counted(chart, years):
+        calls.append(tuple(years))
+        return original(chart, years)
+    monkeypatch.setattr(page, "_pm_seasonal_figure", counted)
+    visible = page._chart_figures(changed, "brazil", (2026,))
+    again = page._chart_figures(changed, "brazil", (2026,))
+    assert len(calls) == 12 and len(visible) == len(again) == 12
+    page._chart_figures(changed, "brazil", (2025,))
+    assert len(calls) == 24
+
+
+def test_api_snapshot_content_change_refreshes_price_and_missing_snapshot_stays_empty(cached_page):
+    from agri_research_agent.soybean_margin.api_inputs import SCHEMA
+    page, args, _ = cached_page
+    day = date(2026, 10, 8)
+    value = dict(schema_version=SCHEMA, business_date=day.isoformat(),
+        captured_at="2026-10-08T09:35:00+08:00", fx_currency="USD/CNY",
+        fx_unit="CNY_per_USD", cbot_unit="US_cents/bushel", domestic_unit="CNY/tonne",
+        cbot={contracts(day, month)[0]: 1200. for month in range(1, 13)},
+        domestic={prefix + contracts(day, month)[1]: (3000. if prefix == "M" else 8000.)
+                  for prefix in ("M", "Y") for month in range(1, 13)},
+        fx_curve={"0": 7., "3": 6.97, "6": 6.94, "9": 6.91, "12": 6.88},
+        sources={"cbot": {}, "fx": {}, "domestic": {}}, errors={})
+    missing_args = args[:5] + (day,) + args[6:]
+    missing, _ = page._prepared_data(*missing_args)
+    assert daily_rows(missing, day, "brazil")[0][FIELDS[1]] is None
+    fresh_args = missing_args[:8] + (page._cache_json({day.isoformat(): value}), "[]")
+    fresh, _ = page._prepared_data(*fresh_args)
+    assert daily_rows(fresh, day, "brazil")[0][FIELDS[1]] == 1200.
+    value["cbot"][contracts(day, 1)[0]] = 1300.
+    changed_args = fresh_args[:8] + (page._cache_json({day.isoformat(): value}), "[]")
+    changed, _ = page._prepared_data(*changed_args)
+    assert daily_rows(changed, day, "brazil")[0][FIELDS[1]] == 1300.
+    assert daily_rows(page._prepared_data(*fresh_args)[0], day, "brazil")[0][FIELDS[1]] == 1200.
+
+
 def source(day=date(2026,6,25), cnf=0., **changes):
     row = dict(business_date=day,commodity="soybean",origin="brazil",shipment_year=2026,
                shipment_month=9,cnf_cents_per_bushel=cnf,cbot_contract_year=2026,

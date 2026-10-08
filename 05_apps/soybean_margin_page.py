@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from html import escape
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -98,6 +99,56 @@ def _overlay_manual(data, path):
     return overlay_cnf(data, manual[KEY + [FIELDS[0]]].to_dict("records"))
 
 
+def _cache_json(value):
+    """Content keys preserve zero, NULL and dates; never cache by filename alone."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                      default=lambda item: item.isoformat() if isinstance(item, (date, datetime)) else str(item))
+
+
+@st.cache_data(show_spinner=False, max_entries=1)
+def _prepared_data(history_path, history_identity, public_root, domestic_path,
+                   public_identity, day, manual_path, manual_identity,
+                   snapshots_json, quotes_json):
+    if public_root:
+        data, source_dates = _public_rows(history_path, history_identity, public_root,
+            domestic_path, public_identity, day, manual_path, manual_identity)
+    else:
+        data = _overlay_manual(_history(history_path, history_identity), manual_path)
+        source_dates = {}
+    snapshots = {date.fromisoformat(key): value for key, value in json.loads(snapshots_json).items()}
+    data = apply_api_inputs(data, snapshots, day)
+    return overlay_cnf(data, json.loads(quotes_json)), source_dates
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _history_tables(view_args, origin):
+    data, _ = _prepared_data(*view_args)
+    return tuple(history_matrix(data, view_args[5], origin, metric)
+                 for metric in (FIELDS[0], "net_margin"))
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _chart_models(view_args, origin):
+    history_path, history_identity, public_root, _, _, day, _, _, snapshots_json, quotes_json = view_args
+    saved_quotes = json.loads(quotes_json)
+    original = _chart_history(history_path, history_identity)
+    if public_root or day >= CUTOVER:
+        data, _ = _prepared_data(*view_args)
+        newer = data.loc[data.business_date > max(original.business_date)].copy()
+        newer["retained_net_margin"] = [calculate(*(row[name] for name in FIELDS))["net_margin"]
+            for row in newer.to_dict("records")]
+        newer["chart_history_source"] = ["soybean_api" if value >= CUTOVER else "public_current"
+                                         for value in newer.business_date]
+        original = pd.concat([original, newer], ignore_index=True)
+    chart_data = overlay_cnf(original, saved_quotes, recalculate_retained=True)
+    return build_margin_charts(chart_data, origin, day)
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _chart_figures(view_args, origin, years):
+    return tuple(_pm_seasonal_figure(chart, years) for chart in _chart_models(view_args, origin))
+
+
 def render_soybean_margin_page(history_root: str | Path | None):
     st.markdown(f"## {TITLE}")
     if not history_root:
@@ -105,8 +156,6 @@ def render_soybean_margin_page(history_root: str | Path | None):
         return
     try:
         path, identity = resolve_history(Path(history_root))
-        data = _overlay_manual(_history(str(path), identity),
-            os.getenv("SOYBEAN_MARGIN_LEGACY_CNF_PATH") or os.getenv("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH"))
     except (OSError, ValueError, KeyError) as exc:
         st.error(f"榨利输入数据不可读取或校验失败：{type(exc).__name__}")
         return
@@ -117,6 +166,13 @@ def render_soybean_margin_page(history_root: str | Path | None):
     public_enabled = any(os.getenv(name, "").strip() for name in
         ("SOYBEAN_MARGIN_PUBLIC_ROOT", "PUBLIC_MARKET_DATA_RUNTIME_ROOT", "PUBLIC_DATA_SERVER_STORE_ROOT"))
     market_tables = None
+    public_root_text = domestic_path_text = public_identity = ""
+    manual_path = os.getenv("SOYBEAN_MARGIN_LEGACY_CNF_PATH") or os.getenv("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH") or ""
+    try:
+        manual_identity = digest(Path(manual_path)) if manual_path and Path(manual_path).is_file() else ""
+    except OSError as exc:
+        st.error(f"人工CNF不可读取：{type(exc).__name__}")
+        return
     if public_enabled:
         try:
             public_root = resolve_public_data_root(os.getenv("SOYBEAN_MARGIN_PUBLIC_ROOT")
@@ -125,14 +181,13 @@ def render_soybean_margin_page(history_root: str | Path | None):
             public_identity = digest(public_root / "public-market-data" / "tankan" / "current.json") + digest(domestic_path)
             if st.button("重新读取已更新行情", key="soy-margin-refresh"):
                 _public_tables.clear(str(public_root), str(domestic_path), public_identity)
-            manual_path = os.getenv("SOYBEAN_MARGIN_LEGACY_CNF_PATH") or os.getenv("IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH") or ""
-            manual_identity = digest(Path(manual_path)) if manual_path and Path(manual_path).is_file() else ""
-            data, source_dates = _public_rows(str(path), identity, str(public_root),
-                str(domestic_path), public_identity, day, manual_path, manual_identity)
+                _prepared_data.clear()
+                _history_tables.clear()
+                _chart_models.clear()
+                _chart_figures.clear()
+            _public_tables(str(public_root), str(domestic_path), public_identity)
+            public_root_text, domestic_path_text = str(public_root), str(domestic_path)
             market_tables = True
-            if day < CUTOVER:
-                dates_text = " · ".join(f"{label}：{value.isoformat() if value else '暂无'}" for label,value in source_dates.items())
-                st.caption(f"已读取公共数据库发布数据 · {dates_text}。")
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
             if day < CUTOVER:
                 st.error(f"公共行情读取或校验失败：{type(exc).__name__}。当前不能确认新行情。")
@@ -142,7 +197,6 @@ def render_soybean_margin_page(history_root: str | Path | None):
         str(Path(os.getenv("IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT") or Path(history_root).parent / "snapshots") / "soybean-api"))
     try:
         snapshots = read_days(api_root, day)
-        data = apply_api_inputs(data, snapshots, day)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         st.error(f"API行情快照读取或校验失败：{type(exc).__name__}。")
         return
@@ -154,22 +208,34 @@ def render_soybean_margin_page(history_root: str | Path | None):
             st.caption(f"实际采集时间：{captured_at:%Y-%m-%d %H:%M:%S}")
         else:
             st.info("所选日期尚无API行情快照。可录入CNF，行情和榨利保留空值。")
-    last = max(data.business_date)
-    if not public_enabled and day < CUTOVER:
-        st.caption(f"历史行情截至 {last.isoformat()}。历史价格为连续合约收盘口径；缺失日期保留空值。")
-    if day.weekday() >= 5:
-        st.info("请选择周一至周五的业务日期。")
-    if day < CUTOVER and (day > last or (market_tables is not None and any(value is None or day > value for value in source_dates.values()))):
-        st.info("所选日期尚无已发布行情。可预览CNF，行情和榨利保持空值。")
     root = os.getenv("SOYBEAN_MARGIN_STORAGE_ROOT", "").strip()
     database = Path(root) / "cnf.sqlite3" if root else None
     try:
         saved_quotes = read_all(database) if database else []
-        data = overlay_cnf(data, saved_quotes)
         overrides, revision = load(database, day, origin) if database else ({}, 0)
     except (OSError, ValueError, sqlite3.Error) as exc:
         st.error(f"CNF存储校验失败：{type(exc).__name__}")
         return
+    view_args = (str(path), identity, public_root_text, domestic_path_text, public_identity,
+                 day, manual_path, manual_identity,
+                 _cache_json({key.isoformat(): value for key, value in snapshots.items()}),
+                 _cache_json(saved_quotes))
+    try:
+        data, source_dates = _prepared_data(*view_args)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.error(f"榨利输入数据不可读取或校验失败：{type(exc).__name__}")
+        return
+    last = max(data.business_date)
+    if day < CUTOVER:
+        if market_tables is not None:
+            dates_text = " · ".join(f"{label}：{value.isoformat() if value else '暂无'}" for label,value in source_dates.items())
+            st.caption(f"已读取公共数据库发布数据 · {dates_text}。")
+        elif not public_enabled:
+            st.caption(f"历史行情截至 {last.isoformat()}。历史价格为连续合约收盘口径；缺失日期保留空值。")
+        if day > last or (market_tables is not None and any(value is None or day > value for value in source_dates.values())):
+            st.info("所选日期尚无已发布行情。可预览CNF，行情和榨利保持空值。")
+    if day.weekday() >= 5:
+        st.info("请选择周一至周五的业务日期。")
     rows = daily_rows(data, day, origin, overrides)
     allowed = bool(database) and os.getenv("SOYBEAN_MARGIN_ALLOW_SAVE") == "1" and day.weekday() < 5
     with st.popover("录入 / 预览 CNF", use_container_width=False):
@@ -193,29 +259,18 @@ def render_soybean_margin_page(history_root: str | Path | None):
         if not allowed:
             st.caption("当前仅支持会话预览；正式保存入口尚未启用。")
     components.html(daily_html(rows, ORIGINS[origin], day), height=640, scrolling=True)
-    for title, metric in [("大豆历史 CNF 报价", FIELDS[0]),
-                          ("中国进口大豆历史盘面净榨利", "net_margin")]:
+    for title, matrix in zip(("大豆历史 CNF 报价", "中国进口大豆历史盘面净榨利"),
+                             _history_tables(view_args, origin)):
         st.markdown(f"#### {title} · {ORIGINS[origin]}")
-        st.dataframe(history_matrix(data, day, origin, metric), hide_index=True,
+        st.dataframe(matrix, hide_index=True,
                      use_container_width=True, column_config={f"{m}月": st.column_config.NumberColumn(format="%.2f") for m in range(1,13)})
     st.markdown("### 盘面榨利历史季节性")
     st.caption(f"中国进口大豆 · {ORIGINS[origin]} · 元/吨 · 沿用原图周期和历史观测值。相邻有效报价间隔不超过10天时连线，较长缺口留白。")
     try:
-        if market_tables is not None:
-            original = _chart_history(str(path), identity)
-            newer = data.loc[data.business_date > max(original.business_date)].copy()
-            newer["retained_net_margin"] = [calculate(*(row[name] for name in FIELDS))["net_margin"]
-                for row in newer.to_dict("records")]
-            newer["chart_history_source"] = ["soybean_api" if value >= CUTOVER else "public_current" for value in newer.business_date]
-            chart_data = overlay_cnf(pd.concat([original, newer], ignore_index=True), saved_quotes,
-                recalculate_retained=True)
-        else:
-            chart_data = overlay_cnf(_chart_history(str(path), identity), saved_quotes,
-                recalculate_retained=True)
+        charts = _chart_models(view_args, origin)
     except (OSError, ValueError, KeyError):
         st.error("历史榨利图数据校验失败。")
     else:
-        charts = build_margin_charts(chart_data, origin, day)
         available_years = sorted({series.series_year for chart in charts for series in chart.series}, reverse=True)
         controls = st.columns([3, 1])
         with controls[0]:
@@ -226,9 +281,10 @@ def render_soybean_margin_page(history_root: str | Path | None):
         if not years:
             st.info("请选择至少一个对比年份。")
             return
+        figures = _chart_figures(view_args, origin, tuple(years))
         for start in range(0,12,per_row):
-            for column,chart in zip(st.columns(per_row),charts[start:start+per_row]):
+            for column,chart,figure in zip(st.columns(per_row),charts[start:start+per_row],figures[start:start+per_row]):
                 with column:
-                    st.plotly_chart(_pm_seasonal_figure(chart, years), use_container_width=True,
+                    st.plotly_chart(figure, use_container_width=True,
                         config={"displayModeBar": False, "displaylogo": False},
                         key=f"soy-margin-original-{origin}-{chart.spec.shipment_month}")
