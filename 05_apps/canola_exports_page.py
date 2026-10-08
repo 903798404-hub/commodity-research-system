@@ -22,7 +22,7 @@ def data_root() -> Path:
                 or os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip() or ROOT / "01_data")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2)
 def read_data(path: str, identity: str) -> dict:
     bundle = load_bundle(Path(path))
     if digest(Path(path).read_bytes()) != identity:

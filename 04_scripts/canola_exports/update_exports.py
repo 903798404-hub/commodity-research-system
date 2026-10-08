@@ -19,14 +19,15 @@ def main(argv=None) -> int:
     parser.add_argument("--runtime-root", type=Path, default=ROOT / "01_data")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init-dev")
-    importer = commands.add_parser("prepare")
-    importer.add_argument("--years", type=int, default=2)
-    importer.add_argument("--crop-year")
-    importer.add_argument("--source-file", type=Path)
+    for command in ("prepare", "update-local"):
+        importer = commands.add_parser(command)
+        importer.add_argument("--years", type=int, default=2)
+        importer.add_argument("--crop-year")
+        importer.add_argument("--source-file", type=Path)
     local = commands.add_parser("activate-local")
     local.add_argument("--candidate", type=Path, required=True)
     args = parser.parse_args(argv)
-    if args.command == "prepare" and (not 1 <= args.years <= 20 or args.source_file and not args.crop_year):
+    if args.command in {"prepare", "update-local"} and (not 1 <= args.years <= 20 or args.source_file and not args.crop_year):
         parser.error("years must be 1..20; source-file requires crop-year")
     context = None
     try:
@@ -41,7 +42,7 @@ def main(argv=None) -> int:
             path = root
         else:
             context = RuntimeContext(RuntimeMode.ISOLATED_DEV, MODULE_ID, args.runtime_root)
-            if args.command == "prepare":
+            if args.command in {"prepare", "update-local"}:
                 years = [args.crop_year] if args.crop_year else discover_years()[:args.years]
                 if args.source_file:
                     downloads = {args.crop_year: args.source_file.resolve(strict=True).read_bytes()}
@@ -49,6 +50,8 @@ def main(argv=None) -> int:
                     downloads = {year: official_bytes(source_url(year)) for year in years}
                 reports = {} if args.source_file else missing_reports(downloads)
                 path = prepare(context, downloads, reports)
+                if args.command == "update-local":
+                    path = activate_local(context, path)
             else:
                 path = activate_local(context, args.candidate)
         print(json.dumps({"status": "PASS", "path": str(path)}, ensure_ascii=False))

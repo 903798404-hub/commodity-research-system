@@ -66,6 +66,20 @@ def test_unpublished_export_does_not_throw_or_fetch(tmp_path, monkeypatch):
     assert len(app.metric) == 0
 
 
+def test_read_cache_is_bounded_and_new_identity_reads_new_data(tmp_path):
+    page.read_data.clear()
+    stable = tmp_path / "weekly.json"
+    first = bundle(("2026-2027", source()))
+    stable.write_text(json.dumps(first), encoding="utf-8")
+    first_identity = data.digest(stable.read_bytes())
+    assert page.read_data(str(stable), first_identity)["records"][0]["weekly_mt"] == 7000
+    second = bundle(("2026-2027", source(weekly="2")))
+    stable.write_text(json.dumps(second), encoding="utf-8")
+    assert page.read_data(str(stable), data.digest(stable.read_bytes()))["records"][0]["weekly_mt"] == 14000
+    assert page.read_data._info.max_entries == 2
+    page.read_data.clear()
+
+
 def test_canada_tabs_preserve_old_route_and_independent_pages(tmp_path, monkeypatch):
     monkeypatch.setenv("CANOLA_EXPORT_RUNTIME_ROOT", str(tmp_path))
     monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(tmp_path))
