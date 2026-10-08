@@ -1,6 +1,7 @@
 """Read-only oilseed positioning pages with explicit missing-source states."""
 from datetime import date, datetime
 import json
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
@@ -9,6 +10,7 @@ from agri_research_agent.oilseed_positions.model import config, metrics, preview
 from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
 from agri_research_agent.sugar_positions.model import domestic_metrics, load_members, positioning_signal
 from agri_research_agent.sugar_positions.storage import read_snapshot
+from agri_research_agent.positions.workspace import validate_domain
 from sugar_positions_page import chinese_time, detail, display_attempt
 
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
@@ -31,12 +33,12 @@ def series_figure(data, title, group):
     return figure
 
 
-def render_oilseed_positions_page(project_root, domain):
+def render_oilseed_positions_page(project_root, domain, *, data_root=None, preview_mode=True):
     spec = config(project_root)[domain]
     st.title(spec["title"])
-    root = preview_root(project_root, domain)
+    root = Path(data_root) if data_root is not None else preview_root(project_root, domain)
     try:
-        snapshot = read_snapshot(root)
+        snapshot = validate_domain(read_snapshot(root), project_root, domain)
         attempt_file = root / "last_attempt.json"
         attempt = json.loads(attempt_file.read_text(encoding="utf-8")) if attempt_file.is_file() else {"attempts": []}
     except (ValueError, OSError, KeyError) as exc:
@@ -46,7 +48,7 @@ def render_oilseed_positions_page(project_root, domain):
     if pending:
         st.warning("部分来源尚未接通，相关品种保留已验证数据或显示缺口。")
     if not snapshot["foreign"] and not snapshot["domestic"]:
-        st.info("尚无已验证持仓数据。国内大商所接口访问失败；马来西亚棕榈油分类基金持仓来源仍待确认。")
+        st.info("尚无已验证持仓数据。")
         st.caption("数据接通后才展示资金情绪。总持仓量不能代替基金净持仓。")
         return
     foreign = metrics(snapshot["foreign"])
@@ -68,7 +70,7 @@ def render_oilseed_positions_page(project_root, domain):
             with column, st.container(border=True):
                 st.markdown(f"**{label}**")
                 if row is None:
-                    st.caption("暂无已验证品种总排名" if "前20名" in label else "暂无已验证基金持仓")
+                    st.caption("暂无已验证排名持仓" if "前20名" in label else "暂无已验证基金持仓")
                     continue
                 st.markdown(positioning_signal(row["net"], row["net_change"]))
                 st.metric("净持仓（手）", fmt(row["net"]),
@@ -160,4 +162,5 @@ def render_oilseed_positions_page(project_root, domain):
                 st.markdown(f"**{label}** · {chinese_time(metadata['retrieved_at'])} · [原始来源]({metadata['url']})")
         with st.expander("最近一次采集结果"):
             st.json(display_attempt(attempt))
-        st.caption("本地预览，页面只读；公开上线前需确认数据展示授权。")
+        st.caption("本地预览，页面只读；公开上线前需确认数据展示授权。" if preview_mode
+                   else "页面展示已保存报告；刷新页面不会触发数据采集。")

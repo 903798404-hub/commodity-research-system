@@ -1618,6 +1618,78 @@
     {
       "path": "05_apps/soybean_margin_assets/tables.css",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/oilseed_positions.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/sugar_positions.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/oilseed_positions/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/oilseed_positions/model.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/oilseed_positions/sources.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/positions/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/positions/bundle.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/positions/workspace.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_positions/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_positions/charts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_positions/model.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_positions/sources.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_positions/storage.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/oilseed_positions/update_positions.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/positions/update_positions.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/sugar_positions/update_sugar_positions.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/oilseed_positions_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/sugar_positions_page.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [

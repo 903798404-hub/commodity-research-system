@@ -94,7 +94,6 @@ WEATHER_PAGE_ROUTES = {
 }
 WORKSPACE_PAGES = list(internal_workspace_pages())
 SIDEBAR_NAVIGATION = NAVIGATION_GROUPS
-FOREIGN_SEATS_DATABASE_FILE = DATA_DIR / "database" / "foreign_seats" / "foreign_seat_positions.parquet"
 
 def get_database_path() -> Path:
     return resolve_domestic_spread_path(DATA_DIR)
@@ -425,7 +424,7 @@ def render_selected_workspace_page(selected_page: str) -> None:
     elif selected_page == "运行监控":
         render_status_page()
     elif selected_page == "外资与重点席位":
-        render_foreign_seats_page(FOREIGN_SEATS_DATABASE_FILE)
+        render_foreign_seats_page(PROJECT_ROOT)
     elif selected_page == IMPORT_PROFIT_ROUTE_ID:
         render_import_profit_route()
     elif selected_page == INTERNATIONAL_SPREAD_PAGE_TITLE:
