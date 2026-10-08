@@ -1632,6 +1632,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/oilseed_positions/aggregation.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/oilseed_positions/model.py",
       "role": "runtime_configuration"
     },

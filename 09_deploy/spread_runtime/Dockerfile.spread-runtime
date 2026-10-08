@@ -112,7 +112,7 @@ COPY ["03_src/agri_research_agent/soybean_margin/api_inputs.py", "03_src/agri_re
 COPY ["04_scripts/import_profit/capture_soybean_api.py", "/app/04_scripts/import_profit/"]
 COPY ["05_apps/soybean_margin_assets/tables.css", "/app/05_apps/soybean_margin_assets/"]
 COPY ["02_configs/oilseed_positions.json", "02_configs/sugar_positions.json", "/app/02_configs/"]
-COPY ["03_src/agri_research_agent/oilseed_positions/__init__.py", "03_src/agri_research_agent/oilseed_positions/model.py", "03_src/agri_research_agent/oilseed_positions/sources.py", "/app/03_src/agri_research_agent/oilseed_positions/"]
+COPY ["03_src/agri_research_agent/oilseed_positions/__init__.py", "03_src/agri_research_agent/oilseed_positions/aggregation.py", "03_src/agri_research_agent/oilseed_positions/model.py", "03_src/agri_research_agent/oilseed_positions/sources.py", "/app/03_src/agri_research_agent/oilseed_positions/"]
 COPY ["03_src/agri_research_agent/positions/__init__.py", "03_src/agri_research_agent/positions/bundle.py", "03_src/agri_research_agent/positions/workspace.py", "/app/03_src/agri_research_agent/positions/"]
 COPY ["03_src/agri_research_agent/sugar_positions/__init__.py", "03_src/agri_research_agent/sugar_positions/charts.py", "03_src/agri_research_agent/sugar_positions/model.py", "03_src/agri_research_agent/sugar_positions/sources.py", "03_src/agri_research_agent/sugar_positions/storage.py", "/app/03_src/agri_research_agent/sugar_positions/"]
 COPY ["04_scripts/oilseed_positions/update_positions.py", "/app/04_scripts/oilseed_positions/"]
