@@ -11,8 +11,8 @@ from agri_research_agent.sugar_positions.charts import chinese_date, movements, 
 from agri_research_agent.sugar_positions.model import (
     GROUPS, MARKETS, domestic_metrics, foreign_metrics, load_members, positioning_signal,
 )
-from agri_research_agent.sugar_positions.storage import preview_root, read_snapshot
-from agri_research_agent.positions.workspace import validate_domain
+from agri_research_agent.sugar_positions.storage import read_snapshot
+from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 
 REPORT_LABELS = {"纯期货": "futures_only", "期货＋期权": "combined"}
 
@@ -51,7 +51,7 @@ def detail(rows):
 def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_mode=True):
     st.title("白糖资金情绪")
     members = load_members(project_root / "02_configs" / "sugar_positions.json")
-    root = Path(data_root) if data_root is not None else preview_root(project_root)
+    root = Path(data_root) if data_root is not None else resolve_positions_root(project_root, "sugar")
     try:
         snapshot = validate_domain(read_snapshot(root), project_root, "sugar")
     except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
