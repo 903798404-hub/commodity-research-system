@@ -31,7 +31,7 @@ def _day(text):
 
 def _cot_record(row, market, report_type, source_url, retrieved_at):
     lowered = {k.lower(): v for k, v in row.items()}
-    day = _day(lowered["report_date_as_yyyy_mm_dd"]) if market == "sugar11" else (
+    day = _day(lowered["report_date_as_yyyy_mm_dd"]) if market != "white_sugar" else (
         datetime.strptime(lowered["as_of_date_form_mm/dd/yyyy"], "%m/%d/%Y").date().isoformat())
     if date.fromisoformat(day) > datetime.now(timezone.utc).date():
         raise ValueError("持仓日期在未来")
@@ -39,7 +39,7 @@ def _cot_record(row, market, report_type, source_url, retrieved_at):
     result = []
     for group, prefix in FIELDS.items():
         # Socrata API names differ from the official CSV names (including double underscores).
-        names = CFTC_FIELDS[group] if market == "sugar11" else (
+        names = CFTC_FIELDS[group] if market != "white_sugar" else (
             f"{prefix}_positions_long_all", f"{prefix}_positions_short_all",
             f"{prefix}_positions_spread_all" if group in ("swap", "managed_money", "other") else None)
         long = integer(lowered[names[0]])
@@ -56,7 +56,7 @@ def _cot_record(row, market, report_type, source_url, retrieved_at):
         total = sum(r[side] + r["spreading"] for r in result)
         if abs(total - oi) > tolerance:
             raise ValueError(f"{market} {day} {side} 未与总持仓核对一致")
-        if market == "sugar11":
+        if market != "white_sugar":
             aggregate_key = "tot_rept_positions_long_all" if side == "long" else "tot_rept_positions_short"
             aggregate = integer(lowered[aggregate_key])
             nonreportable = next(r[side] for r in result if r["group"] == "nonreportable")
@@ -65,15 +65,16 @@ def _cot_record(row, market, report_type, source_url, retrieved_at):
     return result
 
 
-def parse_cftc(payload, report_type, source_url, retrieved_at):
+def parse_cftc(payload, report_type, source_url, retrieved_at, *,
+               market="sugar11", expected_code="080732", expected_name="SUGAR NO. 11"):
     if report_type not in CFTC_DATASETS or not isinstance(payload, list) or not payload:
         raise ValueError("CFTC 报告为空或口径无效")
     rows = []
     for item in payload:
-        if (item.get("cftc_contract_market_code") != "080732"
-                or "SUGAR NO. 11" not in item.get("market_and_exchange_names", "")):
-            raise ValueError("CFTC 返回了非糖11数据")
-        rows.extend(_cot_record(item, "sugar11", report_type, source_url, retrieved_at))
+        if (item.get("cftc_contract_market_code") != expected_code
+                or expected_name not in item.get("market_and_exchange_names", "")):
+            raise ValueError("CFTC 返回了非糖11数据" if market == "sugar11" else "CFTC 返回了非目标品种数据")
+        rows.extend(_cot_record(item, market, report_type, source_url, retrieved_at))
     unique_rows(rows, ("market", "report_type", "group", "report_date"))
     return rows
 
@@ -97,7 +98,7 @@ def parse_ice(content, year, source_url, retrieved_at):
     return rows
 
 
-def parse_czce(content, expected_day, source_url, retrieved_at):
+def parse_czce(content, expected_day, source_url, retrieved_at, *, varieties=("SR",)):
     if not content.startswith(b"PK"):
         raise ValueError("郑商所返回的不是 XLSX，可能是访问限制页面")
     try:
@@ -112,10 +113,10 @@ def parse_czce(content, expected_day, source_url, retrieved_at):
             values = tuple(values) + (None,) * max(0, 10 - len(values))
             title = str(values[0] or "")
             if title.startswith(("品种：", "合约：")):
-                match = re.search(r"(SR\d*)\s+日期：(\d{4}-\d{2}-\d{2})", title)
+                match = re.search(r"([A-Z]+\d*)\s+日期：(\d{4}-\d{2}-\d{2})", title)
                 scope = None
                 header = False
-                if match:
+                if match and re.sub(r"\d", "", match.group(1)) in varieties:
                     scope, day = match.groups()
                     if day != expected_day:
                         raise ValueError("郑商所文件与请求日期不一致")
@@ -156,8 +157,8 @@ def parse_czce(content, expected_day, source_url, retrieved_at):
     finally:
         book.close()
     result = []
-    if "SR" not in sections:
-        raise ValueError("郑商所文件缺少 SR 品种排名")
+    if not any(variety in sections for variety in varieties):
+        raise ValueError("郑商所文件缺少目标品种排名")
     for key, section in sections.items():
         if section["totals"] is None or not section["rows"]:
             raise ValueError(f"{key}排名区块不完整")

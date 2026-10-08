@@ -15,6 +15,24 @@ modules:
       - 08_tests/test_streamlit_dashboard.py
     dependents: []
     full_regression_when_changed: false
+  oilseed_positions:
+    code_paths:
+      - 02_configs/oilseed_positions.json
+      - 03_src/agri_research_agent/oilseed_positions/
+      - 04_scripts/oilseed_positions/
+      - 05_apps/oilseed_positions_page.py
+      - 05_apps/rapeseed_positions_preview.py
+      - 05_apps/soybean_positions_preview.py
+      - 05_apps/palm_positions_preview.py
+    direct_tests:
+      - 08_tests/oilseed_positions/test_oilseed_positions.py
+      - 08_tests/oilseed_positions/test_oilseed_preview.py
+    impact_tests:
+      - 08_tests/sugar_positions/test_positions.py
+      - 08_tests/sugar_positions/test_preview.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: false
   sugar_positions:
     code_paths:
       - 03_src/agri_research_agent/sugar_positions/__init__.py
