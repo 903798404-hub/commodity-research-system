@@ -15,6 +15,11 @@ EURO_HEADERS = ("Investment Firms or Credit Institutions", "Investment Funds",
     "Other Financial Institutions", "Commercial Undertakings",
     "Operators with compliance obligations under Directive 2003/87/EC")
 DCE_URL = "http://www.dce.com.cn/dcereport/publicweb/dailystat/memberDealPosi/batchDownload"
+SINA_URL = "https://vip.stock.finance.sina.com.cn/q/view/vFutures_Positions_cjcc.php"
+
+
+class SourceNotPublished(ValueError):
+    pass
 
 
 def decimal_number(value):
@@ -170,6 +175,55 @@ def parse_dce(content, requested_day, varieties, source_url, stamp):
     return result
 
 
+def parse_sina(content, requested_day, contract, source_url, stamp):
+    if not re.fullmatch(r"[MPY]\d{4}", contract):
+        raise ValueError("新浪备用来源仅接入明确的M/Y/P合约")
+    soup = BeautifulSoup(content.decode("gb18030", errors="strict"), "html.parser")
+    selected = soup.select('select[name="t_breed"] option[selected]')
+    dates = soup.select('input[name="t_date"]')
+    if len(selected) != 1 or selected[0].get("value") != contract:
+        raise ValueError("新浪返回合约与请求不一致")
+    if len(dates) != 1 or dates[0].get("value") != requested_day.isoformat():
+        raise ValueError("新浪返回日期与请求不一致")
+    result = []
+    for side, title in (("long", "多单持仓"), ("short", "空单持仓")):
+        tables = [t for t in soup.find_all("table") if t.find("table") is None and title in t.get_text()]
+        if len(tables) != 1:
+            raise ValueError("新浪多空排名表不唯一")
+        rows = [[c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"], recursive=False)]
+            for tr in tables[0].find_all("tr")]
+        if not rows or rows[0] != ["名次", "会员简称", title, "比上交易增减"]:
+            raise ValueError("新浪排名表头发生变化")
+        total, records = None, []
+        for values in rows[1:]:
+            if not values:
+                continue
+            if values[0] == "合计":
+                if len(values) < 3 or not values[2]:
+                    raise SourceNotPublished("新浪该日该合约无排名数据")
+                if total is not None:
+                    raise ValueError("新浪排名合计重复")
+                total = integer(values[2])
+                continue
+            if len(values) != 4 or not values[0].isdigit() or not values[1]:
+                raise ValueError("新浪排名行不完整")
+            rank = integer(values[0])
+            member, account = split_member(values[1])
+            records.append(dict(report_date=requested_day.isoformat(), scope=contract, side=side,
+                rank=rank, member=member, raw_member=values[1], account=account,
+                positions=integer(values[2]), reported_change=integer(values[3], signed=True, optional=True),
+                unit="contracts", source_provider="sina", source_url=source_url, retrieved_at=stamp))
+        if not records:
+            raise SourceNotPublished("新浪该日该合约无排名数据")
+        if len(records) > 20 or [r["rank"] for r in records] != list(range(1, len(records)+1)):
+            raise ValueError("新浪排名不连续或超出前20名")
+        if total != sum(r["positions"] for r in records):
+            raise ValueError("新浪排名明细与合计不一致")
+        result.extend(records)
+    unique_rows(result, ("report_date", "scope", "side", "member", "account"))
+    return result
+
+
 class Sources:
     def __init__(self, timeout=20):
         self.session = requests.Session()
@@ -211,3 +265,7 @@ class Sources:
             "varietyId": re.sub(r"\d", "", seed_contract), "contractId": seed_contract,
             "tradeType": "1", "lang": "zh"})
         return parse_dce(response.content, day, varieties, DCE_URL, datetime.now(timezone.utc).isoformat()), response.content, DCE_URL
+
+    def sina(self, day, contract):
+        response = self._response("GET", SINA_URL, params={"t_breed": contract, "t_date": day.isoformat()})
+        return parse_sina(response.content, day, contract, response.url, datetime.now(timezone.utc).isoformat()), response.content, response.url

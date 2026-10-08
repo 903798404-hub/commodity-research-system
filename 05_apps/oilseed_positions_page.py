@@ -59,8 +59,9 @@ def render_oilseed_positions_page(project_root, domain):
             and r["group"] == item["fund_group"]]
         overview.append((item["label"] + " · 基金", data[-1] if data else None))
     for variety, label in spec["domestic"].items():
-        data = [r for r in domestic if r["scope"] == variety and r["group"] == "top20"]
-        overview.append((label + " · 前20名", data[-1] if data else None))
+        scope = spec.get("default_scopes",{}).get(variety,variety)
+        data = [r for r in domestic if r["scope"] == scope and r["group"] == "top20"]
+        overview.append((label + (f" {scope}" if scope != variety else "") + " · 前20名", data[-1] if data else None))
     st.subheader("资金情绪速览")
     for offset in range(0, len(overview), 3):
         for column, (label, row) in zip(st.columns(3), overview[offset:offset+3]):
@@ -98,6 +99,10 @@ def render_oilseed_positions_page(project_root, domain):
             if len(data) >= 2:
                 st.plotly_chart(series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"]), width="stretch", key=f"trend_{market}")
                 figure = movements(data[-26:], "最近报告净持仓变化")
+                known_changes = [r for r in data[-26:] if r["net_change"] is not None]
+                if len(known_changes) == 1:
+                    figure.update_xaxes(tickmode="array", tickvals=[known_changes[0]["report_date"]],
+                        ticktext=[chinese_date(known_changes[0]["report_date"])])
                 if unit == "Delta等价手":
                     figure.update_yaxes(title="净变化（Delta等价手）")
                     figure.update_traces(hovertemplate="%{customdata[1]}<br>净变化 %{y:+,.2f} Delta等价手<br>比较日期 %{customdata[0]}<extra></extra>")
@@ -109,6 +114,8 @@ def render_oilseed_positions_page(project_root, domain):
                     frame = frame.rename(columns={c: c.replace("（手）", "（Delta等价手）") for c in frame.columns})
                 st.dataframe(frame, hide_index=True, width="stretch")
     with inside:
+        if any(r.get("source_provider") == "sina" for r in snapshot["domestic"]):
+            st.caption("国内使用新浪公开备用来源的具体合约排名；未自动选定主力合约，待交易所入口恢复后复核。")
         scopes = sorted({r["scope"] for r in domestic}, key=lambda v: (v not in spec["domestic"], v))
         if not scopes:
             st.info("大商所豆粕、豆油、棕榈油持仓排名尚未接通。")
@@ -140,11 +147,14 @@ def render_oilseed_positions_page(project_root, domain):
         st.write("CFTC管理基金与Euronext投资基金的分类不同，各市场单独观察。Euronext期货＋期权保留两位小数；未从分类合计推算交易所总持仓。")
         st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。两侧均披露才计算净仓；五家完整才计算合计。")
         st.write("仅比较相邻已保存的同口径报告；缺仓或间隔超过10天时不计算净变化。合约排名不冒充品种总排名。")
+        if domain != "rapeseed":
+            st.markdown("国内备用来源：[新浪成交持仓](https://vip.stock.finance.sina.com.cn/q/view/vFutures_Positions_cjcc.php)。当前固定展示2701合约，不代表所有合约汇总，也不自动拼接主力。")
         st.markdown("[CFTC](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · [Euronext](https://live.euronext.com/en/products/commodities/commitments_of_traders) · [郑商所](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         with st.expander("原始来源与采集时间"):
             for source_id, metadata in snapshot["sources"].items():
-                if source_id.startswith(("czce_", "euronext_")):
-                    label = ("郑商所" if source_id.startswith("czce_") else "Euronext") + " · " + chinese_date(datetime.strptime(source_id.rsplit("_",1)[1], "%Y%m%d").date())
+                if source_id.startswith(("czce_", "euronext_", "sina_")):
+                    provider = "郑商所" if source_id.startswith("czce_") else "新浪 · " + source_id.split("_")[1] if source_id.startswith("sina_") else "Euronext"
+                    label = provider + " · " + chinese_date(datetime.strptime(source_id.rsplit("_",1)[1], "%Y%m%d").date())
                 else:
                     label = source_id
                 st.markdown(f"**{label}** · {chinese_time(metadata['retrieved_at'])} · [原始来源]({metadata['url']})")
