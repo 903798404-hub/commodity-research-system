@@ -10,7 +10,7 @@ import pytest
 import requests
 
 from agri_research_agent.oilseed_positions.model import config, metrics, preview_root
-from agri_research_agent.oilseed_positions.sources import EURO_HEADERS, parse_euronext, parse_dce, Sources
+from agri_research_agent.oilseed_positions.sources import EURO_HEADERS, parse_euronext, parse_dce, parse_sina, SourceNotPublished, Sources
 from agri_research_agent.sugar_positions.sources import parse_cftc, parse_czce
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +88,36 @@ def test_dce_rejects_html_wrong_date_wrong_product_and_invalid_ranking(raw, matc
 def test_dce_requires_an_explicit_target_contract_before_network():
     with pytest.raises(ValueError, match="明确"):
         Sources().dce(date(2026,9,30), ("M", "Y"), "all")
+
+
+def sina(contract="M2701", day="2026-09-30", total="100", empty=False):
+    content = f'<select name="t_breed"><option selected value="{contract}">{contract}</option></select><input name="t_date" value="{day}">'
+    for title in ("多单持仓", "空单持仓"):
+        content += f"<table><tr><th>名次</th><th>会员简称</th><th>{title}</th><th>比上交易增减</th></tr>"
+        if not empty:
+            content += "<tr><td>1</td><td>东证期货</td><td>100</td><td>-2</td></tr>"
+        content += f'<tr><td>合计</td><td></td><td>{"" if empty else total}</td><td></td></tr></table>'
+    return content.encode("gb18030")
+
+
+def test_sina_preserves_secondary_provenance_scope_and_account_disclosure():
+    rows = parse_sina(sina(), date(2026,9,30), "M2701", URL, STAMP)
+    assert len(rows) == 2 and all(r["source_provider"] == "sina" and r["scope"] == "M2701" and r["account"] == "未区分" for r in rows)
+    assert rows[0]["reported_change"] == -2
+
+
+@pytest.mark.parametrize("raw,match", [
+    (sina(contract="Y2701"), "合约"), (sina(day="2026-09-29"), "日期"),
+    (sina(total="101"), "合计"), (sina().replace("会员简称".encode("gb18030"), "未知列".encode("gb18030")), "表头"),
+])
+def test_sina_cannot_silently_return_default_contract_date_or_corrupted_values(raw,match):
+    with pytest.raises(ValueError, match=match):
+        parse_sina(raw, date(2026,9,30), "M2701", URL, STAMP)
+
+
+def test_sina_empty_holiday_is_missing_not_zero():
+    with pytest.raises(SourceNotPublished):
+        parse_sina(sina(empty=True), date(2026,9,30), "M2701", URL, STAMP)
 
 
 def test_soybean_scope_excludes_both_domestic_soybeans():
