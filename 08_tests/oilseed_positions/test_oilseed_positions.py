@@ -155,11 +155,19 @@ def test_metrics_preserve_decimals_comparison_dates_and_large_gap():
 
 
 def test_preview_never_targets_primary_checkout_or_another_domain(tmp_path):
+    primary = tmp_path / "primary"
+    primary.mkdir()
+    (primary / ".git").mkdir()
     with pytest.raises(ValueError, match="worktree"):
-        preview_root(ROOT.parents[1] / "market-data", "rapeseed")
-    assert preview_root(ROOT,"palm") != preview_root(ROOT,"soybean")
+        preview_root(primary, "rapeseed")
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / ".git").write_text("gitdir: fixture", encoding="utf-8")
+    (linked / "02_configs").mkdir()
+    (linked / "02_configs/oilseed_positions.json").write_bytes((ROOT / "02_configs/oilseed_positions.json").read_bytes())
+    assert preview_root(linked,"palm") != preview_root(linked,"soybean")
     with pytest.raises(ValueError, match="板块"):
-        preview_root(ROOT,"soybean-profit")
+        preview_root(linked,"soybean-profit")
 
 
 def test_czce_retains_explicit_variety_and_contract_and_excludes_sugar():

@@ -45,7 +45,7 @@ sys.path.insert(0, {str(ROOT / "05_apps")!r})
 import streamlit as st
 from sugar_positions_page import render_sugar_positions_page
 st.set_page_config(layout="wide")
-render_sugar_positions_page(Path({str(tmp_path)!r}))
+render_sugar_positions_page(Path({str(tmp_path)!r}), data_root=Path({str(tmp_path / "01_data/sugar_positions_preview")!r}))
 '''
     return AppTest.from_string(source)
 
