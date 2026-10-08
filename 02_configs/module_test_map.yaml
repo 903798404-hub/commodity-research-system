@@ -1,5 +1,20 @@
 schema_version: 1
 modules:
+  soybean_margin.api_inputs:
+    code_paths:
+      - 03_src/agri_research_agent/soybean_margin/api_inputs.py
+      - 03_src/agri_research_agent/soybean_margin/api_sources.py
+      - 04_scripts/import_profit/capture_soybean_api.py
+      - 05_apps/soybean_margin_page.py
+    direct_tests: [08_tests/test_soybean_margin_api.py]
+    impact_tests:
+      - 08_tests/test_soybean_margin_public_inputs.py
+      - 08_tests/test_soybean_margin_readers.py
+      - 08_tests/test_soybean_margin_replacement.py
+      - 08_tests/test_soybean_margin_runtime.py
+      - 08_tests/test_streamlit_dashboard.py
+    dependents: []
+    full_regression_when_changed: false
   domains.spreads:
     code_paths:
       - 03_src/agri_research_agent/domains/spreads/models.py

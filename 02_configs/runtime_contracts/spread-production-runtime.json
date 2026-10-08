@@ -1556,6 +1556,18 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/soybean_margin/api_inputs.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/api_sources.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/capture_soybean_api.py",
+      "role": "entrypoint"
+    },
+    {
       "path": "03_src/agri_research_agent/soybean_margin/charts.py",
       "role": "runtime_configuration"
     },

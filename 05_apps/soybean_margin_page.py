@@ -17,6 +17,7 @@ from agri_research_agent.soybean_margin.model import (
     number, read_chart_history, overlay_cnf, calculate,
 )
 from agri_research_agent.soybean_margin.public_inputs import apply_public_inputs, read_public_tables
+from agri_research_agent.soybean_margin.api_inputs import CUTOVER, read_days, apply_api_inputs
 from agri_research_agent.market_data.activated_runtime import resolve_public_data_root, resolve_domestic_spread_path
 from agri_research_agent.soybean_margin.model import digest
 from agri_research_agent.soybean_margin.charts import build_margin_charts, _pm_seasonal_figure
@@ -73,8 +74,12 @@ def daily_html(rows, region, day):
     result = f'<style>{css}</style><section class="panel"><header>中国进口大豆盘面净榨利 · {escape(region)}<small>{day.isoformat()} · 元/吨</small></header><div class="scroll"><table class="terminal-table"><thead><tr>'
     result += "".join(f"<th>{escape(label)}</th>" for label in labels) + "</tr></thead><tbody>"
     for row in rows:
+        fx = _cell(row[FIELDS[2]])
+        if day >= CUTOVER:
+            tenor = (row["shipment_year"] - day.year) * 12 + row["shipment_month"] - day.month
+            fx += f'<small>{"即期" if tenor < 3 else str(tenor)+"M远期"}</small>'
         values = [escape(row["shipment_period"]), _cell(row[FIELDS[0]]), _cell(row["usd_cost"]),
-                  escape(row["cbot_contract"]), _cell(row[FIELDS[1]]), _cell(row[FIELDS[2]]),
+                  escape(row["cbot_contract"]), _cell(row[FIELDS[1]]), fx,
                   escape(row["domestic_contract"]), _cell(row[FIELDS[3]]), _cell(row[FIELDS[4]]),
                   "3", "9", _cell(row["duty_paid_cost"]), _cell(row["net_margin"], profit=True)]
         result += '<tr class="profit-row">' + "".join(f"<td>{value}</td>" for value in values) + "</tr>"
@@ -129,16 +134,36 @@ def render_soybean_margin_page(history_root: str | Path | None):
                 str(domestic_path), public_identity, day, manual_path, manual_identity)
             market_tables = True
             dates_text = " · ".join(f"{label}：{value.isoformat() if value else '暂无'}" for label,value in source_dates.items())
-            st.caption(f"已读取公共数据库发布数据 · {dates_text}。全量更新并同步后，重新打开页面即可读取新发布版本。")
+            st.caption(f"{'历史区间' if day >= CUTOVER else ''}已读取公共数据库发布数据 · {dates_text}。")
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
-            st.error(f"公共行情读取或校验失败：{type(exc).__name__}。当前不能确认新行情。")
-            return
+            if day < CUTOVER:
+                st.error(f"公共行情读取或校验失败：{type(exc).__name__}。当前不能确认新行情。")
+                return
+            st.warning(f"旧公共行情暂不可读：{type(exc).__name__}。旧历史区间仅显示已校验的保留历史。")
+    api_root = Path(os.getenv("SOYBEAN_MARGIN_API_ROOT") or
+        str(Path(os.getenv("IMPORT_PROFIT_INTRADAY_SNAPSHOT_ROOT") or Path(history_root).parent / "snapshots") / "soybean-api"))
+    try:
+        snapshots = read_days(api_root, day)
+        data = apply_api_inputs(data, snapshots, day)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.error(f"API行情快照读取或校验失败：{type(exc).__name__}。")
+        return
+    if day >= CUTOVER:
+        market_tables = True
+        snapshot = snapshots.get(day)
+        st.caption("CBOT：用户提供截图的最新报价，未提供报价时间时标为时间未知；Databento Historical补充缺失合约的08:59–09:00分钟收盘价。国内：AkShare/新浪具体M/Y合约；汇率：CFETS在岸USD/CNY买卖报价均值。1–2M即期，3M及以上按船期期限匹配远期，非标准期限内插；缺失值留空。")
+        if snapshot:
+            st.caption(f"实际采集时间：{snapshot['captured_at']} · CBOT状态：{snapshot['sources']['cbot'].get('status', 'missing')}。")
+            if snapshot["errors"]:
+                st.caption("缺失来源：" + " · ".join(f"{name}: {value}" for name, value in snapshot["errors"].items()))
+        else:
+            st.info("所选日期尚无API行情快照。可录入CNF，行情和榨利保留空值。")
     last = max(data.business_date)
-    if not public_enabled:
+    if not public_enabled and day < CUTOVER:
         st.caption(f"历史行情截至 {last.isoformat()}。历史价格为连续合约收盘口径；缺失日期保留空值。")
     if day.weekday() >= 5:
         st.info("请选择周一至周五的业务日期。")
-    if day > last or (market_tables is not None and any(value is None or day > value for value in source_dates.values())):
+    if day < CUTOVER and (day > last or (market_tables is not None and any(value is None or day > value for value in source_dates.values()))):
         st.info("所选日期尚无已发布行情。可预览CNF，行情和榨利保持空值。")
     root = os.getenv("SOYBEAN_MARGIN_STORAGE_ROOT", "").strip()
     database = Path(root) / "cnf.sqlite3" if root else None
@@ -185,7 +210,7 @@ def render_soybean_margin_page(history_root: str | Path | None):
             newer = data.loc[data.business_date > max(original.business_date)].copy()
             newer["retained_net_margin"] = [calculate(*(row[name] for name in FIELDS))["net_margin"]
                 for row in newer.to_dict("records")]
-            newer["chart_history_source"] = "public_current"
+            newer["chart_history_source"] = ["soybean_api" if value >= CUTOVER else "public_current" for value in newer.business_date]
             chart_data = overlay_cnf(pd.concat([original, newer], ignore_index=True), saved_quotes,
                 recalculate_retained=True)
         else:
