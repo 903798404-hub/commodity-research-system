@@ -6,11 +6,11 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
-from agri_research_agent.oilseed_positions.model import config, metrics, preview_root
+from agri_research_agent.oilseed_positions.model import config, metrics
 from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
 from agri_research_agent.sugar_positions.model import domestic_metrics, load_members, positioning_signal
 from agri_research_agent.sugar_positions.storage import read_snapshot
-from agri_research_agent.positions.workspace import validate_domain
+from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 from sugar_positions_page import chinese_time, detail, display_attempt
 
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
@@ -36,7 +36,7 @@ def series_figure(data, title, group):
 def render_oilseed_positions_page(project_root, domain, *, data_root=None, preview_mode=True):
     spec = config(project_root)[domain]
     st.title(spec["title"])
-    root = Path(data_root) if data_root is not None else preview_root(project_root, domain)
+    root = Path(data_root) if data_root is not None else resolve_positions_root(project_root, domain)
     try:
         snapshot = validate_domain(read_snapshot(root), project_root, domain)
         attempt_file = root / "last_attempt.json"

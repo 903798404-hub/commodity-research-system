@@ -51,6 +51,22 @@ def test_primary_checkout_without_runtime_reads_formal_only(project, monkeypatch
     assert data_root(project, "sugar") == project / "01_data/processed/commodity_positions/sugar"
 
 
+@pytest.mark.parametrize("domain", DOMAINS)
+def test_read_only_pages_support_primary_checkout_without_creating_data(project, monkeypatch, domain):
+    monkeypatch.delenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", raising=False)
+    (project / ".git").unlink()
+    (project / ".git").mkdir()
+    entry = ("from sugar_positions_page import render_sugar_positions_page\n"
+             f"render_sugar_positions_page(Path({str(project)!r}))" if domain == "sugar" else
+             "from oilseed_positions_page import render_oilseed_positions_page\n"
+             f"render_oilseed_positions_page(Path({str(project)!r}), {domain!r})")
+    app = AppTest.from_string("from pathlib import Path\n" + entry).run(timeout=30)
+    assert not app.exception and app.info
+    assert not (project / "01_data").exists()
+    with pytest.raises(ValueError):
+        local_root(project, domain)
+
+
 def test_wrong_domain_and_excluded_soybean_contracts_are_rejected(project):
     with pytest.raises(ValueError, match="外盘"):
         validate_domain({"foreign": rows("cbot_meal"), "domestic": []}, project, "sugar")
