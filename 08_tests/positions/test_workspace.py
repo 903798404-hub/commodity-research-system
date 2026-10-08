@@ -75,12 +75,11 @@ def test_wrong_domain_and_excluded_soybean_contracts_are_rejected(project):
             validate_domain({"foreign": [], "domestic": [{"scope": scope}]}, project, "soybean")
 
 
-def test_plan_prefers_variety_summaries_without_collecting_contract_substitutes(project):
+def test_plan_collects_explicit_reference_contracts_without_changing_other_domains(project):
     plan = collection_plan(project, list(DOMAINS), "all", date(2026, 10, 8), 14, 2025)
     commands = {item["domain"]: item["argv"] for item in plan}
-    assert "--sina-contracts" not in commands["soybean"]
-    assert "--sina-contracts" not in commands["palm"]
-    assert "M2701" not in commands["soybean"] and "P2701" not in commands["palm"]
+    assert commands["soybean"][commands["soybean"].index("--sina-contracts") + 1:][:2] == ["M2701", "Y2701"]
+    assert commands["palm"][commands["palm"].index("--sina-contracts") + 1] == "P2701"
     assert "--sina-contracts" not in commands["rapeseed"]
     assert "2026-09-25" in commands["sugar"]
     assert "--czce-end" in commands["sugar"]
@@ -175,15 +174,18 @@ def test_domestic_summary_never_uses_saved_single_contract_as_substitute(project
     app = AppTest.from_string(script).run(timeout=30)
     assert not app.exception
     selector = app.selectbox(key=f"domestic_scope_{domain}")
-    assert selector.value == ("M" if domain == "soybean" else "P")
+    assert selector.value == ("M2701" if domain == "soybean" else "P2701")
     selector.set_value(variety).run(timeout=30)
     assert not app.exception and not app.get("plotly_chart")
     if has_summary:
         net = [item for item in app.metric if item.label == "前20名净持仓"]
         assert len(net) == 1 and net[0].value == "40"
     else:
-        assert not app.metric and any("品种汇总数据待接入" in item.value for item in app.info)
-    selector.set_value(variety + "2701").run(timeout=30)
+        assert not [item for item in app.metric if item.label == "前20名净持仓"]
+        assert any("品种汇总数据待接入" in item.value for item in app.info)
+    app.selectbox(key=f"domestic_scope_{domain}").set_value(variety + "2701").run(timeout=30)
     assert not app.exception
     assert [item for item in app.metric if item.label == "前20名净持仓"][0].value == "50"
     assert any("单合约参考" in item.value for item in app.caption)
+    assert any("主力核对 2026年10月8日" in item.value for item in app.caption)
+    assert any("主力参考" in item.value for item in app.markdown)
