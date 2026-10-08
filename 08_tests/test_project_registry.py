@@ -1485,7 +1485,39 @@ def test_registry_v4_migration_preserves_real_legacy_records_and_scope():
     assert by_id['shared-production-infrastructure'] == POST_TRANSFER_INFRA_REGISTRATION
     assert by_id['spread-production-runtime-wiring'] == SPREAD_RUNTIME_WIRING_REGISTRATION
     assert by_id['release-refresh'] == RELEASE_REFRESH_REGISTRATION
-    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure', 'release-refresh', 'rollback-evidence-lifecycle'}
+    assert set(by_id) == {p['project_id'] for p in legacy['projects']} | {'shared-production-infrastructure', 'shared-runtime-manifest', 'public-intraday-runtime', 'spread-production-runtime-wiring', 'soybean-production-input-authority', 'xiaoran-production-data-delivery', 'domestic-spread-status', 'windows-wrapper-platform', 'high-risk-execution-path-closure', 'release-refresh', 'rollback-evidence-lifecycle', 'canola-weekly-exports'}
+
+
+def test_canola_exports_registration_preserves_manual_delivery_and_consumer_boundaries():
+    _, project = registry.select_project(ROOT, 'canola-weekly-exports')
+    assert project['change_class'] == 'shared' and project['runtime_target'] == 'none'
+    assert project['owned_paths'] == [
+        '03_src/agri_research_agent/canola_exports',
+        '03_src/agri_research_agent/automation/production_data_delta_exports.py',
+        '04_scripts/canola_exports', '05_apps/canola_exports_page.py',
+        '05_apps/canada_canola_weekly_page.py', '08_tests/canola_exports',
+        '07_docs/projects/加拿大菜籽出口周度更新契约.md',
+    ]
+    assert set(project['forbidden_paths']) == {
+        '09_deploy/runtime_identity', '02_configs/production_runtime_trust.json',
+    }
+    assert {
+        '08_tests/canola_exports/test_exports.py', '08_tests/canola_exports/test_page.py',
+        '08_tests/canola_exports/test_cli.py', '08_tests/canola_exports/test_delivery_exports.py',
+        '08_tests/test_production_data_delta.py', '08_tests/test_production_data_delta_activation.py',
+        '08_tests/canada_canola/test_delivery.py', '08_tests/brazil_soy/test_brazil_soy_delivery.py',
+        '08_tests/test_streamlit_dashboard.py', '08_tests/canada_canola/test_canada_canola.py',
+        '08_tests/canada_canola/test_canada_canola_fetch.py',
+        '08_tests/test_spread_runtime_contract.py',
+    } == set(project['required_tests'])
+    assert '03_src/agri_research_agent/shared/runtime_context.py' in project['shared_dependencies']
+    assert '09_deploy/production_data_delivery/activate_production_data_delta.py' in project['shared_dependencies']
+    assert {
+        '09_deploy/spread_runtime/Dockerfile.spread-runtime',
+        '02_configs/runtime_contracts/spread-production-runtime.json',
+    } <= set(project['shared_dependencies'])
+    assert 'No web-request acquisition or scheduler installation' in project['boundary_notes']
+    assert 'do not authorize deployment' in project['boundary_notes']
 
 
 def test_historical_rollback_registration_preserves_exact_consumer_and_production_boundaries():

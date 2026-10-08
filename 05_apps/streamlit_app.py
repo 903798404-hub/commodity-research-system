@@ -63,7 +63,7 @@ from navigation import (
     internal_workspace_pages,
 )
 from soybean_weekly_page import render_soybean_weekly_page
-from canada_canola_page import render_canada_canola_page
+from canada_canola_weekly_page import render_canada_canola_weekly_page
 from brazil_soy_page import render_brazil_soy_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
@@ -414,7 +414,7 @@ def render_selected_workspace_page(selected_page: str) -> None:
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
         render_soybean_weekly_page()
     elif selected_page == CANADA_CANOLA_PAGE_TITLE:
-        render_canada_canola_page()
+        render_canada_canola_weekly_page()
     elif selected_page == BRAZIL_SOY_PAGE_TITLE:
         render_brazil_soy_page()
     elif selected_page in WEATHER_PAGE_ROUTES:

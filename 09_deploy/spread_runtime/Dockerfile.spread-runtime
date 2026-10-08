@@ -50,6 +50,8 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
 COPY ["03_src/agri_research_agent/shared/chart_style.py", "/app/03_src/agri_research_agent/shared/"]
 COPY ["03_src/agri_research_agent/pipelines/canada_canola.py", "/app/03_src/agri_research_agent/pipelines/"]
 COPY ["05_apps/canada_canola_page.py", "/app/05_apps/"]
+COPY ["03_src/agri_research_agent/canola_exports/__init__.py", "03_src/agri_research_agent/canola_exports/data.py", "03_src/agri_research_agent/canola_exports/delivery.py", "03_src/agri_research_agent/canola_exports/update.py", "/app/03_src/agri_research_agent/canola_exports/"]
+COPY ["05_apps/canada_canola_weekly_page.py", "05_apps/canola_exports_page.py", "/app/05_apps/"]
 COPY ["03_src/agri_research_agent/pipelines/brazil_soy.py", "/app/03_src/agri_research_agent/pipelines/"]
 COPY ["05_apps/brazil_soy_page.py", "/app/05_apps/"]
 COPY [".streamlit/config.toml", "/app/.streamlit/"]
