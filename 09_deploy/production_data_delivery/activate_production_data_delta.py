@@ -60,8 +60,17 @@ CANOLA_STATUS = "01_data/update_status/canada_canola.json"
 BRAZIL_STABLE = "01_data/processed/brazil_soy/soy_weekly.json"
 BRAZIL_SOURCES = "01_data/processed/brazil_soy/source_evidence.json"
 BRAZIL_STATUS = "01_data/update_status/brazil_soy.json"
+EXPORTS_STABLE = "01_data/processed/canola_exports/weekly.json"
+EXPORTS_SOURCES = "01_data/processed/canola_exports/source_evidence.json"
+EXPORTS_STATUS = "01_data/update_status/canola_exports.json"
 
 DOMAIN_CONTRACTS = {
+    "canola_exports": {
+        "payloads": {"weekly.json": EXPORTS_STABLE, "source_evidence.json": EXPORTS_SOURCES},
+        "baseline": (EXPORTS_STABLE, EXPORTS_SOURCES, EXPORTS_STATUS),
+        "domain_dir": "01_data/processed/canola_exports", "status_path": EXPORTS_STATUS,
+        "metadata": ("record_count", "latest_cutoff", "crop_years"),
+    },
     "brazil_soy": {
         "payloads": {"soy_weekly.json": BRAZIL_STABLE, "source_evidence.json": BRAZIL_SOURCES},
         "baseline": (BRAZIL_STABLE, BRAZIL_SOURCES, BRAZIL_STATUS),
@@ -244,7 +253,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
             "crop stable baseline must be a complete pair")
     require((files.get(FAS_STABLE) is None) == (files.get(FAS_MANIFEST) is None),
             "FAS stable baseline must include its manifest")
-    if root["domain"] in {"canada_canola", "brazil_soy"}:
+    if root["domain"] in {"canada_canola", "brazil_soy", "canola_exports"}:
         require(len({files[path] is None for path in contract["baseline"]}) == 1,
                 "canola baseline must include data, evidence and status together")
 
@@ -284,6 +293,18 @@ def validate_delta_document(value: object) -> dict[str, object]:
         require(type(metadata["source_manifest_sha256"]) is str
                 and HEX64.fullmatch(metadata["source_manifest_sha256"]),
                 "crop source manifest identity is invalid")
+    elif root["domain"] == "canola_exports":
+        require(type(metadata["record_count"]) is int and metadata["record_count"] > 0,
+                "export record count is invalid")
+        cutoff = metadata["latest_cutoff"]
+        require(type(cutoff) is str and date.fromisoformat(cutoff).isoformat() == cutoff,
+                "export latest cutoff is invalid")
+        years = metadata["crop_years"]
+        require(type(years) is list and years and all(type(year) is str for year in years)
+                and years == sorted(set(years)), "export crop years are invalid")
+        for year in years:
+            require(re.fullmatch(r"20\d{2}-20\d{2}", year)
+                    and int(year[5:]) == int(year[:4]) + 1, "export crop year is invalid")
     elif root["domain"] == "brazil_soy":
         require(type(metadata["record_count"]) is int and metadata["record_count"] > 0,
                 "Brazil record count is invalid")
@@ -330,7 +351,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
     require(type(payloads) is dict and set(payloads) == set(contract["payloads"]),
             "delta payload file set is invalid")
     for identity in payloads.values():
-        if root["domain"] in {"canada_canola", "brazil_soy"}:
+        if root["domain"] in {"canada_canola", "brazil_soy", "canola_exports"}:
             _file_identity(identity)
         else:
             _parquet_identity(identity)
@@ -1038,6 +1059,13 @@ def _status_document(domain: str, delta: dict[str, object], identities: dict[str
                      semantic: dict[str, object]) -> dict[str, object]:
     metadata = delta["domain_metadata"]
     status = "initialized" if initialized else "updated"
+    if domain == "canola_exports":
+        return {"schema_version": "canola-exports-publish-status/1", "status": status,
+                "published": True, "published_at_utc": published_at,
+                "delta_id": delta["delta_id"], "git_head": delta["producer"]["commit"],
+                "stable_sha256": identities[EXPORTS_STABLE]["sha256"],
+                "record_count": semantic["record_count"], "latest_cutoff": semantic["latest_cutoff"],
+                "crop_years": semantic["crop_years"], "added": semantic["added"], "revised": semantic["revised"]}
     if domain == "brazil_soy":
         return {"schema_version": "brazil-soy-publish-status/1", "status": status, "published": True,
                 "published_at_utc": published_at, "delta_id": delta["delta_id"], "git_head": delta["producer"]["commit"],
@@ -1203,6 +1231,9 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
         if delta["domain"] == "brazil_soy":
             require((delta["run"]["business_status"] == "initialized") == (delta["baseline"]["files"][BRAZIL_STABLE] is None),
                     "Brazil initialization differs from formal baseline")
+        if delta["domain"] == "canola_exports":
+            require((delta["run"]["business_status"] == "initialized") == (delta["baseline"]["files"][EXPORTS_STABLE] is None),
+                    "export initialization differs from formal baseline")
         if delta["run"]["business_status"] == "no_change" or all(existing_payloads[target] is not None
                and existing_payloads[target]["sha256"] == delta["payloads"][name]["sha256"]
                for name, target in contract["payloads"].items()):
@@ -1536,7 +1567,15 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
     sys.path.insert(0, "/app/03_src")
     import pandas as pd
     observations = {}
-    if domain == "brazil_soy":
+    if domain == "canola_exports":
+        from agri_research_agent.canola_exports.delivery import observations as export_observations
+        baseline = (read_json(Path("/allocation") / EXPORTS_STABLE)
+                    if delta["baseline"]["files"][EXPORTS_STABLE] is not None else None)
+        observations = export_observations(read_json(candidate / "weekly.json"), baseline,
+                                           read_json(candidate / "source_evidence.json"))
+        require(all(observations[key] == delta["domain_metadata"][key]
+                    for key in DOMAIN_CONTRACTS[domain]["metadata"]), "export candidate metadata mismatch")
+    elif domain == "brazil_soy":
         baseline = Path("/allocation") / BRAZIL_STABLE if delta["baseline"]["files"][BRAZIL_STABLE] is not None else None
         observations = _brazil_observations(candidate / "soy_weekly.json", baseline,
             read_json(candidate / "source_evidence.json"), delta["domain_metadata"]["revision_keys"])
@@ -1604,7 +1643,7 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         path = candidate / name
         require(sha256_file(path) == identity["sha256"] and path.stat().st_size == identity["size_bytes"],
                 "worker payload byte identity mismatch")
-        if domain not in {"canada_canola", "brazil_soy"}:
+        if domain not in {"canada_canola", "brazil_soy", "canola_exports"}:
             require(_schema_fingerprint(path) == identity["parquet_schema_sha256"],
                     "worker Parquet schema identity mismatch")
             import pyarrow.parquet as pq

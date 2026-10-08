@@ -1433,11 +1433,12 @@
     },
     {
       "project_id": "canola-weekly-exports",
-      "change_class": "business",
+      "change_class": "shared",
       "status": "ready",
       "runtime_target": "none",
       "owned_paths": [
         "03_src/agri_research_agent/canola_exports",
+        "03_src/agri_research_agent/automation/production_data_delta_exports.py",
         "04_scripts/canola_exports",
         "05_apps/canola_exports_page.py",
         "05_apps/canada_canola_weekly_page.py",
@@ -1447,16 +1448,24 @@
       "shared_dependencies": [
         "05_apps/navigation.py", "05_apps/streamlit_app.py",
         "05_apps/canada_canola_page.py", "03_src/agri_research_agent/shared/atomic_storage.py",
-        "03_src/agri_research_agent/shared/runtime_context.py", "03_src/agri_research_agent/shared/chart_style.py"
+        "03_src/agri_research_agent/shared/runtime_context.py", "03_src/agri_research_agent/shared/chart_style.py",
+        "03_src/agri_research_agent/automation/production_data_delta.py",
+        "04_scripts/automation/run_production_data_delta_windows.py",
+        "09_deploy/production_data_delivery/activate_production_data_delta.py",
+        "09_deploy/production_data_delivery/delta_contract.schema.json",
+        "09_deploy/production_data_delivery/README.md"
       ],
-      "forbidden_paths": ["09_deploy", "02_configs/production_runtime_trust.json"],
+      "forbidden_paths": ["09_deploy/runtime_identity", "02_configs/production_runtime_trust.json"],
       "required_tests": [
         "08_tests/canola_exports/test_exports.py", "08_tests/canola_exports/test_page.py",
+        "08_tests/canola_exports/test_cli.py", "08_tests/canola_exports/test_delivery_exports.py",
+        "08_tests/test_production_data_delta.py", "08_tests/test_production_data_delta_activation.py",
+        "08_tests/canada_canola/test_delivery.py", "08_tests/brazil_soy/test_brazil_soy_delivery.py",
         "08_tests/test_streamlit_dashboard.py", "08_tests/canada_canola/test_canada_canola.py",
         "08_tests/canada_canola/test_canada_canola_fetch.py"
       ],
-      "capabilities": ["Source-backed CGC canola export monitoring and isolated data-only update candidates"],
-      "boundary_notes": "Existing workbench integration; route ID and crop consumer retained. Raw StatCan ZIP remains read-only. No oil, prices, sales commitments or invented destination data. This registration does not authorize production deployment or data writes; protected production delivery and schedule activation are pending separate approval and validation."
+      "capabilities": ["Source-backed CGC canola export monitoring and manually triggered evidence-bound data delivery"],
+      "boundary_notes": "Existing workbench integration; route ID and crop consumer retained. Raw StatCan ZIP remains read-only. No oil, prices, sales commitments or invented destination data. Manual execution uses an independent approved clean detached control clone, owned producer runtime, exact server baseline and protected host publisher. Shared publisher impact tests are additive; other domain contracts remain unchanged. No web-request acquisition or scheduler installation. Registration and main admission do not authorize deployment, production data writes, policy installation or runtime activation. Release must preserve the latest soybean and main-page open-interest changes rather than replace them with the earlier preview baseline."
     }
   ],
   "legacy_registry_commit": "0839be9b57674b3e4ad41a7accffe502d918ff33"

@@ -4,7 +4,7 @@
 Commit/Tree 的独立、干净、detached Git clone 运行现有业务入口，服务器只验证和发布数据。
 producer 的 Commit/Tree 与校验镜像的 Commit/Tree 分别固定，不要求两者相同。
 
-## 四个入口
+## 数据入口
 
 | domain | 原业务入口 | 正式消费者通道 |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ producer 的 Commit/Tree 与校验镜像的 Commit/Tree 分别固定，不要求
 | `soybean_crop_progress` | `04_scripts/soybean_crop_progress/update_soybeans_crop_weekly.py --dry-run` | Crop 两个 stable Parquet 配对发布 |
 | `soybean_export_sales` | `04_scripts/soybean_exports/run_fas_export_sales.py --candidate-only` | FAS stable Parquet、主机生成的 manifest/status |
 | `canada_canola` | `04_scripts/canada_canola/update_canola.py` 人工准备；同一 Windows 正式入口交付 | Canola stable JSON、来源字节证据、主机生成 status |
+| `canola_exports` | 人工触发独立 CGC 采集子进程，仅准备候选 | 出口 weekly.json、全年度来源证据、主机生成 status |
 
 Windows 正式入口为 `04_scripts/automation/run_production_data_delta_windows.py`：
 该入口的 provider 子环境固定 `NO_PROXY=*`，不继承 Windows 用户代理或 CA
@@ -89,6 +90,46 @@ reconciliation manifest SHA 和完整 expected Current。调用者须批准此 e
 这是生产数据发布操作，仍须独立授权；代码进入 main 本身不触发晋升。
 
 ## 配置、基线与凭据
+
+### 菜籽出口人工触发
+
+使用同一 Windows 正式入口 `--domain canola_exports --config <private-config.json>`。
+默认只生成候选，不访问 SSH；独立授权后显式追加 `--publish`，上传、断网来源重放、
+基线比较和原子发布。没有定时任务或网页更新按钮；不能从 feature worktree 正式执行。
+
+配置 schema 为 `canola-exports-delivery-config/1`，封闭字段为 `schema_version`、
+`approved_commit`、`approved_tree`、`origin`、`python`、`runtime_root`、`baseline_root`、
+`baseline_manifest_sha256`、`ssh_target`、`publisher`、`publisher_sha256`、`image_id`、
+`remote_allocation`、`policy`、`policy_sha256`、`initial_years`、`expected_cutoff`。
+policy 两个映射只含 `canola_exports`，不能复用 `canada_canola` 种植数据 policy。
+`initial_years` 为1至20，建议7；已有基线时只下载最新两年并保留未下载历史。
+`expected_cutoff` 为人工核对的 ISO 日期或 null；下载截止日期不足时不交付。
+null 时仅报告实际日期，NO_CHANGE 不证明官方下一期是否已发布。
+
+`baseline_root/baseline_manifest.json` 使用 `canola-exports-production-baseline/1`，
+封闭字段为 `schema_version`、`source_root`、`files`；source_root 为真实获批 allocation。
+files 精确包含 `01_data/processed/canola_exports/weekly.json`、同目录 `source_evidence.json`、
+`01_data/update_status/canola_exports.json` 的 SHA/大小或 null，三项必须全存在或全缺失。
+初次 null 必须来自服务器只读确认，不可从空 Preview 推断。已有快照逐字节取回、哈希验证。
+每次人工更新前取得新基线；不能把上一次快照当永久基线。服务器发布锁内再次检查。
+
+独立 runtime 在 control clone、baseline 外，每次创建唯一运行目录；整次更新持有非等待锁。
+复制已验证基线到本次独占 isolated-dev 目录，用全年度证据还原旧原始来源。
+固定 Python `-I -B -X utf8` 的 `prepare` 子进程只写该目录，20分钟超时，不调用 local activate。
+包固定为 `delta_contract.json`、`weekly.json`、`source_evidence.json`；不传执行脚本或凭据。
+证据 schema 为 `canola-exports-source-evidence/1`，含 `sources` 数组，每项精确字段
+`kind`（csv/xlsx）、`crop_year`、`sha256`、`source_url`、`encoding=gzip`、`bytes_base64`。
+SHA 始终指向官方原始字节；gzip 仅用于传输，服务器有界解压，禁止无上限解压。
+单来源原始字节最多32MB、合计256MB；压缩字节单项34MB、合计64MB。
+重复、缺少、额外、压缩损坏、超限、哈希或非官方URL不符均拒绝。
+producer 和固定 validation image 重放全部 CSV 及所用 Excel，要求记录完全一致、
+不删已发布周、不改已发布截止日期，追加的修订恰好对应实际新旧指标差异。
+下载或准备失败仅在本次独立目录生成 FAIL 记录，不写正式数据。
+正式 NO_CHANGE 保留 stable/status 原字节，检查事实记录在独立结果和服务器回执。
+传输或回执失联后先对账，不从本地 FAIL 推断服务器一定没有完成发布。
+
+代码接纳不等于人工入口启用；正式 publisher/policy 安装、精确镜像与数据盘绑定、
+首次数据发布和网页验收都须独立授权。数据更新不构建镜像、不重启网站。
 
 ### 加拿大人工交付
 
