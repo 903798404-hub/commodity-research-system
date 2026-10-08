@@ -68,7 +68,8 @@ def collection_plan(project_root: Path, domains: list[str], markets: str, end: d
             # onboarding date to expand into an unbounded schedule request.
             euro_start = max(date(2026, 9, 30), end - timedelta(days=35))
             args += ["--euronext-start", min(euro_start, end).isoformat()]
-            contracts = list(specs[domain].get("default_scopes", {}).values())
+            contracts = [scope for variety, scope in specs[domain].get("default_scopes", {}).items()
+                         if scope != variety]
             if contracts and markets != "foreign":
                 args += ["--sina-contracts", *contracts]
         args += ["--markets", markets, "--start-year", str(start_year)]

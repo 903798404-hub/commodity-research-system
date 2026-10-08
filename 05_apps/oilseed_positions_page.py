@@ -50,7 +50,6 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
     if not snapshot["foreign"] and not snapshot["domestic"]:
         st.info("尚无已验证持仓数据。")
         st.caption("数据接通后才展示资金情绪。总持仓量不能代替基金净持仓。")
-        return
     foreign = metrics(snapshot["foreign"])
     members = load_members(project_root / "02_configs/sugar_positions.json")
     account = "代客" if domain == "rapeseed" else "未区分"
@@ -63,14 +62,15 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
     for variety, label in spec["domestic"].items():
         scope = spec.get("default_scopes",{}).get(variety,variety)
         data = [r for r in domestic if r["scope"] == scope and r["group"] == "top20"]
-        overview.append((label + (f" {scope}" if scope != variety else "") + " · 前20名", data[-1] if data else None))
+        overview.append((label + (f" {scope}" if scope != variety else " · 品种汇总") + " · 前20名", data[-1] if data else None))
     st.subheader("资金情绪速览")
     for offset in range(0, len(overview), 3):
         for column, (label, row) in zip(st.columns(3), overview[offset:offset+3]):
             with column, st.container(border=True):
                 st.markdown(f"**{label}**")
                 if row is None:
-                    st.caption("暂无已验证排名持仓" if "前20名" in label else "暂无已验证基金持仓")
+                    st.caption("汇总数据待接入" if "品种汇总" in label else
+                               "暂无已验证排名持仓" if "前20名" in label else "暂无已验证基金持仓")
                     continue
                 st.markdown(positioning_signal(row["net"], row["net_change"]))
                 st.metric("净持仓（手）", fmt(row["net"]),
@@ -116,15 +116,16 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                     frame = frame.rename(columns={c: c.replace("（手）", "（Delta等价手）") for c in frame.columns})
                 st.dataframe(frame, hide_index=True, width="stretch")
     with inside:
-        if any(r.get("source_provider") == "sina" for r in snapshot["domestic"]):
-            st.caption("国内使用新浪公开备用来源的具体合约排名；未自动选定主力合约，待交易所入口恢复后复核。")
-        scopes = sorted({r["scope"] for r in domestic}, key=lambda v: (v not in spec["domestic"], v))
-        if not scopes:
-            st.info("大商所豆粕、豆油、棕榈油持仓排名尚未接通。")
+        scopes = list(spec["domestic"]) + sorted({r["scope"] for r in domestic} - set(spec["domestic"]))
+        scope = st.selectbox("国内统计范围", scopes, key=f"domestic_scope_{domain}",
+            format_func=lambda v: f"{spec['domestic'][v]} {v} · 品种汇总" if v in spec["domestic"] else f"{v} · 合约参考")
+        data = [r for r in domestic if r["scope"] == scope]
+        if not data:
+            st.info(f"{spec['domestic'][scope]}品种汇总数据待接入。" if scope in spec["domestic"] else "此合约暂无已验证排名数据。")
+            st.caption("接入经过核验的品种汇总排名后，再展示净持仓、变化和五家固定席位。")
         else:
-            scope = st.selectbox("国内统计范围", scopes,
-                format_func=lambda v: f"{spec['domestic'][v]} {v} · 品种总排名" if v in spec["domestic"] else f"{v} · 合约排名")
-            data = [r for r in domestic if r["scope"] == scope]
+            if scope not in spec["domestic"]:
+                st.caption("当前为单合约参考，不代表品种汇总，也未自动跟踪主力。")
             day = st.selectbox("持仓日期", sorted({r["report_date"] for r in data}, reverse=True), format_func=chinese_date)
             current = {r["group"]: r for r in data if r["report_date"] == day}
             st.markdown(f"**{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
@@ -150,10 +151,10 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
         st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。两侧均披露才计算净仓；五家完整才计算合计。")
         st.write("仅比较相邻已保存的同口径报告；缺仓或间隔超过10天时不计算净变化。合约排名不冒充品种总排名。")
         if domain != "rapeseed":
-            st.markdown("国内备用来源：[新浪成交持仓](https://vip.stock.finance.sina.com.cn/q/view/vFutures_Positions_cjcc.php)。当前固定展示2701合约，不代表所有合约汇总，也不自动拼接主力。")
+            st.markdown("国内默认展示品种汇总。汇总来源尚待接入；已保存的[新浪成交持仓](https://vip.stock.finance.sina.com.cn/q/view/vFutures_Positions_cjcc.php)仅作为单合约参考，不替代汇总，不自动拼接主力，也不将各合约前20名相加冒充品种前20名。")
         st.markdown("[CFTC](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · [Euronext](https://live.euronext.com/en/products/commodities/commitments_of_traders) · [郑商所](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         with st.expander("原始来源与采集时间"):
-            for source_id, metadata in snapshot["sources"].items():
+            for source_id, metadata in snapshot.get("sources", {}).items():
                 if source_id.startswith(("czce_", "euronext_", "sina_")):
                     provider = "郑商所" if source_id.startswith("czce_") else "新浪 · " + source_id.split("_")[1] if source_id.startswith("sina_") else "Euronext"
                     label = provider + " · " + chinese_date(datetime.strptime(source_id.rsplit("_",1)[1], "%Y%m%d").date())

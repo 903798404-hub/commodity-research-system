@@ -12,7 +12,7 @@
     "palm": {
       "title": "棕榈油资金情绪",
       "domestic": {"P": "棕榈油"},
-      "default_scopes": {"P": "P2701"},
+      "default_scopes": {"P": "P"},
       "foreign": {
         "fcpo": {"label": "马来西亚棕榈油", "source": "pending", "fund_group": "managed_money"}
       }
@@ -20,7 +20,7 @@
     "soybean": {
       "title": "大豆资金情绪",
       "domestic": {"M": "豆粕", "Y": "豆油"},
-      "default_scopes": {"M": "M2701", "Y": "Y2701"},
+      "default_scopes": {"M": "M", "Y": "Y"},
       "foreign": {
         "cbot_soybean": {"label": "CBOT大豆", "source": "cftc", "code": "005602", "name": "SOYBEANS - CHICAGO BOARD OF TRADE", "fund_group": "managed_money"},
         "cbot_meal": {"label": "CBOT豆粕", "source": "cftc", "code": "026603", "name": "SOYBEAN MEAL - CHICAGO BOARD OF TRADE", "fund_group": "managed_money"},

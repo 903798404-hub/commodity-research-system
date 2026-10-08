@@ -75,12 +75,12 @@ def test_wrong_domain_and_excluded_soybean_contracts_are_rejected(project):
             validate_domain({"foreign": [], "domestic": [{"scope": scope}]}, project, "soybean")
 
 
-def test_plan_uses_explicit_contracts_and_independent_collectors(project):
+def test_plan_prefers_variety_summaries_without_collecting_contract_substitutes(project):
     plan = collection_plan(project, list(DOMAINS), "all", date(2026, 10, 8), 14, 2025)
     commands = {item["domain"]: item["argv"] for item in plan}
-    assert "--sina-contracts" in commands["soybean"]
-    assert commands["soybean"][commands["soybean"].index("--sina-contracts")+1:][:2] == ["M2701", "Y2701"]
-    assert "P2701" in commands["palm"]
+    assert "--sina-contracts" not in commands["soybean"]
+    assert "--sina-contracts" not in commands["palm"]
+    assert "M2701" not in commands["soybean"] and "P2701" not in commands["palm"]
     assert "--sina-contracts" not in commands["rapeseed"]
     assert "2026-09-25" in commands["sugar"]
     assert "--czce-end" in commands["sugar"]
@@ -158,3 +158,32 @@ def test_formal_entry_renders_replacement_route_without_legacy_database(monkeypa
     assert not app.exception
     assert app.radio(key="commodity_positions_domain").options == list(DOMAINS.values())
     assert not any("最新交易日摘要" in item.value for item in app.info)
+
+
+@pytest.mark.parametrize("domain,variety", [("soybean", "M"), ("soybean", "Y"), ("palm", "P")])
+@pytest.mark.parametrize("has_summary", [False, True])
+def test_domestic_summary_never_uses_saved_single_contract_as_substitute(project, monkeypatch, domain, variety, has_summary):
+    monkeypatch.delenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", raising=False)
+    raw = []
+    for scope, positions in [(variety + "2701", (100, 50))] + ([(variety, (60, 20))] if has_summary else []):
+        for side, value in zip(("long", "short"), positions):
+            raw.append(dict(report_date="2026-09-30", scope=scope, side=side, rank=1,
+                            member="东证期货", raw_member="东证期货", account="未区分", positions=value))
+    publish(local_root(project, domain), [], raw, [], [])
+    script = ("from pathlib import Path\nfrom oilseed_positions_page import render_oilseed_positions_page\n"
+              f"render_oilseed_positions_page(Path({str(project)!r}), {domain!r})")
+    app = AppTest.from_string(script).run(timeout=30)
+    assert not app.exception
+    selector = app.selectbox(key=f"domestic_scope_{domain}")
+    assert selector.value == ("M" if domain == "soybean" else "P")
+    selector.set_value(variety).run(timeout=30)
+    assert not app.exception and not app.get("plotly_chart")
+    if has_summary:
+        net = [item for item in app.metric if item.label == "前20名净持仓"]
+        assert len(net) == 1 and net[0].value == "40"
+    else:
+        assert not app.metric and any("品种汇总数据待接入" in item.value for item in app.info)
+    selector.set_value(variety + "2701").run(timeout=30)
+    assert not app.exception
+    assert [item for item in app.metric if item.label == "前20名净持仓"][0].value == "50"
+    assert any("单合约参考" in item.value for item in app.caption)
