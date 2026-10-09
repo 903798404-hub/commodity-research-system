@@ -20,6 +20,7 @@ from agri_research_agent.data_sources.tankan.domestic_spread import (
 
 HISTORICAL_KEY_COLUMNS = ("date", "spread_name", "season")
 HISTORICAL_METADATA_COLUMNS = frozenset({"updated_at"})
+CONTRACT_IDENTITY_COLUMNS = frozenset({"leg1_contract", "leg2_contract"})
 UnderlyingPriceKey = tuple[str, str]
 HistoricalSpreadKey = tuple[str, str, str]
 
@@ -241,6 +242,12 @@ def materialize_affected_spreads(
 
     before = _read_spreads(current)
     calculated = _read_spreads(full_recalculation)
+    # Old formal artifacts lack both identities. Preserve those unknown values
+    # as NULL; only the exact affected keys receive actual producer identities.
+    added = set(calculated.columns) - set(before.columns)
+    if not set(before.columns) - set(calculated.columns) and added <= CONTRACT_IDENTITY_COLUMNS:
+        for column in added:
+            before[column] = None
     if set(before.columns) != set(calculated.columns):
         raise ValueError("Domestic Spread incremental schemas do not match")
     calculated = calculated.loc[:, before.columns]
@@ -305,8 +312,9 @@ def historical_changed_keys(
 ) -> tuple[HistoricalSpreadKey, ...]:
     """Return business-key changes without granting publication permission."""
 
-    before_rows = _business_rows(_read_spreads(current))
-    after_rows = _business_rows(_read_spreads(candidate))
+    before, after = _align_legacy_contract_columns(_read_spreads(current), _read_spreads(candidate))
+    before_rows = _business_rows(before)
+    after_rows = _business_rows(after)
     return tuple(
         sorted(
             key
@@ -325,6 +333,7 @@ def validate_historical_publication(
 
     before = _read_spreads(current)
     after = _read_spreads(candidate)
+    before, after = _align_legacy_contract_columns(before, after)
     before_rows = _business_rows(before)
     after_rows = _business_rows(after)
     changed: list[tuple[str, str, str]] = []
@@ -361,6 +370,23 @@ def parse_allowed_key(value: str) -> tuple[str, str, str]:
         raise ValueError("allowed key must be DATE|SPREAD_NAME|SEASON")
     date.fromisoformat(parts[0])
     return parts
+
+
+def _align_legacy_contract_columns(
+    before: pd.DataFrame, after: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Absent legacy identity means NULL, never a guessed listed contract.
+
+    Populating an old NULL with a real identity remains a business mutation and
+    must pass the exact-key publication guard. No other schema change is hidden.
+    """
+    before, after = before.copy(), after.copy()
+    for column in CONTRACT_IDENTITY_COLUMNS & (set(before.columns) | set(after.columns)):
+        if column not in before:
+            before[column] = None
+        if column not in after:
+            after[column] = None
+    return before, after
 
 
 def _read_spreads(value: pd.DataFrame | str | Path) -> pd.DataFrame:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -187,6 +188,37 @@ def _incident_replay() -> tuple[
         ignore_index=True,
     )
     return base_prices, baseline, full, underlying
+
+
+def test_legacy_artifact_adds_only_affected_real_contract_identities() -> None:
+    _prices, baseline, full, underlying = _incident_replay()
+    legacy = baseline.drop(columns=["leg1_contract", "leg2_contract"])
+    affected = derive_affected_spread_keys(pd.read_excel(CONFIG, sheet_name="spread_config"), underlying)
+    candidate, report = materialize_affected_spreads(
+        legacy, full, underlying_keys=underlying, affected_keys=affected,
+    )
+    keys = candidate.apply(lambda r: (r["date"].date().isoformat(), r["spread_name"], r["season"]), axis=1)
+    untouched = ~keys.isin(affected)
+    assert candidate.loc[untouched, ["leg1_contract", "leg2_contract"]].isna().all().all()
+    assert not report.unrelated_rewritten_keys
+    assert set(historical_changed_keys(legacy, candidate)) <= affected
+    policy = HistoricalMutationPolicy(
+        HistoricalPublicationMode.NORMAL, date(2026, 9, 21), date(2026, 9, 21),
+        exact_keys=affected,
+    )
+    assert validate_historical_publication(legacy, candidate, policy).publication_allowed
+    changed = candidate.copy()
+    changed.loc[untouched, "leg1_contract"] = "M2701"
+    with pytest.raises(HistoricalPublicationBlocked):
+        validate_historical_publication(legacy, changed, policy)
+
+
+def test_legacy_artifact_does_not_allow_other_schema_expansion() -> None:
+    _prices, baseline, full, underlying = _incident_replay()
+    legacy = baseline.drop(columns=["leg1_contract", "leg2_contract"])
+    full["unexpected_field"] = 1
+    with pytest.raises(ValueError, match="schemas do not match"):
+        materialize_affected_spreads(legacy, full, underlying_keys=underlying, affected_keys=[])
 
 
 def test_dependency_closure_uses_exact_config_contracts() -> None:
