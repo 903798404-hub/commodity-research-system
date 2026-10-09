@@ -626,14 +626,20 @@ class DomesticBasisRefreshAdapter:
         return domestic_basis_current_identity(self.runtime)
 
     def preflight(self) -> Mapping[str, object]:
+        public_root = self.runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
+        current = load_domestic_basis_current(public_root)
+        if current is not None and current.manifest.get("schema_version") == "domestic-basis-current/4":
+            raise ProviderFailure(
+                ProviderStatus.SOURCE_UNAVAILABLE,
+                "Lutou Domestic Basis source retired; verified Nutstore Current preserved; "
+                "updates use the separate read-only Windows collector",
+            )
         catalog = load_domestic_basis_catalog(self.mapping_path)
         if not catalog.live_verified:
             raise ProviderFailure(
                 ProviderStatus.LIVE_VERIFICATION_PENDING,
                 "Domestic Basis live schema and source mapping verification is pending",
             )
-        public_root = self.runtime.runtime_root / "public-market-data" / "lutou-domestic-basis"
-        current = load_domestic_basis_current(public_root)
         seed = load_historical_basis_seed(public_root)
         if (
             current is None
@@ -872,10 +878,16 @@ def domestic_basis_current_identity(runtime: RuntimeContext) -> CurrentIdentity:
         "release_id": current.release_id,
         "manifest_sha256": str(pointer["manifest_sha256"]),
     }
+    source_max = current.manifest["source_max_date"]
+    if current.manifest.get("schema_version") == "domestic-basis-current/4":
+        # This adapter reports only its own retired source, not Nutstore freshness.
+        old_dates = [row["business_date"] for row in current.observations.to_pylist()
+                     if row["segment"] == "LIVE_LUTOU"]
+        source_max = max(old_dates).isoformat() if old_dates else None
     return CurrentIdentity(
         current.release_id,
         str(pointer["manifest_sha256"]),
-        {"domestic_basis": str(current.manifest["source_max_date"])},
+        {} if source_max is None else {"domestic_basis": str(source_max)},
         {"lutou-domestic-basis": identity},
     )
 

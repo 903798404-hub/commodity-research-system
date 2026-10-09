@@ -121,6 +121,55 @@ def test_candidate_retains_all_history_and_is_readable_by_actual_page(monkeypatc
         pipeline.validate_nutstore_current(output, actual.directory, dict(actual.manifest), damaged)
 
 
+def test_retired_lutou_provider_preserves_nutstore_and_other_provider(monkeypatch, tmp_path):
+    from agri_research_agent.pipelines import public_data_delivery as delivery
+    from agri_research_agent.pipelines.public_data_providers import DomesticBasisRefreshAdapter
+    from agri_research_agent.pipelines.public_data_refresh import (
+        CurrentIdentity, OverallStatus, RefreshResult, run_unified_refresh,
+    )
+    from agri_research_agent.shared.runtime_context import RuntimeContext, RuntimeMode
+    original, _current = baseline(monkeypatch, tmp_path)
+    path = workbook(monkeypatch, tmp_path, [row(品种=product) for product in source.PRODUCTS])
+    public = tmp_path / "public-market-data"
+    output = public / "lutou-domestic-basis"
+    pipeline.build_nutstore_basis_candidate(baseline_root=original, output_root=output, source=path)
+    (tmp_path / ".market-data-runtime.json").write_text(json.dumps({
+        "schema_version": 1, "runtime_id": "nutstore-retirement-fixture",
+        "classification": "isolated-dev", "module_id": "international-spread",
+        "created_at": "2026-09-29T00:00:00Z",
+    }), encoding="utf-8")
+    runtime = RuntimeContext(RuntimeMode.ISOLATED_DEV, "international-spread", tmp_path)
+    adapter = DomesticBasisRefreshAdapter(
+        None, runtime, "retired", tmp_path / "no-old-catalog.yaml",
+        connector=lambda *_: pytest.fail("Retired source must not connect"),
+    )
+    assert adapter.current_identity().source_max_dates == {"domestic_basis": "2026-09-03"}
+    pointer = (output / "current.json").read_bytes()
+    calls = []
+    class OtherProvider:
+        name = "tankan"
+        def current_identity(self):
+            return CurrentIdentity("unchanged", "a" * 64, {"market": "2026-09-29"})
+        def preflight(self):
+            calls.append("other-preflight")
+            return {}
+        def refresh(self):
+            calls.append("other-refresh")
+            return RefreshResult(False, {"market": "2026-09-29"}, {"market": "NO_CHANGE"})
+    result = run_unified_refresh(runtime=runtime, run_id="retired-source-test",
+                                 adapters=[adapter, OtherProvider()])
+    assert result.overall_status is OverallStatus.SUCCESS_WITH_UNAVAILABLE_SOURCE
+    assert calls == ["other-preflight", "other-refresh"]
+    assert (output / "current.json").read_bytes() == pointer
+    dates = delivery._with_current_source_dates(public, ["lutou-domestic-basis"],
+                                                {"lutou_domestic_basis.domestic_basis": "2026-09-03"})
+    assert dates == {"lutou_domestic_basis.domestic_basis": "2026-09-03",
+                     "nutstore.domestic_basis": "2026-09-29"}
+    with pytest.raises(delivery.DeliveryError, match="source date differs"):
+        delivery._with_current_source_dates(public, ["lutou-domestic-basis"],
+                                             {"nutstore.domestic_basis": "2026-10-09"})
+
+
 def test_failure_does_not_create_candidate_or_modify_baseline(monkeypatch, tmp_path):
     original, current = baseline(monkeypatch, tmp_path)
     path = workbook(monkeypatch, tmp_path, [row()])

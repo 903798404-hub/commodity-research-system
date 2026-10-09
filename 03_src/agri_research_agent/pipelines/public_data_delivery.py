@@ -113,6 +113,7 @@ def build_production_package(
         raise DeliveryError("Public Current root is missing")
     dataset_names = _dataset_names(source, required_datasets)
     identities = _current_identities(source, dataset_names)
+    source_max_dates = _with_current_source_dates(source, dataset_names, source_max_dates)
     identity_sha = _json_sha256(identities)
     artifact_identities = _delivery_artifact_identities(delivery_artifacts or {})
     delivery_identity_sha = _json_sha256({
@@ -570,6 +571,26 @@ def _dataset_names(source: Path, required: Sequence[str] | None) -> tuple[str, .
     if missing:
         raise DeliveryError(f"required Public Current dataset is missing: {','.join(missing)}")
     return names
+
+
+def _with_current_source_dates(
+    source: Path, datasets: Sequence[str], reported: Mapping[str, str],
+) -> dict[str, str]:
+    """Keep verified file-source freshness when unrelated API providers update."""
+    dates = dict(reported)
+    dataset = "lutou-domestic-basis"
+    if dataset in datasets:
+        root = source / dataset
+        pointer = _current_pointer(root)
+        manifest = json.loads((root / "releases" / pointer["release_id"] / "manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("schema_version") == "domestic-basis-current/4":
+            from agri_research_agent.market_data.public_basis_current import load_public_basis_current
+            verified = load_public_basis_current(root)
+            actual = verified.identity.source_max_date.isoformat()
+            if dates.get("nutstore.domestic_basis", actual) != actual:
+                raise DeliveryError("Nutstore source date differs from the verified Current")
+            dates["nutstore.domestic_basis"] = actual
+    return dates
 
 
 def _current_identities(source: Path, datasets: Sequence[str]) -> dict[str, Any]:
