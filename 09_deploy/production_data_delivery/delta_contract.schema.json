@@ -20,7 +20,7 @@
     "status": {"const": "CANDIDATE"},
     "delta_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
     "generated_at_utc": {"type": "string", "minLength": 1},
-    "domain": {"enum": ["soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy", "canola_exports"]},
+    "domain": {"enum": ["soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy", "canola_exports", "commodity_positions"]},
     "producer": {
       "type": "object",
       "additionalProperties": false,
@@ -90,6 +90,43 @@
     }
   },
   "allOf": [
+    {
+      "if": {"properties": {"domain": {"const": "commodity_positions"}}},
+      "then": {
+        "properties": {
+          "baseline": {
+            "properties": {
+              "files": {
+                "additionalProperties": false,
+                "required": ["01_data/processed/commodity_positions/positions_archive.json", "01_data/update_status/commodity_positions.json"],
+                "properties": {
+                  "01_data/processed/commodity_positions/positions_archive.json": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/fileIdentity"}]},
+                  "01_data/update_status/commodity_positions.json": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/fileIdentity"}]}
+                }
+              }
+            }
+          },
+          "domain_metadata": {
+            "additionalProperties": false,
+            "required": ["record_count", "latest_dates", "added_partitions", "revised_partitions"],
+            "properties": {
+              "record_count": {"type": "integer", "minimum": 1},
+              "latest_dates": {
+                "type": "object", "minProperties": 1,
+                "propertyNames": {"pattern": "^(sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)$"},
+                "additionalProperties": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+              },
+              "added_partitions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}},
+              "revised_partitions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}
+            }
+          },
+          "payloads": {
+            "additionalProperties": false, "required": ["positions_archive.json"],
+            "properties": {"positions_archive.json": {"$ref": "#/$defs/fileIdentity"}}
+          }
+        }
+      }
+    },
     {
       "if": {"properties": {"domain": {"const": "canola_exports"}}},
       "then": {

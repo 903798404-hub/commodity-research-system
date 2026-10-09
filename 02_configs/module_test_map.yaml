@@ -3,18 +3,25 @@ modules:
   positions.workspace:
     code_paths:
       - 03_src/agri_research_agent/positions
+      - 03_src/agri_research_agent/automation/production_data_delta_positions.py
       - 04_scripts/positions
       - 04_scripts/update_foreign_seats.py
       - 05_apps/foreign_seats_page.py
       - 02_configs/agent_schedule.yaml
     direct_tests:
       - 08_tests/positions/test_workspace.py
+      - 08_tests/positions/test_positions_delivery.py
     impact_tests:
       - 08_tests/sugar_positions/test_positions.py
       - 08_tests/sugar_positions/test_preview.py
       - 08_tests/oilseed_positions/test_oilseed_positions.py
       - 08_tests/oilseed_positions/test_oilseed_preview.py
       - 08_tests/test_streamlit_dashboard.py
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/canola_exports/test_delivery_exports.py
+      - 08_tests/canada_canola/test_delivery.py
+      - 08_tests/brazil_soy/test_brazil_soy_delivery.py
       - 08_tests/test_production_packaging.py
       - 08_tests/test_spread_runtime_contract.py
       - 08_tests/shared/test_module_test_map.py

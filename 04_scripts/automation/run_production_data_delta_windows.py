@@ -62,7 +62,7 @@ def load_module():
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--domain", choices=("akshare", "soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy", "canola_exports"), required=True)
+    parser.add_argument("--domain", choices=("akshare", "soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy", "canola_exports", "commodity_positions"), required=True)
     parser.add_argument(
         "--end-date",
         help="AkShare business end date in strict YYYY-MM-DD form; defaults to today",
@@ -95,19 +95,22 @@ def main(argv=None) -> int:
         config = json.loads(raw.decode("utf-8"), object_pairs_hook=closed_pairs)
         _bootstrap(config)
         module = load_module()
-        if args.domain not in {"canada_canola", "brazil_soy", "canola_exports"}:
+        if args.domain not in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions"}:
             module.validate_config(config)
         module.verify_clean_detached_clone(ROOT, config)
         sys.path.insert(0, str(ROOT / "03_src"))
-        if args.domain in {"canada_canola", "brazil_soy", "canola_exports"}:
+        if args.domain in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions"}:
             if any(value is not None for value in (
                 args.end_date, args.run_root, args.historical_reconciliation_manifest,
                 args.promote_candidate, args.promotion_evidence, args.promotion_evidence_sha256,
                 args.expected_current_id, args.expected_current_artifact_sha256,
                 args.expected_current_manifest_sha256,
             )):
-                raise ValueError("canola delivery only accepts its pinned configuration and publication mode")
-            if args.domain == "canola_exports":
+                raise ValueError("evidence delivery only accepts its pinned configuration and publication mode")
+            if args.domain == "commodity_positions":
+                from agri_research_agent.automation.production_data_delta_positions import run_positions
+                result = run_positions(config, publish=args.publish)
+            elif args.domain == "canola_exports":
                 from agri_research_agent.automation.production_data_delta_exports import run_exports
                 result = run_exports(config, publish=args.publish)
             elif args.domain == "brazil_soy":
