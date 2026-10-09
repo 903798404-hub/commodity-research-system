@@ -13,6 +13,7 @@ producer 的 Commit/Tree 与校验镜像的 Commit/Tree 分别固定，不要求
 | `soybean_export_sales` | `04_scripts/soybean_exports/run_fas_export_sales.py --candidate-only` | FAS stable Parquet、主机生成的 manifest/status |
 | `canada_canola` | `04_scripts/canada_canola/update_canola.py` 人工准备；同一 Windows 正式入口交付 | Canola stable JSON、来源字节证据、主机生成 status |
 | `canola_exports` | 人工触发独立 CGC 采集子进程，仅准备候选 | 出口 weekly.json、全年度来源证据、主机生成 status |
+| `commodity_positions` | 指定四板块export-only包，仅准备交付候选 | 归档来源重放、四板块current/raw/release、主机生成status |
 
 Windows 正式入口为 `04_scripts/automation/run_production_data_delta_windows.py`：
 该入口的 provider 子环境固定 `NO_PROXY=*`，不继承 Windows 用户代理或 CA
@@ -90,6 +91,30 @@ reconciliation manifest SHA 和完整 expected Current。调用者须批准此 e
 这是生产数据发布操作，仍须独立授权；代码进入 main 本身不触发晋升。
 
 ## 配置、基线与凭据
+
+### 持仓交付
+
+同一Windows入口使用`--domain commodity_positions`，固定Python建议`-I -B -X utf8`。
+配置版本为`commodity-positions-delivery-config/1`，精确字段为schema_version、approved_commit、
+approved_tree、origin、python、runtime_root、baseline_root、baseline_manifest_sha256、ssh_target、
+publisher、publisher_sha256、image_id、remote_allocation、policy、policy_sha256、bundle_root、
+bundle_manifest_sha256。两个policy映射仅含commodity_positions。bundle_root指向已准备的四板块
+export-only包，bundle_manifest_sha256固定其bundle.json；不重新采集，不打开浏览器。
+
+baseline_manifest使用`commodity-positions-production-baseline/1`，只含schema_version、
+source_root、files；source_root固定实际allocation。files精确固定
+`01_data/processed/commodity_positions/positions_archive.json`及
+`01_data/update_status/commodity_positions.json`的SHA/大小或null，两项必须齐全。
+首次null须从服务器实际读取确认；后续每次取回新基线。已有未经本入口管理的持仓目录拒绝初始化，
+不能用空archive忽略实际current。正式worker同时核验基线archive与页面实际current/raw/release。
+
+默认只生成positions_archive.json及delta_contract.json，不访问SSH。producer和固定镜像worker
+均重放所有原始来源，报告分区不可丢失，修订须匹配新来源。主机保留旧历史，物化到独立stage，
+整体原子切换持仓目录及status，失败回滚；不可变raw/release发生冲突则拒绝。NO_CHANGE保持正式原字节。
+详见[持仓契约](../../07_docs/projects/农产品持仓与资金情绪契约.md)。
+
+本入口不安装生产policy或定时采集；16:35单次任务、交易日历和延迟后人工触发需另行实际配置验收。
+联合候选准备不授予生产数据写入权限；显式授权后才能使用`--publish`。
 
 ### 菜籽出口人工触发
 

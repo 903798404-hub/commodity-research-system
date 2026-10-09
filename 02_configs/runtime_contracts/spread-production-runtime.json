@@ -1652,6 +1652,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/positions/delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/positions/workspace.py",
       "role": "runtime_configuration"
     },
