@@ -11,6 +11,22 @@ sys.path.insert(0,str(ROOT/'05_apps'))
 from agri_research_agent.market_data.foreign_fx import CURRENCIES, SCHEMA_VERSION
 
 
+def test_seasonal_chart_month_axis_and_current_year_highlight():
+    import pandas as pd
+    from foreign_fx_page import build_seasonality_figure
+    from agri_research_agent.shared.chart_style import CURRENT_YEAR_COLOR, CURRENT_LINE_WIDTH
+    frame = pd.DataFrame([
+        dict(currency='BRL',date=date(y,3,1),local_per_usd=v)
+        for y,v in [(2024,4),(2025,5),(2026,6)]
+    ])
+    figure = build_seasonality_figure(frame,'BRL',[2024,2025,2026],current_year=2026)
+    current = next(t for t in figure.data if '今年' in t.name)
+    assert current.line.color == CURRENT_YEAR_COLOR and current.line.width == CURRENT_LINE_WIDTH
+    assert current.x[0] == date(2000,3,1) and current.customdata[0] == '2026-03-01'
+    assert list(figure.layout.xaxis.ticktext) == [f'{m}月' for m in range(1,13)]
+    assert next(t for t in figure.data if '均值' in t.name).y[0] == 4.5
+
+
 def test_navigation_route_preserves_canada_and_loads_missing_fx_without_network(monkeypatch,tmp_path):
     monkeypatch.setenv('FOREIGN_FX_SNAPSHOT_FILE',str(tmp_path/'missing.json'))
     app=AppTest.from_file(str(ROOT/'05_apps/streamlit_app.py'),default_timeout=30).run()
@@ -43,7 +59,12 @@ def test_main_entry_displays_real_schema_changes_currency_and_comparison(monkeyp
     assert app.metric[2].value=='+25.00%'
     app.selectbox[0].set_value('CAD').run(timeout=30)
     assert not app.exception and app.metric[0].label=='USD/CAD'
-    app.multiselect[0].set_value([]).run(timeout=30)
+    app.multiselect(key='fx_season_years_CAD').set_value([]).run(timeout=30)
+    assert any('选择至少一个年份' in x.value for x in app.info)
+    app.multiselect(key='fx_season_years_CAD').set_value([2026]).run(timeout=30)
+    app.radio(key='fx_season_mode').set_value('年初＝100').run(timeout=30)
+    assert not app.exception
+    app.multiselect(key='fx_compare_currencies').set_value([]).run(timeout=30)
     assert any('选择至少一个币种' in x.value for x in app.info)
     assert path.read_bytes()==original
 

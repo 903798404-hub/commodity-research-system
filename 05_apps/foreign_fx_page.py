@@ -11,11 +11,11 @@ import streamlit as st
 
 from agri_research_agent.market_data.foreign_fx import (
     BY_CODE, CURRENCIES, BCB_CATALOG_URL, ECB_CATALOG_URL, FxDataError,
-    load_snapshot, overview, strength_comparison,
+    load_snapshot, overview, strength_comparison, seasonality,
 )
 from agri_research_agent.shared.chart_style import (
     CURRENT_YEAR_COLOR, CURRENT_LINE_WIDTH, GRID_COLOR, HISTORY_LINE_WIDTH,
-    HISTORICAL_YEAR_COLORS, MEAN_COLOR,
+    HISTORICAL_YEAR_COLORS, MEAN_COLOR, HISTORY_OPACITY, historical_year_color,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +39,34 @@ def _layout(figure: go.Figure, unit: str) -> go.Figure:
 def _scope_table() -> pd.DataFrame:
     return pd.DataFrame([{"币种": c.name, "代码": c.code, "国家": c.country,
                           "关联品种": c.commodities, "研究含义": c.meaning} for c in CURRENCIES])
+
+
+def build_seasonality_figure(frame: pd.DataFrame, code: str, years: list[int], *,
+                             current_year: int, normalize: bool = False) -> go.Figure:
+    rows, average = seasonality(frame, code, years, current_year=current_year, normalize=normalize)
+    figure = go.Figure()
+    for year in sorted(set(rows["year"])):
+        points = rows.loc[rows["year"] == year]
+        current = year == current_year
+        figure.add_trace(go.Scatter(
+            x=points["season_date"], y=points["value"], mode="lines",
+            name=f"{year}年" + ("（今年）" if current else ""),
+            customdata=[d.isoformat() for d in points["date"]],
+            hovertemplate="%{customdata}<br>%{y:.4f}<extra>%{fullData.name}</extra>",
+            opacity=1 if current else HISTORY_OPACITY,
+            line=dict(color=CURRENT_YEAR_COLOR if current else historical_year_color(year),
+                      width=CURRENT_LINE_WIDTH if current else HISTORY_LINE_WIDTH)))
+    if average["value"].notna().any():
+        figure.add_trace(go.Scatter(
+            x=average["season_date"], y=average["value"], mode="lines+markers", name="所选历史月度均值",
+            customdata=average["year_count"], connectgaps=False,
+            hovertemplate="%{x|%m}月<br>%{y:.4f}（%{customdata}年有报价）<extra>历史月度均值</extra>",
+            line=dict(color=MEAN_COLOR, width=2.5, dash="dash")))
+    _layout(figure, "汇率指数（年初＝100）" if normalize else f"{code} / USD")
+    figure.update_xaxes(tickmode="array", tickvals=[date(2000, m, 1) for m in range(1, 13)],
+                        ticktext=[f"{m}月" for m in range(1, 13)],
+                        range=[date(2000, 1, 1), date(2000, 12, 31)], title="月份")
+    return figure
 
 
 def render_foreign_fx_page(*, project_root: Path = PROJECT_ROOT) -> None:
@@ -71,33 +99,37 @@ def render_foreign_fx_page(*, project_root: Path = PROJECT_ROOT) -> None:
     st.caption("1、5、20日均按各币种相邻有报价日计算。缺失显示为空，不补零，不延用旧报价。")
 
     available = [c.code for c in CURRENCIES if c.code in set(frame["currency"])]
-    controls = st.columns([2, 3])
-    with controls[0]:
-        code = st.selectbox("研究币种", available, format_func=lambda c: f"{BY_CODE[c].name} · USD/{c}")
-    with controls[1]:
-        horizon = st.radio("研究区间", ["近3个月", "近1年", "2021年以来"], index=1, horizontal=True)
-    latest = max(frame["date"])
-    start = date(2021, 1, 1) if horizon == "2021年以来" else latest - timedelta(days=92 if horizon == "近3个月" else 365)
-    trend, compare, definitions = st.tabs(["汇率走势", "本币强弱对比", "数据与研究含义"])
+    code = st.selectbox("研究币种", available, format_func=lambda c: f"{BY_CODE[c].name} · USD/{c}")
+    trend, compare, definitions = st.tabs(["季节性", "本币强弱对比", "数据与研究含义"])
     with trend:
-        rows = frame.loc[(frame["currency"] == code) & (frame["date"] >= start)].sort_values("date")
-        if rows.empty:
-            st.info("该币种在所选区间没有报价。")
+        rows = frame.loc[frame["currency"] == code].sort_values("date")
+        last = rows.iloc[-1]
+        cols = st.columns(3)
+        cols[0].metric(f"USD/{code}", f"{last['local_per_usd']:.4f}")
+        cols[1].metric("最新业务日期", str(last["date"]))
+        ret = summary.loc[summary["currency"] == code, "return_1"].iloc[0]
+        cols[2].metric("本币相对美元日涨跌", "—" if pd.isna(ret) else f"{ret:+.2%}")
+        years = sorted({d.year for d in rows["date"]})
+        chosen = st.multiselect("比较年份", years, default=years[-6:], key=f"fx_season_years_{code}")
+        mode = st.radio("图表口径", ["汇率水平", "年初＝100"], horizontal=True, key="fx_season_mode")
+        current_year = datetime.now(timezone(timedelta(hours=8))).year
+        if chosen:
+            st.plotly_chart(build_seasonality_figure(frame, code, chosen, current_year=current_year,
+                            normalize=mode == "年初＝100"), use_container_width=True)
         else:
-            last = rows.iloc[-1]
-            cols = st.columns(3)
-            cols[0].metric(f"USD/{code}", f"{last['local_per_usd']:.4f}")
-            cols[1].metric("最新业务日期", str(last["date"]))
-            ret = summary.loc[summary["currency"] == code, "return_1"].iloc[0]
-            cols[2].metric("本币相对美元日涨跌", "—" if pd.isna(ret) else f"{ret:+.2%}")
-            figure = go.Figure(go.Scatter(x=rows["date"], y=rows["local_per_usd"],
-                                         name=f"USD/{code}", mode="lines",
-                                         line=dict(color=CURRENT_YEAR_COLOR, width=CURRENT_LINE_WIDTH)))
-            st.plotly_chart(_layout(figure, f"{code} / USD"), use_container_width=True)
-            st.write(BY_CODE[code].meaning)
+            st.info("选择至少一个年份查看季节性。")
+        st.caption("灰线为所选历史年份的月度均值：先算各年月均值，再对年份等权平均；至少2年有报价，不含今年。日线不补缺失，闰日单独对齐。")
+        if mode == "年初＝100":
+            st.caption("指数＝当日汇率÷各年首个有报价日汇率×100；高于100代表美元相对本币升值。")
+        st.caption("年份对齐用于同期比较，不代表已证实稳定的季节规律。")
+        st.write(BY_CODE[code].meaning)
     with compare:
+        horizon = st.radio("研究区间", ["近3个月", "近1年", "2021年以来"], index=1, horizontal=True)
+        latest = max(frame["date"])
+        start = date(2021, 1, 1) if horizon == "2021年以来" else latest - timedelta(days=92 if horizon == "近3个月" else 365)
         defaults = [c for c in ("BRL", "CAD", "AUD", "MYR") if c in available]
-        selected = st.multiselect("比较币种", available, default=defaults, format_func=lambda c: BY_CODE[c].name)
+        selected = st.multiselect("比较币种", available, default=defaults, format_func=lambda c: BY_CODE[c].name,
+                                  key="fx_compare_currencies")
         if selected:
             compared, base = strength_comparison(frame, selected, start)
             if base is None:
