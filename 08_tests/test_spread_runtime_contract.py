@@ -189,6 +189,39 @@ for name, module in list(sys.modules.items()):
         assert "ModuleNotFoundError" in result.stderr or "ImportError" in result.stderr
 
 
+@pytest.mark.parametrize("omission", [
+    None,
+    "03_src/agri_research_agent/data_sources/nutstore_basis.py",
+    "03_src/agri_research_agent/pipelines/nutstore_domestic_basis.py",
+])
+def test_nutstore_current_validator_imports_from_image_inputs_only(tmp_path, omission):
+    copied = copied_runtime_inputs(contract())
+    for name in copied - {omission}:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    code = """
+from pathlib import Path
+import sys
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root / '03_src'))
+from agri_research_agent.market_data.public_basis_current import load_public_basis_current
+from agri_research_agent.pipelines.nutstore_domestic_basis import validate_nutstore_current
+assert callable(load_public_basis_current) and callable(validate_nutstore_current)
+for name, module in list(sys.modules.items()):
+    if name.startswith('agri_research_agent'):
+        assert Path(module.__file__).resolve().is_relative_to(root), name
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(tmp_path)], cwd=tmp_path,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    if omission is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0 and "ModuleNotFoundError" in result.stderr
+
+
 @pytest.fixture
 def mounted_inputs(tmp_path):
     m = contract()
