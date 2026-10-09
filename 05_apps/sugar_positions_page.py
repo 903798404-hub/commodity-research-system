@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from agri_research_agent.sugar_positions.charts import CHART_WIDTH, chinese_date, movements, trend
+from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
 from agri_research_agent.sugar_positions.model import (
     GROUPS, MARKETS, domestic_metrics, foreign_metrics, load_members, positioning_signal,
 )
@@ -15,6 +15,23 @@ from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 
 REPORT_LABELS = {"纯期货": "futures_only", "期货＋期权": "combined"}
+
+
+def chart_pair(first, second, *, keys):
+    """Keep related charts visible together, stacking on narrow screens."""
+    key = f"position-charts-{keys[0]}"
+    st.html(f"""<style>@media(max-width:1000px) {{
+      .st-key-{key} [data-testid="stHorizontalBlock"] {{flex-direction:column;}}
+      .st-key-{key} [data-testid="stColumn"] {{width:100% !important; flex:1 1 100% !important;}}
+    }}</style>""")
+    with st.container(key=key):
+        if len(first.data) > 1:
+            first.update_layout(showlegend=False, margin=dict(l=40, r=130, t=70, b=40))
+        for column, figure, chart_key in zip(st.columns(2), (first, second), keys):
+            with column:
+                figure.update_layout(height=340)
+                figure.update_xaxes(nticks=4, tickangle=0)
+                st.plotly_chart(figure, width="stretch", key=chart_key)
 
 
 def fmt(value, signed=False):
@@ -112,10 +129,9 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
                 st.warning("这份周报距今超过14天，请核对最新发布状态。")
             if len(data) >= 8:
-                st.plotly_chart(trend(data, f"{label} · {group_label}净持仓", {group: group_label}),
-                    width=CHART_WIDTH, key=f"foreign_trend_{market}")
-                st.plotly_chart(movements(data[-26:], "近26份报告净持仓变化"),
-                    width=CHART_WIDTH, key=f"foreign_changes_{market}")
+                chart_pair(trend(data, f"{label} · {group_label}净持仓", {group: group_label}),
+                    movements(data[-26:], "近26份报告净持仓变化"),
+                    keys=(f"foreign_trend_{market}", f"foreign_changes_{market}"))
             else:
                 st.caption("已保存报告不足8期，先展示数值明细。")
             with st.expander(f"{label}持仓明细"):
@@ -148,12 +164,11 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
                 "多仓（手）", "空仓（手）", "披露情况"]], hide_index=True, width="stretch")
             history = [r for r in data if r["report_date"] <= day]
             if len({r["report_date"] for r in history}) >= 8:
-                st.plotly_chart(trend(history, f"五家固定席位 · {account}净持仓", {
+                chart_pair(trend(history, f"五家固定席位 · {account}净持仓", {
                     m["id"]: m["label"] for m in members}, direct_labels=True),
-                    width=CHART_WIDTH, key="domestic_fixed_trend")
-                st.caption("零线上方偏多，下方偏空；点击席位名可隐藏曲线。")
-                st.plotly_chart(movements([r for r in history if r["group"] == "top20"],
-                    "前20名净持仓变化"), width=CHART_WIDTH, key="domestic_changes")
+                    movements([r for r in history if r["group"] == "top20"], "前20名净持仓变化"),
+                    keys=("domestic_fixed_trend", "domestic_changes"))
+                st.caption("零线上方偏多，下方偏空；曲线末端显示席位名称与最新净持仓。")
             with st.expander("历史净持仓与比较日期"):
                 st.dataframe(detail(history).iloc[::-1], hide_index=True, width="stretch")
             with st.expander("交易所原始排名"):

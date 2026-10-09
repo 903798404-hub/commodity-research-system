@@ -8,11 +8,11 @@ import streamlit as st
 
 from agri_research_agent.oilseed_positions.model import config, metrics
 from agri_research_agent.oilseed_positions.aggregation import domestic_metrics, METHOD
-from agri_research_agent.sugar_positions.charts import CHART_WIDTH, chinese_date, movements, trend
+from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
 from agri_research_agent.sugar_positions.model import load_members, positioning_signal
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
-from sugar_positions_page import chinese_time, detail, display_attempt
+from sugar_positions_page import chart_pair, chinese_time, detail, display_attempt
 
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
 
@@ -104,7 +104,6 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
             if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
                 st.warning("这份周报距今超过14天，请核对最新发布状态。")
             if len(data) >= 2:
-                st.plotly_chart(series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"]), width=CHART_WIDTH, key=f"trend_{market}")
                 figure = movements(data[-26:], "最近报告净持仓变化")
                 known_changes = [r for r in data[-26:] if r["net_change"] is not None]
                 if len(known_changes) == 1:
@@ -113,7 +112,8 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 if unit == "Delta等价手":
                     figure.update_yaxes(title="净变化（Delta等价手）")
                     figure.update_traces(hovertemplate="%{customdata[1]}<br>净变化 %{y:+,.2f} Delta等价手<br>比较日期 %{customdata[0]}<extra></extra>")
-                st.plotly_chart(figure, width=CHART_WIDTH, key=f"changes_{market}")
+                chart_pair(series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"]),
+                    figure, keys=(f"trend_{market}", f"changes_{market}"))
             with st.expander(item["label"] + "持仓明细"):
                 view = [dict(r, label="投资基金" if market == "euronext_rapeseed" else "管理基金") for r in data]
                 frame = detail(view).iloc[::-1]
@@ -161,8 +161,9 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
             st.dataframe(detail([current[m["id"]] for m in members])[["对象", "持仓情绪", "净持仓（手）", "净变化（手）", "披露情况"]], hide_index=True, width="stretch")
             history = [r for r in data if r["report_date"] <= day]
             if len({r["report_date"] for r in history}) >= 2:
-                st.plotly_chart(trend(history, "五家固定席位 · 已披露净持仓" if observed_summary else f"五家固定席位 · {current['fixed5']['account']}净持仓", {m["id"]: m["label"] for m in members}, direct_labels=True), width=CHART_WIDTH, key="fixed_trend")
-                st.plotly_chart(movements([r for r in history if r["group"] == "top20"], "前20名净持仓变化"), width=CHART_WIDTH, key="domestic_changes")
+                chart_pair(trend(history, "五家固定席位 · 已披露净持仓" if observed_summary else f"五家固定席位 · {current['fixed5']['account']}净持仓", {m["id"]: m["label"] for m in members}, direct_labels=True),
+                    movements([r for r in history if r["group"] == "top20"], "前20名净持仓变化"),
+                    keys=("fixed_trend", "domestic_changes"))
             with st.expander("历史净持仓与比较日期"):
                 st.dataframe(detail(history).iloc[::-1], hide_index=True, width="stretch")
     with sources:

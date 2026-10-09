@@ -1,12 +1,11 @@
 """Native Plotly charts with explicit units, zero baseline, and visible gaps."""
-from datetime import date
+from datetime import date, timedelta
 
 import plotly.graph_objects as go
 
 PALETTE = ("#356FA3", "#B08A32", "#C77B48", "#737F42", "#AE6D87")
 DASHES = ("solid", "dash", "dot", "dashdot", "longdash")
 SEAT_PALETTE = ("#2563EB", "#E59622", "#7C3AED", "#0D9488", "#DC4F86")
-CHART_WIDTH = 1050
 
 
 def chinese_date(value):
@@ -53,6 +52,10 @@ def trend(rows, title, labels, *, direct_labels=False):
     figure.update_yaxes(rangemode="tozero", gridcolor="#E8EBED")
     chinese_date_axis(figure)
     if direct_labels:
+        dates = [date.fromisoformat(r["report_date"]) for r in rows if r["group"] in labels]
+        if dates:
+            figure.update_xaxes(range=[(min(dates) - timedelta(days=1)).isoformat(),
+                (max(dates) + timedelta(days=1)).isoformat()])
         known = [r["net"] for r in rows if r["group"] in labels and r["net"] is not None]
         lower, upper = min([0] + known), max([0] + known)
         span = upper - lower or 1
