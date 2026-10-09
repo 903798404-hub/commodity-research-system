@@ -88,6 +88,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     research_items = [item for group in research_groups for item in group.items]
 
     assert [item.label for item in research_items] == [
+        "外盘汇率",
         "国际价差",
         "价差动态",
         "国内现货（基差与一口价）",
@@ -127,9 +128,9 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 15
+    assert cards_markup.count('class="agri-card"') == 16
     assert cards_markup.count('class="agri-card-keyword"') == 20
-    assert cards_markup.count('class="agri-card-detail-label"') == 6
+    assert cards_markup.count('class="agri-card-detail-label"') == 7
     assert "?home_target=" not in cards_markup
     assert "?workspace_page=" in cards_markup
     assert '<strong class="agri-card-keyword">跨期价差</strong>' in cards_markup

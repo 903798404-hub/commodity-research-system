@@ -1456,6 +1456,14 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/market_data/foreign_fx.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/foreign_fx_page.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "05_apps/crop_weather_page.py",
       "role": "runtime_configuration"
     },

@@ -47,11 +47,13 @@ from foreign_seats_page import render_foreign_seats_page
 from home import get_external_app_url, render_home
 from soybean_margin_page import render_soybean_margin_page
 from international_spread_page import render_international_spread_page
+from foreign_fx_page import render_foreign_fx_page
 from navigation import (
     BRAZIL_SOY_PAGE_TITLE,
     CANADA_CANOLA_PAGE_TITLE,
     IMPORT_PROFIT_ROUTE_ID,
     INTERNATIONAL_SPREAD_PAGE_TITLE,
+    FOREIGN_FX_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
     NAVIGATION_GROUPS,
     PALM_OIL_WEATHER_PAGE_TITLE,
@@ -410,6 +412,8 @@ def render_selected_workspace_page(selected_page: str) -> None:
         render_home(REPORT_CATALOG_FILE)
     elif selected_page == RESEARCH_OVERVIEW_PAGE_TITLE:
         render_research_overview()
+    elif selected_page == FOREIGN_FX_PAGE_TITLE:
+        render_foreign_fx_page(project_root=PROJECT_ROOT)
     elif selected_page == "基差/一口价":
         render_basis_page(get_public_basis_current_root())
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
