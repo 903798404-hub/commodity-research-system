@@ -31,17 +31,30 @@ modules:
     code_paths:
       - 03_src/agri_research_agent/market_data/foreign_fx.py
       - 03_src/agri_research_agent/market_data/foreign_fx_update.py
+      - 03_src/agri_research_agent/market_data/foreign_fx_delivery.py
+      - 03_src/agri_research_agent/automation/production_data_delta_fx.py
       - 04_scripts/foreign_fx/build_preview.py
       - 04_scripts/foreign_fx/update_preview.py
+      - 04_scripts/foreign_fx/launch_scheduled.ps1
+      - 04_scripts/foreign_fx/register_scheduled_task.ps1
       - 05_apps/foreign_fx_page.py
       - 05_apps/navigation.py
     direct_tests:
       - 08_tests/market_data/test_foreign_fx.py
       - 08_tests/market_data/test_foreign_fx_update.py
+      - 08_tests/market_data/test_foreign_fx_delivery.py
+      - 08_tests/test_production_data_delta_fx.py
       - 08_tests/test_foreign_fx_page.py
     impact_tests:
       - 08_tests/test_streamlit_dashboard.py
       - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/positions/test_positions_delivery.py
+      - 08_tests/canola_exports/test_delivery_exports.py
+      - 08_tests/canada_canola/test_delivery.py
+      - 08_tests/brazil_soy/test_brazil_soy_delivery.py
+      - 08_tests/test_production_packaging.py
     dependents: [apps.streamlit_dashboard]
     full_regression_when_changed: false
   soybean_margin.api_inputs:

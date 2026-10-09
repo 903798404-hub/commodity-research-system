@@ -20,7 +20,7 @@
     "status": {"const": "CANDIDATE"},
     "delta_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
     "generated_at_utc": {"type": "string", "minLength": 1},
-    "domain": {"enum": ["soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy", "canola_exports", "commodity_positions"]},
+    "domain": {"enum": ["soybean_crop_progress", "soybean_export_sales", "canada_canola", "brazil_soy", "canola_exports", "commodity_positions", "foreign_fx"]},
     "producer": {
       "type": "object",
       "additionalProperties": false,

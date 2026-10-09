@@ -1460,6 +1460,14 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/market_data/foreign_fx_update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/market_data/foreign_fx_delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "05_apps/foreign_fx_page.py",
       "role": "runtime_configuration"
     },

@@ -65,8 +65,17 @@ EXPORTS_SOURCES = "01_data/processed/canola_exports/source_evidence.json"
 EXPORTS_STATUS = "01_data/update_status/canola_exports.json"
 POSITIONS_STABLE = "01_data/processed/commodity_positions/positions_archive.json"
 POSITIONS_STATUS = "01_data/update_status/commodity_positions.json"
+FX_STABLE = "01_data/processed/foreign_fx/daily.json"
+FX_SOURCES = "01_data/processed/foreign_fx/source_evidence.json"
+FX_STATUS = "01_data/processed/foreign_fx/status.json"
 
 DOMAIN_CONTRACTS = {
+    "foreign_fx": {
+        "payloads": {"daily.json": FX_STABLE, "source_evidence.json": FX_SOURCES},
+        "baseline": (FX_STABLE, FX_SOURCES, FX_STATUS),
+        "domain_dir": "01_data/processed/foreign_fx", "status_path": FX_STATUS,
+        "metadata": ("record_count", "latest_dates", "added", "revised"),
+    },
     "commodity_positions": {
         "payloads": {"positions_archive.json": POSITIONS_STABLE},
         "baseline": (POSITIONS_STABLE, POSITIONS_STATUS),
@@ -261,7 +270,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
             "crop stable baseline must be a complete pair")
     require((files.get(FAS_STABLE) is None) == (files.get(FAS_MANIFEST) is None),
             "FAS stable baseline must include its manifest")
-    if root["domain"] in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions"}:
+    if root["domain"] in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions", "foreign_fx"}:
         require(len({files[path] is None for path in contract["baseline"]}) == 1,
                 "canola baseline must include data, evidence and status together")
 
@@ -301,6 +310,13 @@ def validate_delta_document(value: object) -> dict[str, object]:
         require(type(metadata["source_manifest_sha256"]) is str
                 and HEX64.fullmatch(metadata["source_manifest_sha256"]),
                 "crop source manifest identity is invalid")
+    elif root["domain"] == "foreign_fx":
+        require(type(metadata["record_count"]) is int and metadata["record_count"] > 0, "FX record count invalid")
+        for key in ("added", "revised"):
+            require(type(metadata[key]) is int and 0 <= metadata[key] <= metadata["record_count"], "FX change count invalid")
+        dates = _exact(metadata["latest_dates"], {"BRL", "CAD", "AUD", "MYR", "IDR", "THB", "INR", "CNY"}, "FX latest dates")
+        for value in dates.values():
+            require(type(value) is str and date.fromisoformat(value).isoformat() == value, "FX latest date invalid")
     elif root["domain"] == "commodity_positions":
         require(type(metadata["record_count"]) is int and metadata["record_count"] > 0,
                 "positions record count invalid")
@@ -378,7 +394,7 @@ def validate_delta_document(value: object) -> dict[str, object]:
     require(type(payloads) is dict and set(payloads) == set(contract["payloads"]),
             "delta payload file set is invalid")
     for identity in payloads.values():
-        if root["domain"] in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions"}:
+        if root["domain"] in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions", "foreign_fx"}:
             _file_identity(identity)
         else:
             _parquet_identity(identity)
@@ -774,6 +790,69 @@ def _policy_unchanged(path: str | Path, expected_sha256: str) -> None:
             "protected host policy changed during operation")
 
 
+def snapshot_fx_baseline(policy_path: str | Path) -> dict[str, object]:
+    """Return only approved FX bytes, consistently read under the allocation lock."""
+    policy, policy_sha = _load_policy(policy_path)
+    require(policy["domain"] == "foreign_fx", "baseline export is restricted to FX")
+    allocation = _protected(_under(policy["allocation_root"], ALLOCATION_ROOT))
+    contract = DOMAIN_CONTRACTS["foreign_fx"]
+    with _lock(allocation):
+        formal = _under(allocation / contract["domain_dir"], allocation)
+        if formal.exists():
+            require(set(_file_set(_protected_tree(formal))) <= {"daily.json", "source_evidence.json", "status.json"},
+                    "FX baseline has unmanaged files")
+        files, contents = {}, {}
+        for relative in contract["baseline"]:
+            path = _under(allocation / relative, allocation)
+            identity = _actual_identity(path)
+            files[relative] = identity
+            if identity is None:
+                contents[relative] = None
+            else:
+                _protected(path)
+                require(identity["size_bytes"] <= 64 * 1024 * 1024, "FX baseline size bound exceeded")
+                raw = path.read_bytes()
+                require(len(raw) == identity["size_bytes"] and hashlib.sha256(raw).hexdigest() == identity["sha256"],
+                        "FX baseline changed while reading")
+                contents[relative] = base64.b64encode(raw).decode("ascii")
+        require(len({value is None for value in files.values()}) == 1, "FX baseline incomplete")
+        _policy_unchanged(policy_path, policy_sha)
+        return {"schema_version": "foreign-fx-baseline-snapshot/1", "domain": "foreign_fx",
+                "policy_sha256": policy_sha, "producer": policy["approved_producer"],
+                "image_id": policy["validation_image"]["image_id"], "allocation_root": str(allocation),
+                "files": files, "contents": contents}
+
+
+def record_fx_failure(policy_path: str | Path, run_id: str, expected_stable_sha256: str, error_type: str) -> dict[str, object]:
+    """Record a failed check only against unchanged, already verified FX quotes."""
+    policy, policy_sha = _load_policy(policy_path)
+    require(policy["domain"] == "foreign_fx", "failed check logging is restricted to FX")
+    require(type(run_id) is str and RUN_ID.fullmatch(run_id) and type(expected_stable_sha256) is str
+            and HEX64.fullmatch(expected_stable_sha256), "FX failure check identity invalid")
+    require(type(error_type) is str and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", error_type), "FX failure type invalid")
+    allocation = _protected(_under(policy["allocation_root"], ALLOCATION_ROOT))
+    with _lock(allocation):
+        stable = _protected(_under(allocation / FX_STABLE, allocation))
+        require(sha256_file(stable) == expected_stable_sha256, "FX stable changed since failed check began")
+        status_path = _protected(_under(allocation / FX_STATUS, allocation))
+        previous = status_path.read_bytes()
+        status = read_json(status_path)
+        require(status.get("schema_version") == "foreign-fx-update/1" and status.get("stable_sha256") == expected_stable_sha256,
+                "FX existing status is not bound to current quotes")
+        checked_at = datetime.now(timezone.utc).isoformat()
+        status.update(result="FAILED", checked_at=checked_at, run_id=run_id, error=error_type)
+        _policy_unchanged(policy_path, policy_sha)
+        try:
+            _atomic_json(status_path, status)
+        except Exception:
+            restore = status_path.with_name(".status.restore-" + uuid.uuid4().hex)
+            _write_exclusive(restore, previous)
+            os.replace(restore, status_path)
+            raise
+        return {"schema_version": "foreign-fx-failed-check/1", "status": "RECORDED", "policy_sha256": policy_sha,
+                "stable_sha256": expected_stable_sha256, "checked_at": checked_at}
+
+
 def _derived(root: Path, policy: dict[str, object], delta_id: str, suffix: str = "") -> Path:
     require(SAFE_ID.fullmatch(delta_id) is not None, "delta_id is invalid")
     return root / str(policy["policy_id"]) / (delta_id + suffix)
@@ -1088,6 +1167,12 @@ def _status_document(domain: str, delta: dict[str, object], identities: dict[str
                      semantic: dict[str, object]) -> dict[str, object]:
     metadata = delta["domain_metadata"]
     status = "initialized" if initialized else "updated"
+    if domain == "foreign_fx":
+        return {"schema_version": "foreign-fx-update/1", "run_id": delta["run"]["run_id"],
+                "result": "NO_CHANGE" if delta["run"]["business_status"] == "no_change" else "UPDATED",
+                "checked_at": published_at, "published_at": published_at,
+                "stable_sha256": identities[FX_STABLE]["sha256"], "latest_by_currency": semantic["latest_dates"],
+                "added": semantic["added"], "revised": semantic["revised"]}
     if domain == "commodity_positions":
         return {"schema_version": "commodity-positions-publish-status/1", "status": status,
                 "published": True, "published_at_utc": published_at, "delta_id": delta["delta_id"],
@@ -1263,6 +1348,11 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
                 require(formal_before is None or not formal_before, "unmanaged positions baseline exists")
             require((delta["run"]["business_status"] == "initialized") ==
                     (delta["baseline"]["files"][POSITIONS_STABLE] is None), "positions initialization differs")
+        if delta["domain"] == "foreign_fx":
+            require((delta["run"]["business_status"] == "initialized") ==
+                    (delta["baseline"]["files"][FX_STABLE] is None), "FX initialization differs")
+            require(formal_before is None or set(formal_before) <= {"daily.json", "source_evidence.json", "status.json"},
+                    "FX formal directory has unmanaged files")
         require(type(semantic_changed) is bool, "validation report lacks business comparison")
         require(delta["run"]["business_status"] != "no_change" or semantic_changed is False,
                 "no-change producer status differs from semantic validation")
@@ -1296,6 +1386,18 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             _policy_unchanged(policy_path, policy_sha)
             require(_git_identity(ROOT) == policy["approved_producer"],
                     "source clone changed before NO_CHANGE receipt")
+            if delta["domain"] == "foreign_fx":
+                # Refresh only check status; quotes and their original provenance remain byte-identical.
+                old_check = status_path.read_bytes()
+                try:
+                    _atomic_json(status_path, _status_document(delta["domain"], delta, formal_files,
+                        datetime.now(timezone.utc).isoformat(), False, report["semantic"]["observations"]))
+                except Exception:
+                    _write_restore = status_path.with_name(".status.restore-" + uuid.uuid4().hex)
+                    _write_exclusive(_write_restore, old_check)
+                    os.replace(_write_restore, status_path)
+                    raise
+                formal_files[FX_STATUS] = _actual_identity(status_path)
             receipt = {
                 "schema_version": "production-data-delta-publication/1", "status": "NO_CHANGE",
                 "published_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -1614,7 +1716,20 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
     sys.path.insert(0, "/app/03_src")
     import pandas as pd
     observations = {}
-    if domain == "commodity_positions":
+    if domain == "foreign_fx":
+        from agri_research_agent.market_data.foreign_fx_delivery import observations as fx_observations
+        baseline = (read_json(Path("/allocation") / FX_STABLE)
+                    if delta["baseline"]["files"][FX_STABLE] is not None else None)
+        formal = Path("/allocation") / DOMAIN_CONTRACTS[domain]["domain_dir"]
+        require(not formal.exists() or set(_file_set(formal)) <= {"daily.json", "source_evidence.json", "status.json"},
+                "FX baseline has unmanaged files")
+        if baseline is not None:
+            fx_observations(baseline, None, read_json(Path("/allocation") / FX_SOURCES))
+        observations = fx_observations(read_json(candidate / "daily.json"), baseline,
+                                      read_json(candidate / "source_evidence.json"))
+        require(all(observations[key] == delta["domain_metadata"][key]
+                    for key in DOMAIN_CONTRACTS[domain]["metadata"]), "FX candidate metadata differs")
+    elif domain == "commodity_positions":
         from agri_research_agent.positions.delivery import observations as positions_observations
         from agri_research_agent.positions.delivery import read_json as positions_json, verify_materialized
         baseline = (positions_json(Path("/allocation") / POSITIONS_STABLE)
@@ -1703,7 +1818,7 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         path = candidate / name
         require(sha256_file(path) == identity["sha256"] and path.stat().st_size == identity["size_bytes"],
                 "worker payload byte identity mismatch")
-        if domain not in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions"}:
+        if domain not in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions", "foreign_fx"}:
             require(_schema_fingerprint(path) == identity["parquet_schema_sha256"],
                     "worker Parquet schema identity mismatch")
             import pyarrow.parquet as pq
@@ -1718,6 +1833,13 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
+    snapshot_cmd = commands.add_parser("snapshot-baseline")
+    snapshot_cmd.add_argument("--policy", type=Path, required=True)
+    failed_cmd = commands.add_parser("record-check-failure")
+    failed_cmd.add_argument("--policy", type=Path, required=True)
+    failed_cmd.add_argument("--run-id", required=True)
+    failed_cmd.add_argument("--expected-stable-sha256", required=True)
+    failed_cmd.add_argument("--error-type", required=True)
     stage_cmd = commands.add_parser("stage-upload")
     stage_cmd.add_argument("--policy", type=Path, required=True)
     stage_cmd.add_argument("--upload", type=Path, required=True)
@@ -1748,7 +1870,11 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        if args.command == "stage-upload":
+        if args.command == "snapshot-baseline":
+            result = snapshot_fx_baseline(args.policy)
+        elif args.command == "record-check-failure":
+            result = record_fx_failure(args.policy, args.run_id, args.expected_stable_sha256, args.error_type)
+        elif args.command == "stage-upload":
             result = stage_upload(args.policy, args.upload, args.manifest_sha256)
         elif args.command == "receive":
             result = receive(args.policy, args.incoming, args.manifest_sha256)
