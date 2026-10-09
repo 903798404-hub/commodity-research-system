@@ -590,6 +590,51 @@ def _production_readonly_binding(binding: Mapping) -> tuple[dict, dict]:
             "device": state.st_dev, "inode": state.st_ino, "read_only": True}, production
 
 
+def _readonly_snapshot(source: Path, target: str) -> dict:
+    """Observe all bytes and inodes of an immutable, root-owned candidate tree."""
+    records, seen, total, files_count = [], set(), 0, 0
+    if not source.is_dir() or source.is_symlink() or source.resolve(strict=True) != source:
+        raise HostAuthorizationError("candidate readonly snapshot source is unsafe")
+    for directory, names, files in os.walk(source, topdown=True, followlinks=False):
+        for path in [Path(directory), *[Path(directory) / name for name in sorted([*names, *files])]]:
+            relative = path.relative_to(source).as_posix()
+            if relative in seen:
+                continue  # A child directory is observed again by os.walk.
+            state = path.lstat()
+            if (state.st_uid != 0 or state.st_mode & 0o222 or path.is_symlink()
+                    or path.resolve(strict=True) != path
+                    or not (stat.S_ISDIR(state.st_mode) or stat.S_ISREG(state.st_mode))):
+                raise HostAuthorizationError("candidate readonly snapshot is writable or aliased")
+            item = {'path': relative, 'device': state.st_dev, 'inode': state.st_ino,
+                    'mode': stat.S_IMODE(state.st_mode), 'kind': 'directory' if path.is_dir() else 'file'}
+            if item['kind'] == 'file':
+                if state.st_nlink != 1 or state.st_size > 1024 * 1024 * 1024:
+                    raise HostAuthorizationError("candidate readonly snapshot file is linked or oversized")
+                files_count += 1; total += state.st_size
+                if files_count > 20000 or total > 8 * 1024 * 1024 * 1024:
+                    raise HostAuthorizationError("candidate readonly snapshot exceeds size limit")
+                digest, size = hashlib.sha256(), 0
+                with path.open('rb') as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                        size += len(chunk); digest.update(chunk)
+                        if size > state.st_size:
+                            raise HostAuthorizationError("candidate readonly snapshot changed while read")
+                after = path.lstat()
+                if (size != state.st_size or (after.st_dev, after.st_ino, after.st_size, after.st_mode,
+                        after.st_uid, after.st_nlink) != (state.st_dev, state.st_ino, state.st_size,
+                        state.st_mode, state.st_uid, state.st_nlink)):
+                    raise HostAuthorizationError("candidate readonly snapshot changed while read")
+                item.update(size_bytes=size, sha256=digest.hexdigest())
+            records.append(item)
+            seen.add(relative)
+            if len(records) > 40000:
+                raise HostAuthorizationError("candidate readonly snapshot exceeds entry limit")
+    if not records or not files_count:
+        raise HostAuthorizationError("candidate readonly snapshot is empty")
+    return {'source': str(source), 'target': target, 'tree_sha256': _digest(sorted(records, key=lambda x: x['path'])),
+            'file_count': files_count, 'total_bytes': total}
+
+
 def _candidate_descriptor(policy: Mapping, *, consume: bool, check_expiry: bool = True) -> dict:
     binding = policy.get("candidate_scope")
     if policy.get("schema_version") not in _CANDIDATE_POLICIES or policy.get("role") != "candidate_validation" or not isinstance(binding, dict):
@@ -600,8 +645,11 @@ def _candidate_descriptor(policy: Mapping, *, consume: bool, check_expiry: bool 
         raise HostAuthorizationError("candidate scope descriptor differs from policy")
     descriptor = _json(raw)
     expected = {"schema_version", "scope_id", "created_at", "expires_at", "root", "binds"}
-    if (set(descriptor) not in (expected, expected | {"production_readonly"})
-            or descriptor.get("schema_version") != "candidate-scope/1" or descriptor.get("scope_id") != binding["scope_id"]):
+    version = descriptor.get("schema_version")
+    allowed = (expected, expected | {"production_readonly"}) if version == 'candidate-scope/1' else (
+        expected | {'readonly_snapshots'}, expected | {'production_readonly', 'readonly_snapshots'})
+    if (set(descriptor) not in allowed or version not in {'candidate-scope/1', 'candidate-scope/2'}
+            or descriptor.get("scope_id") != binding["scope_id"]):
         raise HostAuthorizationError("candidate scope descriptor schema is invalid")
     created, expires = _rfc3339(descriptor["created_at"], "candidate scope creation time"), _rfc3339(descriptor["expires_at"], "candidate scope expiry")
     now = datetime.now(timezone.utc)
@@ -659,6 +707,25 @@ def _candidate_descriptor(policy: Mapping, *, consume: bool, check_expiry: bool 
     expected_mounts = [m for m in policy["mounts"] if m["target"] != policy["grant_container_directory"]]
     if sorted(actual, key=lambda item: item["target"]) != sorted(expected_mounts, key=lambda item: item["target"]):
         raise HostAuthorizationError("candidate scope descriptor differs from mount policy")
+    if version == 'candidate-scope/2':
+        snapshots = descriptor['readonly_snapshots']
+        if (not isinstance(snapshots, list) or not snapshots
+                or any(not isinstance(item, dict) or set(item) != {'source', 'target', 'tree_sha256', 'file_count', 'total_bytes'} for item in snapshots)
+                or len({item['target'] for item in snapshots}) != len(snapshots)):
+            raise HostAuthorizationError("candidate readonly snapshot descriptor is invalid")
+        for item in snapshots:
+            if (type(item['source']) is not str or type(item['target']) is not str
+                    or type(item['tree_sha256']) is not str or not _HEX64.fullmatch(item['tree_sha256'])
+                    or type(item['file_count']) is not int or not 0 < item['file_count'] <= 20000
+                    or type(item['total_bytes']) is not int or not 0 <= item['total_bytes'] <= 8 * 1024 * 1024 * 1024):
+                raise HostAuthorizationError("candidate readonly snapshot descriptor is invalid")
+            bind = next((b for b in binds if b['source'] == item['source'] and b['target'] == item['target']), None)
+            if (bind is None or bind['read_only'] is not True or item['source'] == str(root)
+                    or not _within(item['source'], str(root))
+                    or any(not b['read_only'] and (_within(b['source'], item['source'])
+                           or _within(item['source'], b['source'])) for b in binds)
+                    or _readonly_snapshot(Path(item['source']), item['target']) != item):
+                raise HostAuthorizationError("candidate readonly snapshot identity changed")
     if consume:
         receipt = descriptor_path.with_name(descriptor_path.name + ".consumed")
         try:
@@ -774,6 +841,55 @@ def create_candidate_scope(bindings: Sequence[Mapping], *, ttl_seconds: int = 36
         import shutil
         shutil.rmtree(root, ignore_errors=True)
         raise
+
+
+def seal_candidate_readonly_snapshots(scope: Mapping, targets: Sequence[str]) -> dict:
+    """Seal only fresh scope-owned readonly directories before issuing a grant.
+
+    This does not approve production storage or grant production execution.
+    The returned descriptor binds complete bytes, modes and inodes, rechecked
+    by mount preflight and the fresh candidate issuer. Original CI fixture
+    rules continue to apply to every unsealed candidate input.
+    """
+    _require_linux_root()
+    if (set(scope) != {'candidate_host_root', 'candidate_scope', 'mounts'}
+            or not isinstance(targets, Sequence) or isinstance(targets, (str, bytes))
+            or not targets or any(type(t) is not str for t in targets) or len(set(targets)) != len(targets)):
+        raise HostAuthorizationError("candidate readonly snapshot request is invalid")
+    if (type(scope['candidate_host_root']) is not str or not isinstance(scope['mounts'], list)
+            or any(not isinstance(m, dict) or set(m) != {'source', 'target', 'read_only'}
+                   or type(m['source']) is not str or type(m['target']) is not str
+                   or type(m['read_only']) is not bool for m in scope['mounts'])):
+        raise HostAuthorizationError("candidate readonly snapshot scope is invalid")
+    if any(not _within(m['source'], scope['candidate_host_root']) for m in scope['mounts']):
+        raise HostAuthorizationError("candidate snapshot requires a fresh wholly isolated scope")
+    policy = {**scope, 'schema_version': 'host-runtime-policy/4', 'role': 'candidate_validation',
+              'grant_container_directory': '/run/market-data-grants'}
+    descriptor = _candidate_descriptor(policy, consume=False)
+    path = Path(scope['candidate_scope']['descriptor_path'])
+    if (descriptor['schema_version'] != 'candidate-scope/1' or descriptor.get('production_readonly')
+            or path.with_name(path.name + '.consumed').exists()):
+        raise HostAuthorizationError("candidate snapshot requires a fresh wholly isolated scope")
+    snapshots = []
+    for target in targets:
+        bind = next((b for b in descriptor['binds'] if b['target'] == target), None)
+        if (bind is None or bind['read_only'] is not True or bind['source'] == scope['candidate_host_root']
+                or not Path(bind['source']).is_dir()
+                or any(not b['read_only'] and (_within(b['source'], bind['source'])
+                       or _within(bind['source'], b['source'])) for b in descriptor['binds'])):
+            raise HostAuthorizationError("candidate snapshot must be a declared readonly child directory")
+        snapshots.append(_readonly_snapshot(Path(bind['source']), target))
+    sealed = {**descriptor, 'schema_version': 'candidate-scope/2', 'readonly_snapshots': snapshots}
+    raw = _canonical(sealed)
+    destination = path.with_name(path.name + '.readonly-snapshots.json')
+    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+    _fsync_directory(destination.parent)
+    result = {**scope, 'candidate_scope': {**scope['candidate_scope'], 'descriptor_path': str(destination),
+              'descriptor_sha256': hashlib.sha256(raw).hexdigest()}}
+    _candidate_descriptor({**policy, 'candidate_scope': result['candidate_scope']}, consume=False)
+    return result
 
 
 def _load_policy(path: str | Path) -> dict:
@@ -1199,13 +1315,16 @@ def _validate_v3_runtime(manifest: Mapping, observed: Mapping, policy: Mapping, 
     # storage is independently approved and must never be compared to fixtures.
     if policy["role"] != "candidate_validation":
         return
+    if not manifest['candidate_runtime_inputs']:
+        return
     roots = {item["role"]: item for item in manifest["runtime_roots"]}
     # Approved production-backed inputs are real readonly data, not CI seed
     # fixtures. All other inputs retain their exact fixture-byte checks.
     production_targets = set()
+    descriptor = _candidate_descriptor(policy, consume=False)
+    snapshot_targets = {item['target'] for item in descriptor.get('readonly_snapshots', [])}
     if any(m['target'] != policy['grant_container_directory'] and not _within(m['source'], policy['candidate_host_root'])
            for m in observed['mounts']):
-        descriptor = _candidate_descriptor(policy, consume=False)
         production_targets = {item['target'] for item in descriptor.get('production_readonly', [])}
     total = 0
     for item in manifest["candidate_runtime_inputs"]:
@@ -1213,7 +1332,7 @@ def _validate_v3_runtime(manifest: Mapping, observed: Mapping, policy: Mapping, 
         mounts = [mount for mount in observed["mounts"] if mount["target"] == target_root]
         if len(mounts) != 1 or mounts[0]["read_only"] is not True:
             raise HostAuthorizationError("candidate seed must have its exact readonly mount")
-        if target_root in production_targets:
+        if target_root in production_targets or target_root in snapshot_targets:
             continue
         mount_source = _protected_path(Path(mounts[0]["source"]), directory=True, temporary=True)
         source = _protected_path(mount_source / item["relative_path"], temporary=True)

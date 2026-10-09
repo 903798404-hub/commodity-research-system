@@ -316,6 +316,9 @@ def test_v3_candidate_seed_requires_host_and_container_bytes_to_match(tmp_path, 
     observed_value = {"config":{"Env":[]}, "mounts":[{"source":str(source_root), "target":"/runtime/candidate/history", "read_only":True}]}
     monkeypatch.setattr(host, "_contract_module", lambda *args: SimpleNamespace(validate_runtime_environment=lambda *args, **kwargs: None))
     monkeypatch.setattr(host, "_protected_path", lambda path, **kwargs:path)
+    # This unit isolates fixture-byte replay. Real scope observation and drift
+    # rejection are exercised by isolation_fixture and snapshot tests below.
+    monkeypatch.setattr(host, "_candidate_descriptor", lambda *args, **kwargs: {'schema_version': 'candidate-scope/1'})
     monkeypatch.setattr(host, "copy_container_bytes", lambda *_args: b"fixture")
     expected = v3_policy("candidate_validation"); expected["candidate_host_root"] = str(source_root)
     host._validate_v3_runtime(runtime, observed_value, expected, CID)
@@ -816,6 +819,9 @@ def isolation_fixture(monkeypatch):
             n=nodes[str(self)];return SimpleNamespace(st_uid=n.get('uid',0),st_gid=0,st_dev=1,st_ino=n['ino'],st_nlink=n.get('links',1),st_mode=n['mode']|(stat.S_IFREG if self.is_file() else stat.S_IFLNK if self.is_symlink() else stat.S_IFDIR),st_size=len(n['raw']))
         lstat=stat
         def read_bytes(self): return nodes[str(self)]['raw']
+        def open(self, mode):
+            assert mode == 'rb'
+            return io.BytesIO(self.read_bytes())
     root='/tmp/market-data-candidate-scopes/candidate-test';grants='/var/lib/grants'
     add(root);add(grants)
     manifest=json.loads((Path(__file__).resolve().parents[1]/'02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
@@ -935,6 +941,162 @@ def test_approved_production_readonly_does_not_require_fake_fixture_bytes(monkey
     f.nodes[f.prodroot+'/snapshots']['ino']+=1
     with pytest.raises(host.HostAuthorizationError,match='identity changed'):
         host._validate_v3_runtime(runtime,{'config':{'Env':[]},'mounts':f.policy['mounts']},f.policy,CID)
+
+
+def candidate_snapshot_fixture(monkeypatch):
+    f = isolation_fixture(monkeypatch)
+    target = '/runtime/01_data'
+    source = next(b['source'] for b in f.descriptor['binds'] if b['target'] == target)
+    f.nodes[source]['mode'] = 0o555
+    f.nodes[source + '/real-market-data.json'] = dict(kind='file', mode=0o444, ino=10001, raw=b'{"actual_data":true}')
+    snapshot = host._readonly_snapshot(f.P(source), target)
+    f.descriptor.update(schema_version='candidate-scope/2', readonly_snapshots=[snapshot]); f.seal()
+    return f, source, target
+
+
+def test_sealed_candidate_data_uses_all_observed_bytes_instead_of_ci_fixtures(monkeypatch):
+    f, source, target = candidate_snapshot_fixture(monkeypatch)
+    host.validate_candidate_mounts(f.manifest, f.policy['mounts'], f.policy, f.P(f.grants))
+    runtime = copy.deepcopy(f.manifest)
+    runtime['candidate_runtime_inputs'] = [dict(role='data', relative_path='absent-ci-seed.json', sha256='0'*64, source_path='08_tests/fixture.json')]
+    monkeypatch.setattr(host, '_contract_module', lambda *a: SimpleNamespace(validate_runtime_environment=lambda *a, **k: None))
+    monkeypatch.setattr(host, 'copy_container_bytes', lambda *a: pytest.fail('sealed bytes are bound through exact observed mount identity'))
+    host._validate_v3_runtime(runtime, {'config': {'Env': []}, 'mounts': f.policy['mounts']}, f.policy, CID)
+    f.nodes[source + '/real-market-data.json']['raw'] = b'{"actual_data":false}'
+    with pytest.raises(host.HostAuthorizationError, match='snapshot identity changed'):
+        host._validate_v3_runtime(runtime, {'config': {'Env': []}, 'mounts': f.policy['mounts']}, f.policy, CID)
+
+
+@pytest.mark.parametrize('fault', ['revised', 'deleted', 'added', 'inode', 'file-inode', 'writable-file',
+    'writable-directory', 'nonroot-file', 'nonroot-directory', 'symlink', 'hardlink', 'target', 'unknown-source',
+    'rw-mount', 'duplicate', 'bool-count', 'false-digest', 'missing-records', 'legacy-version', 'nested-mount'])
+def test_sealed_candidate_snapshot_rejects_identity_or_byte_drift(monkeypatch, fault):
+    f, source, target = candidate_snapshot_fixture(monkeypatch)
+    file = source + '/real-market-data.json'
+    snapshot = f.descriptor['readonly_snapshots'][0]
+    if fault == 'revised': f.nodes[file]['raw'] += b'changed'
+    elif fault == 'deleted': del f.nodes[file]
+    elif fault == 'added': f.nodes[source + '/extra'] = dict(kind='file', mode=0o444, ino=10002, raw=b'new')
+    elif fault == 'inode': f.nodes[source]['ino'] += 1
+    elif fault == 'file-inode': f.nodes[file]['ino'] += 1
+    elif fault == 'writable-file': f.nodes[file]['mode'] = 0o644
+    elif fault == 'writable-directory': f.nodes[source]['mode'] = 0o755
+    elif fault == 'nonroot-file': f.nodes[file]['uid'] = 65532
+    elif fault == 'nonroot-directory': f.nodes[source]['uid'] = 65532
+    elif fault == 'symlink': f.nodes[file].update(kind='symlink', resolved=f.prodroot + '/snapshots')
+    elif fault == 'hardlink': f.nodes[file]['links'] = 2
+    elif fault == 'target': snapshot['target'] = '/runtime/import-profit/operational/cnf'
+    elif fault == 'unknown-source': snapshot['source'] = f.prodroot + '/snapshots'
+    elif fault == 'rw-mount':
+        next(b for b in f.descriptor['binds'] if b['target'] == target)['read_only'] = False
+        next(m for m in f.policy['mounts'] if m['target'] == target)['read_only'] = False
+    elif fault == 'duplicate': f.descriptor['readonly_snapshots'].append(snapshot.copy())
+    elif fault == 'bool-count': snapshot['file_count'] = True
+    elif fault == 'false-digest': snapshot['tree_sha256'] = '0' * 64
+    elif fault == 'missing-records': f.descriptor['readonly_snapshots'] = []
+    elif fault == 'legacy-version': f.descriptor['schema_version'] = 'candidate-scope/1'
+    elif fault == 'nested-mount': monkeypatch.setattr(host, '_host_mount_points', lambda: (source,))
+    f.seal()
+    with pytest.raises((host.HostAuthorizationError, FileNotFoundError)):
+        host.validate_candidate_mounts(f.manifest, f.policy['mounts'], f.policy, f.P(f.grants))
+
+
+def test_unsealed_candidate_roles_still_require_exact_fixture_bytes(monkeypatch):
+    f, source, target = candidate_snapshot_fixture(monkeypatch)
+    other = next(b['source'] for b in f.descriptor['binds'] if b['target'] == '/runtime/import-profit/snapshots')
+    f.nodes[other + '/fixture.json'] = dict(kind='file', mode=0o444, ino=10002, raw=b'real but not sealed')
+    runtime = copy.deepcopy(f.manifest)
+    runtime['candidate_runtime_inputs'] = [dict(role='snapshots', relative_path='fixture.json', sha256='0'*64, source_path='08_tests/fixture.json')]
+    monkeypatch.setattr(host, '_contract_module', lambda *a: SimpleNamespace(validate_runtime_environment=lambda *a, **k: None))
+    with pytest.raises(host.HostAuthorizationError, match='readonly seed identity differs'):
+        host._validate_v3_runtime(runtime, {'config': {'Env': []}, 'mounts': f.policy['mounts']}, f.policy, CID)
+
+
+def test_candidate_snapshot_cannot_change_production_fixture_rules(monkeypatch):
+    f, source, target = candidate_snapshot_fixture(monkeypatch)
+    monkeypatch.setattr(host, '_candidate_descriptor', lambda *a, **k: pytest.fail('production never accepts candidate descriptor'))
+    monkeypatch.setattr(host, '_contract_module', lambda *a: SimpleNamespace(validate_runtime_environment=lambda *a, **k: None))
+    host._validate_v3_runtime(f.manifest, {'config': {'Env': []}, 'mounts': f.production['mounts']}, f.production, CID)
+
+
+def test_fresh_grant_rejects_snapshot_drift_before_observation_or_signing(monkeypatch):
+    f, source, target = candidate_snapshot_fixture(monkeypatch)
+    f.nodes[source + '/real-market-data.json']['raw'] = b'changed after sealing'
+    monkeypatch.setattr(host, 'require_protected_authority_source', lambda: None)
+    monkeypatch.setattr(host, '_load_policy', lambda _: f.policy)
+    monkeypatch.setattr(host, 'require_protected_key_and_grant_dirs', lambda *a: None)
+    monkeypatch.setattr(host, 'observe_and_validate', lambda *a, **k: pytest.fail('must fail before Docker observation/signing'))
+    with pytest.raises(host.HostAuthorizationError, match='snapshot identity changed'):
+        host.issue_execution_grant(CID, expected_policy_path='/etc/policy', key_path='/etc/key',
+            grant_path=f.grants + '/grant.json', grant_dir=f.grants, role='candidate_validation')
+    assert f.grants + '/grant.json' not in f.nodes
+    assert f.policy['candidate_scope']['descriptor_path'] + '.consumed' not in f.nodes
+
+
+def candidate_snapshot_sealer_fixture(monkeypatch):
+    f, source, target = candidate_snapshot_fixture(monkeypatch)
+    del f.descriptor['readonly_snapshots']; f.descriptor['schema_version'] = 'candidate-scope/1'; f.seal()
+    scope = {'candidate_host_root': f.root, 'candidate_scope': f.policy['candidate_scope'].copy(),
+             'mounts': [m for m in f.policy['mounts'] if m['target'] != '/run/market-data-grants']}
+    output = {}
+    def open_new(path, flags, mode):
+        assert flags & host.os.O_EXCL and mode == 0o600
+        if str(path) in f.nodes: raise FileExistsError(str(path))
+        output['path'] = str(path)
+        return 12345
+    class Sink(io.BytesIO):
+        def fileno(self): return 12345
+        def close(self):
+            f.nodes[output['path']] = dict(kind='file', mode=0o600, ino=10099, raw=self.getvalue())
+            super().close()
+    monkeypatch.setattr(host.os, 'open', open_new)
+    monkeypatch.setattr(host.os, 'fdopen', lambda fd, mode: Sink())
+    monkeypatch.setattr(host.os, 'fsync', lambda fd: None)
+    monkeypatch.setattr(host, '_fsync_directory', lambda path: None)
+    return f, scope, source, target, output
+
+
+def test_snapshot_sealer_creates_new_protected_descriptor_without_overwriting_original(monkeypatch):
+    f, scope, source, target, output = candidate_snapshot_sealer_fixture(monkeypatch)
+    original = f.nodes[scope['candidate_scope']['descriptor_path']]['raw']
+    sealed = host.seal_candidate_readonly_snapshots(scope, [target])
+    assert sealed['candidate_scope'] != scope['candidate_scope']
+    assert sealed['mounts'] == scope['mounts']
+    assert f.nodes[scope['candidate_scope']['descriptor_path']]['raw'] == original
+    observed = json.loads(f.nodes[output['path']]['raw'])
+    assert observed['schema_version'] == 'candidate-scope/2'
+    assert observed['readonly_snapshots'][0]['tree_sha256'] == host._readonly_snapshot(f.P(source), target)['tree_sha256']
+    with pytest.raises(FileExistsError): host.seal_candidate_readonly_snapshots(scope, [target])
+    with pytest.raises(host.HostAuthorizationError, match='fresh wholly isolated'):
+        host.seal_candidate_readonly_snapshots(sealed, [target])
+
+
+@pytest.mark.parametrize('fault', ['consumed', 'production-backed', 'rw', 'unknown', 'duplicate',
+                                 'string', 'empty', 'file', 'writable-data', 'overlap-rw'])
+def test_snapshot_sealer_rejects_unsafe_request_before_descriptor_write(monkeypatch, fault):
+    f, scope, source, target, output = candidate_snapshot_sealer_fixture(monkeypatch)
+    targets = [target]
+    if fault == 'consumed':
+        f.nodes[scope['candidate_scope']['descriptor_path'] + '.consumed'] = dict(kind='file', mode=0o600, ino=10098, raw=b'used')
+    elif fault == 'production-backed':
+        add_production_readonly(f)
+        scope['candidate_scope'] = f.policy['candidate_scope'].copy()
+        scope['mounts'] = [m for m in f.policy['mounts'] if m['target'] != '/run/market-data-grants']
+    elif fault == 'rw': targets = ['/runtime/capture-snapshots']
+    elif fault == 'unknown': targets = ['/unknown']
+    elif fault == 'duplicate': targets = [target, target]
+    elif fault == 'string': targets = target
+    elif fault == 'empty': targets = []
+    elif fault == 'file': f.nodes[source].update(kind='file', mode=0o444)
+    elif fault == 'writable-data': f.nodes[source + '/real-market-data.json']['mode'] = 0o644
+    elif fault == 'overlap-rw':
+        other = next(b for b in f.descriptor['binds'] if not b['read_only'])
+        f.nodes[source + '/rw'] = dict(kind='dir', mode=0o555, ino=10100, raw=b'')
+        old = other['source']; other.update(source=source + '/rw', inode=10100)
+        next(m for m in scope['mounts'] if m['source'] == old)['source'] = source + '/rw'
+        f.seal(); scope['candidate_scope'] = f.policy['candidate_scope'].copy()
+    with pytest.raises(host.HostAuthorizationError): host.seal_candidate_readonly_snapshots(scope, targets)
+    assert not output
 
 
 @pytest.mark.parametrize('relation',['same','ancestor','child','disjoint','readonly','own'])
