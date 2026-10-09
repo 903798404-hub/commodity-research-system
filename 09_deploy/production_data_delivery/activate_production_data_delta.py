@@ -1442,6 +1442,9 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             delta["domain"], delta, identities, published_at,
             initialized or all(value is None for value in existing_payloads.values()),
             report["semantic"]["observations"])
+        if delta["domain"] == "foreign_fx":
+            # The page reads status beside quotes: switch all three as one directory.
+            _atomic_json(stage / Path(contract["status_path"]).name, new_status)
         staged_files = _file_set(stage)
         swapped = False
         old_status = status_path.read_bytes() if status_path.exists() else None
@@ -1464,7 +1467,8 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             else:
                 _renameat2(stage, formal, 1)  # RENAME_NOREPLACE
             swapped = True
-            _atomic_json(status_path, new_status)
+            if delta["domain"] != "foreign_fx":
+                _atomic_json(status_path, new_status)
             require(_file_set(formal) == staged_files,
                     "formal domain differs after publication exchange")
             for name, target in contract["payloads"].items():

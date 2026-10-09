@@ -214,3 +214,71 @@ def test_no_change_publication_keeps_quotes_and_evidence_and_receipt_tracks_new_
     assert all((formal / name).read_bytes() == raw for name, raw in previous.items())
     assert json.loads((formal / "status.json").read_bytes())["result"] == "NO_CHANGE"
     assert receipt["formal_files"][module.FX_STATUS] == module._actual_identity(formal / "status.json")
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("fail_after_exchange", [False, True])
+def test_fx_directory_switch_includes_status_and_failed_switch_restores_complete_old_state(monkeypatch, tmp_path, existing, fail_after_exchange):
+    import json
+    module = host()
+    allocation = tmp_path / "allocation"
+    contract = module.DOMAIN_CONTRACTS["foreign_fx"]
+    formal = allocation / contract["domain_dir"]
+    formal.parent.mkdir(parents=True)
+    old = {name: ("old-" + name).encode() for name in ("daily.json", "source_evidence.json", "status.json")}
+    if existing:
+        formal.mkdir()
+        for name, raw in old.items():
+            (formal / name).write_bytes(raw)
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    for name in contract["payloads"]:
+        (candidate / name).write_bytes(("new-" + name).encode())
+    identity = {"commit": "a" * 40, "tree": "b" * 40, "origin": producer.delivery.ORIGIN}
+    metadata = {"record_count": 8, "latest_dates": {code: "2024-01-10" for code in ("BRL", "CAD", "AUD", "MYR", "IDR", "THB", "INR", "CNY")}, "added": 8, "revised": 0}
+    delta = {"schema_version": module.SCHEMA_VERSION, "status": "CANDIDATE", "delta_id": "fx-switch",
+             "generated_at_utc": "2024-01-11T00:00:00Z", "domain": "foreign_fx", "producer": identity,
+             "run": {"run_id": "fx-switch", "git_head": identity["commit"], "business_status": "updated" if existing else "initialized", "published": False},
+             "baseline": {"files": {path: module._actual_identity(allocation / path) for path in contract["baseline"]}},
+             "domain_metadata": metadata, "payloads": {name: module._actual_identity(candidate / name) for name in contract["payloads"]}}
+    (candidate / module.MANIFEST_NAME).write_text(json.dumps(delta), encoding="utf-8")
+    report = tmp_path / "report.json"
+    report.write_bytes(b"{}")
+    policy = {"policy_id": "fx-policy", "domain": "foreign_fx", "allocation_root": str(allocation), "approved_producer": identity}
+    monkeypatch.setattr(module, "_load_policy", lambda _: (policy, "c" * 64))
+    monkeypatch.setattr(module, "_protected", lambda path, **_: Path(path))
+    monkeypatch.setattr(module, "_protected_tree", lambda path: Path(path))
+    monkeypatch.setattr(module, "_under", lambda path, parent: Path(path))
+    monkeypatch.setattr(module, "_derived", lambda root, policy, delta_id, suffix="": candidate if root == module.CANDIDATE_ROOT else tmp_path / ("backup" if root == module.BACKUP_ROOT else "receipt" + suffix))
+    monkeypatch.setattr(module, "_candidate_files", lambda *_: {})
+    monkeypatch.setattr(module, "_load_pass_report", lambda *_: {"candidate_files": {}, "semantic": {"observations": {**metadata, "business_changed": True}}})
+    monkeypatch.setattr(module, "_check_baseline", lambda *_: None)
+    monkeypatch.setattr(module, "_policy_unchanged", lambda *_: None)
+    monkeypatch.setattr(module, "_lock", lambda _: nullcontext())
+    git_checks = []
+    def git_identity(_):
+        git_checks.append(True)
+        return {} if fail_after_exchange and len(git_checks) == 2 else identity
+    monkeypatch.setattr(module, "_git_identity", git_identity)
+    def exchange(left, right, flag):
+        if flag == 1:
+            left.rename(right)
+        else:
+            temporary = left.with_name(left.name + ".swap")
+            left.rename(temporary); right.rename(left); temporary.rename(right)
+    monkeypatch.setattr(module, "_renameat2", exchange)
+    monkeypatch.setattr(module.os, "chown", lambda *_: None, raising=False)
+    if fail_after_exchange:
+        with pytest.raises(module.DeltaError, match="source clone changed during publication"):
+            module.publish("policy", "fx-switch", report, module.sha256_file(report))
+        if existing:
+            assert all((formal / name).read_bytes() == raw for name, raw in old.items())
+        else:
+            assert not formal.exists()
+        assert not (tmp_path / "receipt.publication.json").exists()
+    else:
+        receipt = module.publish("policy", "fx-switch", report, module.sha256_file(report))
+        assert receipt["status"] == "PUBLISHED"
+        assert set(module._file_set(formal)) == set(old)
+        assert (formal / "daily.json").read_bytes() == b"new-daily.json"
+        assert load_update_status(formal / "daily.json")["result"] == "UPDATED"
