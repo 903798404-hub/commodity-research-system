@@ -98,6 +98,10 @@ def observation(payload: dict) -> str:
 def render_canola_exports_page() -> None:
     st.html("""<style>
       .st-key-canola-export-title h1 {font-size:32px; letter-spacing:0;}
+      @media(max-width:1000px) {
+        .st-key-canola-export-charts [data-testid="stHorizontalBlock"] {flex-direction:column;}
+        .st-key-canola-export-charts [data-testid="stColumn"] {width:100% !important; flex:1 1 100% !important;}
+      }
       @media (max-width:640px) {
         .st-key-canola-export-kpis [data-testid="stHorizontalBlock"] {
           display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px;
@@ -147,10 +151,14 @@ def render_canola_exports_page() -> None:
     else:
         if any(p.get("date_quality") for track in payload["tracks"].values() for p in track):
             st.caption("部分历史记录的官方源日期待复核，图中留空；原值保留在数据与来源中。")
-        chart_tabs = st.tabs([title for _, title in CHARTS])
-        for chart_tab, (metric, _), figure in zip(chart_tabs, CHARTS, build_figures(payload)):
-            with chart_tab:
-                st.plotly_chart(figure, width=1050, key=f"canola-export-{metric}")
+        figures = build_figures(payload)
+        with st.container(key="canola-export-charts"):
+            for offset in range(0, len(CHARTS), 2):
+                for column, (metric, title), figure in zip(st.columns(2), CHARTS[offset:offset+2], figures[offset:offset+2]):
+                    with column:
+                        st.markdown(f"**{title}**")
+                        figure.update_xaxes(dtick="M2", tickangle=0)
+                        st.plotly_chart(figure, width="stretch", key=f"canola-export-{metric}")
     with st.expander("数据与来源"):
         st.caption("单位：万公吨。同作物周比较；四周窗口不跨作物年。缺周、缺值留空。累计采用官方修订值。")
         st.caption(f"数据生成时间（UTC）：{default['generated_at']} · 已记录数值修订：{default['revision_count']}")
