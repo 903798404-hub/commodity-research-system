@@ -588,6 +588,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/data_sources/nutstore_basis.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/data_sources/tankan/__init__.py",
       "role": "runtime_configuration"
     },
@@ -909,6 +913,10 @@
     },
     {
       "path": "03_src/agri_research_agent/pipelines/lutou_domestic_basis.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/nutstore_domestic_basis.py",
       "role": "runtime_configuration"
     },
     {
