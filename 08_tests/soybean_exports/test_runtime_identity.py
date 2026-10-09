@@ -61,6 +61,53 @@ def test_production_env_and_release_mismatch_fails_without_git(tmp_path: Path) -
         )
 
 
+def test_v3_spread_runtime_release_resolves_without_git(tmp_path: Path) -> None:
+    release = tmp_path / "RELEASE.json"
+    write_release(
+        release,
+        application="spread-production-runtime-wiring",
+        release_id=f"spread-dashboard-20261007-{GIT_HEAD[:12]}-b01",
+        source="target-runtime-validator/2",
+    )
+    assert resolve_runtime_git_head(
+        project_root=tmp_path,
+        environment={"MARKET_DATA_GIT_HEAD": GIT_HEAD},
+        release_path=release,
+        git_runner=no_git,
+    ) == GIT_HEAD
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"application": "usda-production-runtime-wiring"},
+        {"source": "unapproved-builder"},
+        {"release_id": f"other-service-20261007-{GIT_HEAD[:12]}-b01"},
+        {"release_id": f"spread-dashboard-20261007-{OTHER_GIT_HEAD[:12]}-b01"},
+        {"git_commit": OTHER_GIT_HEAD},
+        {"git_tree": GIT_HEAD},
+    ],
+)
+def test_v3_spread_runtime_rejects_wrong_bindings_without_git(
+    tmp_path: Path, changes: dict[str, str]
+) -> None:
+    release = tmp_path / "RELEASE.json"
+    fields = {
+        "application": "spread-production-runtime-wiring",
+        "release_id": f"spread-dashboard-20261007-{GIT_HEAD[:12]}-b01",
+        "source": "target-runtime-validator/2",
+        **changes,
+    }
+    write_release(release, **fields)
+    with pytest.raises(PipelineError):
+        resolve_runtime_git_head(
+            project_root=tmp_path,
+            environment={"MARKET_DATA_GIT_HEAD": GIT_HEAD},
+            release_path=release,
+            git_runner=no_git,
+        )
+
+
 @pytest.mark.parametrize(
     ("environment", "create_release", "message"),
     [
@@ -183,14 +230,24 @@ def test_missing_production_identities_do_not_fall_back_without_local_checkout(
     ("script", "pipeline_name"),
     [(FGIS_CLI, "run_fgis_pipeline"), (FAS_CLI, "run_fas_pipeline")],
 )
+@pytest.mark.parametrize("runtime_v3", [False, True])
 def test_export_clis_use_shared_runtime_identity_without_git(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     script: Path,
     pipeline_name: str,
+    runtime_v3: bool,
 ) -> None:
     release = tmp_path / "RELEASE.json"
-    write_release(release)
+    if runtime_v3:
+        write_release(
+            release,
+            application="spread-production-runtime-wiring",
+            release_id=f"spread-dashboard-20261007-{GIT_HEAD[:12]}-b01",
+            source="target-runtime-validator/2",
+        )
+    else:
+        write_release(release)
     monkeypatch.setenv("MARKET_DATA_GIT_HEAD", GIT_HEAD)
     monkeypatch.setattr(common, "RUNTIME_RELEASE_PATH", release)
     monkeypatch.setattr(common.subprocess, "run", no_git)

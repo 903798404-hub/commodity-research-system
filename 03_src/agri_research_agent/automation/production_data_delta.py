@@ -639,6 +639,28 @@ def _akshare_end_date_evidence(data: Path, requested: date) -> dict[str, str]:
     require(observed_effective == expected and
             status.get("target_business_date") == expected,
             "AkShare effective business end date differs from formal request")
+    required = status.get("target_required_contract_keys")
+    present = status.get("target_present_contract_keys")
+    require(isinstance(required, list) and bool(required) and
+            len(required) == len(set(required)) and
+            isinstance(present, list) and len(present) == len(set(present)) and
+            set(required) == set(present) and
+            status.get("target_missing_contract_keys") == [] and
+            status.get("target_date_data_completeness") == "COMPLETE" and
+            status.get("required_contracts") == len(required) and
+            status.get("success_contracts") == len(required) and
+            status.get("failure_contracts") == 0,
+            "AkShare target-date contract coverage is incomplete")
+    from agri_research_agent.application.domestic_spreads import (
+        load_domestic_spread_database, load_domestic_spread_status,
+    )
+    page_status = load_domestic_spread_status(
+        load_domestic_spread_database(data / "historical_spread_database.parquet")
+    )
+    require(page_status.status == "success" and
+            page_status.latest_business_date == expected and
+            page_status.required_contracts == len(required),
+            "AkShare formal spread does not satisfy the page target-date contract")
     return {
         "requested_end_date": observed_requested,
         "effective_end_date": observed_effective,

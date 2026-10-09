@@ -23,8 +23,8 @@ if str(SRC) not in sys.path:
 
 from agri_research_agent.data_sources.tankan.domestic_spread import (  # noqa: E402
     contract_code_from_source_column,
-    full_contract_code,
     resolve_contract_season,
+    window_contract_code,
 )
 from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
     PriceSemantic,
@@ -190,16 +190,17 @@ def build_active_candidates(config_file: Path, target_date: dt.date) -> pd.DataF
         for prefix in ("leg1", "leg2"):
             instrument = str(getattr(rule, f"{prefix}_instrument")).strip().upper()
             month = int(getattr(rule, f"{prefix}_month"))
-            symbol = full_contract_code(instrument, season.label, month)
+            symbol = window_contract_code(
+                instrument, season.label, month,
+                window_start_month=int(rule.window_start_month),
+            )
             rows.append(
                 {
                     "instrument": instrument,
                     "delivery_month": month,
                     "season": season.label,
                     "symbol": symbol,
-                    "akshare_display_symbol": akshare_display_symbol(
-                        instrument, month, season.label
-                    ),
+                    "akshare_display_symbol": f"{INSTRUMENT_CN.get(instrument, instrument)}{symbol[len(instrument):]}",
                     "candidate_source": "active_config_window",
                 }
             )

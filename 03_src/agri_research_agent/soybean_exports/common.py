@@ -54,7 +54,8 @@ def _release_git_head(release_path: Path) -> str:
         ) from exc
     if not isinstance(payload, dict) or set(payload) != RUNTIME_RELEASE_FIELDS:
         raise PipelineError("production runtime /app/RELEASE.json schema is invalid")
-    if payload.get("application") != "spread-dashboard":
+    application = payload.get("application")
+    if application not in {"spread-dashboard", "spread-production-runtime-wiring"}:
         raise PipelineError("production runtime /app/RELEASE.json application is invalid")
     for field in ("release_id", "build_time", "source"):
         if not isinstance(payload.get(field), str) or not payload[field]:
@@ -73,6 +74,16 @@ def _release_git_head(release_path: Path) -> str:
         raise PipelineError(
             "production runtime /app/RELEASE.json git_tree must differ from git_commit"
         )
+    if application == "spread-production-runtime-wiring":
+        # The v3 runtime builder records the project as application and the
+        # service in its release ID. Keep both bindings explicit.
+        if payload["source"] != "target-runtime-validator/2" or not re.fullmatch(
+            rf"spread-dashboard-[0-9]{{8}}-{git_commit[:12]}-b[0-9]+",
+            payload["release_id"],
+        ):
+            raise PipelineError(
+                "production runtime /app/RELEASE.json service or build origin is invalid"
+            )
     return git_commit
 
 

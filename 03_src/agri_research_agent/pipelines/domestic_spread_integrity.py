@@ -12,9 +12,9 @@ import pandas as pd
 
 from agri_research_agent.data_sources.tankan.domestic_spread import (
     contract_code_from_source_column,
-    full_contract_code,
     normalize_full_contract_code,
     resolve_contract_season,
+    window_contract_code,
 )
 
 
@@ -210,15 +210,17 @@ def derive_affected_spread_keys(
             if season is None:
                 continue
             dependencies = {
-                full_contract_code(
+                window_contract_code(
                     str(row["leg1_instrument"]),
                     season.label,
                     int(row["leg1_month"]),
+                    window_start_month=int(row["window_start_month"]),
                 ),
-                full_contract_code(
+                window_contract_code(
                     str(row["leg2_instrument"]),
                     season.label,
                     int(row["leg2_month"]),
+                    window_start_month=int(row["window_start_month"]),
                 ),
             }
             if contract in dependencies:

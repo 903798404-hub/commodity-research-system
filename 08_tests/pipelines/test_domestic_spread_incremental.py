@@ -65,6 +65,31 @@ def _price(symbol: str, business_date: str, value: float) -> dict[str, object]:
     }
 
 
+def test_october_may_september_calculation_rejects_expired_year():
+    calculator = _load_calculator()
+    config = pd.read_excel(CONFIG, sheet_name="spread_config")
+    rule = config.loc[config["spread_name"].eq("M 5-9")].iloc[0]
+    correct, error = calculator.calculate_one_spread(
+        rule, pd.DataFrame([_price("M2705", "2026-10-08", 3200),
+                            _price("M2709", "2026-10-08", 3100)]), "fixture",
+    )
+    assert error is None
+    assert correct.iloc[0]["status"] == "success"
+    assert correct.iloc[0]["spread_value"] == 100
+    assert correct.iloc[0]["leg2_contract"] == "M2709"
+    wrong, error = calculator.calculate_one_spread(
+        rule, pd.DataFrame([_price("M2705", "2026-10-08", 3200),
+                            _price("M2609", "2026-10-08", 3100)]), "fixture",
+    )
+    assert error is None
+    assert wrong.iloc[0]["status"] == "wrong_contract"
+    assert pd.isna(wrong.iloc[0]["spread_value"])
+    keys = derive_affected_spread_keys(config, [("M2709", "2026-10-08")])
+    assert ("2026-10-08", "M 5-9", "2026/2027") in keys
+    expired = derive_affected_spread_keys(config, [("M2609", "2026-10-08")])
+    assert ("2026-10-08", "M 5-9", "2026/2027") not in expired
+
+
 def _calculate(prices: pd.DataFrame) -> pd.DataFrame:
     calculator = _load_calculator()
     config = pd.read_excel(CONFIG, sheet_name="spread_config")

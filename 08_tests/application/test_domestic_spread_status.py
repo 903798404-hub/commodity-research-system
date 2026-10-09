@@ -112,7 +112,7 @@ def test_legacy_akshare_status_cannot_override_formal_page_status(
     assert "最新交易日：2026-08-24" in messages[0]
     assert "更新状态：更新成功" in messages[0]
     assert "合约：15/15 成功，0 项缺失" in messages[0]
-    assert "Goal E / Tankan Domestic Spread" in messages[0]
+    assert "国内价差 / 正式日收盘价" in messages[0]
     assert "2026-08-14" not in messages[0]
     assert "开始：" not in messages[0]
     assert "结束：" not in messages[0]
@@ -163,7 +163,7 @@ def test_page_renders_september_partial_status_without_fixed_fifteen(
         (
             "warning",
             "更新状态：部分更新 | 最新交易日：2026-09-21 | "
-            "合约：2/10 成功，8 项缺失 | 来源：Goal E / Tankan Domestic Spread",
+            "合约：2/10 成功，8 项缺失 | 来源：国内价差 / 正式日收盘价",
         )
     ]
 
@@ -285,12 +285,12 @@ def test_cross_year_window_keeps_the_same_season_then_rolls_forward() -> None:
     assert january_2027 == {
         f"{instrument}{year_month}"
         for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
-        for year_month in ("2609", "2701", "2705")
+        for year_month in ("2709", "2701", "2705")
     }
     assert january_2028 == {
         f"{instrument}{year_month}"
         for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
-        for year_month in ("2709", "2801", "2805")
+        for year_month in ("2809", "2801", "2805")
     }
 
 

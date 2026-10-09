@@ -364,8 +364,11 @@ modules:
       - 02_configs/lutou_domestic_basis.yaml
       - 03_src/agri_research_agent/market_data/basis.py
       - 03_src/agri_research_agent/data_sources/lutou/domestic_basis.py
+      - 03_src/agri_research_agent/data_sources/nutstore_basis.py
       - 03_src/agri_research_agent/data_sources/lutou/live.py
       - 03_src/agri_research_agent/pipelines/lutou_domestic_basis.py
+      - 03_src/agri_research_agent/pipelines/nutstore_domestic_basis.py
+      - 04_scripts/update_basis_from_nutstore.py
       - 03_src/agri_research_agent/market_data/public_basis_current.py
       - 03_src/agri_research_agent/pipelines/public_data_refresh.py
       - 03_src/agri_research_agent/pipelines/public_data_providers.py
@@ -377,6 +380,8 @@ modules:
     direct_tests:
       - 08_tests/market_data/test_basis_contract.py
       - 08_tests/data_sources/lutou/test_domestic_basis.py
+      - 08_tests/data_sources/test_nutstore_basis.py
+      - 08_tests/pipelines/test_nutstore_domestic_basis.py
       - 08_tests/pipelines/test_lutou_domestic_basis.py
       - 08_tests/pipelines/test_domestic_basis_async_update.py
       - 08_tests/pipelines/test_lutou_domestic_basis_formal_current.py

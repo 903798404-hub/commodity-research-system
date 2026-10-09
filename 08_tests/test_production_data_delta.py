@@ -181,6 +181,7 @@ def test_akshare_provider_flags_forward_exact_business_end_date(tmp_path: Path):
 
 
 def test_akshare_date_evidence_rejects_requested_effective_mismatch(tmp_path: Path):
+    import pandas as pd
     module = load_module()
     data = tmp_path / "01_data"
     data.mkdir()
@@ -190,7 +191,20 @@ def test_akshare_date_evidence_rejects_requested_effective_mismatch(tmp_path: Pa
         "requested_end_date": "2026-09-21",
         "effective_end_date": "2026-09-21",
         "target_business_date": "2026-09-21",
+        "target_date_data_completeness": "COMPLETE",
+        "target_required_contract_keys": [f"{i}27{m:02d}" for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5)],
+        "target_present_contract_keys": [f"{i}27{m:02d}" for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5)],
+        "target_missing_contract_keys": [],
+        "required_contracts": 10, "success_contracts": 10, "failure_contracts": 0,
     }
+    pd.DataFrame([
+        {"date": pd.Timestamp("2026-09-21"), "season": "2026/2027", "calendar_offset": 112,
+         "spread_name": f"{i}-{m}", "status": "success", "spread_value": 0,
+         "leg1_instrument": i, "leg2_instrument": i, "leg1_month": m, "leg2_month": m,
+         "leg1_contract": f"{i}27{m:02d}", "leg2_contract": f"{i}27{m:02d}",
+         "leg1_price": 3000, "leg2_price": 3000}
+        for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5)
+    ]).to_parquet(data / "historical_spread_database.parquet", index=False)
     path = data / "update_status.json"
     path.write_bytes(module.canonical_json_bytes(status))
     assert module._akshare_end_date_evidence(data, date(2026, 9, 21)) == {
@@ -201,6 +215,20 @@ def test_akshare_date_evidence_rejects_requested_effective_mismatch(tmp_path: Pa
     status["effective_end_date"] = "2026-09-22"
     path.write_bytes(module.canonical_json_bytes(status))
     with pytest.raises(module.ProductionDataError, match="effective"):
+        module._akshare_end_date_evidence(data, date(2026, 9, 21))
+    status["effective_end_date"] = "2026-09-21"
+    status["target_present_contract_keys"] = status["target_present_contract_keys"][:-1]
+    path.write_bytes(module.canonical_json_bytes(status))
+    with pytest.raises(module.ProductionDataError, match="coverage"):
+        module._akshare_end_date_evidence(data, date(2026, 9, 21))
+    status["target_present_contract_keys"] = list(status["target_required_contract_keys"])
+    path.write_bytes(module.canonical_json_bytes(status))
+    artifact = data / "historical_spread_database.parquet"
+    frame = pd.read_parquet(artifact)
+    frame["leg1_contract"] = None
+    frame["leg2_contract"] = None
+    frame.to_parquet(artifact, index=False)
+    with pytest.raises(module.ProductionDataError, match="page"):
         module._akshare_end_date_evidence(data, date(2026, 9, 21))
 
 

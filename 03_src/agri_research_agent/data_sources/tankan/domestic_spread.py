@@ -102,6 +102,24 @@ def full_contract_code(instrument: str, season: str, month: int) -> str:
     return f"{normalized_instrument}{year % 100:02d}{normalized_month:02d}"
 
 
+def window_contract_code(
+    instrument: str, season: str, month: int, *, window_start_month: int,
+) -> str:
+    """Bind delivery year to the configured observation window.
+
+    October--April observes May and September of the following year; the
+    February--August window observes September then January of the next year.
+    The season label alone cannot distinguish those September contracts.
+    """
+    full_contract_code(instrument, season, month)  # validate the governed identity
+    start_year = int(season.split("/")[0])
+    start_month = int(window_start_month)
+    if not 1 <= start_month <= 12:
+        raise ValueError("Domestic Spread window start month is invalid")
+    year = start_year + int(int(month) < start_month)
+    return f"{str(instrument).strip().upper()}{year % 100:02d}{int(month):02d}"
+
+
 def normalize_full_contract_code(value: object) -> str:
     """Validate and normalize one complete Domestic Spread contract code."""
 

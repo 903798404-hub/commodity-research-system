@@ -20,6 +20,7 @@ from agri_research_agent.data_sources.tankan.domestic_spread import (  # noqa: E
     full_contract_code,
     normalize_full_contract_code,
     resolve_contract_season,
+    window_contract_code,
 )
 from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E402
     select_canonical_historical_prices,
@@ -113,7 +114,9 @@ def prepare_leg(price_long: pd.DataFrame, instrument: str, month: int, prefix: s
     return leg
 
 
-def add_canonical_contract_identities(spread_long: pd.DataFrame) -> pd.DataFrame:
+def add_canonical_contract_identities(
+    spread_long: pd.DataFrame, *, window_start_month: int | None = None,
+) -> pd.DataFrame:
     """Add missing full-contract identities without changing existing business fields.
 
     Explicit producer identities remain authoritative.  Legacy rows that predate
@@ -150,6 +153,10 @@ def add_canonical_contract_identities(spread_long: pd.DataFrame) -> pd.DataFrame
                 completed.append(normalize_full_contract_code(existing))
             else:
                 completed.append(
+                    window_contract_code(
+                        str(instrument), str(season), int(month),
+                        window_start_month=window_start_month,
+                    ) if window_start_month is not None else
                     full_contract_code(str(instrument), str(season), int(month))
                 )
         result[contract_column] = completed
@@ -242,7 +249,23 @@ def calculate_one_spread(config: pd.Series, price_long: pd.DataFrame, updated_at
     merged["leg2_month"] = leg2_month
     merged["updated_at"] = updated_at
 
-    return add_canonical_contract_identities(merged).loc[:, SPREAD_COLUMNS], None
+    # A positive price for the wrong listed year is not a valid spread leg.
+    for prefix in ("leg1", "leg2"):
+        column = f"{prefix}_contract"
+        expected = [
+            window_contract_code(
+                str(config[f"{prefix}_instrument"]), str(season),
+                int(config[f"{prefix}_month"]), window_start_month=window_start_month,
+            )
+            for season in merged["season"]
+        ]
+        mismatch = merged[column].notna() & merged[column].ne(pd.Series(expected, index=merged.index))
+        merged.loc[mismatch, "status"] = "wrong_contract"
+        merged.loc[mismatch, "error"] = "leg contract differs from configured observation window"
+        merged.loc[mismatch, "spread_value"] = pd.NA
+    return add_canonical_contract_identities(
+        merged, window_start_month=window_start_month,
+    ).loc[:, SPREAD_COLUMNS], None
 
 
 def main() -> int:

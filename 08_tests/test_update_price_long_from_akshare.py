@@ -38,6 +38,20 @@ def updater():
     )
 
 
+@pytest.mark.parametrize("business_date,year", [
+    ("2026-10-08", 27), ("2027-01-05", 27), ("2027-10-08", 28),
+])
+def test_october_may_september_window_uses_unexpired_delivery_year(updater, business_date, year):
+    from agri_research_agent.application.domestic_spreads import _active_required_identities
+    target = date.fromisoformat(business_date)
+    candidates = updater.build_active_candidates(CONFIG, target)
+    expected = {f"{i}{year}{m:02d}" for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5, 9)}
+    assert set(candidates["symbol"]) == expected
+    assert _active_required_identities(pd.Timestamp(target), CONFIG) == expected
+    assert all(str(symbol).endswith(str(code)[-4:])
+               for symbol, code in zip(candidates["akshare_display_symbol"], candidates["symbol"]))
+
+
 def _observations(rows: list[tuple[str, str, float]]) -> pd.DataFrame:
     records = []
     for symbol, business_date, price in rows:

@@ -9,15 +9,15 @@ from typing import Any
 import pandas as pd
 
 from agri_research_agent.data_sources.tankan.domestic_spread import (
-    full_contract_code,
     normalize_full_contract_code,
     resolve_contract_season,
+    window_contract_code,
 )
 
 
 TANKAN_DOMESTIC_SPREAD_INSTRUMENTS = ("M", "RM", "Y", "OI", "P")
 TANKAN_DOMESTIC_SPREAD_MONTHS = (1, 5, 9)
-TANKAN_DOMESTIC_SPREAD_SOURCE = "Goal E / Tankan Domestic Spread"
+TANKAN_DOMESTIC_SPREAD_SOURCE = "国内价差 / 正式日收盘价"
 DEFAULT_SPREAD_CONFIG = (
     Path(__file__).resolve().parents[3] / "02_configs" / "historical_spread_config.xlsx"
 )
@@ -146,13 +146,15 @@ def _active_required_identities(
         if season is None:
             continue
         active.add(
-            full_contract_code(
-                str(row.leg1_instrument), season.label, int(row.leg1_month)
+            window_contract_code(
+                str(row.leg1_instrument), season.label, int(row.leg1_month),
+                window_start_month=int(row.window_start_month),
             )
         )
         active.add(
-            full_contract_code(
-                str(row.leg2_instrument), season.label, int(row.leg2_month)
+            window_contract_code(
+                str(row.leg2_instrument), season.label, int(row.leg2_month),
+                window_start_month=int(row.window_start_month),
             )
         )
     return active
