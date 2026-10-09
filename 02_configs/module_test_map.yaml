@@ -30,11 +30,14 @@ modules:
   market_data.foreign_fx:
     code_paths:
       - 03_src/agri_research_agent/market_data/foreign_fx.py
+      - 03_src/agri_research_agent/market_data/foreign_fx_update.py
       - 04_scripts/foreign_fx/build_preview.py
+      - 04_scripts/foreign_fx/update_preview.py
       - 05_apps/foreign_fx_page.py
       - 05_apps/navigation.py
     direct_tests:
       - 08_tests/market_data/test_foreign_fx.py
+      - 08_tests/market_data/test_foreign_fx_update.py
       - 08_tests/test_foreign_fx_page.py
     impact_tests:
       - 08_tests/test_streamlit_dashboard.py

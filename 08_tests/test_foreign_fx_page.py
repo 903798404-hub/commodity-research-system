@@ -76,3 +76,26 @@ def test_corrupt_snapshot_reports_error_instead_of_zero_quotes(monkeypatch,tmp_p
     app.session_state['selected_workspace_page']='外盘汇率'; app.run(timeout=30)
     assert not app.exception
     assert app.error and not app.metric
+
+
+def test_page_reports_failed_check_without_rewriting_stable_data(monkeypatch, tmp_path):
+    from agri_research_agent.market_data.foreign_fx_update import run_update
+    sys.path.insert(0, str(ROOT/'08_tests/market_data'))
+    from test_foreign_fx_update import official_sources, START, END
+    run_update(tmp_path, START, END, fetcher=official_sources())
+    def failed(url):
+        raise TimeoutError('source unavailable')
+    try:
+        run_update(tmp_path, START, END, fetcher=failed)
+    except TimeoutError:
+        pass
+    path = tmp_path/'daily.json'; original = path.read_bytes()
+    monkeypatch.setenv('FOREIGN_FX_SNAPSHOT_FILE', str(path))
+    app = AppTest.from_file(str(ROOT/'05_apps/streamlit_app.py'), default_timeout=30).run()
+    app.session_state['selected_workspace_page'] = '外盘汇率'
+    app.run(timeout=30)
+    assert not app.exception
+    assert any('采集失败' in warning.value for warning in app.warning)
+    assert any('最近检查' in caption.value and '北京时间' in caption.value for caption in app.caption)
+    assert app.metric[1].value == '2024-01-03'
+    assert path.read_bytes() == original

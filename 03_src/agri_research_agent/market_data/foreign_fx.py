@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 import json
+import hashlib
 import math
 from pathlib import Path
 import re
@@ -159,6 +160,27 @@ def load_snapshot(path: Path) -> tuple[dict[str, Any], pd.DataFrame]:
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise FxDataError("日度汇率文件无法读取") from exc
     return payload, validate_snapshot(payload)
+
+
+def load_update_status(snapshot: Path, *, expected_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Read only a status bound to the exact stable bytes currently on the page."""
+    try:
+        status = json.loads(snapshot.with_name("status.json").read_text(encoding="utf-8"))
+        if status["schema_version"] != "foreign-fx-update/1":
+            return None
+        if status["result"] not in {"UPDATED", "NO_CHANGE", "FAILED", "FAILED_AFTER_PUBLISH"}:
+            return None
+        stable_bytes = snapshot.read_bytes()
+        if expected_payload is not None and json.loads(stable_bytes) != expected_payload:
+            return None
+        if status["stable_sha256"] != hashlib.sha256(stable_bytes).hexdigest():
+            return None
+        checked = datetime.fromisoformat(status["checked_at"])
+        if checked.tzinfo is None:
+            return None
+        return status
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        return None
 
 
 def currency_return(current: float, previous: float) -> float:
