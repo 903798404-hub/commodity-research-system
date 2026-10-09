@@ -11,7 +11,7 @@ import streamlit as st
 
 from agri_research_agent.market_data.foreign_fx import (
     BY_CODE, CURRENCIES, BCB_CATALOG_URL, ECB_CATALOG_URL, FxDataError,
-    load_snapshot, overview, strength_comparison, seasonality,
+    load_snapshot, load_update_status, overview, strength_comparison, seasonality,
 )
 from agri_research_agent.shared.chart_style import (
     CURRENT_YEAR_COLOR, CURRENT_LINE_WIDTH, GRID_COLOR, HISTORY_LINE_WIDTH,
@@ -82,8 +82,19 @@ def render_foreign_fx_page(*, project_root: Path = PROJECT_ROOT) -> None:
         st.error(f"日度汇率数据暂不可用：{exc}")
         return
 
-    collected = datetime.fromisoformat(payload['generated_at']).astimezone(timezone.utc)
-    st.caption(f"数据采集时间：{collected:%Y-%m-%d %H:%M} UTC。各币种业务日期单独列示，参考汇率用于日度研究。")
+    beijing = timezone(timedelta(hours=8))
+    collected = datetime.fromisoformat(payload['generated_at']).astimezone(beijing)
+    st.caption(f"当前数据采集时间：{collected:%Y-%m-%d %H:%M} 北京时间。各币种业务日期单独列示，参考汇率用于日度研究。")
+    status = load_update_status(snapshot_path(project_root), expected_payload=payload)
+    if status:
+        checked = datetime.fromisoformat(status['checked_at']).astimezone(beijing)
+        label = {"UPDATED": "已更新", "NO_CHANGE": "来源未新增或修订报价", "FAILED": "更新失败",
+                 "FAILED_AFTER_PUBLISH": "数据已写入，更新状态记录异常"}[status['result']]
+        st.caption(f"最近检查：{checked:%Y-%m-%d %H:%M} 北京时间 · {label}。")
+        if status['result'] == 'FAILED':
+            st.warning("最近一次采集失败，当前展示上次通过校验的数据；请以各币种业务日期判断时效。")
+        elif status['result'] == 'FAILED_AFTER_PUBLISH':
+            st.warning("更新后的状态记录未完整写入，请核查更新日志和业务日期。")
     summary = overview(frame)
     table = summary[["name", "commodities", "latest_date", "rate", "return_1", "return_5", "return_20"]].rename(columns={
         "name": "币种", "commodities": "关联品种", "latest_date": "业务日期", "rate": "本币/美元",
