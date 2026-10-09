@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 PALETTE = ("#356FA3", "#B08A32", "#C77B48", "#737F42", "#AE6D87")
 DASHES = ("solid", "dash", "dot", "dashdot", "longdash")
 SEAT_PALETTE = ("#2563EB", "#E59622", "#7C3AED", "#0D9488", "#DC4F86")
+CHART_WIDTH = 1050
 
 
 def chinese_date(value):
@@ -41,7 +42,8 @@ def trend(rows, title, labels, *, direct_labels=False):
                 missing.append(label)
             else:
                 endings.append((data[-1], label, color))
-    figure.update_layout(title=title, height=440 if direct_labels else 390,
+    height = 340 if direct_labels else 320
+    figure.update_layout(title=title, height=height,
         margin=dict(l=40, r=160 if direct_labels else 25, t=90 if direct_labels else 65, b=40),
         template="plotly_white", font=dict(family="Microsoft YaHei, sans-serif", color="#263238"),
         legend=dict(orientation="h", y=1.14 if direct_labels else 1.12),
@@ -56,7 +58,7 @@ def trend(rows, title, labels, *, direct_labels=False):
         span = upper - lower or 1
         previous_pixel = None
         for row, label, color in sorted(endings, key=lambda item: item[0]["net"]):
-            pixel = (row["net"] - lower) / span * 310
+            pixel = (row["net"] - lower) / span * (height - 130)
             placed = max(pixel, previous_pixel + 22) if previous_pixel is not None else pixel
             figure.add_annotation(x=row["report_date"], y=row["net"],
                 text=f"<b>{label}</b> {row['net']:+,}", showarrow=False,
@@ -77,7 +79,7 @@ def movements(rows, title):
         marker_color=["#BC4749" if r["net_change"] > 0 else "#278568" if r["net_change"] < 0 else "#7A838B" for r in known],
         customdata=[[chinese_date(r["previous_date"]), chinese_date(r["report_date"])] for r in known],
         hovertemplate="%{customdata[1]}<br>净变化 %{y:+,.0f} 手<br>比较日期 %{customdata[0]}<extra></extra>"))
-    figure.update_layout(title=title, height=280, template="plotly_white",
+    figure.update_layout(title=title, height=230, template="plotly_white",
         font=dict(family="Microsoft YaHei, sans-serif", color="#263238"),
         yaxis_title="净持仓变化（手）", margin=dict(l=40, r=25, t=60, b=35),
         annotations=[dict(text="红：向多变化 · 绿：向空变化", x=1, y=1.15,

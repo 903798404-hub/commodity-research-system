@@ -73,7 +73,7 @@ def build_figures(payload: dict) -> list[go.Figure]:
             figure.add_annotation(x=0, y=1.24, xref="paper", yref="paper", showarrow=False,
                                   xanchor="left", text=f"截至 {latest['week_ending']} · 同比 {percent(payload['cumulative_yoy'])}"
                                   f" · 同期排名 {payload['rank']}/{payload['rank_samples']}")
-        figure.update_layout(template="plotly_white", height=390,
+        figure.update_layout(template="plotly_white", height=330,
                              margin={"l": 16, "r": 16, "t": 92, "b": 35},
                              legend={"orientation": "h", "x": 0, "y": 1.14, "font": {"size": 11}},
                              hovermode="x unified", font={"size": 12},
@@ -147,9 +147,10 @@ def render_canola_exports_page() -> None:
     else:
         if any(p.get("date_quality") for track in payload["tracks"].values() for p in track):
             st.caption("部分历史记录的官方源日期待复核，图中留空；原值保留在数据与来源中。")
-        for (metric, title), figure in zip(CHARTS, build_figures(payload)):
-            st.subheader(title)
-            st.plotly_chart(figure, width="stretch", key=f"canola-export-{metric}")
+        chart_tabs = st.tabs([title for _, title in CHARTS])
+        for chart_tab, (metric, _), figure in zip(chart_tabs, CHARTS, build_figures(payload)):
+            with chart_tab:
+                st.plotly_chart(figure, width=1050, key=f"canola-export-{metric}")
     with st.expander("数据与来源"):
         st.caption("单位：万公吨。同作物周比较；四周窗口不跨作物年。缺周、缺值留空。累计采用官方修订值。")
         st.caption(f"数据生成时间（UTC）：{default['generated_at']} · 已记录数值修订：{default['revision_count']}")
