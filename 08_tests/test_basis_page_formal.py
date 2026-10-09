@@ -31,10 +31,8 @@ def _formal_public_current_rows() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-@pytest.mark.parametrize("nutstore", [False, True])
 def test_basis_page_uses_formal_database_and_renders_modules(
     monkeypatch: pytest.MonkeyPatch,
-    nutstore: bool,
 ) -> None:
     apps_dir = str(PROJECT_ROOT / "05_apps")
     if apps_dir not in sys.path:
@@ -46,8 +44,7 @@ def test_basis_page_uses_formal_database_and_renders_modules(
         "load_basis_page_data",
         lambda _root: (
             rows.copy(),
-            {"release_id": "required-test-current", "manifest_sha256": "a" * 64,
-             "schema_version": "domestic-basis-current/4" if nutstore else "lutou-domestic-basis-current/3"},
+            {"release_id": "required-test-current", "manifest_sha256": "a" * 64},
         ),
     )
 
@@ -93,9 +90,6 @@ def test_basis_page_uses_formal_database_and_renders_modules(
     )
     expected_latest = rows["date"].max().date().isoformat()
     assert any(expected_latest in item.value for item in app.caption)
-    if nutstore:
-        assert any("新报价来自坚果云指定文件（只读）" in item.value for item in app.caption)
-        assert not any("之后为Lutou canonical basis" in item.value for item in app.caption)
     assert not any("本地回退文件可用" in item.value for item in (*app.success, *app.info, *app.caption))
     assert not any("本地回退数据" in item.value for item in (*app.success, *app.info, *app.caption))
     assert not any(item.label in {"数据状态", "总行数", "最新日期"} for item in app.metric)

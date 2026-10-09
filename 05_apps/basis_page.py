@@ -921,15 +921,10 @@ def render_basis_page(public_current_root: Path) -> None:
         summary = None
 
     latest_date = data["date"].max()
-    source_note = (
-        "历史报价保留，新报价来自坚果云指定文件（只读）"
-        if source_identity.get("schema_version") == "domestic-basis-current/4"
-        else "2026-06-01前为密封历史数据，之后为Lutou canonical basis"
-    )
     st.caption(
         "数据源：Formal Public Basis Current｜"
         f"数据更新至 {latest_date:%Y-%m-%d}｜"
-        f"{source_note}"
+        "2026-06-01前为密封历史数据，之后为Lutou canonical basis"
     )
     st.subheader("最新基差")
     if summary is not None:
