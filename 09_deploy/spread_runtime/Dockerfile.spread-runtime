@@ -48,6 +48,7 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
 
 # Exact bound runtime inputs; candidate fixtures never enter the image.
 COPY ["03_src/agri_research_agent/market_data/foreign_fx.py", "/app/03_src/agri_research_agent/market_data/"]
+COPY ["03_src/agri_research_agent/market_data/foreign_fx_update.py", "03_src/agri_research_agent/market_data/foreign_fx_delivery.py", "/app/03_src/agri_research_agent/market_data/"]
 COPY ["05_apps/foreign_fx_page.py", "/app/05_apps/"]
 COPY ["03_src/agri_research_agent/shared/chart_style.py", "/app/03_src/agri_research_agent/shared/"]
 COPY ["03_src/agri_research_agent/pipelines/canada_canola.py", "/app/03_src/agri_research_agent/pipelines/"]
