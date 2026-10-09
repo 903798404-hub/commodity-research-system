@@ -796,6 +796,10 @@ def compare_formal_basis_parity(table: pa.Table, baseline_path: str | Path) -> d
 
 
 def _extract_live_canonical(current: DomesticBasisCurrent) -> pa.Table:
+    if current.manifest.get("schema_version") == "domestic-basis-current/4":
+        raise DomesticBasisPipelineError(
+            "Nutstore Current cannot be overwritten by the retired Lutou updater"
+        )
     if current.observations.schema == CANONICAL_SCHEMA:
         return current.observations
     if current.observations.schema != FORMAL_CURRENT_SCHEMA:
@@ -1423,7 +1427,7 @@ def load_domestic_basis_current(public_root: str | Path) -> DomesticBasisCurrent
     if schema_version == "lutou-domestic-basis-current/2":
         if observations.schema != CANONICAL_SCHEMA:
             raise DomesticBasisPipelineError("Domestic Basis Current contract is invalid")
-    elif schema_version == "lutou-domestic-basis-current/3":
+    elif schema_version in {"lutou-domestic-basis-current/3", "domestic-basis-current/4"}:
         if observations.schema != FORMAL_CURRENT_SCHEMA:
             raise DomesticBasisPipelineError("Formal Domestic Basis Current contract is invalid")
     else:
@@ -1432,7 +1436,10 @@ def load_domestic_basis_current(public_root: str | Path) -> DomesticBasisCurrent
         raise DomesticBasisPipelineError("Domestic Basis Current data identity mismatch")
     if _business_sha(observations) != manifest.get("business_content_sha256"):
         raise DomesticBasisPipelineError("Domestic Basis Current business identity mismatch")
-    if observations.schema == CANONICAL_SCHEMA:
+    if schema_version == "domestic-basis-current/4":
+        from agri_research_agent.pipelines.nutstore_domestic_basis import validate_nutstore_current
+        validate_nutstore_current(root, directory, manifest, observations)
+    elif observations.schema == CANONICAL_SCHEMA:
         _validate_canonical(observations, None)
     else:
         _validate_formal_current(observations, None, require_live=True)
