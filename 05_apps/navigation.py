@@ -16,6 +16,7 @@ INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 IMPORT_PROFIT_ROUTE_ID = "import_profit"
 INTERNATIONAL_SPREAD_PAGE_TITLE = "国际价差"
 RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
+FOREIGN_FX_PAGE_TITLE = "外盘汇率"
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,11 @@ NAVIGATION_GROUPS = (
     NavigationGroup(
         "市场行情",
         (
+            NavigationItem(
+                "foreign_fx", FOREIGN_FX_PAGE_TITLE, FOREIGN_FX_PAGE_TITLE, "quote",
+                "比较主要农产品相关货币的日度汇率与相对美元强弱",
+                detail_label="覆盖", detail_text="巴西 · 加拿大 · 澳大利亚 · 东南亚 · 印度 · 中国",
+            ),
             NavigationItem(
                 "international_spread",
                 INTERNATIONAL_SPREAD_PAGE_TITLE,
