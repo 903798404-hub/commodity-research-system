@@ -166,6 +166,33 @@ def currency_return(current: float, previous: float) -> float:
     return _positive(previous) / _positive(current) - 1
 
 
+def seasonality(frame: pd.DataFrame, code: str, years: list[int], *,
+                current_year: int, normalize: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Align observed month/day on leap year 2000; never fill missing quotes.
+
+    The index is the USD/local quote relative to each year's first quote.
+    Monthly averages weight each historical year equally and require two years.
+    """
+    if code not in BY_CODE:
+        raise FxDataError("请选择有效币种")
+    rows = frame.loc[frame["currency"] == code].copy().sort_values("date")
+    rows["year"] = rows["date"].map(lambda d: d.year)
+    rows = rows.loc[rows["year"].isin(years)].copy()
+    rows["season_date"] = rows["date"].map(lambda d: d.replace(year=2000))
+    rows["value"] = rows["local_per_usd"]
+    if normalize and not rows.empty:
+        bases = rows.groupby("year")["local_per_usd"].transform("first")
+        rows["value"] = rows["local_per_usd"] / bases * 100
+    historical = rows.loc[rows["year"] < current_year]
+    historical = historical.assign(month=historical["date"].map(lambda d: d.month))
+    monthly = historical.groupby(["year", "month"], as_index=False)["value"].mean()
+    average = monthly.groupby("month", as_index=False).agg(
+        value=("value", "mean"), year_count=("year", "nunique"))
+    average["season_date"] = average["month"].map(lambda month: date(2000, month, 15))
+    average.loc[average["year_count"] < 2, "value"] = float("nan")
+    return rows.reset_index(drop=True), average
+
+
 def overview(frame: pd.DataFrame) -> pd.DataFrame:
     result = []
     for currency in CURRENCIES:

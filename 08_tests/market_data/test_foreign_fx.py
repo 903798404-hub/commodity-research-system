@@ -6,7 +6,7 @@ import pytest
 
 from agri_research_agent.market_data.foreign_fx import (
     SCHEMA_VERSION, FxDataError, currency_return, overview, parse_bcb, parse_ecb,
-    strength_comparison, validate_snapshot,
+    strength_comparison, validate_snapshot, seasonality,
 )
 
 
@@ -86,3 +86,49 @@ def test_disjoint_reference_calendars_cannot_be_compared():
     frame=validate_snapshot(snapshot([quote('BRL','2026-10-01',5),quote('CAD','2026-10-02',1.4)]))
     result,base=strength_comparison(frame,['BRL','CAD'],date(2026,10,1))
     assert result.empty and base is None
+
+
+def test_seasonal_alignment_preserves_leap_day_and_excludes_current_from_mean():
+    frame = validate_snapshot(snapshot([
+        quote('BRL','2024-02-29',4), quote('BRL','2024-03-01',4),
+        quote('BRL','2025-03-01',6), quote('BRL','2026-03-01',90),
+    ]))
+    original = frame.copy(deep=True)
+    rows, mean = seasonality(frame,'BRL',[2024,2025,2026],current_year=2026)
+    assert rows.loc[rows['year']==2024,'season_date'].tolist()==[date(2000,2,29),date(2000,3,1)]
+    march = mean.loc[mean['season_date']==date(2000,3,15)].iloc[0]
+    assert march['value']==5 and march['year_count']==2
+    assert pd.isna(mean.loc[mean['season_date']==date(2000,2,15),'value'].iloc[0])
+    assert len(rows)==len(frame)
+    pd.testing.assert_frame_equal(frame,original)
+
+
+def test_seasonal_index_uses_each_year_first_quote_and_usd_direction():
+    frame = validate_snapshot(snapshot([
+        quote('BRL','2024-01-02',5),quote('BRL','2024-01-04',6),
+        quote('BRL','2025-01-03',10),quote('BRL','2025-01-04',8),
+        quote('CAD','2024-01-01',1.2),
+    ]))
+    rows, mean = seasonality(frame,'BRL',[2024,2025],current_year=2026,normalize=True)
+    assert rows['value'].tolist()==[100,120,100,80]
+    assert rows['currency'].unique().tolist()==['BRL']
+    assert mean.loc[mean['season_date']==date(2000,1,15),'value'].iloc[0]==100
+    assert not (rows['season_date']==date(2000,1,1)).any()
+
+
+def test_seasonal_selected_years_control_mean_and_one_year_has_no_mean():
+    frame = validate_snapshot(snapshot([quote('BRL',f'{y}-01-02',v) for y,v in [(2023,3),(2024,4),(2025,5),(2026,60)]]))
+    rows, mean = seasonality(frame,'BRL',[2024,2025,2026],current_year=2026)
+    assert mean['value'].tolist()==[4.5] and set(rows['year'])=={2024,2025,2026}
+    _, mean = seasonality(frame,'BRL',[2025,2026],current_year=2026)
+    assert mean['value'].isna().all()
+
+
+def test_seasonal_monthly_mean_weights_years_equally_despite_missing_quotes():
+    frame = validate_snapshot(snapshot([
+        quote('BRL','2024-01-02',2),quote('BRL','2024-01-03',4),
+        quote('BRL','2025-01-02',10),quote('BRL','2026-01-02',90),
+    ]))
+    _, mean = seasonality(frame,'BRL',[2024,2025,2026],current_year=2026)
+    assert mean['value'].tolist()==[6.5]
+    assert mean['year_count'].tolist()==[2]
