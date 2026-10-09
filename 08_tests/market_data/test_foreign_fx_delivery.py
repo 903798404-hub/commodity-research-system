@@ -10,6 +10,35 @@ from agri_research_agent.market_data.foreign_fx import BY_CODE, FxDataError
 END = date(2024, 1, 10)
 
 
+@pytest.mark.parametrize("destination,body,accepted", [(fx.ECB_LATEST_URL, b"official", True),
+    ("https://unexpected.example/quote", b"official", False), (fx.ECB_LATEST_URL, b"too-large", False)])
+def test_formal_fetch_ignores_proxy_ca_overrides_and_bounds_response(monkeypatch, destination, body, accepted):
+    import requests
+    monkeypatch.setenv("HTTPS_PROXY", "http://invalid.example:1")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "untrusted.pem")
+    monkeypatch.setattr(fx, "MAX_RESPONSE_BYTES", 8)
+    class Response:
+        status_code = 200
+        url = destination
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def iter_content(self, **_): yield body
+    class Session:
+        trust_env = True
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def get(self, url, **kwargs):
+            assert self.trust_env is False and kwargs["stream"] is True
+            assert kwargs.get("verify", True) is True
+            return Response()
+    monkeypatch.setattr(requests, "Session", Session)
+    if accepted:
+        assert fx.fetch_delivery_official(fx.ECB_LATEST_URL) == body
+    else:
+        with pytest.raises(FxDataError):
+            fx.fetch_delivery_official(fx.ECB_LATEST_URL)
+
+
 def official_sources(*, bcb_day="2024-01-03", ecb_day="2024-01-03", anchor_day=None, revision=False, partial=False):
     bcb = json.dumps([{"data": "02/01/2024", "valor": "5.1" if revision else "5.0"},
                       {"data": date.fromisoformat(bcb_day).strftime("%d/%m/%Y"), "valor": "5.0"}]).encode()

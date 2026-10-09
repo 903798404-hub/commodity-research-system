@@ -9,14 +9,34 @@ from html.parser import HTMLParser
 import io
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 
 from .foreign_fx import BY_CODE, ECB_HISTORY_URL, FxDataError, bcb_url, parse_bcb, parse_ecb, validate_snapshot
-from .foreign_fx_update import MAX_RESPONSE_BYTES, collect_snapshot, fetch_official
+from .foreign_fx_update import MAX_RESPONSE_BYTES, collect_snapshot
 
 BCB_LATEST_URL = "https://ptax.bcb.gov.br/ptax_internet/consultarUltimaCotacaoDolar.do"
 ECB_LATEST_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 EVIDENCE_SCHEMA = "foreign-fx-source-evidence/1"
 START = date(2021, 1, 1)
+
+
+def fetch_delivery_official(url):
+    """Use verified direct TLS, independently of desktop proxy/CA environment."""
+    import requests
+    allowed = {"api.bcb.gov.br", "ptax.bcb.gov.br", "www.ecb.europa.eu"}
+    if urlparse(url).scheme != "https" or urlparse(url).hostname not in allowed:
+        raise FxDataError("FX official URL outside allowlist")
+    with requests.Session() as session:
+        session.trust_env = False
+        with session.get(url, headers={"User-Agent": "AgriculturalResearch/1.0"}, timeout=45, stream=True) as response:
+            if response.status_code != 200 or urlparse(response.url).scheme != "https" or urlparse(response.url).hostname not in allowed:
+                raise FxDataError("FX official response status or destination invalid")
+            raw = bytearray()
+            for chunk in response.iter_content(chunk_size=65536):
+                raw.extend(chunk)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise FxDataError("FX official response exceeds size limit")
+    return bytes(raw)
 
 
 def exact(value, keys, label):
@@ -78,7 +98,7 @@ def _decode(record, url):
     return raw
 
 
-def collect(end: date, raw_directory: Path, *, fetcher=fetch_official):
+def collect(end: date, raw_directory: Path, *, fetcher=fetch_delivery_official):
     snapshot = collect_snapshot(START, end, raw_directory=raw_directory, fetcher=fetcher)
     references = {"bcb_latest": (BCB_LATEST_URL, fetcher(BCB_LATEST_URL)),
                   "ecb_latest": (ECB_LATEST_URL, fetcher(ECB_LATEST_URL))}
