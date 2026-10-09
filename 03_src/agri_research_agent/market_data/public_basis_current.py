@@ -225,16 +225,17 @@ def _resolve_current_versioned(
     field_differences = (
         parity.get("field_differences") if isinstance(parity, dict) else None
     )
+    nutstore = manifest.get("schema_version") == "domestic-basis-current/4"
     if (
         current.release_id != release_id
         or actual_manifest_sha256 != manifest_sha256
         or manifest.get("release_id") != release_id
-        or manifest.get("schema_version") != _CURRENT_SCHEMA
-        or manifest.get("source") != "sealed_history_plus_lutou"
+        or manifest.get("schema_version") not in {_CURRENT_SCHEMA, "domestic-basis-current/4"}
+        or manifest.get("source") != ("preserved_current_plus_nutstore" if nutstore else "sealed_history_plus_lutou")
         or manifest.get("scope") != _CURRENT_SCOPE
         or manifest.get("quality_status") != "PASS"
         or manifest.get("cutover_date") != FORMAL_CUTOVER_DATE.isoformat()
-        or manifest.get("series_count") != _EXPECTED_SERIES
+        or (not nutstore and manifest.get("series_count") != _EXPECTED_SERIES)
         or manifest.get("historical_row_count") != _EXPECTED_HISTORICAL_ROWS
         or not isinstance(parity, dict)
         or parity.get("quality_status") != "PASS"
@@ -283,7 +284,7 @@ def _resolve_current_versioned(
     identity = PublicBasisCurrentIdentity(
         release_id,
         manifest_sha256,
-        _CURRENT_SCHEMA,
+        str(manifest["schema_version"]),
         len(records),
         records["series_id"].nunique(),
         min_date,
@@ -299,7 +300,9 @@ def _validate_records(records: pd.DataFrame, manifest: dict[str, object]) -> Non
             PublicBasisCurrentErrorCode.CONTRACT_MISMATCH,
             "Formal Domestic Basis row count is inconsistent",
         )
-    if records["series_id"].nunique() != _EXPECTED_SERIES:
+    nutstore = manifest.get("schema_version") == "domestic-basis-current/4"
+    expected_series = manifest.get("series_count") if nutstore else _EXPECTED_SERIES
+    if records["series_id"].nunique() != expected_series:
         raise PublicBasisCurrentError(
             PublicBasisCurrentErrorCode.SERIES_NOT_FOUND,
             "Formal Domestic Basis 29-series coverage is incomplete",
@@ -325,7 +328,7 @@ def _validate_records(records: pd.DataFrame, manifest: dict[str, object]) -> Non
             "Formal Domestic Basis date aliases differ",
         )
     historical = records[records["segment"].eq("SEALED_HISTORICAL")]
-    live = records[records["segment"].eq("LIVE_LUTOU")]
+    live = records[records["segment"].isin({"LIVE_LUTOU", "LIVE_NUTSTORE"} if nutstore else {"LIVE_LUTOU"})]
     observed_dates = pd.to_datetime(records["date"], errors="raise")
     live_dates = pd.to_datetime(live["date"], errors="raise")
     if (
@@ -341,7 +344,8 @@ def _validate_records(records: pd.DataFrame, manifest: dict[str, object]) -> Non
         .ge(pd.Timestamp(FORMAL_CUTOVER_DATE))
         .all()
         or set(historical["provider"]) != {"Historical Domestic Basis Excel"}
-        or set(live["provider"]) != {"Lutou"}
+        or (not nutstore and set(live["provider"]) != {"Lutou"})
+        or (nutstore and not set(live["provider"]) <= {"Lutou", "Nutstore"})
         or observed_dates.min().date().isoformat() != manifest.get("min_date")
         or observed_dates.max().date().isoformat() != manifest.get("max_date")
         or live_dates.max().date().isoformat() != manifest.get("source_max_date")
@@ -356,8 +360,13 @@ def _validate_records(records: pd.DataFrame, manifest: dict[str, object]) -> Non
         historical_basis[["cash_price", "futures_price", "basis"]].isna().any().any()
         or historical_cash["cash_price"].isna().any()
         or historical_cash[["futures_price", "basis"]].notna().any().any()
-        or live[["cash_price", "futures_price"]].notna().any().any()
-        or live["basis"].isna().any()
+        or live["futures_price"].notna().any()
+        or live[live["quote_type"].eq("基差报价")]["cash_price"].notna().any()
+        or live[live["quote_type"].eq("基差报价")]["basis"].isna().any()
+        or live[live["quote_type"].eq("一口价")]["cash_price"].isna().any()
+        or live[live["quote_type"].eq("一口价")]["basis"].notna().any()
+        or (not nutstore and live["cash_price"].notna().any())
+        or (not nutstore and live["basis"].isna().any())
     ):
         raise PublicBasisCurrentError(
             PublicBasisCurrentErrorCode.CONTRACT_MISMATCH,
