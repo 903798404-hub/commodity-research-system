@@ -39,6 +39,10 @@ def percent(value: float | None) -> str:
     return "暂无可比值" if value is None else f"{value:+.1f}%"
 
 
+def crop_year_label(value: str) -> str:
+    return "/".join(value.split("-"))
+
+
 def seasonal_date(value: str | None) -> str | None:
     if value is None:
         return None
@@ -59,7 +63,7 @@ def build_figures(payload: dict) -> list[go.Figure]:
             figure.add_trace(go.Scatter(
                 x=[None if p.get("date_quality") else seasonal_date(p["week_ending"]) for p in track],
                 y=[None if p[metric] is None or p.get("date_quality") else p[metric] / 10000 for p in track],
-                customdata=[f"{p['week_ending']}（源日期待复核）" if p.get("date_quality") else p["week_ending"] for p in track], name=year.replace("-", "/"),
+                customdata=[f"{p['week_ending']}（源日期待复核）" if p.get("date_quality") else p["week_ending"] for p in track], name=crop_year_label(year),
                 mode="lines", connectgaps=False, opacity=1 if current or previous else 0.65,
                 line={"color": color, "width": 3.4 if current else 2, "dash": "dash" if previous else "solid"},
                 hovertemplate="%{fullData.name}<br>截止 %{customdata}<br>%{y:,.2f} 万公吨<extra></extra>",
@@ -83,7 +87,7 @@ def build_figures(payload: dict) -> list[go.Figure]:
 def observation(payload: dict) -> str:
     latest = payload["latest"]
     text = (f"截至 {latest['week_ending']}，当周出口 {amount(latest['weekly_mt'])}，"
-            f"{payload['current_year'].replace('-', '/')} 作物年累计 {amount(latest['cumulative_mt'])}。")
+            f"{crop_year_label(payload['current_year'])} 作物年累计 {amount(latest['cumulative_mt'])}。")
     for name, key in (("累计出口", "cumulative_yoy"), ("近四周出口", "four_week_yoy")):
         value = payload[key]
         if value is not None:
@@ -116,7 +120,7 @@ def render_canola_exports_page() -> None:
         st.error(f"菜籽出口数据暂不可读：{exc}")
         return
     latest = default["latest"]
-    st.caption(f"{default['current_year'].replace('-', '/')} · 数据截至 {latest['week_ending']}"
+    st.caption(f"{crop_year_label(default['current_year'])} · 数据截至 {latest['week_ending']}"
                " · CGC 报告体系出口，非海关全口径")
     status_path = root / STATUS
     if status_path.is_file():
