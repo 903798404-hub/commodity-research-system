@@ -178,14 +178,14 @@ def test_domestic_summary_never_uses_saved_single_contract_as_substitute(project
     selector.set_value(variety).run(timeout=30)
     assert not app.exception and not app.get("plotly_chart")
     if has_summary:
-        net = [item for item in app.metric if item.label == "前20名净持仓"]
+        net = [item for item in app.metric if item.label == "前20名榜内净持仓"]
         assert len(net) == 1 and net[0].value == "40"
     else:
-        assert not [item for item in app.metric if item.label == "前20名净持仓"]
+        assert not [item for item in app.metric if item.label == "前20名榜内净持仓"]
         assert any("品种汇总数据待接入" in item.value for item in app.info)
     app.selectbox(key=f"domestic_scope_{domain}").set_value(variety + "2701").run(timeout=30)
     assert not app.exception
-    assert [item for item in app.metric if item.label == "前20名净持仓"][0].value == "50"
+    assert [item for item in app.metric if item.label == "前20名榜内净持仓"][0].value == "50"
     assert any("单合约参考" in item.value for item in app.caption)
     assert any("主力核对 2026年10月8日" in item.value for item in app.caption)
     assert any("主力参考" in item.value for item in app.markdown)

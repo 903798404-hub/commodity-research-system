@@ -165,7 +165,8 @@ def domestic_metrics(rows, members, *, account="代客"):
                         for side in ("long", "short")}
                     item["coverage"] = f"多仓 {counts['long']}/{len(item['constituent_contracts'])} · 空仓 {counts['short']}/{len(item['constituent_contracts'])} 合约已披露"
             metrics.append(item)
-    result = changes(metrics, ("scope", "group", "account", "aggregation", "source_provider"))
+    result = changes(metrics, ("scope", "group", "account", "aggregation", "source_provider"),
+                     missing_as_zero=True)
     previous = {}
     for item in result:
         key = tuple(item[k] for k in ("scope", "group", "account", "aggregation", "source_provider"))

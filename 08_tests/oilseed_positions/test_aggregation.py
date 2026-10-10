@@ -1,4 +1,5 @@
 import importlib.util
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -63,13 +64,28 @@ def test_incomplete_or_mixed_contracts_never_publish_summary(mutation):
         aggregate_contract_rows(rows, ["M2701", "M2705"])
 
 
-def test_unlisted_side_is_not_zero_and_contract_coverage_remains_visible():
+def test_ranked_net_uses_zero_for_unlisted_side_without_changing_source_or_contract_coverage():
     rows = [row(c, "高盛期货", 10) for c in ["M2701", "M2705"]]
     rows += [row(c, "其他", 20, side="short") for c in ["M2701", "M2705"]]
+    original = deepcopy(rows)
     result = domestic_metrics(aggregate_contract_rows(rows, ["M2701", "M2705"]), MEMBERS)
     goldman = next(r for r in result if r["group"] == "goldman")
-    assert goldman["long"] == 20 and goldman["short"] is None and goldman["net"] is None
+    assert rows == original
+    assert goldman["long"] == 20 and goldman["short"] is None and goldman["net"] == 20
+    assert next(r for r in result if r["group"] == "fixed5")["net"] == 20
     assert "多仓 2/2" in goldman["coverage"] and "空仓 0/2" in goldman["coverage"]
+
+
+def test_ranked_changes_preserve_source_account_and_aggregation_boundaries():
+    rows = [row("P2701", "高盛期货", 100, side="short", day="2026-09-28"),
+        row("P2701", "高盛期货", 120, side="short", day="2026-09-29"),
+        dict(row("P2701", "高盛期货", 130, side="short"), source_provider="stock_api"),
+        dict(row("P2701", "高盛期货", 140, side="short", day="2026-10-01"), account="未区分"),
+        dict(row("P2701", "高盛期货", 150, side="short", day="2026-10-02"), aggregation="other_rankings")]
+    fixed = [r for r in domestic_metrics(rows, MEMBERS) if r["group"] == "goldman"]
+    assert [r["net"] for r in fixed] == [-100, -120, -130, -140, -150]
+    assert [r["net_change"] for r in fixed] == [None, -20, None, None, None]
+    assert all(r["long"] is None for r in fixed)
 
 
 def test_changes_use_saved_net_difference_and_suppress_changed_contract_universe():

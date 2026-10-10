@@ -12,7 +12,9 @@ from agri_research_agent.sugar_positions.charts import chinese_date, movements, 
 from agri_research_agent.sugar_positions.model import load_members, positioning_signal
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
-from sugar_positions_page import chart_pair, chinese_time, detail, display_attempt
+from sugar_positions_page import (
+    RANKED_NET_NOTICE, chart_pair, chinese_time, detail, domestic_detail, display_attempt,
+)
 
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
 
@@ -148,29 +150,28 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 st.caption("覆盖合约：" + "、".join(current['top20']['constituent_contracts']))
             st.markdown(f"**{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
             a, b, c = st.columns(3)
-            a.metric("前20名已披露净持仓" if observed_summary else "前20名净持仓", fmt(current["top20"]["net"]))
+            a.metric("前20名榜内净持仓", fmt(current["top20"]["net"]))
             b.metric("较上一保存交易日变化", fmt(current["top20"]["net_change"], True))
-            c.metric("五家合计已披露净持仓" if observed_summary else "五家合计净持仓", fmt(current["fixed5"]["net"]))
+            c.metric("五家合计榜内净持仓", fmt(current["fixed5"]["net"]))
             st.caption(f"截至 {chinese_date(day)} · 对比 {chinese_date(current['top20']['previous_date'])} · {current['fixed5']['coverage']}")
             st.caption("公开排名的多空名单可不同，净变化包含名单变化。" + ("当前来源未区分账户类型。" if current["fixed5"]["account"] == "未区分" else "固定席位展示代客持仓。"))
             if observed_summary and current['top20'].get('excluded_contracts'):
                 st.caption("未混入旧报告：" + "、".join(f"{r['scope']}（{chinese_date(r['report_date'])}）" for r in current['top20']['excluded_contracts']))
             st.subheader("五家固定席位")
-            if current["fixed5"]["net"] is None:
-                st.warning("部分席位缺少一侧披露，无法计算合计；未披露不代表零仓位。")
-            st.dataframe(detail([current[m["id"]] for m in members])[["对象", "持仓情绪", "净持仓（手）", "净变化（手）", "披露情况"]], hide_index=True, width="stretch")
+            st.caption(RANKED_NET_NOTICE)
+            st.dataframe(domestic_detail([current[m["id"]] for m in members])[["对象", "榜内持仓倾向", "榜内净持仓（手）", "榜内净变化（手）", "多仓（手）", "空仓（手）", "披露情况"]], hide_index=True, width="stretch")
             history = [r for r in data if r["report_date"] <= day]
             if len({r["report_date"] for r in history}) >= 2:
-                chart_pair(trend(history, "五家固定席位 · 已披露净持仓" if observed_summary else f"五家固定席位 · {current['fixed5']['account']}净持仓", {m["id"]: m["label"] for m in members}, direct_labels=True),
-                    movements([r for r in history if r["group"] == "top20"], "前20名净持仓变化"),
+                chart_pair(trend(history, f"五家固定席位 · {current['fixed5']['account']}榜内净持仓", {m["id"]: m["label"] for m in members}, direct_labels=True),
+                    movements([r for r in history if r["group"] == "top20"], "前20名榜内净持仓变化"),
                     keys=("fixed_trend", "domestic_changes"))
-            with st.expander("历史净持仓与比较日期"):
-                st.dataframe(detail(history).iloc[::-1], hide_index=True, width="stretch")
+            with st.expander("历史榜内净持仓与比较日期"):
+                st.dataframe(domestic_detail(history).iloc[::-1], hide_index=True, width="stretch")
     with sources:
         st.write("净持仓＝多仓－空仓。净变化反映倾向变化，不等于资金流入流出。国内会员持仓也包含产业套保。")
         st.write("CFTC管理基金与Euronext投资基金的分类不同，各市场单独观察。Euronext期货＋期权保留两位小数；未从分类合计推算交易所总持仓。")
-        st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。两侧均披露才计算净仓；五家完整才计算合计。")
-        st.write("仅比较相邻已保存的同口径报告；缺仓或间隔超过10天时不计算净变化。合约排名不冒充品种总排名。")
+        st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。" + RANKED_NET_NOTICE)
+        st.write("仅比较相邻已保存的同口径报告；间隔超过10天时不计算净变化，外盘缺仓也不计算。合约排名不冒充品种总排名，来源、账户、聚合方法或合约范围不同不混比。")
         if domain != "rapeseed":
             check = spec["reference_check"]
             st.markdown(f"国内默认显示已核对主力合约参考：{'、'.join(spec['default_scopes'].values())}。{chinese_date(check['checked_on'])}核对新浪连续行情及实际合约持仓量；行情交易日为{chinese_date(check['quote_trade_date'])}夜盘。配置暂不自动换月，历史按实际合约独立比较，不拼接为主力连续持仓。")

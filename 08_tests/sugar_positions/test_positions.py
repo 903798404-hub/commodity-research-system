@@ -1,4 +1,5 @@
 from datetime import date
+from copy import deepcopy
 from io import BytesIO, StringIO
 import csv
 import importlib.util
@@ -11,7 +12,7 @@ import pytest
 import requests
 
 from agri_research_agent.sugar_positions.model import (
-    domestic_metrics, foreign_metrics, integer, load_members, split_member, positioning_signal,
+    RANKED_NET_METHOD, domestic_metrics, foreign_metrics, integer, load_members, split_member, positioning_signal,
 )
 from agri_research_agent.sugar_positions.sources import parse_cftc, parse_czce, parse_ice
 from agri_research_agent.sugar_positions.storage import preview_root, publish, read_snapshot
@@ -167,14 +168,21 @@ def test_czce_invalid_sources_fail_closed(raw, day, match):
         parse_czce(raw, day, SOURCE, STAMP)
 
 
-def test_fixed5_missing_side_never_becomes_zero_or_partial_sum():
+def test_fixed5_ranked_net_counts_disclosed_sides_without_rewriting_missing_or_zero():
     rows = [domestic_row("高盛期货", "short", 120),
             domestic_row("东证期货", "long", 0, rank=2),
             domestic_row("东证期货", "short", 30, rank=2)]
+    original = deepcopy(rows)
     result = {r["group"]: r for r in domestic_metrics(rows, MEMBERS)}
-    assert result["goldman"]["long"] is None and result["goldman"]["net"] is None
+    assert rows == original
+    assert result["goldman"]["long"] is None and result["goldman"]["net"] == -120
+    assert result["orient"]["long"] == 0
     assert result["orient"]["net"] == -30
-    assert result["fixed5"]["net"] is None
+    assert result["fixed5"]["net"] == -150
+    assert result["fixed5"]["long"] == 0 and result["fixed5"]["short"] == 150
+    assert result["yongan"]["long"] is None and result["yongan"]["short"] is None
+    assert result["yongan"]["net"] == 0 and "缺少多仓、空仓" in result["yongan"]["coverage"]
+    assert all(r["net_method"] == RANKED_NET_METHOD for r in result.values())
     assert result["fixed5"]["coverage"] == "1/5 家两侧已披露"
 
 
@@ -186,7 +194,35 @@ def test_accounts_and_contract_scopes_do_not_mix():
     result = domestic_metrics(rows, MEMBERS)
     sr = next(r for r in result if r["scope"] == "SR" and r["group"] == "orient")
     assert sr["net"] == 7
-    assert next(r for r in result if r["scope"] == "SR701" and r["group"] == "orient")["net"] is None
+    assert next(r for r in result if r["scope"] == "SR701" and r["group"] == "orient")["net"] == 999
+
+
+@pytest.mark.parametrize("scope,member,long,short,expected", [
+    ("P2701", "高盛期货", None, 45991, -45991),
+    ("OI", "永安期货", None, 7149, -7149),
+    ("OI701", "永安期货", 3269, 5440, -2171),
+])
+def test_ranked_net_matches_reported_palm_and_rapeseed_examples(scope, member, long, short, expected):
+    rows = [domestic_row(member, side, value, scope=scope) for side, value in
+            (("long", long), ("short", short)) if value is not None]
+    metrics = domestic_metrics(rows, MEMBERS)
+    fixed = next(r for r in metrics if r.get("long_raw_name") or r.get("short_raw_name"))
+    assert (fixed["long"], fixed["short"], fixed["net"]) == (long, short, expected)
+    assert next(r for r in metrics if r["group"] == "fixed5")["net"] == expected
+
+
+def test_ranked_changes_include_entry_exit_but_do_not_create_reports_or_bridge_large_gaps():
+    assert domestic_metrics([], MEMBERS) == []
+    rows = [domestic_row("永安期货", "short", 40, day="2026-09-01"),
+        domestic_row("永安期货", "long", 30, day="2026-09-02"),
+        domestic_row("其他", "long", 10, day="2026-09-03"),
+        domestic_row("永安期货", "short", 20, day="2026-09-30")]
+    fixed = [r for r in domestic_metrics(rows, MEMBERS) if r["group"] == "yongan"]
+    assert [r["net"] for r in fixed] == [-40, 30, 0, -20]
+    assert [r["net_change"] for r in fixed] == [None, 70, -30, None]
+    assert fixed[2]["long"] is None and fixed[2]["short"] is None
+    assert fixed[2]["previous_date"] == "2026-09-02"
+    assert fixed[3]["comparison_days"] == 27
 
 
 def test_alias_ambiguity_is_rejected():

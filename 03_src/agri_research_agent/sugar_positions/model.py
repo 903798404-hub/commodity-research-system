@@ -16,6 +16,7 @@ GROUPS = {
     "nonreportable": "非报告者",
 }
 MARKETS = {"sugar11": "糖11（原糖）", "white_sugar": "伦敦白砂糖"}
+RANKED_NET_METHOD = "ranked_missing_zero_v1"
 
 
 def positioning_signal(net, change):
@@ -77,7 +78,7 @@ def unique_rows(rows, fields):
         seen.add(key)
 
 
-def changes(rows, key_fields):
+def changes(rows, key_fields, *, missing_as_zero=False):
     """Compare adjacent stored observations; preserve gaps and comparison date."""
     grouped = defaultdict(list)
     for row in rows:
@@ -86,8 +87,14 @@ def changes(rows, key_fields):
     for group in grouped.values():
         previous = None
         for row in sorted(group, key=lambda x: x["report_date"]):
-            row["net"] = (row["long"] - row["short"]
-                          if row["long"] is not None and row["short"] is not None else None)
+            if missing_as_zero:
+                # Coalesce only the derived ranked net; keep disclosed sides intact.
+                row["net"] = (row["long"] if row["long"] is not None else 0) - (
+                    row["short"] if row["short"] is not None else 0)
+                row["net_method"] = RANKED_NET_METHOD
+            else:
+                row["net"] = (row["long"] - row["short"]
+                              if row["long"] is not None and row["short"] is not None else None)
             row["previous_date"] = previous["report_date"] if previous else None
             row["comparison_days"] = ((date.fromisoformat(row["report_date"])
                 - date.fromisoformat(previous["report_date"])).days if previous else None)
@@ -105,7 +112,7 @@ def foreign_metrics(rows):
 
 
 def domestic_metrics(rows, members, *, account="代客"):
-    """Top ranks are separate groups; fixed seats require both disclosed sides."""
+    """Compute ranked nets with missing sides as zero, preserving disclosures."""
     sections = defaultdict(list)
     for row in rows:
         sections[(row["report_date"], row["scope"])].append(row)
@@ -139,7 +146,7 @@ def domestic_metrics(rows, members, *, account="代客"):
             metrics.append(item)
         complete = sum(r["long"] is not None and r["short"] is not None for r in fixed)
         metrics.append(dict(report_date=day, scope=scope, group="fixed5", label="五家合计",
-            account=account, long=sum(r["long"] for r in fixed) if complete == 5 else None,
-            short=sum(r["short"] for r in fixed) if complete == 5 else None,
+            account=account, long=sum(r["long"] for r in fixed if r["long"] is not None),
+            short=sum(r["short"] for r in fixed if r["short"] is not None),
             coverage=f"{complete}/5 家两侧已披露"))
-    return changes(metrics, ("scope", "group", "account"))
+    return changes(metrics, ("scope", "group", "account"), missing_as_zero=True)

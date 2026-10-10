@@ -15,6 +15,9 @@ from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 
 REPORT_LABELS = {"纯期货": "futures_only", "期货＋期权": "combined"}
+RANKED_NET_NOTICE = ("榜内净仓＝已披露多仓－已披露空仓；未披露一侧按0参与计算，"
+    "原始多仓、空仓仍保留未披露。五家合计为榜内净仓之和；两侧均未披露时榜内净仓为0，"
+    "不代表实际零仓位或多空平衡。进出排名也会影响榜内净变化。")
 
 
 def chart_pair(first, second, *, keys):
@@ -63,6 +66,13 @@ def detail(rows):
         "持仓情绪": positioning_signal(r["net"], r["net_change"]),
         "披露情况": r.get("coverage", "分类持仓已披露"),
     } for r in rows]).convert_dtypes()
+
+
+def domestic_detail(rows):
+    table = detail(rows).rename(columns={"净持仓（手）": "榜内净持仓（手）",
+        "净变化（手）": "榜内净变化（手）", "持仓情绪": "榜内持仓倾向"})
+    table.loc[[r["long"] is None and r["short"] is None for r in rows], "榜内持仓倾向"] = "两侧未披露 · 榜内按0"
+    return table
 
 
 def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_mode=True):
@@ -150,27 +160,26 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             st.markdown(f"**排名持仓情绪：{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
             st.caption("国内反映公开排名与会员代客持仓倾向，不能直接识别基金资金；产业套保也会影响净持仓。")
             a, b, c = st.columns(3)
-            a.metric("前20名净持仓", fmt(current["top20"]["net"]))
+            a.metric("前20名榜内净持仓", fmt(current["top20"]["net"]))
             b.metric("较上一保存交易日变化", fmt(current["top20"]["net_change"], True))
-            c.metric("五家合计净持仓", fmt(current["fixed5"]["net"]))
+            c.metric("五家合计榜内净持仓", fmt(current["fixed5"]["net"]))
             st.caption(f"持仓截至 {chinese_date(day)} · 比较日期 {chinese_date(current['top20']['previous_date'])} · "
                 f"{current['fixed5']['coverage']}。")
             st.caption("前20名多头和空头名单可不同；净变化按两份排名汇总之差计算，包含名单变化。")
             st.subheader("五家固定席位")
             fixed = [current[m["id"]] for m in members]
-            if current["fixed5"]["net"] is None:
-                st.warning("部分席位未进入某一侧公开排名，无法计算准确的五家合计。未披露不代表零仓位。")
-            st.dataframe(detail(fixed)[["对象", "持仓情绪", "净持仓（手）", "净变化（手）",
+            st.caption(RANKED_NET_NOTICE)
+            st.dataframe(domestic_detail(fixed)[["对象", "榜内持仓倾向", "榜内净持仓（手）", "榜内净变化（手）",
                 "多仓（手）", "空仓（手）", "披露情况"]], hide_index=True, width="stretch")
             history = [r for r in data if r["report_date"] <= day]
             if len({r["report_date"] for r in history}) >= 8:
-                chart_pair(trend(history, f"五家固定席位 · {account}净持仓", {
+                chart_pair(trend(history, f"五家固定席位 · {account}榜内净持仓", {
                     m["id"]: m["label"] for m in members}, direct_labels=True),
-                    movements([r for r in history if r["group"] == "top20"], "前20名净持仓变化"),
+                    movements([r for r in history if r["group"] == "top20"], "前20名榜内净持仓变化"),
                     keys=("domestic_fixed_trend", "domestic_changes"))
-                st.caption("零线上方偏多，下方偏空；曲线末端显示席位名称与最新净持仓。")
-            with st.expander("历史净持仓与比较日期"):
-                st.dataframe(detail(history).iloc[::-1], hide_index=True, width="stretch")
+                st.caption("零线上方榜内偏多，下方榜内偏空；曲线末端显示席位名称与最新榜内净持仓。")
+            with st.expander("历史榜内净持仓与比较日期"):
+                st.dataframe(domestic_detail(history).iloc[::-1], hide_index=True, width="stretch")
             with st.expander("交易所原始排名"):
                 raw = [r for r in snapshot["domestic"] if r["scope"] == scope and r["report_date"] == day]
                 st.dataframe(pd.DataFrame(raw)[["side", "rank", "raw_member", "positions", "reported_change"]],
@@ -180,8 +189,8 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
         st.write("净持仓＝多仓－空仓。外盘为分类交易者、各到期月份汇总；国内为排名披露范围。")
         st.write("净持仓体现多空倾向，净变化体现倾向增强或减弱，不等于资金流入流出。各市场合约规格和截至日期不同，手数不直接比较资金规模。")
         st.write("五家固定席位默认展示代客持仓；原始数据保留账户类型。")
-        st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。未上榜的一侧保持空值；五家均完整时才计算合计。")
-        st.write("比较日期来自上一条已保存的同口径数据；间隔超过10天或任一侧缺失时不计算变化。")
+        st.write("五家固定席位：高盛、摩根大通、永安、国泰君安、东证。" + RANKED_NET_NOTICE)
+        st.write("比较日期来自上一条已保存的同口径数据；间隔超过10天不计算变化。国内比较榜内净仓，外盘任一侧缺失时不计算净仓及变化。")
         st.markdown("[CFTC COT](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · "
             "[ICE COT](https://www.ice.com/report/122) · "
             "[郑商所持仓排名](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")

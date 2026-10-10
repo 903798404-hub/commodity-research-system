@@ -1,5 +1,7 @@
 from pathlib import Path
 import sys
+from copy import deepcopy
+import pytest
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,3 +39,31 @@ def test_euronext_combined_chart_preserves_decimal_hover_and_unit():
         long=11.25,short=5.1,net=6.15,net_change=0.1,previous_date="2026-09-25")], "欧洲菜籽", "investment_funds")
     assert figure.data[0].y[0] == 6.15
     assert ".2f" in figure.data[0].hovertemplate and "Delta等价手" in figure.layout.yaxis.title.text
+
+
+@pytest.mark.parametrize("domain,scope,member,label,short", [
+    ("palm", "P2701", "高盛期货", "高盛", 45991),
+    ("rapeseed", "OI", "永安期货", "永安", 7149),
+])
+def test_domestic_page_shows_single_sided_ranked_net_and_original_missing_side(
+        monkeypatch, domain, scope, member, label, short):
+    import oilseed_positions_page
+    rows = []
+    for day in ("2026-10-08", "2026-10-09"):
+        rows.extend([dict(report_date=day, scope=scope, side=side, rank=1,
+            member=name, raw_member=name + "（代客）", account="代客",
+            positions=value, reported_change=0, source_provider="stock_api")
+            for side, name, value in (("long", "其他期货", 100), ("short", member, short))])
+    original = deepcopy(rows)
+    monkeypatch.setattr(oilseed_positions_page, "read_snapshot",
+        lambda root: {"foreign": [], "domestic": rows, "sources": {}})
+    app = AppTest.from_file(str(ROOT / f"05_apps/{domain}_positions_preview.py")).run(timeout=20)
+    assert not app.exception
+    assert any(m.label == "五家合计榜内净持仓" and m.value == format(-short, ",") for m in app.metric)
+    fixed = next(d.value for d in app.dataframe if "榜内持仓倾向" in d.value and len(d.value) == 5)
+    seat = fixed[fixed["对象"] == label].iloc[0]
+    assert seat["多仓（手）"] == "未披露"
+    assert seat["空仓（手）"] == format(short, ",")
+    assert seat["榜内净持仓（手）"] == format(-short, "+,")
+    assert any("未披露一侧按0" in c.value for c in app.caption)
+    assert app.get("plotly_chart") and rows == original
