@@ -791,14 +791,16 @@ def _policy_unchanged(path: str | Path, expected_sha256: str) -> None:
 
 
 def snapshot_fx_baseline(policy_path: str | Path) -> dict[str, object]:
-    """Return only approved FX bytes, consistently read under the allocation lock."""
+    """Return fixed approved domain bytes consistently under the allocation lock."""
     policy, policy_sha = _load_policy(policy_path)
-    require(policy["domain"] == "foreign_fx", "baseline export is restricted to FX")
+    domain = policy["domain"]
+    require(domain in {"foreign_fx", "canola_exports", "commodity_positions"},
+            "baseline export is restricted to the scheduled allowlist")
     allocation = _protected(_under(policy["allocation_root"], ALLOCATION_ROOT))
-    contract = DOMAIN_CONTRACTS["foreign_fx"]
+    contract = DOMAIN_CONTRACTS[domain]
     with _lock(allocation):
         formal = _under(allocation / contract["domain_dir"], allocation)
-        if formal.exists():
+        if domain == "foreign_fx" and formal.exists():
             require(set(_file_set(_protected_tree(formal))) <= {"daily.json", "source_evidence.json", "status.json"},
                     "FX baseline has unmanaged files")
         files, contents = {}, {}
@@ -817,7 +819,8 @@ def snapshot_fx_baseline(policy_path: str | Path) -> dict[str, object]:
                 contents[relative] = base64.b64encode(raw).decode("ascii")
         require(len({value is None for value in files.values()}) == 1, "FX baseline incomplete")
         _policy_unchanged(policy_path, policy_sha)
-        return {"schema_version": "foreign-fx-baseline-snapshot/1", "domain": "foreign_fx",
+        return {"schema_version": ("foreign-fx-baseline-snapshot/1" if domain == "foreign_fx"
+                                   else "production-domain-baseline-snapshot/1"), "domain": domain,
                 "policy_sha256": policy_sha, "producer": policy["approved_producer"],
                 "image_id": policy["validation_image"]["image_id"], "allocation_root": str(allocation),
                 "files": files, "contents": contents}

@@ -210,6 +210,54 @@
         "kind": "CROSS_PLATFORM_TEST",
         "reason": "Pure contract or mocked transport/Git fixture; no real Windows service is required"
       }
+    },
+    "08_tests/test_first_batch_scheduled.py": {
+      "test_task_has_exact_scope_hidden_windows_and_no_overlapping_execution": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_entire_nutstore_tree_rejected_before_any_write": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_basis_rejects_sibling_source_even_when_readable": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_schema_closed_and_unrelated_modules_rejected": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_exports_refreshes_before_collection_and_persists_no_change_receipt": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_domain_snapshot_rejects_untrusted_input_before_materializing": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_windows_protected_drive_case_is_rejected_without_creating_output": {
+        "kind": "WINDOWS_REQUIRED_TEST",
+        "reason": "Real Windows drive case and protected Nutstore path semantics"
+      },
+      "test_local_consumer_does_not_require_driver_and_real_connection_still_fails_closed": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_protected_snapshot_returns_only_domain_contract_and_retains_read_only_files": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Protected fixed domain snapshot with inert filesystem and lock fixtures"
+      }
+    },
+    "08_tests/positions/test_scheduled_collection.py": {
+      "test_only_selected_implemented_sources_and_one_domestic_day": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      },
+      "test_historical_revisions_are_not_automatically_admitted": {
+        "kind": "CROSS_PLATFORM_TEST",
+        "reason": "Pure data contracts, mocked official collection and isolated local consumer checks"
+      }
     }
   }
 }

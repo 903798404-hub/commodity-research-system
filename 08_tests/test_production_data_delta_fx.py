@@ -58,7 +58,7 @@ def test_protected_snapshot_exports_only_fixed_domain_bytes_and_rejects_partial_
     (stable.parent / "unmanaged.json").write_bytes(b"{}")
     with pytest.raises(module.DeltaError, match="unmanaged"):
         module.snapshot_fx_baseline("policy")
-    policy["domain"] = "commodity_positions"
+    policy["domain"] = "brazil_soy"
     with pytest.raises(module.DeltaError, match="restricted"):
         module.snapshot_fx_baseline("policy")
 

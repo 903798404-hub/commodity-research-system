@@ -10,9 +10,6 @@ from pathlib import Path
 from typing import Callable, Iterator, Sequence, Mapping
 from types import MappingProxyType
 
-import psycopg
-from psycopg.rows import dict_row
-
 from .models import ConnectionProof, PostgresColumn, QueryPlanProof, QuerySpec, SourceBatch
 from .queries import (require_approved_query, require_approved_live_query,
                       CBOT_SOYBEAN_LIVE_QUERY, DCE_SOYMEAL_LIVE_QUERY,
@@ -21,6 +18,17 @@ from .queries import (require_approved_query, require_approved_live_query,
 
 class TankanClientError(RuntimeError):
     """Safe base error that never includes connection or query parameter values."""
+
+
+def _default_connector(**kwargs):
+    """Load the native driver only when a real database connection is requested."""
+    import psycopg
+    return psycopg.connect(**kwargs)
+
+
+def dict_row(cursor):
+    from psycopg.rows import dict_row as factory
+    return factory(cursor)
 
 
 class TankanConnectionError(TankanClientError):
@@ -108,7 +116,7 @@ class TankanClient:
         self,
         settings: TankanConnectionSettings,
         *,
-        connector: Callable[..., object] = psycopg.connect,
+        connector: Callable[..., object] = _default_connector,
     ) -> None:
         self._settings = settings
         self._connector = connector

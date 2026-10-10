@@ -1,5 +1,33 @@
 schema_version: 1
 modules:
+  automation.first_batch_scheduled:
+    code_paths:
+      - 03_src/agri_research_agent/automation/first_batch_scheduled.py
+      - 03_src/agri_research_agent/automation/positions_scheduled_collection.py
+      - 03_src/agri_research_agent/automation/scheduled_baselines.py
+      - 03_src/agri_research_agent/data_sources/tankan/client.py
+      - 04_scripts/automation/run_first_batch_scheduled.py
+      - 04_scripts/automation/launch_first_batch_scheduled.ps1
+      - 04_scripts/automation/register_first_batch_scheduled.ps1
+      - 09_deploy/production_data_delivery/activate_production_data_delta.py
+    direct_tests:
+      - 08_tests/test_first_batch_scheduled.py
+      - 08_tests/positions/test_scheduled_collection.py
+    impact_tests:
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/test_production_data_delta_fx.py
+      - 08_tests/positions/test_positions_delivery.py
+      - 08_tests/canola_exports/test_delivery_exports.py
+      - 08_tests/pipelines/test_nutstore_domestic_basis.py
+      - 08_tests/data_sources/test_nutstore_basis.py
+      - 08_tests/sugar_positions/test_positions.py
+      - 08_tests/oilseed_positions/test_oilseed_positions.py
+      - 08_tests/data_sources/tankan/test_client.py
+      - 08_tests/data_sources/tankan/test_live_queries.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: false
   positions.workspace:
     code_paths:
       - 03_src/agri_research_agent/positions
