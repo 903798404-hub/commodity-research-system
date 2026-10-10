@@ -167,7 +167,10 @@
     "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
     "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT",
     "SOYBEAN_MARGIN_ALLOW_SAVE",
-    "SOYBEAN_MARGIN_STORAGE_ROOT"
+    "SOYBEAN_MARGIN_STORAGE_ROOT",
+    "COMMODITY_IMPORT_ALLOW_SAVE",
+    "COMMODITY_IMPORT_SERVER_ENABLED",
+    "SOYBEAN_MARGIN_SUBMIT_QUOTES"
   ],
   "secret_references": [
     "tankan-reader",
@@ -1790,6 +1793,10 @@
     {
       "path": "04_scripts/import_profit/import_commodity_cnf.py",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/import_commodity_history.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [
@@ -1905,6 +1912,24 @@
       "kind": "runtime_path",
       "role": "manual-cnf",
       "relative_path": ""
+    },
+    {
+      "name": "COMMODITY_IMPORT_SERVER_ENABLED",
+      "kind": "deployment",
+      "value_type": "nonempty",
+      "candidate_value": "1"
+    },
+    {
+      "name": "COMMODITY_IMPORT_ALLOW_SAVE",
+      "kind": "deployment",
+      "value_type": "nonempty",
+      "candidate_value": "1"
+    },
+    {
+      "name": "SOYBEAN_MARGIN_SUBMIT_QUOTES",
+      "kind": "deployment",
+      "value_type": "nonempty",
+      "candidate_value": "1"
     }
   ],
   "forbidden_environment": [

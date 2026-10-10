@@ -33,6 +33,9 @@ services:
       MPLCONFIGDIR: /runtime/10_logs/matplotlib
       IMPORT_PROFIT_INTRADAY_ALLOW_CNF_SAVE: "1"
       SOYBEAN_MARGIN_ALLOW_SAVE: "1"
+      SOYBEAN_MARGIN_SUBMIT_QUOTES: ${SOYBEAN_MARGIN_SUBMIT_QUOTES:-0}
+      COMMODITY_IMPORT_SERVER_ENABLED: ${COMMODITY_IMPORT_SERVER_ENABLED:-0}
+      COMMODITY_IMPORT_ALLOW_SAVE: ${COMMODITY_IMPORT_ALLOW_SAVE:-0}
       SOYBEAN_MARGIN_STORAGE_ROOT: /runtime/import-profit/operational/cnf
       IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH: /runtime/import-profit/operational/cnf/manual_cnf_quotes.parquet
       IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT: /runtime/import-profit/operational/am-results

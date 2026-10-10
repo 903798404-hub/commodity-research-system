@@ -124,3 +124,49 @@ def test_page_history_does_not_fetch_or_recalculate_and_oil_is_separate(monkeypa
     details=next(d.value for d in app.dataframe if "原表利润 (元/吨)" in d.value.columns)
     assert details.loc[details["报价日期"].eq("2020-01-02"),"原表利润 (元/吨)"].iloc[0] == 123.45
     assert len(app.get("plotly_chart"))==12
+
+
+@pytest.mark.parametrize("commodity", ["canola", "palm"])
+def test_three_chart_default_replaces_previous_preview_layout(monkeypatch, tmp_path, commodity):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("COMMODITY_IMPORT_LOCAL_PREVIEW", "1")
+    monkeypatch.delenv("MARKET_DATA_GIT_HEAD", raising=False)
+    monkeypatch.delenv("MARKET_DATA_EXECUTION_GRANT", raising=False)
+    value, source = bundle(tmp_path, commodity)
+    history.publish_history(store.local_database(), value, source, expected_revision=None, authorize=store.authorize_local)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "05_apps"))
+    app = AppTest.from_string(f"from commodity_import_margin_page import render_commodity_import_margin_page\nfrom datetime import date\nrender_commodity_import_margin_page('{commodity}',today=date(2026,10,10))", default_timeout=15)
+    app.session_state[f"season-columns-excel-{commodity}"] = 1
+    app.run()
+    assert not app.exception
+    layout = next(s for s in app.selectbox if s.label == "每行图数")
+    assert layout.value == 3 and len(app.get("plotly_chart")) == 12
+    layout.select(2).run()
+    assert not app.exception
+    assert next(s for s in app.selectbox if s.label == "每行图数").value == 2
+
+
+def test_history_cli_uses_authorized_store_source_hash_and_revision_cas(monkeypatch, tmp_path):
+    import importlib.util
+    import json
+    value, source = bundle(tmp_path)
+    request = tmp_path / "history.json"
+    request.write_text(json.dumps(value), encoding="utf-8")
+    path = tmp_path / "authorized" / "research.sqlite3"
+    cli_path = Path(__file__).resolve().parents[1] / "04_scripts/import_profit/import_commodity_history.py"
+    spec = importlib.util.spec_from_file_location("commodity_history_cli", cli_path)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    calls = []
+    monkeypatch.setattr(cli, "database_path", lambda: path)
+    monkeypatch.setattr(cli, "authorize_write", lambda p: calls.append(p))
+    monkeypatch.setattr(sys, "argv", [str(cli_path), "--history", str(request), "--source-file", str(source)])
+    cli.main()
+    saved, revision = history.read_history(path, "canola", date(2026,10,10))
+    assert saved == value and calls and set(calls) == {path}
+    with pytest.raises(ValueError, match="另一会话"):
+        cli.main()
+    assert history.read_history(path, "canola", date(2026,10,10))[1] == revision
+    source.write_bytes(b"changed source")
+    with pytest.raises(ValueError, match="原始文件已变化"):
+        cli.main()

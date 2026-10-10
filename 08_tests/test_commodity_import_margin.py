@@ -183,7 +183,8 @@ def test_local_page_no_network_and_history_without_fabricated_prices(monkeypatch
 def test_red_table_shows_full_contract_identity_and_missing_values():
     from commodity_import_margin_page import daily_html
     html = daily_html(model.daily_rows(DAY,"canola",{}),"canola")
-    assert "CZCE:RM:2027-09" in html
+    assert "2709" in html
+    assert str(model.contracts(DAY, "canola", 4)[0]) == "CZCE:RM:2027-09"
     assert "background:#ba2924" in html
     assert "<td>--</td>" in html and "nan" not in html
 

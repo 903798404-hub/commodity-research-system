@@ -133,4 +133,4 @@ CMD ["streamlit", "run", "05_apps/streamlit_app.py", "--server.address=0.0.0.0",
 
 COPY ["03_src/agri_research_agent/commodity_import_margin/__init__.py", "03_src/agri_research_agent/commodity_import_margin/charts.py", "03_src/agri_research_agent/commodity_import_margin/history.py", "03_src/agri_research_agent/commodity_import_margin/inputs.py", "03_src/agri_research_agent/commodity_import_margin/live.py", "03_src/agri_research_agent/commodity_import_margin/manual.py", "03_src/agri_research_agent/commodity_import_margin/model.py", "03_src/agri_research_agent/commodity_import_margin/runtime.py", "03_src/agri_research_agent/commodity_import_margin/store.py", "/app/03_src/agri_research_agent/commodity_import_margin/"]
 COPY ["05_apps/commodity_import_margin_page.py", "/app/05_apps/"]
-COPY ["04_scripts/import_profit/capture_commodity_import.py", "04_scripts/import_profit/import_commodity_cnf.py", "/app/04_scripts/import_profit/"]
+COPY ["04_scripts/import_profit/capture_commodity_import.py", "04_scripts/import_profit/import_commodity_cnf.py", "04_scripts/import_profit/import_commodity_history.py", "/app/04_scripts/import_profit/"]

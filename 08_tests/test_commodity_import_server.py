@@ -20,18 +20,19 @@ NOW = datetime(2026, 10, 12, 9, 30, tzinfo=live.SHANGHAI)
 def server(monkeypatch, tmp_path):
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
     monkeypatch.setenv("COMMODITY_IMPORT_SERVER_ENABLED", "1")
+    monkeypatch.setenv("COMMODITY_IMPORT_ALLOW_SAVE", "1")
     monkeypatch.setenv("MARKET_DATA_GIT_HEAD", "a" * 40)
-    monkeypatch.setattr(soybean_runtime, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime, "ROOT", tmp_path)
     identity = SimpleNamespace(classification=RuntimeClassification.CANDIDATE_VALIDATION,
                                module_id="shared-intraday")
-    monkeypatch.setattr(soybean_runtime, "load_runtime_identity", lambda _: identity)
+    monkeypatch.setattr(runtime, "load_runtime_identity", lambda _: identity)
     calls = []
-    monkeypatch.setattr(soybean_runtime, "establish_application_service_context",
+    monkeypatch.setattr(runtime, "establish_application_service_context",
                         lambda **kw: calls.append(kw) or "verified-service")
-    monkeypatch.setattr(soybean_runtime, "assert_runtime_write",
+    monkeypatch.setattr(runtime, "assert_runtime_write",
                         lambda ctx, p: calls.append((ctx, p)))
-    path = tmp_path / soybean_runtime.RELATIVE
-    path.parent.mkdir(parents=True)
+    path = tmp_path / runtime.STORAGE / "research.sqlite3"
+    (tmp_path / runtime.STORAGE.parent).mkdir(parents=True)
     return path, calls, identity
 
 
@@ -60,25 +61,26 @@ def test_protected_server_store_needs_no_windows_path_and_shares_only_declared_d
     assert selected == path and allowed and authorize is runtime.authorize_server
     assert calls[0] == dict(service_id="spread-dashboard", module_id="shared-intraday", runtime_root=tmp_path)
     assert not path.exists()
-    with pytest.raises(ValueError, match="路径"):
+    with pytest.raises(ValueError, match="独立业务库"):
         authorize(tmp_path / "research.sqlite3")
 
 
 def test_opt_in_and_preview_flags_do_not_bypass_server_credential(monkeypatch, tmp_path):
     path, _, identity = server(monkeypatch, tmp_path)
-    monkeypatch.setenv("COMMODITY_IMPORT_LOCAL_PREVIEW", "1")
     monkeypatch.setenv("SOYBEAN_MARGIN_LOCAL_PREVIEW", "1")
     monkeypatch.delenv("COMMODITY_IMPORT_SERVER_ENABLED")
     with pytest.raises(ValueError, match="尚未启用"):
         runtime.authorize_server(path)
     monkeypatch.setenv("COMMODITY_IMPORT_SERVER_ENABLED", "1")
+    monkeypatch.setenv("COMMODITY_IMPORT_ALLOW_SAVE", "1")
     identity.module_id = "other-service"
-    with pytest.raises(ValueError, match="运行身份"):
+    with pytest.raises(ValueError, match="身份或模块"):
         runtime.authorize_server(path)
     identity.module_id = "shared-intraday"
     def denied(**_):
         raise RuntimeError("protected credential missing")
-    monkeypatch.setattr(soybean_runtime, "establish_application_service_context", denied)
+    monkeypatch.setattr(runtime, "establish_application_service_context", denied)
+    monkeypatch.setattr(runtime, "assert_runtime_write", lambda *_: None)
     with pytest.raises(RuntimeError, match="credential missing"):
         store.save_cnf(path, NOW.date(), "palm", dict.fromkeys(range(1,13)), 0, authorize=runtime.authorize_server)
     assert not path.exists()
@@ -87,6 +89,7 @@ def test_opt_in_and_preview_flags_do_not_bypass_server_credential(monkeypatch, t
 def test_server_switch_without_deployed_identity_never_falls_back_to_local(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("COMMODITY_IMPORT_SERVER_ENABLED", "1")
+    monkeypatch.setenv("COMMODITY_IMPORT_ALLOW_SAVE", "1")
     for name in ("MARKET_DATA_GIT_HEAD", "MARKET_DATA_EXECUTION_GRANT"):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(ValueError, match="受保护"):
@@ -255,3 +258,23 @@ def test_daily_worker_accepts_new_eight_contract_set_and_rejects_ambiguous_symbo
     for bad in (symbols + ["M2901"], ["M2701", "M2701"], ["M0"], ["RM705"], [None]):
         with pytest.raises(ValueError, match="contract_set_invalid"):
             api_sources.domestic(bad)
+
+
+@pytest.mark.parametrize("commodity", ["canola", "palm"])
+def test_disabled_server_capture_keeps_page_readable_and_does_not_fetch(monkeypatch, tmp_path, commodity):
+    server(monkeypatch, tmp_path)
+    monkeypatch.delenv("COMMODITY_IMPORT_SERVER_ENABLED", raising=False)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "05_apps"))
+    import commodity_import_margin_page as page
+    monkeypatch.setattr(page, "capture_live", lambda *_: pytest.fail("disabled capture must not fetch"))
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(page, "datetime", Clock)
+    code = f"import commodity_import_margin_page as page\nfrom datetime import date\npage._refresh_live('{commodity}', date(2026,10,12))\npage.render_commodity_import_margin_page('{commodity}',today=date(2026,10,12))"
+    app = AppTest.from_string(code).run()
+    assert not app.exception
+    assert next(b for b in app.button if b.label == "保存CNF").disabled
+    assert next(b for b in app.button if b.label == "刷新国内盘面与汇率").disabled
+    assert any("服务器取价入口尚未启用" in w.value for w in app.warning)

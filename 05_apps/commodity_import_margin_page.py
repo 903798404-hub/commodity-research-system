@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from html import escape
-import os
 import sqlite3
 from zoneinfo import ZoneInfo
 
@@ -17,7 +16,7 @@ from agri_research_agent.commodity_import_margin.charts import build_seasonal_ch
 from agri_research_agent.commodity_import_margin.store import (
     SOURCE, load_cnf, save_cnf, read_market, history_dates, cnf_provenance,
 )
-from agri_research_agent.commodity_import_margin.runtime import storage_context, deployed
+from agri_research_agent.commodity_import_margin.runtime import storage_context, capture_enabled
 
 
 def _live_key(commodity, day):
@@ -27,6 +26,9 @@ def _live_key(commodity, day):
 def _refresh_live(commodity, day):
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     key = _live_key(commodity, day)
+    if not capture_enabled():
+        st.session_state[key] = dict(snapshot=None, error="服务器取价入口尚未启用。")
+        return
     if day != today:
         st.session_state[key] = dict(snapshot=None, error="历史日期不使用当前行情重算，读取当日已保存行情。")
         return
@@ -55,12 +57,15 @@ def _table(rows, commodity):
     records = []
     for r in rows:
         record = {"船期":r["shipment_period"], "CNF ($/吨)":r["cnf_usd_per_tonne"], "汇率":r["fx_value"]}
+        contract_code = " / ".join(dict.fromkeys(
+            f"{year[-2:]}{month}" for year, month in
+            (code.rsplit(":", 1)[-1].split("-") for code in r["domestic_contracts"])))
         if commodity == "canola":
-            record.update({"国内合约":" / ".join(r["domestic_contracts"]), "菜粕盘面":r["domestic_prices"][0],
+            record.update({"国内合约":contract_code, "菜粕盘面":r["domestic_prices"][0],
                            "菜油盘面":r["domestic_prices"][1]})
         record.update({"关税%":PROFILES[commodity]["tariff"]*100, "增值税%":9., "完税成本 (元/吨)":r["duty_paid_cost"]})
         if commodity == "palm":
-            record.update({"国内合约":" / ".join(r["domestic_contracts"]), "内盘价格":r["domestic_prices"][0]})
+            record.update({"国内合约":contract_code, "内盘价格":r["domestic_prices"][0]})
         record["盘面榨利 (元/吨)" if commodity == "canola" else "进口利润 (元/吨)"] = r["net_margin"]
         records.append(record)
     return pd.DataFrame(records)
@@ -102,7 +107,7 @@ def _render_seasonal_history(rows, commodity, as_of, *, source):
         years = st.multiselect("对比年份", available_years, default=available_years[:6],
                                key=f"season-years-{source}-{commodity}")
     with controls[1]:
-        per_row = st.selectbox("每行图数", [3, 2, 1], key=f"season-columns-{source}-{commodity}")
+        per_row = st.selectbox("每行图数", [3, 2, 1], index=0, key=f"season-columns-v2-{source}-{commodity}")
     if available_years and not years:
         st.info("请选择至少一个对比年份。")
         return
@@ -165,9 +170,6 @@ def render_commodity_import_margin_page(commodity: str, *, today: date | None = 
     today = today or datetime.now(ZoneInfo("Asia/Shanghai")).date()
     profile = PROFILES[commodity]
     st.title(f"{profile['label']}进口{'盘面净榨利' if commodity == 'canola' else '利润'}")
-    if deployed() and os.getenv("COMMODITY_IMPORT_SERVER_ENABLED") != "1":
-        st.info("菜籽和棕油服务器入口尚未启用。")
-        return
     st.caption("未来12个月船期 · 当月行表示次年同月 · CNF为美元/吨完整报价")
     st.caption("确认CNF输入后自动刷新国内合约与CFETS在岸USD/CNY；汇率同大豆：近1—2个月即期，3个月起远期。")
     day = st.date_input("业务日期", value=today, max_value=today, key=f"import-date-{commodity}")
@@ -203,7 +205,7 @@ def render_commodity_import_margin_page(commodity: str, *, today: date | None = 
     else:
         st.info("所选日期暂无已保存行情。录入CNF后自动获取国内盘面与汇率，缺失的输入保持空值。")
     if day == today:
-        st.button("刷新国内盘面与汇率", key=f"import-live-refresh-{commodity}", on_click=_refresh_live, args=(commodity, day))
+        st.button("刷新国内盘面与汇率", key=f"import-live-refresh-{commodity}", disabled=not capture_enabled(), on_click=_refresh_live, args=(commodity, day))
     rows = daily_rows(day, commodity, cnf, snapshot)
     editor = pd.DataFrame({"船期": [r["shipment_period"] for r in rows],
                            "CNF": pd.Series([r["cnf_usd_per_tonne"] for r in rows], dtype="float64")})
