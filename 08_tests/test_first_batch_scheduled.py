@@ -3,6 +3,8 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import json
+import hashlib
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -10,6 +12,112 @@ import pytest
 from agri_research_agent.automation import first_batch_scheduled as jobs
 from agri_research_agent.automation import scheduled_baselines as baselines
 from agri_research_agent.data_sources import nutstore_basis as nutstore
+
+
+def _public_copy_fixture(tmp_path, monkeypatch, *, changed=False, large=False):
+    cache = tmp_path / "approved-package"
+    source = cache / "data/test/history.bin"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"verified immutable history")
+    entry = {"path": "test/history.bin", **jobs.delivery._identity(source)}
+    old = {"files": [entry], "package_id": "public-current-old"}
+    (cache / "manifest.json").write_bytes(jobs.delivery.canonical_json_bytes(old))
+    value = {"baseline_package": str(cache), "baseline_manifest_sha256": jobs.delivery.sha256_file(cache / "manifest.json"),
+             "ssh_target": "verified-host", "remote_store_root": "/var/lib/market-data/production-runtime/test/public"}
+    downloaded = b"verified new report"
+    new = {"files": [{"path": "test/new.bin", "sha256": hashlib.sha256(downloaded).hexdigest(),
+                     "size_bytes": 132182680 if large else len(downloaded)}] if changed else [entry],
+           "package_id": "public-current-new"}
+    raw = jobs.delivery.canonical_json_bytes(new)
+    pointer = {"package_id": new["package_id"]}
+    monkeypatch.setattr(jobs.delivery, "_public_pointer", lambda _: pointer)
+    monkeypatch.setattr(jobs.delivery, "_check_public_pointer", lambda p, m: None)
+    monkeypatch.setattr(jobs.delivery, "_remote_hash", lambda *_: hashlib.sha256(raw).hexdigest())
+    from agri_research_agent.pipelines import public_data_delivery
+    monkeypatch.setattr(public_data_delivery, "validate_production_package",
+                        lambda root: SimpleNamespace(manifest=json.loads((root / "manifest.json").read_bytes())))
+    transfers = []
+    def transport(args, **kwargs):
+        if args[0] == "ssh":
+            return SimpleNamespace(stdout=raw)
+        assert args[0] == "scp"
+        transfers.append(kwargs["timeout"])
+        # Simulate a valid large report on the measured slow link, without
+        # allocating 132 MiB in a control-flow test.
+        if large and kwargs["timeout"] < 250:
+            raise jobs.delivery.ProductionDataError("simulated large transfer exceeded bound")
+        Path(args[-1]).write_bytes(downloaded)
+        return SimpleNamespace(stdout=b"")
+    monkeypatch.setattr(jobs.delivery, "_run", transport)
+    if large:
+        original = jobs.delivery._identity
+        monkeypatch.setattr(jobs.delivery, "_identity",
+            lambda path: {"sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(), "size_bytes": 132182680}
+            if Path(path).name == "new.bin" else original(path))
+    return value, cache, source, transfers, pointer
+
+
+def test_public_refresh_reuses_only_verified_unchanged_bytes_and_keeps_input_read_only(tmp_path, monkeypatch):
+    value, cache, source, transfers, _ = _public_copy_fixture(tmp_path, monkeypatch)
+    before = {p.relative_to(cache): p.read_bytes() for p in cache.rglob("*") if p.is_file()}
+    result = baselines.public_baseline(value, tmp_path / "fresh")
+    assert (result / "data/test/history.bin").read_bytes() == source.read_bytes()
+    assert not transfers
+    assert before == {p.relative_to(cache): p.read_bytes() for p in cache.rglob("*") if p.is_file()}
+
+
+def test_public_refresh_accepts_valid_large_slow_transfer_with_finite_bound(tmp_path, monkeypatch):
+    value, _, _, transfers, _ = _public_copy_fixture(tmp_path, monkeypatch, changed=True, large=True)
+    result = baselines.public_baseline(value, tmp_path / "fresh")
+    assert (result / "data/test/new.bin").read_bytes() == b"verified new report"
+    assert len(transfers) == 1 and 250 < transfers[0] <= 1200
+
+
+def test_public_refresh_rejects_corrupt_cache_without_falling_back_to_network(tmp_path, monkeypatch):
+    value, _, source, transfers, _ = _public_copy_fixture(tmp_path, monkeypatch)
+    source.write_bytes(b"external cache corruption")
+    with pytest.raises(ValueError, match="cached baseline file differs"):
+        baselines.public_baseline(value, tmp_path / "fresh")
+    assert not transfers
+
+
+def test_public_refresh_still_rejects_a_moved_formal_pointer(tmp_path, monkeypatch):
+    value, _, _, _, pointer = _public_copy_fixture(tmp_path, monkeypatch)
+    pointers = iter([pointer, {"package_id": "public-current-other"}])
+    monkeypatch.setattr(jobs.delivery, "_public_pointer", lambda _: next(pointers))
+    with pytest.raises(ValueError, match="moved while copying"):
+        baselines.public_baseline(value, tmp_path / "fresh")
+
+
+def test_public_refresh_exhausted_total_budget_stops_before_next_copy(tmp_path, monkeypatch):
+    value, _, _, transfers, _ = _public_copy_fixture(tmp_path, monkeypatch, changed=True)
+    clock = iter([0, 2701])
+    monkeypatch.setattr(baselines.time, "monotonic", lambda: next(clock))
+    with pytest.raises(ValueError, match="time budget exhausted"):
+        baselines.public_baseline(value, tmp_path / "fresh")
+    assert not transfers
+
+
+def test_protected_host_entry_keeps_business_imports_read_only_without_caller_bytecode_flag(tmp_path):
+    import subprocess
+    module = tmp_path / "readonly_business_probe.py"
+    module.write_text("VALUE = 1\n", encoding="utf-8")
+    code = """
+import runpy, sys
+from pathlib import Path
+assert not sys.dont_write_bytecode
+runpy.run_path(sys.argv[1], run_name='protected_host_probe')
+sys.path.insert(0,sys.argv[2])
+import readonly_business_probe
+assert readonly_business_probe.VALUE == 1 and sys.dont_write_bytecode
+assert not (Path(sys.argv[2])/'__pycache__').exists()
+print('READ_ONLY_IMPORT_PASS')
+"""
+    result = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", code,
+        str(jobs.delivery.ROOT / "09_deploy/production_data_delivery/activate_production_data_delta.py"),
+        str(tmp_path)],capture_output=True,text=True,timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "READ_ONLY_IMPORT_PASS"
 
 
 def config(tmp_path, job="canola_exports"):

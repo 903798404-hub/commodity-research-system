@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import base64
+import math
+import shutil
+import time
 from pathlib import Path, PurePosixPath
 
 from agri_research_agent.automation import production_data_delta as delivery
@@ -13,7 +16,7 @@ def domain_baseline(config, work, domain, schema):
     delivery.require(delivery._remote_hash(config, config["publisher"]) == config["publisher_sha256"]
                      and delivery._remote_hash(config, policy) == config["policy_sha256"][domain],
                      "scheduled host pins differ")
-    result = delivery.strict_json(delivery._ssh(config, ["sudo", "-n", "python3", "-I",
+    result = delivery.strict_json(delivery._ssh(config, ["sudo", "-n", "python3", "-I", "-B",
         config["publisher"], "snapshot-baseline", "--policy", policy]))
     delivery.require(set(result) == {"schema_version", "domain", "policy_sha256", "producer",
         "image_id", "allocation_root", "files", "contents"}
@@ -59,6 +62,14 @@ def public_baseline(config, destination):
     """Download exactly the active immutable package; confirm hashes and pointer twice."""
     from agri_research_agent.pipelines.public_data_delivery import validate_production_package
     destination = assert_external_output(destination)
+    cache = assert_external_output(delivery._absolute(config["baseline_package"]))
+    delivery.require(not destination.is_relative_to(cache) and not cache.is_relative_to(destination),
+                     "public baseline output overlaps approved input")
+    delivery.require(delivery.sha256_file(cache / "manifest.json") == config["baseline_manifest_sha256"],
+                     "approved public baseline manifest differs")
+    cached = validate_production_package(cache)
+    cached_files = {entry["path"]: entry for entry in cached.manifest["files"]}
+    deadline = time.monotonic() + 2700
     pointer = delivery._public_pointer(config)
     remote = config["remote_store_root"] + "/releases/" + pointer["package_id"]
     raw = delivery._run(["ssh", *delivery.SSH_OPTIONS, "-T", config["ssh_target"],
@@ -88,10 +99,22 @@ def public_baseline(config, destination):
     for item in entries:
         target = root / "data" / item["path"]
         target.parent.mkdir(parents=True, exist_ok=True)
-        delivery._run(["scp", *delivery.SSH_OPTIONS, "--", config["ssh_target"] + ":" + remote +
-                       "/data/" + item["path"], str(target)], timeout=180)
-        delivery.require(delivery._identity(target) == {k: item[k] for k in ("sha256", "size_bytes")},
+        remaining = deadline - time.monotonic()
+        delivery.require(remaining > 0, "public baseline copy time budget exhausted")
+        identity = {k: item[k] for k in ("sha256", "size_bytes")}
+        if cached_files.get(item["path"]) == item:
+            source = delivery._unlinked(cache / "data" / item["path"])
+            delivery.require(delivery._identity(source) == identity, "approved cached baseline file differs")
+            shutil.copyfile(source, target)
+        else:
+            # A 132 MiB immutable baseline needs over 180 seconds on a 5 Mbps
+            # link. Size-aware bounds still fit the task's 90 minute deadline.
+            timeout = min(remaining, 1200, max(180, 60 + math.ceil(item["size_bytes"] / (256 * 1024))))
+            delivery._run(["scp", *delivery.SSH_OPTIONS, "--", config["ssh_target"] + ":" + remote +
+                           "/data/" + item["path"], str(target)], timeout=timeout)
+        delivery.require(delivery._identity(target) == identity,
                          "public baseline transferred file differs")
+    delivery.require(time.monotonic() < deadline, "public baseline copy time budget exhausted")
     delivery.require(delivery._public_pointer(config) == pointer, "public baseline moved while copying")
     validate_production_package(root)
     return root

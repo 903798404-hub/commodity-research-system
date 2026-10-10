@@ -724,7 +724,7 @@ def invoke_publisher(config: dict, candidate: Path) -> dict:
     names = [MANIFEST_NAME, *sorted(manifest["payloads"])]
     require({p.name for p in candidate.iterdir()} == set(names), "candidate upload contains unexpected files")
     _run(["scp", *SSH_OPTIONS, "--", *[str(candidate / name) for name in names], config["ssh_target"] + ":" + staging + "/"])
-    command = ["sudo", "-n", "python3", "-I", config["publisher"]]
+    command = ["sudo", "-n", "python3", "-I", "-B", config["publisher"]]
     sealed = strict_json(_ssh(config, [*command, "stage-upload", "--policy", policy,
                                       "--upload", staging, "--manifest-sha256", expected_sha]))
     require(sealed.get("status") == "SEALED" and sealed.get("transfer_manifest_sha256") == expected_sha and

@@ -24,6 +24,10 @@ import sys
 import tempfile
 import uuid
 
+# Protected publisher imports must never alter its pinned source checkout,
+# including when an operator invokes the host entry without Python -B.
+sys.dont_write_bytecode = True
+
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_NAME = "delta_contract.json"
