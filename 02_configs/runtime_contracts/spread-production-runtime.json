@@ -1722,6 +1722,26 @@
     {
       "path": "05_apps/sugar_positions_page.py",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/latest_quotes.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_margin/reference.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/oilseed_positions/stock_api.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/positions/server_collection.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/positions/collect_server_positions.py",
+      "role": "entrypoint"
     }
   ],
   "environment_bindings": [

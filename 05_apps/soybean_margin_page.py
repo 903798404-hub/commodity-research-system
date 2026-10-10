@@ -24,6 +24,7 @@ from agri_research_agent.soybean_margin.model import digest
 from agri_research_agent.soybean_margin.charts import build_margin_charts, _pm_seasonal_figure
 from agri_research_agent.soybean_margin.store import load, save, read_all
 from agri_research_agent.soybean_margin.runtime import validate_cnf_write
+from agri_research_agent.soybean_margin.reference import submit, read_latest
 
 TITLE = "日度进口大豆盘面净榨利"
 SOURCE_DIR = Path(__file__).parent / "soybean_margin_assets"
@@ -238,6 +239,7 @@ def render_soybean_margin_page(history_root: str | Path | None):
         st.info("请选择周一至周五的业务日期。")
     rows = daily_rows(data, day, origin, overrides)
     allowed = bool(database) and os.getenv("SOYBEAN_MARGIN_ALLOW_SAVE") == "1" and day.weekday() < 5
+    submit_quotes = os.getenv('SOYBEAN_MARGIN_SUBMIT_QUOTES') == '1'
     with st.popover("录入 / 预览 CNF", use_container_width=False):
         st.caption("只编辑CNF；0为平水报价，留空为缺失。计算参数保持固定。")
         frame = pd.DataFrame({"船期": [r["shipment_period"] for r in rows],
@@ -251,7 +253,11 @@ def render_soybean_margin_page(history_root: str | Path | None):
         if st.button("保存CNF", disabled=not allowed, key="soy-margin-save"):
             try:
                 validate_cnf_write(database)
-                save(database, day, origin, proposed, revision)
+                if submit_quotes:
+                    with st.spinner('CNF已提交，正在读取盘面报价…'):
+                        submit(database, day, origin, proposed, revision)
+                else:
+                    save(database, day, origin, proposed, revision)
                 st.success("CNF已保存。")
                 st.rerun()
             except (OSError, ValueError, sqlite3.Error, RuntimeError) as exc:
@@ -259,6 +265,21 @@ def render_soybean_margin_page(history_root: str | Path | None):
         if not allowed:
             st.caption("当前仅支持会话预览；正式保存入口尚未启用。")
     components.html(daily_html(rows, ORIGINS[origin], day), height=640, scrolling=True)
+    if submit_quotes and database:
+        st.markdown('#### CNF提交时读取行情的参考榨利')
+        try:
+            reference = read_latest(database, day, origin, revision)
+            if reference and reference['rows']:
+                st.caption(f"提交时间：{reference['submitted_at']} · 各行情可能延迟；美豆报价时间尚未确认。")
+                components.html(daily_html(reference['rows'], ORIGINS[origin], day), height=640, scrolling=True)
+                with st.expander('本次行情时间与缺失状态'):
+                    st.json(reference['quotes'])
+            elif reference:
+                st.info('CNF已保存，本次未取得参考行情：' + (reference['error'] or '行情缺失'))
+            else:
+                st.info('当前CNF版本尚无提交时行情记录。')
+        except (ValueError, OSError, sqlite3.Error, KeyError):
+            st.error('提交时行情记录校验失败。')
     for title, matrix in zip(("大豆历史 CNF 报价", "中国进口大豆历史盘面净榨利"),
                              _history_tables(view_args, origin)):
         st.markdown(f"#### {title} · {ORIGINS[origin]}")
