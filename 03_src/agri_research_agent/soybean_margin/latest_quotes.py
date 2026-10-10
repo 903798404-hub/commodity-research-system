@@ -32,7 +32,6 @@ def response_bytes(response, limit=MAX_BYTES):
 
 
 def domestic(symbols, *, session=requests, now=None, max_age_seconds=3600):
-    now = now or stamp()
     if not symbols or any(not re.fullmatch(r'[MY]\d{4}', s) for s in symbols):
         raise SourceError('domestic_contract_invalid')
     # Use Sina's upstream directly; preserves appended fields and the omitted date.
@@ -40,6 +39,8 @@ def domestic(symbols, *, session=requests, now=None, max_age_seconds=3600):
                      headers={'Referer': 'https://vip.stock.finance.sina.com.cn/'},
                      timeout=(5, 10), stream=True) as response:
         raw = response_bytes(response, 65536)
+    # Quotes can advance while the response is in flight.
+    now = now or stamp()
     matches = re.findall(r'var hq_str_nf_([A-Z]+\d{4})="([^"\r\n]*)";', raw.decode('gb18030'))
     if len({s for s, _ in matches}) != len(matches) or any(s not in symbols for s, _ in matches):
         raise SourceError('domestic_identity_invalid')
