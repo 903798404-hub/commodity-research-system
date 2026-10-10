@@ -75,6 +75,35 @@ def test_secret_parser_and_child_environment_are_closed_and_do_not_preserve_unre
     with pytest.raises(module.ProductionDataError): module.safe_child_environment({"UNAPPROVED": "x"})
 
 
+@pytest.mark.parametrize("binary", [False, True])
+def test_child_without_payload_closes_inherited_input_that_never_reaches_eof(monkeypatch, binary):
+    module = load_module()
+    real_run = subprocess.run
+    reader, writer = os.pipe()
+    def task_console(command, **kwargs):
+        # An open writer reproduces a scheduler input stream with no EOF.
+        kwargs.setdefault("stdin", reader)
+        return real_run(command, **kwargs)
+    monkeypatch.setattr(module.subprocess, "run", task_console)
+    try:
+        result = module._run([sys.executable, "-I", "-B", "-c",
+            "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read() + b'EOF')"],
+            timeout=3, binary=binary)
+        assert result.stdout == (b"EOF" if binary else "EOF")
+    finally:
+        os.close(reader)
+        os.close(writer)
+
+
+@pytest.mark.parametrize("payload", ["", "{\"source\":\"正式输入\"}\n", b"", b"\x00\xff\n"])
+def test_explicit_child_payload_is_transferred_exactly(payload):
+    module = load_module()
+    result = module._run([sys.executable, "-I", "-B", "-c",
+        "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+        timeout=3, input=payload, binary=isinstance(payload, bytes))
+    assert result.stdout == payload
+
+
 def test_baseline_requires_pinned_manifest_exact_bytes_and_no_extra_files(tmp_path: Path):
     module = load_module(); root = tmp_path / "baseline"; root.mkdir()
     payload = root / "historical_price_long.xlsx"; payload.write_bytes(b"baseline")

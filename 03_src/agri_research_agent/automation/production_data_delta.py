@@ -186,6 +186,10 @@ def _run(command: list[str], *, cwd: Path | None = None, env: dict | None = None
         command = [str(executable), *command[1:]]
     try:
         result = subprocess.run(command, cwd=cwd, env=env or safe_child_environment(), input=input,
+                                # Native Windows tasks can inherit a console input
+                                # that keeps OpenSSH waiting after the remote read.
+                                # Explicit payloads still use subprocess.run's pipe.
+                                **({"stdin": subprocess.DEVNULL} if input is None else {}),
                                 capture_output=True, text=not binary,
                                 **({"encoding": "utf-8", "errors": "strict"} if not binary else {}),
                                 timeout=timeout, check=False)
