@@ -397,7 +397,6 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
     host, engine, pre = backend.host, backend.engine, backend.pre
     module = load(backend.host.SOURCE_ROOT, '09_deploy/runtime_identity/recovery_namespace.py', '_execution_rehearsal')
     old = host._load_policy(baseline_policy_path)
-    assert 'application_service' not in old  # Historical old image uses its existing path.
     nonce = uuid.uuid4().hex
     root = module.SANDBOX_PARENT / nonce
     module.SANDBOX_PARENT.mkdir(parents=True, exist_ok=True)
@@ -411,14 +410,22 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
         sandbox=dict(mode='isolated-rehearsal', root=str(root), roots=[dict(production_source=s,
             sandbox_source=str(root / ('root-' + str(i))), initialization='COPY_CURRENT_STATE_REQUIRED', uid=65532, gid=65532,
             mode=0o755) for i, s in enumerate(writable)]))
+    if 'application_service' in old:
+        module.CREDENTIAL_PARENT.mkdir(parents=True, exist_ok=True)
+        policy['recovery']['application_service_credential_source'] = str(
+            module.CREDENTIAL_PARENT / nonce / 'service-secret' / 'credential.json')
     policy['mounts'] = [dict(m, source=str(grants)) if m['target'] == '/run/market-data-grants' else m
-        for m in module.sandbox_mounts(host, policy, old, check_files=False)]
+        for m in module.project_mounts(host, policy, old, check_files=False)]
+    if 'application_service' in old:
+        module.allocate_service_credential(host, policy)
     built = module.build_sandbox(host, policy)
     replacement = {i['production_source']: i['sandbox_source'] for i in policy['recovery']['sandbox']['roots']}
     replacement[next(m['source'] for m in old['mounts'] if m['target'] == '/run/market-data-grants')] = str(grants)
     env_values = {k: replacement.get(v, v) for k, v in values.items()}
     env_values['SPREAD_IMAGE'] = old['image_id']
     env_values['SPREAD_GRANT_ROOT'] = str(grants)
+    if 'application_service' in old:
+        env_values['SPREAD_SERVICE_CREDENTIAL_FILE'] = policy['recovery']['application_service_credential_source']
     env = work / 'rehearsal.env'
     write(env, ''.join(f'{k}={v}\n' for k, v in env_values.items()).encode())
     policy['compose_environment_file'] = str(env)
@@ -440,6 +447,12 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
         compose_project_directory=str(source), rendered_compose_sha256=host._digest(host._json(run(*command, 'config', '--format', 'json').encode())))
     path = save(work, 'rehearsal-policy.json', policy)
     pre.revalidate_production(fresh, path, work / 'rehearsal-pre-release.json')
+    if 'application_service' in old:
+        # Existing issuer creates a distinct bearer bound to the actual fresh ID.
+        # The original production secret remains untouched and never supplies this grant.
+        secret = policy['recovery']['application_service_credential_source']
+        host.issue_application_service_credential(fresh, expected_policy_path=path,
+            credential_path=secret, role='production')
     envelope = host.issue_execution_grant(fresh, expected_policy_path=path, key_path=production_key,
         grant_path=grants / 'grant.json', grant_dir=grants, role='production')
     grant = save(work, 'rehearsal-grant-evidence.json', envelope)
@@ -463,6 +476,53 @@ def rehearsal(work, backend, baseline_policy_path, cid, sources, values, product
         probe = dict(container_id=fresh, commit=old['approved_commit'], tree=old['approved_tree'], image_id=c['Image'], exit_code=0, status='PASS', raw=ref(raw))
         probes[name] = ref(save(work, name + '-probe.json', probe))
     return dict(instance=ref(instance), grant=ref(grant), **probes), ref(path), fresh, root, network
+
+
+def application_service_rehearsal(work, tool, source, image_evidence, record, key_id, key_path):
+    """Actual Hosted Docker service credential issuance plus production-domain recovery."""
+    execution = load(tool, '09_deploy/spread_release/high_risk_execution.py', '_service_recovery_execution')
+    backend = execution.HostBackend(directory(work / 'baseline-receipts', 0o700))
+    allocation, sources, values = runtime_inputs(work, source, source, backend.host)
+    spec_path, policy = instance(work, 'baseline', source, image_evidence, record, backend.host,
+        backend.engine, allocation, sources, values, key_id, key_path)
+    assert 'application_service' in policy
+    execution.credential_preparation(backend.host, policy, '65532:65532', prepare=True)
+    asset = dict(identity(source), image_id=image_evidence['image_id'])
+    seed = dict(tool=identity(tool), primary_rollback=asset, instances=dict(primary_rollback=ref(spec_path)),
+        project_id=PROJECT, policy=dict(start_timeout_seconds=60, readiness=execution.contract().DEFAULT_READINESS_POLICY))
+    cid = fresh = network = None
+    try:
+        backend._prepare_session(seed, 'primary_rollback')
+        backend.create(seed, 'primary_rollback'); backend.authorize(seed, 'primary_rollback'); backend.start(seed, 'primary_rollback')
+        cid = backend.sessions['primary_rollback'].container_id
+        initialize_baseline_font_cache(work, backend, cid)
+        backend.accept(seed, 'primary_rollback')
+        baseline = copy.deepcopy(backend.sessions['primary_rollback'].current_policy)
+        c = backend.host.docker_inspect(cid)
+        baseline['actual_config_sha256'] = backend.host.normalize_observation(c,
+            backend.host.docker_image_inspect(c['Image']), backend.host.copy_container_json(cid))['actual_config_sha256']
+        baseline_path = save(work, 'baseline-policy.json', baseline)
+        old_secret = Path(next(m['source'] for m in baseline['mounts'] if m['target'] == '/run/secrets/market-data-service.json'))
+        original_secret_sha = hashlib.sha256(old_secret.read_bytes()).hexdigest()
+        evidence, recovery_policy, fresh, sandbox, network = rehearsal(work, backend, baseline_path, cid, sources, values, key_path)
+        assert hashlib.sha256(old_secret.read_bytes()).hexdigest() == original_secret_sha
+        recovered = backend.read(recovery_policy)
+        new_secret = Path(recovered['recovery']['application_service_credential_source'])
+        credential = json.loads(new_secret.read_bytes())
+        assert credential['container_id'] == fresh and credential['container_id'] != cid
+        assert hashlib.sha256(new_secret.read_bytes()).hexdigest() != original_secret_sha
+        observation = dict(schema_version='production-recovery-observation/1', base=identity(source), target=identity(source),
+            old_image_id=asset['image_id'], runtime_config_sha256='a'*64, data_schema_sha256='b'*64,
+            method='fresh-recovery', observed_at=datetime.now(timezone.utc).isoformat(), result='PASS',
+            evidence=evidence, recovery_policy=recovery_policy)
+        backend.pre.verify_recovery_observation(observation, backend.host)
+        save(work, 'observation.json', observation)
+        return dict(result='PASS', production_acceptance='NOT_EXECUTED', evidence=evidence,
+            recovery_policy=recovery_policy, fresh_instance_credential=True, original_credential_unchanged=True)
+    finally:
+        for current in (fresh, cid):
+            if current: run('docker', 'rm', '--force', current)
+        if network: run('docker', 'network', 'rm', network)
 
 
 def case(work, tool, old_source, target_source, old_evidence, target_evidence, old_record, target_record,
@@ -962,6 +1022,10 @@ def main():
             assert len(additive_paths) == 1 and additive_paths[0]['case'] == 'authorization'
         else:
             assert not additive_paths
+        if args.case_profile == 'full':
+            receipt['application_service_recovery'] = application_service_rehearsal(
+                directory(work / 'application-service-recovery', 0o700), tool, target_source,
+                target_evidence, target_record, *[keys['production'][i] for i in (0, 2)])
         assert (work / 'target-source-signed-record.json').read_bytes() == expired_bytes
         receipt['status'] = 'PASS'
     except Exception as exc:
@@ -976,7 +1040,7 @@ def main():
         public_evidence = args.output.with_suffix('')
         public_evidence.mkdir(mode=0o755)
         receipt['evidence_index'] = []
-        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'directory-drift','rollback-timeout', 'routine-collector'):
+        for scope_name in ('success', 'failure', 'authorization', 'aged-authorization', 'directory-drift','rollback-timeout', 'routine-collector', 'application-service-recovery'):
             scope = work / scope_name
             if not scope.exists():
                 continue

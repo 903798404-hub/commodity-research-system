@@ -12,6 +12,65 @@ import stat
 
 
 SANDBOX_PARENT = Path('/var/lib/market-data/recovery-sandboxes')
+CREDENTIAL_PARENT = Path('/var/lib/market-data/recovery-credentials')
+SERVICE_CREDENTIAL_TARGET = '/run/secrets/market-data-service.json'
+
+
+def service_credential_source(h, policy, old, *, check_files=True):
+    """The sole secret projection is a newly allocated deployment-bound bearer."""
+    r = policy['recovery']
+    source = r.get('application_service_credential_source')
+    if source is None:
+        return None
+    require(h, 'application_service' in old and 'sandbox' in r,
+        'fresh service credential requires an approved service and isolated sandbox')
+    expected = CREDENTIAL_PARENT / r['nonce'] / 'service-secret' / 'credential.json'
+    require(h, source == str(expected), 'fresh service credential outside nonce allocation')
+    matches = [m for m in old['mounts'] if m['target'] == SERVICE_CREDENTIAL_TARGET]
+    require(h, len(matches) == 1 and matches[0]['read_only'] is True,
+        'retained service credential must be one readonly file secret')
+    require(h, all(not overlap(h, str(expected.parent.parent), m['source']) for m in old['mounts']),
+        'fresh service credential overlaps retained sources')
+    if check_files:
+        h._protected_path(CREDENTIAL_PARENT, directory=True)
+        for parent in (expected.parent.parent, expected.parent):
+            h._protected_path(parent, directory=True)
+            require(h, stat.S_IMODE(parent.stat().st_mode) == 0o700,
+                'fresh service credential allocation must be root-private')
+        path = h._protected_path(expected)
+        require(h, path.is_file() and path.stat().st_nlink == 1,
+            'fresh service credential must be an unshared regular file')
+        require(h, (path.stat().st_dev, path.stat().st_ino) !=
+            (Path(matches[0]['source']).stat().st_dev, Path(matches[0]['source']).stat().st_ino),
+            'fresh service credential reuses retained inode')
+    return source
+
+
+def project_mounts(h, policy, old, *, check_files=True):
+    mounts = sandbox_mounts(h, policy, old, check_files=check_files) if 'sandbox' in policy['recovery'] else copy.deepcopy(old['mounts'])
+    source = service_credential_source(h, policy, old, check_files=check_files)
+    return [dict(m, source=source) if source and m['target'] == SERVICE_CREDENTIAL_TARGET else m for m in mounts]
+
+
+def allocate_service_credential(h, policy):
+    """Allocate only an empty private inode; the existing issuer binds the fresh container."""
+    h._require_linux_root(); h.require_protected_authority_source(); validate(h, policy)
+    old, _ = retained(h, policy, sandbox_ready=False)
+    source = service_credential_source(h, policy, old, check_files=False)
+    require(h, source is not None, 'explicit fresh service credential declaration required')
+    h._protected_path(CREDENTIAL_PARENT, directory=True)
+    path = Path(source); allocation = path.parent.parent
+    require(h, not allocation.exists(), 'fresh service credential allocation already exists')
+    h._reject_other_writable_sources(str(allocation), None)
+    allocation.mkdir(mode=0o700); allocation.chmod(0o700)
+    path.parent.mkdir(mode=0o700); path.parent.chmod(0o700)
+    with path.open('xb'):
+        pass
+    groups = {i['gid'] for i in policy['recovery']['sandbox']['roots']}
+    require(h, len(groups) == 1, 'fresh service credential runtime group differs')
+    os.chown(path, 0, groups.pop()); path.chmod(0o440)
+    service_credential_source(h, policy, old)
+    return {'path': str(path), 'credential_issued': False}
 
 
 def validate_sandbox_declaration(h, r):
@@ -138,7 +197,7 @@ def build_sandbox(h, policy):
         os.chown(dst, item['uid'], item['gid']); dst.chmod(item['mode'])
     after = {name: tree_identity(h, name) for name in before}
     require(h, before == after, 'production source changed during copy')
-    projected = sandbox_mounts(h, policy, old)
+    projected = project_mounts(h, policy, old)
     return {'rehearsal_id': r['nonce'], 'root': str(root), 'mounts': projected,
         'production_before': before, 'production_after': after,
         'sandbox_initial': {i['sandbox_source']: tree_identity(h, i['sandbox_source']) for i in r['sandbox']['roots']}}
@@ -156,9 +215,13 @@ def validate(h, policy):
         'preserved_store_sources'}
     # The network object does not exist while the Compose projection is prepared.
     # It must be pinned in the protected policy after create and before any grant.
-    require(h, type(r) is dict and set(r) in (fields, fields | {'expected_network_id'},
-        fields | {'sandbox'}, fields | {'expected_network_id', 'sandbox'}),
+    optional = {'expected_network_id', 'sandbox', 'application_service_credential_source'}
+    require(h, type(r) is dict and fields <= set(r) <= fields | optional,
         'invalid protected projection fields')
+    if 'application_service_credential_source' in r:
+        require(h, 'sandbox' in r and 'application_service' in policy and
+            type(r['application_service_credential_source']) is str,
+            'fresh service credential requires isolated approved service recovery')
     require(h, r['purpose'] == 'recovery-validation', 'not a recovery validation policy')
     require(h, isinstance(r['nonce'], str) and re.fullmatch('[0-9a-f]{32}', r['nonce']), 'invalid nonce')
     require(h, r['project'] == 'spread-recovery-' + r['nonce'] and
@@ -236,7 +299,7 @@ def retained(h, policy, *, sandbox_ready=True):
     grant_target = policy['grant_container_directory']
     old_mounts = [m for m in old['mounts'] if m['target'] != grant_target]
     mounts = [m for m in policy['mounts'] if m['target'] != grant_target]
-    expected_mounts = sandbox_mounts(h, policy, old, check_files=sandbox_ready) if 'sandbox' in r else old['mounts']
+    expected_mounts = project_mounts(h, policy, old, check_files=sandbox_ready)
     validate_mount_projection(h, policy['mounts'], expected_mounts, grant_target)
     og = [m for m in old['mounts'] if m['target'] == grant_target]
     ng = [m for m in policy['mounts'] if m['target'] == grant_target]
@@ -342,12 +405,17 @@ def project_compose(h, desired, policy):
         if 'name' in definition:
             require(h, definition['name'].startswith(old_name + '_'), 'non-project secret identity')
             definition['name'] = r['project'] + definition['name'][len(old_name):]
+    fresh_credential = service_credential_source(h, policy, old)
+    if fresh_credential:
+        refs = [i for i in service.get('secrets', []) if i['target'] == SERVICE_CREDENTIAL_TARGET]
+        require(h, len(refs) == 1, 'missing declared recovery service file secret')
+        projected['secrets'][refs[0]['source']]['file'] = fresh_credential
     grant_source = next(m['source'] for m in policy['mounts'] if m['target'] == policy['grant_container_directory'])
     for mount in service.get('volumes', []):
         if mount['target'] == policy['grant_container_directory']:
             mount['source'] = grant_source
         elif 'sandbox' in r:
-            replacement = next((m for m in sandbox_mounts(h, policy, old)
+            replacement = next((m for m in project_mounts(h, policy, old)
                 if m['target'] == mount['target']), None)
             require(h, replacement is not None, 'undeclared Compose mount')
             require(h, type(mount.get('read_only', False)) is bool and mount.get('read_only', False) == replacement['read_only'], 'Compose access mode changed')
@@ -462,6 +530,8 @@ def grant_id(h, policy, container_id):
         approved_tree=policy['approved_tree'])
     if 'sandbox' in r:
         binding['sandbox'] = r['sandbox']
+    if 'application_service_credential_source' in r:
+        binding['application_service_credential_source'] = r['application_service_credential_source']
     return h._digest(binding)[:32]
 
 

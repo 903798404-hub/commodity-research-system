@@ -129,3 +129,52 @@ def test_signed_grant_scope_and_preservation_facts_cannot_be_substituted(case,mo
     elif fault=='production-changed':data['production_before']={str(rw):{'changed':True}}
     else:data['sandbox_after']={}
     with pytest.raises(Rejected):m.verify_sandbox_evidence(h,p,grant,data)
+
+
+@pytest.fixture
+def service_case(case, monkeypatch, tmp_path):
+    h,p,old,root,rw,dst = case
+    parent = tmp_path / 'recovery-credentials'; parent.mkdir()
+    monkeypatch.setattr(m, 'CREDENTIAL_PARENT', parent)
+    original = rw.parent / 'service.json'; original.write_bytes(b'original-production-bearer')
+    old['application_service'] = {'allowed_writable_roots': ['/runtime/write']}
+    p['application_service'] = copy.deepcopy(old['application_service'])
+    old['mounts'].append(dict(source=str(original), target=m.SERVICE_CREDENTIAL_TARGET, read_only=True))
+    fresh = parent / p['recovery']['nonce'] / 'service-secret' / 'credential.json'
+    p['recovery']['application_service_credential_source'] = str(fresh)
+    return h,p,old,fresh,original
+
+
+@pytest.mark.parametrize('fault', [None, 'reuse-original', 'outside', 'other-nonce', 'no-service',
+    'no-sandbox', 'missing-secret', 'writable-secret', 'duplicate-secret'])
+def test_recovery_service_bearer_is_the_only_bounded_secret_projection(service_case, fault):
+    h,p,old,fresh,original = service_case
+    before = original.read_bytes()
+    if fault == 'reuse-original': p['recovery']['application_service_credential_source'] = str(original)
+    elif fault == 'outside': p['recovery']['application_service_credential_source'] = '/arbitrary/secret.json'
+    elif fault == 'other-nonce': p['recovery']['application_service_credential_source'] = str(fresh).replace('a'*32, 'b'*32)
+    elif fault == 'no-service': old.pop('application_service')
+    elif fault == 'no-sandbox': p['recovery'].pop('sandbox')
+    elif fault == 'missing-secret': old['mounts'].pop()
+    elif fault == 'writable-secret': old['mounts'][-1]['read_only'] = False
+    elif fault == 'duplicate-secret': old['mounts'].append(copy.deepcopy(old['mounts'][-1]))
+    if fault:
+        with pytest.raises(Rejected): m.project_mounts(h,p,old,check_files=False)
+    else:
+        mounts = m.project_mounts(h,p,old,check_files=False)
+        assert mounts[-1] == dict(source=str(fresh), target=m.SERVICE_CREDENTIAL_TARGET, read_only=True)
+        assert mounts[2] == old['mounts'][2]
+        assert mounts[0]['source'] == mounts[1]['source']
+    assert original.read_bytes() == before and not fresh.exists()
+
+
+@pytest.mark.parametrize('fault', ['hardlink', 'public-parent', 'shared-inode'])
+def test_fresh_recovery_bearer_rejects_shared_files_and_public_parents(service_case, fault):
+    h,p,old,fresh,original = service_case
+    fresh.parent.mkdir(parents=True, mode=0o700); fresh.parent.parent.chmod(0o700)
+    if fault == 'shared-inode': os.link(original, fresh)
+    else:
+        fresh.write_bytes(b'fresh-placeholder')
+        if fault == 'hardlink': os.link(fresh, fresh.with_name('alias'))
+        else: fresh.parent.chmod(0o755)
+    with pytest.raises(Rejected): m.service_credential_source(h,p,old)
