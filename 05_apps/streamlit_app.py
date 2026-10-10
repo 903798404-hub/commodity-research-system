@@ -46,12 +46,15 @@ from basis_page import render_basis_page
 from foreign_seats_page import render_foreign_seats_page
 from home import get_external_app_url, render_home
 from soybean_margin_page import render_soybean_margin_page
+from commodity_import_margin_page import render_commodity_import_margin_page
 from international_spread_page import render_international_spread_page
 from foreign_fx_page import render_foreign_fx_page
 from navigation import (
     BRAZIL_SOY_PAGE_TITLE,
     CANADA_CANOLA_PAGE_TITLE,
     IMPORT_PROFIT_ROUTE_ID,
+    CANOLA_IMPORT_ROUTE_ID,
+    PALM_IMPORT_ROUTE_ID,
     INTERNATIONAL_SPREAD_PAGE_TITLE,
     FOREIGN_FX_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
@@ -87,7 +90,7 @@ PUBLIC_RUNTIME_ROOT = (
     / "market-data-worktree-runtime"
     / "international-spread"
 )
-IMPORT_PROFIT_PAGE_TITLE = "日度进口大豆盘面净榨利"
+IMPORT_PROFIT_PAGE_TITLE = "日度进口商品利润"
 WEATHER_PAGE_ROUTES = {
     SOYBEAN_WEATHER_PAGE_TITLE: "soybean_weather",
     RAPESEED_WEATHER_PAGE_TITLE: "rapeseed_weather",
@@ -431,6 +434,10 @@ def render_selected_workspace_page(selected_page: str) -> None:
         render_foreign_seats_page(PROJECT_ROOT)
     elif selected_page == IMPORT_PROFIT_ROUTE_ID:
         render_import_profit_route()
+    elif selected_page == CANOLA_IMPORT_ROUTE_ID:
+        render_commodity_import_margin_page("canola")
+    elif selected_page == PALM_IMPORT_ROUTE_ID:
+        render_commodity_import_margin_page("palm")
     elif selected_page == INTERNATIONAL_SPREAD_PAGE_TITLE:
         render_international_spread_page(project_root=PROJECT_ROOT)
     else:

@@ -6,6 +6,7 @@ import sys
 
 from streamlit.testing.v1 import AppTest
 import yaml
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,9 +40,9 @@ def test_authoritative_route_is_unique_and_catalog_schema_stays_deployment_only(
         if item.target == workspace.IMPORT_PROFIT_ROUTE_ID
     ]
     assert [(item.label, item.target, item.external_env) for item in matching] == [
-        ("进口大豆榨利", "import_profit", None)
+        ("大豆进口榨利", "import_profit", None)
     ]
-    assert workspace.IMPORT_PROFIT_PAGE_TITLE == "日度进口大豆盘面净榨利"
+    assert workspace.IMPORT_PROFIT_PAGE_TITLE == "日度进口商品利润"
 
 
 def test_route_environment_is_resolved_only_when_route_is_called(
@@ -111,3 +112,40 @@ def test_module_source_has_no_runtime_read_or_deployment_side_effect():
         "def render_import_profit_route"
     )
     importlib.reload(workspace)
+
+
+@pytest.mark.parametrize("route,title", [
+    ("canola_import_profit", "加拿大菜籽进口盘面净榨利"),
+    ("palm_import_profit", "24度精炼棕榈油进口利润"),
+])
+def test_independent_routes_open_without_database_or_market_fetch(monkeypatch,tmp_path,route,title):
+    from agri_research_agent.soybean_margin import api_sources
+    monkeypatch.setenv("LOCALAPPDATA",str(tmp_path))
+    monkeypatch.delenv("MARKET_DATA_GIT_HEAD",raising=False)
+    monkeypatch.delenv("MARKET_DATA_EXECUTION_GRANT",raising=False)
+    monkeypatch.delenv("SOYBEAN_MARGIN_HISTORY_ROOT",raising=False)
+    monkeypatch.delenv("IMPORT_PROFIT_RUNTIME_ROOT",raising=False)
+    monkeypatch.setattr(api_sources,"fx_curve",lambda *_:pytest.fail("page must not fetch FX"))
+    monkeypatch.setattr(api_sources,"domestic",lambda *_:pytest.fail("page must not fetch domestic quotes"))
+    app=AppTest.from_file(str(APPS_DIR/"streamlit_app.py"),default_timeout=30).run()
+    app.session_state["selected_workspace_page"]=route
+    app.run()
+    assert not app.exception
+    assert any(item.value==title for item in app.title)
+    assert any("暂无已保存行情" in item.value for item in app.info)
+    assert not any(item.label=="品种" for item in app.radio)
+    assert not (tmp_path/"market-data-runtime"/"canola-palm-local"/"research.sqlite3").exists()
+
+
+def test_separate_project_cards_and_route_dispatch(monkeypatch):
+    items={item.target:item for group in workspace.SIDEBAR_NAVIGATION for item in group.items}
+    for route,label in [(workspace.CANOLA_IMPORT_ROUTE_ID,"加拿大菜籽进口榨利"),
+                        (workspace.PALM_IMPORT_ROUTE_ID,"棕榈油进口利润")]:
+        assert workspace.WORKSPACE_PAGES.count(route)==1
+        assert items[route].label==label and items[route].external_env is None
+    calls=[]
+    monkeypatch.setattr(workspace,"render_commodity_import_margin_page",lambda kind:calls.append(kind))
+    monkeypatch.setattr(workspace,"render_soybean_margin_page",lambda *_:calls.append("soybean"))
+    for route in (workspace.CANOLA_IMPORT_ROUTE_ID,workspace.PALM_IMPORT_ROUTE_ID,workspace.IMPORT_PROFIT_ROUTE_ID):
+        workspace.render_selected_workspace_page(route)
+    assert calls==["canola","palm","soybean"]

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import reprlib
 import math
+import builtins
+import os
+import subprocess
+import sys
+from types import ModuleType
 from datetime import date
 from pathlib import Path
 
@@ -133,6 +138,70 @@ def test_import_and_construction_do_not_connect() -> None:
 
     TankanClient(settings(), connector=connector)
     assert calls == 0
+
+
+def test_published_workspace_import_does_not_load_native_driver():
+    root = Path(__file__).resolve().parents[3]
+    code = '''
+import importlib.abc, sys
+class BlockDriver(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "psycopg" or fullname.startswith("psycopg."):
+            raise AssertionError("published-data page tried to load the database driver")
+sys.meta_path.insert(0, BlockDriver())
+from agri_research_agent.data_sources.tankan import TankanClient, TankanConnectionSettings
+from agri_research_agent.soybean_margin.public_inputs import read_public_tables
+import streamlit_app
+TankanClient(TankanConnectionSettings("unused", 5432, "unused", "unused", "unused"))
+assert "psycopg" not in sys.modules
+'''
+    result = subprocess.run([sys.executable,"-c",code], cwd=root, timeout=30,
+        capture_output=True, encoding="utf-8", env={**os.environ,
+            "PYTHONIOENCODING":"utf-8", "PYTHONPATH":os.pathsep.join((str(root/"03_src"),str(root/"05_apps")))})
+    assert result.returncode == 0, result.stderr
+
+
+def test_blocked_real_driver_fails_closed_and_redacts_error(monkeypatch):
+    original = builtins.__import__
+    attempted = []
+    def blocked(name, *args, **kwargs):
+        if name == "psycopg":
+            attempted.append(name)
+            raise ImportError("application control blocked libpq super-secret db.example")
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins,"__import__",blocked)
+    values = settings()
+    client = TankanClient(values)
+    assert not attempted
+    with pytest.raises(TankanConnectionError,match="driver could not load") as error:
+        with client:
+            pytest.fail("a blocked real connection must not continue")
+    assert attempted == ["psycopg"] and values.password == ""
+    assert "super-secret" not in str(error.value) and "db.example" not in str(error.value)
+    assert error.value.__suppress_context__
+    with pytest.raises(TankanConnectionError,match="not connected"):
+        _ = client.proof
+
+
+def test_default_connector_preserves_real_driver_options_and_dictionary_rows(monkeypatch):
+    calls = []
+    connection = FakeConnection()
+    module, rows = ModuleType("psycopg"), ModuleType("psycopg.rows")
+    def connect(**kwargs):
+        calls.append(kwargs)
+        return connection
+    marker = lambda _: lambda values: dict(values)
+    module.connect = connect
+    rows.dict_row = marker
+    monkeypatch.setitem(sys.modules,"psycopg",module)
+    monkeypatch.setitem(sys.modules,"psycopg.rows",rows)
+    with TankanClient(settings()) as client:
+        assert client.proof.transaction_read_only == "on"
+    assert len(calls)==1 and calls[0]["row_factory"] is marker
+    assert calls[0]["autocommit"] is True
+    assert "default_transaction_read_only=on" in calls[0]["options"]
+    assert "statement_timeout=120000" in calls[0]["options"]
+    assert connection.closed
 
 
 def test_client_requires_both_session_and_transaction_read_only() -> None:

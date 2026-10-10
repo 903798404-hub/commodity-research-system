@@ -15,6 +15,7 @@ PARAMETERS = {"meal_yield": .795, "oil_yield": .19, "tariff": .03, "vat": .09,
               "port_fee": 50., "processing_fee": 150., "conversion": .367437}
 CBOT_MONTHS = {1:1, 2:3, 3:3, 4:5, 5:5, 6:7, 7:7, 8:9, 9:9, 10:11, 11:11, 12:1}
 DCE_MONTHS = {m: 5 if m <= 8 else 1 for m in range(1, 13)}
+DOMESTIC_MAPPING_CUTOVER = date(2026, 10, 12)
 KEY = ["business_date", "origin", "shipment_year", "shipment_month"]
 FIELDS = ["cnf_cents_per_bushel", "cbot_price_cents_per_bushel", "fx_value",
           "soymeal_price_cny_per_tonne", "soyoil_price_cny_per_tonne"]
@@ -40,8 +41,13 @@ def contracts(business_date: date, month: int) -> tuple[str, str, int]:
     year = shipment_year(business_date, month)
     cbot_year = year + (month == 12)
     domestic_year = year + (month >= 9)
+    domestic_month = DCE_MONTHS[month]
+    if business_date >= DOMESTIC_MAPPING_CUTOVER:
+        # Preserve earlier snapshots; apply the user-confirmed hedge after cutover.
+        domestic_month = 5 if month <= 3 or month == 12 else (9 if month <= 7 else 1)
+        domestic_year = year + (month >= 8)
     return (f"{cbot_year % 100:02}{CBOT_MONTHS[month]:02}",
-            f"{domestic_year % 100:02}{DCE_MONTHS[month]:02}", year)
+            f"{domestic_year % 100:02}{domestic_month:02}", year)
 
 
 def calculate(cnf, cbot, fx, meal, oil):

@@ -198,6 +198,8 @@ def domestic_worker(symbols: list[str]):
                 fields = match[1].split(",")
                 if len(fields) < 28:
                     raise SourceError("domestic_schema_invalid")
+                if not fields[0].endswith(symbol[-4:]):
+                    raise SourceError("domestic_contract_identity_invalid")
                 raw_fields.extend(fields)
                 # AkShare 1.18.64 expects the original 28 columns; Sina now appends depth.
                 adapted = copy.copy(response)
@@ -217,7 +219,7 @@ def domestic_worker(symbols: list[str]):
             if price is None or price <= 0 or price != number(raw_fields[8]):
                 raise SourceError("domestic_price_invalid")
             result[symbol] = price
-            evidence[symbol] = dict(quoted_at=stamp.isoformat(), price_field="current_price")
+            evidence[symbol] = dict(quoted_at=stamp.isoformat(), price_field="current_price", raw_contract=raw_fields[0])
         except Exception as exc:
             errors[symbol] = str(exc) if isinstance(exc, SourceError) else "domestic_transport_or_schema_error"
     return result, dict(provider="AkShare/Sina", akshare_version=ak.__version__, quotes=evidence), errors
@@ -360,6 +362,6 @@ if __name__ == "__main__":
         print(json.dumps(trading_calendar()))
         raise SystemExit(0)
     symbols = json.loads(sys.argv[1])
-    if not isinstance(symbols, list) or not 1 <= len(symbols) <= 6 or any(not re.fullmatch(r"[MY]\d{4}", s) for s in symbols):
+    if not isinstance(symbols, list) or not 1 <= len(symbols) <= 8 or any(not re.fullmatch(r"(?:M|Y|P|RM|OI)\d{4}", s) for s in symbols):
         raise SystemExit(2)
     print(json.dumps(domestic_worker(symbols), ensure_ascii=False, allow_nan=False))

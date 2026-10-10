@@ -14,6 +14,8 @@ RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
 INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 IMPORT_PROFIT_ROUTE_ID = "import_profit"
+CANOLA_IMPORT_ROUTE_ID = "canola_import_profit"
+PALM_IMPORT_ROUTE_ID = "palm_import_profit"
 INTERNATIONAL_SPREAD_PAGE_TITLE = "国际价差"
 RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
 FOREIGN_FX_PAGE_TITLE = "外盘汇率"
@@ -181,10 +183,18 @@ NAVIGATION_GROUPS = (
         (
             NavigationItem(
                 "import_profit",
-                "进口大豆榨利",
+                "大豆进口榨利",
                 IMPORT_PROFIT_ROUTE_ID,
                 "quote",
-                "测算进口大豆盘面净榨利并拆解关键成本参数",
+                "测算进口大豆盘面净榨利及多年历史季节性",
+            ),
+            NavigationItem(
+                "canola_import_profit", "加拿大菜籽进口榨利", CANOLA_IMPORT_ROUTE_ID,
+                "quote", "测算加拿大菜籽盘面净榨利并比较12个船期月的多年变化",
+            ),
+            NavigationItem(
+                "palm_import_profit", "棕榈油进口利润", PALM_IMPORT_ROUTE_ID,
+                "quote", "测算24度精炼棕榈油进口利润并比较12个船期月的多年变化",
             ),
             NavigationItem(
                 "foreign_seats",

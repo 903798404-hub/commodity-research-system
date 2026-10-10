@@ -152,6 +152,13 @@ class TankanClient:
         except TankanClientError:
             self.close()
             raise
+        except ImportError:
+            self._settings.clear_password()
+            self.close()
+            raise TankanConnectionError(
+                "Tankan PostgreSQL driver could not load; check psycopg/libpq "
+                "and the operating system application-control policy"
+            ) from None
         except Exception as exc:
             self._settings.clear_password()
             self.close()
