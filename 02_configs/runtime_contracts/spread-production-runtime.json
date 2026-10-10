@@ -1742,6 +1742,54 @@
     {
       "path": "04_scripts/positions/collect_server_positions.py",
       "role": "entrypoint"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/charts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/history.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/inputs.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/live.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/manual.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/model.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/commodity_import_margin/store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/commodity_import_margin_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/capture_commodity_import.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/import_profit/import_commodity_cnf.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [

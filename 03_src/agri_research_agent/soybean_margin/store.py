@@ -23,6 +23,8 @@ def load(path: Path, day: date, origin: str):
     if not path.is_file():
         return {}, 0
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='cnf' AND type='table'").fetchone():
+            return {}, 0
         rows = db.execute("SELECT shipment_month,value,shipment_year FROM cnf WHERE business_date=? AND origin=?",
                           (day.isoformat(), origin)).fetchall()
         version = db.execute("SELECT version FROM revisions WHERE business_date=? AND origin=?",
@@ -37,6 +39,8 @@ def read_all(path: Path) -> list[dict]:
     if not path.is_file():
         return []
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='cnf' AND type='table'").fetchone():
+            return []
         rows = db.execute(
             "SELECT business_date,origin,shipment_year,shipment_month,value FROM cnf"
         ).fetchall()

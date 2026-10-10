@@ -51,6 +51,10 @@ def domestic(symbols, *, session=requests, now=None, max_age_seconds=3600):
         item = dict(provider='Sina', contract=symbol, unit='CNY/tonne', price=None,
                     quoted_at=None, status='not_available', raw_fields=fields)
         if len(fields) >= 28:
+            if not fields[0].endswith(symbol[-4:]):
+                item['status'] = 'contract_identity_invalid'
+                evidence[symbol] = item
+                continue
             try:
                 quoted = datetime.strptime(fields[17] + ' ' + fields[1].zfill(6),
                                            '%Y-%m-%d %H%M%S').replace(tzinfo=SHANGHAI)
