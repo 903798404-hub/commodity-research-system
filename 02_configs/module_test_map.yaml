@@ -13,6 +13,7 @@ modules:
     direct_tests:
       - 08_tests/test_first_batch_scheduled.py
       - 08_tests/positions/test_scheduled_collection.py
+      - 08_tests/pipelines/test_full_daily_windows_wrapper.py
     impact_tests:
       - 08_tests/test_production_data_delta.py
       - 08_tests/test_production_data_delta_activation.py

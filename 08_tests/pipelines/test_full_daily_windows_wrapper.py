@@ -955,3 +955,23 @@ def test_run_id_is_sortable_unique_and_allows_same_day_multiple_runs() -> None:
     first, second = wrapper.new_run_id(now), wrapper.new_run_id(now)
     assert first != second
     assert first.startswith("full-daily-20260831T010203.456789Z-")
+def test_first_batch_protected_nutstore_tree_and_native_path_case(tmp_path, monkeypatch):
+    """New mixed-platform case remains required on both existing hosted lanes."""
+    import importlib.util
+    import os
+    from pathlib import Path
+    from agri_research_agent.automation import first_batch_scheduled as jobs
+    from agri_research_agent.data_sources import nutstore_basis as source
+    spec = importlib.util.spec_from_file_location("scheduled_job_fixtures", Path(__file__).parents[1] / "test_first_batch_scheduled.py")
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    protected = tmp_path / "123"
+    monkeypatch.setattr(source, "PROTECTED_ROOT", protected)
+    value = fixtures.config(tmp_path, "nutstore_basis")
+    forbidden = str(protected / "never-create-log")
+    if os.name == "nt":
+        forbidden = forbidden.swapcase()
+    value["delivery"]["runtime_root"] = forbidden
+    with pytest.raises(ValueError, match="forbidden for writes"):
+        jobs.validate_config(value)
+    assert not protected.exists()

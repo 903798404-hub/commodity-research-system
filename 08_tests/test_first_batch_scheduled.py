@@ -122,16 +122,6 @@ def test_domain_snapshot_rejects_untrusted_input_before_materializing(tmp_path, 
     assert not (tmp_path / "baseline").exists()
 
 
-def test_windows_protected_drive_case_is_rejected_without_creating_output(tmp_path):
-    import os
-    assert os.name == "nt"  # Required Windows lane, never silently skipped on Linux.
-    value = config(tmp_path, "nutstore_basis")
-    value["delivery"]["runtime_root"] = str(nutstore.PROTECTED_ROOT / "must-not-create-first-batch-log").lower()
-    with pytest.raises(ValueError, match="forbidden for writes"):
-        jobs.validate_config(value)
-    assert not (nutstore.PROTECTED_ROOT / "must-not-create-first-batch-log").exists()
-
-
 def test_local_consumer_does_not_require_driver_and_real_connection_still_fails_closed():
     import subprocess
     code = '''
