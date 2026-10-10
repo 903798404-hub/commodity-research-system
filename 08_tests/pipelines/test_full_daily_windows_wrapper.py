@@ -164,6 +164,7 @@ def test_local_runtime_filesystem_passes_and_is_created(tmp_path: Path) -> None:
     assert runtime.is_dir()
     assert evidence["cloud_files"] is False
     assert evidence["runtime_class"] == "LOCALAPPDATA_LOCAL_FILESYSTEM"
+    _assert_first_batch_protected_nutstore_tree(tmp_path)
 
 
 def test_cloud_files_reparse_runtime_fails_closed(
@@ -955,8 +956,8 @@ def test_run_id_is_sortable_unique_and_allows_same_day_multiple_runs() -> None:
     first, second = wrapper.new_run_id(now), wrapper.new_run_id(now)
     assert first != second
     assert first.startswith("full-daily-20260831T010203.456789Z-")
-def test_first_batch_protected_nutstore_tree_and_native_path_case(tmp_path, monkeypatch):
-    """New mixed-platform case remains required on both existing hosted lanes."""
+def _assert_first_batch_protected_nutstore_tree(tmp_path):
+    """Additional path protection within the existing required Windows filesystem case."""
     import importlib.util
     import os
     from pathlib import Path
@@ -966,12 +967,13 @@ def test_first_batch_protected_nutstore_tree_and_native_path_case(tmp_path, monk
     fixtures = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixtures)
     protected = tmp_path / "123"
-    monkeypatch.setattr(source, "PROTECTED_ROOT", protected)
-    value = fixtures.config(tmp_path, "nutstore_basis")
-    forbidden = str(protected / "never-create-log")
-    if os.name == "nt":
-        forbidden = forbidden.swapcase()
-    value["delivery"]["runtime_root"] = forbidden
-    with pytest.raises(ValueError, match="forbidden for writes"):
-        jobs.validate_config(value)
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(source, "PROTECTED_ROOT", protected)
+        value = fixtures.config(tmp_path, "nutstore_basis")
+        forbidden = str(protected / "never-create-log")
+        if os.name == "nt":
+            forbidden = forbidden.swapcase()
+        value["delivery"]["runtime_root"] = forbidden
+        with pytest.raises(ValueError, match="forbidden for writes"):
+            jobs.validate_config(value)
     assert not protected.exists()
