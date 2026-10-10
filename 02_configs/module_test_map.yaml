@@ -1,5 +1,32 @@
 schema_version: 1
 modules:
+  soybean_margin.submit_reference:
+    code_paths:
+      - 03_src/agri_research_agent/soybean_margin/latest_quotes.py
+      - 03_src/agri_research_agent/soybean_margin/reference.py
+      - 03_src/agri_research_agent/soybean_margin/store.py
+    direct_tests: [08_tests/test_soybean_margin_reference.py]
+    impact_tests:
+      - 08_tests/test_soybean_margin_api.py
+      - 08_tests/test_soybean_margin_replacement.py
+      - 08_tests/test_soybean_margin_runtime.py
+      - 08_tests/test_spread_runtime_contract.py
+    dependents: [soybean_margin.api_inputs]
+    full_regression_when_changed: false
+  positions.server_collection:
+    code_paths:
+      - 03_src/agri_research_agent/positions/server_collection.py
+      - 03_src/agri_research_agent/oilseed_positions/stock_api.py
+      - 04_scripts/positions/collect_server_positions.py
+    direct_tests: [08_tests/positions/test_server_collection.py]
+    impact_tests:
+      - 08_tests/positions/test_positions_delivery.py
+      - 08_tests/positions/test_scheduled_collection.py
+      - 08_tests/sugar_positions/test_positions.py
+      - 08_tests/oilseed_positions/test_oilseed_positions.py
+      - 08_tests/test_spread_runtime_contract.py
+    dependents: [positions.workspace, oilseed_positions]
+    full_regression_when_changed: false
   automation.first_batch_scheduled:
     code_paths:
       - 03_src/agri_research_agent/automation/first_batch_scheduled.py

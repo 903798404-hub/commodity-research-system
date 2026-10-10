@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 import sqlite3
+import json
 
 from .model import ORIGINS, number, shipment_year
 
@@ -52,7 +53,7 @@ def read_all(path: Path) -> list[dict]:
     return records
 
 
-def save(path: Path, day: date, origin: str, values: dict, expected_version: int):
+def save(path: Path, day: date, origin: str, values: dict, expected_version: int, *, submission=None):
     if origin not in ORIGINS or type(day) is not date or day.weekday() >= 5:
         raise ValueError("产地或业务日期无效")
     normalized = {}
@@ -68,6 +69,9 @@ def save(path: Path, day: date, origin: str, values: dict, expected_version: int
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path, timeout=10) as db:
         db.executescript(DDL)
+        if submission is not None:
+            from .reference import DDL as REFERENCE_DDL
+            db.executescript(REFERENCE_DDL)
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT version FROM revisions WHERE business_date=? AND origin=?",
                          (day.isoformat(), origin)).fetchone()
@@ -79,4 +83,9 @@ def save(path: Path, day: date, origin: str, values: dict, expected_version: int
                        (day.isoformat(), origin, shipment_year(day, month), month, value))
         db.execute("INSERT INTO revisions VALUES (?,?,?) ON CONFLICT DO UPDATE SET version=excluded.version",
                    (day.isoformat(), origin, version + 1))
+        if submission is not None:
+            db.execute('INSERT INTO quote_submissions '
+                '(request_id,business_date,origin,revision,submitted_at,cnf_json) VALUES (?,?,?,?,?,?)',
+                (submission['request_id'], day.isoformat(), origin, version + 1,
+                 submission['submitted_at'], json.dumps(normalized, allow_nan=False, sort_keys=True)))
     return version + 1
