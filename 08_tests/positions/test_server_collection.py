@@ -70,13 +70,23 @@ def test_exact_contract_does_not_fabricate_whole_variety():
     assert {r['scope'] for r in parse(value)} == {'M2701'}
 
 
-def test_source_switch_does_not_create_change_or_zero_missing_seats():
+def test_source_switch_preserves_disclosures_and_ranked_net_semantics():
     rows = parse(capture(('M2701',)))
+    assert not any(r['member'] == '永安期货' and r['side'] == 'long' for r in rows)
     new = [dict(r, report_date='2026-10-08', source_provider='sina') for r in rows]
     members = json.loads((ROOT/'02_configs/sugar_positions.json').read_text(encoding='utf-8'))['members']
     metrics = domestic_metrics(rows + new, members)
     assert all(m['net_change'] is None for m in metrics)
-    assert all(m['long'] is None for m in metrics if m['group'] in {'yongan', 'fixed5'})
+    assert all(m['net_method'] == 'ranked_missing_zero_v1' for m in metrics)
+    yongan = [m for m in metrics if m['group'] == 'yongan']
+    assert yongan and all(m['long'] is None and m['short'] == 80 and m['net'] == -80
+                          for m in yongan)
+    fixed = [m for m in metrics if m['group'] == 'fixed5']
+    assert fixed and all(m['long'] == 100 and m['short'] == 170 and m['net'] == -70
+                         for m in fixed)
+    absent = [m for m in metrics if m['group'] in {'goldman', 'jpmorgan', 'guotai'}]
+    assert absent and all(m['long'] is None and m['short'] is None and m['net'] == 0
+                          for m in absent)
 
 
 class Source:
