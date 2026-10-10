@@ -23,6 +23,9 @@ LABEL org.opencontainers.image.revision="${MARKET_DATA_GIT_HEAD}" \
       market-data.deployment.role="${MARKET_DATA_DEPLOYMENT_ROLE}"
 
 ENV PYTHONDONTWRITEBYTECODE=1
+COPY ["03_src/agri_research_agent/commodity_import_margin/__init__.py", "03_src/agri_research_agent/commodity_import_margin/charts.py", "03_src/agri_research_agent/commodity_import_margin/history.py", "03_src/agri_research_agent/commodity_import_margin/inputs.py", "03_src/agri_research_agent/commodity_import_margin/live.py", "03_src/agri_research_agent/commodity_import_margin/manual.py", "03_src/agri_research_agent/commodity_import_margin/model.py", "03_src/agri_research_agent/commodity_import_margin/store.py", "03_src/agri_research_agent/commodity_import_margin/runtime.py", "/app/03_src/agri_research_agent/commodity_import_margin/"]
+COPY ["05_apps/commodity_import_margin_page.py", "/app/05_apps/"]
+COPY ["04_scripts/import_profit/import_commodity_cnf.py", "04_scripts/import_profit/import_commodity_history.py", "04_scripts/import_profit/capture_commodity_import.py", "/app/04_scripts/import_profit/"]
 ENV PYTHONUNBUFFERED=1
 ENV MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD}"
 ENV MARKET_DATA_GIT_TREE="${MARKET_DATA_GIT_TREE}"

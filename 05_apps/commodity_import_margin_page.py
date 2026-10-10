@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from html import escape
-import os
 import sqlite3
 from zoneinfo import ZoneInfo
 
@@ -15,8 +14,9 @@ from agri_research_agent.commodity_import_margin.live import capture as capture_
 from agri_research_agent.commodity_import_margin.history import read_history, LABELS
 from agri_research_agent.commodity_import_margin.charts import build_seasonal_charts, seasonal_figure
 from agri_research_agent.commodity_import_margin.store import (
-    SOURCE, local_database, authorize_local, load_cnf, save_cnf, read_market, history_dates, cnf_provenance,
+    load_cnf, save_cnf, read_market, history_dates, cnf_provenance,
 )
+from agri_research_agent.commodity_import_margin.runtime import database_path, authorize_write, save_enabled
 
 def _live_key(commodity, day):
     return f"commodity-import-live-{commodity}-{day}"
@@ -167,20 +167,17 @@ def render_commodity_import_margin_page(commodity: str, *, today: date | None = 
     today = today or datetime.now(ZoneInfo("Asia/Shanghai")).date()
     profile = PROFILES[commodity]
     st.title(f"{profile['label']}进口{'盘面净榨利' if commodity == 'canola' else '利润'}")
-    if os.getenv("MARKET_DATA_GIT_HEAD") or os.getenv("MARKET_DATA_EXECUTION_GRANT") or (SOURCE / "RELEASE.json").exists():
-        st.info("新模块当前为本地开发版本，正式运行尚未接入。")
-        return
     st.caption("未来12个月船期 · 当月行表示次年同月 · CNF为美元/吨完整报价")
     st.caption("确认CNF输入后自动刷新国内合约与CFETS在岸USD/CNY；汇率同大豆：近1—2个月即期，3个月起远期。")
     day = st.date_input("业务日期", value=today, max_value=today, key=f"import-date-{commodity}")
     eligible = day >= START
     try:
-        database = local_database()
+        database = database_path()
         cnf, revision = load_cnf(database, day, commodity) if eligible else ({}, 0)
         snapshot, identity = read_market(database, day, commodity) if eligible else (None, None)
         provenance = cnf_provenance(database, day, commodity, revision) if eligible else None
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as exc:
-        st.error(f"本地数据读取或校验失败：{type(exc).__name__}")
+        st.error(f"数据读取或运行身份校验失败：{type(exc).__name__}")
         return
     if not eligible:
         st.info(f"当前仅预览。保存日期须为{START.isoformat()}起的日期。")
@@ -211,10 +208,10 @@ def render_commodity_import_margin_page(commodity: str, *, today: date | None = 
             on_change=_refresh_live, args=(commodity, day))
         proposed = {r["shipment_month"]: number(v) for r,v in zip(rows, edited.CNF)}
         rows = daily_rows(day, commodity, proposed, snapshot)
-        allowed = eligible and os.getenv("COMMODITY_IMPORT_LOCAL_PREVIEW") == "1"
+        allowed = eligible and save_enabled()
         if st.button("保存CNF", disabled=not allowed, key=f"import-save-{commodity}"):
             try:
-                save_cnf(database, day, commodity, proposed, revision, authorize=authorize_local,
+                save_cnf(database, day, commodity, proposed, revision, authorize=authorize_write,
                          market_snapshot=snapshot if snapshot and snapshot.get("schema_version") == "commodity-import-live-inputs/1" else None,
                          expected_identity=identity)
                 st.success("CNF已保存。")
@@ -222,7 +219,7 @@ def render_commodity_import_margin_page(commodity: str, *, today: date | None = 
             except (OSError, ValueError, sqlite3.Error) as exc:
                 st.error(str(exc) if isinstance(exc, ValueError) else "保存失败，请重新读取后重试。")
         if not allowed:
-            st.caption("当前仅支持会话预览。本地启动入口可启用保存。")
+            st.caption("当前仅支持会话预览，保存入口尚未启用。")
     st.iframe(daily_html(rows, commodity), height=690, width="stretch")
     with st.expander("汇率期限与计算口径"):
         st.dataframe(pd.DataFrame([{"船期":r["shipment_period"], "目标期限(月)":r["fx_tenor_months"],

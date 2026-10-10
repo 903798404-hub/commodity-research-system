@@ -116,6 +116,7 @@ modules:
       - 08_tests/test_commodity_import_live.py
       - 08_tests/test_commodity_import_history.py
       - 08_tests/test_commodity_import_charts.py
+      - 08_tests/test_commodity_import_runtime.py
     impact_tests:
       - 08_tests/test_import_profit_route.py
       - 08_tests/test_streamlit_dashboard.py

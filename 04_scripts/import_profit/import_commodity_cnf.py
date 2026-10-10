@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "03_src"))
 
 from agri_research_agent.commodity_import_margin.manual import import_manual_cnf
-from agri_research_agent.commodity_import_margin.store import local_database, authorize_local
+from agri_research_agent.commodity_import_margin.runtime import database_path, authorize_write
 
 
 def main():
@@ -18,10 +18,10 @@ def main():
     parser.add_argument("--expected-version", type=int, required=True)
     args = parser.parse_args()
     try:
-        database = local_database()
-        authorize_local(database)
+        database = database_path()
+        authorize_write(database)
         version = import_manual_cnf(database, args.quotes_file, expected_version=args.expected_version,
-                                    authorize=authorize_local, refresh_current=True)
+                                    authorize=authorize_write, refresh_current=True)
         print(json.dumps(dict(version=version, entry_method="manual_codex")))
         return 0
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:

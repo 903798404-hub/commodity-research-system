@@ -197,7 +197,8 @@ def test_default_connector_preserves_real_driver_options_and_dictionary_rows(mon
     monkeypatch.setitem(sys.modules,"psycopg.rows",rows)
     with TankanClient(settings()) as client:
         assert client.proof.transaction_read_only == "on"
-    assert len(calls)==1 and calls[0]["row_factory"] is marker
+    assert len(calls)==1
+    assert calls[0]["row_factory"](None)([("value", 1)]) == {"value": 1}
     assert calls[0]["autocommit"] is True
     assert "default_transaction_read_only=on" in calls[0]["options"]
     assert "statement_timeout=120000" in calls[0]["options"]

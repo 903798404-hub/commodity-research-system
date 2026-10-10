@@ -167,7 +167,8 @@
     "IMPORT_PROFIT_INTRADAY_CNF_STORE_PATH",
     "IMPORT_PROFIT_INTRADAY_AM_RESULT_ROOT",
     "SOYBEAN_MARGIN_ALLOW_SAVE",
-    "SOYBEAN_MARGIN_STORAGE_ROOT"
+    "SOYBEAN_MARGIN_STORAGE_ROOT",
+    "COMMODITY_IMPORT_ALLOW_SAVE"
   ],
   "secret_references": [
     "tankan-reader",
@@ -227,6 +228,19 @@
     }
   ],
   "source_inputs": [
+    {"path": "03_src/agri_research_agent/commodity_import_margin/__init__.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/charts.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/history.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/inputs.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/live.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/manual.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/model.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/store.py", "role": "runtime_configuration"},
+    {"path": "03_src/agri_research_agent/commodity_import_margin/runtime.py", "role": "runtime_configuration"},
+    {"path": "05_apps/commodity_import_margin_page.py", "role": "runtime_configuration"},
+    {"path": "04_scripts/import_profit/import_commodity_cnf.py", "role": "entrypoint"},
+    {"path": "04_scripts/import_profit/import_commodity_history.py", "role": "entrypoint"},
+    {"path": "04_scripts/import_profit/capture_commodity_import.py", "role": "entrypoint"},
     {
       "path": "09_deploy/runtime_identity/runtime_observation.py",
       "role": "runtime_configuration"
@@ -1726,6 +1740,12 @@
   ],
   "environment_bindings": [
     {
+      "name": "COMMODITY_IMPORT_ALLOW_SAVE",
+      "kind": "deployment",
+      "value_type": "nonempty",
+      "candidate_value": "1"
+    },
+    {
       "name": "MARKET_DATA_EXECUTION_GRANT",
       "kind": "execution_grant"
     },
@@ -1840,6 +1860,7 @@
     }
   ],
   "forbidden_environment": [
+    "COMMODITY_IMPORT_LOCAL_PREVIEW",
     "IMPORT_PROFIT_INTRADAY_WRITE_RUNTIME_ROOT",
     "IMPORT_PROFIT_INTRADAY_WRITE_MODE",
     "IMPORT_PROFIT_INTRADAY_EXPECTED_RUNTIME_ID",
