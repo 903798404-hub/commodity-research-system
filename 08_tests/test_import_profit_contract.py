@@ -364,9 +364,12 @@ def test_unique_contract_is_registered_and_contains_required_business_rules() ->
         "未修改键的原历史净榨利保持不变",
         "不展示 CNF 报价图、到港完税成本图",
         "不得回退到前一日期",
-        "录入、预览或保存 CNF 时不得重新获取行情",
+        "显式启用`SOYBEAN_MARGIN_SUBMIT_QUOTES=1`后，确认保存CNF",
+        "默认未启用时保持原保存行为",
+        "普通输入编辑、预览和页面刷新不联网",
+        "历史业务日CNF补录只保存输入",
         "全量更新暂不可用",
-        "页面不连接供应商数据库、不采集、不建立服务器定时任务",
+        "不新增定时任务",
         "每日 SQL 数据及其运行结果不得提交 Git",
     ):
         assert required in contract
