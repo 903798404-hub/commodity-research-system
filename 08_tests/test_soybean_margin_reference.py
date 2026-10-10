@@ -145,6 +145,7 @@ def test_eastmoney_repeated_page_is_rejected():
     ('2026-10-09', '080000', 'stale_or_future', None)])
 def test_sina_accepts_delay_but_rejects_old_date_and_future(quote_date,time,status,price):
     fields = ['']*44
+    fields[0] = '豆粕2701'
     fields[1], fields[8], fields[17] = time, '3400', quote_date
     raw = ('var hq_str_nf_M2701="'+','.join(fields)+'";').encode('gb18030')
     class Session:
@@ -176,6 +177,7 @@ def test_sina_quote_advancing_during_request_uses_response_time(monkeypatch):
     clock = [NOW]
     monkeypatch.setattr(latest, 'stamp', lambda: clock[0])
     fields = [''] * 44
+    fields[0] = '豆粕2701'
     fields[1], fields[8], fields[17] = '093005', '3400', DAY.isoformat()
     raw = ('var hq_str_nf_M2701="' + ','.join(fields) + '";').encode('gb18030')
     class Session:
