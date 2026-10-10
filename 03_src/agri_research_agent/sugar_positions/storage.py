@@ -68,7 +68,7 @@ def _writer_lock(root):
         path.unlink()
 
 
-def publish(root: Path, foreign, domestic, captures, attempts):
+def publish(root: Path, foreign, domestic, captures, attempts, *, preserve_untouched=False):
     """Merge validated rows without erasing other sources or old dates."""
     unique_rows(foreign, FOREIGN_KEY)
     unique_rows(domestic, DOMESTIC_KEY)
@@ -82,7 +82,8 @@ def publish(root: Path, foreign, domestic, captures, attempts):
             old_rows = [r for r in previous[name] if (
                 (r["report_date"], r["scope"]) if name == "domestic" else
                 (r["report_date"], r["market"], r["report_type"])) not in partitions]
-            merged[name] = sorted(old_rows + new_rows, key=lambda r: tuple(r[k] for k in key))
+            merged[name] = (old_rows if preserve_untouched and not new_rows else
+                            sorted(old_rows + new_rows, key=lambda r: tuple(r[k] for k in key)))
         sources = dict(previous["sources"])
         for source_id, raw, url, extension in captures:
             sha = digest(raw)

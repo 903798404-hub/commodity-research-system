@@ -178,6 +178,18 @@ def _replay_source(key, source, raw, domain, spec):
             "positions CZCE URL invalid")
         _xlsx_bound(raw)
         return "domestic", parse_czce(raw, day.isoformat(), url, stamp, varieties=varieties)
+    if key.startswith('stockapi_DCE_'):
+        from agri_research_agent.oilseed_positions.stock_api import parse_capture, URL
+        compact, *contracts = key.removeprefix('stockapi_DCE_').split('_')
+        require(len(contracts) <= 1, 'positions stock-api key invalid')
+        day = datetime.strptime(compact, '%Y%m%d').date()
+        require(domain in {'soybean', 'palm'} and url == URL, 'positions stock-api source invalid')
+        capture = strict_json(raw)
+        require(capture['trade_date'] == day.strftime('%Y%m%d'), 'positions stock-api date differs')
+        require(capture.get('scope_contract') == (contracts[0] if contracts else None),
+                'positions stock-api scope differs')
+        rows = parse_capture(raw, url, stamp)
+        return 'domestic', [r for r in rows if re.sub(r'\d+$', '', r['scope']) in varieties]
     if key.startswith("sina_"):
         _, contract, compact = key.split("_")
         day = datetime.strptime(compact, "%Y%m%d").date()
