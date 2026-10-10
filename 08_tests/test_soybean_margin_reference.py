@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import copy
 import json
 import sqlite3
@@ -170,6 +170,21 @@ def test_capture_0930_independent_sources_and_calendar(monkeypatch):
     assert all('requested_at' in s and 'returned_at' in s for s in value['sources'].values())
     with pytest.raises(SourceError, match='holiday'):
         latest.capture(DAY, now=NOW, calendar=lambda: ['2026-10-12'])
+
+
+def test_sina_quote_advancing_during_request_uses_response_time(monkeypatch):
+    clock = [NOW]
+    monkeypatch.setattr(latest, 'stamp', lambda: clock[0])
+    fields = [''] * 44
+    fields[1], fields[8], fields[17] = '093005', '3400', DAY.isoformat()
+    raw = ('var hq_str_nf_M2701="' + ','.join(fields) + '";').encode('gb18030')
+    class Session:
+        def get(self, url, **kw):
+            clock[0] += timedelta(seconds=5)
+            return Response(raw)
+    values, source = latest.domestic(['M2701'], session=Session())
+    assert values['M2701'] == 3400.
+    assert source['quotes']['M2701']['status'] == 'available'
 
 
 def test_legacy_save_remains_opt_out_and_reference_read_never_fetches(tmp_path):
