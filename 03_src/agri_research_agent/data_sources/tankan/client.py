@@ -10,9 +10,6 @@ from pathlib import Path
 from typing import Callable, Iterator, Sequence, Mapping
 from types import MappingProxyType
 
-import psycopg
-from psycopg.rows import dict_row
-
 from .models import ConnectionProof, PostgresColumn, QueryPlanProof, QuerySpec, SourceBatch
 from .queries import (require_approved_query, require_approved_live_query,
                       CBOT_SOYBEAN_LIVE_QUERY, DCE_SOYMEAL_LIVE_QUERY,
@@ -103,12 +100,19 @@ class LiveReadResult:
     retrieved_at: datetime
 
 
+def _dictionary_rows(cursor):
+    """Injected connectors retain the row-factory contract without eager libpq."""
+    from psycopg.rows import dict_row
+
+    return dict_row(cursor)
+
+
 class TankanClient:
     def __init__(
         self,
         settings: TankanConnectionSettings,
         *,
-        connector: Callable[..., object] = psycopg.connect,
+        connector: Callable[..., object] | None = None,
     ) -> None:
         self._settings = settings
         self._connector = connector
@@ -123,7 +127,17 @@ class TankanClient:
 
     def __enter__(self) -> "TankanClient":
         try:
-            self._connection = self._connector(
+            connector = self._connector
+            row_factory = _dictionary_rows
+            if connector is None:
+                # Published-data consumers can import this package without loading
+                # a native database driver. A real connection still requires it.
+                import psycopg
+                from psycopg.rows import dict_row
+
+                connector = psycopg.connect
+                row_factory = dict_row
+            self._connection = connector(
                 host=self._settings.host,
                 port=self._settings.port,
                 dbname=self._settings.database,
@@ -131,7 +145,7 @@ class TankanClient:
                 password=self._settings.password,
                 connect_timeout=self._settings.connect_timeout_seconds,
                 autocommit=True,
-                row_factory=dict_row,
+                row_factory=row_factory,
                 options=(
                     "-c default_transaction_read_only=on "
                     f"-c statement_timeout={self._settings.statement_timeout_ms} "
@@ -144,6 +158,13 @@ class TankanClient:
         except TankanClientError:
             self.close()
             raise
+        except ImportError:
+            self._settings.clear_password()
+            self.close()
+            raise TankanConnectionError(
+                "Tankan PostgreSQL driver could not load; check psycopg/libpq "
+                "and the operating system application-control policy"
+            ) from None
         except Exception as exc:
             self._settings.clear_password()
             self.close()

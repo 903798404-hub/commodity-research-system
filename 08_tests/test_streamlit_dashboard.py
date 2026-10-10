@@ -101,7 +101,9 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         "印度作物天气",
         "USDA供需平衡",
         "Oil World供需平衡",
-        "进口大豆榨利",
+        "大豆进口榨利",
+        "加拿大菜籽进口榨利",
+        "棕榈油进口利润",
         "外资与重点席位",
         "运行监控",
     ]
@@ -128,7 +130,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 16
+    assert cards_markup.count('class="agri-card"') == 18
     assert cards_markup.count('class="agri-card-keyword"') == 20
     assert cards_markup.count('class="agri-card-detail-label"') == 7
     assert "?home_target=" not in cards_markup

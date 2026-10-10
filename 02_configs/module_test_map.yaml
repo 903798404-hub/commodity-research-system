@@ -59,6 +59,7 @@ modules:
     full_regression_when_changed: false
   soybean_margin.api_inputs:
     code_paths:
+      - 03_src/agri_research_agent/soybean_margin/model.py
       - 03_src/agri_research_agent/soybean_margin/api_inputs.py
       - 03_src/agri_research_agent/soybean_margin/api_sources.py
       - 04_scripts/import_profit/capture_soybean_api.py
@@ -71,6 +72,28 @@ modules:
       - 08_tests/test_soybean_margin_runtime.py
       - 08_tests/test_streamlit_dashboard.py
     dependents: []
+    full_regression_when_changed: false
+  commodity_import_margin.local:
+    code_paths:
+      - 03_src/agri_research_agent/commodity_import_margin
+      - 04_scripts/import_profit/capture_commodity_import.py
+      - 04_scripts/import_profit/import_commodity_cnf.py
+      - 04_scripts/import_profit/import_commodity_history.py
+      - 04_scripts/import_profit/launch_commodity_import_local.ps1
+      - 05_apps/commodity_import_margin_page.py
+      - 05_apps/import_margin_preview.py
+    direct_tests:
+      - 08_tests/test_commodity_import_margin.py
+      - 08_tests/test_commodity_import_live.py
+      - 08_tests/test_commodity_import_history.py
+      - 08_tests/test_commodity_import_charts.py
+    impact_tests:
+      - 08_tests/test_import_profit_route.py
+      - 08_tests/test_streamlit_dashboard.py
+      - 08_tests/test_soybean_margin_api.py
+      - 08_tests/test_soybean_margin_replacement.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: [apps.streamlit_dashboard]
     full_regression_when_changed: false
   oilseed_positions:
     code_paths:
