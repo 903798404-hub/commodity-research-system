@@ -14,7 +14,7 @@ from agri_research_agent.data_sources import nutstore_basis as nutstore
 
 def config(tmp_path, job="canola_exports"):
     inner = {"schema_version": jobs.exports.CONFIG_SCHEMA, "approved_commit": "a" * 40,
-        "approved_tree": "b" * 40, "origin": jobs.delivery.ORIGIN, "python": sys.executable,
+        "approved_tree": "b" * 40, "origin": jobs.delivery.ORIGIN, "python": str(Path(sys.executable).resolve()),
         "runtime_root": str(tmp_path / "producer"), "baseline_root": str(tmp_path / "initial-baseline"),
         "baseline_manifest_sha256": "c" * 64, "ssh_target": "verified-host",
         "publisher": "/opt/market-data/publisher.py", "publisher_sha256": "d" * 64,
