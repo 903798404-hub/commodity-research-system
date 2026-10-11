@@ -19,6 +19,10 @@ Configuration schema `public-package-retention/1` includes `tool_sha256`,
 `publisher_locks` and `stores`. Each store names its exact `root` and
 `protected_package_ids`; required pins must exist. The source SHA, root ownership,
 paths and disk UUID are checked on every run. Missing disks fail closed.
+Store paths use the single physical `/srv/market-data-disk/active` view; list
+their production bind aliases in `aliases` for live-reference checks. The single
+systemd writable mount permits atomic links on the same mount instance. Binding
+each alias separately can raise EXDEV even when device IDs are equal.
 
 Run `public_package_retention.py --config CONFIG` to validate and plan without
 altering package files; add `--apply` only in the independently authorized server

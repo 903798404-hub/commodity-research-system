@@ -261,7 +261,14 @@ def main(argv=None):
             store = Path(item["root"])
             # A whole-store application mount reads Current dynamically; it must not
             # pin all old versions. Exact package/child mounts and open files do pin.
-            package_busy = [p for p in busy if any(parent.name == "releases" for parent in p.parents)]
+            package_busy = []
+            for path in busy:
+                for alias in item.get("aliases", []):
+                    alias = Path(alias)
+                    if path == alias or alias in path.parents:
+                        path = store / path.relative_to(alias)
+                        break
+                if any(parent.name == "releases" for parent in path.parents): package_busy.append(path)
             planned = plan(store, now=datetime.now(timezone.utc), keep_days=config["keep_full_days"],
                            keep_count=config["keep_full_count"], pins=item["protected_package_ids"], busy_paths=package_busy)
             changed = compact(planned, pool) if args.apply else []
