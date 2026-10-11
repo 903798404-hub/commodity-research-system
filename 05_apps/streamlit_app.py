@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from agri_research_agent.shared.chart_style import CURRENT_LINE_WIDTH
+
 from agri_research_agent.domains.spreads.calculation import add_plot_value
 from agri_research_agent.application.domestic_spreads import (
     load_domestic_spread_database,
@@ -208,7 +210,7 @@ def build_figure(
         line_width = 2.25
         if is_latest:
             line_color = "#D62728"
-            line_width = 5
+            line_width = CURRENT_LINE_WIDTH
         fig.add_trace(
             go.Scatter(
                 x=season_data["calendar_offset"],
@@ -325,6 +327,13 @@ def render_spread_grid(
 
 
 def render_spread_dashboard() -> None:
+    st.header("价差看板")
+    board = st.radio("板块", BOARD_OPTIONS, horizontal=True, label_visibility="collapsed")
+    with st.expander("展示设置"):
+        method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
+        year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
+
+    st.title(board)
     database_path = get_database_path()
     if not database_path.exists():
         st.error(f"未找到历史价差数据库：{DATABASE_XLSX_FILE}")
@@ -336,15 +345,19 @@ def render_spread_dashboard() -> None:
     config = load_spread_config(SPREAD_CONFIG_FILE, SPREAD_CONFIG_FILE.stat().st_mtime if SPREAD_CONFIG_FILE.exists() else 0)
     board_spreads = configured_spreads(success_data, config)
 
-    with st.sidebar:
-        st.header("价差看板")
-        board = st.radio("板块", BOARD_OPTIONS, label_visibility="collapsed")
-        with st.expander("展示设置"):
-            method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
-            year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
-
-    st.title(board)
     render_update_status(data)
+    if board == "国内白糖价差":
+        expected = ["SR 9-1", "SR 1-5", "SR 5-9"]
+        missing = [name for name in expected if name not in board_spreads[board]]
+        if missing:
+            st.info("暂无可用白糖月差数据：" + "、".join(display_spread_name(name) for name in missing))
+        st.caption(
+            "郑商所白糖 SR：前一交割月减后一交割月，价差单位为元/吨。"
+            if method == "绝对价差 A-B"
+            else "郑商所白糖 SR：前一交割月除以后一个交割月，商品比值无单位。"
+        )
+        if not board_spreads[board]:
+            return
     if board == "品种间套利":
         for subgroup in ["油脂之间套利", "粕之间套利", "其他"]:
             names = [name for name in board_spreads[board] if classify_board(name)[1] == subgroup]

@@ -11,13 +11,14 @@ from agri_research_agent.market_data.contracts import ContractId, Exchange
 from .models import SpreadCalculation, SpreadDefinition, SpreadLeg
 
 
-BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "品种间套利"]
+BOARD_OPTIONS = ["豆系月差", "棕榈油与菜系月差", "国内白糖价差", "品种间套利"]
 INSTRUMENT_LABELS = {
     "M": "豆粕",
     "Y": "豆油",
     "RM": "菜粕",
     "OI": "菜油",
     "P": "棕榈油",
+    "SR": "白糖",
 }
 INSTRUMENT_EXCHANGES = {
     "M": Exchange.DCE,
@@ -25,6 +26,7 @@ INSTRUMENT_EXCHANGES = {
     "P": Exchange.DCE,
     "RM": Exchange.CZCE,
     "OI": Exchange.CZCE,
+    "SR": Exchange.CZCE,
 }
 SOY_INSTRUMENTS = {"M", "Y"}
 PALM_RAPESEED_INSTRUMENTS = {"P", "OI", "RM"}
@@ -132,6 +134,8 @@ def classify_board(spread_name: str) -> tuple[str, str]:
             return "豆系月差", "月差"
         if instruments[0] in PALM_RAPESEED_INSTRUMENTS:
             return "棕榈油与菜系月差", "月差"
+        if instruments[0] == "SR":
+            return "国内白糖价差", "月差"
         return "品种间套利", "其他"
     if len(instruments) == 2 and len(months) == 1:
         instrument_set = set(instruments)
@@ -152,7 +156,7 @@ def display_spread_name(spread_name: str) -> str:
     if len(parsed.instruments) == 1 and len(parsed.months) == 2:
         return f"{labels[0]} {parsed.months[0]:02d}-{parsed.months[1]:02d}"
     if len(parsed.instruments) == 2 and len(parsed.months) == 1:
-        preferred_order = {"Y": 0, "OI": 1, "P": 2, "M": 0, "RM": 1}
+        preferred_order = {"Y": 0, "OI": 1, "P": 2, "M": 0, "RM": 1, "SR": 3}
         labels = [
             label
             for _, label in sorted(
@@ -170,7 +174,7 @@ def spread_sort_key(spread_name: str) -> tuple[int, int, int, str]:
         return (9, 9, 9, str(spread_name))
     instruments, months = parsed.instruments, parsed.months
     if len(instruments) == 1 and len(months) == 2:
-        instrument_order = {"Y": 0, "M": 1, "P": 0, "OI": 1, "RM": 2}
+        instrument_order = {"Y": 0, "M": 1, "P": 0, "OI": 1, "RM": 2, "SR": 0}
         month_order = {(9, 1): 0, (1, 5): 1, (5, 9): 2}
         return (
             0,

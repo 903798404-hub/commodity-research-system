@@ -83,7 +83,7 @@ NAVIGATION_GROUPS = (
                 "价差动态",
                 "价差动态看板",
                 "chart",
-                "研究油脂油料跨期价差与跨品种套利的历史季节性结构",
+                "研究油脂油料与白糖跨期价差、跨品种套利的历史季节性结构",
             ),
             NavigationItem(
                 "basis_domestic",

@@ -94,7 +94,7 @@ def window_for_delivery_month(month: int) -> tuple[int, int, int, int]:
 def build_configs() -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
 
-    for instrument in ["M", "RM", "Y", "OI", "P"]:
+    for instrument in ["M", "RM", "Y", "OI", "P", "SR"]:
         for leg1_month, leg2_month in [(1, 5), (5, 9), (9, 1)]:
             spread_name = f"{instrument} {leg1_month}-{leg2_month}"
             window_start_month, window_start_day, window_end_month, window_end_day = window_for_month_pair(

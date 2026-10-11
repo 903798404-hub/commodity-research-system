@@ -15,6 +15,7 @@ INSTRUMENT_MAP = {
     "豆油": "Y",
     "菜籽油": "OI",
     "棕榈油": "P",
+    "白糖": "SR",
 }
 
 REQUIRED_COLUMNS = [

@@ -43,6 +43,7 @@ def test_legacy_name_parsing_display_classification_and_sorting() -> None:
     assert app.configured_spreads(data, config) == {
         "豆系月差": ["Y 9-1", "M 9-1", "M 5-9"],
         "棕榈油与菜系月差": [],
+        "国内白糖价差": [],
         "品种间套利": ["OI-Y 5", "unknown"],
     }
 
@@ -149,6 +150,8 @@ def test_legacy_figure_freezes_seasons_latest_trace_and_centered_rolling_mean() 
     assert figure.layout.legend.yanchor == "bottom"
     assert figure.layout.margin.t >= 90
     assert figure.layout.yaxis.title.text == "绝对价差 A-B"
+    assert figure.data[-2].line.width == 3.4
+    assert figure.data[-2].line.width > figure.data[0].line.width
 
 
 def test_legacy_latest_summary_uses_five_recent_history_values_and_lte_percentile() -> None:

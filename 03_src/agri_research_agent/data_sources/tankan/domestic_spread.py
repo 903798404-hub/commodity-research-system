@@ -23,8 +23,10 @@ PRODUCTS = {
 REQUIRED_RELATION_COLUMNS = frozenset(
     {"trade_date", "product_name", "contract", PRICE_FIELD, "updated_at"}
 )
-_INSTRUMENTS = frozenset(instrument for _, instrument, _ in PRODUCTS.values())
-_FULL_CONTRACT = re.compile(r"^(RM|OI|M|Y|P)(\d{2})(01|05|09)$")
+# Shared exact-contract helpers also serve AkShare; Tankan PRODUCTS retains
+# its independently validated source/completeness scope.
+_INSTRUMENTS = frozenset(instrument for _, instrument, _ in PRODUCTS.values()) | {"SR"}
+_FULL_CONTRACT = re.compile(r"^(RM|OI|SR|M|Y|P)(\d{2})(01|05|09)$")
 
 
 class DomesticSpreadSourceError(RuntimeError):

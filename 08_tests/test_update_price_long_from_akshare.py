@@ -45,7 +45,7 @@ def test_october_may_september_window_uses_unexpired_delivery_year(updater, busi
     from agri_research_agent.application.domestic_spreads import _active_required_identities
     target = date.fromisoformat(business_date)
     candidates = updater.build_active_candidates(CONFIG, target)
-    expected = {f"{i}{year}{m:02d}" for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5, 9)}
+    expected = {f"{i}{year}{m:02d}" for i in ("M", "RM", "Y", "OI", "P", "SR") for m in (1, 5, 9)}
     assert set(candidates["symbol"]) == expected
     assert _active_required_identities(pd.Timestamp(target), CONFIG) == expected
     assert all(str(symbol).endswith(str(code)[-4:])
@@ -127,7 +127,7 @@ def test_current_contracts_do_not_trigger_unnecessary_gap_queries(updater) -> No
         target_date=target,
     )
 
-    assert len(candidates) == 10
+    assert len(candidates) == 12
     assert plan.empty
 
 
@@ -237,6 +237,11 @@ def test_incident_replay_selects_four_late_arrivals_and_restores_status(
         (row.symbol, row.date, float(row.close))
         for row in pd.concat([current[["symbol", "date", "close"]], old]).itertuples(index=False)
     ]
+    # Synthetic current SR closes keep this replay focused on four late legs.
+    existing_rows.extend([
+        ("SR2701", target.isoformat(), 6100.0),
+        ("SR2705", target.isoformat(), 5900.0),
+    ])
     existing = _price_rows(updater, existing_rows)
     plan = updater.plan_contract_refreshes(
         candidates,
@@ -285,8 +290,8 @@ def test_incident_replay_selects_four_late_arrivals_and_restores_status(
     assert len(recovered) == 4
 
     status = load_domestic_spread_status(target_spreads, CONFIG)
-    assert status.required_contracts == 10
-    assert status.success_contracts == 10
+    assert status.required_contracts == 12
+    assert status.success_contracts == 12
     assert status.failure_contracts == 0
     assert status.status == "success"
 

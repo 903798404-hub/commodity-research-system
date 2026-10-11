@@ -21,6 +21,7 @@ from agri_research_agent.data_sources.tankan.domestic_spread import full_contrac
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SPREAD_INSTRUMENTS = TANKAN_DOMESTIC_SPREAD_INSTRUMENTS + ("SR",)
 APPS_DIR = PROJECT_ROOT / "05_apps"
 if str(APPS_DIR) not in sys.path:
     sys.path.insert(0, str(APPS_DIR))
@@ -31,7 +32,7 @@ def _rows_for_date(value: str, *, omit: tuple[str, int] | None = None) -> pd.Dat
     season = f"{business_date.year}/{business_date.year + 1}"
     pairs = [
         (instrument, month)
-        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for instrument in SPREAD_INSTRUMENTS
         for month in TANKAN_DOMESTIC_SPREAD_MONTHS
         if (instrument, month) != omit
     ]
@@ -76,7 +77,7 @@ def test_status_uses_current_artifact_latest_and_tankan_completeness(
     status = load_domestic_spread_status(payload)
 
     assert status.latest_business_date == "2026-08-24"
-    assert (status.success_contracts, status.required_contracts) == (15, 15)
+    assert (status.success_contracts, status.required_contracts) == (18, 18)
     assert status.failure_contracts == 0
     assert status.status == "success"
     pd.testing.assert_frame_equal(payload, before, check_exact=True)
@@ -111,7 +112,7 @@ def test_legacy_akshare_status_cannot_override_formal_page_status(
     assert len(messages) == 1
     assert "最新交易日：2026-08-24" in messages[0]
     assert "更新状态：更新成功" in messages[0]
-    assert "合约：15/15 成功，0 项缺失" in messages[0]
+    assert "合约：18/18 成功，0 项缺失" in messages[0]
     assert "国内价差 / 正式日收盘价" in messages[0]
     assert "2026-08-14" not in messages[0]
     assert "开始：" not in messages[0]
@@ -163,7 +164,7 @@ def test_page_renders_september_partial_status_without_fixed_fifteen(
         (
             "warning",
             "更新状态：部分更新 | 最新交易日：2026-09-21 | "
-            "合约：2/10 成功，8 项缺失 | 来源：国内价差 / 正式日收盘价",
+            "合约：2/12 成功，10 项缺失 | 来源：国内价差 / 正式日收盘价",
         )
     ]
 
@@ -215,7 +216,7 @@ def test_september_status_excludes_contracts_after_their_seasonal_window() -> No
     status = load_domestic_spread_status(_rows_for_date("2026-09-08", omit=("M", 9)))
 
     assert status.latest_business_date == "2026-09-08"
-    assert (status.success_contracts, status.required_contracts) == (10, 10)
+    assert (status.success_contracts, status.required_contracts) == (12, 12)
     assert status.failure_contracts == 0
     assert status.status == "success"
 
@@ -227,7 +228,7 @@ def test_september_required_identities_roll_to_full_next_year_contracts() -> Non
 
     assert required == {
         f"{instrument}27{month:02d}"
-        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for instrument in SPREAD_INSTRUMENTS
         for month in (1, 5)
     }
     assert not any(code.endswith("09") for code in required)
@@ -240,7 +241,7 @@ def test_old_year_contract_cannot_satisfy_current_full_identity() -> None:
 
     status = load_domestic_spread_status(data)
 
-    assert (status.success_contracts, status.required_contracts) == (9, 10)
+    assert (status.success_contracts, status.required_contracts) == (11, 12)
     assert status.failure_contracts == 1
     assert status.status == "failed"
 
@@ -253,9 +254,9 @@ def test_current_full_identity_is_recognized_and_month_only_payload_fails_closed
         data.drop(columns=["leg1_contract", "leg2_contract"])
     )
 
-    assert (current.success_contracts, current.required_contracts) == (10, 10)
+    assert (current.success_contracts, current.required_contracts) == (12, 12)
     assert current.status == "success"
-    assert (month_only.success_contracts, month_only.required_contracts) == (0, 10)
+    assert (month_only.success_contracts, month_only.required_contracts) == (0, 12)
     assert month_only.status == "failed"
 
 
@@ -267,10 +268,10 @@ def test_rollover_continues_without_a_fixed_2027_year() -> None:
 
     assert required == {
         f"{instrument}28{month:02d}"
-        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for instrument in SPREAD_INSTRUMENTS
         for month in (1, 5)
     }
-    assert (status.success_contracts, status.required_contracts) == (10, 10)
+    assert (status.success_contracts, status.required_contracts) == (12, 12)
     assert status.status == "success"
 
 
@@ -284,12 +285,12 @@ def test_cross_year_window_keeps_the_same_season_then_rolls_forward() -> None:
 
     assert january_2027 == {
         f"{instrument}{year_month}"
-        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for instrument in SPREAD_INSTRUMENTS
         for year_month in ("2709", "2701", "2705")
     }
     assert january_2028 == {
         f"{instrument}{year_month}"
-        for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS
+        for instrument in SPREAD_INSTRUMENTS
         for year_month in ("2809", "2801", "2805")
     }
 
@@ -298,12 +299,12 @@ def test_window_end_still_requires_month_nine_and_active_missing_series_fails() 
     complete = load_domestic_spread_status(_rows_for_date("2026-08-31"))
     missing = load_domestic_spread_status(_rows_for_date("2026-08-31", omit=("M", 9)))
 
-    assert (complete.success_contracts, complete.required_contracts) == (15, 15)
+    assert (complete.success_contracts, complete.required_contracts) == (18, 18)
     assert complete.status == "success"
-    assert (missing.success_contracts, missing.required_contracts) == (14, 15)
+    assert (missing.success_contracts, missing.required_contracts) == (17, 18)
     assert missing.failure_contracts == 1
     assert missing.status == "failed"
     required = _active_required_identities(
         pd.Timestamp("2026-08-31"), DEFAULT_SPREAD_CONFIG
     )
-    assert {f"{instrument}2609" for instrument in TANKAN_DOMESTIC_SPREAD_INSTRUMENTS} <= required
+    assert {f"{instrument}2609" for instrument in SPREAD_INSTRUMENTS} <= required

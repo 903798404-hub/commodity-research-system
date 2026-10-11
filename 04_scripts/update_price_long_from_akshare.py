@@ -32,7 +32,7 @@ from agri_research_agent.pipelines.domestic_spread_integrity import (  # noqa: E
 )
 
 
-DEFAULT_INSTRUMENTS = ["M", "RM", "Y", "OI", "P"]
+DEFAULT_INSTRUMENTS = ["M", "RM", "Y", "OI", "P", "SR"]
 DEFAULT_MONTHS = [1, 5, 9]
 INSTRUMENT_CN = {
     "M": "豆粕",
@@ -40,6 +40,7 @@ INSTRUMENT_CN = {
     "Y": "豆油",
     "OI": "菜油",
     "P": "棕榈油",
+    "SR": "白糖",
 }
 PRICE_FIELD_PRIORITY = ["current_price", "last_close", "last_settle_price", "avg_price"]
 PRICE_LONG_SHEET = "price_long"

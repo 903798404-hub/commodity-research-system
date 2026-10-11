@@ -69,5 +69,26 @@ def test_configured_spreads_keeps_available_unconfigured_names_and_excludes_forb
     assert configured_spreads(data, config) == {
         "豆系月差": ["Y 9-1", "M 9-1", "M 5-9"],
         "棕榈油与菜系月差": [],
+        "国内白糖价差": [],
         "品种间套利": ["OI-Y 5"],
     }
+
+
+@pytest.mark.parametrize("pair", ["1-5", "5-9", "9-1"])
+def test_sugar_month_spreads_have_czce_identity_and_their_own_board(pair: str) -> None:
+    name = f"SR {pair}"
+    assert classify_board(name) == ("国内白糖价差", "月差")
+    first, second = (int(month) for month in pair.split("-"))
+    assert display_spread_name(name) == f"白糖 {first:02d}-{second:02d}"
+    definition = definition_from_legacy(name, "2026/2027")
+    year1 = 2026 if first == 9 else 2027
+    assert str(definition.leg1.instrument) == f"CZCE:SR:{year1}-{first:02d}"
+    assert str(definition.leg2.instrument) == f"CZCE:SR:2027-{second:02d}"
+
+
+def test_sugar_spreads_do_not_leak_into_other_boards() -> None:
+    data = pd.DataFrame({"spread_name": ["SR 5-9", "M 1-5", "SR 9-1", "SR 1-5"]})
+    grouped = configured_spreads(data, pd.DataFrame())
+    assert grouped["国内白糖价差"] == ["SR 9-1", "SR 1-5", "SR 5-9"]
+    assert grouped["豆系月差"] == ["M 1-5"]
+    assert grouped["品种间套利"] == []
