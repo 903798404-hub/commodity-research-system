@@ -221,8 +221,8 @@ def test_collector_replays_real_fx_semantics_and_keeps_all_history(tmp_path):
 
 def test_systemd_preserves_exact_three_windows_without_app_commands():
     path = ROOT / '09_deploy/foreign_fx_server'
-    timer = (path / 'market-data-foreign-fx.timer').read_text(encoding='utf-8')
-    service = (path / 'market-data-foreign-fx.service').read_text(encoding='utf-8')
+    timer = (path / 'market-data-foreign-fx.timer.template').read_text(encoding='utf-8')
+    service = (path / 'market-data-foreign-fx.service.template').read_text(encoding='utf-8')
     assert [line for line in timer.splitlines() if line.startswith('OnCalendar=')] == [
         'OnCalendar=*-*-* 07:00:00 Asia/Shanghai', 'OnCalendar=*-*-* 07:30:00 Asia/Shanghai',
         'OnCalendar=*-*-* 08:00:00 Asia/Shanghai']
