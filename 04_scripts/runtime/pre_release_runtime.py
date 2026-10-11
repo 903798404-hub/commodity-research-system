@@ -837,7 +837,8 @@ def verify_rollback_assets(repo: Path, assets: dict, host) -> dict:
 def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated: bool,
                           irreversible_state_change: str, compatibility: bool,
                           acceptance_plan_ready: bool, rehearsal_validated: bool,
-                          old_grant_expired: bool, targeted_recovery_validated: bool = False) -> dict:
+                          old_grant_expired: bool, targeted_recovery_validated: bool = False,
+                          migration_validation: dict | None = None) -> dict:
     """Pure aggregation of trusted observations, never an authorization API.
 
     Unknown state/compatibility fails closed. An expired historical grant is
@@ -867,11 +868,19 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
     elif irreversible_state_change == 'UNKNOWN' or high and state_class == 'NOT_APPLICABLE':
         state_class = 'UNKNOWN'
     full = high and state_class != 'ADDITIVE_REVERSIBLE'
+    migration_ready = False
+    if migration_validation is not None:
+        try:
+            _load('04_scripts/runtime/strict_migration_gate.py', '_migration_observation').validate_observation(migration_validation)
+        except ValueError as exc:
+            raise PreReleaseError(str(exc)) from exc
+        migration_ready = (destructive and final_treatment == 'HIGH_RISK'
+                           and irreversible_state_change == 'NO' and rehearsal_validated)
     failures = []
     for ok, code in ((assets_ready, "ROLLBACK_ASSETS_INCOMPLETE"), (candidate_validated, "NEW_CANDIDATE_NOT_VALIDATED"),
                      (compatibility, "DATA_SCHEMA_COMPATIBILITY_UNPROVEN"), (acceptance_plan_ready, "ACCEPTANCE_PLAN_MISSING"),
                      (irreversible_state_change == "NO", "IRREVERSIBLE_STATE_REQUIRES_SEPARATE_MIGRATION_GATE"),
-                     (state_class != 'IRREVERSIBLE_OR_DESTRUCTIVE', "DESTRUCTIVE_CHANGE_REQUIRES_SEPARATE_MIGRATION_GATE"),
+                     (state_class != 'IRREVERSIBLE_OR_DESTRUCTIVE' or migration_ready, "DESTRUCTIVE_CHANGE_REQUIRES_SEPARATE_MIGRATION_GATE"),
                      (state_class != 'UNKNOWN', "STATE_COMPATIBILITY_UNPROVEN"),
                      (state_class != 'NEEDS_MAINTAINER_RISK_REVIEW', 'MAINTAINER_RISK_REVIEW_REQUIRED'),
                      (not full or rehearsal_validated, "RECOVERY_REHEARSAL_REQUIRED"),
@@ -887,6 +896,7 @@ def evaluate_release_gate(risk: dict, *, assets_ready: bool, candidate_validated
             "ROLLBACK_REHEARSAL_REQUIRED": full, "FULL_ROLLBACK_REHEARSAL_REQUIRED": full,
             "TARGETED_RECOVERY_VALIDATION_REQUIRED": full, "OLD_GRANT_EXPIRED": old_grant_expired,
             "EXECUTION_AUTHORIZATION": "REQUIRED_AT_FRESH_INSTANCE_START",
+            "SEPARATE_MIGRATION_GATE": migration_validation,
             "PRODUCTION_RELEASE_PREFLIGHT": "FAIL" if failures else "PASS", "failure_codes": failures,
             "production_authorized": False}
 
@@ -1100,6 +1110,20 @@ def reviewed_release_state(request: dict, risk: dict, host) -> tuple[dict, dict,
     return risk, state, reviewed_main
 
 
+def verify_separate_migration_gate(request, risk, state, host, *, tool, candidate_image_id,
+                                   rehearsal_validated, approval_required=True):
+    from types import SimpleNamespace
+    adapter = SimpleNamespace(ROOT=ROOT, Path=Path, _risk_file=_risk_file,
+        _risk_git=_risk_git, current_main_identity=current_main_identity)
+    try:
+        return _load('04_scripts/runtime/strict_migration_gate.py', '_strict_migration_gate').verify(
+            adapter, request, risk, state, host, tool=tool,
+            candidate_image_id=candidate_image_id, rehearsal_validated=rehearsal_validated,
+            approval_required=approval_required)
+    except ValueError as exc:
+        raise PreReleaseError(str(exc)) from exc
+
+
 def assess_release(request_path: Path, destination: Path) -> dict:
     """Protected, read-only planning entry; no instance or grant mutations.
 
@@ -1116,7 +1140,8 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     request = host._json(request_raw)
     fields = {"schema_version", "project_id", "current", "previous", "target_commit",
               "candidate_record", "state_plan", "acceptance_plan", "recovery_evidence", "target_source_root"}
-    _risk_fields(request, fields | ({'maintainer_risk_review'} if 'maintainer_risk_review' in request else set()), "release request")
+    optional = {'maintainer_risk_review', 'migration_gate'} & set(request)
+    _risk_fields(request, fields | optional, "release request")
     if request["schema_version"] != "production-release-request/1":
         raise PreReleaseError("release request schema differs")
     target_source = Path(request["target_source_root"])
@@ -1171,11 +1196,29 @@ def assess_release(request_path: Path, destination: Path) -> dict:
         verify_recovery_observation(recovery, host, targeted_roots=targeted_roots)
         targeted = recovery['result'] == 'PASS' and targeted_roots is not None
         rehearsal = recovery['result'] == 'PASS' and targeted_roots is None
+    migration = None
+    migration_main = None
+    migration_proposal = None
+    if 'migration_gate' in request:
+        migration, migration_main = verify_separate_migration_gate(request, risk, state, host,
+            tool=dict(commit=source_identity[0], tree=source_identity[1]),
+            candidate_image_id=candidate['image_id'], rehearsal_validated=rehearsal)
+    elif risk.get('MACHINE_DESTRUCTIVE_EVIDENCE') is True and risk.get('FINAL_RELEASE_TREATMENT') == 'HIGH_RISK':
+        # A concrete review template is useful, but PENDING is never admission.
+        # Unsupported profiles retain the existing destructive failure Gate.
+        try:
+            migration_proposal, migration_main = verify_separate_migration_gate(request, risk, state, host,
+                tool=dict(commit=source_identity[0], tree=source_identity[1]),
+                candidate_image_id=candidate['image_id'], rehearsal_validated=rehearsal,
+                approval_required=False)
+        except (PreReleaseError, KeyError):
+            migration_proposal = None
     result = {**risk, **evaluate_release_gate(risk, assets_ready=True, candidate_validated=True,
               irreversible_state_change=state["irreversible"], compatibility=state["compatible"],
               acceptance_plan_ready=True, rehearsal_validated=rehearsal, old_grant_expired=False,
-              targeted_recovery_validated=targeted),
+              targeted_recovery_validated=targeted, migration_validation=migration),
               "OLD_GRANT_EXPIRED": "NOT_READ_NOT_A_GATE", "retained_assets": retained,
+              "SEPARATE_MIGRATION_PROPOSAL": migration_proposal,
               "request_sha256": hashlib.sha256(request_raw).hexdigest(), "candidate_image_id": candidate["image_id"],
               "governance_identity": {"commit": source_identity[0], "tree": source_identity[1]}}
     if (host._protected_path(request_path, private=True).read_bytes() != request_raw
@@ -1184,6 +1227,8 @@ def assess_release(request_path: Path, destination: Path) -> dict:
         raise PreReleaseError("release assessment inputs changed")
     if reviewed_main is not None and current_main_identity(ROOT) != reviewed_main:
         raise PreReleaseError('authoritative main changed during risk review assessment')
+    if migration_main is not None and current_main_identity(ROOT) != migration_main:
+        raise PreReleaseError('authoritative main changed during migration assessment')
     for name in ("current", "previous"):
         verify_rollback_assets(ROOT, request[name], host)
     for name in ("candidate_record", "state_plan", "acceptance_plan"):
@@ -1191,6 +1236,12 @@ def assess_release(request_path: Path, destination: Path) -> dict:
     if request["recovery_evidence"] is not None:
         _risk_file(request["recovery_evidence"], host)
         verify_recovery_observation(recovery, host, targeted_roots=targeted_roots)
+    if migration is not None:
+        checked, _ = verify_separate_migration_gate(request, risk, state, host,
+            tool=dict(commit=source_identity[0], tree=source_identity[1]),
+            candidate_image_id=candidate['image_id'], rehearsal_validated=rehearsal)
+        if checked != migration:
+            raise PreReleaseError('migration validation changed during assessment')
     _write_new(host, destination, json.dumps(result, sort_keys=True).encode())
     return result
 

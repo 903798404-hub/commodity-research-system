@@ -238,6 +238,36 @@ def test_supplied_optional_recovery_is_still_verified(tmp_path):
     assert calls == [{}]
 
 
+@pytest.mark.parametrize('fault', [None, 'unassessed', 'request', 'tool', 'image', 'failed', 'expired', 'changed', 'targeted'])
+def test_migration_approval_is_reconsumed_before_any_stop(tmp_path, fault):
+    from types import SimpleNamespace
+    backend, plan, assessment, path, reference = recovery_requirement_backend(tmp_path)
+    recovery = tmp_path / 'recovery.json'
+    recovery.write_text(json.dumps(dict(result='PASS', method='targeted-recovery' if fault == 'targeted' else 'fresh-recovery')))
+    request = Path(plan['release_request']['path'])
+    request.write_text(json.dumps(dict(recovery_evidence=reference(recovery), migration_gate={'fixture': True})))
+    plan['release_request'] = reference(request)
+    assessment.update(request_sha256=plan['release_request']['sha256'], SEPARATE_MIGRATION_GATE={'fixture': 'verified'})
+    if fault in ('request', 'tool', 'image', 'failed'):
+        field = dict(request='request_sha256', tool='governance_identity', image='candidate_image_id', failed='PRODUCTION_RELEASE_PREFLIGHT')[fault]
+        assessment[field] = 'changed'
+    path.write_text(json.dumps(assessment))
+    if fault != 'unassessed': backend.release_assessment = reference(path)
+    calls = []
+    def verify(*args, **kwargs):
+        calls.append('migration')
+        assert kwargs['tool'] == plan['tool'] and kwargs['candidate_image_id'] == plan['target']['image_id']
+        if fault == 'expired' or not kwargs['rehearsal_validated']: raise ValueError('invalid migration approval')
+        return ({'fixture': 'changed'} if fault == 'changed' else {'fixture': 'verified'}), None
+    backend.pre = SimpleNamespace(verify_recovery_observation=lambda *a: calls.append('recovery'),
+        reviewed_release_state=lambda request, risk, host: (risk, {}, None), verify_separate_migration_gate=verify)
+    if fault:
+        with pytest.raises((execution.ExecutionError, ValueError)): backend.consume_recovery(plan)
+    else:
+        backend.consume_recovery(plan)
+        assert calls == ['recovery', 'migration']
+
+
 def test_hosted_formal_runtime_fixture_preserves_candidate_snapshot_and_empty_formal_store(tmp_path):
     fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
         '_test_formal_execution_inputs')

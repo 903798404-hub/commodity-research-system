@@ -669,6 +669,25 @@ def case(work, tool, old_source, target_source, old_evidence, target_evidence, o
         assert refresh_outcomes['target']['action'] == 'REUSED' and not audits
     negatives = {}
     if injection == 'NONE':
+        # A protected file with a PASS label is not a separate migration
+        # approval. Exercise the actual formal executor and parser, keeping
+        # the real old service running and its original start time intact.
+        migration_scope = directory(work / 'migration-approval-negative', 0o700)
+        migration_request = copy.deepcopy(prepared_request)
+        migration_request['migration_gate'] = ref(save(migration_scope, 'fake-approval.json',
+            dict(schema_version='strict-migration-approval/1', status='PASS',
+                 reviewer='SYNTHETIC_NOT_PRODUCTION_APPROVAL')))
+        migration_plan = copy.deepcopy(plan)
+        migration_plan['release_request'] = ref(save(migration_scope, 'request.json', migration_request))
+        migration_path = migration_scope / 'deployment_plan.json'
+        execution.seal_plan(migration_plan, migration_path)
+        migration_backend = execution.HostBackend(directory(migration_scope / 'execution', 0o700))
+        migration_result = execution.execute_verified_plan(migration_path, migration_backend)
+        assert migration_result['result'] == 'FAIL' and migration_result['source'] == 'PRESERVED_NOT_STOPPED'
+        assert 'stop_source' not in migration_result['steps']
+        assert backend.host.docker_inspect(cid)['State']['StartedAt'] == running['State']['StartedAt']
+        negatives['unapproved-migration'] = dict(status='PASS', actual_stop_called=False,
+            result=ref(migration_backend.output / 'execution-result.json'))
         credential_receipt = json.loads((preparation.output/'credential-preparation.json').read_bytes())
         credential_identity = credential_receipt['target']
         credential_parent = Path(credential_identity['parent']['path'])

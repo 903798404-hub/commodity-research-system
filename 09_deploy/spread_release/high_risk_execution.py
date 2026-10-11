@@ -758,6 +758,22 @@ class HostBackend:
             return
         recovery = self.read(request['recovery_evidence'])
         self.pre.verify_recovery_observation(recovery, self.host)
+        if 'migration_gate' in request:
+            # Approval/evidence must still be fresh at the last consumer before
+            # stop, not merely when an earlier plan was prepared.
+            reference = getattr(self, 'release_assessment', None)
+            require(reference is not None, 'MIGRATION_REQUIREMENTS_NOT_ASSESSED')
+            assessment = self.read(reference)
+            require(assessment['request_sha256'] == plan['release_request']['sha256']
+                    and assessment['governance_identity'] == plan['tool']
+                    and assessment['candidate_image_id'] == plan['target']['image_id']
+                    and assessment['PRODUCTION_RELEASE_PREFLIGHT'] == 'PASS'
+                    and assessment['production_authorized'] is False, 'MIGRATION_ASSESSMENT_CHANGED')
+            risk, state, _ = self.pre.reviewed_release_state(request, assessment, self.host)
+            checked, _ = self.pre.verify_separate_migration_gate(request, risk, state, self.host,
+                tool=plan['tool'], candidate_image_id=plan['target']['image_id'],
+                rehearsal_validated=recovery['result'] == 'PASS' and recovery['method'] != 'targeted-recovery')
+            require(checked == assessment['SEPARATE_MIGRATION_GATE'], 'MIGRATION_VALIDATION_CHANGED')
         if 'recovery_policy' in recovery:
             policy = self.read(recovery['recovery_policy'])
             require('sandbox' in policy['recovery'], 'ISOLATED_REHEARSAL_REQUIRED')

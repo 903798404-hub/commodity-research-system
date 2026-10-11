@@ -1,5 +1,20 @@
 schema_version: 1
 modules:
+  runtime.strict_migration_gate:
+    code_paths:
+      - 04_scripts/runtime/strict_migration_gate.py
+      - 04_scripts/runtime/pre_release_runtime.py
+      - 09_deploy/spread_release/high_risk_execution.py
+    direct_tests:
+      - 08_tests/test_strict_migration_gate.py
+      - 08_tests/test_pre_release_runtime.py
+      - 08_tests/test_high_risk_execution.py
+    impact_tests:
+      - 08_tests/test_release_refresh.py
+      - 08_tests/test_recovery_sandbox.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
   soybean_margin.submit_reference:
     code_paths:
       - 03_src/agri_research_agent/soybean_margin/latest_quotes.py
