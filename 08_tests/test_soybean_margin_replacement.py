@@ -150,6 +150,34 @@ def test_mapping_uses_full_year_and_keeps_existing_policy():
     assert contracts(date(2026,6,25),8) == ('2609','2605',2026)
 
 
+@pytest.mark.parametrize("day", [date(2026,10,11), date(2026,10,12), date(2027,10,11)])
+def test_confirmed_domestic_mapping_applies_from_october_eleven_and_future_years(day):
+    shipment = day.year + 1
+    for month in range(4, 8):
+        assert contracts(day, month)[1:] == (f"{shipment%100:02}09", shipment)
+    for month in range(8, 11):
+        assert contracts(day, month)[1:] == (f"{(shipment+1)%100:02}01", shipment)
+
+
+def test_previous_business_date_retains_legacy_domestic_mapping():
+    day = date(2026,10,10)
+    for month in range(4, 9):
+        assert contracts(day, month)[1:] == ("2705", 2027)
+    assert contracts(day, 12) == ("2701", "2701", 2026)
+
+
+def test_october_eleven_empty_page_shows_new_contracts_with_missing_prices():
+    day = date(2026,10,11)
+    empty = pd.DataFrame(columns=["business_date", "origin"])
+    rows = daily_rows(empty, day, "brazil")
+    assert [row["domestic_contract"] for row in rows[3:7]] == ["2709"] * 4
+    assert [row["domestic_contract"] for row in rows[7:10]] == ["2801"] * 3
+    assert all(row[FIELDS[3]] is None and row[FIELDS[4]] is None
+               and row["net_margin"] is None for row in rows)
+    html = daily_html(rows, "巴西", day)
+    assert "2026-10-11" in html and "2709" in html and "2801" in html
+
+
 def test_twelve_rows_keep_empty_dates_empty():
     rows = daily_rows(source(),date(2026,9,30),'brazil')
     assert len(rows)==12
