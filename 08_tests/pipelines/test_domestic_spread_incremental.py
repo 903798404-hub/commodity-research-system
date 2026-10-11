@@ -328,10 +328,10 @@ def test_incident_replay_materializes_only_eight_target_dependencies() -> None:
         pd.to_datetime(materialized["date"]).eq(pd.Timestamp("2026-09-21"))
     ]
     status = load_domestic_spread_status(target_rows, CONFIG)
-    assert status.required_contracts == 10
+    assert status.required_contracts == 12
     assert status.success_contracts == 10
-    assert status.failure_contracts == 0
-    assert status.status == "success"
+    assert status.failure_contracts == 2
+    assert status.status == "failed"
 
 
 def test_server_materialization_starts_from_pinned_current(

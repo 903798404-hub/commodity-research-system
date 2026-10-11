@@ -46,6 +46,68 @@ def load_script(relative: str, name: str):
     return module
 
 
+@pytest.mark.parametrize(
+    ("name", "business_date", "contracts"),
+    [
+        ("SR 1-5", "2026-06-01", ("SR2701", "SR2705")),
+        ("SR 5-9", "2026-10-01", ("SR2705", "SR2709")),
+        ("SR 9-1", "2026-06-01", ("SR2609", "SR2701")),
+    ],
+)
+def test_sugar_configuration_calculation_and_exact_contract_rollover(
+    name: str, business_date: str, contracts: tuple[str, str],
+) -> None:
+    builder = load_script("04_scripts/build_spread_config.py", "sugar_config_builder")
+    calculator = load_script("04_scripts/calculate_historical_spreads.py", "sugar_calculator")
+    importer = load_script("04_scripts/import_historical_prices.py", "sugar_importer")
+    updater = load_script("04_scripts/update_price_long_from_akshare.py", "sugar_updater")
+    rules = pd.read_excel(ROOT / "02_configs/historical_spread_config.xlsx", sheet_name="spread_config")
+    generated = builder.build_configs()
+    pd.testing.assert_frame_equal(
+        rules.sort_values("spread_name").reset_index(drop=True),
+        generated.sort_values("spread_name").reset_index(drop=True),
+    )
+    config = rules.loc[rules["spread_name"].eq(name)].iloc[0]
+    prices = pd.DataFrame([
+        {"date": pd.Timestamp(business_date), "instrument": "SR",
+         "delivery_month": month, "price": value, "source_column": f"{code}:close",
+         "source_file": "akshare_futures_zh_daily_sina", "status": "success", "error": ""}
+        for month, value, code in zip(
+            (config.leg1_month, config.leg2_month), (6100.0, 5900.0), contracts, strict=True
+        )
+    ])
+    result, failure = calculator.calculate_one_spread(config, prices, "fixture")
+    assert failure is None
+    assert result.iloc[0]["spread_value"] == 200.0
+    assert result.iloc[0]["leg1_contract"] == contracts[0]
+    assert result.iloc[0]["leg2_contract"] == contracts[1]
+    assert result.iloc[0]["status"] == "success"
+    assert importer.parse_price_column("期货收盘价(1月交割连续):白糖") == ("SR", 1, "白糖")
+    assert updater.akshare_display_symbol("SR", 1, "2026/2027") == "白糖2701"
+    assert ("SR", 1) in updater.instruments_and_months_from_config(ROOT / "02_configs/historical_spread_config.xlsx")
+
+
+def test_sugar_missing_leg_keeps_missing_price_and_tankan_scope_unchanged() -> None:
+    calculator = load_script("04_scripts/calculate_historical_spreads.py", "sugar_missing_calculator")
+    rules = pd.read_excel(ROOT / "02_configs/historical_spread_config.xlsx", sheet_name="spread_config")
+    config = rules.loc[rules["spread_name"].eq("SR 1-5")].iloc[0]
+    prices = pd.DataFrame([
+        {"date": pd.Timestamp(day), "instrument": "SR", "delivery_month": month,
+         "price": value, "source_column": f"SR27{month:02d}:close",
+         "source_file": "akshare_futures_zh_daily_sina", "status": "success", "error": ""}
+        for day, month, value in [
+            ("2026-06-01", 1, 6100.0), ("2026-06-01", 5, 5900.0), ("2026-06-02", 1, 6150.0)
+        ]
+    ])
+    result, failure = calculator.calculate_one_spread(config, prices, "fixture")
+    assert failure is None
+    missing = result.loc[result["date"].eq(pd.Timestamp("2026-06-02"))].iloc[0]
+    assert missing["status"] == "missing_price"
+    assert pd.isna(missing["spread_value"])
+    assert len(required_symbols("2026/2027")) == 15
+    assert not any(code.startswith("SR") for code in required_symbols("2026/2027"))
+
+
 def test_15_tankan_contracts_normalize_to_actual_business_symbols() -> None:
     normalized = normalize_rows(source_rows(), season="2026/2027")
     assert len(normalized) == 15
