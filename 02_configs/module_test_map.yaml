@@ -127,6 +127,7 @@ modules:
     direct_tests:
       - 08_tests/positions/test_workspace.py
       - 08_tests/positions/test_positions_delivery.py
+      - 08_tests/positions/test_cftc_annual.py
     impact_tests:
       - 08_tests/sugar_positions/test_positions.py
       - 08_tests/sugar_positions/test_preview.py

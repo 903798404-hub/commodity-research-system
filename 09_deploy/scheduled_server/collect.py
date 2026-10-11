@@ -49,7 +49,8 @@ def prepare(request,baseline,output,credentials):
         from agri_research_agent.automation.positions_scheduled_collection import collect_bundle
         from agri_research_agent.positions import delivery as codec
         previous=host.read_json(baseline/host.POSITIONS_STABLE)
-        bundle,attempts=collect_bundle(previous,output,markets=job.removeprefix('positions_'),today=date.fromisoformat(request['business_date']))
+        bundle,attempts=collect_bundle(previous,output,markets=job.removeprefix('positions_'),today=date.fromisoformat(request['business_date']),
+            cftc_annual=job=='positions_foreign')
         archive=codec.archive_bundle(bundle,SOURCE); semantic=codec.observations(archive,previous,SOURCE)
         package(request,output,{'positions_archive.json':codec.canonical(archive)},semantic,host)
         return {'attempts':attempts,'observations':semantic}

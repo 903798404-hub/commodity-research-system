@@ -17,14 +17,15 @@ from agri_research_agent.shared.atomic_storage import atomic_write_json
 
 
 def collect(source, spec, *, markets, start_year, start_day, end_day, euro_start,
-            existing_dates=(), seed_contract=None, sina_contracts=(), existing_partitions=()):
+            existing_dates=(), seed_contract=None, sina_contracts=(), existing_partitions=(), include_cftc=True):
     tasks, foreign, domestic, captures, attempts = [], [], [], [], []
     if markets in ("all", "foreign"):
         for market, source_spec in spec["foreign"].items():
             if source_spec["source"] == "cftc":
                 for kind in ("futures_only", "combined"):
-                    tasks.append((f"cftc_{market}_{kind}", "foreign", "json",
-                        lambda m=market, s=source_spec, k=kind: source.cftc(m, s, k, start_year)))
+                    if include_cftc:
+                        tasks.append((f"cftc_{market}_{kind}", "foreign", "json",
+                            lambda m=market, s=source_spec, k=kind: source.cftc(m, s, k, start_year)))
             elif source_spec["source"] == "euronext":
                 cursor = euro_start
                 while cursor <= end_day:

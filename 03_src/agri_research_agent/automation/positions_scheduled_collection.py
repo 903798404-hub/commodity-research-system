@@ -14,7 +14,7 @@ from agri_research_agent.sugar_positions.sources import OfficialSources
 from agri_research_agent.sugar_positions.storage import publish, read_snapshot
 
 
-def collect_bundle(baseline, work, *, markets, today=None):
+def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
     today = today or date.today()
     delivery.require(markets in {"domestic", "foreign"}, "scheduled positions market scope invalid")
     snapshots, _ = codec.validate_archive(baseline, delivery.ROOT)
@@ -23,6 +23,11 @@ def collect_bundle(baseline, work, *, markets, today=None):
     sugar = delivery._module(delivery.ROOT, "04_scripts/sugar_positions/update_sugar_positions.py", "scheduled_sugar")
     oilseed = delivery._module(delivery.ROOT, "04_scripts/oilseed_positions/update_positions.py", "scheduled_oilseed")
     specs, attempts = domain_config(delivery.ROOT), []
+    annual=None
+    if cftc_annual:
+        delivery.require(markets=='foreign','annual CFTC collection is foreign only')
+        from agri_research_agent.positions.cftc_annual import AnnualSources
+        annual=AnnualSources(today)
     selected = ("sugar", "rapeseed") if markets == "domestic" else ("sugar", "rapeseed", "soybean")
     for domain in selected:
         old = snapshots[domain]
@@ -33,14 +38,17 @@ def collect_bundle(baseline, work, *, markets, today=None):
         existing = {row["report_date"] for row in old["domestic"]}
         if domain == "sugar":
             rows = sugar.collect(OfficialSources(), markets=markets, start_year=start_year,
-                start_day=today, end_day=today, existing_dates=existing)
+                start_day=today, end_day=today, existing_dates=existing,include_cftc=not cftc_annual)
         else:
             # No DCE, browser, Sina or pending FCPO requests in this automatic chain.
             spec = specs[domain]
             rows = oilseed.collect(Sources(), spec, markets=markets, start_year=start_year,
                 start_day=today, end_day=today, euro_start=max(date(2026, 9, 30), today - timedelta(days=35)),
-                existing_dates=existing)
+                existing_dates=existing,include_cftc=not cftc_annual)
         foreign, domestic, captures, observed = rows
+        if annual:
+            more,raws,checks=annual.collect(domain,specs.get(domain),old['foreign'],start_year)
+            foreign.extend(more);captures.extend(raws);observed.extend(checks)
         attempts.extend({"domain": domain, **item} for item in observed)
         root = store / domain
         (root / "last_attempt.json").write_bytes(delivery.canonical_json_bytes({"attempts": observed}))

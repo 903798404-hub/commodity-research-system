@@ -57,7 +57,7 @@ def snapshot(host,config,work):
     def add(relative,path,identity):
         host._file_identity(identity)
         host._no_links(path)
-        host.require(path.is_file() and path.stat().st_size <= 64*1024**2,'spread input absent or oversized')
+        host.require(path.is_file() and path.stat().st_size <= 192*1024**2,'spread input absent or oversized')
         raw=path.read_bytes()
         host.require({'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)}==identity,'spread input identity differs')
         files[relative]=identity; contents[relative]=base64.b64encode(raw).decode('ascii')

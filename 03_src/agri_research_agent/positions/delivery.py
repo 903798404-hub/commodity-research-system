@@ -140,6 +140,16 @@ def _replay_source(key, source, raw, domain, spec):
     parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     require(parsed.tzinfo is not None and parsed <= datetime.now(timezone.utc), "positions source timestamp invalid")
     varieties = ("SR",) if domain == "sugar" else tuple(spec[domain]["domestic"])
+    if key.startswith('cftc_archive_'):
+        from agri_research_agent.positions.cftc_annual import archive_url,parse_archive
+        match=re.fullmatch(r'cftc_archive_(20\d{2})_(sugar11|canola|cbot_soybean|cbot_meal|cbot_oil)_(futures_only|combined)',key)
+        require(match is not None,'positions CFTC archive key invalid')
+        year,market,suffix=match.groups();year=int(year)
+        require((domain=='sugar' and market=='sugar11') or (domain!='sugar' and market in spec[domain]['foreign']),
+                'positions CFTC archive domain differs')
+        definition={'code':'080732','name':'SUGAR NO. 11'} if domain=='sugar' else spec[domain]['foreign'][market]
+        require(url==archive_url(year,suffix),'positions CFTC archive URL invalid')
+        return 'foreign',parse_archive(raw,year,suffix,market,definition['code'],definition['name'],stamp)
     if key.startswith("cftc_"):
         suffix = "combined" if key.endswith("_combined") else "futures_only"
         require(key.endswith("_" + suffix), "positions CFTC source key invalid")

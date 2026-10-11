@@ -18,12 +18,13 @@ from agri_research_agent.sugar_positions.storage import preview_root, publish, r
 from agri_research_agent.shared.atomic_storage import atomic_write_json
 
 
-def collect(source, *, markets, start_year, start_day, end_day, existing_dates=()):
+def collect(source, *, markets, start_year, start_day, end_day, existing_dates=(), include_cftc=True):
     foreign, domestic, captures, attempts = [], [], [], []
     tasks = []
     if markets in ("all", "foreign"):
         for kind in ("futures_only", "combined"):
-            tasks.append((f"cftc_{kind}", "foreign", "json", lambda k=kind: source.cftc(k, start_year)))
+            if include_cftc:
+                tasks.append((f"cftc_{kind}", "foreign", "json", lambda k=kind: source.cftc(k, start_year)))
         for year in range(start_year, end_day.year + 1):
             tasks.append((f"ice_{year}", "foreign", "csv", lambda y=year: source.ice(y)))
     if markets in ("all", "domestic"):
