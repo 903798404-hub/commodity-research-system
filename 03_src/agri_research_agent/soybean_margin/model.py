@@ -15,7 +15,7 @@ PARAMETERS = {"meal_yield": .795, "oil_yield": .19, "tariff": .03, "vat": .09,
               "port_fee": 50., "processing_fee": 150., "conversion": .367437}
 CBOT_MONTHS = {1:1, 2:3, 3:3, 4:5, 5:5, 6:7, 7:7, 8:9, 9:9, 10:11, 11:11, 12:1}
 DCE_MONTHS = {m: 5 if m <= 8 else 1 for m in range(1, 13)}
-DOMESTIC_MAPPING_CUTOVER = date(2026, 10, 12)
+DOMESTIC_MAPPING_CUTOVER = date(2026, 10, 11)
 KEY = ["business_date", "origin", "shipment_year", "shipment_month"]
 FIELDS = ["cnf_cents_per_bushel", "cbot_price_cents_per_bushel", "fx_value",
           "soymeal_price_cny_per_tonne", "soyoil_price_cny_per_tonne"]
