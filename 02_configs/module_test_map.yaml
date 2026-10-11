@@ -1,5 +1,17 @@
 schema_version: 1
 modules:
+  maintenance.public_package_retention:
+    code_paths:
+      - 04_scripts/maintenance
+    direct_tests:
+      - 08_tests/test_public_package_retention.py
+    impact_tests:
+      - 08_tests/pipelines/test_public_data_delivery.py
+      - 08_tests/pipelines/test_public_data_transport.py
+      - 08_tests/test_scheduled_server.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
   automation.scheduled_server:
     code_paths:
       - 09_deploy/scheduled_server

@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily public package compaction and capacity check
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=0
+Unit=market-data-package-retention.service
+
+[Install]
+WantedBy=timers.target
+
