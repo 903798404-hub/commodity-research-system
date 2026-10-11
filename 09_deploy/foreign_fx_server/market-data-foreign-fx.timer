@@ -1,0 +1,14 @@
+[Unit]
+Description=Foreign FX Beijing 07:00 with conditional 07:30 and 08:00 retries
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 Asia/Shanghai
+OnCalendar=*-*-* 07:30:00 Asia/Shanghai
+OnCalendar=*-*-* 08:00:00 Asia/Shanghai
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=market-data-foreign-fx.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Official foreign FX collection and protected data delivery
+RequiresMountsFor=/var/lib/market-data
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B @SOURCE_ROOT@/09_deploy/foreign_fx_server/run.py --config @CONFIG_PATH@ --publish --retry-if-needed
+TimeoutStartSec=25min
+UMask=0022
+Nice=10
+StandardOutput=journal
+StandardError=journal
