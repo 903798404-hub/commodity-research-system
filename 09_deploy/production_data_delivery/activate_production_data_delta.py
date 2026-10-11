@@ -798,7 +798,7 @@ def snapshot_fx_baseline(policy_path: str | Path) -> dict[str, object]:
     """Return fixed approved domain bytes consistently under the allocation lock."""
     policy, policy_sha = _load_policy(policy_path)
     domain = policy["domain"]
-    require(domain in {"foreign_fx", "canola_exports", "commodity_positions"},
+    require(domain in {"foreign_fx", "canola_exports", "commodity_positions", "soybean_crop_progress", "soybean_export_sales"},
             "baseline export is restricted to the scheduled allowlist")
     allocation = _protected(_under(policy["allocation_root"], ALLOCATION_ROOT))
     contract = DOMAIN_CONTRACTS[domain]
@@ -821,7 +821,14 @@ def snapshot_fx_baseline(policy_path: str | Path) -> dict[str, object]:
                 require(len(raw) == identity["size_bytes"] and hashlib.sha256(raw).hexdigest() == identity["sha256"],
                         "FX baseline changed while reading")
                 contents[relative] = base64.b64encode(raw).decode("ascii")
-        require(len({value is None for value in files.values()}) == 1, "FX baseline incomplete")
+        if domain in {"foreign_fx", "canola_exports", "commodity_positions"}:
+            require(len({value is None for value in files.values()}) == 1, "FX baseline incomplete")
+        else:
+            require((files.get(CROP_PROGRESS) is None) == (files.get(CROP_CONDITION) is None), "crop baseline pair incomplete")
+            require((files.get(FAS_STABLE) is None) == (files.get(FAS_MANIFEST) is None), "FAS baseline manifest incomplete")
+            if domain == "soybean_crop_progress":
+                require(files[CROP_LEGACY_PROGRESS] is not None and files[CROP_LEGACY_CONDITION] is not None,
+                        "crop historical baseline absent")
         _policy_unchanged(policy_path, policy_sha)
         return {"schema_version": ("foreign-fx-baseline-snapshot/1" if domain == "foreign_fx"
                                    else "production-domain-baseline-snapshot/1"), "domain": domain,

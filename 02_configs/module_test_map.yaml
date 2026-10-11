@@ -1,5 +1,26 @@
 schema_version: 1
 modules:
+  automation.scheduled_server:
+    code_paths:
+      - 09_deploy/scheduled_server
+      - 04_scripts/transfer_public_data_package.py
+    direct_tests:
+      - 08_tests/test_scheduled_server.py
+    impact_tests:
+      - 08_tests/test_foreign_fx_server.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/test_first_batch_scheduled.py
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_fx.py
+      - 08_tests/positions/test_scheduled_collection.py
+      - 08_tests/positions/test_positions_delivery.py
+      - 08_tests/canola_exports/test_delivery_exports.py
+      - 08_tests/pipelines/test_public_data_transport.py
+      - 08_tests/pipelines/test_public_data_delivery.py
+      - 08_tests/pipelines/test_application_runtime_readability.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: [automation.first_batch_scheduled]
+    full_regression_when_changed: false
   runtime.strict_migration_gate:
     code_paths:
       - 04_scripts/runtime/strict_migration_gate.py

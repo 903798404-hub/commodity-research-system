@@ -25,12 +25,14 @@ SRC = ROOT / "03_src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from agri_research_agent.pipelines.public_data_delivery import (  # noqa: E402
-    validate_production_package,
-)
-from agri_research_agent.pipelines.public_data_prewarm import (  # noqa: E402
-    validate_formal_consumer_reads,
-)
+def validate_production_package(*args, **kwargs):
+    from agri_research_agent.pipelines.public_data_delivery import validate_production_package as validate
+    return validate(*args, **kwargs)
+
+
+def validate_formal_consumer_reads(*args, **kwargs):
+    from agri_research_agent.pipelines.public_data_prewarm import validate_formal_consumer_reads as validate
+    return validate(*args, **kwargs)
 
 
 _SSH_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,199}$")
@@ -185,6 +187,11 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def _ssh(target: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    if target is None:
+        import os
+        if sys.platform != 'linux' or os.geteuid() != 0:
+            raise RuntimeError('local publisher requires protected Linux host root')
+        return _run(arguments)
     return _run(["ssh", *_SSH_OPTIONS, "-T", target, shlex.join(arguments)])
 
 
