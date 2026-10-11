@@ -10,4 +10,3 @@ Unit=market-data-package-retention.service
 
 [Install]
 WantedBy=timers.target
-

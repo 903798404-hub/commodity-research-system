@@ -17,4 +17,3 @@ ProtectHome=read-only
 # Use one physical data-disk view so atomic links share the same mount instance.
 ReadWritePaths=/srv/market-data-disk/active
 PrivateTmp=true
-
