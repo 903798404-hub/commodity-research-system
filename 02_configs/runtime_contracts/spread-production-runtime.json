@@ -1683,6 +1683,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/positions/cftc_annual.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/positions/workspace.py",
       "role": "runtime_configuration"
     },
