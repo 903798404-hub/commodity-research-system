@@ -11,6 +11,29 @@ from agri_research_agent.market_data.foreign_fx import load_update_status
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_failed_official_fetch_persists_detailed_run_and_last_state_without_publication(monkeypatch,tmp_path):
+    import json,sys
+    from types import SimpleNamespace
+    from agri_research_agent.market_data import foreign_fx_delivery as fx
+    runtime=tmp_path/'runtime';baseline=tmp_path/'baseline';baseline.mkdir()
+    marker=baseline/'untouched';marker.write_bytes(b'original')
+    config=dict(runtime_root=str(runtime),baseline_root=str(baseline),python=sys.executable)
+    module=host();identity=dict(commit='a'*40,tree='b'*40)
+    monkeypatch.setattr(producer,'validate_config',lambda _:None)
+    monkeypatch.setattr(producer,'sys',SimpleNamespace(flags=SimpleNamespace(isolated=True),dont_write_bytecode=True,executable=sys.executable))
+    monkeypatch.setattr(producer.delivery,'verify_clean_detached_clone',lambda *_:identity)
+    monkeypatch.setattr(producer.delivery,'_host_contract',lambda:module)
+    monkeypatch.setattr(producer,'local_baseline',lambda _:(baseline,{module.FX_STABLE:None}))
+    def failed(*_):raise fx.FxSourceError('official response rejected',source_url=fx.BCB_LATEST_URL,http_status=503)
+    monkeypatch.setattr(fx,'collect',failed)
+    with pytest.raises(fx.FxSourceError):producer.run_fx(config)
+    state=json.loads((runtime/'foreign-fx-last-run.json').read_text(encoding='utf-8'))
+    run=json.loads((runtime/state['run_id']/'result.json').read_text(encoding='utf-8'))
+    assert run==state and state['status']=='FAIL' and not state['published']
+    assert state['error']['stage']=='collect_official_sources' and state['error']['http_status']==503
+    assert state['error']['source_url']==fx.BCB_LATEST_URL and marker.read_bytes()==b'original'
+
+
 def host():
     spec = importlib.util.spec_from_file_location("fx_host_test", ROOT / "09_deploy/production_data_delivery/activate_production_data_delta.py")
     module = importlib.util.module_from_spec(spec)

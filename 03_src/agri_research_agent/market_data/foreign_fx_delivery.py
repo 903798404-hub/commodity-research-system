@@ -7,35 +7,62 @@ import gzip
 import hashlib
 from html.parser import HTMLParser
 import io
+import json
 from pathlib import Path
 import re
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from .foreign_fx import BY_CODE, ECB_HISTORY_URL, FxDataError, bcb_url, parse_bcb, parse_ecb, validate_snapshot
 from .foreign_fx_update import MAX_RESPONSE_BYTES, collect_snapshot
 
-BCB_LATEST_URL = "https://ptax.bcb.gov.br/ptax_internet/consultarUltimaCotacaoDolar.do"
+BCB_LEGACY_LATEST_URL = "https://ptax.bcb.gov.br/ptax_internet/consultarUltimaCotacaoDolar.do"
+BCB_LATEST_URL = "https://www.bcb.gov.br/api/servico/sitebcb/indicadorCambio"
 ECB_LATEST_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 EVIDENCE_SCHEMA = "foreign-fx-source-evidence/1"
 START = date(2021, 1, 1)
 
 
+class FxSourceError(FxDataError):
+    """Bounded diagnostics for an official request, without response bodies."""
+    def __init__(self, message, **details):
+        super().__init__(message)
+        self.details = details
+
+
+def failure_details(exc, stage):
+    message = re.sub(r"(?i)(token|password|api[_-]?key|authorization)(\s*[=:]\s*)[^\s&]+",
+                     r"\1\2[REDACTED]", str(exc))
+    message = re.sub(r"https?://[^\s/@]+:[^\s/@]+@", "https://[REDACTED]@", message)
+    result = dict(stage=stage, error_type=type(exc).__name__, message=message[:1000])
+    if isinstance(exc, FxSourceError):
+        result.update(exc.details)
+    return result
+
+
 def fetch_delivery_official(url):
     """Use verified direct TLS, independently of desktop proxy/CA environment."""
     import requests
-    allowed = {"api.bcb.gov.br", "ptax.bcb.gov.br", "www.ecb.europa.eu"}
+    allowed = {"api.bcb.gov.br", "www.bcb.gov.br", "www.ecb.europa.eu"}
     if urlparse(url).scheme != "https" or urlparse(url).hostname not in allowed:
         raise FxDataError("FX official URL outside allowlist")
     with requests.Session() as session:
         session.trust_env = False
-        with session.get(url, headers={"User-Agent": "AgriculturalResearch/1.0"}, timeout=45, stream=True) as response:
-            if response.status_code != 200 or urlparse(response.url).scheme != "https" or urlparse(response.url).hostname not in allowed:
-                raise FxDataError("FX official response status or destination invalid")
-            raw = bytearray()
-            for chunk in response.iter_content(chunk_size=65536):
-                raw.extend(chunk)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    raise FxDataError("FX official response exceeds size limit")
+        try:
+            with session.get(url, headers={"User-Agent": "AgriculturalResearch/1.0"}, timeout=45, stream=True) as response:
+                if response.status_code != 200 or response.url != url:
+                    raise FxSourceError("FX official response status or destination invalid",
+                                        source_url=url, http_status=response.status_code)
+                raw = bytearray()
+                for chunk in response.iter_content(chunk_size=65536):
+                    raw.extend(chunk)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        raise FxSourceError("FX official response exceeds size limit", source_url=url,
+                                            http_status=response.status_code, received_bytes=len(raw))
+        except requests.RequestException as exc:
+            details=failure_details(exc, "request")
+            raise FxSourceError("FX official request failed", source_url=url,
+                                cause_type=details['error_type'], cause_message=details['message']) from exc
     return bytes(raw)
 
 
@@ -59,7 +86,7 @@ class Text(HTMLParser):
         self.parts.append(data)
 
 
-def bcb_latest(raw):
+def _legacy_bcb_latest(raw):
     # This official legacy page declares ISO-8859-1, unlike SGS JSON.
     parser = Text()
     parser.feed(raw.decode("iso-8859-1", errors="strict"))
@@ -71,6 +98,35 @@ def bcb_latest(raw):
     if len(quotes) != 1 or quotes[0][0] != dates[0]:
         raise FxDataError("BCB latest closing sale quote missing or ambiguous")
     return datetime.strptime(dates[0], "%d/%m/%Y").date().isoformat(), float(quotes[0][2].replace(",", "."))
+
+
+def bcb_latest(raw):
+    """Only USD closing sale quotes; intermediate and EUR quotes are not anchors."""
+    def closed(pairs):
+        value={}
+        for key,item in pairs:
+            if key in value: raise FxDataError("BCB latest response has duplicate fields")
+            value[key]=item
+        return value
+    try:
+        value=json.loads(raw.decode('utf-8',errors='strict'),object_pairs_hook=closed)
+        rows=value['conteudo']
+        if not isinstance(rows,list) or not 0<len(rows)<=100:
+            raise FxDataError("BCB latest closing rows missing or oversized")
+        quotes=[row for row in rows if isinstance(row,dict) and row.get('moeda')=='Dólar'
+                and row.get('tipoCotacao')=='Fechamento']
+        if len(quotes)!=1:
+            raise FxDataError("BCB latest closing sale quote missing or ambiguous")
+        quote=quotes[0]
+        timestamp=datetime.fromisoformat(quote['dataIndicador'])
+        if timestamp.tzinfo is None: raise FxDataError("BCB closing timestamp lacks timezone")
+        value=quote['valorVenda']
+        if type(value) not in (int,float) or not 0<float(value)<float('inf'):
+            raise FxDataError("BCB latest closing sale quote invalid")
+        return timestamp.astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat(),float(value)
+    except (UnicodeError,json.JSONDecodeError,KeyError,TypeError,ValueError) as exc:
+        if isinstance(exc,FxDataError):raise
+        raise FxDataError("BCB latest JSON or closing quote invalid") from exc
 
 
 def _raw_record(url, raw):
@@ -125,9 +181,12 @@ def replay(snapshot, evidence):
     if end.isoformat() != evidence["request_end"] or end < START:
         raise FxDataError("FX replay date invalid")
     records = exact(evidence["raw"], ("bcb_history", "ecb_history", "bcb_latest", "ecb_latest"), "FX raw set")
+    latest_url=records['bcb_latest'].get('url') if isinstance(records['bcb_latest'],dict) else None
+    if latest_url not in (BCB_LATEST_URL,BCB_LEGACY_LATEST_URL):
+        raise FxDataError("BCB latest official URL differs")
     raws = {key: _decode(records[key], url) for key, url in {
         "bcb_history": bcb_url(START, end), "ecb_history": ECB_HISTORY_URL,
-        "bcb_latest": BCB_LATEST_URL, "ecb_latest": ECB_LATEST_URL}.items()}
+        "bcb_latest": latest_url, "ecb_latest": ECB_LATEST_URL}.items()}
     rows = sorted(parse_bcb(raws["bcb_history"], START, end) + parse_ecb(raws["ecb_history"], START, end),
                   key=lambda row: (row["currency"], row["date"]))
     if rows != snapshot["observations"]:
@@ -146,7 +205,7 @@ def replay(snapshot, evidence):
     for day, daily in frame.loc[frame.provider == "ECB_CROSS"].groupby("date"):
         if set(daily.currency) != set(BY_CODE) - {"BRL"}:
             raise FxDataError(f"ECB date has partial coverage: {day}")
-    expected_bcb, bcb_sale = bcb_latest(raws["bcb_latest"])
+    expected_bcb, bcb_sale = (_legacy_bcb_latest if latest_url==BCB_LEGACY_LATEST_URL else bcb_latest)(raws["bcb_latest"])
     ecb = parse_ecb(raws["ecb_latest"], START, end)
     expected_ecb = max(row["date"] for row in ecb)
     if len({row["date"] for row in ecb}) != 1 or {row["currency"] for row in ecb} != set(BY_CODE) - {"BRL"}:

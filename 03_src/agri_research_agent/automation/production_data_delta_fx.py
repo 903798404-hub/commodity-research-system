@@ -175,15 +175,20 @@ def run_fx(config, *, publish=False, retry_if_needed=False):
         result = {"schema_version": "foreign-fx-delivery-result/1", "run_id": run_id, "producer": producer,
                   "status": "FAIL", "published": False, "checked_at": now.isoformat()}
         files = None
+        stage = "baseline"
         try:
             host = delivery._host_contract()
             root, files = refresh_baseline(config, work, producer) if publish else local_baseline(config)
             baseline = delivery.strict_json((root / host.FX_STABLE).read_bytes()) if files[host.FX_STABLE] is not None else None
             if baseline is not None:
+                stage = "baseline_validation"
                 fx.observations(baseline, None, delivery.strict_json((root / host.FX_SOURCES).read_bytes()))
             # Both official fixings occur before the UTC day closes; publication references decide freshness.
+            stage = "collect_official_sources"
             snapshot, evidence = fx.collect(now.date(), work / "raw")
+            stage = "candidate_validation"
             semantic = fx.observations(snapshot, baseline, evidence)
+            stage = "package"
             package = work / "package"
             package.mkdir()
             (package / "daily.json").write_bytes(fx.canonical(snapshot))
@@ -202,10 +207,12 @@ def run_fx(config, *, publish=False, retry_if_needed=False):
             host._candidate_files(package, delta)
             result.update(status="CANDIDATE", candidate=str(package), observations=semantic)
             if publish:
+                stage = "publish"
                 receipt = delivery.invoke_publisher(config, package)
                 result.update(status=receipt["status"], published=receipt["status"] == "PUBLISHED", receipt=receipt)
         except Exception as exc:
-            result.update(status="FAIL", error_type=type(exc).__name__)
+            result.update(status="FAIL", error_type=type(exc).__name__,
+                          error=fx.failure_details(exc, stage))
             # Logging cannot overwrite a newly published snapshot after an ambiguous transport failure.
             if publish and files is not None and files.get(delivery._host_contract().FX_STABLE) is not None:
                 expected = files[delivery._host_contract().FX_STABLE]["sha256"]
@@ -219,7 +226,8 @@ def run_fx(config, *, publish=False, retry_if_needed=False):
                         and receipt.get("policy_sha256") == config["policy_sha256"][DOMAIN], "FX failure logger receipt differs")
                     result["failure_status_recorded"] = True
                 except Exception as logging_error:
-                    result.update(failure_status_recorded=False, failure_log_error_type=type(logging_error).__name__)
+                    result.update(failure_status_recorded=False, failure_log_error_type=type(logging_error).__name__,
+                                  failure_log_error=fx.failure_details(logging_error, "record_failure_status"))
             raise
         finally:
             result["checked_at"] = datetime.now(timezone.utc).isoformat()
