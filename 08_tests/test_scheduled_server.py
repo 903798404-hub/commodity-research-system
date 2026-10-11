@@ -1,5 +1,6 @@
 from copy import deepcopy
 import importlib.util
+import json
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
@@ -109,6 +110,63 @@ def test_public_scope_preserves_basis_and_all_other_datasets():
     public.assert_scope({'public_manifest':old},changed)
     changed['files'][1]['sha256']='changed basis'
     with pytest.raises(ValueError): public.assert_scope({'public_manifest':old},changed)
+
+
+@pytest.mark.parametrize('job',['positions_domestic','positions_foreign','canola_exports'])
+def test_network_worker_builds_domain_package_after_collection(monkeypatch,tmp_path,job):
+    from agri_research_agent.automation import production_data_delta as delivery
+    from agri_research_agent.automation import positions_scheduled_collection,production_data_delta_exports
+    from agri_research_agent.positions import delivery as positions_codec
+    from agri_research_agent.canola_exports import delivery as exports_codec
+    collector=load('candidate_collect_package','09_deploy/scheduled_server/collect.py')
+    host=delivery._host_contract()
+    baseline=tmp_path/'baseline'; baseline.mkdir()
+    output=tmp_path/'output'; output.mkdir()
+    previous={'baseline':'verified'}
+    for relative in (host.POSITIONS_STABLE,host.EXPORTS_STABLE,host.EXPORTS_SOURCES):
+        p=baseline/relative; p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(previous))
+    candidate=tmp_path/'weekly.json';candidate.write_text(json.dumps({'candidate':'collected'}))
+    monkeypatch.setattr(positions_scheduled_collection,'collect_bundle',lambda *a,**k:(tmp_path/'bundle',[]))
+    monkeypatch.setattr(positions_codec,'archive_bundle',lambda *a:{'candidate':'collected'})
+    monkeypatch.setattr(positions_codec,'observations',lambda *a:{'business_changed':False})
+    monkeypatch.setattr(production_data_delta_exports,'_collect',lambda *a:(candidate,{'source':'verified'}))
+    monkeypatch.setattr(exports_codec,'observations',lambda *a:{'business_changed':False})
+    calls=[]
+    monkeypatch.setattr(collector,'package',lambda request,output,payloads,semantic,host:calls.append((request['job'],payloads,semantic)))
+    request={'job':job,'business_date':'2026-10-11','baseline_files':{}}
+    result=collector.prepare(request,baseline,output,{})
+    assert len(calls)==1 and calls[0][0]==job
+    assert set(calls[0][1])==({'positions_archive.json'} if job.startswith('positions_') else {'weekly.json','source_evidence.json'})
+    assert result['observations']['business_changed'] is False
+
+
+def test_crop_worker_stages_approved_display_definition_before_pipeline(monkeypatch,tmp_path):
+    from agri_research_agent.pipelines import soybean_crop_weekly_update
+    collector=load('candidate_crop_config','09_deploy/scheduled_server/collect.py')
+    monkeypatch.setattr(collector,'SOURCE',ROOT)
+    output=tmp_path/'output';output.mkdir()
+    def check_pipeline(**kwargs):
+        actual=kwargs['project_root']/'02_configs/soybean_crop_progress_display.yaml'
+        assert actual.read_bytes()==(ROOT/'02_configs/soybean_crop_progress_display.yaml').read_bytes()
+        assert kwargs['dry_run'] is True and kwargs['git_head']=='a'*40
+        return {'status':'out_of_season'}
+    monkeypatch.setattr(soybean_crop_weekly_update,'run_soybean_crop_weekly_update',check_pipeline)
+    result=collector.prepare({'job':'soybean_crop_progress','producer':{'commit':'a'*40},'baseline_files':{}},tmp_path,output,{'NASS_API_KEY':'test'})
+    assert result=={'out_of_season':True}
+
+
+def test_public_worker_timeout_removes_only_its_named_container(monkeypatch):
+    import subprocess
+    public=load('public_cleanup','09_deploy/scheduled_server/public.py')
+    calls=[]
+    def run(command,**kwargs):
+        calls.append(command)
+        if command[1]=='run':raise subprocess.TimeoutExpired(command,1200)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(public.subprocess,'run',run)
+    with pytest.raises(subprocess.TimeoutExpired):public.invoke(['docker','run','--rm','image','python','--validate-only'])
+    name=calls[0][calls[0].index('--name')+1]
+    assert name.startswith('scheduled-public-') and calls[1]==['docker','rm','-f',name]
 
 
 def test_local_host_transport_keeps_existing_remote_path_and_requires_linux_root(monkeypatch):

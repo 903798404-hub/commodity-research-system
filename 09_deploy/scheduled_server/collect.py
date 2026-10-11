@@ -68,6 +68,9 @@ def prepare(request,baseline,output,credentials):
         if expected is None: continue
         path=project/relative; path.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(baseline/relative,path)
     if job=='soybean_crop_progress':
+        config=project/'02_configs/soybean_crop_progress_display.yaml'
+        config.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(SOURCE/'02_configs/soybean_crop_progress_display.yaml',config)
         from agri_research_agent.pipelines.soybean_crop_weekly_update import run_soybean_crop_weekly_update
         audit=run_soybean_crop_weekly_update(project_root=project,dry_run=True,git_head=request['producer']['commit'],env=credentials)
         if audit['status']=='out_of_season': return {'out_of_season':True}
@@ -89,9 +92,9 @@ def prepare(request,baseline,output,credentials):
         if result.returncode: raise ValueError('spread collector returned '+str(result.returncode))
         status=host.read_json(project/'01_data/update_status.json')
         if status.get('target_date_data_completeness')=='PARTIAL': raise ValueError('spread coverage incomplete')
-        package=delivery._build_public_package(project,baseline/request['public_package_relative'],output/'packages')
-        load('public_worker','09_deploy/scheduled_server/public.py').assert_scope(request,package.manifest)
-        return {'package_id':package.package_id,'package_path':str(package.directory.relative_to(output)),
+        public_package=delivery._build_public_package(project,baseline/request['public_package_relative'],output/'packages')
+        load('public_worker','09_deploy/scheduled_server/public.py').assert_scope(request,public_package.manifest)
+        return {'package_id':public_package.package_id,'package_path':str(public_package.directory.relative_to(output)),
             'business_status':status['status'],'latest_date':status['latest_date'],'required_contracts':status['required_contracts'],
             'success_contracts':status['success_contracts']}
     raise ValueError('unsupported scheduled job')

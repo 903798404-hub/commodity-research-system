@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
+import uuid
 
 ROOT=Path(__file__).resolve().parents[2]
 RUNTIME=Path('/var/lib/market-data/production-data-automation/scheduled')
@@ -71,10 +72,15 @@ def transport():
 
 
 def invoke(args):
-    value=subprocess.run(args,capture_output=True,timeout=1200)
-    if value.returncode:
-        raise RuntimeError('offline public publisher failed; exit='+str(value.returncode))
-    return json.loads(value.stdout.decode('utf-8','strict').strip().splitlines()[-1])
+    name='scheduled-public-'+uuid.uuid4().hex
+    command=args[:3]+['--name',name]+args[3:]
+    try:
+        value=subprocess.run(command,capture_output=True,timeout=1200)
+        if value.returncode:
+            raise RuntimeError('offline public publisher failed; exit='+str(value.returncode))
+        return json.loads(value.stdout.decode('utf-8','strict').strip().splitlines()[-1])
+    finally:
+        subprocess.run(['docker','rm','-f',name],capture_output=True,timeout=30)
 
 
 def deliver(host,config,work,extra,publish):
@@ -101,11 +107,13 @@ def deliver(host,config,work,extra,publish):
     host.require(pre['STATUS']=='PASS','actual application cannot read candidate')
     mounted='/runtime/public-data-server-store'
     common=['docker','run','--rm','--pull','never','--network','none','--read-only','--cap-drop','ALL',
-        '--security-opt','no-new-privileges','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m',
+        '--security-opt','no-new-privileges','--memory','768m','--cpus','1','--pids-limit','96',
+        '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m',
         '--mount',f'type=bind,src={store},dst={mounted}']
     command=[config['image_id'],'python','-I','-B','/app/04_scripts/activate_public_data_package.py',
         '--incoming-package',mounted+'/incoming/'+upload.name,'--store-root',mounted]
-    validation=invoke(common[:]+command+['--validate-only'])
+    readonly=common[:];readonly[readonly.index('--mount')+1]+=',readonly'
+    validation=invoke(readonly+command+['--validate-only'])
     host.require(validation['status']=='VALIDATED' and validation['package_id']==candidate,'public offline validation differs')
     host.require(validation.get('manifest_sha256')==host.sha256_file(upload/'manifest.json') and
         'public-current-server-cas/1' in validation.get('activation_capabilities',[]),'public offline CAS identity invalid')
