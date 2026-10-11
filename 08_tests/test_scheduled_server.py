@@ -210,6 +210,7 @@ def test_validation_failure_never_calls_formal_publish_and_preserves_failure_sta
         'policy_sha256':c['policy_sha256'],'allocation_root':c['allocation_root'],'files':{},'contents':{}})
     monkeypatch.setattr(runner,'copy_snapshot',lambda *a:None)
     monkeypatch.setattr(runner,'collect',lambda *a:{'status':'PASS'})
+    monkeypatch.setattr(runner,'disk_budget',lambda *a:{})
     def reject(*args): raise ValueError('invalid candidate')
     monkeypatch.setattr(runner,'seal_delta',reject)
     monkeypatch.setattr(host,'publish',lambda *a:pytest.fail('publication must not run'))
@@ -227,6 +228,7 @@ def test_partial_source_failure_keeps_delivery_status_but_cannot_pass_acceptance
         'policy_sha256':c['policy_sha256'],'allocation_root':c['allocation_root'],'files':{},'contents':{}})
     monkeypatch.setattr(runner,'copy_snapshot',lambda *a:None)
     monkeypatch.setattr(runner,'collect',lambda *a:{'status':'PASS','attempts':[{'status':'failed'}]})
+    monkeypatch.setattr(runner,'disk_budget',lambda *a:{})
     monkeypatch.setattr(runner,'seal_delta',lambda *a:{'report_path':'/report','report_sha256':'e'*64})
     monkeypatch.setattr(fx,'check_mount',lambda *a:None)
     monkeypatch.setattr(host,'publish',lambda *a:{'status':'NO_CHANGE'})
@@ -254,3 +256,48 @@ def test_new_snapshot_domains_preserve_fixed_files_and_reject_incomplete_pair(ru
     missing=host.CROP_CONDITION if domain=='soybean_crop_progress' else host.FAS_MANIFEST
     (allocation/missing).unlink()
     with pytest.raises(ValueError): host.snapshot_fx_baseline('/policy')
+
+
+def test_disk_budget_accounts_for_peak_copies_and_reserves_other_tasks(runner):
+    host=runner.helpers()[1]
+    baseline={'files':{'public':{'size_bytes':200*1024**2},'missing':None}}
+    exact=(5*200+768)*1024**2
+    stats=SimpleNamespace(f_bavail=exact,f_frsize=1,f_favail=1001)
+    value=runner.disk_budget(host,config(runner,'akshare'),baseline,stats)
+    assert value['required_free_bytes']==exact and value['reserved_bytes']==768*1024**2
+    stats.f_bavail-=1
+    with pytest.raises(ValueError,match='capacity insufficient'):runner.disk_budget(host,config(runner,'akshare'),baseline,stats)
+    stats.f_bavail=exact;stats.f_favail=1000
+    with pytest.raises(ValueError,match='capacity insufficient'):runner.disk_budget(host,config(runner,'akshare'),baseline,stats)
+
+
+@pytest.mark.parametrize('tamper',[False,True])
+@pytest.mark.parametrize('no_change',[False,True])
+def test_cleanup_only_verified_duplicates_and_keeps_retained_releases(runner,monkeypatch,tmp_path,tamper,no_change):
+    public=load('scheduled_public_cleanup_test','09_deploy/scheduled_server/public.py');host=runner.helpers()[1]
+    work=tmp_path/'runtime/accepted';store=tmp_path/'store';old='public-current-'+'a'*24;candidate=old if no_change else 'public-current-'+'b'*24
+    relative='public-package/'+old;upload=store/'incoming'/(candidate+'.upload-'+work.name)
+    copies=[(work/'baseline'/relative/'data',store/'releases'/old/'data'),
+            (work/'collection/packages'/candidate/'data',store/'releases'/candidate/'data')]
+    if no_change:copies.append((upload/'data',store/'releases'/candidate/'data'))
+    for target,reference in copies:
+        target.mkdir(parents=True,exist_ok=True);reference.mkdir(parents=True,exist_ok=True)
+        (target/'quote').write_bytes(b'preserved quote');(reference/'quote').write_bytes(b'preserved quote')
+    if no_change:(upload/'manifest.json').write_text('retained original upload manifest')
+    (work/'result.json').write_text('retained result')
+    unrelated=store/'incoming/another-task';unrelated.mkdir(parents=True);(unrelated/'data').write_bytes(b'other task')
+    monkeypatch.setattr(public,'RUNTIME',tmp_path/'runtime')
+    monkeypatch.setattr(host,'_under',lambda p,root,**k:Path(p) if Path(p).is_relative_to(root) else (_ for _ in ()).throw(ValueError('outside')))
+    monkeypatch.setattr(public.shutil.rmtree,'avoids_symlink_attacks',True)
+    extra={'public_pointer':{'package_id':old},'public_package_relative':relative}
+    if tamper:
+        (copies[1][0]/'quote').write_bytes(b'unverified')
+        with pytest.raises(ValueError,match='duplicate differs'):public.release_duplicates(host,work,store,extra,candidate,upload,no_change)
+        assert all(target.exists() for target,_ in copies)
+    else:
+        proof=public.release_duplicates(host,work,store,extra,candidate,upload,no_change)
+        assert proof['status']=='PASS' and proof['removed_directories']==(3 if no_change else 2)
+        assert all(not target.exists() for target,_ in copies)
+    assert all(reference.exists() for _,reference in copies)
+    assert (work/'result.json').read_text()=='retained result' and (unrelated/'data').read_bytes()==b'other task'
+    if no_change:assert (upload/'manifest.json').read_text()=='retained original upload manifest'

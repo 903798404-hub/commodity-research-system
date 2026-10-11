@@ -67,6 +67,7 @@ def prepare(request,baseline,output,credentials):
     project=output/'project'; project.mkdir()
     for relative,expected in request['baseline_files'].items():
         if expected is None: continue
+        if job=='akshare' and relative.startswith('public-package/'): continue
         path=project/relative; path.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(baseline/relative,path)
     if job=='soybean_crop_progress':
         config=project/'02_configs/soybean_crop_progress_display.yaml'

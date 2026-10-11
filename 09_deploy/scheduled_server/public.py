@@ -93,6 +93,35 @@ def invoke(args):
         subprocess.run(['docker','rm','-f',name],capture_output=True,timeout=30)
 
 
+def release_duplicates(host,work,store,extra,candidate,upload,no_change):
+    host._under(work,RUNTIME)
+    host.require(shutil.rmtree.avoids_symlink_attacks, 'safe temporary cleanup unavailable')
+    old=extra['public_pointer']['package_id']
+    host.require(all(re.fullmatch(r'public-current-[0-9a-f]{24}',value) for value in (old,candidate))
+                 and extra['public_package_relative']=='public-package/'+old, 'cleanup package identity invalid')
+    targets=[(work/'baseline'/extra['public_package_relative']/'data',store/'releases'/old/'data'),
+             (work/'collection/packages'/candidate/'data',store/'releases'/candidate/'data')]
+    if no_change:
+        host.require(candidate==old, 'unchanged cleanup package differs')
+        host.require(upload==store/'incoming'/(candidate+'.upload-'+work.name), 'cleanup upload identity differs')
+        targets.append((upload/'data',store/'releases'/candidate/'data'))
+    verified=[]
+    # Verify every duplicate against a retained immutable release before deleting any.
+    for target,reference in targets:
+        host._no_links(target);host._no_links(reference)
+        files=host._file_set(target)
+        host.require(files==host._file_set(reference), 'temporary duplicate differs from retained release')
+        verified.append({'path':str(target),'retained_reference':str(reference),'files':files})
+    host._write_json_exclusive(work/'duplicate-cleanup-plan.json',{'scope':'this accepted run only','verified':verified})
+    for item in verified:
+        target=Path(item['path'])
+        host.require(host._file_set(target)==item['files'], 'duplicate changed before cleanup')
+        shutil.rmtree(target)
+    return {'status':'PASS','removed_directories':len(verified),
+            'reclaimed_bytes':sum(v['size_bytes'] for item in verified for v in item['files'].values()),
+            'proof_path':str(work/'duplicate-cleanup-plan.json')}
+
+
 def deliver(host,config,work,extra,publish):
     result=host.read_json(work/'collection/collection-result.json')
     host.require(re.fullmatch(r'packages/public-current-[0-9a-f]{24}',result['package_path']), 'public candidate path invalid')
@@ -167,6 +196,11 @@ def deliver(host,config,work,extra,publish):
     from_run=importlib.util.spec_from_file_location('scheduled_fx_state',ROOT/'09_deploy/foreign_fx_server/run.py')
     state_module=importlib.util.module_from_spec(from_run); from_run.loader.exec_module(state_module)
     state_module.write_state(host,RUNTIME/'akshare-continuation.json',{'directory':str(saved),'files':entries,'package_id':candidate})
+    try:
+        receipt['duplicate_cleanup']=release_duplicates(host,work,store,extra,candidate,upload,receipt['status']=='NO_CHANGE')
+    except Exception as exc:
+        # Publication and continuation already succeeded; retain any unverified inputs.
+        receipt['duplicate_cleanup']={'status':'FAILED','error_type':type(exc).__name__}
     return receipt
 
 

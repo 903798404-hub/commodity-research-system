@@ -136,6 +136,18 @@ def copy_snapshot(host, snapshot, destination, request):
     host._make_tree_readonly(destination,public_read=True)
 
 
+def disk_budget(host, config, snapshot, stats=None):
+    size=sum(item['size_bytes'] for item in snapshot['files'].values() if item is not None)
+    host.require(size <= 256*1024**2, 'scheduled baseline exceeds disk budget')
+    # Copies, collector output, sealed upload and a new release can coexist.
+    reserve=768*1024**2
+    required=size*(5 if config['job']=='akshare' else 3)+reserve
+    stats=os.statvfs(config['allocation_root']) if stats is None else stats
+    available=stats.f_bavail*stats.f_frsize
+    host.require(available >= required and stats.f_favail > 1000, 'scheduled data disk capacity insufficient')
+    return {'baseline_bytes':size,'required_free_bytes':required,'available_bytes':available,'reserved_bytes':reserve}
+
+
 def collector_command(config, work):
     return ['docker','run','--rm','-i','--name',work.name,'--pull','never','--network','bridge',
         '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user','65532:65532',
@@ -201,6 +213,7 @@ def execute(fx, host, config, work, publish):
         request={'job':config['job'],'run_id':work.name,'checked_at':now.isoformat(),
             'business_date':now.astimezone(timezone(timedelta(hours=8))).date().isoformat(),
             'producer':config['producer'],'baseline_files':snapshot['files'],**extra}
+        result['disk_budget']=disk_budget(host,config,snapshot)
         copy_snapshot(host,snapshot,work/'baseline',request)
         stage='collect_sources'; collected=collect(host,config,work); result['collection']=collected
         if collected.get('out_of_season'):
