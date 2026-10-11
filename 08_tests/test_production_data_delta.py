@@ -221,10 +221,10 @@ def test_akshare_date_evidence_rejects_requested_effective_mismatch(tmp_path: Pa
         "effective_end_date": "2026-09-21",
         "target_business_date": "2026-09-21",
         "target_date_data_completeness": "COMPLETE",
-        "target_required_contract_keys": [f"{i}27{m:02d}" for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5)],
-        "target_present_contract_keys": [f"{i}27{m:02d}" for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5)],
+        "target_required_contract_keys": [f"{i}27{m:02d}" for i in ("M", "RM", "Y", "OI", "P", "SR") for m in (1, 5)],
+        "target_present_contract_keys": [f"{i}27{m:02d}" for i in ("M", "RM", "Y", "OI", "P", "SR") for m in (1, 5)],
         "target_missing_contract_keys": [],
-        "required_contracts": 10, "success_contracts": 10, "failure_contracts": 0,
+        "required_contracts": 12, "success_contracts": 12, "failure_contracts": 0,
     }
     pd.DataFrame([
         {"date": pd.Timestamp("2026-09-21"), "season": "2026/2027", "calendar_offset": 112,
@@ -232,7 +232,7 @@ def test_akshare_date_evidence_rejects_requested_effective_mismatch(tmp_path: Pa
          "leg1_instrument": i, "leg2_instrument": i, "leg1_month": m, "leg2_month": m,
          "leg1_contract": f"{i}27{m:02d}", "leg2_contract": f"{i}27{m:02d}",
          "leg1_price": 3000, "leg2_price": 3000}
-        for i in ("M", "RM", "Y", "OI", "P") for m in (1, 5)
+        for i in ("M", "RM", "Y", "OI", "P", "SR") for m in (1, 5)
     ]).to_parquet(data / "historical_spread_database.parquet", index=False)
     path = data / "update_status.json"
     path.write_bytes(module.canonical_json_bytes(status))
