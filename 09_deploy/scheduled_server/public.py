@@ -24,11 +24,21 @@ def assert_scope(request,manifest):
 
 
 def snapshot(host,config,work):
-    store=host._protected(Path(config['allocation_root'])/'01_data/public-data-server-store')
-    pointer=host.read_json(host._no_links(store/'current.json'))
+    allocation=host._protected(config['allocation_root'])
+    store=Path(allocation)/'01_data/public-data-server-store'
+    def managed(path):
+        selected=host._no_links(path)
+        for entry in (selected,*selected.parents):
+            if entry==store.parent:break
+            info=entry.stat();owner=config['public_store_owner']
+            host.require(info.st_uid==owner['uid'] and info.st_gid==owner['gid'] and not info.st_mode & 0o022,
+                         'public store publisher ownership or permissions differ')
+        return selected
+    managed(store)
+    pointer=host.read_json(managed(store/'current.json'))
     host.require(re.fullmatch(r'public-current-[0-9a-f]{24}',pointer['package_id']), 'public package ID invalid')
-    package=host._protected(store/'releases'/pointer['package_id'])
-    manifest=host.read_json(host._protected(package/'manifest.json'))
+    package=managed(store/'releases'/pointer['package_id'])
+    manifest=host.read_json(managed(package/'manifest.json'))
     host.require(all(pointer[k]==manifest[k] for k in ('current_identity_sha256','delivery_identity_sha256','bundle_sha256')),'public pointer differs')
     continuation=RUNTIME/'akshare-continuation.json'
     if continuation.exists():
@@ -56,7 +66,7 @@ def snapshot(host,config,work):
     for item in manifest['files']:
         host.require(type(item['path']) is str and re.fullmatch(r'[A-Za-z0-9_./-]+',item['path']) and
                      not Path(item['path']).is_absolute() and '..' not in Path(item['path']).parts,'public input path unsafe')
-        add(prefix+'/data/'+item['path'],package/'data'/item['path'],{k:item[k] for k in ('sha256','size_bytes')})
+        add(prefix+'/data/'+item['path'],managed(package/'data'/item['path']),{k:item[k] for k in ('sha256','size_bytes')})
     raw=(package/'manifest.json').read_bytes()
     add(prefix+'/manifest.json',package/'manifest.json',{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)})
     host.require(host.read_json(store/'current.json')==pointer,'Public Current moved while reading')
@@ -92,6 +102,9 @@ def deliver(host,config,work,extra,publish):
     previous=extra['public_pointer']['package_id']; candidate=manifest['package_id']
     host.require(candidate==result['package_id'],'public candidate ID changed')
     trans=transport(); runtime=trans._discover_application_runtime(None,str(store))
+    owner=config['public_store_owner'];info=host._no_links(store).stat()
+    host.require(info.st_uid==owner['uid'] and info.st_gid==owner['gid'] and owner['uid']!=runtime['uid'],
+                 'public publisher owner changed or equals application owner')
     upload=store/'incoming'/(candidate+'.upload-'+work.name)
     host._no_links(upload)
     upload.mkdir(mode=0o700)
@@ -100,6 +113,9 @@ def deliver(host,config,work,extra,publish):
         path=upload/rel; path.parent.mkdir(parents=True,exist_ok=True)
         host._write_exclusive(path,(package/rel).read_bytes())
     host.require(host._file_set(upload)==before and host._file_set(package)==before,'public payload changed sealing')
+    # Preserve the existing Windows basis publisher account; only this new upload changes ownership.
+    for path in (upload,*upload.rglob('*')):
+        host._no_links(path);os.chown(path,owner['uid'],owner['gid'])
     sealed=trans._ssh(None,['sh','-c',trans._SEAL_FOR_RUNTIME_READ_SCRIPT,'seal-owned-server-upload',str(upload),str(runtime['uid'])])
     host.require(sealed.returncode==0,'public candidate seal failed')
     pre=trans._run_application_runtime_gate(None,runtime,phase='PRE_SWITCH',
@@ -108,7 +124,9 @@ def deliver(host,config,work,extra,publish):
     mounted='/runtime/public-data-server-store'
     common=['docker','run','--rm','--pull','never','--network','none','--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges','--memory','768m','--cpus','1','--pids-limit','96',
+        '--user',f'{owner["uid"]}:{owner["gid"]}',
         '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m',
+        '--env',f'PUBLIC_DATA_SERVER_STORE_ROOT={mounted}',
         '--mount',f'type=bind,src={store},dst={mounted}']
     command=[config['image_id'],'python','-I','-B','/app/04_scripts/activate_public_data_package.py',
         '--incoming-package',mounted+'/incoming/'+upload.name,'--store-root',mounted]

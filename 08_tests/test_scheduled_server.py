@@ -36,6 +36,7 @@ def config(runner,job):
         'image_id':'sha256:'+'d'*64,'data_disk_uuid':'109b359d-6e55-4911-a665-c67735dc0a10',
         'secret_file':'/etc/market-data/production-input-secrets/'+job+'.env' if job in runner.KEYS else None,
         'initial_baseline':None,'initial_baseline_sha256':None,
+        'public_store_owner':{'uid':1000,'gid':1000} if job=='akshare' else None,
         'allocation_root':'/var/lib/market-data/production-runtime/test',
         'producer':{'commit':'a'*40,'tree':'b'*40,'origin':'https://github.com/903798404-hub/commodity-research-system.git'}}
 
@@ -153,6 +154,27 @@ def test_crop_worker_stages_approved_display_definition_before_pipeline(monkeypa
     monkeypatch.setattr(soybean_crop_weekly_update,'run_soybean_crop_weekly_update',check_pipeline)
     result=collector.prepare({'job':'soybean_crop_progress','producer':{'commit':'a'*40},'baseline_files':{}},tmp_path,output,{'NASS_API_KEY':'test'})
     assert result=={'out_of_season':True}
+
+
+@pytest.mark.parametrize('job',['soybean_crop_progress','soybean_export_sales'])
+def test_weekly_delivery_receives_full_existing_baseline_without_losing_prefix(monkeypatch,tmp_path,job):
+    from agri_research_agent.automation import production_data_delta as delivery
+    from agri_research_agent.pipelines import soybean_crop_weekly_update
+    from agri_research_agent.soybean_exports import fas
+    collector=load('candidate_weekly_baseline','09_deploy/scheduled_server/collect.py')
+    monkeypatch.setattr(collector,'SOURCE',ROOT)
+    baseline=tmp_path/'baseline';baseline.mkdir()
+    output=tmp_path/'output';output.mkdir()
+    relative='01_data/processed/'+job+'/existing.parquet'
+    path=baseline/relative;path.parent.mkdir(parents=True);path.write_bytes(b'verified existing input')
+    identity=delivery._identity(path)
+    monkeypatch.setattr(soybean_crop_weekly_update,'run_soybean_crop_weekly_update',lambda **k:{'status':'no_change'})
+    monkeypatch.setattr(fas,'run_fas_pipeline',lambda **k:{'status':'candidate_only','validation':{'latest_week':'2026-10-01'}})
+    received=[]
+    monkeypatch.setattr(delivery,'collect_delta',lambda domain,project,output,producer,baseline,**k:received.append(baseline))
+    request={'job':job,'run_id':'verified-run','producer':{'commit':'a'*40},'baseline_files':{relative:identity}}
+    collector.prepare(request,baseline,output,{'FAS_EXPORT_SALES_API_KEY':'test'})
+    assert received==[{relative.removeprefix('01_data/'):identity}]
 
 
 def test_public_worker_timeout_removes_only_its_named_container(monkeypatch):

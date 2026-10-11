@@ -74,13 +74,15 @@ def prepare(request,baseline,output,credentials):
         from agri_research_agent.pipelines.soybean_crop_weekly_update import run_soybean_crop_weekly_update
         audit=run_soybean_crop_weekly_update(project_root=project,dry_run=True,git_head=request['producer']['commit'],env=credentials)
         if audit['status']=='out_of_season': return {'out_of_season':True}
-        delivery.collect_delta(job,project,output/'package',request['producer'],request['baseline_files'],run_id=request['run_id'])
+        delivery.collect_delta(job,project,output/'package',request['producer'],
+            {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},run_id=request['run_id'])
         return {'business_status':audit['status'],'latest_week':audit.get('latest_week')}
     if job=='soybean_export_sales':
         from agri_research_agent.soybean_exports.fas import FasAdapter,run_fas_pipeline
         audit=run_fas_pipeline(runtime_root=project,adapter=FasAdapter(api_key=credentials['FAS_EXPORT_SALES_API_KEY'],use_environment_proxy=False),
             git_head=request['producer']['commit'],publish=False)
-        delivery.collect_delta(job,project,output/'package',request['producer'],request['baseline_files'],run_id=request['run_id'])
+        delivery.collect_delta(job,project,output/'package',request['producer'],
+            {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},run_id=request['run_id'])
         return {'business_status':audit['status'],'latest_week':audit['validation']['latest_week']}
     if job=='akshare':
         for directory in ('02_configs','03_src','04_scripts'):

@@ -55,7 +55,7 @@ def helpers():
 
 def validate_config(host, value):
     required = {'schema_version', 'job', 'policy', 'policy_sha256', 'image_id', 'data_disk_uuid',
-                'secret_file', 'initial_baseline', 'initial_baseline_sha256', 'allocation_root', 'producer'}
+                'secret_file', 'initial_baseline', 'initial_baseline_sha256', 'allocation_root', 'producer', 'public_store_owner'}
     c = host._exact(value, required, 'scheduled server config')
     host.require(c['schema_version'] == 'scheduled-server-config/1' and c['job'] in JOBS, 'scheduled job invalid')
     host.require(type(c['image_id']) is str and host.IMAGE_ID.fullmatch(c['image_id']), 'scheduled image invalid')
@@ -69,10 +69,13 @@ def validate_config(host, value):
     else:
         host.require(c['secret_file'] is None, 'unexpected server credential')
     if c['job'] == 'akshare':
+        owner=host._exact(c['public_store_owner'],{'uid','gid'},'public store owner')
+        host.require(all(type(v) is int and 0 < v < 65532 for v in owner.values()),'public publisher owner invalid')
         host.require(c['policy'] is None and c['policy_sha256'] is None, 'public package cannot use delta policy')
         host._under(c['initial_baseline'], RUNTIME / 'initial-baselines')
         host.require(type(c['initial_baseline_sha256']) is str and host.HEX64.fullmatch(c['initial_baseline_sha256']), 'spread baseline pin invalid')
     else:
+        host.require(c['public_store_owner'] is None,'unexpected public store owner')
         host._under(c['policy'], host.POLICY_ROOT)
         host.require(type(c['policy_sha256']) is str and host.HEX64.fullmatch(c['policy_sha256']), 'policy pin invalid')
         host.require(c['initial_baseline'] is None and c['initial_baseline_sha256'] is None, 'unexpected static domain baseline')
