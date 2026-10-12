@@ -170,7 +170,8 @@
     "SOYBEAN_MARGIN_STORAGE_ROOT",
     "COMMODITY_IMPORT_ALLOW_SAVE",
     "COMMODITY_IMPORT_SERVER_ENABLED",
-    "SOYBEAN_MARGIN_SUBMIT_QUOTES"
+    "SOYBEAN_MARGIN_SUBMIT_QUOTES",
+    "SUGAR_IMPORT_ALLOW_SAVE"
   ],
   "secret_references": [
     "tankan-reader",
@@ -1963,6 +1964,12 @@
     },
     {
       "name": "SOYBEAN_MARGIN_SUBMIT_QUOTES",
+      "kind": "deployment",
+      "value_type": "nonempty",
+      "candidate_value": "1"
+    },
+    {
+      "name": "SUGAR_IMPORT_ALLOW_SAVE",
       "kind": "deployment",
       "value_type": "nonempty",
       "candidate_value": "1"
