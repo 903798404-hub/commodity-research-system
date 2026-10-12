@@ -543,6 +543,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/data_sources/domestic_sugar_history.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/data_sources/foreign_seats.py",
       "role": "runtime_configuration"
     },
@@ -1464,6 +1468,10 @@
     },
     {
       "path": "05_apps/basis_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/domestic_sugar_basis.py",
       "role": "runtime_configuration"
     },
     {
