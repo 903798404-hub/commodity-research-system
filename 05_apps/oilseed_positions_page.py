@@ -19,6 +19,11 @@ from sugar_positions_page import (
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
 
 
+def provider_label(provider):
+    return {'stock_api':'用户指定 Tushare 兼容服务','eastmoney':'东方财富排名',
+            'sina':'新浪排名'}.get(provider,'原始来源排名')
+
+
 def fmt(value, signed=False):
     if value is None:
         return "未披露"
@@ -81,7 +86,7 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                     delta_color="inverse")
                 st.caption(f"截至 {chinese_date(row['report_date'])} · 对比 {chinese_date(row['previous_date'])}")
                 if row.get("aggregation") == METHOD:
-                    st.caption(f"全合约已披露汇总 · {len(row['constituent_contracts'])}个合约 · 东方财富排名")
+                    st.caption(f"全合约已披露汇总 · {len(row['constituent_contracts'])}个合约 · {provider_label(row.get('source_provider'))}")
                 elif "主力参考" in label:
                     st.caption("单合约排名 · " + ("东方财富" if row.get("source_provider") == "eastmoney" else "按原始来源披露") + " · 不代表品种汇总")
     st.caption("红：向多 · 绿：向空 ｜ 净持仓与变化反映多空倾向。各市场日期不同，手数不合并。")
@@ -124,7 +129,7 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 st.dataframe(frame, hide_index=True, width="stretch")
     with inside:
         references = {v for k, v in spec.get("default_scopes", {}).items() if k != v}
-        scopes = list(dict.fromkeys([*spec.get("default_scopes", {}).values(), *spec["domestic"],
+        scopes = list(dict.fromkeys([*spec["domestic"], *spec.get("default_scopes", {}).values(),
             *sorted({r["scope"] for r in domestic} - set(spec["domestic"]))]))
         scope = st.selectbox("国内统计范围", scopes,
             index=scopes.index("OI") if domain == "rapeseed" else 0, key=f"domestic_scope_{domain}",
@@ -148,6 +153,7 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
             if observed_summary:
                 st.caption("全合约已披露持仓汇总：按席位合并后重新排名；未上榜部分不属于已披露持仓。")
                 st.caption("覆盖合约：" + "、".join(current['top20']['constituent_contracts']))
+                st.caption("来源：" + provider_label(current['top20'].get('source_provider')))
             st.markdown(f"**{positioning_signal(current['top20']['net'], current['top20']['net_change'])}**")
             a, b, c = st.columns(3)
             a.metric("前20名榜内净持仓", fmt(current["top20"]["net"]))
@@ -174,15 +180,14 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
         st.write("仅比较相邻已保存的同口径报告；间隔超过10天时不计算净变化，外盘缺仓也不计算。合约排名不冒充品种总排名，来源、账户、聚合方法或合约范围不同不混比。")
         if domain != "rapeseed":
             check = spec["reference_check"]
-            st.markdown(f"国内默认显示已核对主力合约参考：{'、'.join(spec['default_scopes'].values())}。{chinese_date(check['checked_on'])}核对新浪连续行情及实际合约持仓量；行情交易日为{chinese_date(check['quote_trade_date'])}夜盘。配置暂不自动换月，历史按实际合约独立比较，不拼接为主力连续持仓。")
-            st.markdown("品种汇总可在国内统计范围中选择：逐合约读取多空排名，按同一席位合并后重新排名。未上榜持仓不可见，不能视作席位完整仓位。净变化比较相同来源、相同合约范围的两份已保存报告。")
-            st.markdown("已有排名通过登录浏览器读取[东方财富多空持仓排名](https://qhweb.eastmoney.com/lhb/dkcc/dce/m)，不采用净持仓页的估算数值。联网采集尝试新浪单合约排名；请求失败或尚未发布时保留原报告，不能以行情日期代替持仓日期。服务器自动采集尚未接通。")
-            st.markdown("其他接口：[Tushare fut_holding](https://tushare.pro/document/2?doc_id=139)（至少2000积分）和[RQData会员排名](https://www.ricequant.com/doc/rqdata/python/futures-mod)（需账户权限）支持合约或品种查询；尚未取得授权数据，M/Y/P品种汇总覆盖及账户分类仍需样本核验。")
+            st.markdown("国内优先显示 M/Y/P 品种汇总，单合约参考仍可选择。历史按实际合约独立保存，不拼接为主力连续持仓。")
+            st.markdown("品种汇总逐合约读取已披露多空排名，按同一席位合并后重新排名。未上榜持仓不可见，不能视作席位完整仓位。净变化只比较相同来源、账户和合约范围的两份已保存报告。")
+            st.markdown("M/Y/P 服务器自动采集使用用户指定的 [Tushare 兼容服务](https://t.xiaodefa.top/) fut_holding 接口；这是第三方兼容服务。历史[东方财富多空持仓排名](https://qhweb.eastmoney.com/lhb/dkcc/dce/m)及新浪参考仍保留各自来源，不能以行情日期代替持仓日期。实际更新结果见最近一次采集结果。")
         st.markdown("[CFTC](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · [Euronext](https://live.euronext.com/en/products/commodities/commitments_of_traders) · [郑商所](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         with st.expander("原始来源与采集时间"):
             for source_id, metadata in snapshot.get("sources", {}).items():
-                if source_id.startswith(("czce_", "euronext_", "sina_", "browser_contracts_")):
-                    provider = "东方财富 · 全合约读取" if source_id.startswith("browser_contracts_") else "郑商所" if source_id.startswith("czce_") else "新浪 · " + source_id.split("_")[1] if source_id.startswith("sina_") else "Euronext"
+                if source_id.startswith(("czce_", "euronext_", "sina_", "browser_contracts_", "stockapi_DCE_")):
+                    provider = "用户指定 Tushare 兼容服务" if source_id.startswith("stockapi_DCE_") else "东方财富 · 全合约读取" if source_id.startswith("browser_contracts_") else "郑商所" if source_id.startswith("czce_") else "新浪 · " + source_id.split("_")[1] if source_id.startswith("sina_") else "Euronext"
                     label = provider + " · " + chinese_date(datetime.strptime(source_id.rsplit("_",1)[1], "%Y%m%d").date())
                 else:
                     label = source_id

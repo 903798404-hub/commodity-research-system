@@ -28,7 +28,8 @@ def test_soybean_page_shows_foreign_positions_and_domestic_gap_with_chinese_date
     assert not app.exception
     assert len(app.metric) == 9
     assert any("2026年9月29日" in item.value for item in app.caption)
-    assert any("此合约暂无已验证排名数据" in item.value for item in app.info)
+    assert any("品种汇总数据待接入" in item.value for item in app.info)
+    assert app.selectbox(key='domestic_scope_soybean').value=='M'
     app.radio[0].set_value("期货＋期权").run(timeout=20)
     assert not app.exception and any("此口径暂无" in item.value for item in app.info)
 
@@ -58,6 +59,7 @@ def test_domestic_page_shows_single_sided_ranked_net_and_original_missing_side(
     monkeypatch.setattr(oilseed_positions_page, "read_snapshot",
         lambda root: {"foreign": [], "domestic": rows, "sources": {}})
     app = AppTest.from_file(str(ROOT / f"05_apps/{domain}_positions_preview.py")).run(timeout=20)
+    app.selectbox(key=f'domestic_scope_{domain}').set_value(scope).run(timeout=20)
     assert not app.exception
     assert any(m.label == "五家合计榜内净持仓" and m.value == format(-short, ",") for m in app.metric)
     fixed = next(d.value for d in app.dataframe if "榜内持仓倾向" in d.value and len(d.value) == 5)
@@ -67,3 +69,15 @@ def test_domestic_page_shows_single_sided_ranked_net_and_original_missing_side(
     assert seat["榜内净持仓（手）"] == format(-short, "+,")
     assert any("未披露一侧按0" in c.value for c in app.caption)
     assert app.get("plotly_chart") and rows == original
+
+
+@pytest.mark.parametrize('domain,expected',[('soybean','M'),('palm','P')])
+def test_variety_summary_precedes_contracts_without_falling_back_to_old_reference(monkeypatch,domain,expected):
+    import oilseed_positions_page
+    monkeypatch.setattr(oilseed_positions_page,'read_snapshot',lambda root:{'foreign':[],'domestic':[],'sources':{}})
+    app=AppTest.from_file(str(ROOT/f'05_apps/{domain}_positions_preview.py')).run(timeout=20)
+    assert not app.exception
+    selection=app.selectbox(key=f'domestic_scope_{domain}')
+    assert selection.value==expected and '品种汇总' in selection.options[0]
+    assert all('主力参考' not in item.value for item in app.caption)
+    assert any('品种汇总数据待接入' in item.value for item in app.info)
