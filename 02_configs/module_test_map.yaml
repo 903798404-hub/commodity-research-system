@@ -8,6 +8,7 @@ modules:
       - 03_src/agri_research_agent/soybean_margin/public_inputs.py
       - 03_src/agri_research_agent/alerts/gate.py
       - 04_scripts/application_runtime_readability_gate.py
+      - 09_deploy/spread_release/release_contract.py
       - 04_scripts/calculate_historical_spreads.py
       - 04_scripts/server_update_spreads.py
       - 04_scripts/update_price_long_from_akshare.py
@@ -34,6 +35,7 @@ modules:
       - 08_tests/positions/test_scheduled_collection.py
       - 08_tests/alerts/test_notification.py
       - 08_tests/shared/test_module_test_map.py
+      - 08_tests/test_spread_deployment_contract.py
     dependents: []
     full_regression_when_changed: true
   maintenance.public_package_retention:

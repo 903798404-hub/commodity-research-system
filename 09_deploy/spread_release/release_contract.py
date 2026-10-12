@@ -936,7 +936,7 @@ for name, path in consumers.items():
     resolved = path.resolve(strict=True)
     if not resolved.is_relative_to(resolved_data):
         raise RuntimeError(f"Candidate consumer escaped immutable package: {name}")
-    if name == "domestic_spread" and not resolved.is_file():
+    if name == "domestic_spread" and not (resolved.is_file() or resolved.is_dir()):
         raise RuntimeError("Candidate Domestic Spread artifact is missing")
     if name != "domestic_spread" and not resolved.is_dir():
         raise RuntimeError(f"Candidate public consumer root is missing: {name}")
