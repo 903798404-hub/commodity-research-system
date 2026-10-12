@@ -77,6 +77,37 @@ def test_public_job_cannot_borrow_delta_policy_or_other_credential(runner,linux_
     with pytest.raises(ValueError): runner.validate_config(host,c)
 
 
+def test_stock_api_is_explicit_domestic_only_and_requires_protected_secret(runner,linux_host):
+    value=config(runner,'positions_domestic')
+    runner.validate_config(linux_host,value)
+    value['positions_stock_api']=True
+    with pytest.raises((ValueError,TypeError)):runner.validate_config(linux_host,value)
+    value['secret_file']='/etc/market-data/production-input-secrets/stock-api.env'
+    runner.validate_config(linux_host,value)
+    assert runner.credential_key(value)=='STOCK_API_TOKEN'
+    for job in ('positions_foreign','akshare'):
+        bad={**value,'job':job}
+        with pytest.raises(ValueError):runner.validate_config(linux_host,bad)
+    value['positions_stock_api']='true'
+    with pytest.raises(ValueError):runner.validate_config(linux_host,value)
+
+
+def test_stock_token_is_stdin_only_and_extra_secret_keys_are_rejected(runner,tmp_path,monkeypatch):
+    host=runner.helpers()[1];secret=tmp_path/'stock.env';secret.write_text('STOCK_API_TOKEN=private-test-token\n')
+    secret.chmod(0o600)
+    # Windows mode bits do not model the production ACL; test the parser with a protected-file proxy.
+    class ProtectedFile:
+        def stat(self):return SimpleNamespace(st_size=100,st_mode=0o600)
+        def read_text(self,**kwargs):return secret.read_text(**kwargs)
+    monkeypatch.setattr(host,'_protected',lambda p:ProtectedFile())
+    value={**config(runner,'positions_domestic'),'positions_stock_api':True,'secret_file':str(secret)}
+    assert json.loads(runner.secret_input(host,value))=={'STOCK_API_TOKEN':'private-test-token'}
+    command=runner.collector_command(value,tmp_path/'work')
+    assert not any('private-test-token' in arg or 'STOCK_API_TOKEN' in arg or str(secret) in arg for arg in command)
+    secret.write_text('STOCK_API_TOKEN=private-test-token\nOTHER_KEY=forbidden\n')
+    with pytest.raises(ValueError):runner.secret_input(host,value)
+
+
 def test_collectors_have_no_formal_writable_mount_or_credentials_in_args(runner,tmp_path):
     for job in runner.JOBS:
         command=runner.collector_command(config(runner,job),tmp_path/'run')

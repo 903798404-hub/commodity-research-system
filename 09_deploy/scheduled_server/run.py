@@ -60,6 +60,10 @@ def validate_config(host, value):
         required.add('partitioned_public_packages')
         host.require(value.get('job') == 'akshare' and type(value['partitioned_public_packages']) is bool,
                      'partitioned packages require explicit public job boolean')
+    if isinstance(value, dict) and 'positions_stock_api' in value:
+        required.add('positions_stock_api')
+        host.require(value.get('job') == 'positions_domestic' and type(value['positions_stock_api']) is bool,
+                     'stock API requires explicit domestic positions boolean')
     c = host._exact(value, required, 'scheduled server config')
     host.require(c['schema_version'] == 'scheduled-server-config/1' and c['job'] in JOBS, 'scheduled job invalid')
     host.require(type(c['image_id']) is str and host.IMAGE_ID.fullmatch(c['image_id']), 'scheduled image invalid')
@@ -68,7 +72,7 @@ def validate_config(host, value):
     p = host._exact(c['producer'], {'commit', 'tree', 'origin'}, 'producer')
     host.require(p['origin'] == 'https://github.com/903798404-hub/commodity-research-system.git'
                  and all(type(p[k]) is str and host.HEX40.fullmatch(p[k]) for k in ('commit','tree')), 'producer identity invalid')
-    if c['job'] in KEYS:
+    if credential_key(c):
         host._under(c['secret_file'], SECRET_ROOT)
     else:
         host.require(c['secret_file'] is None, 'unexpected server credential')
@@ -84,6 +88,12 @@ def validate_config(host, value):
         host.require(type(c['policy_sha256']) is str and host.HEX64.fullmatch(c['policy_sha256']), 'policy pin invalid')
         host.require(c['initial_baseline'] is None and c['initial_baseline_sha256'] is None, 'unexpected static domain baseline')
     return c
+
+
+def credential_key(config):
+    if config['job'] == 'positions_domestic' and config.get('positions_stock_api', False):
+        return 'STOCK_API_TOKEN'
+    return KEYS.get(config['job'])
 
 
 def check_identity(host, config):
@@ -102,11 +112,11 @@ def check_identity(host, config):
 
 
 def secret_input(host, config):
-    if config['job'] not in KEYS:
+    key = credential_key(config)
+    if key is None:
         return b'{}'
     path = host._protected(config['secret_file'])
     host.require(path.stat().st_size <= 8192 and path.stat().st_mode & 0o077 == 0, 'server secret permissions invalid')
-    key = KEYS[config['job']]
     values = {}
     for line in path.read_text(encoding='utf-8').splitlines():
         if not line.strip() or line.lstrip().startswith('#'): continue
@@ -220,6 +230,8 @@ def execute(fx, host, config, work, publish):
             'producer':config['producer'],'baseline_files':snapshot['files'],**extra}
         if config['job'] == 'akshare':
             request['partitioned_public_packages'] = config.get('partitioned_public_packages', False)
+        if config['job'] == 'positions_domestic':
+            request['positions_stock_api'] = config.get('positions_stock_api', False)
         result['disk_budget']=disk_budget(host,config,snapshot)
         copy_snapshot(host,snapshot,work/'baseline',request)
         stage='collect_sources'; collected=collect(host,config,work); result['collection']=collected

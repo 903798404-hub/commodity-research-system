@@ -77,8 +77,13 @@ def prepare(request,baseline,output,credentials):
         from agri_research_agent.automation.positions_scheduled_collection import collect_bundle
         from agri_research_agent.positions import delivery as codec
         previous=host.read_json(baseline/host.POSITIONS_STABLE)
+        kwargs={}
+        if request.get('positions_stock_api', False):
+            if job != 'positions_domestic': raise ValueError('stock API is domestic only')
+            from agri_research_agent.oilseed_positions.stock_api import StockApiSources
+            kwargs['stock_source']=StockApiSources(token=credentials['STOCK_API_TOKEN'])
         bundle,attempts=collect_bundle(previous,output,markets=job.removeprefix('positions_'),today=date.fromisoformat(request['business_date']),
-            cftc_annual=job=='positions_foreign')
+            cftc_annual=job=='positions_foreign',**kwargs)
         archive=codec.archive_bundle(bundle,SOURCE); semantic=codec.observations(archive,previous,SOURCE)
         package(request,output,{'positions_archive.json':codec.canonical(archive)},semantic,host)
         return {'attempts':attempts,'observations':semantic}
@@ -147,6 +152,9 @@ def main():
         request=json.loads(Path('/baseline/request.json').read_bytes())
         credentials=json.load(sys.stdin)
         expected={'soybean_crop_progress':{'NASS_API_KEY'},'soybean_export_sales':{'FAS_EXPORT_SALES_API_KEY'}}.get(request['job'],set())
+        if request.get('positions_stock_api', False):
+            if request['job'] != 'positions_domestic': raise ValueError('stock API is domestic only')
+            expected={'STOCK_API_TOKEN'}
         if set(credentials)!=expected: raise ValueError('unexpected credentials')
         result.update(prepare(request,Path('/baseline'),output,credentials),status='PASS')
     except Exception as exc:

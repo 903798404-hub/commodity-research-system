@@ -14,7 +14,7 @@ from agri_research_agent.sugar_positions.sources import OfficialSources
 from agri_research_agent.sugar_positions.storage import publish, read_snapshot
 
 
-def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
+def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, stock_source=None):
     today = today or date.today()
     delivery.require(markets in {"domestic", "foreign"}, "scheduled positions market scope invalid")
     snapshots, _ = codec.validate_archive(baseline, delivery.ROOT)
@@ -29,8 +29,13 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
         from agri_research_agent.positions.cftc_annual import AnnualSources
         annual=AnnualSources(today)
     selected = ("sugar", "rapeseed") if markets == "domestic" else ("sugar", "rapeseed", "soybean")
+    if stock_source is not None:
+        delivery.require(markets == 'domestic', 'stock API is domestic only')
+        selected = (*selected, 'soybean', 'palm')
     windows = {}
     for domain in selected:
+        if domain in ('soybean', 'palm') and stock_source is not None:
+            continue  # One complete DCE response is shared by these two boards.
         old = snapshots[domain]
         # Keep CFTC query identity and all already published years covered by that source.
         years = [int(match.group(1)) for source in old["sources"].values()
@@ -58,6 +63,10 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
         (root / "last_attempt.json").write_bytes(delivery.canonical_json_bytes({"attempts": observed}))
         if foreign or domestic:
             publish(root, foreign, domestic, captures, observed)
+    if stock_source is not None:
+        observed, window = collect_dce(stock_source, snapshots, store, today)
+        attempts.extend(observed)
+        windows['dce'] = window
     bundle = assert_external_output(work / "bundle")
     (work / "collection-window.json").write_bytes(delivery.canonical_json_bytes(windows))
     bundle.mkdir()
@@ -86,6 +95,46 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
             delivery.require(current[domain][untouched] == snapshots[domain][untouched],
                              "unselected positions market changed")
     return bundle, attempts
+
+
+def collect_dce(source, snapshots, store, today):
+    """Append verified all-contract disclosures; preserve same-day/manual partitions."""
+    from agri_research_agent.oilseed_positions.stock_api import StockApiError
+    from agri_research_agent.oilseed_positions.sources import SourceNotPublished
+    latest=[]
+    for domain,varieties in (('soybean',('M','Y')),('palm',('P',))):
+        for variety in varieties:
+            dates={r['report_date'] for r in snapshots[domain]['domestic']
+                   if r['scope'].rstrip('0123456789')==variety}
+            if dates: latest.append(max(dates))
+    start,end=domestic_window({min(latest)} if len(latest)==3 else set(),today)
+    attempts=[];by_domain={'soybean':[],'palm':[]}
+    cursor=start
+    while cursor<=end:
+        if cursor.weekday()<5:
+            source_id=f'stockapi_DCE_{cursor:%Y%m%d}'
+            try:
+                rows,raw,url=source.holdings(cursor,('M','Y','P'))
+                delivery.require(rows and all(r['report_date']==cursor.isoformat() for r in rows),
+                                 'DCE source date differs')
+                for domain,varieties in (('soybean',{'M','Y'}),('palm',{'P'})):
+                    previous=snapshots[domain]['domestic']
+                    existing={(r['scope'],r['report_date']) for r in previous}
+                    current=[r for r in rows if r['scope'].rstrip('0123456789') in varieties
+                             and (r['scope'],r['report_date']) not in existing]
+                    observed=dict(domain=domain,source_id=source_id,status='ok' if current else 'no_change',rows=len(current))
+                    if current:publish(store/domain,[],current,[(source_id,raw,url,'json')],[observed],preserve_untouched=True)
+                    attempts.append(observed);by_domain[domain].append(observed)
+            except (StockApiError,SourceNotPublished,ValueError) as exc:
+                # Never persist arbitrary upstream exception text or authentication messages.
+                status='not_published' if isinstance(exc,SourceNotPublished) else 'failed'
+                for domain in by_domain:
+                    observed=dict(domain=domain,source_id=source_id,status=status,error='stock_api_report_not_published' if status=='not_published' else 'stock_api_source_unavailable_or_invalid')
+                    attempts.append(observed);by_domain[domain].append(observed)
+        cursor+=timedelta(days=1)
+    for domain,observed in by_domain.items():
+        (store/domain/'last_attempt.json').write_bytes(delivery.canonical_json_bytes({'attempts':observed}))
+    return attempts,dict(start=start.isoformat(),end=end.isoformat(),target=today.isoformat(),catchup_remaining=end<today)
 
 
 def domestic_window(existing_dates, today):
