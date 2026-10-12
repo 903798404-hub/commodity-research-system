@@ -35,10 +35,11 @@ def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     artifact = candidate / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet"
     artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"validated spread bytes")
-    write(candidate / "manifest.json", {"package_id": NEW})
+    write(candidate / "manifest.json", {"package_id": NEW, "schema_version": packages.PACKAGE_SCHEMA})
     manifest_sha = sha(candidate / "manifest.json")
     package = SimpleNamespace(package_id=NEW, directory=candidate,
-                              manifest={"delivery_artifacts": {"domestic-spread": {
+                              manifest={"schema_version": packages.PACKAGE_SCHEMA,
+                                  "delivery_artifacts": {"domestic-spread": {
                                   "sha256": sha(artifact),
                                   "package_path": "consumer-artifacts/domestic-spread/historical_spread_database.parquet"}}})
     monkeypatch.setattr(packages, "validate_production_package", lambda _: package)
