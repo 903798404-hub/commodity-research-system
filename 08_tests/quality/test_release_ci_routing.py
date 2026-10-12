@@ -109,9 +109,9 @@ def test_release_inputs_unknown_paths_and_mixed_changes_still_replay(monkeypatch
 
 def test_exempt_lock_profiles_are_confined_to_their_audited_ci_consumers():
     workflow = yaml.safe_load((ROOT / '.github/workflows/trusted-main-admission.yml').read_text(encoding='utf-8'))
-    for lock, expected_job in [('windows-py312', 'windows'), ('aggregate-py312', 'final')]:
+    for lock, expected_jobs in [('windows-py312', {'windows'}), ('aggregate-py312', {'final', 'frontend'})]:
         consumers = {name for name, job in workflow['jobs'].items() if lock in json.dumps(job)}
-        assert consumers == {expected_job}
+        assert consumers == expected_jobs
     assert 'requirements-dev.' not in json.dumps(workflow)
 
 
