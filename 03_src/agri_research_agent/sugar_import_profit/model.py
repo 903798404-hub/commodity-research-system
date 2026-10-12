@@ -69,4 +69,3 @@ def validate_inputs(raw):
             if clean[key]>clean['date']:errors.append(LABELS[key]+'晚于计算日期')
     if errors:raise ValueError('；'.join(errors))
     return clean
-
