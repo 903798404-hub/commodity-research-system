@@ -7,13 +7,14 @@ import { filterVisibleMetrics } from '../utils/metrics'
 import type { MatrixData } from '../types/dashboard'
 
 type ChartPanelProps = {
-  data: MatrixData
+  data: Pick<MatrixData, 'years' | 'rows'>
   selectedIndicators: string[]
   chartMode: ChartMode
   visibleStart: number
+  forecastYears?: number[]
 }
 
-export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }: ChartPanelProps) {
+export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart, forecastYears }: ChartPanelProps) {
   const visibleYears = data.years.slice(visibleStart)
   const chartTitle = useMemo(() => {
     const names = filterVisibleMetrics(data.rows)
@@ -28,6 +29,7 @@ export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }
     const hasPercentageSeries = definitions.some((series) => series.isPercent)
     const hasNumberSeries = definitions.some((series) => !series.isPercent)
     const chartForecastStart = Math.max(0, data.years.length - 2 - visibleStart)
+    const isForecastAt = (index: number) => forecastYears ? forecastYears.includes(visibleYears[index]) : index >= chartForecastStart
 
     return {
       tooltip: {
@@ -36,7 +38,7 @@ export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }
           const title = params[0]?.axisValueLabel ?? ''
           const lines = params.map((item) => {
             const definition = definitions[item.seriesIndex ?? -1]
-            const isForecast = (item.dataIndex ?? -1) >= chartForecastStart
+            const isForecast = isForecastAt(item.dataIndex ?? -1)
             const sampleInsufficient = definition?.sampleInsufficient[(item.dataIndex ?? -1) + visibleStart]
             const formatted = definition?.isPercent ? formatPercent(item.value) : formatNumber(item.value)
             const valueText = sampleInsufficient ? '样本不足' : formatted === '—' ? '暂无数据' : formatted
@@ -51,7 +53,7 @@ export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }
         type: 'category',
         data: visibleYears.map(formatMarketYear),
         axisLabel: {
-          formatter: (value: string, index: number) => index >= chartForecastStart ? `{forecast|${value}*}` : value,
+          formatter: (value: string, index: number) => isForecastAt(index) ? `{forecast|${value}*}` : value,
           rich: { forecast: { color: '#c8372d', fontWeight: 700 } },
         },
       },
@@ -73,7 +75,7 @@ export function ChartPanel({ data, selectedIndicators, chartMode, visibleStart }
         lineStyle: chartMode === 'fiveYearAverage' && definition.name.endsWith('原始') ? { type: 'dashed' } : undefined,
       })),
     }
-  }, [chartMode, data, selectedIndicators, visibleStart, visibleYears])
+  }, [chartMode, data, selectedIndicators, visibleStart, visibleYears, forecastYears])
 
   const description = chartMode === 'raw' ? '显示所选指标的原始数值。' : chartMode === 'yoy' ? '同比变化仅在上一年有效且不为零时计算。' : '五年均值仅在窗口内有五个有效年份时显示。'
   return <section className="card chart-card" aria-label="供需指标趋势图表"><div className="card-heading"><div><h2>{chartTitle}</h2><p>{description}</p></div></div><ReactECharts option={chartOption} style={{ height: 390, width: '100%' }} /></section>

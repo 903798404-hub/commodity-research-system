@@ -113,6 +113,17 @@ tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
 
 .forecast { color: #c8372d; font-weight: 700; }
 
+.sugar-source-row td { max-width: 165px; white-space: normal; font-size: 12px; line-height: 1.5; vertical-align: top; }
+.sugar-source-row a { display: block; color: #17617f; }
+.sugar-source-row span { color: #667085; }
+.sugar-table th:nth-child(6), .sugar-table td:nth-child(6) { border-left: 2px solid #9cb5c6; }
+.sugar-notes dl, .sugar-notes ul, .sugar-report-link { margin: 0 24px 22px; line-height: 1.7; }
+.sugar-notes dl > div { display: grid; grid-template-columns: 140px 1fr; gap: 16px; margin-bottom: 10px; }
+.sugar-notes dt { color: #263c4d; font-weight: 700; }
+.sugar-notes dd { margin: 0; color: #475467; }
+.sugar-comparison .sugar-difference { background: #fff3d6; font-weight: 700; }
+@media (max-width: 600px) { .sugar-notes dl > div { grid-template-columns: 1fr; gap: 2px; } }
+
 .chart-card { padding-bottom: 8px; }
 
 .page-state { display: grid; min-height: 100vh; place-items: center; padding: 24px; color: #475467; }

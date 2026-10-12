@@ -1,7 +1,7 @@
 import type { BalanceRow } from '../types/dashboard'
 
 export const HIDDEN_METRICS = ['饲用及损耗消费', 'Feed Waste Dom. Cons.', 'Feed and Residual', 'Feed Waste Consumption']
-export const RATIO_METRICS = ['库存/总使用比']
+export const RATIO_METRICS = ['库存/总使用比', '库存/国内消费比', '产量同比']
 
 export function isHiddenMetric(name: string): boolean {
   const normalized = name.trim().toLowerCase()
