@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from html import escape
+import hashlib
 import json
 import os
 import sqlite3
@@ -45,9 +46,25 @@ def _chart_history(path: str, identity: str):
 @st.cache_data(show_spinner=False, max_entries=2)
 def _public_tables(root: str, domestic_path: str, identity: str):
     result = read_public_tables(Path(root), Path(domestic_path))
-    if identity != digest(Path(root) / "public-market-data" / "tankan" / "current.json") + digest(Path(domestic_path)):
+    if identity != digest(Path(root) / "public-market-data" / "tankan" / "current.json") + _domestic_identity(Path(domestic_path)):
         raise ValueError("公共行情在读取时发生变化，请重新读取")
     return result
+
+
+def _domestic_identity(path: Path) -> str:
+    """Fingerprint both legacy files and the actual immutable monthly dataset."""
+    if path.is_symlink():
+        raise ValueError("国内行情缓存输入不能重定向")
+    if not path.is_dir():
+        return digest(path)
+    entries = sorted(path.rglob("*"))
+    if any(p.is_symlink() for p in entries):
+        raise ValueError("国内行情分区不能重定向")
+    files = [p for p in entries if p.is_file()]
+    if not files:
+        raise ValueError("国内行情分区为空")
+    content = [(p.relative_to(path).as_posix(), digest(p)) for p in files]
+    return hashlib.sha256(json.dumps(content, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _public_rows(history_path: str, history_identity: str, root: str, domestic_path: str,
@@ -179,7 +196,7 @@ def render_soybean_margin_page(history_root: str | Path | None):
             public_root = resolve_public_data_root(os.getenv("SOYBEAN_MARGIN_PUBLIC_ROOT")
                 or os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT") or Path(history_root))
             domestic_path = Path(os.getenv("SOYBEAN_MARGIN_DOMESTIC_PATH", "")) if os.getenv("SOYBEAN_MARGIN_DOMESTIC_PATH") else resolve_domestic_spread_path(public_root / "consumer-artifacts" / "domestic-spread")
-            public_identity = digest(public_root / "public-market-data" / "tankan" / "current.json") + digest(domestic_path)
+            public_identity = digest(public_root / "public-market-data" / "tankan" / "current.json") + _domestic_identity(domestic_path)
             if st.button("重新读取已更新行情", key="soy-margin-refresh"):
                 _public_tables.clear(str(public_root), str(domestic_path), public_identity)
                 _prepared_data.clear()

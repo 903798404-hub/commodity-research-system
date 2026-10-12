@@ -183,3 +183,52 @@ def test_public_identity_race_still_rejects_a_view(published, monkeypatch):
             page._public_tables(str(root), str(domestic_path), "a" * 128)
     finally:
         page._public_tables.clear()
+
+
+def test_monthly_dataset_reads_like_legacy_and_changed_partition_refreshes_cache(published):
+    root, legacy, _, _, original = published
+    dataset = root / "monthly.parquet"
+    part = dataset / "month=2026-08" / "part.parquet"
+    part.parent.mkdir(parents=True)
+    original.to_parquet(part, index=False)
+    pointer = root / "public-market-data/tankan/current.json"
+    page._public_tables.clear()
+    try:
+        identity = page.digest(pointer) + page._domestic_identity(dataset)
+        monthly = page._public_tables(str(root), str(dataset), identity)
+        flat = readers.read_public_tables(root, legacy)
+        for left, right in zip(monthly[:3], flat[:3]):
+            pd.testing.assert_frame_equal(left, right)
+        updated = original.copy()
+        updated.loc[0, "leg1_price"] = 3100.
+        updated.to_parquet(part, index=False)
+        next_identity = page.digest(pointer) + page._domestic_identity(dataset)
+        assert next_identity != identity
+        refreshed = page._public_tables(str(root), str(dataset), next_identity)
+        assert refreshed[2].iloc[0].leg1_price == 3100.
+        assert monthly[2].iloc[0].leg1_price == 3000.
+        assert page._domestic_identity(legacy) == page.digest(legacy)
+    finally:
+        page._public_tables.clear()
+
+
+def test_partition_changed_during_public_read_is_rejected(published, monkeypatch):
+    root, _, _, _, original = published
+    dataset = root / "monthly.parquet"
+    dataset.mkdir()
+    part = dataset / "part.parquet"
+    original.to_parquet(part, index=False)
+    identity = page.digest(root / "public-market-data/tankan/current.json") + page._domestic_identity(dataset)
+    def changed_while_reading(root, path):
+        result = readers.read_public_tables(root, path)
+        updated = original.copy()
+        updated.loc[0, "leg1_price"] = 3100.
+        updated.to_parquet(part, index=False)
+        return result
+    monkeypatch.setattr(page, "read_public_tables", changed_while_reading)
+    page._public_tables.clear()
+    try:
+        with pytest.raises(ValueError, match="发生变化"):
+            page._public_tables(str(root), str(dataset), identity)
+    finally:
+        page._public_tables.clear()
