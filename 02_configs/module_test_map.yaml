@@ -22,6 +22,7 @@ modules:
       - 08_tests/test_scheduled_server.py
       - 08_tests/test_foreign_fx_server.py
       - 08_tests/test_production_data_delta.py
+      - 08_tests/test_public_candidate_promotion.py
       - 08_tests/test_production_data_delta_activation.py
       - 08_tests/test_production_data_delta_fx.py
       - 08_tests/test_first_batch_scheduled.py

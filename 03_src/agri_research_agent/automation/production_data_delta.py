@@ -952,6 +952,8 @@ def _validated_promotion(config: dict, *, candidate: Path, reconciliation_manife
         require(_domestic_spread_identity(source / "01_data/historical_spread_database.parquet", partitioned=True)["business_sha256"] == artifact["business_sha256"],
                 "candidate and continuation business history differ")
     else:
+        require(sha256_file(candidate / "data" / artifact["package_path"]) == evidence["candidate_artifact_sha256"],
+                "candidate artifact bytes changed")
         require(evidence["source_files"]["historical_spread_database.parquet"] == evidence["candidate_artifact_sha256"],
                 "candidate and continuation artifact differ")
     return evidence, manifest, candidate, source, result
