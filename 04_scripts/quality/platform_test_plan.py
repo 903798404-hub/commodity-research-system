@@ -9,6 +9,10 @@ from collections import Counter
 import hashlib
 import json
 import re
+if __package__:
+    from .main_admission import frontend_test_path
+else:
+    from main_admission import frontend_test_path
 
 RUNNERS = {"linux": "ubuntu-24.04", "windows": "windows-2022"}
 
@@ -63,6 +67,11 @@ def plan(required_paths, trusted_sources, candidate_sources, policy, *, base, ca
     for path in paths:
         if path not in candidate_sources:
             raise ValueError("REQUIRED_TEST_REMOVED: " + path)
+        if frontend_test_path(path):
+            if path in policy['files']:
+                raise ValueError('FRONTEND_PLATFORM_POLICY_NOT_SUPPORTED')
+            lanes.setdefault('frontend', []).append({'selector': path, 'minimum_cases': 1})
+            continue
         if not isinstance(path, str) or not re.fullmatch(r"08_tests/(?:[A-Za-z0-9_./-]+)\.py", path) or ".." in path.split("/"):
             raise ValueError("INVALID_TEST_PATH")
         policy_file = policy["files"].get(path)
@@ -88,7 +97,8 @@ def plan(required_paths, trusted_sources, candidate_sources, policy, *, base, ca
             for platform in selected:
                 lanes[platform].append({"selector": path + "::" + name, "minimum_cases": count})
     value = {"schema_version": "platform-test-plan/1", "base": base, "candidate": candidate,
-             "policy_sha256": digest(policy), "lanes": lanes, "runners": RUNNERS,
+             "policy_sha256": digest(policy), "lanes": lanes,
+             "runners": {**RUNNERS, **({'frontend': 'ubuntu-24.04'} if 'frontend' in lanes else {})},
              "candidate_test_sha256": {p: hashlib.sha256(candidate_sources[p]).hexdigest() for p in paths}}
     return {**value, "plan_sha256": digest(value)}
 
@@ -113,7 +123,7 @@ def aggregate(plan_value, receipts, *, workflow_run_id, workflow_run_attempt, jo
                   "runner_environment", "workflow_run_id", "workflow_run_attempt", "tests"}
         if type(receipt) is not dict or set(receipt) != fields:
             errors.append("INVALID_PLATFORM_RECEIPT"); continue
-        expected_os = {"linux": "Linux", "windows": "Windows"}[platform]
+        expected_os = {"linux": "Linux", "windows": "Windows", "frontend": "Linux"}[platform]
         expected = dict(schema_version="platform-test-result/1", base=plan_value["base"], candidate=plan_value["candidate"],
                         plan_sha256=plan_value["plan_sha256"], platform=platform, runner_os=expected_os,
                         runner_environment="github-hosted", workflow_run_id=workflow_run_id, workflow_run_attempt=workflow_run_attempt)

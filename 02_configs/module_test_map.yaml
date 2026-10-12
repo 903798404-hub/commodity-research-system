@@ -588,3 +588,20 @@ modules:
       - 08_tests/test_main_admission.py
     dependents: []
     full_regression_when_changed: false
+
+  ci.frontend:
+    code_paths:
+      - 04_scripts/quality/frontend_ci.py
+      - 04_scripts/quality/platform_test_plan.py
+      - 04_scripts/quality/platform_ci.py
+      - 04_scripts/quality/main_admission.py
+      - .github/workflows/trusted-main-admission.yml
+    direct_tests:
+      - 08_tests/quality/test_frontend_ci.py
+      - 11_独立应用/USDA平衡表/src/utils/marketYear.test.ts
+      - 11_独立应用/USDA平衡表/src/utils/runtimeDataClient.test.ts
+    impact_tests:
+      - 08_tests/test_main_admission.py
+      - 08_tests/test_full_regression.py
+    dependents: []
+    full_regression_when_changed: false

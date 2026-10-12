@@ -241,7 +241,7 @@ def execute(platform, plan_path, output):
     if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('GITHUB_HOSTED_REQUIRED')
     plan=read(plan_path)
-    expected_os={'linux':'Linux','windows':'Windows'}[platform]
+    expected_os={'linux':'Linux','windows':'Windows','frontend':'Linux'}[platform]
     if os.environ.get('RUNNER_OS') != expected_os:
         raise ValueError('WRONG_REQUIRED_RUNNER_OS')
     repo=Path.cwd()
@@ -257,16 +257,23 @@ def execute(platform, plan_path, output):
     selectors=[t['selector'] for t in plan['lanes'][platform]]
     if not selectors: raise ValueError('EMPTY_PLATFORM_PLAN')
     output.mkdir(parents=True,exist_ok=True)
-    import pytest
     before={p:admission.digest((repo/p).read_bytes()) for p,e in admission.tree(repo,plan['candidate']['commit']).items() if e['kind']=='blob'}
     run_id=os.environ['GITHUB_RUN_ID']; attempt=os.environ['GITHUB_RUN_ATTEMPT']
     # Remove credential variables, preserve official runner tool/system paths.
     for key in list(os.environ):
         if any(word in key.upper() for word in ('TOKEN','PASSWORD','SECRET','CREDENTIAL')):
             os.environ.pop(key,None)
-    with tempfile.TemporaryDirectory(prefix='required-pytest-') as tmp:
-        code=pytest.main(['-q','-p','no:cacheprovider','-o','xfail_strict=true',
-                          '--basetemp='+tmp,'--junitxml='+str(output/'junit.xml'),*selectors],plugins=[collector])
+    if platform == 'frontend':
+        if __package__:
+            from .frontend_ci import execute_tests
+        else:
+            from frontend_ci import execute_tests
+        code, collector.results = execute_tests(repo, selectors, output)
+    else:
+        import pytest
+        with tempfile.TemporaryDirectory(prefix='required-pytest-') as tmp:
+            code=pytest.main(['-q','-p','no:cacheprovider','-o','xfail_strict=true',
+                              '--basetemp='+tmp,'--junitxml='+str(output/'junit.xml'),*selectors],plugins=[collector])
     mutated=any(not (repo/p).is_file() or (repo/p).is_symlink() or admission.digest((repo/p).read_bytes())!=d for p,d in before.items())
     receipt=dict(schema_version='platform-test-result/1',base=plan['base'],candidate=plan['candidate'],
                  plan_sha256=plan['plan_sha256'],platform=platform,runner_os=expected_os,
@@ -361,7 +368,7 @@ def validate_release_replay(plan, receipts_root, run_id, attempt):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('action',choices=['plan','run','aggregate'])
-    p.add_argument('--base');p.add_argument('--candidate');p.add_argument('--platform',choices=['linux','windows'])
+    p.add_argument('--base');p.add_argument('--candidate');p.add_argument('--platform',choices=['linux','windows','frontend'])
     p.add_argument('--plan',type=Path);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--receipts',type=Path)
     a=p.parse_args()
@@ -370,6 +377,7 @@ def main():
         if os.environ.get('GITHUB_OUTPUT'):
             with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:
                 for lane,items in plan['lanes'].items(): f.write(lane+'='+str(bool(items)).lower()+'\n')
+                if 'frontend' not in plan['lanes']: f.write('frontend=false\n')
                 report=read(a.output/'admission/main-admission.json')
                 f.write('full='+str(requires_full(report)).lower()+'\n')
                 f.write('base_commit='+plan['base']['commit']+'\n')

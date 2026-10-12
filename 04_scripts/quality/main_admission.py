@@ -342,6 +342,22 @@ def test_path(path: str) -> bool:
     return path.startswith("08_tests/") and path.endswith(".py") and Path(path).name.startswith("test_")
 
 
+USDA_FRONTEND_ROOT = "11_独立应用/USDA平衡表"
+
+
+def frontend_test_path(path: str) -> bool:
+    """Only the registered USDA Node test layout, never arbitrary executables."""
+    prefix = USDA_FRONTEND_ROOT + "/"
+    if not isinstance(path, str) or not path.startswith(prefix):
+        return False
+    relative = path[len(prefix):]
+    return bool(re.fullmatch(r"(?:src|scripts)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.test\.ts", relative))
+
+
+def supported_test_path(path: str) -> bool:
+    return test_path(path) or frontend_test_path(path)
+
+
 def impact_plan(mapping: dict, paths: list[str], old: dict, *, include_full=True) -> tuple[list[str], list[str], bool]:
     modules = mapping.get("modules", {})
     selected = {name for name, module in modules.items()
@@ -560,8 +576,14 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
                 if not separate_full:
                     tests += [p for p in old if test_path(p)]
                 receipt['checks']['full_regression'] = True
+        # A USDA change keeps the entire committed frontend test inventory.
+        # Base files remain obligations, so removing even an unlisted TS test
+        # cannot reduce coverage. Python full regression keeps its own inventory.
+        if any(frontend_test_path(p) for p in tests):
+            tests += [p for p in old if frontend_test_path(p)]
+            tests += [p for p in new if frontend_test_path(p)]
         required = list(dict.fromkeys(tests))
-        tests += [i["path"] for i in paths if i["path"] in new and test_path(i["path"])
+        tests += [i["path"] for i in paths if i["path"] in new and supported_test_path(i["path"])
 ]
         tests = list(dict.fromkeys(tests))
         receipt["test_plan"] = tests
@@ -570,8 +592,10 @@ def admit(repo: Path, base: str, candidate: str, project_id: str, evidence: Path
         receipt["checks"]["test_source_commit"] = candidate
         if any(p not in new for p in required):
             failures.append("REQUIRED_TEST_REMOVED")
-        if not tests or any(p not in new or not test_path(p) for p in tests):
+        if not tests or any(p not in new or not supported_test_path(p) for p in tests):
             failures.append("TRUSTED_TEST_UNAVAILABLE")
+        if not plan_only and any(frontend_test_path(p) for p in tests):
+            failures.append("FRONTEND_REQUIRES_HOSTED_PLATFORM_PLAN")
         receipt["test_identities"] = [{"path": p, "trusted_blob": old.get(p, {}).get("oid"),
                                       "candidate_blob": new[p]["oid"],
                                       "sha256": digest(blob(repo, candidate, p))} for p in tests if p in new]
