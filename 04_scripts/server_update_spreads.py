@@ -2,6 +2,7 @@
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import logging
 import os
@@ -308,6 +309,36 @@ def apply_bounded_incremental_materialization(
     return payload, unrelated_full_drift, affected
 
 
+def apply_direct_incremental_materialization(*, price_baseline, price_candidate,
+        spread_baseline, spread_output, spread_workbook, config_file):
+    """Avoid a full-history recompute for ordinary AkShare daily collection."""
+    underlying = changed_daily_close_keys(price_baseline, price_candidate)
+    config = pd.read_excel(config_file, sheet_name="spread_config")
+    affected = derive_affected_spread_keys(config, underlying)
+    payload = {"incremental_underlying_keys": [f"{c}|{d}" for c, d in sorted(underlying)],
+        "incremental_affected_keys": ["|".join(k) for k in sorted(affected)],
+        "incremental_unrelated_rewritten_keys": [], "full_recompute_performed": False,
+        "full_recompute_business_diff_count": 0, "full_recompute_drift_count": 0,
+        "full_recompute_drift_date_count": 0, "full_recompute_drift_backlog": "",
+        "calculated_spread_rows": len(affected)}
+    if not affected:
+        return payload, (), affected
+    path = Path(__file__).resolve().with_name("calculate_historical_spreads.py")
+    spec = importlib.util.spec_from_file_location("_daily_incremental_calculator", path)
+    calculator = importlib.util.module_from_spec(spec); spec.loader.exec_module(calculator)
+    calculated = calculator.calculate_affected_spreads(config,
+        pd.read_excel(price_candidate, sheet_name="price_long"), affected, now_text())
+    baseline = pd.read_parquet(spread_baseline)
+    # Keep the legacy schema of unrelated history; only exact affected keys gain identities.
+    for column in baseline.columns:
+        if column not in calculated: calculated[column] = None
+    materialized, report = materialize_affected_spreads(baseline, calculated,
+        underlying_keys=underlying, affected_keys=affected)
+    write_incremental_spread_outputs(spread_workbook, spread_output, materialized)
+    payload["incremental_unrelated_rewritten_keys"] = ["|".join(k) for k in report.unrelated_rewritten_keys]
+    return payload, (), affected
+
+
 def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -574,6 +605,9 @@ def main() -> int:
                     status["failed_contracts"],
                 )
                 logger.info("price_long_written=%s", update_result.get("price_long_written"))
+                status["collection_metrics"] = {key: update_result.get(key) for key in (
+                    "endpoint_requested_contracts", "endpoint_skipped_current_contracts",
+                    "to_append_rows", "idempotent_no_change_rows", "overwritten_rows")}
                 logger.info(
                     "producer_health job_execution=%s target_date=%s data_completeness=%s",
                     status["job_execution_status"],
@@ -609,25 +643,21 @@ def main() -> int:
                 logger.info("dry_run_completed=true spread_recalculation_started=false")
             else:
                 logger.info("spread_recalculation_started=true")
-                result = run_script_args(["calculate_historical_spreads.py"], root, logger)
-                if result.returncode != 0:
-                    raise RuntimeError(f"calculate_historical_spreads.py failed with code {result.returncode}")
                 if price_backup is None or parquet_backup is None:
                     raise RuntimeError(
                         "bounded materialization baseline is unavailable"
                     )
-                (
-                    incremental_status,
-                    unrelated_full_drift,
-                    approved_incremental_keys,
-                ) = apply_bounded_incremental_materialization(
-                    price_baseline=price_backup,
-                    price_candidate=price_file,
-                    spread_baseline=parquet_backup,
-                    spread_full_recalculation=parquet_file,
-                    spread_workbook=database_file,
-                    config_file=config_file,
-                )
+                if args.update_from_akshare and getattr(args, "historical_publication_mode", "normal") == "normal":
+                    incremental_status, unrelated_full_drift, approved_incremental_keys = apply_direct_incremental_materialization(
+                        price_baseline=price_backup, price_candidate=price_file, spread_baseline=parquet_backup,
+                        spread_output=parquet_file, spread_workbook=database_file, config_file=config_file)
+                else:
+                    result = run_script_args(["calculate_historical_spreads.py"], root, logger)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"calculate_historical_spreads.py failed with code {result.returncode}")
+                    incremental_status, unrelated_full_drift, approved_incremental_keys = apply_bounded_incremental_materialization(
+                        price_baseline=price_backup, price_candidate=price_file, spread_baseline=parquet_backup,
+                        spread_full_recalculation=parquet_file, spread_workbook=database_file, config_file=config_file)
                 status.update(incremental_status)
                 if mutation_policy is None:
                     raise RuntimeError(

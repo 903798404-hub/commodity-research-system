@@ -57,7 +57,7 @@ def read_public_tables(root: Path, domestic_path: Path):
         (ds.field("exchange") == "CBOT") & (ds.field("product") == "SOYBEAN"),
     )
     fx = _read_view(current.directory / "fx.parquet", FX_COLUMNS)
-    names = pq.read_schema(domestic_path).names
+    names = ds.dataset(domestic_path, format="parquet").schema.names
     if not set(DOMESTIC_COLUMNS).issubset(names):
         raise ValueError("Domestic soybean input fields are incomplete")
     columns = [*DOMESTIC_COLUMNS,

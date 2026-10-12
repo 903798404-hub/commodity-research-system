@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -33,6 +35,32 @@ def package(request,output,payloads,semantic,host):
         'payloads':{name:delivery._identity(target/name) for name in contract['payloads']}}
     host.validate_delta_document(delta)
     (target/host.MANIFEST_NAME).write_bytes(delivery.canonical_json_bytes(delta))
+
+
+def clear_monthly_build_cache(output, package):
+    """Drop only byte-verified cache duplicates in this worker's own output."""
+    pool=output/'packages/.monthly-objects'
+    if not pool.exists():return 0
+    if pool.is_symlink() or package.directory.parent!=output/'packages':
+        raise ValueError('monthly cache scope invalid')
+    references={entry['sha256']:package.directory/'data'/entry['path'] for entry in package.manifest['files']
+        if entry['path'].startswith('consumer-artifacts/domestic-spread/')}
+    objects=list(pool.iterdir())
+    verified=[]
+    for obj in objects:
+        if obj.is_symlink() or not obj.is_file() or not re.fullmatch(r'[0-9a-f]{64}\.parquet',obj.name):
+            raise ValueError('unknown monthly cache file retained')
+        ref=references.get(obj.stem)
+        if ref is None or hashlib.sha256(obj.read_bytes()).hexdigest()!=obj.stem or hashlib.sha256(ref.read_bytes()).hexdigest()!=obj.stem:
+            raise ValueError('monthly cache lacks an identical retained package file')
+        if obj.stat().st_nlink>2:raise ValueError('monthly cache has an external reference')
+        verified.append((obj,ref))
+    for obj,ref in verified:
+        if sys.platform=='win32':obj.chmod(0o600)
+        obj.unlink()
+        ref.chmod(0o444)
+    pool.rmdir()
+    return len(verified)
 
 
 def prepare(request,baseline,output,credentials):
@@ -82,11 +110,14 @@ def prepare(request,baseline,output,credentials):
     if job=='soybean_export_sales':
         from agri_research_agent.soybean_exports.fas import FasAdapter,run_fas_pipeline
         audit=run_fas_pipeline(runtime_root=project,adapter=FasAdapter(api_key=credentials['FAS_EXPORT_SALES_API_KEY'],use_environment_proxy=False),
-            git_head=request['producer']['commit'],publish=False)
+            git_head=request['producer']['commit'],publish=False,incremental=True)
         delivery.collect_delta(job,project,output/'package',request['producer'],
             {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},run_id=request['run_id'])
-        return {'business_status':audit['status'],'latest_week':audit['validation']['latest_week']}
+        return {'business_status':audit['status'],'latest_week':audit['validation']['latest_week'],
+                'metrics':audit.get('collection_metrics',{})}
     if job=='akshare':
+        history=delivery.adopt_public_spread_history(project/'01_data',baseline/request['public_package_relative'],
+            expected_manifest=request['public_manifest'])
         for directory in ('02_configs','03_src','04_scripts'):
             shutil.copytree(SOURCE/directory,project/directory)
         result=subprocess.run([sys.executable,'-I','-B','-X','utf8',str(project/'04_scripts/server_update_spreads.py'),
@@ -96,11 +127,17 @@ def prepare(request,baseline,output,credentials):
         if result.returncode: raise ValueError('spread collector returned '+str(result.returncode))
         status=host.read_json(project/'01_data/update_status.json')
         if status.get('target_date_data_completeness')=='PARTIAL': raise ValueError('spread coverage incomplete')
-        public_package=delivery._build_public_package(project,baseline/request['public_package_relative'],output/'packages')
+        public_package=delivery._build_public_package(project,baseline/request['public_package_relative'],output/'packages',
+            partitioned=request.get('partitioned_public_packages',False))
         load('public_worker','09_deploy/scheduled_server/public.py').assert_scope(request,public_package.manifest)
+        cache_removed=clear_monthly_build_cache(output,public_package)
         return {'package_id':public_package.package_id,'package_path':str(public_package.directory.relative_to(output)),
             'business_status':status['status'],'latest_date':status['latest_date'],'required_contracts':status['required_contracts'],
-            'success_contracts':status['success_contracts']}
+            'success_contracts':status['success_contracts'],'metrics':{
+                **status.get('collection_metrics',{}),'calculated_spread_rows':status.get('calculated_spread_rows'),
+                'package_bytes':sum(f['size_bytes'] for f in public_package.manifest['files']),
+                'package_files':public_package.manifest['file_count'],'package_schema':public_package.manifest['schema_version'],
+                'historical_rows_preserved':history['history_rows'],'temporary_monthly_cache_files_removed':cache_removed}}
     raise ValueError('unsupported scheduled job')
 
 

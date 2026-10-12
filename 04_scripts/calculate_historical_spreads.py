@@ -268,6 +268,32 @@ def calculate_one_spread(config: pd.Series, price_long: pd.DataFrame, updated_at
     ).loc[:, SPREAD_COLUMNS], None
 
 
+def calculate_affected_spreads(config, price_long, affected_keys, updated_at):
+    """Calculate only the exact date/rule dependency closure, using the same formula."""
+    requested = set(affected_keys)
+    frames = []
+    for _, rule in config.iterrows():
+        if "enabled" in rule and not is_enabled(rule["enabled"]):
+            continue
+        keys = {key for key in requested if key[1] == str(rule["spread_name"])}
+        if not keys:
+            continue
+        days = {pd.Timestamp(key[0]) for key in keys}
+        prices = price_long.loc[pd.to_datetime(price_long["date"], errors="coerce").isin(days)].copy()
+        frame, failure = calculate_one_spread(rule, prices, updated_at)
+        if failure:
+            raise ValueError(f"affected spread calculation failed: {failure}")
+        selected = frame.apply(lambda row: (pd.Timestamp(row["date"]).date().isoformat(),
+            str(row["spread_name"]), str(row["season"])) in keys, axis=1)
+        frames.append(frame.loc[selected])
+    calculated = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=SPREAD_COLUMNS)
+    found = {(pd.Timestamp(row.date).date().isoformat(), str(row.spread_name), str(row.season))
+             for row in calculated.itertuples(index=False)}
+    if found != requested or calculated.duplicated(["date", "spread_name", "season"]).any():
+        raise ValueError("incremental calculator omitted or duplicated affected keys")
+    return calculated
+
+
 def main() -> int:
     project_root = Path(__file__).resolve().parents[1]
     price_file = project_root / "01_data" / "historical_price_long.xlsx"

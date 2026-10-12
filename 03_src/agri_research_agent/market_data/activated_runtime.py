@@ -59,7 +59,7 @@ def resolve_server_current_data_root(store_root: str | Path) -> Path:
         raise ActivatedRuntimeError("server release path is unsafe")
     manifest = _strict_json(release / "manifest.json")
     if (
-        manifest.get("schema_version") != PACKAGE_SCHEMA
+        manifest.get("schema_version") not in {PACKAGE_SCHEMA, "public-current-production-package/3"}
         or manifest.get("package_id") != package_id
         or manifest.get("current_identity_sha256") != pointer["current_identity_sha256"]
         or manifest.get("delivery_identity_sha256") != pointer["delivery_identity_sha256"]
@@ -88,7 +88,7 @@ def resolve_domestic_spread_path(default_data_root: str | Path) -> Path:
     configured = os.getenv(PUBLIC_DATA_SERVER_STORE_ROOT_ENV, "").strip()
     if configured:
         path = resolve_server_current_data_root(configured) / DOMESTIC_SPREAD_RELATIVE_PATH
-        if not path.is_file() or path.is_symlink():
+        if not (path.is_file() or path.is_dir()) or path.is_symlink():
             raise ActivatedRuntimeError("activated Domestic Spread artifact is missing")
         return path
     root = Path(default_data_root).resolve()

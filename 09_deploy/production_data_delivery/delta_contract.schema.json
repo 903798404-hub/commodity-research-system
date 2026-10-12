@@ -259,7 +259,13 @@
                     "minItems": 1,
                     "uniqueItems": true,
                     "items": {"type": "integer", "minimum": 2000}
-                  }
+                  },
+                  "mode": {"enum": ["incremental", "reconciliation"]},
+                  "reconciliation_at": {"type": "string", "format": "date-time"}
+                },
+                "dependentRequired": {
+                  "mode": ["reconciliation_at"],
+                  "reconciliation_at": ["mode"]
                 }
               },
               "raw_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},

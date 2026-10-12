@@ -37,6 +37,22 @@ def configuration(tmp_path, host):
         image_id='sha256:' + 'd' * 64, data_disk_uuid='109b359d-6e55-4911-a665-c67735dc0a10')
 
 
+def test_volume_metrics_record_growth_and_keep_unavailable_measurements_unknown(runner, host, monkeypatch):
+    monkeypatch.setattr(runner, 'check_mount', lambda *args: None)
+    disks = iter([SimpleNamespace(f_blocks=1000, f_bfree=400, f_bavail=350, f_frsize=4096),
+                  SimpleNamespace(f_blocks=1000, f_bfree=370, f_bavail=320, f_frsize=4096)])
+    monkeypatch.setattr(runner.os, 'statvfs', lambda path: next(disks), raising=False)
+    before = runner.volume_usage(host, {})
+    result = runner.volume_change(host, {}, before)
+    assert result['scope'] == 'shared_data_volume' and result['net_used_bytes'] == 30 * 4096
+    def reject(*args):
+        raise ValueError('data volume identity differs')
+    monkeypatch.setattr(runner, 'check_mount', reject)
+    result = runner.volume_change(host, {}, before)
+    assert result['net_used_bytes'] is None and result['after']['status'] == 'UNAVAILABLE'
+    assert result['after']['used_bytes'] is None
+
+
 @pytest.mark.parametrize('status,needed', [('PUBLISHED', False), ('NO_CHANGE', False),
     ('FAIL', True), ('CANDIDATE', True), ('SKIPPED', True)])
 def test_conditional_windows_use_success_only_on_beijing_day(runner, status, needed):
