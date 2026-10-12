@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -31,6 +32,8 @@ from agri_research_agent.summary_engine.basis import build_basis_summary  # noqa
 from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
     configure_matplotlib_chinese_fonts,
 )
+from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError  # noqa: E402
+from domestic_sugar_basis import load_sugar_page_data, render_sugar_history  # noqa: E402
 
 
 UNIT_LABEL = "元/吨"
@@ -898,16 +901,30 @@ def load_basis_page_data(
     )
 
 
-def render_basis_page(public_current_root: Path) -> None:
+def render_basis_page(public_current_root: Path, sugar_history_root: Path | None = None,
+                      *, default_tab: str | None = None) -> None:
     st.markdown(
         "<h1 style='text-align:center;'>国内基差研究</h1>",
         unsafe_allow_html=True,
     )
+    sugar_snapshot = None
+    sugar_error = None
+    configured = sugar_history_root or Path(os.environ.get("DOMESTIC_SUGAR_HISTORY_ROOT", str(PROJECT_ROOT / "01_data" / "processed" / "domestic_sugar_history")))
+    if (configured / "current.json").exists():
+        try:
+            sugar_snapshot = load_sugar_page_data(configured)
+        except (SugarHistoryError, OSError, ValueError, KeyError):
+            sugar_error = "柳州历史快照校验失败，白糖图表暂停显示。"
     try:
         data, source_identity = load_basis_page_data(public_current_root)
         data = filter_display_data(data)
     except (PublicBasisCurrentError, OSError, ValueError, KeyError):
         st.warning("Formal Public Basis Current 暂不可用。")
+        if sugar_snapshot is not None:
+            render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
+                                 missing_trading_days=missing_trading_days_between)
+        elif sugar_error:
+            st.warning(sugar_error)
         return
 
     try:
@@ -938,8 +955,8 @@ def render_basis_page(public_current_root: Path) -> None:
         st.caption(summary.detail_text)
     years = _latest_three_years(data)
 
-    basis_tab, cash_tab, spread_tab = st.tabs(
-        ["基差", "一口价", "批发价差"]
+    basis_tab, cash_tab, spread_tab, sugar_tab = st.tabs(
+        ["基差", "一口价", "批发价差", "白糖（柳州）"], default=default_tab
     )
     with basis_tab:
         _render_basis_tab(data, years)
@@ -947,3 +964,11 @@ def render_basis_page(public_current_root: Path) -> None:
         _render_cash_price_tab(data, years)
     with spread_tab:
         _render_wholesale_spread_tab(data, years)
+    with sugar_tab:
+        if sugar_snapshot is not None:
+            render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
+                                 missing_trading_days=missing_trading_days_between)
+        elif sugar_error:
+            st.warning(sugar_error)
+        else:
+            st.info("柳州历史快照尚未配置。")
