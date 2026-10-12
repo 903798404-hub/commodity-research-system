@@ -58,6 +58,34 @@ pnpm run test
 
 ## 4. 地址配置
 
+### 中国食糖研究页
+
+`/usda/sugar` 是看板内的“食糖供需”入口。数量展示为万吨原糖值，市场年度为10月—翌年9月。
+2020/21—2023/24保留原表WMT历史，2024/25起使用已核对FAS驻华报告的New Post列。
+逐年来源、报告日期、原文链接、数据状态、甘蔗糖和甜菜糖分项、变化原因以及原表差异对照必须保留。
+早期未披露分项为NULL；库存/国内消费比分母是国内总使用，不含出口。差异对照不得标为月修。
+
+数据使用当前页面固定的Runtime release中的`research/sugar/china.json`，由独立食糖输入构造，
+不修改油脂油粕`index.json`、月度`report_version.json`或任何旧snapshot。
+食糖JSON包含自身schema、单位、市场年度、逐年来源、原始千吨数值、WMT对照和输入文件SHA-256；
+schema、供需平衡、分项合计、库存衔接或来源校验失败时整页停止展示，不填零或回退到旧数据。
+食糖报告日期独立于Runtime bundle中油脂油粕的PSD月份，页面直接显示食糖来源日期。
+
+更新前确认输入工作簿及官方报告的绝对路径和SHA-256，再在隔离候选发布树生成该JSON，执行：
+
+```powershell
+pnpm run check:sugar -- '<候选china.json的绝对路径>'
+pnpm run test
+pnpm run build
+```
+
+`check:sugar`验证记录及业务计算，最后仍须独立核对工作簿、报告原文和页面。
+输入及生成数据属于独立Runtime数据渠道，不随普通代码提交或镜像构建发布。
+普通PSD`build:data`只重建其既有matrix目录，必须保留该独立research文件；未来食糖更新不能改写PSD快照。
+Runtime bundle仍需完整现行发布树、成功PSD fetch manifest及逐文件身份，额外食糖文件由自己的来源和输入身份约束。
+新增代码按main-first和候选同镜像合同发布，食糖JSON另外通过不可变Runtime bundle校验与原子pointer切换发布。
+代码合入、候选验收、生产代码部署和食糖数据发布是独立事实，不能以本地页面代替线上验收。
+
 正式外部地址只从环境变量 `USDA_DASHBOARD_URL` 读取。
 
 `02_configs/report_catalog.yaml` 可以保留本地开发示例和 `url_env` 登记，但页面不得在环境变量缺失时把示例 URL 当作隐式生产地址。
