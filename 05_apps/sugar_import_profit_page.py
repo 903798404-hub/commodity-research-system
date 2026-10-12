@@ -89,17 +89,23 @@ def _calculator(sources, store, enabled):
     raw = dict(date=day, example=False)
     st.caption("原糖、升贴水：美分/磅；海运费、保险费：美元/吨；成本、售价、利润：元/吨。行情由人工填写。")
     with st.container(border=True):
-        columns = st.columns(3)
+        percent_fields = {"tariff_in", "tariff_out", "vat", "loss"}
         for index, key in enumerate(NUMERIC):
-            label = LABELS[key] + ("（比例，如 0.15）" if key in ("tariff_in", "tariff_out", "vat", "loss") else "")
+            if index % 3 == 0:
+                columns = st.columns(3)
+            label = LABELS[key] + ("（%）" if key in percent_fields else "")
             value = initial.get(key)
-            raw[key] = columns[index % 3].number_input(label, value=float(value) if value is not None else None,
+            if value is not None:
+                value = float(value) * (100 if key in percent_fields else 1)
+            entered = columns[index % 3].number_input(label, value=value,
                 format="%.4f", key=group + ":" + key)
+            raw[key] = entered / 100 if entered is not None and key in percent_fields else entered
         raw["loss_mode"] = st.selectbox("损耗口径", ("成本加成", "实际损耗"),
             index=0 if initial.get("loss_mode") == "成本加成" else 1, key=group + ":loss-mode")
         raw["contract"] = st.text_input("ICE 原糖合约", initial.get("contract", ""), key=group + ":contract")
-        dates = st.columns(3)
         for index, key in enumerate(DATE_FIELDS[1:]):
+            if index % 3 == 0:
+                dates = st.columns(3)
             value = initial.get(key)
             selected = dates[index % 3].date_input(LABELS[key], date.fromisoformat(value) if value else None,
                                                  key=group + ":" + key)
