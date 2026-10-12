@@ -1809,6 +1809,30 @@
     {
       "path": "04_scripts/import_profit/import_commodity_history.py",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_import_profit/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_import_profit/model.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_import_profit/history.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_import_profit/store.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/sugar_import_profit/runtime.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/sugar_import_profit_page.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [

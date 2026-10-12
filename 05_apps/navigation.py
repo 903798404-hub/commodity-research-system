@@ -16,6 +16,7 @@ INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 IMPORT_PROFIT_ROUTE_ID = "import_profit"
 CANOLA_IMPORT_ROUTE_ID = "canola_import_profit"
 PALM_IMPORT_ROUTE_ID = "palm_import_profit"
+SUGAR_IMPORT_ROUTE_ID = "sugar_import_profit"
 INTERNATIONAL_SPREAD_PAGE_TITLE = "国际价差"
 RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
 FOREIGN_FX_PAGE_TITLE = "外盘汇率"
@@ -195,6 +196,11 @@ NAVIGATION_GROUPS = (
             NavigationItem(
                 "palm_import_profit", "棕榈油进口利润", PALM_IMPORT_ROUTE_ID,
                 "quote", "测算24度精炼棕榈油进口利润并比较12个船期月的多年变化",
+            ),
+            NavigationItem(
+                "sugar_import_profit", "白糖进口利润", SUGAR_IMPORT_ROUTE_ID,
+                "quote", "比较巴西与泰国配额内外历史利润，保存当日人工录价计算",
+                detail_label="覆盖", detail_text="巴西 · 泰国",
             ),
             NavigationItem(
                 "foreign_seats",

@@ -47,6 +47,8 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
     && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
 
 # Exact bound runtime inputs; candidate fixtures never enter the image.
+COPY ["03_src/agri_research_agent/sugar_import_profit/__init__.py", "03_src/agri_research_agent/sugar_import_profit/model.py", "03_src/agri_research_agent/sugar_import_profit/history.py", "03_src/agri_research_agent/sugar_import_profit/store.py", "03_src/agri_research_agent/sugar_import_profit/runtime.py", "/app/03_src/agri_research_agent/sugar_import_profit/"]
+COPY ["05_apps/sugar_import_profit_page.py", "/app/05_apps/"]
 COPY ["03_src/agri_research_agent/soybean_margin/latest_quotes.py", "03_src/agri_research_agent/soybean_margin/reference.py", "/app/03_src/agri_research_agent/soybean_margin/"]
 COPY ["03_src/agri_research_agent/oilseed_positions/stock_api.py", "/app/03_src/agri_research_agent/oilseed_positions/"]
 COPY ["03_src/agri_research_agent/positions/server_collection.py", "/app/03_src/agri_research_agent/positions/"]

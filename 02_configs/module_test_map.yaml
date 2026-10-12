@@ -100,6 +100,21 @@ modules:
       - 08_tests/test_spread_runtime_contract.py
     dependents: [soybean_margin.api_inputs]
     full_regression_when_changed: false
+  sugar_import_profit:
+    code_paths:
+      - 03_src/agri_research_agent/sugar_import_profit
+      - 05_apps/sugar_import_profit_page.py
+      - 04_scripts/import_profit/prepare_sugar_import_history.py
+    direct_tests:
+      - 08_tests/test_sugar_import_profit.py
+      - 08_tests/test_sugar_import_profit_page.py
+    impact_tests:
+      - 08_tests/test_import_profit_route.py
+      - 08_tests/test_streamlit_dashboard.py
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: [apps.streamlit_dashboard]
+    full_regression_when_changed: false
   commodity_import_margin.server:
     code_paths:
       - 03_src/agri_research_agent/commodity_import_margin
