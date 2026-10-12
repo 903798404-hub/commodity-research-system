@@ -1,5 +1,8 @@
 import hashlib
+import contextlib
+import io
 import importlib.util
+import json
 import shutil
 from pathlib import Path
 
@@ -112,3 +115,34 @@ def test_new_partitioned_current_rolls_back_to_the_exact_old_single_file_package
     assert restored.status == "ROLLED_BACK" and (store / "current.json").read_bytes() == before
     assert delivery.resolve_server_current(store).name == old.package_id
     assert delivery.validate_production_package(store / "releases" / new.package_id).package_id == new.package_id
+
+
+def test_actual_candidate_runtime_probe_accepts_partitioned_artifact(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / '09_deploy/spread_release'))
+    import release_contract as contract
+    _, _, package = build(tmp_path)
+    data = tmp_path / 'app-data'; store = data / 'public-data-server-store'
+    delivery.sync_to_local_server_store(package.directory, store_root=store)
+    root = store / 'releases' / package.package_id / 'data'
+    for domain in ('lutou-three-oil', 'lutou-weather', 'lutou-domestic-basis'):
+        (root / 'public-market-data' / domain).mkdir(parents=True)
+    monkeypatch.setenv('PUBLIC_DATA_SERVER_STORE_ROOT', str(store))
+    monkeypatch.setattr(contract, 'PUBLIC_MARKET_DATA_CONTAINER_ROOT', data.as_posix())
+    monkeypatch.setattr(contract, 'PUBLIC_DATA_SERVER_STORE_CONTAINER_ROOT', store.as_posix())
+    class Runner:
+        def run(self, command):
+            if command[1] == 'inspect':
+                return json.dumps([{'Config': {'Env': ['PUBLIC_DATA_SERVER_STORE_ROOT=' + store.as_posix()]},
+                    'Mounts': [{'Type': 'bind', 'Destination': data.as_posix(), 'RW': False}]}])
+            program = command[-1].replace('/app/01_data', data.as_posix())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                exec(program, {})
+            observed = json.loads(output.getvalue())
+            observed['resolved_data_root'] = Path(observed['resolved_data_root']).as_posix()
+            for item in observed['required_consumers'].values():
+                item['resolved_path'] = Path(item['resolved_path']).as_posix()
+            return json.dumps(observed)
+    # Runs the production probe's actual Python against a real native v3 Current.
+    evidence = contract.validate_candidate_server_store_runtime('isolated-fixture', Runner())
+    assert evidence['required_consumers']['domestic_spread']['status'] == 'passed'
