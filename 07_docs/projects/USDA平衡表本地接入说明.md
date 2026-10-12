@@ -185,3 +185,16 @@ USDA 自动化工具未完善时，必须记录工具缺口并采用受控步骤
 - 部署结果或 Manifest 缺失。
 - Runtime manifest 不完整、release ID 非法、逐文件身份不符或兼容性门禁失败；
 - Runtime data 请求回退到 SPA、父目录挂载不是只读，或 incoming/releases 不在同一文件系统。
+
+## USDA 前端 required CI
+
+`trusted-main-admission-v1` 为 USDA 创建独立的 `frontend` hosted job，使用 Node 24、
+Corepack/pnpm 10.12.1 和 `pnpm install --frozen-lockfile`。注册表原有 TypeScript 必测文件
+继续保留；涉及 USDA 时，base 和 candidate 的 `src/`、`scripts/` 下所有 `.test.ts`
+都进入必测库存，新增测试必须执行，删除旧测试文件直接失败。
+
+每个文件由 Node 实际执行并输出 JUnit；空收集、失败、取消、skip、TODO、缺少文件或
+同次 run/attempt 的回执都不能获得 PASS。测试、TypeScript 检查和 `/usda/` 生产构建
+在同一 exact candidate 上完成，源码哈希与执行前后完整性继续核验，最终 required check
+同时核对 GitHub 的真实 job 结果。Python Linux、Windows 和 strict/governance full regression
+保持原有要求。此 CI 不抓取 USDA 数据、不重建 `public/data/`、不发布数据、不部署生产。

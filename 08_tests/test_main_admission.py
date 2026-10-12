@@ -325,7 +325,7 @@ def test_workflow_shadow_permissions_and_trust_source():
             assert step['with']['persist-credentials'] is False
     assert "platform_ci.py plan" in raw
     assert jobs["windows"]["runs-on"] == "windows-2022"
-    assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows", "full"}
+    assert set(jobs["final"]["needs"]) == {"plan", "linux", "windows", "frontend", "full"}
     assert jobs['full']['name'] == 'full-regression-candidate'
     assert 'strategy' not in jobs['full']
     validation = next(s for s in jobs['final']['steps'] if s.get('name') == 'Require all-green candidate full regression')
@@ -965,6 +965,27 @@ def test_platform_plan_only_is_not_required_check_success(fixture_repo,tmp_path)
     assert result['final_result']=='PLANNED',result
     assert result['checks']['TECHNICAL_VALIDATION']=='NOT_RUN'
     assert not admission.evidence_valid(result,repo,base,head)
+
+
+@pytest.mark.parametrize('remove_old', [False, True])
+def test_frontend_admission_preserves_base_inventory_and_adds_candidate_tests(fixture_repo, tmp_path, remove_old):
+    repo, _ = fixture_repo
+    root = admission.USDA_FRONTEND_ROOT
+    registry = json.loads((repo/admission.REGISTRY).read_text())
+    project = registry['projects'][0]
+    project.update(project_id='usda', owned_paths=[root], required_tests=[root+'/src/a.test.ts'])
+    write(repo, admission.REGISTRY, json.dumps(registry))
+    write(repo, root+'/src/a.test.ts', 'import test from "node:test"; test("required", () => {});')
+    write(repo, root+'/scripts/old.test.ts', 'import test from "node:test"; test("old", () => {});')
+    base = commit(repo)
+    git(repo, 'update-ref', 'refs/remotes/origin/main', base)
+    write(repo, root+'/src/new.test.ts', 'import test from "node:test"; test("new", () => {});')
+    if remove_old: (repo/root/'scripts/old.test.ts').unlink()
+    head = commit(repo)
+    result = admission.admit(repo, base, head, 'usda', tmp_path/'evidence', executor=inert_executor, plan_only=True)
+    assert set(result['test_plan']) == {root+'/src/a.test.ts', root+'/scripts/old.test.ts', root+'/src/new.test.ts'}
+    assert result['final_result'] == ('FAIL' if remove_old else 'PLANNED'), result
+    if remove_old: assert 'REQUIRED_TEST_REMOVED' in result['failure_codes']
 
 
 @pytest.mark.parametrize('path,content', [

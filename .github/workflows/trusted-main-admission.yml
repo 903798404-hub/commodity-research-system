@@ -23,6 +23,7 @@ jobs:
     outputs:
       linux: ${{ steps.plan.outputs.linux }}
       windows: ${{ steps.plan.outputs.windows }}
+      frontend: ${{ steps.plan.outputs.frontend }}
       full: ${{ steps.plan.outputs.full }}
       base_commit: ${{ steps.plan.outputs.base_commit }}
       spread_runtime_docker: ${{ steps.plan.outputs.spread_runtime_docker }}
@@ -311,6 +312,55 @@ jobs:
         path: ${{ runner.temp }}/platform-results/windows
         if-no-files-found: error
         retention-days: 14
+  frontend:
+    name: trusted-main-admission-frontend
+    needs: plan
+    if: needs.plan.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Use exact Git bytes
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        path: candidate
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install CI planning dependencies
+      run: |
+        python -I -m pip install --require-hashes -r candidate/04_scripts/quality/locks/aggregate-py312.txt
+        python -I -m pip check
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '24'
+    - name: Install exact frontend dependency lock
+      working-directory: candidate/11_独立应用/USDA平衡表
+      run: |
+        corepack enable
+        corepack prepare pnpm@10.12.1 --activate
+        test "$(corepack pnpm --version)" = '10.12.1'
+        corepack pnpm install --frozen-lockfile
+    - uses: actions/download-artifact@v4
+      with:
+        name: platform-plan
+        path: ${{ runner.temp }}/platform-plan
+    - name: Execute exact required TypeScript tests and production build
+      working-directory: candidate
+      env:
+        VITE_BASE_PATH: /usda/
+      run: python -I -B 04_scripts/quality/platform_ci.py run --platform frontend --plan
+        "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/frontend"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: platform-frontend
+        path: ${{ runner.temp }}/platform-results/frontend
+        if-no-files-found: error
+        retention-days: 14
   final:
     name: trusted-main-admission-v1
     if: always()
@@ -318,6 +368,7 @@ jobs:
     - plan
     - linux
     - windows
+    - frontend
     - full
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -351,6 +402,11 @@ jobs:
         pattern: platform-windows
         path: ${{ runner.temp }}/platform-results/windows
         merge-multiple: true
+    - uses: actions/download-artifact@v4
+      if: needs.plan.outputs.frontend == 'true'
+      with:
+        name: platform-frontend
+        path: ${{ runner.temp }}/platform-results/frontend
     - name: Require plan and fresh main
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
@@ -379,7 +435,7 @@ jobs:
       working-directory: candidate
       env:
         PLATFORM_JOB_RESULTS: '{"linux":"${{ needs.linux.result }}","windows":"${{
-          needs.windows.result }}"}'
+          needs.windows.result }}","frontend":"${{ needs.frontend.result }}"}'
       run: python -I -B 04_scripts/quality/platform_ci.py aggregate --plan "$RUNNER_TEMP/platform-plan/plan.json"
         --receipts "$RUNNER_TEMP/platform-results" --output "$RUNNER_TEMP/final-admission/main-admission.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
