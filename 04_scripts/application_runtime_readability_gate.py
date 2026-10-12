@@ -85,7 +85,7 @@ def _traverse_and_open(package_root: Path, evidence: dict[str, Any]) -> None:
     evidence["JSON_FILE_COUNT"] = len(json_files)
     evidence["JSON_PARSE"] = _PASS
 
-    parquet_files = sorted(package_root.rglob("*.parquet"))
+    parquet_files = sorted(path for path in package_root.rglob("*.parquet") if path.is_file())
     for path in parquet_files:
         metadata = pq.ParquetFile(path).metadata
         if metadata is None:
@@ -154,7 +154,7 @@ def validate_application_runtime_readability(
 
         if phase != "PRE_SWITCH":
             spread = resolve_domestic_spread_path(data_root)
-            if not spread.is_file() or spread.is_symlink():
+            if not (spread.is_file() or spread.is_dir()) or spread.is_symlink():
                 raise RuntimeError("activated Domestic Spread path is unsafe")
 
         evidence["STATUS"] = _PASS

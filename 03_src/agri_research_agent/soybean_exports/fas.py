@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -18,6 +19,7 @@ from .common import (
     publish_candidate,
     read_last_success,
     sha256_bytes,
+    sha256_file,
     utc_now,
     write_json_atomic,
     write_parquet_atomic,
@@ -227,8 +229,11 @@ class FasAdapter:
         }
 
     def fetch_export_sales(
-        self, report_market_years: Sequence[int] | None = None
+        self, report_market_years: Sequence[int] | None = None, *, recent_years: int = 7,
+        retained_years: Sequence[int] = (),
     ) -> FasFetchResult:
+        if type(recent_years) is not int or not 1 <= recent_years <= 7:
+            raise FasAdapterError("FAS refresh years must be between one and seven")
         fetched_at = iso_utc(utc_now())
         release, release_audit = self.get_soybean_release()
         years = sorted(
@@ -237,10 +242,12 @@ class FasAdapter:
                 for value in (
                     report_market_years
                     if report_market_years is not None
-                    else range(release.report_market_year_end - 6, release.report_market_year_end + 1)
+                    else range(release.report_market_year_end - recent_years + 1, release.report_market_year_end + 1)
                 )
             )
         )
+        if report_market_years is None:
+            years = sorted(set(years) | {int(year) for year in retained_years})
         countries, countries_content = self._get("/api/esr/countries")
         commodities, commodities_content = self._get("/api/esr/commodities")
         units, units_content = self._get("/api/esr/unitsOfMeasure")
@@ -539,6 +546,7 @@ def run_fas_pipeline(
     report_market_years: Sequence[int] | None = None,
     batch_id: str | None = None,
     publish: bool = True,
+    incremental: bool = False,
 ) -> dict[str, Any]:
     if not _valid_git_head(git_head):
         raise PipelineError("git_head must be a full 40-character hexadecimal SHA")
@@ -547,7 +555,27 @@ def run_fas_pipeline(
     started = iso_utc(utc_now())
     previous_success = read_last_success(paths["status"])
     try:
-        fetched: FasFetchResult = adapter.fetch_export_sales(report_market_years)
+        old = pd.read_parquet(paths["stable"]) if paths["stable"].exists() else None
+        previous_manifest = None
+        recent = 7
+        reconciliation_at = started
+        if incremental and old is not None:
+            validate_fas_stable(old)
+            previous_manifest = json.loads(paths["stable_manifest"].read_text(encoding="utf-8"))
+            if sha256_file(paths["stable"]).lower() != previous_manifest["sha256"].lower():
+                raise PipelineError("FAS baseline manifest identity differs")
+            scope = previous_manifest["fetch_scope"]
+            reconciliation_at = scope.get("reconciliation_at", previous_manifest["fetch_completed_at_utc"])
+            prior_check = datetime.fromisoformat(reconciliation_at.replace("Z", "+00:00"))
+            if prior_check.tzinfo is None or prior_check > datetime.fromisoformat(started.replace("Z", "+00:00")):
+                raise PipelineError("FAS prior reconciliation date invalid")
+            if datetime.fromisoformat(reconciliation_at.replace("Z", "+00:00")).strftime("%Y-%m") == datetime.fromisoformat(started.replace("Z", "+00:00")).strftime("%Y-%m"):
+                recent = 2
+            else:
+                reconciliation_at = started
+        retained = sorted(set(old["report_market_year_end"].astype(int))) if old is not None and recent == 7 else []
+        fetched: FasFetchResult = (adapter.fetch_export_sales(report_market_years, recent_years=recent, retained_years=retained)
+                                  if incremental else adapter.fetch_export_sales(report_market_years))
         raw_records = [
             {key: value for key, value in row.items() if key in FAS_RAW_FIELDS or key == "_report_market_year_end"}
             for row in fetched.records
@@ -578,6 +606,8 @@ def run_fas_pipeline(
             raw_snapshot_sha256=raw_manifest["raw_file_sha256"],
             fetch_time_utc=fetched.fetch_time_utc,
         )
+        if incremental and old is not None:
+            candidate = merge_fas_years(old, candidate, fetched.report_market_years)
         validation = validate_fas_stable(candidate)
         generated_at = iso_utc(utc_now())
         stable_relative_path = (
@@ -620,7 +650,8 @@ def run_fas_pipeline(
             "raw_manifest_sha256": raw_manifest["manifest_sha256"],
             "git_head": git_head,
             "generator_version": SCHEMA_VERSION,
-            "fetch_scope": {"report_market_years": fetched.report_market_years},
+            "fetch_scope": {"report_market_years": fetched.report_market_years,
+                **({"mode": "incremental" if recent == 2 else "reconciliation", "reconciliation_at": reconciliation_at} if incremental else {})},
             "revision_coverage": {
                 "mode": "candidate_vs_current",
                 "report_market_years": fetched.report_market_years,
@@ -629,7 +660,6 @@ def run_fas_pipeline(
             "quality": validation,
         }
         write_json_atomic(paths["candidate_dir"] / "manifest.json", manifest, overwrite=False)
-        old = pd.read_parquet(paths["stable"]) if paths["stable"].exists() else None
         revisions = detect_fas_revisions(old, candidate, detected_at_utc=iso_utc(utc_now()))
         publication = {"status": "candidate_only", "published": False, "backup_dir": None}
         if publish:
@@ -699,6 +729,9 @@ def run_fas_pipeline(
             "latest": latest_values,
             "latest_attempt": latest_attempt,
             "last_success": last_success,
+            "collection_metrics": {"queried_years": fetched.report_market_years,
+                "collection_mode": manifest["fetch_scope"].get("mode", "full"),
+                "downloaded_rows":len(raw_records), "retained_rows":len(candidate), "revision_rows":len(revisions)},
         }
         write_json_atomic(paths["status"], audit)
         return audit
@@ -727,6 +760,48 @@ def run_fas_pipeline(
             },
         )
         raise
+
+
+def merge_fas_years(baseline: pd.DataFrame, fresh: pd.DataFrame, years: Sequence[int]) -> pd.DataFrame:
+    """Replace queried year partitions; preserve every untouched provenance row."""
+    validate_fas_stable(baseline); validate_fas_stable(fresh)
+    selected = set(years)
+    if not selected or set(fresh["report_market_year_end"].astype(int)) != selected:
+        raise PipelineError("FAS refresh year coverage differs")
+    before = set(baseline.loc[:, FAS_KEY].itertuples(index=False, name=None))
+    untouched = baseline.loc[~baseline["report_market_year_end"].isin(selected)]
+    result = pd.concat([untouched, fresh], ignore_index=True).loc[:, FAS_STABLE_COLUMNS]
+    after = set(result.loc[:, FAS_KEY].itertuples(index=False, name=None))
+    if before - after:
+        raise PipelineError("FAS refresh removes published business keys")
+    validate_fas_stable(result)
+    return result.sort_values(list(FAS_KEY), kind="stable").reset_index(drop=True)
+
+
+def validate_fas_increment(candidate, baseline, metadata):
+    """Bind fresh rows to this run and all unqueried rows to the pinned baseline."""
+    validate_fas_stable(candidate)
+    years = set(metadata["fetch_scope"]["report_market_years"])
+    fresh = candidate.loc[candidate["report_market_year_end"].isin(years)]
+    if set(fresh["report_market_year_end"].astype(int)) != years:
+        raise PipelineError("FAS fresh partition coverage differs")
+    if set(fresh["batch_id"].astype(str)) != {metadata["batch_id"]} or set(fresh["raw_snapshot_sha256"].str.lower()) != {metadata["raw_snapshot_sha256"].lower()}:
+        raise PipelineError("FAS fresh row provenance mismatch")
+    untouched = candidate.loc[~candidate["report_market_year_end"].isin(years)]
+    if baseline is None:
+        if not untouched.empty:
+            raise PipelineError("FAS history lacks a pinned baseline")
+        return
+    validate_fas_stable(baseline)
+    expected = baseline.loc[~baseline["report_market_year_end"].isin(years)]
+    actual = untouched.sort_values(list(FAS_KEY)).reset_index(drop=True)
+    expected = expected.sort_values(list(FAS_KEY)).reset_index(drop=True)
+    if not actual.equals(expected):
+        raise PipelineError("FAS untouched history or provenance changed")
+    before_keys = set(baseline.loc[:, FAS_KEY].itertuples(index=False, name=None))
+    after_keys = set(candidate.loc[:, FAS_KEY].itertuples(index=False, name=None))
+    if before_keys - after_keys:
+        raise PipelineError("FAS candidate removes published business keys")
 
 
 def _valid_git_head(value: str) -> bool:

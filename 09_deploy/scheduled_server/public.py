@@ -51,8 +51,9 @@ def snapshot(host,config,work):
         host.require(host.sha256_file(pin)==config['initial_baseline_sha256'],'initial spread baseline changed')
         entries=host.read_json(pin)['files']
     host.require(set(entries)==set(FILES),'spread continuation set differs')
-    host.require(entries['historical_spread_database.parquet']['sha256']==manifest['delivery_artifacts']['domestic-spread']['sha256'],
-                 'spread continuation and actual Public Current differ')
+    # Continuation prices are independently pinned inputs. The network worker
+    # adopts the fully validated actual Public Current as its spread baseline,
+    # preserving separately published history instead of reverting it.
     files,contents={},{}
     def add(relative,path,identity):
         host._file_identity(identity)

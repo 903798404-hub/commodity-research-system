@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import base64
-from datetime import date, datetime
+from copy import deepcopy
+from datetime import date, datetime, timedelta
 import gzip
 import hashlib
 from html.parser import HTMLParser
@@ -20,6 +21,9 @@ BCB_LEGACY_LATEST_URL = "https://ptax.bcb.gov.br/ptax_internet/consultarUltimaCo
 BCB_LATEST_URL = "https://www.bcb.gov.br/api/servico/sitebcb/indicadorCambio"
 ECB_LATEST_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 EVIDENCE_SCHEMA = "foreign-fx-source-evidence/1"
+WINDOW_EVIDENCE_SCHEMA = "foreign-fx-source-evidence/2"
+ECB_RECENT_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml"
+REVISION_LOOKBACK_DAYS = 14
 START = date(2021, 1, 1)
 
 
@@ -170,6 +174,8 @@ def collect(end: date, raw_directory: Path, *, fetcher=fetch_delivery_official):
 
 
 def replay(snapshot, evidence):
+    if evidence.get("schema_version") == WINDOW_EVIDENCE_SCHEMA:
+        return _replay_windows(snapshot, evidence)
     exact(snapshot, ("schema_version", "generated_at", "sources", "observations"), "FX snapshot")
     frame = validate_snapshot(snapshot)
     if set(frame.currency) != set(BY_CODE):
@@ -219,6 +225,134 @@ def replay(snapshot, evidence):
     if any(index[(row["currency"], row["date"])] != row for row in ecb):
         raise FxDataError("ECB latest fixing differs from history")
     return rows, latest
+
+
+def _window_dates(segment):
+    exact(segment, ("start", "end", "raw", "retrieved_at"), "FX window")
+    start, end = date.fromisoformat(segment["start"]), date.fromisoformat(segment["end"])
+    if start.isoformat() != segment["start"] or end.isoformat() != segment["end"] or not START <= start <= end:
+        raise FxDataError("FX window dates invalid")
+    return start, end
+
+
+def _window_rows(segments):
+    rows, identities, sources = {}, {"BCB_SGS1": [], "ECB_CROSS": []}, {}
+    covered_until = None
+    for segment in segments:
+        start, end = _window_dates(segment)
+        if covered_until is None and start != START:
+            raise FxDataError("FX history anchor missing")
+        if covered_until is not None and (end < covered_until or start > covered_until + timedelta(days=1)):
+            raise FxDataError("FX windows retreat or leave a gap")
+        records = exact(segment["raw"], ("bcb_history", "ecb_history"), "FX window raw")
+        captures = exact(segment["retrieved_at"], ("BCB_SGS1", "ECB_CROSS"), "FX window capture times")
+        for captured in captures.values():
+            if datetime.fromisoformat(captured).tzinfo is None:
+                raise FxDataError("FX window capture time lacks timezone")
+        ecb_url = records["ecb_history"].get("url")
+        if ecb_url not in {ECB_HISTORY_URL, ECB_RECENT_URL}:
+            raise FxDataError("FX window ECB URL invalid")
+        fresh = {}
+        for provider, key, url, parser in (("BCB_SGS1", "bcb_history", bcb_url(start, end), parse_bcb),
+                                          ("ECB_CROSS", "ecb_history", ecb_url, parse_ecb)):
+            raw = _decode(records[key], url)
+            parsed = parser(raw, start, end)
+            if len({(r["currency"], r["date"]) for r in parsed}) != len(parsed):
+                raise FxDataError("FX source has duplicate business keys")
+            fresh.update({(r["currency"], r["date"]): r for r in parsed})
+            identities[provider].append({"start": segment["start"], "end": segment["end"],
+                                         "url": url, "sha256": records[key]["sha256"], "retrieved_at": captures[provider]})
+            sources[provider] = url
+        expected = {key for key in rows if start.isoformat() <= key[1] <= end.isoformat()}
+        if expected - set(fresh):
+            raise FxDataError("FX refresh removes published historical observations")
+        for day in {r["date"] for r in fresh.values() if r["provider"] == "ECB_CROSS"}:
+            if {r["currency"] for r in fresh.values() if r["date"] == day and r["provider"] == "ECB_CROSS"} != set(BY_CODE) - {"BRL"}:
+                raise FxDataError("ECB window has partial currency coverage")
+        rows.update(fresh)
+        covered_until = end
+    return sorted(rows.values(), key=lambda r: (r["currency"], r["date"])), identities, sources, covered_until
+
+
+def _replay_windows(snapshot, evidence):
+    exact(snapshot, ("schema_version", "generated_at", "sources", "observations"), "FX snapshot")
+    validate_snapshot(snapshot)
+    exact(evidence, ("schema_version", "request_start", "request_end", "segments", "raw"), "FX window evidence")
+    if evidence["request_start"] != START.isoformat() or not isinstance(evidence["segments"], list) or not 1 <= len(evidence["segments"]) <= 400:
+        raise FxDataError("FX window evidence bounds invalid")
+    rows, identities, urls, end = _window_rows(evidence["segments"])
+    if end.isoformat() != evidence["request_end"] or rows != snapshot["observations"]:
+        raise FxDataError("FX observations differ from window replay")
+    sources = {s["provider"]: s for s in snapshot["sources"]}
+    if set(sources) != set(identities):
+        raise FxDataError("FX window provider coverage differs")
+    for provider, source in sources.items():
+        exact(source, ("provider", "url", "raw_sha256", "retrieved_at", "method"), "FX source")
+        if source["url"] != urls[provider] or source["raw_sha256"] != hashlib.sha256(canonical(identities[provider])).hexdigest():
+            raise FxDataError("FX window source identity differs")
+        expected_method = "PTAX卖出参考汇率" if provider == "BCB_SGS1" else "同日EUR/本币除以EUR/USD"
+        if source["method"] != expected_method or datetime.fromisoformat(source["retrieved_at"]).tzinfo is None:
+            raise FxDataError("FX window method or timestamp differs")
+    anchors = exact(evidence["raw"], ("bcb_latest", "ecb_latest"), "FX window anchors")
+    bcb_day, bcb_price = bcb_latest(_decode(anchors["bcb_latest"], BCB_LATEST_URL))
+    ecb = parse_ecb(_decode(anchors["ecb_latest"], ECB_LATEST_URL), START, end)
+    if len({r["date"] for r in ecb}) != 1 or {r["currency"] for r in ecb} != set(BY_CODE) - {"BRL"}:
+        raise FxDataError("ECB latest reference has partial coverage")
+    latest = {code: max(r["date"] for r in rows if r["currency"] == code) for code in BY_CODE}
+    if latest["BRL"] != bcb_day or any(latest[r["currency"]] != r["date"] for r in ecb):
+        raise FxDataError("History has not reached the official latest publication; retry required")
+    index = {(r["currency"], r["date"]): r for r in rows}
+    if index[("BRL", bcb_day)]["local_per_usd"] != bcb_price or any(index[(r["currency"], r["date"])] != r for r in ecb):
+        raise FxDataError("FX latest fixing differs from history")
+    return rows, latest
+
+
+def collect_incremental(end, raw_directory, *, baseline=None, baseline_evidence=None,
+                        fetcher=fetch_delivery_official, reconcile=False):
+    """Refresh a bounded overlap, replay retained raw windows, reconcile monthly."""
+    if type(end) is not date or not START <= end <= date.today():
+        raise FxDataError("FX incremental request date invalid")
+    if baseline is None:
+        if baseline_evidence is not None:
+            raise FxDataError("FX evidence lacks a baseline")
+        return collect(end, raw_directory, fetcher=fetcher)
+    if baseline_evidence is None:
+        raise FxDataError("FX baseline evidence missing")
+    _, latest = replay(baseline, baseline_evidence)
+    previous_end = date.fromisoformat(baseline_evidence["request_end"])
+    if end < previous_end:
+        raise FxDataError("FX request end retreats")
+    if reconcile or (end.year, end.month) != (previous_end.year, previous_end.month):
+        snapshot, evidence = collect(end, raw_directory, fetcher=fetcher)
+        observations(snapshot, baseline, evidence)
+        return snapshot, evidence
+    start = max(START, min(date.fromisoformat(v) for v in latest.values()) - timedelta(days=REVISION_LOOKBACK_DAYS))
+    ecb_url = ECB_RECENT_URL if start >= end - timedelta(days=85) else ECB_HISTORY_URL
+    segment = {"start": start.isoformat(), "end": end.isoformat(), "raw": {}, "retrieved_at": {}}
+    raw_directory.mkdir(parents=True, exist_ok=True)
+    for key, url in (("bcb_history", bcb_url(start, end)), ("ecb_history", ecb_url)):
+        raw = fetcher(url); (raw_directory / (key + ".raw")).write_bytes(raw)
+        segment["raw"][key] = _raw_record(url, raw)
+        segment["retrieved_at"]["BCB_SGS1" if key == "bcb_history" else "ECB_CROSS"] = datetime.now().astimezone().isoformat()
+    if baseline_evidence["schema_version"] == EVIDENCE_SCHEMA:
+        segments = [{"start": START.isoformat(), "end": previous_end.isoformat(),
+                     "raw": {key: deepcopy(baseline_evidence["raw"][key]) for key in ("bcb_history", "ecb_history")},
+                     "retrieved_at": {s["provider"]: s["retrieved_at"] for s in baseline["sources"]}}]
+    else:
+        segments = deepcopy(baseline_evidence["segments"])
+    segments.append(segment)
+    evidence = {"schema_version": WINDOW_EVIDENCE_SCHEMA, "request_start": START.isoformat(),
+                "request_end": end.isoformat(), "segments": segments, "raw": {}}
+    for key, url in (("bcb_latest", BCB_LATEST_URL), ("ecb_latest", ECB_LATEST_URL)):
+        raw = fetcher(url); (raw_directory / (key + ".raw")).write_bytes(raw)
+        evidence["raw"][key] = _raw_record(url, raw)
+    rows, identities, urls, _ = _window_rows(segments)
+    sources = [{**source, "url": urls[source["provider"]],
+                "raw_sha256": hashlib.sha256(canonical(identities[source["provider"]])).hexdigest(),
+                "retrieved_at": datetime.now().astimezone().isoformat()} for source in baseline["sources"]]
+    snapshot = {**baseline, "generated_at": datetime.now().astimezone().isoformat(), "sources": sources, "observations": rows}
+    observations(snapshot, baseline, evidence)
+    return snapshot, evidence
 
 
 def observations(snapshot, baseline, evidence):

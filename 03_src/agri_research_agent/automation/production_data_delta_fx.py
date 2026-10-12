@@ -185,7 +185,8 @@ def run_fx(config, *, publish=False, retry_if_needed=False):
                 fx.observations(baseline, None, delivery.strict_json((root / host.FX_SOURCES).read_bytes()))
             # Both official fixings occur before the UTC day closes; publication references decide freshness.
             stage = "collect_official_sources"
-            snapshot, evidence = fx.collect(now.date(), work / "raw")
+            snapshot, evidence = fx.collect_incremental(now.date(), work / "raw", baseline=baseline,
+                baseline_evidence=delivery.strict_json((root / host.FX_SOURCES).read_bytes()) if baseline is not None else None)
             stage = "candidate_validation"
             semantic = fx.observations(snapshot, baseline, evidence)
             stage = "package"

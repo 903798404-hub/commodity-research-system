@@ -29,6 +29,7 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
         from agri_research_agent.positions.cftc_annual import AnnualSources
         annual=AnnualSources(today)
     selected = ("sugar", "rapeseed") if markets == "domestic" else ("sugar", "rapeseed", "soybean")
+    windows = {}
     for domain in selected:
         old = snapshots[domain]
         # Keep CFTC query identity and all already published years covered by that source.
@@ -36,14 +37,17 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
                  if (match := re.search(r"(20\d{2})-01-01T00", source["url"]))]
         start_year = min(years, default=today.year - 1)
         existing = {row["report_date"] for row in old["domestic"]}
+        start_day, end_day = domestic_window(existing, today) if markets == "domestic" else (today, today)
+        windows[domain] = {"start": start_day.isoformat(), "end": end_day.isoformat(),
+                           "target": today.isoformat(), "catchup_remaining": end_day < today}
         if domain == "sugar":
             rows = sugar.collect(OfficialSources(), markets=markets, start_year=start_year,
-                start_day=today, end_day=today, existing_dates=existing,include_cftc=not cftc_annual)
+                start_day=start_day, end_day=end_day, existing_dates=existing,include_cftc=not cftc_annual)
         else:
             # No DCE, browser, Sina or pending FCPO requests in this automatic chain.
             spec = specs[domain]
             rows = oilseed.collect(Sources(), spec, markets=markets, start_year=start_year,
-                start_day=today, end_day=today, euro_start=max(date(2026, 9, 30), today - timedelta(days=35)),
+                start_day=start_day, end_day=end_day, euro_start=max(date(2026, 9, 30), today - timedelta(days=35)),
                 existing_dates=existing,include_cftc=not cftc_annual)
         foreign, domestic, captures, observed = rows
         if annual:
@@ -55,6 +59,7 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
         if foreign or domestic:
             publish(root, foreign, domestic, captures, observed)
     bundle = assert_external_output(work / "bundle")
+    (work / "collection-window.json").write_bytes(delivery.canonical_json_bytes(windows))
     bundle.mkdir()
     manifest = {"schema_version": "commodity-positions-bundle/1", "domains": {}, "files": {}}
     for domain in codec.DOMAINS:
@@ -81,3 +86,13 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False):
             delivery.require(current[domain][untouched] == snapshots[domain][untouched],
                              "unselected positions market changed")
     return bundle, attempts
+
+
+def domestic_window(existing_dates, today):
+    """Resume after actual published observations in bounded 31-day batches."""
+    if not existing_dates:
+        return today, today
+    latest = max(date.fromisoformat(day) for day in existing_dates)
+    delivery.require(latest <= today, "positions baseline is future dated")
+    start = min(today, latest + timedelta(days=1))
+    return start, min(today, start + timedelta(days=30))

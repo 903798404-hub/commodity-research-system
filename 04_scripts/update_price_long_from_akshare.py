@@ -294,8 +294,8 @@ def plan_contract_refreshes(
         record.update(
             {
                 "watermark": watermark,
-                "missing_gap_start": max(gap_start, lower_bound),
-                "refresh_start": max(overlap_start, lower_bound),
+                "missing_gap_start": gap_start,
+                "refresh_start": overlap_start,
                 "target_date": target_date,
             }
         )

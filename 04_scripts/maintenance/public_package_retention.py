@@ -67,11 +67,15 @@ def validate(package):
     no_links(package)
     require(PACKAGE.fullmatch(package.name), "package name invalid")
     manifest = read(package / "manifest.json")
-    require(manifest.get("schema_version") == SCHEMA and manifest.get("package_id") == package.name,
+    require(manifest.get("schema_version") in {SCHEMA, "public-current-production-package/3"} and manifest.get("package_id") == package.name,
             "unsupported package identity")
     require(digest(manifest["current_identities"]) == manifest["current_identity_sha256"], "current identities invalid")
-    delivery = digest({"current_identity_sha256": manifest["current_identity_sha256"],
-                       "delivery_artifacts": {k: v["business_sha256"] for k, v in sorted(manifest["delivery_artifacts"].items())}})
+    delivery_identity = {"current_identity_sha256": manifest["current_identity_sha256"],
+                       "delivery_artifacts": {k: v["business_sha256"] for k, v in sorted(manifest["delivery_artifacts"].items())}}
+    if manifest["schema_version"] == "public-current-production-package/3":
+        require(manifest["delivery_artifacts"] and all(v.get("storage") == "MONTHLY_PARQUET" for v in manifest["delivery_artifacts"].values()), "partition storage invalid")
+        delivery_identity["artifact_storage"] = "MONTHLY_PARQUET"
+    delivery = digest(delivery_identity)
     require(delivery == manifest["delivery_identity_sha256"] and package.name == "public-current-" + delivery[:24],
             "delivery identity invalid")
     created = datetime.fromisoformat(manifest["created_at"].replace("Z", "+00:00"))
@@ -186,7 +190,18 @@ def compact(plan_result, pool):
 def lock(path):
     import fcntl
     no_links(path)
-    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    else:
+        # A newly created publisher lock must remain writable by its store owner.
+        owner = path.parent.stat()
+        try:
+            os.fchown(descriptor, owner.st_uid, owner.st_gid)
+        except BaseException:
+            os.close(descriptor)
+            raise
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield

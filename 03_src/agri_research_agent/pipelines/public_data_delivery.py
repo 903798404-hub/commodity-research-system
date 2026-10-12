@@ -31,6 +31,7 @@ from agri_research_agent.shared.atomic_storage import atomic_write_json
 
 
 PACKAGE_SCHEMA = "public-current-production-package/2"
+PARTITIONED_PACKAGE_SCHEMA = "public-current-production-package/3"
 SERVER_POINTER_SCHEMA = "public-current-server-pointer/2"
 SERVER_POINTER_MODE = 0o640
 DOMESTIC_SPREAD_ARTIFACT = "domestic-spread"
@@ -105,6 +106,7 @@ def build_production_package(
     source_max_dates: Mapping[str, str],
     required_datasets: Sequence[str] | None = None,
     delivery_artifacts: Mapping[str, str | Path] | None = None,
+    partitioned_delivery_artifacts: bool = False,
 ) -> ProductionPackage:
     """Seal active Currents and consumer artifacts into one immutable package."""
 
@@ -115,14 +117,18 @@ def build_production_package(
     identities = _current_identities(source, dataset_names)
     source_max_dates = _with_current_source_dates(source, dataset_names, source_max_dates)
     identity_sha = _json_sha256(identities)
-    artifact_identities = _delivery_artifact_identities(delivery_artifacts or {})
-    delivery_identity_sha = _json_sha256({
+    artifact_identities = _delivery_artifact_identities(delivery_artifacts or {}, partitioned=partitioned_delivery_artifacts)
+    partitioned = partitioned_delivery_artifacts or any(v.get("storage") == "MONTHLY_PARQUET" for v in artifact_identities.values())
+    delivery_identity = {
         "current_identity_sha256": identity_sha,
         "delivery_artifacts": {
             name: identity["business_sha256"]
             for name, identity in sorted(artifact_identities.items())
         },
-    })
+    }
+    if partitioned:
+        delivery_identity["artifact_storage"] = "MONTHLY_PARQUET"
+    delivery_identity_sha = _json_sha256(delivery_identity)
     package_id = f"public-current-{delivery_identity_sha[:24]}"
     root = Path(packages_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -141,14 +147,20 @@ def build_production_package(
         for name, identity in artifact_identities.items():
             artifact_root = temporary / "data" / "consumer-artifacts" / name
             artifact_root.mkdir(parents=True)
-            shutil.copy2(Path(identity["source_path"]), artifact_root / identity["filename"])
+            target = artifact_root / identity["filename"]
+            source_artifact = Path(identity["source_path"])
+            if partitioned:
+                _write_monthly_artifact(source_artifact, target, root / ".monthly-objects")
+                identity.update(_domestic_spread_identity(target), storage="MONTHLY_PARQUET")
+            else:
+                shutil.copy2(source_artifact, target)
         records = _file_records(temporary / "data")
         sealed_artifacts = {
             name: {key: value for key, value in identity.items() if key != "source_path"}
             for name, identity in artifact_identities.items()
         }
         manifest: dict[str, Any] = {
-            "schema_version": PACKAGE_SCHEMA,
+            "schema_version": PARTITIONED_PACKAGE_SCHEMA if partitioned else PACKAGE_SCHEMA,
             "package_id": package_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "current_identity_sha256": identity_sha,
@@ -186,7 +198,7 @@ def validate_production_package(
         "current_identities", "delivery_identity_sha256", "delivery_artifacts",
         "source_max_dates", "file_count", "bundle_sha256", "files",
     }
-    if set(manifest) != required or manifest["schema_version"] != PACKAGE_SCHEMA:
+    if set(manifest) != required or manifest["schema_version"] not in {PACKAGE_SCHEMA, PARTITIONED_PACKAGE_SCHEMA}:
         raise DeliveryError("production package manifest schema is invalid")
     identities = manifest["current_identities"]
     if not isinstance(identities, dict) or _json_sha256(identities) != manifest["current_identity_sha256"]:
@@ -194,14 +206,21 @@ def validate_production_package(
     artifacts = manifest["delivery_artifacts"]
     if not isinstance(artifacts, dict):
         raise DeliveryError("production package delivery artifacts are invalid")
-    expected_delivery_sha = _json_sha256({
+    delivery_identity = {
         "current_identity_sha256": manifest["current_identity_sha256"],
         "delivery_artifacts": {
             name: identity.get("business_sha256")
             for name, identity in sorted(artifacts.items())
             if isinstance(identity, dict)
         },
-    })
+    }
+    if manifest["schema_version"] == PARTITIONED_PACKAGE_SCHEMA:
+        delivery_identity["artifact_storage"] = "MONTHLY_PARQUET"
+        if not artifacts or any(v.get("storage") != "MONTHLY_PARQUET" for v in artifacts.values()):
+            raise DeliveryError("partitioned package storage declaration invalid")
+    elif any(v.get("storage") for v in artifacts.values()):
+        raise DeliveryError("legacy package declares unsupported storage")
+    expected_delivery_sha = _json_sha256(delivery_identity)
     if manifest["delivery_identity_sha256"] != expected_delivery_sha:
         raise DeliveryError("production package delivery identity is invalid")
     expected_id = f"public-current-{str(manifest['delivery_identity_sha256'])[:24]}"
@@ -711,6 +730,7 @@ def _validate_packaged_currents(root: Path, identities: Mapping[str, Any]) -> No
 
 def _delivery_artifact_identities(
     artifacts: Mapping[str, str | Path],
+    *, partitioned=False,
 ) -> dict[str, dict[str, Any]]:
     identities: dict[str, dict[str, Any]] = {}
     for raw_name, raw_path in sorted(artifacts.items()):
@@ -718,7 +738,7 @@ def _delivery_artifact_identities(
         if name != DOMESTIC_SPREAD_ARTIFACT:
             raise DeliveryError(f"unsupported delivery artifact: {name}")
         path = Path(raw_path).resolve()
-        details = _domestic_spread_identity(path)
+        details = _domestic_spread_identity(path, partitioned=partitioned)
         identities[name] = {
             "source_path": str(path),
             "filename": DOMESTIC_SPREAD_FILENAME,
@@ -726,13 +746,27 @@ def _delivery_artifact_identities(
                 f"consumer-artifacts/{name}/{DOMESTIC_SPREAD_FILENAME}"
             ),
             **details,
+            **({"storage": "MONTHLY_PARQUET"} if path.is_dir() else {}),
         }
     return identities
 
 
-def _domestic_spread_identity(path: Path) -> dict[str, Any]:
-    if path.name != DOMESTIC_SPREAD_FILENAME or not path.is_file() or path.is_symlink():
+def _domestic_spread_identity(path: Path, *, partitioned=False) -> dict[str, Any]:
+    if path.name != DOMESTIC_SPREAD_FILENAME or not (path.is_file() or path.is_dir()) or path.is_symlink():
         raise DeliveryError("Domestic Spread formal Parquet artifact is missing or unsafe")
+    if path.is_dir():
+        leaves = list(path.iterdir())
+        if not leaves or any(not p.is_file() or p.is_symlink() or not re.fullmatch(r"part-\d{4}-\d{2}-[0-9a-f]{64}\.parquet", p.name) for p in leaves):
+            raise DeliveryError("Domestic Spread monthly partitions invalid")
+        months = set()
+        for leaf in leaves:
+            month = leaf.name[5:12]
+            if month in months or _sha256_file(leaf) != leaf.stem[13:]:
+                raise DeliveryError("monthly partition identity differs")
+            months.add(month)
+            part_dates = pq.read_table(leaf, columns=["date"])
+            if set(pc.strftime(part_dates["date"], format="%Y-%m").to_pylist()) != {month}:
+                raise DeliveryError("monthly partition contains dates outside its month")
     try:
         table = pq.read_table(path)
     except Exception as exc:
@@ -744,6 +778,10 @@ def _domestic_spread_identity(path: Path) -> dict[str, Any]:
         )
     if table.num_rows == 0:
         raise DeliveryError("Domestic Spread Parquet contains no rows")
+    if partitioned or path.is_dir():
+        table = _partition_table(table)
+    if table.select(["date", "spread_name", "season"]).to_pandas().duplicated().any():
+        raise DeliveryError("Domestic Spread business keys are duplicated")
     successful = table.filter(pc.equal(table["status"], "success"))
     if successful.num_rows == 0:
         raise DeliveryError("Domestic Spread Parquet contains no successful rows")
@@ -777,12 +815,71 @@ def _domestic_spread_identity(path: Path) -> dict[str, Any]:
         writer.write_table(business.combine_chunks())
     business_sha = hashlib.sha256(sink.getvalue().to_pybytes()).hexdigest()
     return {
-        "size_bytes": path.stat().st_size,
-        "sha256": _sha256_file(path),
+        "size_bytes": sum(p.stat().st_size for p in path.iterdir()) if path.is_dir() else path.stat().st_size,
+        "sha256": _bundle_sha256(_file_records(path)) if path.is_dir() else _sha256_file(path),
         "business_sha256": business_sha,
         "latest_business_date": latest_text,
         "row_count": table.num_rows,
     }
+
+
+def _write_monthly_artifact(source, target, pool):
+    """Cache immutable content objects; unchanged months reuse the same bytes."""
+    table = _partition_table(pq.read_table(source))
+    months = [value[:7] for value in pc.strftime(table["date"], format="%Y-%m-%d").to_pylist()]
+    target.mkdir(); pool.mkdir(mode=0o700, exist_ok=True)
+    if pool.is_symlink():
+        raise DeliveryError("monthly object pool is unsafe")
+    for month in sorted(set(months)):
+        if not re.fullmatch(r"\d{4}-\d{2}", month):
+            raise DeliveryError("monthly partition date invalid")
+        part = table.filter(pa.array([m == month for m in months]))
+        part = part.sort_by([(name, "ascending") for name in part.column_names]).combine_chunks()
+        sink = pa.BufferOutputStream(); pq.write_table(part, sink, compression="zstd")
+        raw = sink.getvalue().to_pybytes(); digest = hashlib.sha256(raw).hexdigest()
+        obj = pool / (digest + ".parquet")
+        if obj.exists():
+            if obj.is_symlink() or not obj.is_file() or _sha256_file(obj) != digest or obj.stat().st_mode & 0o222:
+                raise DeliveryError("monthly object is mutable or corrupt")
+        else:
+            descriptor, temporary = tempfile.mkstemp(prefix=".monthly-", dir=pool)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+                Path(temporary).chmod(0o444); os.replace(temporary, obj)
+            finally:
+                if Path(temporary).exists(): Path(temporary).unlink()
+        destination = target / f"part-{month}-{digest}.parquet"
+        try:
+            os.link(obj, destination)
+        except OSError:
+            # Cross-device/mount Windows and Linux staging still keep byte identity.
+            shutil.copy2(obj, destination)
+
+
+def _partition_table(table):
+    """Keep one stable physical schema as new months gain numeric/identity values."""
+    table = table.replace_schema_metadata(None)
+    for name in ("leg1_price", "leg2_price", "spread_value"):
+        index = table.schema.get_field_index(name)
+        original = table[name]
+        try:
+            converted = pc.cast(original, pa.float64())
+        except pa.ArrowInvalid as exc:
+            raise DeliveryError("monthly numeric conversion would change historical values") from exc
+        for before, after in zip(original.to_pylist(), converted.to_pylist(), strict=True):
+            if isinstance(before, bool) or (before != after and not (
+                isinstance(before, float) and isinstance(after, float) and math.isnan(before) and math.isnan(after))):
+                raise DeliveryError("monthly numeric conversion would change historical values")
+        table = table.set_column(index, name, converted)
+    for name in ("spread_group", "spread_name", "leg1_instrument", "leg2_instrument", "status", "season",
+                 "updated_at", "error", "month_day", "leg1_contract", "leg2_contract"):
+        if name in table.column_names:
+            index = table.schema.get_field_index(name)
+            table = table.set_column(index, name, pc.cast(table[name], pa.string()))
+        elif name in {"leg1_contract", "leg2_contract"}:
+            table = table.append_column(name, pa.nulls(table.num_rows, type=pa.string()))
+    return table
 
 
 def _validate_packaged_delivery_artifacts(
@@ -802,6 +899,8 @@ def _validate_packaged_delivery_artifacts(
         if expected.get("package_path") != relative:
             raise DeliveryError("delivery artifact package path is invalid")
         actual = _domestic_spread_identity(data_root / relative)
+        if (data_root / relative).is_dir() != (expected.get("storage") == "MONTHLY_PARQUET"):
+            raise DeliveryError("delivery storage type differs")
         for key in ("size_bytes", "sha256", "business_sha256", "latest_business_date", "row_count"):
             if actual[key] != expected.get(key):
                 raise DeliveryError(f"packaged delivery artifact identity mismatch: {name}")

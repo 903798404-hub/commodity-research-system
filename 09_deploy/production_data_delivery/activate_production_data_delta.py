@@ -386,7 +386,17 @@ def validate_delta_document(value: object) -> dict[str, object]:
             raise DeltaError("FAS latest week is invalid") from None
         require(type(metadata["source_release_time_raw"]) is str
                 and bool(metadata["source_release_time_raw"]), "FAS release time is invalid")
-        scope = _exact(metadata["fetch_scope"], {"report_market_years"}, "FAS fetch scope")
+        scope = metadata["fetch_scope"]
+        if isinstance(scope, dict) and set(scope) == {"report_market_years", "mode", "reconciliation_at"}:
+            require(scope["mode"] in {"incremental", "reconciliation"}, "FAS collection mode invalid")
+            try:
+                checked = datetime.fromisoformat(scope["reconciliation_at"].replace("Z", "+00:00"))
+                generated = datetime.fromisoformat(root["generated_at_utc"].replace("Z", "+00:00"))
+                require(checked.tzinfo is not None and checked <= generated, "FAS reconciliation timestamp invalid")
+            except (ValueError, TypeError, AttributeError):
+                raise DeltaError("FAS reconciliation timestamp invalid") from None
+        else:
+            scope = _exact(scope, {"report_market_years"}, "FAS fetch scope")
         years = scope["report_market_years"]
         require(type(years) is list and years and all(type(year) is int and year >= 2000 for year in years)
                 and len(years) == len(set(years)), "FAS report market years are invalid")
@@ -1785,7 +1795,7 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
                 "canola candidate metadata mismatch")
     elif domain == "soybean_export_sales":
         from agri_research_agent.soybean_exports.fas import (FAS_KEY, FAS_STABLE_COLUMNS,
-                                                             _business_equal, validate_fas_stable)
+                                                             _business_equal, validate_fas_stable, validate_fas_increment)
         name = "soybean_export_sales_weekly.parquet"
         frame = pd.read_parquet(candidate / name)
         require(tuple(frame.columns) == FAS_STABLE_COLUMNS, "FAS Parquet columns mismatch")
@@ -1793,12 +1803,10 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         quality = validate_fas_stable(frame)
         metadata = delta["domain_metadata"]
         require(quality["latest_week"] == metadata["source_latest_week"], "FAS latest week mismatch")
-        require(set(frame["batch_id"].astype(str)) == {metadata["batch_id"]}
-                and set(frame["source"].astype(str)) == {"usda_fas_esr"}
-                and set(frame["raw_snapshot_sha256"].str.lower()) == {metadata["raw_snapshot_sha256"]},
-                "FAS row provenance mismatch")
         baseline = (Path("/allocation") / FAS_STABLE
                     if delta["baseline"]["files"][FAS_STABLE] is not None else None)
+        require(set(frame["source"].astype(str)) == {"usda_fas_esr"}, "FAS source differs")
+        validate_fas_increment(frame, pd.read_parquet(baseline) if baseline is not None else None, metadata)
         business_changed = baseline is None or not _business_equal(pd.read_parquet(baseline), frame)
         observations = {**quality, "business_changed": business_changed}
     else:

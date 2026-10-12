@@ -149,7 +149,7 @@ def build_consumer_freshness_validator(
             )
             spread_path = (
                 packaged_spread
-                if packaged_spread.is_file()
+                if packaged_spread.is_file() or packaged_spread.is_dir()
                 else project / "01_data" / "historical_spread_database.parquet"
             )
             price_path = project / "01_data" / "historical_price_long.xlsx"

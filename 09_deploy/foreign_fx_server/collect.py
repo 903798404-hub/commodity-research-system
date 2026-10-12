@@ -33,7 +33,9 @@ def prepare(request, baseline_root, output, *, fetcher=fx.fetch_delivery_officia
         fx.observations(baseline, None, json.loads((baseline_root / sources).read_bytes()))
     now = datetime.fromisoformat(request['checked_at'])
     if now.tzinfo is None: raise fx.FxDataError('FX check timestamp lacks timezone')
-    snapshot, evidence = fx.collect(now.date(), output / 'raw', fetcher=fetcher)
+    snapshot, evidence = fx.collect_incremental(now.date(), output / 'raw', baseline=baseline,
+        baseline_evidence=json.loads((baseline_root / sources).read_bytes()) if baseline is not None else None,
+        fetcher=fetcher)
     semantic = fx.observations(snapshot, baseline, evidence)
     package = output / 'package'
     package.mkdir()
@@ -51,7 +53,8 @@ def prepare(request, baseline_root, output, *, fetcher=fx.fetch_delivery_officia
                  domain_metadata={key: semantic[key] for key in ('record_count', 'latest_dates', 'added', 'revised')},
                  payloads=payloads)
     (package / 'delta_contract.json').write_bytes(fx.canonical(delta))
-    return semantic
+    return {**semantic, 'downloaded_raw_bytes':sum(p.stat().st_size for p in (output/'raw').iterdir() if p.is_file()),
+            'source_windows':len(evidence.get('segments', [])) or 1}
 
 
 def main():

@@ -71,6 +71,25 @@ def check_mount(host, config):
     host.require(disk.f_bavail * disk.f_frsize > 256 * 1024**2 and disk.f_favail > 1000, 'FX data disk capacity insufficient')
 
 
+def volume_usage(host, config):
+    """Observe the verified data volume; unavailable measurements stay explicit."""
+    try:
+        check_mount(host, config)
+        disk = os.statvfs('/var/lib/market-data')
+        return {'status': 'OBSERVED', 'used_bytes': (disk.f_blocks - disk.f_bfree) * disk.f_frsize,
+                'available_bytes': disk.f_bavail * disk.f_frsize}
+    except Exception as exc:
+        return {'status': 'UNAVAILABLE', 'used_bytes': None, 'available_bytes': None,
+                'error_type': type(exc).__name__}
+
+
+def volume_change(host, config, before):
+    after = volume_usage(host, config)
+    observed = before['status'] == after['status'] == 'OBSERVED'
+    return {'scope': 'shared_data_volume', 'before': before, 'after': after,
+            'net_used_bytes': after['used_bytes'] - before['used_bytes'] if observed else None}
+
+
 def pinned_policy(host, config):
     host.require(host.sha256_file(host._protected(config['policy'])) == config['policy_sha256'], 'FX policy pin differs')
     policy, digest = host._load_policy(config['policy'])
@@ -172,6 +191,7 @@ def execute(host, config, policy, work, *, publish):
     result = dict(schema_version='foreign-fx-server-result/1', run_id=run_id, producer=producer,
                   status='FAIL', published=False, checked_at=now.isoformat(), execution_host='server')
     snapshot = None
+    volume_before = volume_usage(host, config)
     stage = 'baseline'
     try:
         snapshot = host.snapshot_fx_baseline(config['policy'])
@@ -208,6 +228,7 @@ def execute(host, config, policy, work, *, publish):
         raise
     finally:
         result['checked_at'] = datetime.now(timezone.utc).isoformat()
+        result['volume_metrics'] = volume_change(host, config, volume_before)
         host._write_json_exclusive(work / 'result.json', result)
         write_state(host, RUNTIME / 'foreign-fx-last-run.json', result)
     return result

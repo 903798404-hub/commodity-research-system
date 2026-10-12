@@ -694,14 +694,35 @@ def _public_baseline(config: dict, *, remote: bool) -> Path:
     raise ProductionDataError("current public package has no verified local replica")
 
 
-def _build_public_package(source: Path, public: Path, packages: Path):
+def adopt_public_spread_history(data: Path, public: Path, *, expected_manifest=None):
+    """Rebase an isolated producer on validated Current, never on loose old history."""
+    from agri_research_agent.pipelines.public_data_delivery import validate_production_package
+    import pandas as pd
+    package = validate_production_package(public)
+    if expected_manifest is not None:
+        require(package.manifest == expected_manifest, "formal baseline manifest differs from request")
+    artifact = package.directory / "data" / package.manifest["delivery_artifacts"]["domestic-spread"]["package_path"]
+    history = pd.read_parquet(artifact)
+    workbook = _unlinked(data / "historical_spread_database.xlsx")
+    destination = _unlinked(data / "historical_spread_database.parquet")
+    sheets = pd.read_excel(workbook, sheet_name=None)
+    require("spread_long" in sheets, "producer workbook lacks spread_long")
+    sheets["spread_long"] = history
+    history.to_parquet(destination, index=False)
+    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+        for name, frame in sheets.items(): frame.to_excel(writer, sheet_name=name, index=False)
+    return {"package_id": package.package_id, "history_rows": len(history)}
+
+
+def _build_public_package(source: Path, public: Path, packages: Path, *, partitioned=False):
     from agri_research_agent.pipelines.public_data_delivery import build_production_package, validate_production_package
     baseline = validate_production_package(public)
     artifacts = {name: public / "data" / entry["package_path"] for name, entry in baseline.manifest["delivery_artifacts"].items()}
     artifacts["domestic-spread"] = source / "01_data/historical_spread_database.parquet"
     result = build_production_package(public_current_root=public / "data/public-market-data", packages_root=packages,
                                       source_max_dates=baseline.manifest["source_max_dates"],
-                                      required_datasets=list(baseline.manifest["current_identities"]), delivery_artifacts=artifacts)
+                                      required_datasets=list(baseline.manifest["current_identities"]), delivery_artifacts=artifacts,
+                                      partitioned_delivery_artifacts=partitioned or baseline.manifest["schema_version"] == "public-current-production-package/3")
     old = {entry["path"]: entry for entry in baseline.manifest["files"] if not entry["path"].startswith("consumer-artifacts/domestic-spread/")}
     new = {entry["path"]: entry for entry in result.manifest["files"] if not entry["path"].startswith("consumer-artifacts/domestic-spread/")}
     require(old == new and result.manifest["current_identities"] == baseline.manifest["current_identities"] and
@@ -859,8 +880,7 @@ def _validated_promotion(config: dict, *, candidate: Path, reconciliation_manife
     package = validate_production_package(candidate)
     artifact = package.manifest["delivery_artifacts"]["domestic-spread"]
     require(sha256_file(candidate / "manifest.json") == evidence["candidate_manifest_sha256"] and
-            artifact["sha256"] == evidence["candidate_artifact_sha256"] and
-            sha256_file(candidate / "data" / artifact["package_path"]) == evidence["candidate_artifact_sha256"],
+            artifact["sha256"] == evidence["candidate_artifact_sha256"],
             "candidate artifact or manifest changed")
     result_path = candidate.parent.parent / "result.json"
     require(_identity(result_path)["sha256"] == evidence["candidate_result_sha256"],
@@ -927,8 +947,13 @@ def _validated_promotion(config: dict, *, candidate: Path, reconciliation_manife
         require(isinstance(digest, str) and HEX64.fullmatch(digest) and
                 sha256_file(_unlinked(source / "01_data" / name)) == digest,
                 "candidate continuation source changed")
-    require(evidence["source_files"]["historical_spread_database.parquet"] ==
-            evidence["candidate_artifact_sha256"], "candidate and continuation artifact differ")
+    from agri_research_agent.pipelines.public_data_delivery import _domestic_spread_identity
+    if package.manifest["schema_version"] == "public-current-production-package/3":
+        require(_domestic_spread_identity(source / "01_data/historical_spread_database.parquet", partitioned=True)["business_sha256"] == artifact["business_sha256"],
+                "candidate and continuation business history differ")
+    else:
+        require(evidence["source_files"]["historical_spread_database.parquet"] == evidence["candidate_artifact_sha256"],
+                "candidate and continuation artifact differ")
     return evidence, manifest, candidate, source, result
 
 
@@ -990,9 +1015,11 @@ def promote_existing_candidate(config: dict, *, candidate: Path,
                 receipt["promotion"]["promoted_manifest_sha256"] == evidence["candidate_manifest_sha256"] and
                 receipt["promotion"]["reconciliation_manifest_sha256"] == evidence["reconciliation_manifest_sha256"],
                 "exact candidate promotion receipt invalid")
+        from agri_research_agent.pipelines.public_data_delivery import validate_production_package
+        package = validate_production_package(candidate)
         require(sha256_file(candidate / "manifest.json") == evidence["candidate_manifest_sha256"] and
-                sha256_file(candidate / "data/consumer-artifacts/domestic-spread/historical_spread_database.parquet") ==
-                evidence["candidate_artifact_sha256"], "candidate changed during promotion")
+                package.manifest["delivery_artifacts"]["domestic-spread"]["sha256"] == evidence["candidate_artifact_sha256"],
+                "candidate changed during promotion")
         _check_public_pointer(_public_pointer(config),
                               strict_json((candidate / "manifest.json").read_bytes()))
         _save_continuation(config, "akshare", baseline_root, work, source, receipt)
@@ -1059,6 +1086,8 @@ def run_domain(config: dict, domain: str, *, run_root: Path | None = None,
             shutil.copy2(baseline_root / relative, target)
             require(_identity(target) == identity, "baseline replica hash differs")
         verify_clean_detached_clone(source, config, allow_runtime=True)
+        if domain == "akshare":
+            result["adopted_formal_history"] = adopt_public_spread_history(data, public)
         credentials = {}
         if domain != "akshare":
             entry = config["secrets"]["nass" if domain == "soybean_crop_progress" else "fas-export-sales"]

@@ -139,7 +139,7 @@ def load_ready_run(run_dir: Path, source_run_id: str, *, mode: str,
     manifest_path = contained(package_root, "manifest.json")
     package = read_json(manifest_path)
     package_sha = file_sha(manifest_path)
-    if package.get("schema_version") != "public-current-production-package/2":
+    if package.get("schema_version") not in {"public-current-production-package/2", "public-current-production-package/3"}:
         raise ValueError("FORMAL_PACKAGE_SCHEMA_INVALID")
     if not re.fullmatch(r"[0-9a-f]{64}", str(daily.get("delivery_identity", ""))):
         raise ValueError("DAILY_DELIVERY_IDENTITY_INVALID")

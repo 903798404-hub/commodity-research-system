@@ -56,6 +56,10 @@ def helpers():
 def validate_config(host, value):
     required = {'schema_version', 'job', 'policy', 'policy_sha256', 'image_id', 'data_disk_uuid',
                 'secret_file', 'initial_baseline', 'initial_baseline_sha256', 'allocation_root', 'producer', 'public_store_owner'}
+    if isinstance(value, dict) and 'partitioned_public_packages' in value:
+        required.add('partitioned_public_packages')
+        host.require(value.get('job') == 'akshare' and type(value['partitioned_public_packages']) is bool,
+                     'partitioned packages require explicit public job boolean')
     c = host._exact(value, required, 'scheduled server config')
     host.require(c['schema_version'] == 'scheduled-server-config/1' and c['job'] in JOBS, 'scheduled job invalid')
     host.require(type(c['image_id']) is str and host.IMAGE_ID.fullmatch(c['image_id']), 'scheduled image invalid')
@@ -201,6 +205,7 @@ def execute(fx, host, config, work, publish):
     result={'schema_version':'scheduled-server-result/1','job':config['job'],'run_id':work.name,
         'producer':config['producer'],'execution_host':'server','status':'FAIL','published':False,'checked_at':now.isoformat()}
     stage='baseline'
+    volume_before=fx.volume_usage(host,config)
     try:
         check_identity(host,config)
         if config['job']=='akshare':
@@ -213,6 +218,8 @@ def execute(fx, host, config, work, publish):
         request={'job':config['job'],'run_id':work.name,'checked_at':now.isoformat(),
             'business_date':now.astimezone(timezone(timedelta(hours=8))).date().isoformat(),
             'producer':config['producer'],'baseline_files':snapshot['files'],**extra}
+        if config['job'] == 'akshare':
+            request['partitioned_public_packages'] = config.get('partitioned_public_packages', False)
         result['disk_budget']=disk_budget(host,config,snapshot)
         copy_snapshot(host,snapshot,work/'baseline',request)
         stage='collect_sources'; collected=collect(host,config,work); result['collection']=collected
@@ -236,6 +243,7 @@ def execute(fx, host, config, work, publish):
         raise
     finally:
         result['checked_at']=datetime.now(timezone.utc).isoformat()
+        result['volume_metrics']=fx.volume_change(host,config,volume_before)
         host._write_json_exclusive(work/'result.json',result)
         fx.write_state(host,RUNTIME/(config['job']+'-last-run.json'),result)
     return result

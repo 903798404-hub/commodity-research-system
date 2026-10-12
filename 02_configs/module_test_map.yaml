@@ -1,5 +1,41 @@
 schema_version: 1
 modules:
+  automation.incremental_updates:
+    code_paths:
+      - 03_src/agri_research_agent/soybean_exports/fas.py
+      - 03_src/agri_research_agent/pipelines/public_data_delivery.py
+      - 03_src/agri_research_agent/market_data/activated_runtime.py
+      - 03_src/agri_research_agent/soybean_margin/public_inputs.py
+      - 03_src/agri_research_agent/alerts/gate.py
+      - 04_scripts/application_runtime_readability_gate.py
+      - 04_scripts/calculate_historical_spreads.py
+      - 04_scripts/server_update_spreads.py
+      - 04_scripts/update_price_long_from_akshare.py
+    direct_tests:
+      - 08_tests/test_incremental_collection_contracts.py
+      - 08_tests/pipelines/test_direct_incremental_spreads.py
+      - 08_tests/pipelines/test_public_data_partitions.py
+      - 08_tests/market_data/test_foreign_fx_incremental.py
+      - 08_tests/soybean_exports/test_fas_incremental.py
+    impact_tests:
+      - 08_tests/test_scheduled_server.py
+      - 08_tests/test_foreign_fx_server.py
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/test_production_data_delta_fx.py
+      - 08_tests/test_first_batch_scheduled.py
+      - 08_tests/pipelines/test_public_data_delivery.py
+      - 08_tests/pipelines/test_public_data_transport.py
+      - 08_tests/pipelines/test_application_runtime_readability.py
+      - 08_tests/pipelines/test_domestic_spread_integrity.py
+      - 08_tests/test_soybean_margin_public_inputs.py
+      - 08_tests/soybean_exports/test_fas_data_layer.py
+      - 08_tests/market_data/test_foreign_fx_delivery.py
+      - 08_tests/positions/test_scheduled_collection.py
+      - 08_tests/alerts/test_notification.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
   maintenance.public_package_retention:
     code_paths:
       - 04_scripts/maintenance
