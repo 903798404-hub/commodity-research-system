@@ -55,6 +55,8 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     result.add_argument("--identity-kind", choices=("oci_container",), required=True)
+    result.add_argument("--verify-http-delivery", action="store_true",
+                        help="verify the container's actual static gzip and health endpoints")
     result.set_defaults(runtime_root=RUNTIME_ROOT, snapshot_root=SNAPSHOT_ROOT,
                         soybean_runtime_root=SOYBEAN_RUNTIME_ROOT, result_root=RESULT_ROOT,
                         historical_cnf_cache=HISTORICAL_CNF_CACHE,
@@ -235,7 +237,14 @@ def readonly_preflight(args) -> dict[str, object]:
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
     try:
-        print(json.dumps(readonly_preflight(args), ensure_ascii=False, sort_keys=True))
+        report = readonly_preflight(args)
+        if args.verify_http_delivery:
+            from runtime.serve_spread_dashboard import verify_static_http_delivery
+
+            report["static_http_delivery"] = verify_static_http_delivery()
+            report["network_accessed"] = True
+            report["network_scope"] = "container_loopback_only"
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
     except Exception as exc:
         print(json.dumps({"schema_version": "spread-runtime-preflight/1", "status": "FAILED",

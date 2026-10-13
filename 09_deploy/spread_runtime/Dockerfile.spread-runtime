@@ -36,7 +36,7 @@ RUN sed -i \
         -e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g' \
         /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nginx \
     && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
@@ -47,6 +47,9 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
     && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
 
 # Exact bound runtime inputs; candidate fixtures never enter the image.
+COPY ["04_scripts/runtime/precompress_streamlit_assets.py", "04_scripts/runtime/serve_spread_dashboard.py", "/app/04_scripts/runtime/"]
+COPY ["09_deploy/spread_runtime/nginx.conf", "/app/09_deploy/spread_runtime/"]
+RUN python -B /app/04_scripts/runtime/precompress_streamlit_assets.py
 COPY ["03_src/agri_research_agent/sugar_import_profit/__init__.py", "03_src/agri_research_agent/sugar_import_profit/model.py", "03_src/agri_research_agent/sugar_import_profit/history.py", "03_src/agri_research_agent/sugar_import_profit/store.py", "03_src/agri_research_agent/sugar_import_profit/runtime.py", "/app/03_src/agri_research_agent/sugar_import_profit/"]
 COPY ["05_apps/sugar_import_profit_page.py", "/app/05_apps/"]
 COPY ["03_src/agri_research_agent/soybean_margin/latest_quotes.py", "03_src/agri_research_agent/soybean_margin/reference.py", "/app/03_src/agri_research_agent/soybean_margin/"]
@@ -131,7 +134,7 @@ COPY ["05_apps/oilseed_positions_page.py", "05_apps/sugar_positions_page.py", "/
 
 USER 65532:65532
 EXPOSE 8501
-CMD ["streamlit", "run", "05_apps/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
 
 COPY ["03_src/agri_research_agent/commodity_import_margin/__init__.py", "03_src/agri_research_agent/commodity_import_margin/charts.py", "03_src/agri_research_agent/commodity_import_margin/history.py", "03_src/agri_research_agent/commodity_import_margin/inputs.py", "03_src/agri_research_agent/commodity_import_margin/live.py", "03_src/agri_research_agent/commodity_import_margin/manual.py", "03_src/agri_research_agent/commodity_import_margin/model.py", "03_src/agri_research_agent/commodity_import_margin/runtime.py", "03_src/agri_research_agent/commodity_import_margin/store.py", "/app/03_src/agri_research_agent/commodity_import_margin/"]
 COPY ["05_apps/commodity_import_margin_page.py", "/app/05_apps/"]

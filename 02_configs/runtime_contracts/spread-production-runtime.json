@@ -16,11 +16,9 @@
     ]
   },
   "entrypoint": [
-    "streamlit",
-    "run",
-    "05_apps/streamlit_app.py",
-    "--server.address=0.0.0.0",
-    "--server.port=8501"
+    "python",
+    "-B",
+    "04_scripts/runtime/serve_spread_dashboard.py"
   ],
   "working_directory": "/app",
   "runtime_roots": [
@@ -179,7 +177,8 @@
   ],
   "required_executables": [
     "python",
-    "streamlit"
+    "streamlit",
+    "nginx"
   ],
   "required_python_modules": [
     "agri_research_agent",
@@ -226,7 +225,8 @@
         "-B",
         "/app/04_scripts/runtime/spread_runtime_preflight.py",
         "--identity-kind",
-        "oci_container"
+        "oci_container",
+        "--verify-http-delivery"
       ]
     }
   ],
@@ -1833,6 +1833,18 @@
     },
     {
       "path": "05_apps/sugar_import_profit_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/runtime/serve_spread_dashboard.py",
+      "role": "entrypoint"
+    },
+    {
+      "path": "04_scripts/runtime/precompress_streamlit_assets.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "09_deploy/spread_runtime/nginx.conf",
       "role": "runtime_configuration"
     }
   ],

@@ -108,7 +108,9 @@ def test_compose_binds_full_app_and_separates_consumer_from_capture():
     assert set(c["services"]) == {"spread-dashboard"}
     service = c["services"]["spread-dashboard"]
     assert service["entrypoint"] == m["entrypoint"]
-    assert m["entrypoint"][:3] == ["streamlit", "run", "05_apps/streamlit_app.py"]
+    assert m["entrypoint"] == ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
+    assert "nginx" in m["required_executables"]
+    assert "--verify-http-delivery" in m["initialization_commands"][0]["argv"]
     assert service["read_only"] and service["user"] == "65532:65532"
     assert set(service["environment"]) == set(m["required_environment"])
     assert service["environment"]["IMPORT_PROFIT_INTRADAY_PAGE_MODE"] == "STRICT_RUNTIME"

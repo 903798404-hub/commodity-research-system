@@ -7,11 +7,9 @@ services:
       dockerfile: 09_deploy/spread_runtime/Dockerfile.spread-runtime
     container_name: spread-dashboard
     entrypoint:
-    - streamlit
-    - run
-    - 05_apps/streamlit_app.py
-    - --server.address=0.0.0.0
-    - --server.port=8501
+    - python
+    - -B
+    - 04_scripts/runtime/serve_spread_dashboard.py
     working_dir: /app
     user: 65532:65532
     read_only: true
