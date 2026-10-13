@@ -24,8 +24,8 @@ def test_spread_source_contract_preserves_full_entrypoint_and_readonly_page_poli
     contract = parser.load_runtime_manifest(path).to_dict()
     assert contract["project_id"] == "spread-production-runtime-wiring"
     assert contract["runtime_target"] == "production_container"
-    assert contract["entrypoint"] == ["streamlit", "run", "05_apps/streamlit_app.py",
-                                      "--server.address=0.0.0.0", "--server.port=8501"]
+    assert contract["entrypoint"] == ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
+    assert "--verify-http-delivery" in contract["initialization_commands"][0]["argv"]
     assert contract["service_id"] == "spread-dashboard"
     assert contract["identity_kind"] == "oci_container"
     environment = engine._candidate_environment(contract)
@@ -137,7 +137,7 @@ def test_candidate_grant_never_discards_supplied_external_trust():
 
 def test_current_image_keeps_all_declared_lifecycle_probes():
     engine = load_engine()
-    contract = json.loads((ROOT / "02_configs/runtime_contracts/spread-production-runtime.json").read_text())
+    contract = json.loads((ROOT / "02_configs/runtime_contracts/spread-production-runtime.json").read_text(encoding="utf-8"))
     assert engine._lifecycle_probe_names(contract) == (
         "lifecycle", "lifecycle_events", "lifecycle_reconciler", "lifecycle_store")
 
