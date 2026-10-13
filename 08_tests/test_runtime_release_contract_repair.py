@@ -58,6 +58,60 @@ def signed_packaging():
     return key,item
 
 
+def signed_http_packaging():
+    key, item = signed_packaging()
+    e = item['payload']['evidence']
+    e['binding']['source_sha256']['04_scripts/runtime/serve_spread_dashboard.py'] = 'f' * 64
+    claim = e['spread_runtime_packaging']['readonly_initialization']
+    claim.update(network_accessed=True, network_scope='container_loopback_only',
+        static_http_delivery=dict(status='PASS', assets=[
+            dict(file='index.test.js', original_bytes=900000, gzip_bytes=270000),
+            dict(file='PlotlyChart.test.js', original_bytes=4600000, gzip_bytes=1380000)]))
+    item['payload']['evidence_sha256'] = hashlib.sha256(record.canonical(e)).hexdigest()
+    fixtures.resign(item, key)
+    return key, item
+
+
+def test_loopback_http_claim_is_signed_and_accepted_by_actual_record_pipeline(tmp_path):
+    key, item = signed_http_packaging()
+    assert record.verify_record(fixtures.raw(item), fixtures.trust(key), now=fixtures.NOW) == item['payload']
+    e2e = load('08_tests/shared/runtime_release_record_e2e.py', 'http_record_contract')
+    receipt = e2e.verify_actual_engine_record(item['payload']['evidence'], tmp_path / 'record')
+    assert receipt['CANDIDATE_VALIDATION_RECORD'] == 'PASS'
+    assert receipt['production_approval'] is False
+    item['payload']['evidence']['spread_runtime_packaging']['readonly_initialization']['static_http_delivery']['assets'][0]['gzip_bytes'] += 1
+    with pytest.raises(record.CandidateValidationRecordError):
+        record.verify_record(fixtures.raw(item), fixtures.trust(key), now=fixtures.NOW)
+
+
+@pytest.mark.parametrize('mutation', ['missing_http', 'external_scope', 'false_network',
+    'unknown_delivery', 'failed_delivery', 'missing_asset', 'duplicate_asset', 'unknown_asset',
+    'unsafe_file', 'uncompressed', 'boolean_size', 'secret_access', 'capture', 'unbound_http'])
+def test_http_claim_rejects_incomplete_or_forbidden_operations_after_resigning(mutation):
+    key, item = signed_http_packaging()
+    e = item['payload']['evidence']
+    claim = e['spread_runtime_packaging']['readonly_initialization']
+    delivery = claim['static_http_delivery']
+    if mutation == 'missing_http': claim.pop('static_http_delivery')
+    elif mutation == 'external_scope': claim['network_scope'] = 'external'
+    elif mutation == 'false_network': claim['network_accessed'] = False
+    elif mutation == 'unknown_delivery': delivery['unknown'] = True
+    elif mutation == 'failed_delivery': delivery['status'] = 'FAIL'
+    elif mutation == 'missing_asset': delivery['assets'].pop()
+    elif mutation == 'duplicate_asset': delivery['assets'][1] = copy.deepcopy(delivery['assets'][0])
+    elif mutation == 'unknown_asset': delivery['assets'][0]['unknown'] = True
+    elif mutation == 'unsafe_file': delivery['assets'][0]['file'] = '../index.test.js'
+    elif mutation == 'uncompressed': delivery['assets'][0]['gzip_bytes'] = 900000
+    elif mutation == 'boolean_size': delivery['assets'][0]['gzip_bytes'] = True
+    elif mutation == 'secret_access': claim['secret_accessed'] = True
+    elif mutation == 'capture': claim['capture_executed'] = True
+    elif mutation == 'unbound_http': e['binding']['source_sha256'].pop('04_scripts/runtime/serve_spread_dashboard.py')
+    item['payload']['evidence_sha256'] = hashlib.sha256(record.canonical(e)).hexdigest()
+    fixtures.resign(item, key)
+    with pytest.raises(record.CandidateValidationRecordError):
+        record.verify_record(fixtures.raw(item), fixtures.trust(key), now=fixtures.NOW)
+
+
 def test_retained_source_packaging_does_not_claim_unavailable_lifecycle_modules():
     key = Ed25519PrivateKey.generate()
     item = fixtures.envelope(key, validator_version='target-runtime-validator/2')

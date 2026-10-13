@@ -215,6 +215,9 @@ def _validate_packaging(value: object, evidence: dict) -> None:
             _fail("spread initialization claim is required")
     else:
         fields = {"schema_version", "status", "mode", "runtime_id", "git_commit", "git_tree", "image_id", "identity_role", "domestic_spread_rows", "soybean_release", "snapshot_status", "snapshot_release", "snapshot_business_date", "capture_executed", "secret_accessed", "network_accessed"}
+        http_required = "04_scripts/runtime/serve_spread_dashboard.py" in binding["source_sha256"]
+        if http_required:
+            fields |= {"network_scope", "static_http_delivery"}
         if type(readonly) is not dict or set(readonly) != fields:
             _fail("readonly initialization fields incomplete or unknown")
         expected = {"schema_version": "spread-runtime-preflight/1", "status": "PASS", "mode": "CANDIDATE_VALIDATION",
@@ -224,8 +227,32 @@ def _validate_packaging(value: object, evidence: dict) -> None:
             _fail("readonly initialization identity differs")
         if type(value["readonly_exit_code"]) is not int or value["readonly_exit_code"] != 0 or value["initialize_strict_page"] != "PASS" or value["app_test"] != "PASS":
             _fail("readonly initialization did not pass")
-        if any(readonly[name] is not False for name in ("capture_executed", "secret_accessed", "network_accessed")):
+        if any(readonly[name] is not False for name in ("capture_executed", "secret_accessed")):
             _fail("readonly initialization performed forbidden operations")
+        if http_required:
+            if readonly["network_accessed"] is not True or readonly["network_scope"] != "container_loopback_only":
+                _fail("readonly HTTP verification must remain container loopback only")
+            delivery = readonly["static_http_delivery"]
+            if type(delivery) is not dict or set(delivery) != {"status", "assets"} or delivery["status"] != "PASS":
+                _fail("static HTTP delivery did not pass")
+            assets = delivery["assets"]
+            if type(assets) is not list or len(assets) != 2:
+                _fail("static HTTP delivery asset claims incomplete")
+            families = set()
+            for asset in assets:
+                if type(asset) is not dict or set(asset) != {"file", "original_bytes", "gzip_bytes"}:
+                    _fail("static HTTP delivery asset fields incomplete or unknown")
+                name = asset["file"]
+                if type(name) is not str or re.fullmatch(r"(index|PlotlyChart)\.[A-Za-z0-9_-]+\.js", name) is None:
+                    _fail("static HTTP delivery asset identity invalid")
+                families.add(name.split(".", 1)[0])
+                if (type(asset["original_bytes"]) is not int or type(asset["gzip_bytes"]) is not int
+                        or not 0 < asset["gzip_bytes"] < asset["original_bytes"]):
+                    _fail("static HTTP delivery byte counts invalid")
+            if families != {"index", "PlotlyChart"}:
+                _fail("static HTTP delivery asset identities incomplete")
+        elif readonly["network_accessed"] is not False:
+            _fail("readonly initialization performed forbidden network operations")
         if type(readonly["domestic_spread_rows"]) is not int or readonly["domestic_spread_rows"] <= 0:
             _fail("invalid domestic reader row count")
         if type(readonly["soybean_release"]) is not str or not readonly["soybean_release"]:
