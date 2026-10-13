@@ -112,7 +112,7 @@ def verify_static_http_delivery() -> dict:
 def main() -> int:
     if os.name != "posix":
         raise RuntimeError("The packaged dashboard service requires Linux")
-    for child_dir in ("nginx-body", "nginx-proxy"):
+    for child_dir in ("nginx-body", "nginx-proxy", "nginx-fastcgi", "nginx-uwsgi", "nginx-scgi"):
         (LOG_ROOT / child_dir).mkdir(parents=True, exist_ok=True)
     nginx = ["nginx", "-c", str(SOURCE_ROOT / NGINX_CONFIG)]
     subprocess.run([*nginx, "-t"], check=True)
