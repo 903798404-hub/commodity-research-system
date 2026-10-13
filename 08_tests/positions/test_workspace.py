@@ -26,6 +26,21 @@ def project(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def reference_project(project):
+    """Freeze the dated reference-contract scenario in test-owned inputs.
+
+    Production defaults now select variety summaries; these cases still exercise
+    explicitly configured, verified single-contract references.
+    """
+    path = project / "02_configs/oilseed_positions.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["domains"]["soybean"]["default_scopes"] = {"M": "M2701", "Y": "Y2701"}
+    config["domains"]["palm"]["default_scopes"] = {"P": "P2701"}
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    return project
+
+
 def rows(market="sugar11"):
     return [dict(market=market, group="managed_money", report_type="futures_only",
                  report_date=f"2026-09-{n:02d}", long=n*100, short=300, open_interest=3000,
@@ -75,7 +90,8 @@ def test_wrong_domain_and_excluded_soybean_contracts_are_rejected(project):
             validate_domain({"foreign": [], "domestic": [{"scope": scope}]}, project, "soybean")
 
 
-def test_plan_collects_explicit_reference_contracts_without_changing_other_domains(project):
+def test_plan_collects_explicit_reference_contracts_without_changing_other_domains(reference_project):
+    project = reference_project
     plan = collection_plan(project, list(DOMAINS), "all", date(2026, 10, 8), 14, 2025)
     commands = {item["domain"]: item["argv"] for item in plan}
     assert commands["soybean"][commands["soybean"].index("--sina-contracts") + 1:][:2] == ["M2701", "Y2701"]
@@ -87,6 +103,11 @@ def test_plan_collects_explicit_reference_contracts_without_changing_other_domai
     assert "--sina-contracts" not in foreign[0]["argv"]
     with pytest.raises(ValueError):
         collection_plan(project, ["sugar", "sugar"], "all", date(2026, 10, 8), 14, 2025)
+
+
+def test_current_variety_defaults_do_not_request_old_reference_contracts(project):
+    plan = collection_plan(project, ["soybean", "palm"], "all", date(2026, 10, 8), 14, 2025)
+    assert all("--sina-contracts" not in item["argv"] for item in plan)
 
 
 def test_weekly_plan_does_not_keep_expanding_the_onboarding_date(project):
@@ -161,7 +182,8 @@ def test_formal_entry_renders_replacement_route_without_legacy_database(monkeypa
 
 @pytest.mark.parametrize("domain,variety", [("soybean", "M"), ("soybean", "Y"), ("palm", "P")])
 @pytest.mark.parametrize("has_summary", [False, True])
-def test_domestic_summary_never_uses_saved_single_contract_as_substitute(project, monkeypatch, domain, variety, has_summary):
+def test_domestic_summary_never_uses_saved_single_contract_as_substitute(reference_project, monkeypatch, domain, variety, has_summary):
+    project = reference_project
     monkeypatch.delenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", raising=False)
     raw = []
     for scope, positions in [(variety + "2701", (100, 50))] + ([(variety, (60, 20))] if has_summary else []):
@@ -174,7 +196,7 @@ def test_domestic_summary_never_uses_saved_single_contract_as_substitute(project
     app = AppTest.from_string(script).run(timeout=30)
     assert not app.exception
     selector = app.selectbox(key=f"domestic_scope_{domain}")
-    assert selector.value == ("M2701" if domain == "soybean" else "P2701")
+    assert selector.value == ("M" if domain == "soybean" else "P")
     selector.set_value(variety).run(timeout=30)
     assert not app.exception and not app.get("plotly_chart")
     if has_summary:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from html import escape
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 from urllib.parse import quote
 
@@ -10,6 +11,7 @@ import streamlit as st
 
 if TYPE_CHECKING:
     from navigation import NavigationGroup, NavigationItem
+    from streamlit.navigation.page import StreamlitPage
 
 
 def _icon_markup(name: str, css_class: str = "agri-icon") -> str:
@@ -78,6 +80,17 @@ def inject_workspace_theme() -> None:
 .agri-nav-link.is-disabled { cursor: not-allowed; color: #97A4B3 !important; }
 .agri-sidebar-system { margin: 18px 10px 0; padding: 12px 8px 16px; border-top: 1px solid #DDE6EF; color: #748397; font-size: 11px; line-height: 1.65; }
 .agri-sidebar-system strong { color: #486077; font-weight: 750; }
+/* Scope native navigation styling to our own containers. */
+.st-key-agri_nav_shell { gap: 3px; }
+[class*="st-key-agri_nav_item_"] [data-testid="stPageLink"] a p { font-size: 13px; margin: 0; }
+[class*="st-key-agri_nav_item_"] [data-testid="stPageLink"] a { min-height: 34px; padding: 0 9px; border-left: 3px solid transparent; border-radius: 7px; color: #53677E; font-size: 13px; font-weight: 650; background: transparent; }
+[class*="st-key-agri_nav_item_"] [data-testid="stPageLink"] a:hover { background: #EDF4FB; color: #204E82; }
+[class*="st-key-agri_nav_item_"][class*="_active"] [data-testid="stPageLink"] a { border-left-color: #2870B7; background: #E8F1FB; color: #174F86; font-weight: 800; }
+[class*="st-key-agri_home_card_"] { border: 1px solid #DCE5EF; border-radius: 14px; background: #FFF; padding: 19px; box-shadow: 0 5px 16px rgba(22,43,68,.055); }
+[class*="st-key-agri_home_card_"] .agri-card { padding: 0; border: 0; box-shadow: none; min-height: 150px; }
+[class*="st-key-agri_home_card_"] [data-testid="stPageLink"] a { width: fit-content; margin-left: auto; padding: 7px 14px; border-radius: 7px; background: #245B97; color: #FFF; font-size: 13px; font-weight: 750; }
+[class*="st-key-agri_home_card_"] [data-testid="stPageLink"] a:hover { background: #1C4879; }
+[class*="st-key-agri_home_card_"] [data-testid="stPageLink"] a p { color: #FFF; font-size: 13px; font-weight: 750; }
 @container (min-width: 520px) {
   .agri-card-collection { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -100,44 +113,46 @@ def inject_workspace_theme() -> None:
 
 
 def render_sidebar_navigation(
-    groups: Iterable[NavigationGroup], selected_page: str
+    groups: Iterable[NavigationGroup], selected_page: str, *,
+    workspace_page: StreamlitPage | None = None,
 ) -> None:
-    """Render a stable HTML navigation shell that delegates routing to query params."""
-    group_markup: list[str] = []
+    """Use client-side page links, preserving existing query-string routes."""
+    st.html(f'''<header class="agri-sidebar-brand">{_icon_markup("brand", "agri-sidebar-brand-icon")}
+      <div><strong>农产品研究工作台</strong><span>AGRICULTURAL RESEARCH</span></div>
+    </header>''')
     for group in groups:
-        links: list[str] = []
+        st.html(f'<div class="agri-nav-group-title">{escape(group.title)}</div>')
         for item in group.items:
             if item.external_env:
                 external_url = os.getenv(item.external_env, "").strip()
                 if external_url:
-                    links.append(
+                    st.html(
                         f'<a class="agri-nav-link" href="{escape(external_url, quote=True)}" '
                         'target="_blank" rel="noopener noreferrer">'
                         f'{escape(item.label)}</a>'
                     )
                 else:
-                    links.append(f'<span class="agri-nav-link is-disabled">{escape(item.label)}（暂不可用）</span>')
+                    st.html(f'<span class="agri-nav-link is-disabled">{escape(item.label)}（暂不可用）</span>')
                 continue
-            links.append(
-                '<a class="agri-nav-link {active}" href="?workspace_page={target}">{label}</a>'.format(
-                    active="is-active" if item.target == selected_page else "",
-                    target=escape(quote(item.target), quote=True),
-                    label=escape(item.label),
-                )
-            )
-        group_markup.append(
-            f'<section class="agri-nav-group"><div class="agri-nav-group-title">{escape(group.title)}</div>{"".join(links)}</section>'
-        )
+            active = "_active" if item.target == selected_page else ""
+            with st.container(key=f"agri_nav_item_{item.key}{active}"):
+                render_workspace_page_link(item, label=item.label, workspace_page=workspace_page)
 
     environment = os.getenv("APP_ENV", "").strip() or "本地开发环境"
     st.html(
-        f'''<aside class="agri-sidebar">
-  <header class="agri-sidebar-brand">{_icon_markup("brand", "agri-sidebar-brand-icon")}
-    <div><strong>农产品研究工作台</strong><span>AGRICULTURAL RESEARCH</span></div>
-  </header>
-  <nav class="agri-nav" aria-label="研究工作台导航">{"".join(group_markup)}</nav>
-  <footer class="agri-sidebar-system"><strong>{escape(environment)}</strong><br>应用运行正常</footer>
-</aside>'''
+        f'<footer class="agri-sidebar-system"><strong>{escape(environment)}</strong><br>应用运行正常</footer>'
+    )
+
+
+def render_workspace_page_link(
+    item: NavigationItem, *, label: str, workspace_page: StreamlitPage | None = None
+) -> None:
+    """Target the formal entry without reloading the document or WebSocket."""
+    st.page_link(
+        workspace_page or str(Path(__file__).with_name("streamlit_app.py")),
+        label=label,
+        query_params={"workspace_page": item.target},
+        width="stretch",
     )
 
 
@@ -189,7 +204,7 @@ def _emphasize_keywords(text: str, keywords: tuple[str, ...]) -> str:
     return markup
 
 
-def render_navigation_card(item: NavigationItem) -> str:
+def render_navigation_card(item: NavigationItem, *, include_action: bool = True) -> str:
     """Return one static research-navigation card without runtime health state."""
 
     if not item.external_env:
@@ -218,7 +233,7 @@ def render_navigation_card(item: NavigationItem) -> str:
     <div class="agri-card-title-group"><h3>{escape(item.label)}</h3></div></div>
   <p class="agri-card-description">{description_markup}</p>
   {f'<p class="agri-card-detail"><span class="agri-card-detail-label">{escape(item.detail_label)}：</span>{detail_markup}</p>' if item.detail_label else '<p class="agri-card-detail"></p>'}
-  {action}
+  {action if include_action else ''}
 </article>'''
 
 

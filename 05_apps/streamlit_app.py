@@ -415,18 +415,34 @@ def main() -> None:
     apply_workspace_navigation_request()
     inject_workspace_theme()
 
+    # One registered client-side destination; business routes keep their existing
+    # query strings and dispatcher. PageLink can reuse the current connection.
+    def render_current_workspace() -> None:
+        render_selected_workspace_page(
+            st.session_state.selected_workspace_page, workspace_page=workspace_page
+        )
+
+    workspace_page = st.Page(render_current_workspace, title="农产品研究工作台", default=True)
+    current_page = st.navigation([workspace_page], position="hidden")
+
     with st.sidebar:
-        render_sidebar_navigation(SIDEBAR_NAVIGATION, st.session_state.selected_workspace_page)
+        with st.container(key="agri_nav_shell"):
+            render_sidebar_navigation(
+                SIDEBAR_NAVIGATION, st.session_state.selected_workspace_page,
+                workspace_page=workspace_page,
+            )
 
-    selected_page = st.session_state.selected_workspace_page
-    render_selected_workspace_page(selected_page)
+    current_page.run()
 
 
-def render_selected_workspace_page(selected_page: str) -> None:
+def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -> None:
     """Dispatch one validated workspace route without preloading others."""
 
     if selected_page == "首页":
-        render_home(REPORT_CATALOG_FILE)
+        if workspace_page is None:
+            render_home(REPORT_CATALOG_FILE)
+        else:
+            render_home(REPORT_CATALOG_FILE, workspace_page=workspace_page)
     elif selected_page == RESEARCH_OVERVIEW_PAGE_TITLE:
         render_research_overview()
     elif selected_page == FOREIGN_FX_PAGE_TITLE:
