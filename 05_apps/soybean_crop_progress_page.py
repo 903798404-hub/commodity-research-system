@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -16,11 +17,14 @@ if str(SRC_DIR) not in sys.path:
 
 from agri_research_agent.pipelines.soybean_crop_comparison import (  # noqa: E402
     build_dashboard_comparisons,
+    MetricComparison,
     load_display_config,
     style_comparison_table,
 )
 from agri_research_agent.summary_engine.crop import build_crop_summary  # noqa: E402
 from agri_research_agent.summary_engine.io import file_identity  # noqa: E402
+from agri_research_agent.summary_engine.rules import DEFAULT_CONFIG as SUMMARY_RULES_FILE  # noqa: E402
+from agri_research_agent.summary_engine.schema import Summary  # noqa: E402
 from summary_panel import render_summary_panel  # noqa: E402
 
 
@@ -112,6 +116,27 @@ def _require_page_inputs(progress_file: Path, condition_file: Path) -> bool:
     return True
 
 
+@st.cache_data(show_spinner=False, max_entries=16)
+def cached_crop_comparisons(
+    progress: pd.DataFrame, condition: pd.DataFrame,
+    config: dict[str, object], source_identity: dict[str, object],
+) -> list[MetricComparison]:
+    """Reuse derived comparisons until either approved input version changes."""
+    del source_identity
+    return build_dashboard_comparisons(progress, condition, config)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def cached_crop_summary(
+    progress: pd.DataFrame, condition: pd.DataFrame,
+    config: dict[str, object], source_identity: dict[str, object],
+    rules_identity: dict[str, object], freshness_day: str,
+) -> Summary:
+    """Keep original summary logic, including daily freshness and rule invalidation."""
+    del rules_identity, freshness_day
+    return build_crop_summary(progress, condition, source_identity=source_identity, display_config=config)
+
+
 def render_soybean_crop_progress_page() -> None:
     """Render six metric tabs inside the existing 8501 workspace."""
 
@@ -135,11 +160,15 @@ def render_soybean_crop_progress_page() -> None:
         str(condition_file),
         condition_file.stat().st_mtime_ns,
     )
-    comparisons = build_dashboard_comparisons(progress, condition, config)
+    source_identity = {
+        "progress": file_identity(progress_file), "condition": file_identity(condition_file),
+    }
+    comparisons = cached_crop_comparisons(progress, condition, config, source_identity)
     try:
-        render_summary_panel(build_crop_summary(progress, condition, source_identity={
-            "progress": file_identity(progress_file), "condition": file_identity(condition_file)
-        }, display_config=config))
+        render_summary_panel(cached_crop_summary(
+            progress, condition, config, source_identity, file_identity(SUMMARY_RULES_FILE),
+            datetime.now(timezone.utc).date().isoformat(),
+        ))
     except (OSError, ValueError) as exc:
         st.warning(f"美豆种植生长摘要暂不可用：{exc}")
 

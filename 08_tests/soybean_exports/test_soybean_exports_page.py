@@ -120,7 +120,11 @@ def test_formal_workspace_has_two_first_level_tabs_and_preserves_crop_content(mo
     assert labels[-1] == "出口销售与装船"
     assert labels[1:-1] == ["播种率", "出苗率", "开花率", "结荚率", "收割率", "优良率"]
     assert any(title.value == "美豆种植生长" for title in app.title)
+    assert not any(title.value == "出口销售与装船" for title in app.title)
+    app.session_state["soybean_weekly_tab"] = "出口销售与装船"
+    app.run(timeout=30)
     assert any(title.value == "出口销售与装船" for title in app.title)
+    assert not any(title.value == "美豆种植生长" for title in app.title)
     assert not app.exception
 
 

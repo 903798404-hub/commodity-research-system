@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import os
 import tempfile
+from io import BytesIO
 from functools import lru_cache
 from pathlib import Path
 
@@ -112,9 +113,13 @@ def missing_trading_days_between(
         if trading_days is None
         else pd.DatetimeIndex(trading_days).normalize().sort_values()
     )
-    if previous < calendar.min() or current > calendar.max():
+    if calendar.hasnans:
+        calendar = calendar.dropna()
+    if not calendar.empty and (previous < calendar[0] or current > calendar[-1]):
         raise ValueError("报价日期超出国内期货交日历覆盖范围")
-    return int(((calendar > previous) & (calendar < current)).sum())
+    if calendar.empty or pd.isna(previous) or pd.isna(current):
+        return 0
+    return int(calendar.searchsorted(current, side="left") - calendar.searchsorted(previous, side="right"))
 
 
 def _missing_columns(
@@ -392,6 +397,11 @@ def _filter_selector(
 ) -> str:
     selectable = ["全部", *options] if include_all else options
     preferred_value = preferred if preferred in selectable else selectable[0]
+    retained_value = st.session_state.get(key, preferred_value)
+    # A remounted hidden widget must receive the retained selection as its default
+    # too, otherwise the browser can display All while the server filters one item.
+    if retained_value in selectable:
+        preferred_value = retained_value
     return st.selectbox(
         label,
         selectable,
@@ -446,6 +456,31 @@ def _card_pairs(dataframe: pd.DataFrame) -> list[tuple[str, str]]:
     )
 
 
+@st.cache_data(show_spinner=False, max_entries=128)
+def cached_seasonal_report_image(
+    dataframe: pd.DataFrame,
+    *,
+    value_col: str,
+    title: str,
+    years: tuple[int, ...],
+    zero_line: bool,
+    trading_calendar_bytes: bytes,
+) -> bytes:
+    """Cache PNG bytes by observations, selection and the bundled calendar."""
+    # The calendar is also a cache dependency; the builder uses the same calendar.
+    del trading_calendar_bytes
+    figure = build_seasonal_report_figure(
+        dataframe, value_col=value_col, title=title, years=list(years), zero_line=zero_line,
+    )
+    try:
+        image = BytesIO()
+        # Match Streamlit pyplot's existing PNG export settings exactly.
+        figure.savefig(image, bbox_inches="tight", dpi=200, format="png")
+        return image.getvalue()
+    finally:
+        plt.close(figure)
+
+
 def _render_report_card(
     dataframe: pd.DataFrame,
     *,
@@ -460,15 +495,15 @@ def _render_report_card(
             st.markdown(f"#### {title}")
             st.info("缺少对应数据。")
             return
-        figure = build_seasonal_report_figure(
+        image = cached_seasonal_report_image(
             dataframe,
             value_col=value_col,
             title=title,
-            years=years,
+            years=tuple(years),
             zero_line=zero_line,
+            trading_calendar_bytes=china_futures_trading_days().asi8.tobytes(),
         )
-        st.pyplot(figure, width="stretch")
-        plt.close(figure)
+        st.image(image, width="stretch")
         with st.expander("查看明细", expanded=False):
             available_columns = [
                 column
@@ -955,20 +990,32 @@ def render_basis_page(public_current_root: Path, sugar_history_root: Path | None
         st.caption(summary.detail_text)
     years = _latest_three_years(data)
 
+    # Retain only hidden-tab filters; visible widgets keep their ordinary state.
+    active_tab = st.session_state.get("basis_research_tab", default_tab or "基差")
+    filter_tabs = {"basis_matrix_": "基差", "cash_matrix_": "一口价", "spread_matrix_": "批发价差"}
+    for key in list(st.session_state):
+        hidden_filter = any(key.startswith(prefix) and active_tab != label for prefix, label in filter_tabs.items())
+        if hidden_filter or (key == "sugar_history_years" and active_tab != "白糖（柳州）"):
+            st.session_state[key] = st.session_state[key]
     basis_tab, cash_tab, spread_tab, sugar_tab = st.tabs(
-        ["基差", "一口价", "批发价差", "白糖（柳州）"], default=default_tab
+        ["基差", "一口价", "批发价差", "白糖（柳州）"], default=default_tab,
+        key="basis_research_tab", on_change="rerun",
     )
-    with basis_tab:
-        _render_basis_tab(data, years)
-    with cash_tab:
-        _render_cash_price_tab(data, years)
-    with spread_tab:
-        _render_wholesale_spread_tab(data, years)
-    with sugar_tab:
-        if sugar_snapshot is not None:
-            render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
-                                 missing_trading_days=missing_trading_days_between)
-        elif sugar_error:
-            st.warning(sugar_error)
-        else:
-            st.info("柳州历史快照尚未配置。")
+    if basis_tab.open:
+        with basis_tab:
+            _render_basis_tab(data, years)
+    if cash_tab.open:
+        with cash_tab:
+            _render_cash_price_tab(data, years)
+    if spread_tab.open:
+        with spread_tab:
+            _render_wholesale_spread_tab(data, years)
+    if sugar_tab.open:
+        with sugar_tab:
+            if sugar_snapshot is not None:
+                render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
+                                     missing_trading_days=missing_trading_days_between)
+            elif sugar_error:
+                st.warning(sugar_error)
+            else:
+                st.info("柳州历史快照尚未配置。")
