@@ -78,6 +78,11 @@ def test_actual_basis_page_adds_sugar_tab_without_changing_existing_oil_rows(pre
     assert not app.exception
     assert [t.label for t in app.tabs]==["基差","一口价","批发价差","白糖（柳州）"]
     assert list(app.dataframe[0].value["品种"])==["豆粕"]
+    assert not app.metric
+    app.session_state["basis_research_tab"] = "白糖（柳州）"
+    app.run()
+    assert not app.exception
+    assert list(app.dataframe[0].value["品种"])==["豆粕"]
     assert any("5,330"==m.value for m in app.metric)
 
 
@@ -88,6 +93,10 @@ def test_invalid_sugar_does_not_break_existing_oil_current(prepared_root,monkeyp
     oil=pd.DataFrame([dict(date=pd.Timestamp("2026-08-19"),commodity="豆粕",region="华东",quote_type="基差报价",delivery_month="现货",futures_contract="2609",cash_price=8000,futures_price=7900,basis=110,source_sheet="formal")])
     monkeypatch.setattr(basis_page,"load_basis_page_data",lambda root:(oil.copy(),dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4")))
     app=AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('formal-current'))",default_timeout=35).run()
+    assert not app.exception and len(app.dataframe)>0
+    assert not app.warning
+    app.session_state["basis_research_tab"] = "白糖（柳州）"
+    app.run()
     assert not app.exception and len(app.dataframe)>0
     assert any("白糖图表暂停" in w.value for w in app.warning)
     assert not app.metric
