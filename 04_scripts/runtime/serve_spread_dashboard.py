@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import gzip
+from html.parser import HTMLParser
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -62,6 +64,31 @@ def supervise(commands: list[list[str]], stop: threading.Event) -> int:
         stop_children(children)
 
 
+def framework_asset_paths(static_root: Path) -> list[Path]:
+    """Select the declared application entry, never an arbitrary index.* chunk."""
+    class ModuleScripts(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.sources: list[str] = []
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "script" and values.get("type") == "module" and values.get("src"):
+                self.sources.append(values["src"])
+
+    parser = ModuleScripts()
+    parser.feed((static_root / "index.html").read_text(encoding="utf-8"))
+    entries = [src for src in parser.sources
+               if re.fullmatch(r"(?:\./|/)?static/js/index\.[A-Za-z0-9_-]+\.js", src)]
+    plotly = list((static_root / "static" / "js").glob("PlotlyChart.*.js"))
+    if len(entries) != 1 or len(plotly) != 1:
+        raise RuntimeError("Framework application assets are missing or ambiguous")
+    main = static_root / entries[0].removeprefix("./").lstrip("/")
+    if not main.is_file():
+        raise RuntimeError("Declared framework application entry is missing")
+    return [main, plotly[0]]
+
+
 def verify_static_http_delivery() -> dict:
     """Read-only real HTTP checks, executed inside the identity-verified container."""
     import streamlit
@@ -81,8 +108,7 @@ def verify_static_http_delivery() -> dict:
             pass
         time.sleep(0.1)
 
-    assets = Path(streamlit.__file__).resolve().parent / "static" / "static" / "js"
-    paths = [next(assets.glob("index.*.js")), next(assets.glob("PlotlyChart.*.js"))]
+    paths = framework_asset_paths(Path(streamlit.__file__).resolve().parent / "static")
     results = []
     for path in paths:
         url = base + "/static/js/" + path.name

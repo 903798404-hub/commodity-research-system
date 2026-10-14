@@ -21,6 +21,41 @@ def load_script(name, path):
     return module
 
 
+@pytest.mark.parametrize("names", [
+    ["index.esm.CfwaQ0Sp.js", "index.AppHash.js"],
+    ["index.AppHash.js", "index.esm.CfwaQ0Sp.js"],
+])
+def test_http_probe_uses_html_entry_despite_auxiliary_index_chunks(tmp_path, names):
+    service = load_script("html_entry_probe", "04_scripts/runtime/serve_spread_dashboard.py")
+    assets = tmp_path / "static" / "js"
+    assets.mkdir(parents=True)
+    for name in names:
+        (assets / name).write_text("export default 1;", encoding="utf-8")
+    plotly = assets / "PlotlyChart.PlotHash.js"
+    plotly.write_text("export default 2;", encoding="utf-8")
+    (tmp_path / "index.html").write_text(
+        '<script src="./static/js/index.esm.CfwaQ0Sp.js"></script>\n'
+        '<script crossorigin type="module"\n src="./static/js/index.AppHash.js"></script>', encoding="utf-8")
+    assert service.framework_asset_paths(tmp_path) == [assets / "index.AppHash.js", plotly]
+
+
+@pytest.mark.parametrize("fault", ["missing", "ambiguous", "external"])
+def test_http_probe_rejects_invalid_html_entry_instead_of_guessing(tmp_path, fault):
+    service = load_script("invalid_html_entry_probe", "04_scripts/runtime/serve_spread_dashboard.py")
+    assets = tmp_path / "static" / "js"
+    assets.mkdir(parents=True)
+    (assets / "PlotlyChart.PlotHash.js").write_text("plotly", encoding="utf-8")
+    script = '<script type="module" src="./static/js/index.AppHash.js"></script>'
+    if fault != "missing":
+        (assets / "index.AppHash.js").write_text("main", encoding="utf-8")
+    html = script * 2 if fault == "ambiguous" else script
+    if fault == "external":
+        html = '<script type="module" src="https://example.com/static/js/index.AppHash.js"></script>'
+    (tmp_path / "index.html").write_text(html, encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        service.framework_asset_paths(tmp_path)
+
+
 def test_precompressed_assets_are_lossless_deterministic_and_preserve_originals(tmp_path):
     build = load_script("asset_build", "04_scripts/runtime/precompress_streamlit_assets.py")
     script = tmp_path / "chart.js"
