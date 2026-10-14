@@ -1862,6 +1862,18 @@
     {
       "path": "05_apps/warehouse_receipts_page.py",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/warehouse_receipts/provider.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/warehouse_receipts/update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/update_warehouse_receipts.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [
