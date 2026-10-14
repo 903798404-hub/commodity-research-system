@@ -504,7 +504,13 @@ def _render_report_card(
             trading_calendar_bytes=china_futures_trading_days().asi8.tobytes(),
         )
         st.image(image, width="stretch")
-        with st.expander("查看明细", expanded=False):
+        detail_panel = st.expander(
+            "查看明细", expanded=False, on_change="rerun",
+            key=f"basis_report_detail_{value_col}_{title}",
+        )
+        if not detail_panel.open:
+            return
+        with detail_panel:
             available_columns = [
                 column
                 for column in detail_columns

@@ -103,7 +103,8 @@ def validate_nutstore_current(root: Path, directory: Path, manifest: dict, table
         "segment", "provider", "currency", "unit", "futures_price", "location",
         "consumer_product", "basis", "value", "cash_price", "snapshot_identity"})
     projected = table.select(validation_fields).to_pandas(date_as_object=True).astype(object)
-    rows = [dict(zip(projected.columns, values)) for values in
+    columns = projected.columns.tolist()
+    rows = [dict(zip(columns, values)) for values in
             projected.where(projected.notna(), None).to_numpy(dtype=object).tolist()]
     ordering = [(field, "ascending") for field in FORMAL_STABLE_KEY]
     require(preserved.sort_by(ordering).equals(baseline.sort_by(ordering)),

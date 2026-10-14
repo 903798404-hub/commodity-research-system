@@ -219,7 +219,8 @@ def test_validation_scalar_projection_keeps_dates_decimals_nulls_and_zero(monkey
     rows[1]["value"] = Decimal("-0.0001")
     table = pa.Table.from_pylist(rows, schema=existing.FORMAL_CURRENT_SCHEMA).select(fields)
     projected = table.to_pandas(date_as_object=True).astype(object)
-    actual = [dict(zip(projected.columns, values)) for values in
+    columns = projected.columns.tolist()
+    actual = [dict(zip(columns, values)) for values in
               projected.where(projected.notna(), None).to_numpy(dtype=object).tolist()]
     assert actual == table.to_pylist()
 

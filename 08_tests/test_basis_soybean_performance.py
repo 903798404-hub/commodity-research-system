@@ -124,6 +124,27 @@ def test_basis_default_does_not_load_hidden_sugar_but_fallback_still_does(monkey
     assert any("Formal Public Basis Current 暂不可用" in warning.value for warning in app.warning)
 
 
+def test_basis_details_load_on_expansion_with_original_rows_and_columns(monkeypatch) -> None:
+    rows = _formal_public_current_rows()
+    monkeypatch.setattr(basis_page, "load_basis_page_data", lambda root: (
+        rows.copy(), {"release_id": "detail-test", "manifest_sha256": "a" * 64},
+    ))
+    app = AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('test-current'))", default_timeout=30).run()
+    assert not app.exception and len(app.dataframe) == 1  # Latest quotes remain visible.
+    key = "basis_report_detail_basis_华东豆粕（基差）"
+    assert any(expander.label == "查看明细" for expander in app.expander)
+    app.session_state[key] = True
+    app.run()
+    assert not app.exception and len(app.dataframe) == 2
+    columns = ["date", "commodity", "region", "delivery_month", "futures_contract", "cash_price", "futures_price", "basis"]
+    displayed = basis_page.filter_display_data(rows)
+    expected = displayed.loc[displayed.commodity.eq("豆粕"), columns].sort_values("date", ascending=False).reset_index(drop=True)
+    pd.testing.assert_frame_equal(app.dataframe[1].value.reset_index(drop=True), expected)
+    app.session_state[key] = False
+    app.run()
+    assert not app.exception and len(app.dataframe) == 1
+
+
 def test_crop_cache_preserves_results_and_invalidates_input_rules_config_and_day(monkeypatch) -> None:
     fixture = ROOT / "08_tests/fixtures/summary/soybean_crop_progress"
     progress_path = fixture / "soybeans_crop_progress_weekly_2021_2026.parquet"

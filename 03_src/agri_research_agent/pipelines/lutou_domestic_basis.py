@@ -677,7 +677,8 @@ def _validate_formal_current(
                          "futures_price", "basis"]).to_pandas(date_as_object=True).astype(object)
     # Pandas string columns can represent Arrow nulls as NaN. Restore actual
     # None values before the existing scalar null-semantics checks.
-    rows = [dict(zip(projected.columns, values)) for values in
+    columns = projected.columns.tolist()
+    rows = [dict(zip(columns, values)) for values in
             projected.where(projected.notna(), None).to_numpy(dtype=object).tolist()]
     legacy_key = (
         "business_date", "consumer_product", "location", "quote_type", "delivery_month", "futures_contract",
