@@ -21,34 +21,54 @@ class TushareReceipts:
         self.token, self.endpoint, self.pause = token, endpoint, pause
         self.session = requests.Session()
 
+    def request(self, api: str, params: dict, fields: str) -> tuple[dict, int]:
+        """Bounded retries; never put provider response messages in logs."""
+        body = dict(api_name=api, token=self.token, fields=fields, params=params)
+        for attempt in range(3):
+            time.sleep(self.pause if attempt == 0 else 2 ** attempt)
+            try:
+                response = self.session.post(self.endpoint, json=body, timeout=(10, 40))
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict) or payload.get("code") != 0:
+                    raise ReceiptError("仓单数据接口拒绝请求")
+                return payload, response.status_code
+            except (requests.RequestException, ValueError):
+                if attempt == 2:
+                    raise ReceiptError("仓单数据接口请求失败，保留上次快照") from None
+        raise ReceiptError("仓单数据接口请求失败")
+
+    def calendar(self, start: dt.date, end: dt.date) -> list[dict]:
+        payload, _ = self.request("trade_cal", dict(exchange="DCE", start_date=start.strftime("%Y%m%d"),
+                              end_date=end.strftime("%Y%m%d")), "exchange,cal_date,is_open")
+        data = payload.get("data") or {}
+        fields = data.get("fields") or []
+        if set(fields) != {"exchange", "cal_date", "is_open"}:
+            raise ReceiptError("交易日历响应无效")
+        rows = [dict(zip(fields, row)) for row in data.get("items", [])]
+        expected = {(start + dt.timedelta(days=i)).strftime("%Y%m%d") for i in range((end-start).days + 1)}
+        if (len(rows) >= 1000 or len(rows) != len(expected) or {r.get("cal_date") for r in rows} != expected
+                or any(r.get("exchange") != "DCE" or r.get("is_open") not in (0, 1) for r in rows)):
+            raise ReceiptError("交易日历未完整覆盖更新区间")
+        return rows
+
     def query(self, symbol: str, start: dt.date, end: dt.date) -> dict:
         if symbol not in PRODUCTS or start > end:
             raise ReceiptError("仓单查询范围无效")
-        body = dict(api_name="fut_wsr", token=self.token, fields=FIELDS,
-                    params=dict(symbol=symbol, exchange=PRODUCTS[symbol][1],
-                                start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d")))
-        time.sleep(self.pause)
-        try:
-            response = self.session.post(self.endpoint, json=body, timeout=(10, 40))
-            response.raise_for_status()
-            payload = response.json()
-        except (requests.RequestException, ValueError):
-            raise ReceiptError("仓单接口请求失败，未写入新快照") from None
-        if payload.get("code") != 0:
-            # Do not echo provider messages: gateways may include credentials there.
-            raise ReceiptError(f"仓单接口拒绝请求（API code={payload.get('code')}）")
+        params = dict(symbol=symbol, exchange=PRODUCTS[symbol][1], start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d"))
+        payload, http_status = self.request("fut_wsr", params, FIELDS)
         data = payload.get("data")
         if not isinstance(data, dict) or not isinstance(data.get("fields"), list) or not isinstance(data.get("items"), list):
             raise ReceiptError("仓单响应结构无效")
-        if not set(FIELDS.split(",")).issubset(data["fields"]) or len(set(data["fields"])) != len(data["fields"]):
+        if set(FIELDS.split(",")) != set(data["fields"]) or len(set(data["fields"])) != len(data["fields"]):
             raise ReceiptError("仓单响应缺少完整源维度")
         if any(len(row) != len(data["fields"]) for row in data["items"]):
             raise ReceiptError("仓单响应字段长度不一致")
         rows = [dict(zip(data["fields"], row)) for row in data["items"]]
         if any(row["symbol"] != symbol or not start.strftime("%Y%m%d") <= str(row["trade_date"]) <= end.strftime("%Y%m%d") for row in rows):
             raise ReceiptError("仓单响应超出品种或日期范围")
-        return dict(api_name="fut_wsr", endpoint=self.endpoint, params=body["params"], fields=data["fields"], rows=rows,
-                    captured_at=dt.datetime.now(dt.timezone.utc).isoformat(), http_status=response.status_code)
+        return dict(api_name="fut_wsr", endpoint=self.endpoint, params=params, fields=data["fields"], rows=rows,
+                    captured_at=dt.datetime.now(dt.timezone.utc).isoformat(), http_status=http_status)
 
 
 def acquire_window(client: TushareReceipts, symbol: str, start: dt.date, end: dt.date,

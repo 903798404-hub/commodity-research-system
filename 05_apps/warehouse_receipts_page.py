@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -21,7 +22,7 @@ def default_receipt_root(project_root: Path) -> Path:
 def cached_snapshot(root: str, pointer_sha: str) -> tuple[pd.DataFrame, dict]:
     if sha256(Path(root) / "current.json") != pointer_sha:
         raise ReceiptError("仓单指针在读取前发生变化")
-    return load_snapshot(Path(root))
+    return load_snapshot(Path(root), full_validation=False)
 
 
 @st.cache_data(show_spinner=False)
@@ -58,7 +59,17 @@ def render_warehouse_receipts(project_root: Path) -> None:
         return
     field = "vol" if metric == "仓单总量" else "vol_chg"
     columns = st.columns(2)
-    calendar = trading_calendar()
+    calendar = (pd.DatetimeIndex(pd.to_datetime(manifest["trading_dates"], format="%Y-%m-%d", errors="raise"))
+                if manifest.get("trading_dates") else trading_calendar())
+    status_path = root / "update_status.json"
+    if status_path.is_file():
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8", errors="strict"))
+            checked = pd.Timestamp(status["checked_at"]).tz_convert("Asia/Shanghai")
+            label = {"UPDATED": "已更新", "NO_CHANGE": "无新增数据", "WAITING_FOR_SOURCE": "等待源数据", "FAILED": "更新失败，保留上次数据"}.get(status["status"], "已检查")
+            st.caption(f"每日17:30更新 · 最近检查 {checked:%Y-%m-%d %H:%M} · {label}")
+        except (OSError, ValueError, KeyError, TypeError):
+            st.caption("最近更新状态暂不可读取；当前图表仍使用已校验快照。")
     for index, symbol in enumerate(selected):
         with columns[index % 2]:
             with st.container(border=True):
@@ -90,14 +101,18 @@ def render_warehouse_receipts(project_root: Path) -> None:
                         st.plotly_chart(figure, width="stretch", key=f"warehouse_chart_{symbol}_{unit}")
                     except ReceiptError as exc:
                         st.error(str(exc))
-                with st.expander("查看日度明细"):
-                    detail = product.loc[product.date.dt.year.isin(years)].sort_values("date", ascending=False)
-                    st.dataframe(detail.head(200), hide_index=True, width="stretch")
-                    st.download_button("下载完整日度数据", detail.to_csv(index=False).encode("utf-8-sig"),
-                        file_name=f"warehouse_receipts_{symbol}.csv", mime="text/csv", key=f"warehouse_download_{symbol}")
-    with st.expander("仓单数据口径"):
-        st.write("来源：Tushare兼容接口 fut_wsr，仓库/厂库日报。原始年度、等级、品牌、地区及折算标识均保留；总计与明细不重复累加。这里展示仓单，不能直接等同于产业库存。")
-        st.write("每日增减直接汇总源 vol_chg，昨日量缺失不反推；任一分项缺失或数量为负时对应总量留空。单位切换单独绘图，不推定吨数换算。")
-        st.write(f"本次请求 {manifest['requested_start']} 至 {manifest['requested_end']}；实际覆盖如下。")
-        st.dataframe(pd.DataFrame(manifest["coverage"]).T, width="stretch")
-        st.caption(f"快照 {manifest['snapshot_id'][:12]} · 当前为人工获取历史快照，未开启自动更新。")
+                panel = st.expander("查看日度明细", key=f"warehouse_detail_{symbol}", on_change="rerun")
+                if panel.open:
+                    with panel:
+                        detail = product.loc[product.date.dt.year.isin(years)].sort_values("date", ascending=False)
+                        st.dataframe(detail.head(200), hide_index=True, width="stretch")
+                        st.download_button("下载完整日度数据", detail.to_csv(index=False).encode("utf-8-sig"),
+                            file_name=f"warehouse_receipts_{symbol}.csv", mime="text/csv", key=f"warehouse_download_{symbol}", on_click="ignore")
+    scope = st.expander("仓单数据口径", key="warehouse_scope", on_change="rerun")
+    if scope.open:
+        with scope:
+            st.write("来源：Tushare兼容接口 fut_wsr，仓库/厂库日报。原始年度、等级、品牌、地区及折算标识均保留；总计与明细不重复累加。这里展示仓单，不能直接等同于产业库存。")
+            st.write("每日增减直接汇总源 vol_chg，昨日量缺失不反推；任一分项缺失或数量为负时对应总量留空。单位切换单独绘图，不推定吨数换算。")
+            st.write(f"本次请求 {manifest['requested_start']} 至 {manifest['requested_end']}；实际覆盖如下。")
+            st.dataframe(pd.DataFrame(manifest["coverage"]).T, width="stretch")
+            st.caption(f"快照 {manifest['snapshot_id'][:12]} · 更新与页面访问分开执行，打开网页不触发外网取数。")
