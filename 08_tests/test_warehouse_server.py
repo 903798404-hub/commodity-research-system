@@ -79,5 +79,8 @@ def test_canonical_origin_survives_the_readonly_ssh_transport_rewrite(tmp_path):
     git("config",f"url.{rewritten}.insteadOf",canonical)
     assert git("remote","get-url","origin")==rewritten
     assert git("config","--get","remote.origin.url")==canonical
-    source=(ROOT/"09_deploy/warehouse_server/run.py").read_text(encoding="utf-8")
-    assert 'git("config", "--get", "remote.origin.url")' in source
+    host=host_module()
+    host.verify_source_origin(repository)
+    git("remote","set-url","origin","https://github.com/example/unapproved.git")
+    with pytest.raises(ValueError,match="source origin differs"):
+        host.verify_source_origin(repository)
