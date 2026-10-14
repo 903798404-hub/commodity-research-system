@@ -103,7 +103,7 @@ def test_snapshot_identity_and_recalculation(tmp_path):
         load_snapshot(tmp_path)
 
 
-def test_seasonality_missing_days_leap_alignment_and_observation_mean():
+def test_seasonality_missing_days_leap_alignment_and_year_lines_only():
     daily = aggregate_daily(normalize_rows([
         row(date="20240301", vol=20), row(date="20250301", vol=40),
         row(date="20260302", vol=0), row(date="20260304", vol=60),
@@ -115,9 +115,8 @@ def test_seasonality_missing_days_leap_alignment_and_observation_mean():
     figure = build_figure(daily, field="vol", focus_year=2026, years=[2024, 2025, 2026], title="测试", unit="手", trading_calendar=calendar)
     assert figure.data[-1].line.color == "#C1493F" and figure.data[-1].line.width == 3.4
     assert all(trace.connectgaps is False for trace in figure.data)
-    mean = next(trace for trace in figure.data if "均值" in trace.name)
-    idx = list(mean.x).index(pd.Timestamp("2000-03-01"))
-    assert mean.y[idx] == 30 and mean.customdata[idx] == 2
+    assert len(figure.data) == 3
+    assert all("均值" not in trace.name for trace in figure.data)
     for trace in figure.data[:2]:
         assert pd.Timestamp("2000-03-01") in trace.x
 
@@ -140,6 +139,7 @@ render_warehouse_receipts(Path({str(ROOT)!r}))
     app = AppTest.from_string(script, default_timeout=20).run()
     assert not app.exception
     assert len(app.get("plotly_chart")) == 1
+    assert not app.checkbox
     assert len(app.dataframe) == 2
     assert app.metric[0].value == "0"
     app.selectbox[1].set_value("每日增减").run()

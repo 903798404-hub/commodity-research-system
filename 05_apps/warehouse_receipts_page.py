@@ -52,8 +52,7 @@ def render_warehouse_receipts(project_root: Path) -> None:
     with controls[2]:
         metric = st.selectbox("仓单指标", ["仓单总量", "每日增减"], key="warehouse_metric")
     years = st.multiselect("显示年份", available, default=[y for y in available if y >= 2022], key="warehouse_years")
-    show_mean = st.checkbox("显示此前5年同月同日均值", value=True, key="warehouse_mean")
-    st.caption("自然年按月日对齐；红线为对比年，历史年份固定配色。按源单位分别绘图，缺测断线，未来不延长。均值仅使用对比年前5年同月同日实测值，悬浮显示有效样本数。")
+    st.caption("自然年按月日对齐；红线为对比年，历史年份固定配色。按源单位分别绘图，缺测断线，未来不延长。")
     if not selected or not years:
         st.info("请选择品种和显示年份。")
         return
@@ -87,7 +86,7 @@ def render_warehouse_receipts(project_root: Path) -> None:
                         continue
                     try:
                         figure = build_figure(block, field=field, focus_year=focus, years=years,
-                            title=f"{PRODUCTS[symbol][0]} · {metric}", unit=unit, trading_calendar=calendar, show_mean=show_mean)
+                            title=f"{PRODUCTS[symbol][0]} · {metric}", unit=unit, trading_calendar=calendar)
                         st.plotly_chart(figure, width="stretch", key=f"warehouse_chart_{symbol}_{unit}")
                     except ReceiptError as exc:
                         st.error(str(exc))
