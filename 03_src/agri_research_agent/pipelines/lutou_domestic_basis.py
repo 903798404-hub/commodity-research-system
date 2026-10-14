@@ -14,6 +14,7 @@ from typing import Callable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from agri_research_agent.data_sources.lutou.domestic_basis import (
@@ -670,7 +671,14 @@ def _validate_formal_current(
         raise DomesticBasisPipelineError("Formal Domestic Basis schema is invalid")
     if _duplicate_count(table, FORMAL_STABLE_KEY):
         raise DomesticBasisPipelineError("Formal Domestic Basis stable-key collision")
-    rows = table.to_pylist()
+    projected = table.select(["business_date", "date", "commodity", "consumer_product",
+                         "region", "location", "quote_type", "delivery_month",
+                         "futures_contract", "segment", "series_id", "cash_price",
+                         "futures_price", "basis"]).to_pandas(date_as_object=True).astype(object)
+    # Pandas string columns can represent Arrow nulls as NaN. Restore actual
+    # None values before the existing scalar null-semantics checks.
+    rows = [dict(zip(projected.columns, values)) for values in
+            projected.where(projected.notna(), None).to_numpy(dtype=object).tolist()]
     legacy_key = (
         "business_date", "consumer_product", "location", "quote_type", "delivery_month", "futures_contract",
     )
@@ -1669,9 +1677,24 @@ def _source_group_sha(rows: Sequence[Mapping[str, object]]) -> str:
 
 def _business_sha(table: pa.Table) -> str:
     fields = [x for x in CANONICAL_SCHEMA.names if x not in {"captured_at", "snapshot_identity", "query_identity"}]
-    rows = []
-    for row in table.select(fields).to_pylist():
-        rows.append({k: (v.isoformat() if isinstance(v, date) else str(v) if isinstance(v, Decimal) else v) for k, v in row.items()})
+    selected = table.select(fields)
+    columns = []
+    # Convert typed columns once, retaining the original JSON bytes and row order.
+    # Checking every scalar's type repeatedly dominates cold Current validation.
+    for field in selected.schema:
+        column = selected[field.name]
+        if pa.types.is_date(field.type) or pa.types.is_decimal(field.type):
+            # Arrow's ISO dates and fixed-scale decimals match the original
+            # Python date.isoformat()/Decimal string representation exactly.
+            values = pc.cast(column, pa.string()).to_numpy(zero_copy_only=False).tolist()
+        elif pa.types.is_timestamp(field.type):
+            values = column.to_pylist()
+            values = [value.isoformat() if value is not None else None for value in values]
+        else:
+            values = (column.to_numpy(zero_copy_only=False).tolist()
+                      if pa.types.is_string(field.type) else column.to_pylist())
+        columns.append(values)
+    rows = [dict(zip(fields, values)) for values in zip(*columns)]
     return hashlib.sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

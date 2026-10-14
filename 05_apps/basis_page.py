@@ -936,25 +936,30 @@ def load_basis_page_data(
     )
 
 
+def _optional_sugar_snapshot(configured: Path):
+    sugar_snapshot = None
+    sugar_error = None
+    if (configured / "current.json").exists():
+        try:
+            sugar_snapshot = load_sugar_page_data(configured)
+        except (SugarHistoryError, OSError, ValueError, KeyError):
+            sugar_error = "柳州历史快照校验失败，白糖图表暂停显示。"
+    return sugar_snapshot, sugar_error
+
+
 def render_basis_page(public_current_root: Path, sugar_history_root: Path | None = None,
                       *, default_tab: str | None = None) -> None:
     st.markdown(
         "<h1 style='text-align:center;'>国内基差研究</h1>",
         unsafe_allow_html=True,
     )
-    sugar_snapshot = None
-    sugar_error = None
     configured = sugar_history_root or Path(os.environ.get("DOMESTIC_SUGAR_HISTORY_ROOT", str(PROJECT_ROOT / "01_data" / "processed" / "domestic_sugar_history")))
-    if (configured / "current.json").exists():
-        try:
-            sugar_snapshot = load_sugar_page_data(configured)
-        except (SugarHistoryError, OSError, ValueError, KeyError):
-            sugar_error = "柳州历史快照校验失败，白糖图表暂停显示。"
     try:
         data, source_identity = load_basis_page_data(public_current_root)
         data = filter_display_data(data)
     except (PublicBasisCurrentError, OSError, ValueError, KeyError):
         st.warning("Formal Public Basis Current 暂不可用。")
+        sugar_snapshot, sugar_error = _optional_sugar_snapshot(configured)
         if sugar_snapshot is not None:
             render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
                                  missing_trading_days=missing_trading_days_between)
@@ -1012,6 +1017,7 @@ def render_basis_page(public_current_root: Path, sugar_history_root: Path | None
             _render_wholesale_spread_tab(data, years)
     if sugar_tab.open:
         with sugar_tab:
+            sugar_snapshot, sugar_error = _optional_sugar_snapshot(configured)
             if sugar_snapshot is not None:
                 render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
                                      missing_trading_days=missing_trading_days_between)

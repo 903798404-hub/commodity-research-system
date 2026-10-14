@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from agri_research_agent.data_sources.nutstore_basis import (
@@ -94,10 +95,16 @@ def validate_nutstore_current(root: Path, directory: Path, manifest: dict, table
             _business_sha(baseline) == manifest.get("baseline_business_sha256"),
             "Nutstore preserved baseline schema or business identity differs")
     cutoff = date.fromisoformat(manifest["append_after"])
-    rows = table.to_pylist()
-    preserved = pa.Table.from_pylist(
-        [row for row in rows if row["business_date"] <= cutoff], schema=FORMAL_CURRENT_SCHEMA,
-    )
+    require(table["business_date"].null_count == 0, "Nutstore business date is missing")
+    preserved = table.filter(pc.less_equal(table["business_date"], pa.scalar(cutoff)))
+    # Preservation compares every original column. Scalar validation below only
+    # materializes the fields it reads, avoiding a full Arrow/Python round trip.
+    validation_fields = sorted({*FORMAL_STABLE_KEY, "date", "commodity", "region",
+        "segment", "provider", "currency", "unit", "futures_price", "location",
+        "consumer_product", "basis", "value", "cash_price", "snapshot_identity"})
+    projected = table.select(validation_fields).to_pandas(date_as_object=True).astype(object)
+    rows = [dict(zip(projected.columns, values)) for values in
+            projected.where(projected.notna(), None).to_numpy(dtype=object).tolist()]
     ordering = [(field, "ascending") for field in FORMAL_STABLE_KEY]
     require(preserved.sort_by(ordering).equals(baseline.sort_by(ordering)),
             "Nutstore candidate changed or dropped previous formal observations")
@@ -105,12 +112,13 @@ def validate_nutstore_current(root: Path, directory: Path, manifest: dict, table
     require(bool(additions) and all(row["segment"] == "LIVE_NUTSTORE" for row in additions),
             "Nutstore candidate has no verified extension")
     seed = load_historical_basis_seed(root)
-    historical = pa.Table.from_pylist(
-        [row for row in rows if row["segment"] == "SEALED_HISTORICAL"], schema=FORMAL_CURRENT_SCHEMA,
-    )
+    historical = table.filter(pc.equal(table["segment"], "SEALED_HISTORICAL"))
     require(seed is not None and historical.sort_by(ordering).equals(seed.observations.sort_by(ordering)),
             "Nutstore Current changed sealed historical observations")
-    require(manifest.get("historical_seed_business_sha256") == _business_sha(historical),
+    # The seed loader already verified these exact bytes against its business
+    # hash, and full-column equality above proved historical == seed. Reuse
+    # that verified identity rather than serializing the same 16,331 rows again.
+    require(manifest.get("historical_seed_business_sha256") == seed.manifest.get("business_content_sha256"),
             "Nutstore historical business identity differs")
     require(manifest.get("source") == "preserved_current_plus_nutstore" and
             manifest.get("scope") == "formal-domestic-basis" and

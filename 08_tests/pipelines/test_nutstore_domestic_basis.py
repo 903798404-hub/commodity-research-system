@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -71,7 +72,7 @@ def baseline(monkeypatch, tmp_path):
     (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (baseline_root / "historical-seeds").mkdir()
     (baseline_root / "historical-seed.json").write_text("{}", encoding="utf-8")
-    seed = SimpleNamespace(observations=hist)
+    seed = SimpleNamespace(observations=hist, manifest={"business_content_sha256": existing._business_sha(hist)})
     current = SimpleNamespace(release_id="original", directory=directory,
                               observations=table, manifest=manifest)
     original_loader = existing.load_domestic_basis_current
@@ -179,3 +180,61 @@ def test_failure_does_not_create_candidate_or_modify_baseline(monkeypatch, tmp_p
         pipeline.build_nutstore_basis_candidate(baseline_root=original, output_root=output, source=path)
     assert not output.exists()
     assert (current.directory / "manifest.json").read_bytes() == before
+
+
+def test_business_hash_matches_original_bytes_for_nullable_chunked_and_reordered_rows(monkeypatch, tmp_path):
+    _, current = baseline(monkeypatch, tmp_path)
+    fields = [name for name in existing.CANONICAL_SCHEMA.names
+              if name not in {"captured_at", "snapshot_identity", "query_identity"}]
+
+    def original_hash(table):
+        rows = [{key: value.isoformat() if isinstance(value, date) else
+                 str(value) if isinstance(value, Decimal) else value
+                 for key, value in row.items()}
+                for row in table.select(fields).to_pylist()]
+        return hashlib.sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True,
+                                        separators=(",", ":")).encode()).hexdigest()
+
+    tables = [current.observations, current.observations.select(existing.CANONICAL_SCHEMA.names)]
+    for table in tables:
+        variants = [table, table.slice(0, 0), table.take([2, 0, 1]),
+                    pa.concat_tables([table.slice(0, 1), table.slice(1)])]
+        rows = table.to_pylist()
+        rows[0]["value"] = Decimal("-0.0001")
+        rows[1]["value"] = Decimal("0.0000")
+        rows[2]["value"] = None
+        rows[2]["business_date"] = None
+        variants.append(pa.Table.from_pylist(rows, schema=table.schema))
+        for variant in variants:
+            assert existing._business_sha(variant) == original_hash(variant)
+
+
+def test_validation_scalar_projection_keeps_dates_decimals_nulls_and_zero(monkeypatch, tmp_path):
+    _, current = baseline(monkeypatch, tmp_path)
+    fields = sorted({*existing.FORMAL_STABLE_KEY, "date", "commodity", "region",
+        "segment", "provider", "currency", "unit", "futures_price", "location",
+        "consumer_product", "basis", "value", "cash_price", "snapshot_identity"})
+    rows = current.observations.to_pylist()
+    rows[0]["basis"] = Decimal("0.0000")
+    rows[1]["value"] = Decimal("-0.0001")
+    table = pa.Table.from_pylist(rows, schema=existing.FORMAL_CURRENT_SCHEMA).select(fields)
+    projected = table.to_pandas(date_as_object=True).astype(object)
+    actual = [dict(zip(projected.columns, values)) for values in
+              projected.where(projected.notna(), None).to_numpy(dtype=object).tolist()]
+    assert actual == table.to_pylist()
+
+
+@pytest.mark.parametrize("field,value", [("source_locator", "changed provenance"),
+                                        ("snapshot_identity", "changed capture"),
+                                        ("basis", Decimal("0.0000"))])
+def test_columnar_preservation_still_checks_every_old_field(monkeypatch, tmp_path, field, value):
+    original, _ = baseline(monkeypatch, tmp_path)
+    path = workbook(monkeypatch, tmp_path, [row(品种=product) for product in source.PRODUCTS])
+    output = tmp_path / "candidate/lutou-domestic-basis"
+    pipeline.build_nutstore_basis_candidate(baseline_root=original, output_root=output, source=path)
+    current = existing.load_domestic_basis_current(output)
+    rows = current.observations.to_pylist()
+    rows[0][field] = value
+    changed = pa.Table.from_pylist(rows, schema=existing.FORMAL_CURRENT_SCHEMA)
+    with pytest.raises(existing.DomesticBasisPipelineError, match="changed or dropped"):
+        pipeline.validate_nutstore_current(output, current.directory, current.manifest, changed)
