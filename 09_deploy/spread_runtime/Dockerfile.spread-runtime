@@ -132,6 +132,9 @@ COPY ["04_scripts/positions/update_positions.py", "/app/04_scripts/positions/"]
 COPY ["04_scripts/sugar_positions/update_sugar_positions.py", "/app/04_scripts/sugar_positions/"]
 COPY ["05_apps/oilseed_positions_page.py", "05_apps/sugar_positions_page.py", "/app/05_apps/"]
 
+COPY ["03_src/agri_research_agent/warehouse_receipts/__init__.py", "03_src/agri_research_agent/warehouse_receipts/model.py", "03_src/agri_research_agent/warehouse_receipts/charts.py", "/app/03_src/agri_research_agent/warehouse_receipts/"]
+COPY ["05_apps/warehouse_receipts_page.py", "/app/05_apps/"]
+
 USER 65532:65532
 EXPOSE 8501
 CMD ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
