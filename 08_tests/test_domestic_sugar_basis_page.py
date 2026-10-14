@@ -84,6 +84,18 @@ def test_actual_basis_page_adds_sugar_tab_without_changing_existing_oil_rows(pre
     assert not app.exception
     assert list(app.dataframe[0].value["品种"])==["豆粕"]
     assert any("5,330"==m.value for m in app.metric)
+    # Real browser remounts use the declared default, even when the server kept
+    # the hidden widget's state. Keep both frontend selection and server value.
+    for selected in ([2023,2026],[]):
+        app.multiselect[0].set_value(selected).run()
+        assert not app.exception
+        app.session_state["basis_research_tab"] = "基差"
+        app.run()
+        app.session_state["basis_research_tab"] = "白糖（柳州）"
+        app.run()
+        assert not app.exception
+        assert app.multiselect[0].value == selected
+        assert [app.multiselect[0].options[i] for i in app.multiselect[0].proto.default] == [str(year) for year in selected]
 
 
 def test_invalid_sugar_does_not_break_existing_oil_current(prepared_root,monkeypatch):

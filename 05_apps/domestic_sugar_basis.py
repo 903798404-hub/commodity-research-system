@@ -158,7 +158,9 @@ def render_sugar_history(snapshot: SugarHistorySnapshot, *, year_colors: dict[in
     st.caption(f"现货报价 {latest.business_date:%Y-%m-%d}｜同日基差 {common_label}｜"
                "基差 = 柳州贸易商报价平均值 − SR 原始合约收盘价；不同日不配对，缺失不填补。")
     years = sorted(observed.business_date.dt.year.unique().tolist())
-    selected = st.multiselect("白糖对比年份", years, default=years[-3:], key="sugar_history_years")
+    retained_years = st.session_state.get("sugar_history_years", years[-3:])
+    selected = st.multiselect("白糖对比年份", years,
+        default=[year for year in retained_years if year in years], key="sugar_history_years")
     st.caption("现货和主力按自然年；固定 01/05/09 合约按上年下一月至交割月排列。所有曲线使用完整日数据。")
     if not selected:
         st.info("请选择至少一个对比年份。")
