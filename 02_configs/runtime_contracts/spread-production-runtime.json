@@ -1846,6 +1846,22 @@
     {
       "path": "09_deploy/spread_runtime/nginx.conf",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/warehouse_receipts/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/warehouse_receipts/model.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/warehouse_receipts/charts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/warehouse_receipts_page.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [

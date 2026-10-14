@@ -77,6 +77,7 @@ from brazil_soy_page import render_brazil_soy_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
 from weather_research_page import render_weather_research_page
 from research_overview_page import render_research_overview
+from warehouse_receipts_page import render_warehouse_receipts
 
 
 PAGE_TITLE = "油脂油料价差动态看板"
@@ -330,6 +331,10 @@ def render_spread_grid(
 
 def render_spread_dashboard() -> None:
     st.header("价差看板")
+    view = st.segmented_control("研究视图", ["价差", "仓单季节性"], default="价差", key="spread_research_view")
+    if view == "仓单季节性":
+        render_warehouse_receipts(PROJECT_ROOT)
+        return
     board = st.radio("板块", BOARD_OPTIONS, horizontal=True, label_visibility="collapsed")
     with st.expander("展示设置"):
         method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
