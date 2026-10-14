@@ -76,7 +76,7 @@ def verify_config(path):
         return subprocess.check_output(["git", "-C", str(source), *args], text=True, timeout=30).strip()
     require(git("rev-parse", "HEAD") == config["commit"] and git("rev-parse", "HEAD^{tree}") == config["tree"]
             and git("status", "--porcelain") == "", "approved source identity differs")
-    require(git("remote", "get-url", "origin") == "https://github.com/903798404-hub/commodity-research-system.git", "source origin differs")
+    require(git("config", "--get", "remote.origin.url") == "https://github.com/903798404-hub/commodity-research-system.git", "source origin differs")
     require(Path(__file__).resolve() == source / "09_deploy/warehouse_server/run.py", "controller source binding differs")
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", config["image_id"]), "image ID invalid")
     image = json.loads(subprocess.check_output(["docker", "image", "inspect", config["image_id"]], timeout=30))[0]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -65,3 +66,18 @@ def test_conditional_retries_only_skip_fully_current_same_day_checks():
     assert host.retry_needed({**status,"pending_products":["SR"]},now)
     assert host.retry_needed({**status,"checked_at":(now-dt.timedelta(days=1)).isoformat()},now)
     assert host.retry_needed({**status,"checked_at":(now+dt.timedelta(hours=1)).isoformat()},now)
+
+
+def test_canonical_origin_survives_the_readonly_ssh_transport_rewrite(tmp_path):
+    repository=tmp_path/"approved-source"
+    canonical="https://github.com/903798404-hub/commodity-research-system.git"
+    rewritten="git@github.com:903798404-hub/commodity-research-system.git"
+    subprocess.run(["git","init",str(repository)],check=True,capture_output=True)
+    def git(*args):
+        return subprocess.check_output(["git","-C",str(repository),*args],text=True).strip()
+    git("remote","add","origin",canonical)
+    git("config",f"url.{rewritten}.insteadOf",canonical)
+    assert git("remote","get-url","origin")==rewritten
+    assert git("config","--get","remote.origin.url")==canonical
+    source=(ROOT/"09_deploy/warehouse_server/run.py").read_text(encoding="utf-8")
+    assert 'git("config", "--get", "remote.origin.url")' in source
