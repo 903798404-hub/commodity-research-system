@@ -47,12 +47,17 @@ def normalize_rows(rows: list[dict]) -> pd.DataFrame:
             raise ReceiptError("仓单数值无效")
         # Preserve provider mistakes in raw evidence. Negative stock quantities
         # invalidate the affected daily aggregate instead of fabricating a value.
+    for name in ("year", "pd"):
+        data[name] = data[name].map(lambda value: format(float(value), ".15g") if pd.notna(value) else None)
     # The same warehouse can carry several production years, grades and brands.
     # Conflicts on the full source key fail; only byte-equivalent observations deduplicate.
     data = data.drop_duplicates(subset=FIELDS.split(","))
     if data.duplicated(DIMENSIONS).any():
         raise ReceiptError("仓单完整业务键存在冲突记录")
-    return data.sort_values(["symbol", "date", "warehouse"]).reset_index(drop=True)
+    # API row order within a warehouse can change between identical requests.
+    # Stable full-key ordering prevents false revisions and redundant snapshots.
+    order = data[DIMENSIONS].astype("string").fillna("").sort_values(DIMENSIONS, kind="stable").index
+    return data.loc[order].reset_index(drop=True)
 
 
 def aggregate_daily(raw: pd.DataFrame) -> pd.DataFrame:
@@ -89,6 +94,8 @@ def aggregate_daily(raw: pd.DataFrame) -> pd.DataFrame:
                             aggregation=basis, source_rows=len(block), component_rows=len(chosen),
                             source="Tushare-compatible fut_wsr"))
     result = pd.DataFrame(results)
+    for name in ("vol", "pre_vol", "vol_chg"):
+        result[name] = pd.to_numeric(result[name], errors="raise").astype(float)
     # A historical unit switch is a separate series, never spliced into one curve.
     return result.sort_values(["symbol", "unit", "date"]).reset_index(drop=True)
 
@@ -118,7 +125,12 @@ def write_snapshot(root: Path, raw: pd.DataFrame, daily: pd.DataFrame, evidence:
     return manifest
 
 
-def load_snapshot(root: Path) -> tuple[pd.DataFrame, dict]:
+def load_snapshot(root: Path, *, full_validation: bool = True) -> tuple[pd.DataFrame, dict]:
+    """Publishers replay raw observations; readers verify the compact serving file.
+
+    The read-only daily table remains bound to the same immutable manifest and
+    pointer. Raw replay is performed before publication, rather than per page open.
+    """
     try:
         pointer_bytes = (root / "current.json").read_bytes()
         pointer = json.loads(pointer_bytes.decode("utf-8", errors="strict"))
@@ -135,22 +147,53 @@ def load_snapshot(root: Path) -> tuple[pd.DataFrame, dict]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8", errors="strict"))
         if manifest["schema_version"] != SCHEMA or manifest["snapshot_id"] != sid:
             raise ReceiptError("仓单快照身份不匹配")
-        for name in ("raw", "daily"):
+        for name in (("raw", "daily") if full_validation else ("daily",)):
             path = folder / f"{name}.csv"
             if path.is_symlink() or sha256(path) != manifest[f"{name}_sha256"]:
                 raise ReceiptError("仓单数据身份不匹配")
-        raw = pd.read_csv(folder / "raw.csv", dtype={key: str for key in DIMENSIONS}, keep_default_na=False,
-                          na_values=[""])
-        raw = normalize_rows(raw[FIELDS.split(",")].to_dict("records"))
-        daily = aggregate_daily(raw)
         stored = pd.read_csv(folder / "daily.csv", parse_dates=["date"])
-        pd.testing.assert_frame_equal(daily, stored, check_dtype=False, check_exact=False, rtol=0, atol=1e-8)
-        if len(raw) != manifest["raw_rows"] or len(daily) != manifest["daily_rows"]:
+        validate_daily(stored)
+        if full_validation:
+            raw_bytes = (folder / "raw.csv").read_bytes()
+            daily_bytes = (folder / "daily.csv").read_bytes()
+            if hashlib.sha256(raw_bytes + daily_bytes).hexdigest() != sid:
+                raise ReceiptError("仓单快照内容身份不匹配")
+            raw = pd.read_csv(folder / "raw.csv", dtype={key: str for key in DIMENSIONS}, keep_default_na=False,
+                              na_values=[""])
+            raw = normalize_rows(raw[FIELDS.split(",")].to_dict("records"))
+            daily = aggregate_daily(raw)
+            pd.testing.assert_frame_equal(daily, stored, check_dtype=False, check_exact=False, rtol=0, atol=1e-8)
+            if len(raw) != manifest["raw_rows"]:
+                raise ReceiptError("仓单原始条数与清单不一致")
+        if len(stored) != manifest["daily_rows"]:
             raise ReceiptError("仓单条数与清单不一致")
         if pointer_bytes != (root / "current.json").read_bytes():
             raise ReceiptError("仓单指针在读取期间变化")
-        return daily, manifest
+        return stored, manifest
     except ReceiptError:
         raise
     except (OSError, ValueError, KeyError, TypeError, AssertionError) as exc:
         raise ReceiptError("仓单快照缺失或校验失败") from exc
+
+
+def validate_daily(data: pd.DataFrame) -> None:
+    required = {"symbol", "date", "unit", "vol", "pre_vol", "vol_chg", "status", "aggregation",
+                "source_rows", "component_rows", "source"}
+    if set(data.columns) != required or data.empty:
+        raise ReceiptError("仓单日度表结构无效")
+    if (data.date.isna().any() or data.duplicated(["symbol", "date"]).any()
+            or not data.symbol.isin(PRODUCTS).all() or data.unit.isna().any()
+            or data.unit.astype(str).str.strip().eq("").any()
+            or not data.status.isin(["actual", "missing_component", "invalid_component"]).all()):
+        raise ReceiptError("仓单日度键或状态无效")
+    for name in ("vol", "pre_vol", "vol_chg"):
+        values = pd.to_numeric(data[name], errors="raise")
+        if not np.isfinite(values.dropna()).all() or (name != "vol_chg" and values.dropna().lt(0).any()):
+            raise ReceiptError("仓单日度数值无效")
+    if not data.status.eq("actual").equals(data.vol.notna()):
+        raise ReceiptError("仓单日度状态与缺失不一致")
+    if not data.aggregation.isin(["source_total", "warehouse_sum"]).all():
+        raise ReceiptError("仓单汇总口径无效")
+    if (data.source_rows.le(0).any() or data.component_rows.le(0).any()
+            or data.component_rows.gt(data.source_rows).any()):
+        raise ReceiptError("仓单分项条数无效")

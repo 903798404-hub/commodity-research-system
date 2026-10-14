@@ -140,7 +140,10 @@ render_warehouse_receipts(Path({str(ROOT)!r}))
     assert not app.exception
     assert len(app.get("plotly_chart")) == 1
     assert not app.checkbox
-    assert len(app.dataframe) == 2
+    assert len(app.dataframe) == 0
+    app.session_state["warehouse_detail_M"] = True
+    app.run()
+    assert len(app.dataframe) == 1
     assert app.metric[0].value == "0"
     app.selectbox[1].set_value("每日增减").run()
     assert not app.exception
@@ -161,3 +164,16 @@ render_spread_dashboard()
     app = AppTest.from_string(script, default_timeout=20).run()
     assert not app.exception and not app.error
     assert "尚未接入" in app.info[0].value
+
+
+def test_compact_reader_avoids_raw_replay_but_checks_serving_identity(tmp_path, monkeypatch):
+    from agri_research_agent.warehouse_receipts import model
+    raw = normalize_rows([row()])
+    manifest = write_snapshot(tmp_path, raw, aggregate_daily(raw), {})
+    monkeypatch.setattr(model, "normalize_rows", lambda rows: pytest.fail("page must not replay warehouse history"))
+    daily, _ = load_snapshot(tmp_path, full_validation=False)
+    assert daily.vol.iloc[0] == 100
+    path = tmp_path / "snapshots" / manifest["snapshot_id"] / "daily.csv"
+    path.write_bytes(path.read_bytes() + b"tamper")
+    with pytest.raises(ReceiptError, match="身份"):
+        load_snapshot(tmp_path, full_validation=False)
