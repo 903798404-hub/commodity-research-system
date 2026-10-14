@@ -37,7 +37,10 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
     baseline = pd.read_csv(old_folder / "raw.csv", dtype={k:str for k in DIMENSIONS},
                            keep_default_na=False, na_values=[""])
     baseline = normalize_rows(baseline[FIELDS.split(",")].to_dict("records"))
-    latest = old_daily.groupby("symbol").date.max()
+    valid_baseline = old_daily.loc[old_daily.vol.notna()]
+    if set(valid_baseline.symbol) != set(PRODUCTS):
+        raise ReceiptError("增量基线缺少某品种的有效总量观测")
+    latest = valid_baseline.groupby("symbol").date.max()
     end = now.date()
     start = max(pd.Timestamp(old_manifest["requested_start"]).date(), latest.min().date() - dt.timedelta(days=lookback_days - 1))
     if end < start:
@@ -64,7 +67,8 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
     if not eligible:
         raise ReceiptError("无法确定最近交易日")
     expected = eligible[-1]
-    latest_dates = {s: block.date.max().date().isoformat() for s, block in daily.groupby("symbol")}
+    latest_dates = {s: block.loc[block.vol.notna(), "date"].max().date().isoformat()
+                    for s, block in daily.groupby("symbol")}
     pending = [s for s in PRODUCTS if latest_dates[s] < expected]
     changed = (merged[FIELDS.split(",")].to_csv(index=False) != baseline[FIELDS.split(",")].to_csv(index=False))
     candidate_root.mkdir(parents=True, exist_ok=False)

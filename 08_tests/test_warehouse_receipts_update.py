@@ -81,3 +81,11 @@ def test_empty_update_is_no_change_and_failure_keeps_existing_pointer(tmp_path):
                              dt.datetime(2026,10,12,18,tzinfo=dt.timezone(dt.timedelta(hours=8))))
     assert (baseline/"current.json").read_bytes()==pointer
     assert not (tmp_path/"failure/current.json").exists()
+
+
+def test_returned_date_with_missing_total_still_requires_retry(tmp_path):
+    baseline=tmp_path/"baseline"; seed(baseline)
+    result=prepare_incremental(Client([observation(date="20261012",vol=None)]),baseline,
+        tmp_path/"candidate",tmp_path/"raw",dt.datetime(2026,10,12,18,tzinfo=dt.timezone(dt.timedelta(hours=8))))
+    assert result["status"]=="WAITING_FOR_SOURCE"
+    assert "M" in result["pending_products"] and result["latest_dates"]["M"]=="2026-10-09"
