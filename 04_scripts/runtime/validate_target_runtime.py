@@ -564,7 +564,9 @@ def build_image(root: Path, context: Path, contract: Mapping[str, Any],
     build_time = datetime.now(timezone.utc).isoformat()
     release_id = (f"{contract['service_id']}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-"
                   f"{binding['commit'][:12]}-b01")
-    args = ["build", "--no-cache", "--iidfile", str(context.parent / "image.id"),
+    # Verified context bytes and digest-pinned dependencies participate in Docker's
+    # cache keys. Reuse those layers; final image/source/identity checks still run.
+    args = ["build", "--iidfile", str(context.parent / "image.id"),
             "-f", str(context / contract["build"]["dockerfile"]), "-t", tag,
             "--label", f"org.opencontainers.image.revision={binding['commit']}",
             "--label", f"market-data.git.tree={binding['tree']}",

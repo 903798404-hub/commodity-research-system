@@ -60,6 +60,40 @@ def load_engine():
     return module
 
 
+@pytest.mark.parametrize('wrong_identity', [False, True])
+def test_cached_build_still_verifies_context_and_final_identity(tmp_path, monkeypatch, wrong_identity):
+    engine = load_engine()
+    context = tmp_path / 'context'
+    context.mkdir()
+    binding = {'commit': 'a' * 40, 'tree': 'b' * 40, 'validator_version': 'target-runtime-validator/2'}
+    contract = {'service_id': 'spread-dashboard', 'build': {'dockerfile': 'Dockerfile'}}
+    events = []
+    def validate(*args):
+        events.append('validated-context')
+        return BASE_IMAGE
+    monkeypatch.setattr(engine, 'validate_dockerfile_inputs', validate)
+    monkeypatch.setattr(engine, 'require_base_image', lambda value: events.append('verified-base'))
+    image_id = 'sha256:' + 'c' * 64
+    def docker(*args, **kwargs):
+        assert events == ['validated-context', 'verified-base']
+        assert args[0] == 'build' and '--no-cache' not in args
+        assert '--build-arg' in args and 'MARKET_DATA_GIT_HEAD=' + binding['commit'] in args
+        (tmp_path / 'image.id').write_text(image_id, encoding='ascii')
+        events.append('built')
+    monkeypatch.setattr(engine, '_docker', docker)
+    labels = {'org.opencontainers.image.revision': 'd' * 40 if wrong_identity else binding['commit'],
+              'market-data.git.tree': binding['tree'], 'market-data.service': 'spread-dashboard',
+              'market-data.artifact.origin': 'candidate', 'market-data.artifact.promotable': 'true',
+              'market-data.release.id': 'test-release'}
+    monkeypatch.setattr(engine, 'inspect_one', lambda kind, value: {'Id': image_id, 'Config': {'Labels': labels, 'User': '65532:65532'}})
+    if wrong_identity:
+        with pytest.raises(engine.ValidationError, match='labels differ'):
+            engine.build_image(tmp_path, context, contract, binding)
+    else:
+        assert engine.build_image(tmp_path, context, contract, binding) == image_id
+    assert events == ['validated-context', 'verified-base', 'built']
+
+
 def test_candidate_secret_abi_keeps_current_declared_credentials(monkeypatch):
     engine = load_engine()
     declarations = {"service": "/run/secrets/market-data-service.json"}
