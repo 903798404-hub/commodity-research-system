@@ -826,7 +826,11 @@ def snapshot_fx_baseline(policy_path: str | Path) -> dict[str, object]:
                 contents[relative] = None
             else:
                 _protected(path)
-                require(identity["size_bytes"] <= 64 * 1024 * 1024, "FX baseline size bound exceeded")
+                # The positions archive embeds four domains and their source
+                # evidence. Its transport budget already allows 256 MiB;
+                # applying the FX file ceiling stopped normal daily growth.
+                limit = (256 if domain == "commodity_positions" and relative == POSITIONS_STABLE else 64) * 1024 * 1024
+                require(identity["size_bytes"] <= limit, "baseline size bound exceeded")
                 raw = path.read_bytes()
                 require(len(raw) == identity["size_bytes"] and hashlib.sha256(raw).hexdigest() == identity["sha256"],
                         "FX baseline changed while reading")

@@ -293,3 +293,50 @@ def test_protected_snapshot_returns_only_domain_contract_and_retains_read_only_f
     (allocation / expected[-1]).unlink()
     with pytest.raises(ValueError, match="incomplete"):
         host.snapshot_fx_baseline("policy")
+
+
+def test_positions_baseline_larger_than_fx_ceiling_preserves_bytes(tmp_path, monkeypatch):
+    import base64
+    from contextlib import nullcontext
+    host = jobs.delivery._host_contract()
+    allocation = tmp_path / "allocation"
+    policy = {"domain": "commodity_positions", "allocation_root": str(allocation),
+              "approved_producer": {"commit": "a" * 40},
+              "validation_image": {"image_id": "sha256:" + "b" * 64}}
+    for relative in host.DOMAIN_CONTRACTS["commodity_positions"]["baseline"]:
+        path = allocation / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * (64 * 1024 * 1024 + 1) if relative == host.POSITIONS_STABLE else b"{}")
+    archive = allocation / host.POSITIONS_STABLE
+    before = host.sha256_file(archive)
+    monkeypatch.setattr(host, "_load_policy", lambda _: (policy, "c" * 64))
+    monkeypatch.setattr(host, "_protected", lambda path, **_: Path(path))
+    monkeypatch.setattr(host, "_under", lambda path, parent: Path(path))
+    monkeypatch.setattr(host, "_lock", lambda _: nullcontext())
+    monkeypatch.setattr(host, "_policy_unchanged", lambda *_: None)
+    result = host.snapshot_fx_baseline("policy")
+    decoded = base64.b64decode(result["contents"][host.POSITIONS_STABLE], validate=True)
+    assert len(decoded) == 64 * 1024 * 1024 + 1
+    assert hashlib.sha256(decoded).hexdigest() == before == host.sha256_file(archive)
+    assert result["files"][host.POSITIONS_STABLE]["sha256"] == before
+
+
+@pytest.mark.parametrize("domain,baseline_index,size", [
+    ("commodity_positions", 0, 256 * 1024 * 1024 + 1),
+    ("commodity_positions", 1, 64 * 1024 * 1024 + 1),
+    ("canola_exports", 0, 64 * 1024 * 1024 + 1),
+    ("foreign_fx", 0, 64 * 1024 * 1024 + 1),
+])
+def test_baseline_size_ceiling_stays_bounded_before_read(tmp_path, monkeypatch, domain, baseline_index, size):
+    from contextlib import nullcontext
+    host = jobs.delivery._host_contract()
+    policy = {"domain": domain, "allocation_root": str(tmp_path),
+              "approved_producer": {"commit": "a" * 40}, "validation_image": {"image_id": "sha256:" + "b" * 64}}
+    selected = host.DOMAIN_CONTRACTS[domain]["baseline"][baseline_index]
+    monkeypatch.setattr(host, "_load_policy", lambda _: (policy, "c" * 64))
+    monkeypatch.setattr(host, "_protected", lambda path, **_: Path(path))
+    monkeypatch.setattr(host, "_under", lambda path, parent: Path(path))
+    monkeypatch.setattr(host, "_lock", lambda _: nullcontext())
+    monkeypatch.setattr(host, "_actual_identity", lambda path: {"sha256": "d" * 64, "size_bytes": size} if Path(path) == tmp_path / selected else None)
+    with pytest.raises(ValueError, match="baseline size bound exceeded"):
+        host.snapshot_fx_baseline("policy")
