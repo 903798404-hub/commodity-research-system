@@ -179,7 +179,12 @@ def test_release_identity_is_after_dependency_and_application_layers():
     dockerfile = (ROOT / '09_deploy/spread_runtime/Dockerfile.spread-runtime').read_text(encoding='utf-8')
     metadata = dockerfile.index('ARG MARKET_DATA_GIT_HEAD')
     assert metadata > dockerfile.rindex('COPY ')
-    assert metadata > dockerfile.rindex('RUN ')
+    identity_run = dockerfile.index("RUN python -c 'import json,re,sys;")
+    assert metadata > dockerfile.index('RUN python -B /app/04_scripts/runtime/precompress_streamlit_assets.py')
+    assert metadata < identity_run < dockerfile.index('USER 65532:65532')
+    for name in ('GIT_HEAD', 'GIT_TREE', 'RELEASE_ID', 'BUILD_TIME', 'SOURCE'):
+        assert dockerfile.index('ARG MARKET_DATA_' + name) < identity_run
+    assert dockerfile.count('USER ') == 1
     assert 'market-data.git.tree="${MARKET_DATA_GIT_TREE}"' in dockerfile
     assert 'ENV MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD}"' in dockerfile
     assert 'ENV MARKET_DATA_GIT_TREE="${MARKET_DATA_GIT_TREE}"' in dockerfile

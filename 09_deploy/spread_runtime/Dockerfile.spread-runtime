@@ -84,15 +84,6 @@ COPY ["04_scripts/weather/refresh_weather_from_sql.py", "/app/04_scripts/weather
 COPY ["05_apps/basis_page.py", "05_apps/domestic_sugar_basis.py", "05_apps/crop_weather_page.py", "05_apps/foreign_seats_page.py", "05_apps/home.py", "05_apps/import_profit_components.py", "05_apps/import_profit_intraday_page.py", "05_apps/import_profit_intraday_runtime_page.py", "05_apps/import_profit_page.py", "05_apps/import_profit_runtime_page.py", "05_apps/international_spread_page.py", "05_apps/navigation.py", "05_apps/research_overview_page.py", "05_apps/soybean_crop_progress_page.py", "05_apps/soybean_exports_page.py", "05_apps/soybean_weather_page.py", "05_apps/soybean_weekly_page.py", "05_apps/streamlit_app.py", "05_apps/summary_panel.py", "05_apps/ui_theme.py", "05_apps/weather_research_page.py", "05_apps/说明.md", "/app/05_apps/"]
 COPY ["05_apps/deprecated_pages/01_行情总览.py", "05_apps/deprecated_pages/02_基差月差.py", "05_apps/deprecated_pages/03_报告解读.py", "05_apps/deprecated_pages/05_Agent日志.py", "/app/05_apps/deprecated_pages/"]
 
-RUN python -c 'import json,re,sys; commit,tree,release_id,build_time,source=sys.argv[1:]; match=re.fullmatch(r"spread-dashboard-\d{8}-([0-9a-f]{12,40})-b\d{2,}",release_id); assert re.fullmatch(r"[0-9a-f]{40}",commit), "MARKET_DATA_GIT_HEAD must be a full 40-character commit"; assert re.fullmatch(r"[0-9a-f]{40}",tree) and tree != commit, "MARKET_DATA_GIT_TREE must be a full tree SHA distinct from the commit"; assert match and commit.startswith(match.group(1)), "MARKET_DATA_RELEASE_ID must identify MARKET_DATA_GIT_HEAD"; assert build_time and source, "build time and source are required"; payload={"application":"spread-production-runtime-wiring","release_id":release_id,"git_commit":commit,"git_tree":tree,"build_time":build_time,"source":source}; open("/app/RELEASE.json","w",encoding="utf-8").write(json.dumps(payload,ensure_ascii=False,indent=2,sort_keys=True)+"\n")' \
-        "$MARKET_DATA_GIT_HEAD" "$MARKET_DATA_GIT_TREE" "$MARKET_DATA_RELEASE_ID" "$MARKET_DATA_BUILD_TIME" "$MARKET_DATA_SOURCE" \
-    && chmod 0444 /app/RELEASE.json \
-    && mkdir -p /app/runtime \
-    && ln -s /runtime/01_data /app/01_data \
-    && ln -s /runtime/06_outputs /app/06_outputs \
-    && ln -s /runtime/10_logs /app/10_logs \
-    && ln -s /runtime/weather /app/runtime/weather
-
 ENV PYTHONPATH=/app/03_src
 COPY ["03_src/agri_research_agent/import_profit/operational_runtime.py", "/app/03_src/agri_research_agent/import_profit/"]
 COPY ["03_src/agri_research_agent/soybean_margin/__init__.py", "03_src/agri_research_agent/soybean_margin/charts.py", "03_src/agri_research_agent/soybean_margin/model.py", "03_src/agri_research_agent/soybean_margin/public_inputs.py", "03_src/agri_research_agent/soybean_margin/runtime.py", "03_src/agri_research_agent/soybean_margin/store.py", "/app/03_src/agri_research_agent/soybean_margin/"]
@@ -113,10 +104,6 @@ COPY ["03_src/agri_research_agent/warehouse_receipts/__init__.py", "03_src/agri_
 COPY ["05_apps/warehouse_receipts_page.py", "/app/05_apps/"]
 
 COPY ["04_scripts/update_warehouse_receipts.py", "/app/04_scripts/"]
-
-USER 65532:65532
-EXPOSE 8501
-CMD ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
 
 COPY ["03_src/agri_research_agent/commodity_import_margin/__init__.py", "03_src/agri_research_agent/commodity_import_margin/charts.py", "03_src/agri_research_agent/commodity_import_margin/history.py", "03_src/agri_research_agent/commodity_import_margin/inputs.py", "03_src/agri_research_agent/commodity_import_margin/live.py", "03_src/agri_research_agent/commodity_import_margin/manual.py", "03_src/agri_research_agent/commodity_import_margin/model.py", "03_src/agri_research_agent/commodity_import_margin/runtime.py", "03_src/agri_research_agent/commodity_import_margin/store.py", "/app/03_src/agri_research_agent/commodity_import_margin/"]
 COPY ["05_apps/commodity_import_margin_page.py", "/app/05_apps/"]
@@ -146,3 +133,16 @@ LABEL org.opencontainers.image.revision="${MARKET_DATA_GIT_HEAD}" \
 
 ENV MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD}"
 ENV MARKET_DATA_GIT_TREE="${MARKET_DATA_GIT_TREE}"
+
+RUN python -c 'import json,re,sys; commit,tree,release_id,build_time,source=sys.argv[1:]; match=re.fullmatch(r"spread-dashboard-\d{8}-([0-9a-f]{12,40})-b\d{2,}",release_id); assert re.fullmatch(r"[0-9a-f]{40}",commit), "MARKET_DATA_GIT_HEAD must be a full 40-character commit"; assert re.fullmatch(r"[0-9a-f]{40}",tree) and tree != commit, "MARKET_DATA_GIT_TREE must be a full tree SHA distinct from the commit"; assert match and commit.startswith(match.group(1)), "MARKET_DATA_RELEASE_ID must identify MARKET_DATA_GIT_HEAD"; assert build_time and source, "build time and source are required"; payload={"application":"spread-production-runtime-wiring","release_id":release_id,"git_commit":commit,"git_tree":tree,"build_time":build_time,"source":source}; open("/app/RELEASE.json","w",encoding="utf-8").write(json.dumps(payload,ensure_ascii=False,indent=2,sort_keys=True)+"\n")' \
+        "$MARKET_DATA_GIT_HEAD" "$MARKET_DATA_GIT_TREE" "$MARKET_DATA_RELEASE_ID" "$MARKET_DATA_BUILD_TIME" "$MARKET_DATA_SOURCE" \
+    && chmod 0444 /app/RELEASE.json \
+    && mkdir -p /app/runtime \
+    && ln -s /runtime/01_data /app/01_data \
+    && ln -s /runtime/06_outputs /app/06_outputs \
+    && ln -s /runtime/10_logs /app/10_logs \
+    && ln -s /runtime/weather /app/runtime/weather
+
+USER 65532:65532
+EXPOSE 8501
+CMD ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
