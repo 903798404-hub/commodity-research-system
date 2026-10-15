@@ -250,16 +250,18 @@ def docker_state():
     return images, mounts
 
 
-def config_image_pins():
+def config_image_pins(config_root=Path('/etc/market-data')):
     pins = set()
     # Never read secret/credential files; only known host configuration names.
-    paths = list(Path('/etc/market-data/scheduled-server').glob('*.json'))
-    paths += list(Path('/etc/market-data/foreign-fx-server').glob('*.json'))
-    paths += [Path('/etc/market-data/warehouse-server/config.json')]
+    paths = list((config_root / 'scheduled-server').glob('*.json'))
+    paths += list((config_root / 'foreign-fx-server').glob('*.json'))
+    paths += list((config_root / 'production-data-delivery').glob('*.json'))
+    paths += [config_root / 'warehouse-server/config.json']
     for path in paths:
         if any(w in path.name.lower() for w in ('secret', 'credential')) or not path.exists():
             continue
-        image = read(path).get('image_id')
+        config = read(path)
+        image = config.get('image_id') or config.get('validation_image', {}).get('image_id')
         require(image is None or IMAGE.fullmatch(image), 'configured image invalid')
         if image:
             pins.add(image)

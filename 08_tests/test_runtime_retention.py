@@ -159,6 +159,22 @@ def test_images_require_fresh_evidence_and_no_references(tmp_path):
         m.images_to_retire([row], set(), {image})
 
 
+def test_collectors_and_publishers_pin_images_without_reading_credentials(tmp_path):
+    image = 'sha256:' + 'a' * 64
+    other = 'sha256:' + 'b' * 64
+    scheduled = tmp_path / 'scheduled-server'
+    scheduled.mkdir()
+    (scheduled / 'job.json').write_text(json.dumps({'image_id': image}))
+    policies = tmp_path / 'production-data-delivery'
+    policies.mkdir()
+    (policies / 'domain.json').write_text(json.dumps({'validation_image': {'image_id': other}}))
+    warehouse = tmp_path / 'warehouse-server'
+    warehouse.mkdir()
+    (warehouse / 'credential.json').write_text('not JSON and must never be read')
+    (scheduled / 'secret.json').write_text('must never be read')
+    assert m.config_image_pins(tmp_path) == {image, other}
+
+
 def test_release_identity_is_after_dependency_and_application_layers():
     dockerfile = (ROOT / '09_deploy/spread_runtime/Dockerfile.spread-runtime').read_text(encoding='utf-8')
     metadata = dockerfile.index('ARG MARKET_DATA_GIT_HEAD')
