@@ -22,4 +22,3 @@ ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-
 ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-uploads
 ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-candidates
 ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-incoming
-
