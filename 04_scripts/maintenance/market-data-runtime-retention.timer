@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily recoverable retention at 04:20 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+Unit=market-data-runtime-retention.service
+
+[Install]
+WantedBy=timers.target

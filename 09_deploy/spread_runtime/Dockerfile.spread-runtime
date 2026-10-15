@@ -1,31 +1,8 @@
 # Verified on the production builder as Python 3.12.13 for linux/amd64.
 FROM python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9
 
-ARG MARKET_DATA_GIT_HEAD
-ARG MARKET_DATA_GIT_TREE
-ARG MARKET_DATA_RELEASE_ID
-ARG MARKET_DATA_BUILD_TIME
-ARG MARKET_DATA_SOURCE
-ARG MARKET_DATA_SERVICE=spread-dashboard
-ARG MARKET_DATA_ARTIFACT_ORIGIN=candidate
-ARG MARKET_DATA_ARTIFACT_PROMOTABLE=true
-ARG MARKET_DATA_DEPLOYMENT_ROLE=candidate
-
-LABEL org.opencontainers.image.revision="${MARKET_DATA_GIT_HEAD}" \
-      org.opencontainers.image.version="${MARKET_DATA_RELEASE_ID}" \
-      org.opencontainers.image.created="${MARKET_DATA_BUILD_TIME}" \
-      org.opencontainers.image.source="${MARKET_DATA_SOURCE}" \
-      market-data.git.tree="${MARKET_DATA_GIT_TREE}" \
-      market-data.release.id="${MARKET_DATA_RELEASE_ID}" \
-      market-data.service="${MARKET_DATA_SERVICE}" \
-      market-data.artifact.origin="${MARKET_DATA_ARTIFACT_ORIGIN}" \
-      market-data.artifact.promotable="${MARKET_DATA_ARTIFACT_PROMOTABLE}" \
-      market-data.deployment.role="${MARKET_DATA_DEPLOYMENT_ROLE}"
-
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD}"
-ENV MARKET_DATA_GIT_TREE="${MARKET_DATA_GIT_TREE}"
 ENV PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
 ENV PIP_DEFAULT_TIMEOUT=120
 
@@ -144,3 +121,28 @@ CMD ["python", "-B", "04_scripts/runtime/serve_spread_dashboard.py"]
 COPY ["03_src/agri_research_agent/commodity_import_margin/__init__.py", "03_src/agri_research_agent/commodity_import_margin/charts.py", "03_src/agri_research_agent/commodity_import_margin/history.py", "03_src/agri_research_agent/commodity_import_margin/inputs.py", "03_src/agri_research_agent/commodity_import_margin/live.py", "03_src/agri_research_agent/commodity_import_margin/manual.py", "03_src/agri_research_agent/commodity_import_margin/model.py", "03_src/agri_research_agent/commodity_import_margin/runtime.py", "03_src/agri_research_agent/commodity_import_margin/store.py", "/app/03_src/agri_research_agent/commodity_import_margin/"]
 COPY ["05_apps/commodity_import_margin_page.py", "/app/05_apps/"]
 COPY ["04_scripts/import_profit/capture_commodity_import.py", "04_scripts/import_profit/import_commodity_cnf.py", "04_scripts/import_profit/import_commodity_history.py", "/app/04_scripts/import_profit/"]
+
+# Release identity changes must not invalidate shared dependency layers.
+ARG MARKET_DATA_GIT_HEAD
+ARG MARKET_DATA_GIT_TREE
+ARG MARKET_DATA_RELEASE_ID
+ARG MARKET_DATA_BUILD_TIME
+ARG MARKET_DATA_SOURCE
+ARG MARKET_DATA_SERVICE=spread-dashboard
+ARG MARKET_DATA_ARTIFACT_ORIGIN=candidate
+ARG MARKET_DATA_ARTIFACT_PROMOTABLE=true
+ARG MARKET_DATA_DEPLOYMENT_ROLE=candidate
+
+LABEL org.opencontainers.image.revision="${MARKET_DATA_GIT_HEAD}" \
+      org.opencontainers.image.version="${MARKET_DATA_RELEASE_ID}" \
+      org.opencontainers.image.created="${MARKET_DATA_BUILD_TIME}" \
+      org.opencontainers.image.source="${MARKET_DATA_SOURCE}" \
+      market-data.git.tree="${MARKET_DATA_GIT_TREE}" \
+      market-data.release.id="${MARKET_DATA_RELEASE_ID}" \
+      market-data.service="${MARKET_DATA_SERVICE}" \
+      market-data.artifact.origin="${MARKET_DATA_ARTIFACT_ORIGIN}" \
+      market-data.artifact.promotable="${MARKET_DATA_ARTIFACT_PROMOTABLE}" \
+      market-data.deployment.role="${MARKET_DATA_DEPLOYMENT_ROLE}"
+
+ENV MARKET_DATA_GIT_HEAD="${MARKET_DATA_GIT_HEAD}"
+ENV MARKET_DATA_GIT_TREE="${MARKET_DATA_GIT_TREE}"

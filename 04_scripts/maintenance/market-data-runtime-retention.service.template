@@ -1,0 +1,25 @@
+[Unit]
+Description=Verified image retirement and recoverable staging retention
+After=docker.service
+Requires=docker.service
+RequiresMountsFor=/srv/market-data-disk /var/lib/market-data /var/lib/docker
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 -I -B @SOURCE@/04_scripts/maintenance/runtime_retention.py --config /etc/market-data/runtime-retention.json --config-sha256 @CONFIG_SHA256@ --apply
+TimeoutStartSec=1800
+Nice=10
+CPUQuota=50%
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/storage-hygiene/runtime-retention
+ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-automation/scheduled
+ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-uploads
+ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-candidates
+ReadWritePaths=/srv/market-data-disk/active/var/lib/market-data/production-data-incoming
+
