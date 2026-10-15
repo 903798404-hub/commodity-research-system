@@ -69,3 +69,128 @@ def validate_inputs(raw):
             if clean[key]>clean['date']:errors.append(LABELS[key]+'晚于计算日期')
     if errors:raise ValueError('；'.join(errors))
     return clean
+
+
+# Monthly records deliberately have a separate schema from the original spot model.
+MONTHLY_VERSION = 'sugar-monthly/1'
+QUOTE_MODES = ('升贴水（美分/磅，不含运费）', 'CNF升贴水（美分/磅，含运费）', 'CNF全价（美元/吨）')
+MONTH_CODES = {3: 'H', 5: 'K', 7: 'N', 10: 'V'}
+MONTHLY_PARAMETERS = dict(polarization=1.042, conversion=22.046, tariff_in=.15,
+    tariff_out=.50, vat=.13, loss=.04, loss_mode='成本加成', processing=400., other=0.)
+
+
+def month_periods(day):
+    """Same future-twelve-month convention as the palm page; current month is next year."""
+    return [f'{day.year + (month <= day.month)}-{month:02}' for month in range(1, 13)]
+
+
+def default_mapping(period):
+    year, month = map(int, period.split('-'))
+    ice_month = next((m for m in MONTH_CODES if m > month), 3)
+    ice_year = year + (ice_month <= month)
+    # Explicit research assumption: two months transit/refining, then next SR 1/5/9.
+    arrival = year * 12 + month - 1 + 2
+    arrival_year, arrival_month = divmod(arrival, 12)
+    arrival_month += 1
+    sr_month = next((m for m in (1, 5, 9) if m >= arrival_month), 1)
+    sr_year = arrival_year + (sr_month < arrival_month)
+    return f'SB{MONTH_CODES[ice_month]}{ice_year % 100:02}', f'SR{sr_year % 100:02}{sr_month:02}'
+
+
+def monthly_rows(payload):
+    """Partial calculation: actual margins require insurance; estimates name the omission."""
+    market, params = payload.get('market') or {}, payload['parameters']
+    rows = []
+    for item in payload['quotes']:
+        r = dict(item)
+        month = int(r['period'][-2:])
+        year = int(r['period'][:4])
+        day = date.fromisoformat(payload['date'])
+        tenor = (year - day.year) * 12 + month - day.month
+        from agri_research_agent.commodity_import_margin.model import select_fx
+        fx = select_fx(market.get('fx_curve', {}), tenor)[0]
+        ice = (market.get('ice', {}).get(r['ice_contract']) or {}).get('price')
+        sr = (market.get('domestic', {}).get(r['sr_contract']) or {}).get('price')
+        quote, mode = r['quote'], payload['quote_mode']
+        cfr = None
+        if quote is not None:
+            if mode == QUOTE_MODES[2]:
+                cfr = quote
+            elif ice is not None:
+                cfr = (ice + quote) * params['polarization'] * params['conversion']
+                if mode == QUOTE_MODES[0]:
+                    cfr = cfr + r['freight'] if r['freight'] is not None else None
+        if cfr is not None and cfr <= 0: cfr = None
+        missing = []
+        if quote is None: missing.append('CNF报价')
+        if mode != QUOTE_MODES[2] and ice is None: missing.append('原糖行情')
+        if mode == QUOTE_MODES[0] and r['freight'] is None: missing.append('运费')
+        if quote is not None and cfr is None and ice is not None and r['freight'] is not None: missing.append('有效到岸价格')
+        if fx is None: missing.append('汇率')
+        if sr is None: missing.append('郑糖行情')
+        if r['insurance'] is None: missing.append('保险')
+        r.update(ice=ice, sr=sr, fx=fx, cfr_usd=cfr, status='缺' + '、'.join(missing) if missing else '输入完整')
+        for quota in ('in', 'out'):
+            factor = (1 + params['tariff_' + quota]) * (1 + params['vat'])
+            def cost(usd):
+                if usd is None or fx is None: return None
+                taxed = usd * fx * factor
+                return (taxed / (1 - params['loss']) if params['loss_mode'] == '实际损耗'
+                        else taxed * (1 + params['loss'])) + params['processing'] + params['other']
+            estimate = cost(cfr)
+            actual = cost(cfr + r['insurance']) if cfr is not None and r['insurance'] is not None else None
+            r['cost_' + quota] = actual
+            r['margin_' + quota] = sr - actual if sr is not None and actual is not None else None
+            r['excluding_insurance_' + quota] = sr - estimate if sr is not None and estimate is not None else None
+            spot = r['rizhao']
+            r['spot_' + quota] = spot - actual if spot is not None and actual is not None else None
+        rows.append(r)
+    return sorted(rows, key=lambda r: r['period'])
+
+
+def validate_monthly(payload):
+    import re
+    from copy import deepcopy
+    if not isinstance(payload, dict) or payload.get('schema_version') != MONTHLY_VERSION:
+        raise ValueError('月份记录版本无效')
+    value = deepcopy(payload)
+    day = date.fromisoformat(value['date'])
+    if day.isoformat() > today(): raise ValueError('不能保存未来业务日')
+    if value.get('country') not in COUNTRIES or value.get('quote_mode') not in QUOTE_MODES:
+        raise ValueError('国家或报价口径无效，请先选择CNF口径')
+    if not isinstance(value.get('source'), str) or not value['source'].strip() or len(value['source']) > 4000:
+        raise ValueError('请填写CNF及人工参数来源')
+    params = value.get('parameters', {})
+    if set(params) != set(MONTHLY_PARAMETERS): raise ValueError('计算参数集合无效')
+    for key, v in params.items():
+        if key == 'loss_mode':
+            if v not in ('成本加成', '实际损耗'): raise ValueError('损耗口径无效')
+        elif isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v) or v < 0:
+            raise ValueError('计算参数必须为非负有限数值')
+    if any(not 0 <= params[k] < 1 for k in ('tariff_in', 'tariff_out', 'vat', 'loss')):
+        raise ValueError('税率及损耗应小于100%')
+    if params['polarization'] <= 0 or params['conversion'] <= 0: raise ValueError('换算系数必须为正')
+    quotes = value.get('quotes')
+    if not isinstance(quotes, list) or len(quotes) != 12 or {r['period'] for r in quotes} != set(month_periods(day)):
+        raise ValueError('必须保存完整12个月船期')
+    for r in quotes:
+        if not re.fullmatch(r'SB[HKNV]\d{2}', r.get('ice_contract', '')) or not re.fullmatch(r'SR\d{2}(?:01|05|09)', r.get('sr_contract', '')):
+            raise ValueError('须使用完整ICE和郑糖1/5/9合约')
+        ice_month = {v: k for k, v in MONTH_CODES.items()}[r['ice_contract'][2]]
+        if (2000 + int(r['ice_contract'][-2:]), ice_month) <= (day.year, day.month):
+            raise ValueError('ICE合约已进入交割月或已到期，请核对年份')
+        if (2000 + int(r['sr_contract'][2:4]), int(r['sr_contract'][-2:])) <= (day.year, day.month):
+            raise ValueError('郑糖合约已进入交割月或已到期，请核对年份')
+        for k in ('quote', 'freight', 'insurance', 'rizhao'):
+            v = r.get(k)
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v)
+                                  or (k != 'quote' and v < 0) or (k == 'quote' and value['quote_mode'] == QUOTE_MODES[2] and v <= 0)):
+                raise ValueError('报价须为有限数值，费用不能为负；空值请留空')
+        if r.get('rizhao') is not None:
+            if not isinstance(r.get('rizhao_date'), str) or date.fromisoformat(r['rizhao_date']) > day:
+                raise ValueError('日照现货需填写实际报价日期')
+    market = value.get('market')
+    if market is not None:
+        from .runtime import validate_monthly_market
+        validate_monthly_market(market, day)
+    return value
