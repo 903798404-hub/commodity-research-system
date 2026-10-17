@@ -265,14 +265,20 @@ def test_invalid_input_never_invokes_publish(config, authorized, monkeypatch, fa
     assert not calls
 
 
-@pytest.mark.parametrize("mode", ["initialize", "update", "no_change", "status_failure", "drift", "materialized_drift"])
-def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize("mode,incremental", [(m, False) for m in
+    ("initialize", "update", "no_change", "status_failure", "drift", "materialized_drift")] +
+    [(m, True) for m in ("update", "no_change", "status_failure", "drift", "materialized_drift")])
+def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode, incremental):
     host = producer.delivery._host_contract()
     allocation, candidate = tmp_path / "allocation", tmp_path / "package"
     contract = host.DOMAIN_CONTRACTS[producer.DOMAIN]
     formal = allocation / contract["domain_dir"]
     old = None if mode == "initialize" else archive()
     sample = archive(amount=21) if mode not in {"initialize", "no_change"} else archive()
+    transport = sample
+    if incremental:
+        from test_positions_incremental import increment
+        transport, sample = increment(old, changed=mode != 'no_change')
     write(allocation / host.EXPORTS_STABLE, {"canada": "untouched"})
     if old is not None:
         write(allocation / host.POSITIONS_STABLE, old)
@@ -281,7 +287,7 @@ def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, mon
     semantic = delivery.observations(sample, old, ROOT)
     value = delta(sample, old)
     value["baseline"]["files"] = {name: host._actual_identity(allocation / name) for name in contract["baseline"]}
-    value["payloads"]["positions_archive.json"] = host._actual_identity(write(candidate / "positions_archive.json", sample))
+    value["payloads"]["positions_archive.json"] = host._actual_identity(write(candidate / "positions_archive.json", transport))
     write(candidate / host.MANIFEST_NAME, value)
     report = write(tmp_path / "report.json", {})
     policy = {"policy_id": "positions-policy", "domain": producer.DOMAIN, "allocation_root": str(allocation), "approved_producer": value["producer"]}
@@ -304,7 +310,8 @@ def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, mon
     if mode == "status_failure":
         def status_error(path, val):
             write(path, val)
-            raise OSError("status fsync failure")
+            if path == allocation / host.POSITIONS_STATUS:
+                raise OSError("status fsync failure")
         monkeypatch.setattr(host, "_atomic_json", status_error)
     if mode == "drift": write(allocation / host.POSITIONS_STATUS, {"concurrent": True})
     if mode == "materialized_drift": (formal / "palm/current.json").write_bytes(b"corrupt")

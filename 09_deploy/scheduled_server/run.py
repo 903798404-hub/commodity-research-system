@@ -145,7 +145,10 @@ def copy_snapshot(host, snapshot, destination, request):
         host.require(total <= 256 * 1024**2 and dict(sha256=host.sha256_bytes(raw),size_bytes=len(raw)) == identity, 'baseline copy differs')
         path = destination / relative
         path.parent.mkdir(parents=True,exist_ok=True)
-        host._write_exclusive(path, raw)
+        # The large positions archive is mounted read-only as an exact file.
+        # Keep only a mountpoint placeholder in the per-run baseline directory.
+        mounted = request['job'].startswith('positions_') and relative == host.POSITIONS_STABLE
+        host._write_exclusive(path, b'' if mounted else raw)
     host._write_json_exclusive(destination / 'request.json',request)
     host._make_tree_readonly(destination,public_read=True)
 
@@ -163,14 +166,17 @@ def disk_budget(host, config, snapshot, stats=None):
 
 
 def collector_command(config, work):
-    return ['docker','run','--rm','-i','--name',work.name,'--pull','never','--network','bridge',
+    command = ['docker','run','--rm','-i','--name',work.name,'--pull','never','--network','bridge',
         '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user','65532:65532',
         '--memory','1024m' if config['job']=='akshare' else '768m','--cpus','1','--pids-limit','96',
         '--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=128m','--env','TZ=Asia/Shanghai',
         '--mount',f'type=bind,src={ROOT},dst=/source,readonly',
         '--mount',f'type=bind,src={work / "baseline"},dst=/baseline,readonly',
-        '--mount',f'type=bind,src={work / "collection"},dst=/output',
-        '--entrypoint','python',config['image_id'],'-I','-B','/source/09_deploy/scheduled_server/collect.py']
+        '--mount',f'type=bind,src={work / "collection"},dst=/output']
+    if config['job'].startswith('positions_'):
+        relative='01_data/processed/commodity_positions/positions_archive.json'
+        command += ['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
+    return command + ['--entrypoint','python',config['image_id'],'-I','-B','/source/09_deploy/scheduled_server/collect.py']
 
 
 def collect(host, config, work):

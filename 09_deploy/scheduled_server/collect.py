@@ -82,11 +82,19 @@ def prepare(request,baseline,output,credentials):
             if job != 'positions_domestic': raise ValueError('stock API is domestic only')
             from agri_research_agent.oilseed_positions.stock_api import StockApiSources
             kwargs['stock_source']=StockApiSources(token=credentials['STOCK_API_TOKEN'])
-        bundle,attempts=collect_bundle(previous,output,markets=job.removeprefix('positions_'),today=date.fromisoformat(request['business_date']),
-            cftc_annual=job=='positions_foreign',**kwargs)
-        archive=codec.archive_bundle(bundle,SOURCE); semantic=codec.observations(archive,previous,SOURCE)
-        package(request,output,{'positions_archive.json':codec.canonical(archive)},semantic,host)
-        return {'attempts':attempts,'observations':semantic}
+        increment,attempts=collect_bundle(previous,output,markets=job.removeprefix('positions_'),today=date.fromisoformat(request['business_date']),
+            cftc_annual=job=='positions_foreign',incremental=True,**kwargs)
+        archive=codec.resolve_increment(increment,previous)
+        semantic=codec.observations(archive,previous,SOURCE)
+        payload=codec.canonical(increment)
+        # Even NO_CHANGE carries a tiny baseline-bound proof through the existing
+        # independent validator and CAS publisher, never a full historical package.
+        package(request,output,{'positions_archive.json':payload},semantic,host)
+        return {'attempts':attempts,'observations':semantic,'metrics':{
+            'transport_schema':codec.INCREMENT_SCHEMA,'payload_bytes':len(payload),
+            'new_source_objects':len(increment['objects']),
+            'new_records':sum(len(u[k]) for u in increment['updates'].values() for k in ('foreign','domestic')),
+            'full_bundle_written':False}}
     if job=='canola_exports':
         from agri_research_agent.automation.production_data_delta_exports import _collect
         from agri_research_agent.canola_exports.delivery import observations

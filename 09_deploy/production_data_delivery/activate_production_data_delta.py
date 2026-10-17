@@ -1369,13 +1369,15 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
         if delta["domain"] == "commodity_positions":
             # Pin the actual files used by pages, not only the archive container.
             sys.path.insert(0, str(ROOT / "03_src"))
-            from agri_research_agent.positions.delivery import read_json as positions_json, verify_materialized
+            from agri_research_agent.positions.delivery import read_json as positions_json, verify_materialized, resolve_increment
             if existing_payloads[POSITIONS_STABLE] is not None:
                 verify_materialized(positions_json(allocation / POSITIONS_STABLE), formal)
             else:
                 require(formal_before is None or not formal_before, "unmanaged positions baseline exists")
             require((delta["run"]["business_status"] == "initialized") ==
                     (delta["baseline"]["files"][POSITIONS_STABLE] is None), "positions initialization differs")
+            positions_candidate = resolve_increment(positions_json(candidate / "positions_archive.json"),
+                positions_json(allocation / POSITIONS_STABLE) if existing_payloads[POSITIONS_STABLE] is not None else None)
         if delta["domain"] == "foreign_fx":
             require((delta["run"]["business_status"] == "initialized") ==
                     (delta["baseline"]["files"][FX_STABLE] is None), "FX initialization differs")
@@ -1456,11 +1458,17 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
         identities = {}
         for name, target in contract["payloads"].items():
             destination = stage / Path(target).name
-            _atomic_copy(candidate / name, destination)
-            identities[target] = {**delta["payloads"][name]}
+            if delta["domain"] == "commodity_positions" and positions_json(candidate / name).get("schema_version") == "commodity-positions-increment/1":
+                # Reconstruct the compatibility view once at publication, not at
+                # every collection/transfer stage. Backups retain the prior view.
+                _atomic_json(destination, positions_candidate)
+                identities[target] = _actual_identity(destination)
+            else:
+                _atomic_copy(candidate / name, destination)
+                identities[target] = {**delta["payloads"][name]}
         if delta["domain"] == "commodity_positions":
             from agri_research_agent.positions.delivery import materialize
-            materialize(positions_json(candidate / "positions_archive.json"), stage)
+            materialize(positions_candidate, stage)
         published_at = datetime.now(timezone.utc).isoformat()
         if delta["domain"] == "soybean_export_sales":
             _atomic_json(stage / Path(FAS_MANIFEST).name,
@@ -1500,7 +1508,7 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             require(_file_set(formal) == staged_files,
                     "formal domain differs after publication exchange")
             for name, target in contract["payloads"].items():
-                require(_actual_identity(allocation / target)["sha256"] == delta["payloads"][name]["sha256"],
+                require(_actual_identity(allocation / target)["sha256"] == identities[target]["sha256"],
                         "formal payload identity mismatch after publication")
             require(_file_set(backup) == backup_files,
                     "publication backup changed during publication")
@@ -1763,7 +1771,7 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
                     for key in DOMAIN_CONTRACTS[domain]["metadata"]), "FX candidate metadata differs")
     elif domain == "commodity_positions":
         from agri_research_agent.positions.delivery import observations as positions_observations
-        from agri_research_agent.positions.delivery import read_json as positions_json, verify_materialized
+        from agri_research_agent.positions.delivery import read_json as positions_json, verify_materialized, resolve_increment
         baseline = (positions_json(Path("/allocation") / POSITIONS_STABLE)
                     if delta["baseline"]["files"][POSITIONS_STABLE] is not None else None)
         if baseline is not None:
@@ -1771,7 +1779,8 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         else:
             formal = Path("/allocation") / DOMAIN_CONTRACTS[domain]["domain_dir"]
             require(not formal.exists() or not any(formal.iterdir()), "unmanaged positions baseline exists")
-        observations = positions_observations(positions_json(candidate / "positions_archive.json"), baseline, Path("/app"))
+        resolved = resolve_increment(positions_json(candidate / "positions_archive.json"), baseline)
+        observations = positions_observations(resolved, baseline, Path("/app"))
         require(all(observations[key] == delta["domain_metadata"][key]
                     for key in DOMAIN_CONTRACTS[domain]["metadata"]), "positions candidate metadata mismatch")
     elif domain == "canola_exports":

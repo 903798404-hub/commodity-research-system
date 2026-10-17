@@ -114,8 +114,14 @@ def test_collectors_have_no_formal_writable_mount_or_credentials_in_args(runner,
         assert '--read-only' in command and '--user' in command and '65532:65532' in command
         assert '--pull' in command and 'never' in command and '-i' in command
         mounts=[command[i+1] for i,x in enumerate(command) if x=='--mount']
-        assert len(mounts)==3 and sum(m.endswith(',readonly') for m in mounts)==2
-        assert not any('production-runtime' in m or 'secrets' in m for m in mounts)
+        extra = int(job.startswith('positions_'))
+        assert len(mounts)==3+extra and sum(m.endswith(',readonly') for m in mounts)==2+extra
+        if extra:
+            assert mounts[-1] == ('type=bind,src='+config(runner,job)['allocation_root']+
+                '/01_data/processed/commodity_positions/positions_archive.json,dst=/baseline/'
+                '01_data/processed/commodity_positions/positions_archive.json,readonly')
+        assert not any('secrets' in m for m in mounts)
+        assert not any('production-runtime' in m for m in (mounts[:-1] if extra else mounts))
         assert not any('API_KEY' in x or 'docker.sock' in x for x in command)
 
 
@@ -125,6 +131,20 @@ def test_corrupt_or_extra_baseline_content_rejected_before_network(runner,tmp_pa
     with pytest.raises(ValueError): runner.copy_snapshot(host,value,tmp_path/'corrupt',{})
     value['contents']['other']='unexpected'
     with pytest.raises(ValueError): runner.copy_snapshot(host,value,tmp_path/'extra',{})
+
+
+def test_positions_baseline_keeps_only_empty_mountpoint_and_small_status(runner, tmp_path):
+    import base64
+    host=runner.helpers()[1]
+    raw=b'x'*(1024*1024)
+    contents={host.POSITIONS_STABLE:raw,host.POSITIONS_STATUS:b'{}'}
+    snapshot={'files':{k:{'sha256':host.sha256_bytes(v),'size_bytes':len(v)} for k,v in contents.items()},
+              'contents':{k:base64.b64encode(v).decode() for k,v in contents.items()}}
+    destination=tmp_path/'baseline'
+    runner.copy_snapshot(host,snapshot,destination,{'job':'positions_domestic'})
+    assert (destination/host.POSITIONS_STABLE).read_bytes()==b''
+    assert (destination/host.POSITIONS_STATUS).read_bytes()==b'{}'
+    assert sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<256
 
 
 def test_domain_policy_drift_and_wrong_source_block_before_collection(runner,monkeypatch):
@@ -158,8 +178,8 @@ def test_network_worker_builds_domain_package_after_collection(monkeypatch,tmp_p
     for relative in (host.POSITIONS_STABLE,host.EXPORTS_STABLE,host.EXPORTS_SOURCES):
         p=baseline/relative; p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(previous))
     candidate=tmp_path/'weekly.json';candidate.write_text(json.dumps({'candidate':'collected'}))
-    monkeypatch.setattr(positions_scheduled_collection,'collect_bundle',lambda *a,**k:(tmp_path/'bundle',[]))
-    monkeypatch.setattr(positions_codec,'archive_bundle',lambda *a:{'candidate':'collected'})
+    monkeypatch.setattr(positions_scheduled_collection,'collect_bundle',lambda *a,**k:({'objects':{},'updates':{}},[]))
+    monkeypatch.setattr(positions_codec,'resolve_increment',lambda *a:{'candidate':'collected'})
     monkeypatch.setattr(positions_codec,'observations',lambda *a:{'business_changed':False})
     monkeypatch.setattr(production_data_delta_exports,'_collect',lambda *a:(candidate,{'source':'verified'}))
     monkeypatch.setattr(exports_codec,'observations',lambda *a:{'business_changed':False})

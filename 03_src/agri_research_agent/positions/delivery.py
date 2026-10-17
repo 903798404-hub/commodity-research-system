@@ -374,3 +374,130 @@ def materialize(archive, root):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(raw)
         require(path.read_bytes() == raw, "positions stage write differs")
+
+
+INCREMENT_SCHEMA = "commodity-positions-increment/1"
+
+
+def archive_snapshots(archive):
+    """Decode already pinned bytes; semantic/source replay remains a separate gate."""
+    files = decode(archive)
+    snapshots = {}
+    for domain in DOMAINS:
+        pointer = strict_json(files[domain + "/current.json"])
+        snapshots[domain] = strict_json(files[domain + "/releases/" + pointer["release_id"] + "/snapshot.json"])
+    return snapshots, files
+
+
+def resolve_increment(document, baseline):
+    """Expand an append-only transport in memory against its exact approved baseline.
+
+    Legacy full archives remain readable. The host uses only stdlib here; its
+    isolated validator subsequently replays every source and checks semantics.
+    """
+    if document.get("schema_version") == SCHEMA:
+        return document
+    exact(document, ("schema_version", "baseline_sha256", "updates", "objects"), "positions increment")
+    require(document["schema_version"] == INCREMENT_SCHEMA and baseline is not None,
+            "positions increment requires a baseline")
+    require(digest(canonical(baseline)) == document["baseline_sha256"], "positions increment baseline differs")
+    updates, objects = document["updates"], document["objects"]
+    require(type(updates) is dict and set(updates) <= set(DOMAINS), "positions increment domains invalid")
+    require(type(objects) is dict and len(objects) <= MAX_FILES, "positions increment objects invalid")
+    decoded, total = {}, 0
+    for sha, entry in objects.items():
+        require(type(sha) is str and SHA.fullmatch(sha), "positions increment object key invalid")
+        # Reuse the archive codec's strict size/base64/hash checks.
+        raw = decode({"schema_version": SCHEMA, "files": {"sugar/raw/" + sha: entry}})["sugar/raw/" + sha]
+        require(digest(raw) == sha, "positions increment object identity differs")
+        decoded[sha] = raw
+        total += len(raw)
+        require(total <= MAX_TOTAL, "positions increment total size bound exceeded")
+    snapshots, previous_files = archive_snapshots(baseline)
+    retained_objects = {digest(raw): raw for name, raw in previous_files.items() if "/raw/" in name}
+    files, used = dict(previous_files), set()
+    for domain, update in updates.items():
+        exact(update, ("release_id", "published_at", "foreign", "domestic", "sources", "attempts"), "positions increment update")
+        require(type(update["sources"]) is dict and type(update["attempts"]) is list,
+                "positions increment metadata invalid")
+        old = snapshots[domain]
+        snapshot = {**old, **update, "sources": {**old["sources"], **update["sources"]}}
+        for kind in ("foreign", "domestic"):
+            rows = update[kind]
+            require(type(rows) is list and not (set(_groups(rows, kind)) & set(_groups(old[kind], kind))),
+                    "positions increment overwrites historical partition")
+            snapshot[kind] = old[kind] + rows
+        require(update["foreign"] or update["domestic"], "empty positions increment update")
+        release = snapshot["release_id"]
+        require(type(release) is str and RELEASE.fullmatch(release) and release != old["release_id"],
+                "positions increment release invalid")
+        prefix = domain + "/"
+        # The stable archive describes current inputs; immutable old releases and
+        # raw evidence remain in the formal tree and its rollback backup.
+        files = {name: raw for name, raw in files.items() if not name.startswith(prefix)}
+        for source in snapshot["sources"].values():
+            name = prefix + str(relative(source["raw_file"]))
+            sha = source["sha256"]
+            raw = previous_files.get(name, retained_objects.get(sha))
+            if raw is None:
+                require(sha in decoded, "positions increment evidence missing")
+                raw = decoded[sha]; used.add(sha)
+            require(digest(raw) == sha, "positions increment evidence differs")
+            files[name] = raw
+        raw = canonical(snapshot)
+        manifest = canonical(dict(schema_version=1, release_id=release, snapshot_sha256=digest(raw),
+                                  foreign_rows=len(snapshot["foreign"]), domestic_rows=len(snapshot["domestic"])))
+        base = prefix + "releases/" + release + "/"
+        files[base + "snapshot.json"] = raw
+        files[base + "manifest.json"] = manifest
+        files[prefix + "current.json"] = canonical(dict(release_id=release, manifest_sha256=digest(manifest)))
+    require(used == set(objects), "positions increment contains unused objects")
+    return encode(files)
+
+
+class IncrementBuilder:
+    """Accumulate only new complete report partitions, never a disk history clone."""
+
+    def __init__(self, baseline, project_root):
+        self.baseline = baseline
+        self.snapshots, self.files = validate_archive(baseline, project_root)
+        self.retained_hashes = {digest(raw) for name, raw in self.files.items() if "/raw/" in name}
+        self.document = dict(schema_version=INCREMENT_SCHEMA, baseline_sha256=digest(canonical(baseline)),
+                             updates={}, objects={})
+
+    def publish(self, root, foreign, domestic, captures, attempts, **_kwargs):
+        import uuid
+        domain = Path(root).name
+        require(domain in DOMAINS, "positions increment domain invalid")
+        old = self.snapshots[domain]
+        pending = self.document["updates"].get(domain)
+        fresh = {}
+        for kind, rows in (("foreign", foreign), ("domestic", domestic)):
+            previous = _groups(old[kind] + (pending[kind] if pending else []), kind)
+            current = _groups(rows, kind)
+            require(all(previous[part] == values for part, values in current.items() if part in previous),
+                    "positions historical revision requires review")
+            fresh[kind] = [r for r in rows if _part(r, kind) not in previous]
+        if not fresh["foreign"] and not fresh["domestic"]:
+            return
+        if pending is None:
+            now = datetime.now(timezone.utc)
+            pending = dict(release_id=now.strftime("%Y%m%dT%H%M%SZ_") + uuid.uuid4().hex[:8],
+                           published_at=now.isoformat(), foreign=[], domestic=[], sources={}, attempts=[])
+            self.document["updates"][domain] = pending
+        for kind in ("foreign", "domestic"):
+            pending[kind].extend(fresh[kind])
+        pending["attempts"].extend(attempts)
+        for key, raw, url, extension in captures:
+            sha = digest(raw)
+            name = "raw/" + sha + "." + extension
+            pending["sources"][key] = dict(url=url, retrieved_at=datetime.now(timezone.utc).isoformat(),
+                                          sha256=sha, raw_file=name)
+            if sha not in self.retained_hashes:
+                self.document["objects"][sha] = encode({domain + "/" + name: raw})["files"][domain + "/" + name]
+
+    def finish(self, project_root):
+        candidate = resolve_increment(self.document, self.baseline)
+        semantic = observations(candidate, self.baseline, project_root)
+        require(not semantic["revised_partitions"], "positions historical revision requires review")
+        return self.document, semantic
