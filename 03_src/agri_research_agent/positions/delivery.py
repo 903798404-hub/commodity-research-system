@@ -305,7 +305,7 @@ def validate_archive(archive, project_root):
 
 def observations(candidate, baseline, project_root):
     snapshots, _ = validate_archive(candidate, project_root)
-    previous = validate_archive(baseline, project_root)[0] if baseline is not None else {}
+    previous = (snapshots if candidate is baseline else validate_archive(baseline, project_root)[0]) if baseline is not None else {}
     added, revised, total, dates = [], [], 0, {}
     for domain, snapshot in snapshots.items():
         for kind in ("foreign", "domestic"):
@@ -404,6 +404,11 @@ def resolve_increment(document, baseline):
     updates, objects = document["updates"], document["objects"]
     require(type(updates) is dict and set(updates) <= set(DOMAINS), "positions increment domains invalid")
     require(type(objects) is dict and len(objects) <= MAX_FILES, "positions increment objects invalid")
+    if not updates:
+        require(not objects, "positions increment contains unused objects")
+        # The exact same pinned document still receives full source replay in
+        # observations; it need not be decoded/encoded/copied as a second archive.
+        return baseline
     decoded, total = {}, 0
     for sha, entry in objects.items():
         require(type(sha) is str and SHA.fullmatch(sha), "positions increment object key invalid")

@@ -44,7 +44,24 @@ def test_noop_proof_has_no_objects_or_rows_and_reconstructs_exact_baseline():
     document, resolved = increment(baseline, changed=False)
     assert document['updates'] == document['objects'] == {}
     assert len(codec.canonical(document)) < 256
+    assert resolved is baseline
     assert codec.canonical(resolved) == codec.canonical(baseline)
+
+
+def test_noop_replays_the_pinned_archive_once_without_skipping_validation(monkeypatch):
+    baseline=archive()
+    document,resolved=increment(baseline,changed=False)
+    validate=codec.validate_archive
+    calls=[]
+    def checked(value,root):
+        calls.append(value)
+        return validate(value,root)
+    monkeypatch.setattr(codec,'validate_archive',checked)
+    assert not codec.observations(resolved,baseline,ROOT)['business_changed']
+    assert len(calls)==1 and calls[0] is baseline
+    corrupted=deepcopy(baseline)
+    next(iter(corrupted['files'].values()))['sha256']='0'*64
+    with pytest.raises(ValueError):codec.observations(corrupted,corrupted,ROOT)
 
 
 @pytest.mark.parametrize('mutation', ['stale', 'missing_evidence', 'hash', 'extra_object', 'extra_field', 'overwrite', 'traversal'])
