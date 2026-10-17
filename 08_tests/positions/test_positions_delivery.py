@@ -265,10 +265,17 @@ def test_invalid_input_never_invokes_publish(config, authorized, monkeypatch, fa
     assert not calls
 
 
-@pytest.mark.parametrize("mode,incremental", [(m, False) for m in
-    ("initialize", "update", "no_change", "status_failure", "drift", "materialized_drift")] +
-    [(m, True) for m in ("update", "no_change", "status_failure", "drift", "materialized_drift")])
-def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode, incremental):
+@pytest.mark.parametrize("mode", ["initialize", "update", "no_change", "status_failure", "drift", "materialized_drift"])
+def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode):
+    _publication_is_atomic(tmp_path, monkeypatch, mode, incremental=False)
+
+
+@pytest.mark.parametrize("mode", ["update", "no_change", "status_failure", "drift", "materialized_drift"])
+def test_increment_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode):
+    _publication_is_atomic(tmp_path, monkeypatch, mode, incremental=True)
+
+
+def _publication_is_atomic(tmp_path, monkeypatch, mode, incremental):
     host = producer.delivery._host_contract()
     allocation, candidate = tmp_path / "allocation", tmp_path / "package"
     contract = host.DOMAIN_CONTRACTS[producer.DOMAIN]
