@@ -104,6 +104,20 @@ def test_changed_collection_uses_delta_only(tmp_path, monkeypatch):
     assert not (tmp_path/'collection').exists() and not (tmp_path/'bundle').exists()
 
 
+def test_newer_single_contract_does_not_advance_whole_variety_watermark(tmp_path):
+    snapshots={'soybean':{'domestic':[{'scope':s,'report_date':'2026-10-08'} for s in ('M','Y')]+[
+        {'scope':'M2701','report_date':'2026-10-09'},{'scope':'Y2701','report_date':'2026-10-09'}]},
+        'palm':{'domestic':[{'scope':'P','report_date':'2026-10-08'},{'scope':'P2701','report_date':'2026-10-09'}]}}
+    from agri_research_agent.oilseed_positions.sources import SourceNotPublished
+    calls=[]
+    class Missing:
+        def holdings(self,day,*a):
+            calls.append(day)
+            raise SourceNotPublished('not published')
+    _,window=collection.collect_dce(Missing(),snapshots,tmp_path,date(2026,10,10),incremental=True)
+    assert calls==[date(2026,10,9)] and window['start']=='2026-10-09'
+
+
 @pytest.mark.parametrize('today,start_year',[(date(2026,10,17),2026),(date(2027,1,10),2026)])
 def test_annual_window_avoids_closed_year_downloads_but_keeps_rollover(tmp_path,monkeypatch,today,start_year):
     from agri_research_agent.positions.cftc_annual import AnnualSources

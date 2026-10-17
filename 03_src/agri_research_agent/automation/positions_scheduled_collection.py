@@ -17,9 +17,9 @@ from agri_research_agent.sugar_positions.storage import publish, read_snapshot
 def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, stock_source=None, incremental=False):
     today = today or date.today()
     delivery.require(markets in {"domestic", "foreign"}, "scheduled positions market scope invalid")
-    snapshots, _ = codec.validate_archive(baseline, delivery.ROOT)
-    store = assert_external_output(work / "collection")
     builder = codec.IncrementBuilder(baseline, delivery.ROOT) if incremental else None
+    snapshots = builder.snapshots if builder else codec.validate_archive(baseline, delivery.ROOT)[0]
+    store = assert_external_output(work / "collection")
     if not incremental:
         codec.materialize(baseline, store)
     publish_rows = builder.publish if builder else publish
@@ -117,7 +117,7 @@ def collect_dce(source, snapshots, store, today, *, publish_rows=publish, increm
     for domain,varieties in (('soybean',('M','Y')),('palm',('P',))):
         for variety in varieties:
             dates={r['report_date'] for r in snapshots[domain]['domestic']
-                   if r['scope'].rstrip('0123456789')==variety}
+                   if (r['scope']==variety if incremental else r['scope'].rstrip('0123456789')==variety)}
             if dates: latest.append(max(dates))
     start,end=domestic_window({min(latest)} if len(latest)==3 else set(),today)
     attempts=[];by_domain={'soybean':[],'palm':[]}
