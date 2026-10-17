@@ -58,28 +58,38 @@ def test_public_worker_adopts_actual_current_including_independently_backfilled_
     with pd.ExcelWriter(data / "historical_price_long.xlsx") as writer: initial[["date"]].to_excel(writer, sheet_name="price_long", index=False)
     files = {p.relative_to(baseline).as_posix(): delta._identity(p) for p in data.iterdir()}
     old_bytes = {p: p.read_bytes() for p in baseline.rglob("*") if p.is_file()}
-    fixture_source = tmp_path / "worker-source"; fixture_source.mkdir()
-    for directory in ("02_configs", "03_src", "04_scripts"): (fixture_source / directory).mkdir()
-    public_code = fixture_source / "09_deploy/scheduled_server/public.py"
-    public_code.parent.mkdir(parents=True)
-    public_code.write_bytes((ROOT / "09_deploy/scheduled_server/public.py").read_bytes())
-    monkeypatch.setattr(collector, "SOURCE", fixture_source)
+    spreads = load("incremental_spread_worker", "09_deploy/scheduled_server/spreads.py")
+    server = load("incremental_spread_calculator", "04_scripts/server_update_spreads.py")
+    monkeypatch.setattr(collector, "load", lambda *a: spreads)
+    original_load = spreads.load
+    monkeypatch.setattr(spreads, "load", lambda name, relative:
+        server if relative == "04_scripts/server_update_spreads.py" else original_load(name, relative))
+    # Collection/replay is tested independently. This test isolates rebasing on
+    # actual Current before calculation, including separately published sugar.
+    added = pd.DataFrame({"date": [pd.Timestamp("2026-08-24")]})
+    monkeypatch.setattr(spreads, "replay", lambda *a: (pd.concat([initial[["date"]], added]), added))
     output = tmp_path / "output"; output.mkdir()
-    def update(command, **kwargs):
+    def update(**kwargs):
         project = output / "project"
         actual = pd.read_parquet(project / "01_data/historical_spread_database.parquet")
         assert set(actual.spread_name) == {"M9-1", "SR9-1"}
-        (project / "01_data/update_status.json").write_text(json.dumps(dict(status="NO_CHANGE",
-            target_date_data_completeness="COMPLETE", latest_date="2026-08-21", required_contracts=1, success_contracts=1)))
-        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
-    monkeypatch.setattr(collector.subprocess, "run", update)
-    request = dict(job="akshare", business_date="2026-08-21", baseline_files=files,
+        extra = actual.iloc[[0]].copy(); extra["date"] = pd.Timestamp("2026-08-24")
+        server.write_incremental_spread_outputs(kwargs["spread_workbook"], kwargs["spread_output"], pd.concat([actual, extra]))
+        key = ("2026-08-24", str(extra.iloc[0].spread_name), str(extra.iloc[0].season))
+        return {"calculated_spread_rows": 1}, (), frozenset({key})
+    monkeypatch.setattr(server, "apply_direct_incremental_materialization", update)
+    request = dict(job="akshare", business_date="2026-08-24", baseline_files=files,
         public_package_relative=formal.directory.relative_to(baseline).as_posix(), public_manifest=formal.manifest,
+        public_preflight={"required_contracts": ["M2609"], "present_contracts": ["M2609"], "metrics": {}},
         partitioned_public_packages=True)
     result = collector.prepare(request, baseline, output, {})
     candidate = validate_production_package(output / result["package_path"])
     actual = pd.read_parquet(candidate.directory / "data" / candidate.manifest["delivery_artifacts"]["domestic-spread"]["package_path"])
-    assert len(actual) == result["metrics"]["historical_rows_preserved"] == 2
+    assert len(actual) == 3 and result["metrics"]["historical_rows_preserved"] == 2
     assert set(actual.spread_name) == {"M9-1", "SR9-1"}
+    retained = actual.loc[pd.to_datetime(actual.date).eq("2026-08-21")].sort_values("spread_name").reset_index(drop=True)
+    original = pd.read_parquet(source).sort_values("spread_name").reset_index(drop=True)
+    pd.testing.assert_frame_equal(retained[original.columns], original, check_dtype=False)
+    assert retained[["leg1_contract", "leg2_contract"]].isna().all().all()
     assert candidate.manifest["schema_version"].endswith("/3")
     for path, raw in old_bytes.items(): assert path.read_bytes() == raw
