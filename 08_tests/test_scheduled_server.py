@@ -42,7 +42,7 @@ def config(runner,job):
 
 
 @pytest.mark.parametrize('job,clocks',[
-    ('akshare',['Mon..Fri *-*-* 16:30:00 Asia/Shanghai']),
+    ('akshare',['Mon..Fri *-*-* 16:30:00 Asia/Shanghai','Mon..Fri *-*-* 18:30:00 Asia/Shanghai','Mon..Fri *-*-* 22:30:00 Asia/Shanghai']),
     ('canola_exports',['*-*-* 08:30:00 Asia/Shanghai']),
     ('positions_domestic',['Mon..Fri *-*-* 16:35:00 Asia/Shanghai','Mon..Fri *-*-* 18:00:00 Asia/Shanghai']),
     ('positions_foreign',['*-*-* 07:45:00 Asia/Shanghai']),

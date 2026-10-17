@@ -73,6 +73,8 @@ def prepare(request,baseline,output,credentials):
             if path.exists(): raise ValueError('absent baseline file exists')
         elif delivery._identity(path)!=expected: raise ValueError('baseline file identity differs')
     job=request['job']
+    if job=='akshare':
+        return load('public_spread_materialize','09_deploy/scheduled_server/spreads.py').materialize(request,baseline,output)
     if job.startswith('positions_'):
         from agri_research_agent.automation.positions_scheduled_collection import collect_bundle
         from agri_research_agent.positions import delivery as codec
@@ -128,29 +130,6 @@ def prepare(request,baseline,output,credentials):
             {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},run_id=request['run_id'])
         return {'business_status':audit['status'],'latest_week':audit['validation']['latest_week'],
                 'metrics':audit.get('collection_metrics',{})}
-    if job=='akshare':
-        history=delivery.adopt_public_spread_history(project/'01_data',baseline/request['public_package_relative'],
-            expected_manifest=request['public_manifest'])
-        for directory in ('02_configs','03_src','04_scripts'):
-            shutil.copytree(SOURCE/directory,project/directory)
-        result=subprocess.run([sys.executable,'-I','-B','-X','utf8',str(project/'04_scripts/server_update_spreads.py'),
-            '--update-from-akshare','--end-date',request['business_date']],capture_output=True,timeout=2100)
-        # Network script logs contain no credentials for this public source.
-        (output/'spread.stdout').write_bytes(result.stdout[-65536:]); (output/'spread.stderr').write_bytes(result.stderr[-65536:])
-        if result.returncode: raise ValueError('spread collector returned '+str(result.returncode))
-        status=host.read_json(project/'01_data/update_status.json')
-        if status.get('target_date_data_completeness')=='PARTIAL': raise ValueError('spread coverage incomplete')
-        public_package=delivery._build_public_package(project,baseline/request['public_package_relative'],output/'packages',
-            partitioned=request.get('partitioned_public_packages',False))
-        load('public_worker','09_deploy/scheduled_server/public.py').assert_scope(request,public_package.manifest)
-        cache_removed=clear_monthly_build_cache(output,public_package)
-        return {'package_id':public_package.package_id,'package_path':str(public_package.directory.relative_to(output)),
-            'business_status':status['status'],'latest_date':status['latest_date'],'required_contracts':status['required_contracts'],
-            'success_contracts':status['success_contracts'],'metrics':{
-                **status.get('collection_metrics',{}),'calculated_spread_rows':status.get('calculated_spread_rows'),
-                'package_bytes':sum(f['size_bytes'] for f in public_package.manifest['files']),
-                'package_files':public_package.manifest['file_count'],'package_schema':public_package.manifest['schema_version'],
-                'historical_rows_preserved':history['history_rows'],'temporary_monthly_cache_files_removed':cache_removed}}
     raise ValueError('unsupported scheduled job')
 
 
@@ -163,8 +142,16 @@ def main():
         if request.get('positions_stock_api', False):
             if request['job'] != 'positions_domestic': raise ValueError('stock API is domestic only')
             expected={'STOCK_API_TOKEN'}
+        if '--public-preflight' in sys.argv:
+            expected={'price_baseline'}
         if set(credentials)!=expected: raise ValueError('unexpected credentials')
-        result.update(prepare(request,Path('/baseline'),output,credentials),status='PASS')
+        if '--public-preflight' in sys.argv:
+            if request['job'] != 'akshare' or set(credentials) != {'price_baseline'}:
+                raise ValueError('public preflight input differs')
+            prepared=load('public_spread_preflight','09_deploy/scheduled_server/spreads.py').preflight(request,output,credentials['price_baseline'])
+        else:
+            prepared=prepare(request,Path('/baseline'),output,credentials)
+        result.update(prepared,status='PASS')
     except Exception as exc:
         result['error_type']=type(exc).__name__
     finally:

@@ -125,6 +125,11 @@ def release_duplicates(host,work,store,extra,candidate,upload,no_change):
 
 def deliver(host,config,work,extra,publish):
     result=host.read_json(work/'collection/collection-result.json')
+    if result.get('business_status')=='NO_CHANGE':
+        receipt=unchanged(host,config,extra,publish)
+        if publish and result.get('continuation_changed'):
+            save_continuation(host,work,extra['public_pointer']['package_id'])
+        return receipt
     host.require(re.fullmatch(r'packages/public-current-[0-9a-f]{24}',result['package_path']), 'public candidate path invalid')
     package=host._no_links(work/'collection'/result['package_path'])
     manifest=host.read_json(package/'manifest.json'); assert_scope(extra,manifest)
@@ -187,6 +192,16 @@ def deliver(host,config,work,extra,publish):
         host._write_json_exclusive(work/'public-rollback.json',{'rollback':rollback,'readback':readback})
         raise RuntimeError('application read failed; previous Current restored')
     receipt['application_post_switch']=post
+    save_continuation(host,work,candidate)
+    try:
+        receipt['duplicate_cleanup']=release_duplicates(host,work,store,extra,candidate,upload,receipt['status']=='NO_CHANGE')
+    except Exception as exc:
+        # Publication and continuation already succeeded; retain any unverified inputs.
+        receipt['duplicate_cleanup']={'status':'FAILED','error_type':type(exc).__name__}
+    return receipt
+
+
+def save_continuation(host,work,candidate):
     saved=RUNTIME/'continuations'/work.name
     saved.mkdir(mode=0o700,parents=True)
     entries={}
@@ -197,12 +212,50 @@ def deliver(host,config,work,extra,publish):
     from_run=importlib.util.spec_from_file_location('scheduled_fx_state',ROOT/'09_deploy/foreign_fx_server/run.py')
     state_module=importlib.util.module_from_spec(from_run); from_run.loader.exec_module(state_module)
     state_module.write_state(host,RUNTIME/'akshare-continuation.json',{'directory':str(saved),'files':entries,'package_id':candidate})
-    try:
-        receipt['duplicate_cleanup']=release_duplicates(host,work,store,extra,candidate,upload,receipt['status']=='NO_CHANGE')
-    except Exception as exc:
-        # Publication and continuation already succeeded; retain any unverified inputs.
-        receipt['duplicate_cleanup']={'status':'FAILED','error_type':type(exc).__name__}
-    return receipt
+
+
+def read_preflight(host,work,request,collected):
+    path=host._no_links(work/'preflight/preflight.json')
+    host.require(path.is_file() and path.stat().st_size <= 8*1024**2,'public preflight absent or oversized')
+    proof=host.read_json(path)
+    host.require(proof['schema_version']=='public-spread-preflight/1'
+        and proof['baseline_files']==request['baseline_files']
+        and proof['public_pointer']==request['public_pointer']
+        and proof['business_date']==request['business_date']
+        and proof['outcome']==collected['business_status']
+        and proof['outcome'] in {'CHANGED','NO_CHANGE','WAITING_FOR_SOURCE','SOURCE_FAILED'},
+        'public preflight identity differs')
+    required=set(proof['required_contracts']); present=set(proof['present_contracts'])
+    host.require(required and present<=required and set(proof['missing_contracts'])==required-present,
+                 'public preflight contract coverage differs')
+    host.require(len(proof['new_rows'])==proof['metrics']['to_append_rows'], 'public increment count differs')
+    if proof['outcome'] in {'CHANGED','NO_CHANGE'}:
+        host.require(required==present and proof['endpoint_failure_contracts']==0,'public preflight incomplete')
+        host.require(bool(proof['new_rows'])==(proof['outcome']=='CHANGED'),'public preflight change differs')
+    collected['proof_sha256']=host.sha256_file(path)
+    collected['source_evidence_sha256']=host.sha256_file(host._no_links(work/'preflight/source-evidence.xlsx'))
+    return proof
+
+
+def unchanged(host,config,extra,publish):
+    """Validate the retained immutable release and CAS; allocate no upload or package."""
+    store=Path(config['allocation_root'])/'01_data/public-data-server-store'
+    pointer=extra['public_pointer']; package=store/'releases'/pointer['package_id']
+    host.require(host.read_json(store/'current.json')==pointer,'unchanged public pointer moved')
+    host.require(host.sha256_file(host._no_links(package/'manifest.json'))==extra['public_manifest_sha256'],
+                 'unchanged public manifest differs')
+    for entry in extra['public_manifest']['files']:
+        path=host._no_links(package/'data'/entry['path'])
+        host.require(path.stat().st_size==entry['size_bytes'] and host.sha256_file(path)==entry['sha256'],
+                     'unchanged public file differs')
+    trans=transport(); runtime=trans._discover_application_runtime(None,str(store))
+    gate=trans._run_application_runtime_gate(None,runtime,phase='PRE_SWITCH',
+        package_root=runtime['container_store']+'/releases/'+pointer['package_id'],expected_package_id=pointer['package_id'])
+    host.require(gate['STATUS']=='PASS','actual application cannot read unchanged Current')
+    host.require(host.read_json(store/'current.json')==pointer,'unchanged public pointer moved during verification')
+    return {'status':'NO_CHANGE' if publish else 'CANDIDATE','package_id':pointer['package_id'],
+            'business_status':'NO_CHANGE','application_pre_switch':gate,
+            'full_bundle_written':False,'upload_created':False,'history_versions_deleted':0}
 
 
 import re
