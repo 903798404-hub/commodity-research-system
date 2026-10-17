@@ -141,6 +141,9 @@ def test_changed_data_materializes_offline_and_keeps_history_and_other_domains(f
     pd.testing.assert_frame_equal(retained.sort_values(['spread_name','season']).reset_index(drop=True),
         old.sort_values(['spread_name','season']).reset_index(drop=True), check_dtype=False)
     assert result['metrics']['calculated_spread_rows'] > 0
+    status=json.loads((f.output/'project/01_data/update_status.json').read_text())
+    assert status['target_business_date']=='2026-10-16' and status['target_date_data_completeness']=='COMPLETE'
+    assert status['required_contracts']==status['success_contracts']==18
     assert built.manifest['current_identities'] == package.manifest['current_identities']
     assert not (f.output / 'project/01_data/backups').exists()
     assert (f.baseline / '01_data/historical_price_long.xlsx').read_bytes() == f.raw

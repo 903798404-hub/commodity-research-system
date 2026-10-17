@@ -124,7 +124,14 @@ def materialize(request, baseline, output):
     import logging
     summaries = server.validate_database_outputs(data / 'historical_spread_database.xlsx',
         data / 'historical_spread_database.parquet', logging.getLogger(__name__))
+    proof=request['public_preflight']
     status.update(status='success', latest_date=summaries['parquet']['latest_date'],
+                  requested_end_date=request['business_date'], effective_end_date=request['business_date'],
+                  target_business_date=request['business_date'], target_date_data_completeness='COMPLETE',
+                  required_contracts=len(proof['required_contracts']), success_contracts=len(proof['present_contracts']),
+                  failure_contracts=0, failed_contracts=[], job_execution_status='SUCCESS',
+                  target_required_contract_keys=proof['required_contracts'], target_present_contract_keys=proof['present_contracts'],
+                  target_missing_contract_keys=[], collection_metrics=proof['metrics'],
                   historical_diff_guard='PASS', historical_changed_keys=['|'.join(k) for k in diff.changed_keys])
     server.atomic_write_json(data / 'update_status.json', status)
     # A source-only addition can advance the continuation without rebuilding Public Current.
