@@ -359,8 +359,28 @@ def archive_bundle(root, project_root):
 def verify_materialized(archive, root):
     """Pin the page's real inputs, beyond the transport archive's own hash."""
     root = unlinked(root)
+    selected = None
+    if root.name == "commodity_positions":
+        from . import formal_store
+        selected = formal_store.pointer(root)
+    if selected is not None:
+        require(formal_store.read_archive(root, selected) == archive, "positions active store differs")
+        require(formal_store.pointer(root) == selected, "positions Current moved during verification")
+        return
     for name, raw in decode(archive).items():
         require(unlinked(root / name).read_bytes() == raw, "positions materialized input differs")
+
+
+def read_archive(path):
+    """Resolve the status-pinned formal view; generic JSON reads remain literal."""
+    from . import formal_store
+    path = unlinked(path)
+    selected = formal_store.pointer(path.parent) if path.parent.name == "commodity_positions" else None
+    if selected is None:
+        return read_json(path)
+    value = formal_store.read_archive(path.parent, selected)
+    require(formal_store.pointer(path.parent) == selected, "positions Current moved during archive read")
+    return value
 
 
 def materialize(archive, root):

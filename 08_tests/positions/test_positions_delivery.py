@@ -323,13 +323,23 @@ def _publication_is_atomic(tmp_path, monkeypatch, mode, incremental):
     if mode == "drift": write(allocation / host.POSITIONS_STATUS, {"concurrent": True})
     if mode == "materialized_drift": (formal / "palm/current.json").write_bytes(b"corrupt")
     before = {str(p): p.read_bytes() for p in allocation.rglob("*") if p.is_file()}
+    if old is not None:
+        monkeypatch.setattr(host, "_copy_tree", lambda *a: pytest.fail("formal history cloned"))
+        monkeypatch.setattr(delivery, "materialize", lambda *a: pytest.fail("full history materialized"))
     if mode in {"status_failure", "drift", "materialized_drift"}:
         with pytest.raises((ValueError, OSError)):
             host.publish(tmp_path / "policy", value["delta_id"], report, host.sha256_file(report))
         for path, raw in before.items():
             assert Path(path).read_bytes() == raw
-        assert {str(p) for p in formal.rglob("*") if p.is_file()} == {
-            path for path in before if Path(path).is_relative_to(formal)}
+        # A failed atomic pointer commit retains sealed additions as recovery
+        # evidence. Every pre-existing byte and the old reader view stay intact.
+        extras = {p for p in formal.rglob("*") if p.is_file() and str(p) not in before}
+        from agri_research_agent.positions import formal_store
+        for path in extras:
+            assert path.is_relative_to(formal / formal_store.DIRECTORY)
+            assert path.stem == delivery.digest(path.read_bytes())
+        if mode == "status_failure":
+            assert delivery.read_archive(allocation / host.POSITIONS_STABLE) == old
     else:
         result = host.publish(tmp_path / "policy", value["delta_id"], report, host.sha256_file(report))
         assert result["status"] == ("NO_CHANGE" if mode == "no_change" else "PUBLISHED")
@@ -338,6 +348,16 @@ def _publication_is_atomic(tmp_path, monkeypatch, mode, incremental):
         if old is not None:
             for name, raw in delivery.decode(old).items():
                 if "/releases/" in name or "/raw/" in name: assert (formal / name).read_bytes() == raw
+        if mode == "update":
+            assert result["schema_version"] == "production-data-delta-publication/2"
+            assert result["storage_metrics"]["full_history_copies"] == 0
+            assert set(result["backup_files"]) == {"status.json", "position-view.json"}
+            assert delivery.read_archive(allocation / host.POSITIONS_STABLE) == sample
+            retained = {str(p):p.read_bytes() for p in formal.rglob("*") if p.is_file()}
+            rolled = host.rollback(tmp_path / "policy", result["receipt_path"], result["receipt_sha256"])
+            assert rolled["status"] == "ROLLED_BACK" and rolled["full_history_copies"] == 0
+            assert delivery.read_archive(allocation / host.POSITIONS_STABLE) == old
+            assert retained == {str(p):p.read_bytes() for p in formal.rglob("*") if p.is_file()}
     assert delivery.read_json(allocation / host.EXPORTS_STABLE) == {"canada": "untouched"}
 
 

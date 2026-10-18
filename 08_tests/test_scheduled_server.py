@@ -163,7 +163,23 @@ def test_positions_baseline_keeps_only_empty_mountpoint_and_small_status(runner,
     runner.copy_snapshot(host,snapshot,destination,{'job':'positions_domestic'})
     assert (destination/host.POSITIONS_STABLE).read_bytes()==b''
     assert (destination/host.POSITIONS_STATUS).read_bytes()==b'{}'
+    assert (destination/Path(host.POSITIONS_STABLE).parent/'.position-store').is_dir()
     assert sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<256
+
+
+def test_positions_collector_mounts_the_protected_append_store_readonly(runner,tmp_path,monkeypatch):
+    c=config(runner,'positions_domestic')
+    c['allocation_root']=str(tmp_path/'allocation')
+    pool=Path(c['allocation_root'])/'01_data/processed/commodity_positions/.position-store'
+    pool.mkdir(parents=True)
+    fx,host=runner.helpers()
+    checks=[]
+    monkeypatch.setattr(host,'_protected_tree',lambda p:checks.append(p) or p)
+    monkeypatch.setattr(runner,'helpers',lambda:(fx,host))
+    command=runner.collector_command(c,tmp_path/'work')
+    mounts=[command[i+1] for i,v in enumerate(command) if v=='--mount']
+    assert checks==[pool]
+    assert f'type=bind,src={pool},dst=/baseline/{Path("01_data/processed/commodity_positions/.position-store")},readonly' in mounts
 
 
 def test_domain_policy_drift_and_wrong_source_block_before_collection(runner,monkeypatch):

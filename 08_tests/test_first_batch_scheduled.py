@@ -340,3 +340,59 @@ def test_baseline_size_ceiling_stays_bounded_before_read(tmp_path, monkeypatch, 
     monkeypatch.setattr(host, "_actual_identity", lambda path: {"sha256": "d" * 64, "size_bytes": size} if Path(path) == tmp_path / selected else None)
     with pytest.raises(ValueError, match="baseline size bound exceeded"):
         host.snapshot_fx_baseline("policy")
+
+
+@pytest.mark.parametrize('mutation',[None,'bytes','cutoff','current','duplicate'])
+def test_basis_preflight_reads_only_pinned_small_metadata_and_never_copies_history(tmp_path,monkeypatch,mutation):
+    prefix='public-market-data/lutou-domestic-basis/'
+    metadata={'schema_version':'domestic-basis-current/4','release_id':'nutstore-basis-verified','max_date':'2026-10-16'}
+    raw=json.dumps(metadata,indent=2).encode()  # Must hash actual bytes, not canonical re-encoding.
+    sha=hashlib.sha256(raw).hexdigest()
+    current={'schema_version':1,'release_id':metadata['release_id'],'manifest_sha256':sha}
+    pointer={'package_id':'public-current-'+'a'*24,'current_identity_sha256':'b'*64,
+             'delivery_identity_sha256':'c'*64,'bundle_sha256':'d'*64}
+    contents={'data/'+prefix+'current.json':jobs.delivery.canonical_json_bytes(current),
+              'data/'+prefix+'releases/'+metadata['release_id']+'/manifest.json':raw}
+    manifest={'schema_version':'public-current-production-package/3',**pointer,
+        'files':[{'path':name.removeprefix('data/'),'sha256':hashlib.sha256(body).hexdigest(),'size_bytes':len(body)}
+                 for name,body in contents.items()],
+        'current_identities':{'lutou-domestic-basis':{'release_id':metadata['release_id'],'manifest_sha256':sha}},
+        'source_max_dates':{'nutstore.domestic_basis':'2026-10-16'}}
+    if mutation=='bytes': contents[next(reversed(contents))]=b'corrupt'
+    if mutation=='cutoff': manifest['source_max_dates']['nutstore.domestic_basis']='2026-10-15'
+    if mutation=='current': manifest['current_identities']['lutou-domestic-basis']['manifest_sha256']='0'*64
+    if mutation=='duplicate': manifest['files'].append(dict(manifest['files'][0]))
+    contents['manifest.json']=jobs.delivery.canonical_json_bytes(manifest)
+    remote='/remote/releases/'+pointer['package_id']+'/'
+    calls=[]
+    def read(args,**kwargs):
+        assert args[-1].startswith('cat -- '+remote)
+        name=args[-1].removeprefix('cat -- '+remote)
+        calls.append(name)
+        return SimpleNamespace(stdout=contents[name])
+    monkeypatch.setattr(jobs.delivery,'_run',read)
+    monkeypatch.setattr(jobs.delivery,'_public_pointer',lambda c:pointer)
+    monkeypatch.setattr(jobs.delivery,'_remote_hash',lambda c,p:hashlib.sha256(contents['manifest.json']).hexdigest())
+    value={'remote_store_root':'/remote','ssh_target':'tencent-market'}
+    if mutation:
+        with pytest.raises(ValueError): baselines.public_basis_preflight(value)
+    else:
+        assert baselines.public_basis_preflight(value)['cutoff']=='2026-10-16'
+        assert len(calls)==3 and not list(tmp_path.iterdir())
+
+
+def test_basis_nochange_preflight_never_downloads_or_materializes_a_full_package(tmp_path,monkeypatch):
+    value=config(tmp_path,'nutstore_basis')['delivery']
+    cache=Path(value['baseline_package']);cache.mkdir()
+    (cache/'manifest.json').write_bytes(b'{}')
+    value['baseline_manifest_sha256']=jobs.delivery.sha256_file(cache/'manifest.json')
+    monkeypatch.setattr(jobs,'public_basis_preflight',lambda c:{'cutoff':'2026-10-16'})
+    checks=[]
+    monkeypatch.setattr(jobs,'verify_public_preflight',lambda *a:checks.append('CAS'))
+    monkeypatch.setattr(jobs,'sha256',lambda p:'a'*64)
+    monkeypatch.setattr(jobs,'read_nutstore_basis',lambda *a,**kw:SimpleNamespace(rows=[],report={'PASS':True}))
+    monkeypatch.setattr(jobs,'public_baseline',lambda *a:pytest.fail('full baseline copied'))
+    result=jobs.run_basis(value,tmp_path/'work',publish=True)
+    assert result['status']=='NO_CHANGE' and checks==['CAS']
+    assert result['metrics']['full_baseline_copied'] is result['metrics']['full_package_written'] is False
+    assert not (tmp_path/'work').exists()

@@ -13,7 +13,8 @@ import xml.etree.ElementTree as ET
 from agri_research_agent.automation import production_data_delta as delivery
 from agri_research_agent.automation import production_data_delta_exports as exports
 from agri_research_agent.automation import production_data_delta_positions as positions
-from agri_research_agent.automation.scheduled_baselines import domain_baseline, public_baseline
+from agri_research_agent.automation.scheduled_baselines import (domain_baseline, public_baseline,
+    public_basis_preflight, verify_public_preflight)
 from agri_research_agent.data_sources.nutstore_basis import SOURCE_PATH, assert_external_output, read_nutstore_basis, sha256
 from agri_research_agent.shared.atomic_storage import atomic_write_json
 
@@ -118,6 +119,15 @@ def run_basis(config, work, *, publish):
     local = Path(config["baseline_package"])
     delivery.require(delivery.sha256_file(local / "manifest.json") == config["baseline_manifest_sha256"],
                      "approved basis baseline differs")
+    if publish:
+        proof = public_basis_preflight(config)
+        before = sha256(SOURCE_PATH)
+        snapshot = read_nutstore_basis(SOURCE_PATH, after=date.fromisoformat(proof['cutoff']))
+        delivery.require(sha256(SOURCE_PATH) == before, 'basis source changed during preflight')
+        if not snapshot.rows:
+            verify_public_preflight(config, proof)
+            return {'status':'NO_CHANGE','published':False,'source_sha256':before,'source_report':snapshot.report,
+                    'metrics':{'full_baseline_copied':False,'full_package_written':False,'preflight_cutoff':proof['cutoff']}}
     baseline = public_baseline(config, work / "public-baseline") if publish else local
     previous = validate_production_package(baseline)
     current = load_domestic_basis_current(baseline / "data/public-market-data/lutou-domestic-basis")
@@ -196,7 +206,7 @@ def run(config, *, publish=False):
                 files = positions.verify_baseline(selected)
                 host = delivery._host_contract()
                 delivery.require(files[host.POSITIONS_STABLE] is not None, "scheduled positions baseline absent")
-                baseline = delivery.strict_json((Path(selected["baseline_root"]) / host.POSITIONS_STABLE).read_bytes())
+                baseline = positions.load_baseline(selected)
                 bundle, attempts = collect_bundle(baseline, work, markets=job.removeprefix("positions_"))
                 selected = {**selected, "bundle_root": str(bundle), "bundle_manifest_sha256": delivery.sha256_file(bundle / "bundle.json")}
                 result.update(positions.run_positions(selected, publish=publish))

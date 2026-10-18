@@ -1700,6 +1700,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/positions/formal_store.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/positions/cftc_annual.py",
       "role": "runtime_configuration"
     },

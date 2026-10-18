@@ -78,7 +78,7 @@ def prepare(request,baseline,output,credentials):
     if job.startswith('positions_'):
         from agri_research_agent.automation.positions_scheduled_collection import collect_bundle
         from agri_research_agent.positions import delivery as codec
-        previous=host.read_json(baseline/host.POSITIONS_STABLE)
+        previous=codec.read_archive(baseline/host.POSITIONS_STABLE)
         kwargs={}
         if request.get('positions_stock_api', False):
             if job != 'positions_domestic': raise ValueError('stock API is domestic only')

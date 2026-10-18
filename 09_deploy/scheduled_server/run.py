@@ -155,6 +155,9 @@ def copy_snapshot(host, snapshot, destination, request):
         # Keep only a mountpoint placeholder in the per-run baseline directory.
         mounted = request['job'].startswith('positions_') and relative == host.POSITIONS_STABLE
         host._write_exclusive(path, b'' if mounted else raw)
+        if mounted:
+            # Nested bind target must exist before the baseline becomes read-only.
+            (path.parent/'.position-store').mkdir(mode=0o755)
     host._write_json_exclusive(destination / 'request.json',request)
     host._make_tree_readonly(destination,public_read=True)
 
@@ -185,6 +188,13 @@ def collector_command(config, work, *, public_preflight=False):
     if config['job'].startswith('positions_'):
         relative='01_data/processed/commodity_positions/positions_archive.json'
         command += ['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
+        # Host launcher is stdlib-only; the pinned image interprets this store.
+        DIRECTORY='.position-store'
+        pool=Path(config['allocation_root'])/Path(relative).parent/DIRECTORY
+        if pool.exists():
+            host=helpers()[1]
+            host._protected_tree(pool)
+            command+=['--mount',f'type=bind,src={pool},dst=/baseline/{Path(relative).parent/DIRECTORY},readonly']
     if config['job']=='akshare':
         command[command.index('--network')+1]='none' if public_materialize else 'bridge'
         command=[arg.replace(f'src={work / "baseline"},',f'src={work / baseline},')
