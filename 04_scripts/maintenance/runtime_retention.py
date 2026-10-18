@@ -191,6 +191,16 @@ def staged_plan(base, now, keep_days=3, keep_count=2, busy=(), pins=()):
         run = d['run_id']
         roots = [receipt.parent / p for p in (
             'baseline', 'collection/package', 'collection/bundle', 'collection/collection')]
+        # These admitted collectors also expand retained source history into
+        # private work trees. Keep the same successful-receipt, age, mount,
+        # pin and recoverable-archive gates as for transport copies.
+        expanded = {
+            'canola_exports': 'collection/01_data',
+            'soybean_crop_progress': 'collection/project',
+            'soybean_export_sales': 'collection/project',
+        }.get(d.get('job'))
+        if expanded and run.startswith(d['job'].replace('_', '-') + '-server-'):
+            roots.append(receipt.parent / expanded)
         roots.append(base / 'production-data-uploads' / run)
         for family in ('production-data-candidates', 'production-data-incoming'):
             roots.extend(sorted((base / family).glob('*/' + run)))
