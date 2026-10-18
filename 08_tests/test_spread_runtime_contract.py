@@ -146,6 +146,7 @@ def test_image_copies_exact_code_inputs_and_excludes_candidate_fixtures():
     None,
     "03_src/agri_research_agent/canola_exports/data.py",
     "03_src/agri_research_agent/canola_exports/delivery.py",
+    "03_src/agri_research_agent/canola_exports/increment.py",
     "03_src/agri_research_agent/canola_exports/update.py",
     "05_apps/canada_canola_weekly_page.py",
     "05_apps/canola_exports_page.py",
@@ -157,11 +158,13 @@ def test_canola_page_and_offline_worker_import_from_image_inputs_only(tmp_path, 
         "03_src/agri_research_agent/canola_exports/__init__.py",
         "03_src/agri_research_agent/canola_exports/data.py",
         "03_src/agri_research_agent/canola_exports/delivery.py",
+        "03_src/agri_research_agent/canola_exports/increment.py",
         "03_src/agri_research_agent/canola_exports/update.py",
         "05_apps/canada_canola_weekly_page.py",
         "05_apps/canola_exports_page.py",
     }
     assert_runtime_import_closure(required, {x["path"] for x in manifest["source_inputs"]}, copied)
+    assert "agri_research_agent.canola_exports.increment" in manifest["required_python_modules"]
     for name in copied - {omission}:
         target = tmp_path / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -173,8 +176,9 @@ import sys
 root = Path(sys.argv[1]).resolve()
 sys.path[:0] = [str(root / '03_src'), str(root / '05_apps')]
 import canada_canola_weekly_page
-from agri_research_agent.canola_exports import delivery
+from agri_research_agent.canola_exports import delivery, increment
 assert callable(delivery.decode_evidence)
+assert callable(increment.build) and callable(increment.resolve)
 for name, module in list(sys.modules.items()):
     if name.startswith('agri_research_agent') or name in {
         'canada_canola_weekly_page', 'canada_canola_page', 'canola_exports_page'}:

@@ -182,6 +182,7 @@
   ],
   "required_python_modules": [
     "agri_research_agent",
+    "agri_research_agent.canola_exports.increment",
     "cryptography",
     "streamlit",
     "pandas",
@@ -893,6 +894,10 @@
     },
     {
       "path": "03_src/agri_research_agent/canola_exports/delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/canola_exports/increment.py",
       "role": "runtime_configuration"
     },
     {
