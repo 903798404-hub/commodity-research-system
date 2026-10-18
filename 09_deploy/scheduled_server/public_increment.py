@@ -16,13 +16,14 @@ def prepare_upload(host, config, work, extra, package, upload, runtime, publish,
     host.require(host.read_json(store / 'current.json') == extra['public_pointer'], 'increment Current moved')
     host.require(host.sha256_file(baseline / 'manifest.json') == extra['public_manifest_sha256'], 'increment baseline moved')
     sealed = host._file_set(package)
+    mounted_baseline = '/baseline/' + baseline.name
     proof = invoke(['docker', 'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', '1024m', '--cpus', '1',
         '--pids-limit', '96', '--user', '65532:65532',
         '--mount', f'type=bind,src={package},dst=/increment,readonly',
-        '--mount', f'type=bind,src={baseline},dst=/baseline,readonly',
+        '--mount', f'type=bind,src={baseline},dst={mounted_baseline},readonly',
         '--entrypoint', 'python', config['image_id'], '-I', '-B', '/app/04_scripts/validate_public_increment.py',
-        '--increment', '/increment', '--baseline', '/baseline'])
+        '--increment', '/increment', '--baseline', mounted_baseline])
     host.require(proof['status'] == 'PASS' and host._file_set(package) == sealed, 'increment offline validation differs')
     manifest = host.read_json(package / 'manifest.json')
     host.require(manifest['package_id'] == proof['package_id'], 'increment identity differs')

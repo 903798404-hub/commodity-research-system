@@ -91,7 +91,7 @@ def test_incremental_public_requires_pinned_protected_pool_and_readonly_base_mou
     (baseline/'request.json').write_text(json.dumps({'public_pointer':{'package_id':package_id}}))
     command=runner.collector_command(c,tmp_path)
     mounts=[command[i+1] for i,v in enumerate(command) if v=='--mount']
-    assert any(f'releases{Path("/")}{package_id}' in v and v.endswith('dst=/public-baseline,readonly') for v in mounts)
+    assert any(f'releases{Path("/")}{package_id}' in v and v.endswith(f'dst=/public-baseline/{package_id},readonly') for v in mounts)
     assert command[command.index('--network')+1]=='none'
     assert not any('dst=/public-baseline' in v for v in runner.collector_command(c,tmp_path,public_preflight=True))
 

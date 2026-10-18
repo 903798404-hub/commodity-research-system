@@ -127,7 +127,17 @@ def test_projection_is_independent_for_candidate_and_shared_immutable_for_produc
              'public_manifest_sha256':delivery._sha256_file(formal/'manifest.json')}
     config = {'allocation_root':str(allocation),'public_object_pool':str(pool),
               'public_store_owner':{'uid':1000,'gid':1000},'image_id':'test'}
-    def invoke(command): return delta.validate_increment(increment.directory, formal)
+    invocations = []
+    def invoke(command):
+        # Reproduce the container-visible path, rather than validating the host
+        # source and accidentally bypassing the package leaf-name identity gate.
+        mounted = command[command.index('--baseline') + 1]
+        mounts = [command[i + 1] for i, arg in enumerate(command) if arg == '--mount']
+        assert f'type=bind,src={formal},dst={mounted},readonly' in mounts
+        view = tmp_path / 'validator-views' / str(len(invocations)) / mounted.lstrip('/')
+        invocations.append(view)
+        shutil.copytree(formal, view)
+        return delta.validate_increment(increment.directory, view)
     work = tmp_path / 'work'; work.mkdir()
     upload = store / 'incoming' / 'projection'
     report = publisher.prepare_upload(host,config,work,extra,increment.directory,upload,{'uid':65532},publish,invoke)

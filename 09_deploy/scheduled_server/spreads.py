@@ -101,7 +101,8 @@ def materialize(request, baseline, output):
         HistoricalMutationPolicy, HistoricalPublicationMode, validate_historical_publication)
     combined, added = replay(request, baseline)
     incremental = request.get('incremental_public_packages',False)
-    public = PUBLIC_BASELINE if incremental else baseline / request['public_package_relative']
+    public = (PUBLIC_BASELINE / request['public_pointer']['package_id'] if incremental
+              else baseline / request['public_package_relative'])
     package = validate_production_package(public)
     if package.manifest != request['public_manifest']:
         raise ValueError('public manifest differs')

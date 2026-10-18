@@ -133,7 +133,8 @@ def test_changed_data_materializes_offline_and_keeps_history_and_other_domains(f
     f.request.update(public_manifest=package.manifest, public_package_relative=str(package.directory.relative_to(f.baseline)),
                      public_pointer={'package_id': package.package_id})
     f.request['incremental_public_packages']=incremental
-    monkeypatch.setattr(f.spreads,'PUBLIC_BASELINE',package.directory)
+    # Match Docker's mount-parent layout; the package id remains the leaf name.
+    monkeypatch.setattr(f.spreads,'PUBLIC_BASELINE',package.directory.parent)
     _, proof = check(f)
     f.request['public_preflight'] = proof
     monkeypatch.setattr(f.updater.ak, 'futures_zh_daily_sina', lambda **k: pytest.fail('offline materializer queried source'))

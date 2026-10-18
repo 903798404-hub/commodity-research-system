@@ -194,7 +194,7 @@ def collector_command(config, work, *, public_preflight=False):
             package_id=request['public_pointer']['package_id']
             if not re.fullmatch(r'public-current-[0-9a-f]{24}',package_id):raise ValueError('public mount identity invalid')
             source=Path(config['allocation_root'])/'01_data/public-data-server-store/releases'/package_id
-            command+=['--mount',f'type=bind,src={source},dst=/public-baseline,readonly']
+            command+=['--mount',f'type=bind,src={source},dst=/public-baseline/{package_id},readonly']
     return command + ['--entrypoint','python',config['image_id'],'-I','-B','/source/09_deploy/scheduled_server/collect.py'] + (['--public-preflight'] if public_preflight else [])
 
 
