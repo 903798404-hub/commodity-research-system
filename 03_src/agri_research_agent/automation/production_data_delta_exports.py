@@ -89,10 +89,7 @@ def _collect(config: dict, work: Path, baseline: dict | None, baseline_evidence:
         stable = root / data.STABLE
         stable.parent.mkdir(parents=True)
         stable.write_bytes(delivery.canonical_json_bytes(baseline))
-        for (kind, year, sha, _url), raw in replay(baseline, baseline_evidence).items():
-            path = root / f"raw/canola_exports/{year}/{sha}.{kind}"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+        replay(baseline, baseline_evidence)
     result = delivery._run([
         config["python"], "-I", "-B", "-X", "utf8",
         str(delivery.ROOT / "04_scripts/canola_exports/update_exports.py"),
@@ -104,7 +101,7 @@ def _collect(config: dict, work: Path, baseline: dict | None, baseline_evidence:
     delivery.require(candidate.is_relative_to(root / "candidates/canola_exports") and candidate.name == "weekly.json",
                      "export provider candidate outside owned runtime")
     bundle = delivery.strict_json(candidate.read_bytes())
-    return candidate, archive_evidence(bundle, root)
+    return candidate, archive_evidence(bundle, root, retained=baseline_evidence)
 
 
 def run_exports(config: dict, *, publish: bool = False) -> dict:

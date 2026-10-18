@@ -128,6 +128,10 @@ def test_stock_token_is_stdin_only_and_extra_secret_keys_are_rejected(runner,tmp
 
 
 def test_collectors_have_no_formal_writable_mount_or_credentials_in_args(runner,tmp_path):
+    baseline=tmp_path/'run/baseline';baseline.mkdir(parents=True)
+    host=runner.helpers()[1]
+    (baseline/'request.json').write_text(json.dumps({'baseline_files':{
+        host.EXPORTS_STABLE:None,host.EXPORTS_SOURCES:None}}))
     for job in runner.JOBS:
         command=runner.collector_command(config(runner,job),tmp_path/'run')
         assert '--read-only' in command and '--user' in command and '65532:65532' in command
@@ -205,6 +209,7 @@ def test_network_worker_builds_domain_package_after_collection(monkeypatch,tmp_p
     from agri_research_agent.automation import positions_scheduled_collection,production_data_delta_exports
     from agri_research_agent.positions import delivery as positions_codec
     from agri_research_agent.canola_exports import delivery as exports_codec
+    from agri_research_agent.canola_exports import increment as exports_increment
     collector=load('candidate_collect_package','09_deploy/scheduled_server/collect.py')
     host=delivery._host_contract()
     baseline=tmp_path/'baseline'; baseline.mkdir()
@@ -218,9 +223,12 @@ def test_network_worker_builds_domain_package_after_collection(monkeypatch,tmp_p
     monkeypatch.setattr(positions_codec,'observations',lambda *a:{'business_changed':False})
     monkeypatch.setattr(production_data_delta_exports,'_collect',lambda *a:(candidate,{'source':'verified'}))
     monkeypatch.setattr(exports_codec,'observations',lambda *a:{'business_changed':False})
+    monkeypatch.setattr(exports_increment,'build',lambda *a:({'updates':[]},{'sources':[]}))
     calls=[]
     monkeypatch.setattr(collector,'package',lambda request,output,payloads,semantic,host:calls.append((request['job'],payloads,semantic)))
-    request={'job':job,'business_date':'2026-10-11','baseline_files':{}}
+    request={'job':job,'business_date':'2026-10-11','baseline_files':{
+        name:delivery._identity(baseline/name) for name in (host.EXPORTS_STABLE,host.EXPORTS_SOURCES)}
+        if job=='canola_exports' else {}}
     result=collector.prepare(request,baseline,output,{})
     assert len(calls)==1 and calls[0][0]==job
     assert set(calls[0][1])==({'positions_archive.json'} if job.startswith('positions_') else {'weekly.json','source_evidence.json'})

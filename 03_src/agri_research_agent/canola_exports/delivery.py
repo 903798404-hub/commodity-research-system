@@ -114,8 +114,15 @@ def replay(bundle: dict, evidence: dict) -> dict:
     return raw_sources
 
 
-def archive_evidence(bundle: dict, root: Path) -> dict:
+def archive_evidence(bundle: dict, root: Path, retained: dict | None = None) -> dict:
     closed_bundle(bundle)
+    # Reuse verified compressed evidence without expanding old annual files to
+    # every private collection directory. New downloads still keep their bytes.
+    prior = {}
+    if retained is not None:
+        decode_evidence(retained)
+        prior = {tuple(item[name] for name in ("kind", "crop_year", "sha256", "source_url")): item
+                 for item in retained["sources"]}
     references = {("csv", year, source["sha256"], source["source_url"])
                   for year, source in bundle["sources"].items()}
     references.update(("xlsx", row["crop_year"], row["report_evidence"]["sha256"],
@@ -125,13 +132,23 @@ def archive_evidence(bundle: dict, root: Path) -> dict:
     total = 0
     for kind, year, sha, url in sorted(references):
         path = root / f"raw/canola_exports/{year}/{sha}.{kind}"
+        require(not any(parent.is_symlink() or (parent.exists() and
+                    getattr(parent.stat(), "st_file_attributes", 0) & 0x400)
+                    for parent in (path, *path.parents)), "linked export source parent")
+        if not path.exists() and (kind, year, sha, url) in prior:
+            sources.append(dict(prior[kind, year, sha, url]))
+            continue
         require(path.is_file() and not path.is_symlink(), "export source archive missing or linked")
         require(not any(parent.is_symlink() or getattr(parent.stat(), "st_file_attributes", 0) & 0x400
                         for parent in (path, *path.parents)), "linked export source parent")
         require(0 < path.stat().st_size <= MAX_SOURCE, "export archive too large")
         raw = path.read_bytes()
+        require(digest(raw) == sha, "export source archive byte identity differs")
         total += len(raw)
         require(total <= MAX_TOTAL, "export archive exceeds size bound")
+        if (kind, year, sha, url) in prior:
+            sources.append(dict(prior[kind, year, sha, url]))
+            continue
         sources.append({"kind": kind, "crop_year": year, "sha256": sha, "source_url": url,
                         "encoding": "gzip", "bytes_base64": base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")})
     evidence = {"schema_version": EVIDENCE_SCHEMA, "sources": sources}

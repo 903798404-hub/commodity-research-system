@@ -151,11 +151,12 @@ def copy_snapshot(host, snapshot, destination, request):
         host.require(total <= 256 * 1024**2 and dict(sha256=host.sha256_bytes(raw),size_bytes=len(raw)) == identity, 'baseline copy differs')
         path = destination / relative
         path.parent.mkdir(parents=True,exist_ok=True)
-        # The large positions archive is mounted read-only as an exact file.
+        # Large positions/CGC baseline files are mounted read-only as exact files.
         # Keep only a mountpoint placeholder in the per-run baseline directory.
-        mounted = request['job'].startswith('positions_') and relative == host.POSITIONS_STABLE
+        mounted = (request['job'].startswith('positions_') and relative == host.POSITIONS_STABLE) or (
+            request['job']=='canola_exports' and relative in {host.EXPORTS_STABLE,host.EXPORTS_SOURCES})
         host._write_exclusive(path, b'' if mounted else raw)
-        if mounted:
+        if mounted and request['job'].startswith('positions_'):
             # Nested bind target must exist before the baseline becomes read-only.
             (path.parent/'.position-store').mkdir(mode=0o755)
     host._write_json_exclusive(destination / 'request.json',request)
@@ -195,6 +196,12 @@ def collector_command(config, work, *, public_preflight=False):
             host=helpers()[1]
             host._protected_tree(pool)
             command+=['--mount',f'type=bind,src={pool},dst=/baseline/{Path(relative).parent/DIRECTORY},readonly']
+    if config['job']=='canola_exports':
+        request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
+        for relative in ('01_data/processed/canola_exports/weekly.json',
+                         '01_data/processed/canola_exports/source_evidence.json'):
+            if request['baseline_files'][relative] is not None:
+                command+=['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
     if config['job']=='akshare':
         command[command.index('--network')+1]='none' if public_materialize else 'bridge'
         command=[arg.replace(f'src={work / "baseline"},',f'src={work / baseline},')

@@ -1474,6 +1474,13 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
         if delta["domain"] == "canola_exports":
             require((delta["run"]["business_status"] == "initialized") == (delta["baseline"]["files"][EXPORTS_STABLE] is None),
                     "export initialization differs from formal baseline")
+            sys.path.insert(0, str(ROOT / "03_src"))
+            from agri_research_agent.canola_exports.increment import resolve as resolve_exports
+            export_candidate, export_evidence = resolve_exports(
+                read_json(candidate / "weekly.json"),
+                read_json(allocation / EXPORTS_STABLE) if existing_payloads[EXPORTS_STABLE] is not None else None,
+                read_json(candidate / "source_evidence.json"),
+                read_json(allocation / EXPORTS_SOURCES) if existing_payloads[EXPORTS_SOURCES] is not None else None)
         if delta["run"]["business_status"] == "no_change" or all(existing_payloads[target] is not None
                and existing_payloads[target]["sha256"] == delta["payloads"][name]["sha256"]
                for name, target in contract["payloads"].items()):
@@ -1539,7 +1546,12 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
         identities = {}
         for name, target in contract["payloads"].items():
             destination = stage / Path(target).name
-            if delta["domain"] == "commodity_positions" and positions_json(candidate / name).get("schema_version") == "commodity-positions-increment/1":
+            if delta["domain"] == "canola_exports":
+                # Only the final compatibility view is materialized. Transport
+                # and validation reuse the baseline's immutable source objects.
+                _atomic_json(destination, export_candidate if name == "weekly.json" else export_evidence)
+                identities[target] = _actual_identity(destination)
+            elif delta["domain"] == "commodity_positions" and positions_json(candidate / name).get("schema_version") == "commodity-positions-increment/1":
                 # Reconstruct the compatibility view once at publication, not at
                 # every collection/transfer stage. Backups retain the prior view.
                 _atomic_json(destination, positions_candidate)
@@ -1932,10 +1944,13 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
                     for key in DOMAIN_CONTRACTS[domain]["metadata"]), "positions candidate metadata mismatch")
     elif domain == "canola_exports":
         from agri_research_agent.canola_exports.delivery import observations as export_observations
+        from agri_research_agent.canola_exports.increment import resolve as resolve_exports
         baseline = (read_json(Path("/allocation") / EXPORTS_STABLE)
                     if delta["baseline"]["files"][EXPORTS_STABLE] is not None else None)
-        observations = export_observations(read_json(candidate / "weekly.json"), baseline,
-                                           read_json(candidate / "source_evidence.json"))
+        baseline_evidence = read_json(Path("/allocation") / EXPORTS_SOURCES) if baseline is not None else None
+        resolved, sources = resolve_exports(read_json(candidate / "weekly.json"), baseline,
+                                           read_json(candidate / "source_evidence.json"), baseline_evidence)
+        observations = export_observations(resolved, baseline, sources)
         require(all(observations[key] == delta["domain_metadata"][key]
                     for key in DOMAIN_CONTRACTS[domain]["metadata"]), "export candidate metadata mismatch")
     elif domain == "brazil_soy":

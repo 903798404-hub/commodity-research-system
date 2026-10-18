@@ -27,6 +27,8 @@ def package(request,output,payloads,semantic,host):
     for name,raw in payloads.items(): (target/name).write_bytes(raw)
     domain={'positions_domestic':'commodity_positions','positions_foreign':'commodity_positions'}.get(request['job'],request['job'])
     status='updated' if semantic['business_changed'] else 'no_change'
+    if domain=='canola_exports' and request['baseline_files'][host.EXPORTS_STABLE] is None:
+        status='initialized'
     contract=host.DOMAIN_CONTRACTS[domain]
     delta={'schema_version':host.SCHEMA_VERSION,'status':'CANDIDATE','delta_id':request['run_id'],
         'generated_at_utc':request['checked_at'],'domain':domain,'producer':request['producer'],
@@ -100,13 +102,19 @@ def prepare(request,baseline,output,credentials):
     if job=='canola_exports':
         from agri_research_agent.automation.production_data_delta_exports import _collect
         from agri_research_agent.canola_exports.delivery import observations
-        previous=host.read_json(baseline/host.EXPORTS_STABLE)
-        evidence=host.read_json(baseline/host.EXPORTS_SOURCES)
+        from agri_research_agent.canola_exports.increment import build, canonical, SCHEMA
+        previous=(host.read_json(baseline/host.EXPORTS_STABLE)
+                  if request['baseline_files'][host.EXPORTS_STABLE] is not None else None)
+        evidence=host.read_json(baseline/host.EXPORTS_SOURCES) if previous is not None else None
         path,sources=_collect({'python':sys.executable,'initial_years':2},output,previous,evidence)
         candidate=host.read_json(path); semantic=observations(candidate,previous,sources)
-        package(request,output,{'weekly.json':delivery.canonical_json_bytes(candidate),
-            'source_evidence.json':delivery.canonical_json_bytes(sources)},semantic,host)
-        return {'observations':semantic}
+        increment,source_increment=build(candidate,previous,sources,evidence)
+        payloads={'weekly.json':canonical(increment),'source_evidence.json':canonical(source_increment)}
+        package(request,output,payloads,semantic,host)
+        return {'observations':semantic,'metrics':{'transport_schema':SCHEMA,
+            'payload_bytes':sum(len(raw) for raw in payloads.values()),
+            'new_source_objects':len(source_increment['sources']),
+            'changed_records':len(increment['updates']),'full_transport_bundle_written':False}}
     project=output/'project'; project.mkdir()
     for relative,expected in request['baseline_files'].items():
         if expected is None: continue

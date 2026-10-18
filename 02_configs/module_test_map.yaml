@@ -56,9 +56,13 @@ modules:
   automation.scheduled_server:
     code_paths:
       - 09_deploy/scheduled_server
+      - 03_src/agri_research_agent/canola_exports/increment.py
+      - 03_src/agri_research_agent/canola_exports/delivery.py
+      - 03_src/agri_research_agent/automation/production_data_delta_exports.py
       - 04_scripts/transfer_public_data_package.py
     direct_tests:
       - 08_tests/test_scheduled_server.py
+      - 08_tests/canola_exports/test_incremental_delivery.py
     impact_tests:
       - 08_tests/test_foreign_fx_server.py
       - 08_tests/test_production_data_delta_activation.py
