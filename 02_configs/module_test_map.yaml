@@ -45,6 +45,7 @@ modules:
     direct_tests:
       - 08_tests/test_public_package_retention.py
       - 08_tests/test_runtime_retention.py
+      - 08_tests/shared/test_expanded_collector_retention.py
     impact_tests:
       - 08_tests/pipelines/test_public_data_delivery.py
       - 08_tests/pipelines/test_public_data_transport.py
