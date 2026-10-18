@@ -952,6 +952,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/pipelines/public_data_increment.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/pipelines/public_data_prewarm.py",
       "role": "runtime_configuration"
     },
@@ -1461,6 +1465,10 @@
     },
     {
       "path": "04_scripts/weather/refresh_weather_from_sql.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/validate_public_increment.py",
       "role": "runtime_configuration"
     },
     {

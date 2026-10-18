@@ -224,6 +224,31 @@ for name, module in list(sys.modules.items()):
         assert result.returncode != 0 and "ModuleNotFoundError" in result.stderr
 
 
+@pytest.mark.parametrize("omission", [
+    None,
+    "04_scripts/validate_public_increment.py",
+    "03_src/agri_research_agent/pipelines/public_data_increment.py",
+])
+def test_public_increment_validator_starts_from_image_inputs_only(tmp_path, omission):
+    # This worker is launched by the host publisher, outside the web app's
+    # import graph. Exercise its actual CLI from the exact packaged file set.
+    copied = copied_runtime_inputs(contract())
+    for name in copied - {omission}:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(tmp_path / "04_scripts/validate_public_increment.py"), "--help"],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    if omission is None:
+        assert result.returncode == 0, result.stderr
+        assert "--baseline" in result.stdout and "--increment" in result.stdout
+    else:
+        assert result.returncode != 0
+        assert "No such file" in result.stderr or "ModuleNotFoundError" in result.stderr
+
+
 @pytest.fixture
 def mounted_inputs(tmp_path):
     m = contract()
