@@ -102,5 +102,3 @@ def test_expanded_source_hardlink_cannot_archive_external_history(tmp_path):
     with pytest.raises(ValueError, match='shared file'):
         m.staged_plan(tmp_path, NOW)
     assert external.read_bytes() == b'protected formal evidence'
-
-
