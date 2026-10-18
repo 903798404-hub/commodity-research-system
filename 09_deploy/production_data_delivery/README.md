@@ -251,9 +251,25 @@ publisher重读归档Soja面积列并核对27个UF与BRASIL、参考季及来源
 生产 storage 必须是 `/var/lib/market-data/production-runtime` 下独立 allocation，
 该 allocation 下的 `01_data` 对应页面数据根。
 
-语义验证仅在固定镜像中运行一次 readonly、network-none、非 root worker；只读挂载候选、
+语义验证在固定镜像中运行 readonly、network-none、非 root worker；只读挂载候选、
 基线和批准的主机工具源码。Worker 复用镜像内现有 Crop/FAS 校验器，不查询任何 provider，
 不使用 Tailscale，不 build、不 pull。候选必须能被镜像的实际 UID 读取。
+
+服务器的 Crop/FAS 采集器可运输 `agri-table-increment/1` JSON，绑定实际基线 SHA、
+授权年度、稀疏记录和来源元数据。固定 payload 文件名沿用合同中的 `.parquet`，因此
+不能仅凭扩展名复制安装：worker 识别 PAR1 或封闭 JSON，重建后执行原有完整域校验。
+无变化在整表编码、备份和正式写入之前返回。真实业务变化时，第二次同精确镜像调用
+在独立 scratch 写兼容 Parquet，仅该 scratch 可写，其余挂载只读、网络禁用。
+两次完整报告及输出集合、字节 SHA、Schema 和行数必须一致，宿主在容器移除后核验
+65532 所有权并封为 root 只读文件，才移入发布 staging。宿主不加载 pandas/Arrow；
+失败的部分 scratch 保留但不消费。旧格式 payload 仍执行原路径。
+
+FAS 月度完整范围检查在业务 NO_CHANGE 时，另外保存小型受保护操作证据与 current
+指针。只有真实完整七年及所有保留年度的来源、独立验证和 NO_CHANGE 发布回执，
+才能推进记录；接收/验证/发布 SHA、producer/image/policy、检查时间和基线身份均绑定。
+下一次采集只在同一未变基线上使用有效记录，业务 Manifest/status 原样保留。
+来源过期、证据损坏、未来时间或自报检查时间拒绝；合法新基线令旧记录失效。
+版本化检查及其回执独立于可归档的私有展开候选，不能随临时副本删除。
 
 发布前重新核对 policy/source/candidate/report/baseline，在域目录 staging 中保留未受影响
 文件，使用同文件系统的目录交换完成替换，并生成主机 status。失败时恢复旧域目录和旧

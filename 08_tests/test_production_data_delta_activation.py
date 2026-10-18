@@ -202,7 +202,13 @@ def test_worker_is_exact_image_networkless_readonly_and_never_runs_provider_or_h
     assert "--mount" in worker
     rendered = " ".join(worker)
     assert "--privileged" not in rendered and "docker.sock" not in rendered
-    assert "akshare" not in rendered.lower() and "nass" not in rendered.lower() and "fas" not in rendered.lower()
+    # Provider names in a legitimate checkout/bind-mount path are not executed
+    # commands. Pin the entire executable tail instead of substring-matching it.
+    assert worker[worker.index("--entrypoint") + 1] == "python"
+    assert worker[worker.index(IMAGE) + 1:] == [
+        "-B", "/opt/production-data-delivery/activate_production_data_delta.py", "_worker",
+        "--domain", "soybean_crop_progress", "--expected-commit", COMMIT, "--expected-tree", TREE,
+    ]
     assert calls[-1][:4] == ["docker", "rm", "-f", worker[worker.index("--name") + 1]]
 
 

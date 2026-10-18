@@ -174,8 +174,13 @@ def _trusted_source(tmp_path: Path) -> tuple[Path, str, str]:
     wrapper_dir = source / "09_deploy" / "soybean_exports"
     wrapper_dir.mkdir(parents=True)
     for path in (FGIS_WRAPPER, FGIS_UPLOAD_WRAPPER, FAS_WRAPPER):
-        (wrapper_dir / path.name).write_bytes(path.read_bytes())
+        # The installer consumes Linux shell blobs. A Windows CRLF checkout
+        # must not change this trusted-source fixture's committed identity.
+        raw = subprocess.check_output(["git", "-C", str(REPOSITORY), "show", "HEAD:" + path.relative_to(REPOSITORY).as_posix()])
+        assert raw.startswith(b"#!/usr/bin/env bash\n") and b"\r\n" not in raw
+        (wrapper_dir / path.name).write_bytes(raw)
     _git(source, "init")
+    _git(source, "config", "core.autocrlf", "false")
     _git(source, "config", "user.name", "runtime-test")
     _git(source, "config", "user.email", "runtime-test@example.invalid")
     _git(source, "add", "--", "09_deploy/soybean_exports")

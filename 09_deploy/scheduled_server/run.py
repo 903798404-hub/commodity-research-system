@@ -154,7 +154,10 @@ def copy_snapshot(host, snapshot, destination, request):
         # Large positions/CGC baseline files are mounted read-only as exact files.
         # Keep only a mountpoint placeholder in the per-run baseline directory.
         mounted = (request['job'].startswith('positions_') and relative == host.POSITIONS_STABLE) or (
-            request['job']=='canola_exports' and relative in {host.EXPORTS_STABLE,host.EXPORTS_SOURCES})
+            request['job']=='canola_exports' and relative in {host.EXPORTS_STABLE,host.EXPORTS_SOURCES}) or (
+            request['job']=='soybean_crop_progress' and relative in {host.CROP_PROGRESS,host.CROP_CONDITION,
+                host.CROP_LEGACY_PROGRESS,host.CROP_LEGACY_CONDITION}) or (
+            request['job']=='soybean_export_sales' and relative == host.FAS_STABLE)
         host._write_exclusive(path, b'' if mounted else raw)
         if mounted and request['job'].startswith('positions_'):
             # Nested bind target must exist before the baseline becomes read-only.
@@ -200,6 +203,16 @@ def collector_command(config, work, *, public_preflight=False):
         request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
         for relative in ('01_data/processed/canola_exports/weekly.json',
                          '01_data/processed/canola_exports/source_evidence.json'):
+            if request['baseline_files'][relative] is not None:
+                command+=['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
+    if config['job'] in {'soybean_crop_progress','soybean_export_sales'}:
+        request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
+        relative_paths = ('01_data/processed/soybean_export_sales/soybean_export_sales_weekly.parquet',) if config['job']=='soybean_export_sales' else (
+            '01_data/processed/soybean_crop_progress/soybeans_crop_progress_weekly.parquet',
+            '01_data/processed/soybean_crop_progress/soybeans_crop_condition_weekly.parquet',
+            '01_data/processed/soybean_crop_progress/soybeans_crop_progress_weekly_2021_2026.parquet',
+            '01_data/processed/soybean_crop_progress/soybeans_crop_condition_weekly_2021_2026.parquet')
+        for relative in relative_paths:
             if request['baseline_files'][relative] is not None:
                 command+=['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
     if config['job']=='akshare':
@@ -270,6 +283,8 @@ def execute(fx, host, config, work, publish, business_date=None):
         request={'job':config['job'],'run_id':work.name,'checked_at':now.isoformat(),
             'business_date':now.astimezone(timezone(timedelta(hours=8))).date().isoformat(),
             'producer':config['producer'],'baseline_files':snapshot['files'],**extra}
+        if config['job']=='soybean_export_sales' and snapshot.get('fas_reconciliation_check') is not None:
+            request['fas_reconciliation_check']=snapshot['fas_reconciliation_check']
         if config['job'] == 'akshare':
             request['partitioned_public_packages'] = config.get('partitioned_public_packages', False)
             request['incremental_public_packages'] = config.get('incremental_public_packages',False)

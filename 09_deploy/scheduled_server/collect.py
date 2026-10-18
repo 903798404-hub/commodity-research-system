@@ -116,28 +116,30 @@ def prepare(request,baseline,output,credentials):
             'new_source_objects':len(source_increment['sources']),
             'changed_records':len(increment['updates']),'full_transport_bundle_written':False}}
     project=output/'project'; project.mkdir()
-    for relative,expected in request['baseline_files'].items():
-        if expected is None: continue
-        if job=='akshare' and relative.startswith('public-package/'): continue
-        path=project/relative; path.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(baseline/relative,path)
     if job=='soybean_crop_progress':
         config=project/'02_configs/soybean_crop_progress_display.yaml'
         config.parent.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(SOURCE/'02_configs/soybean_crop_progress_display.yaml',config)
         from agri_research_agent.pipelines.soybean_crop_weekly_update import run_soybean_crop_weekly_update
-        audit=run_soybean_crop_weekly_update(project_root=project,dry_run=True,git_head=request['producer']['commit'],env=credentials)
+        audit=run_soybean_crop_weekly_update(project_root=project,baseline_root=baseline,incremental_transport=True,
+            dry_run=True,git_head=request['producer']['commit'],env=credentials)
         if audit['status']=='out_of_season': return {'out_of_season':True}
         delivery.collect_delta(job,project,output/'package',request['producer'],
-            {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},run_id=request['run_id'])
-        return {'business_status':audit['status'],'latest_week':audit.get('latest_week')}
+            {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},
+            run_id=request['run_id'],baseline_root=baseline)
+        return {'business_status':audit['status'],'latest_week':audit.get('latest_week'),
+                'metrics':{'transport_schema':'agri-table-increment/1','full_transport_bundle_written':False,'baseline_copied':False}}
     if job=='soybean_export_sales':
         from agri_research_agent.soybean_exports.fas import FasAdapter,run_fas_pipeline
         audit=run_fas_pipeline(runtime_root=project,adapter=FasAdapter(api_key=credentials['FAS_EXPORT_SALES_API_KEY'],use_environment_proxy=False),
-            git_head=request['producer']['commit'],publish=False,incremental=True)
+            git_head=request['producer']['commit'],publish=False,incremental=True,baseline_root=baseline,incremental_transport=True,
+            reconciliation_check=request.get('fas_reconciliation_check'))
         delivery.collect_delta(job,project,output/'package',request['producer'],
-            {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},run_id=request['run_id'])
+            {rel.removeprefix('01_data/'):identity for rel,identity in request['baseline_files'].items()},
+            run_id=request['run_id'],baseline_root=baseline)
         return {'business_status':audit['status'],'latest_week':audit['validation']['latest_week'],
-                'metrics':audit.get('collection_metrics',{})}
+                'metrics':{**audit.get('collection_metrics',{}),'transport_schema':'agri-table-increment/1',
+                           'full_transport_bundle_written':False,'baseline_copied':False}}
     raise ValueError('unsupported scheduled job')
 
 

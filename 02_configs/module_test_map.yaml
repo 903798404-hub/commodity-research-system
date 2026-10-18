@@ -1,5 +1,40 @@
 schema_version: 1
 modules:
+  automation.sparse_table_delivery:
+    code_paths:
+      - 03_src/agri_research_agent/shared/table_increment.py
+      - 03_src/agri_research_agent/shared/table_delivery.py
+      - 03_src/agri_research_agent/soybean_exports/reconciliation.py
+      - 03_src/agri_research_agent/soybean_exports/fas.py
+      - 03_src/agri_research_agent/pipelines/soybean_crop_weekly_update.py
+      - 03_src/agri_research_agent/automation/production_data_delta.py
+      - 09_deploy/production_data_delivery/activate_production_data_delta.py
+      - 09_deploy/scheduled_server/collect.py
+      - 09_deploy/scheduled_server/run.py
+    direct_tests:
+      - 08_tests/shared/test_table_increment.py
+      - 08_tests/shared/test_table_delivery.py
+      - 08_tests/soybean_exports/test_fas_table_transport.py
+      - 08_tests/soybean_exports/test_fas_reconciliation.py
+      - 08_tests/soybean_crop_progress/test_crop_table_transport.py
+      - 08_tests/test_table_delta_worker.py
+      - 08_tests/test_fas_reconciliation_host.py
+    impact_tests:
+      - 08_tests/soybean_exports/test_fas_incremental.py
+      - 08_tests/soybean_exports/test_fas_data_layer.py
+      - 08_tests/soybean_crop_progress/test_soybean_crop_weekly_update.py
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/test_production_data_delta_fx.py
+      - 08_tests/test_scheduled_server.py
+      - 08_tests/test_first_batch_scheduled.py
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/soybean_exports/test_host_runtime_entrypoints.py
+      - 08_tests/soybean_exports/test_soybean_exports_page.py
+      - 08_tests/soybean_crop_progress/test_soybean_crop_progress_page.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
   automation.incremental_updates:
     code_paths:
       - 03_src/agri_research_agent/soybean_exports/fas.py

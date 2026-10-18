@@ -230,6 +230,53 @@ for name, module in list(sys.modules.items()):
 
 @pytest.mark.parametrize("omission", [
     None,
+    "03_src/agri_research_agent/shared/table_increment.py",
+    "03_src/agri_research_agent/shared/table_delivery.py",
+    "03_src/agri_research_agent/soybean_exports/reconciliation.py",
+])
+def test_sparse_table_workers_import_only_declared_image_inputs(tmp_path, omission):
+    manifest = contract()
+    copied = copied_runtime_inputs(manifest)
+    modules = {
+        "agri_research_agent.shared.table_increment",
+        "agri_research_agent.shared.table_delivery",
+        "agri_research_agent.soybean_exports.reconciliation",
+    }
+    assert modules <= set(manifest["required_python_modules"])
+    required = {"03_src/" + name.replace(".", "/") + ".py" for name in modules}
+    assert_runtime_import_closure(required, {x["path"] for x in manifest["source_inputs"]}, copied)
+    for name in copied - {omission}:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    code = """
+from pathlib import Path
+import sys
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root / '03_src'))
+from agri_research_agent.shared import table_increment, table_delivery
+from agri_research_agent.soybean_exports import fas, reconciliation
+from agri_research_agent.pipelines import soybean_crop_weekly_update
+assert callable(table_increment.build) and callable(table_increment.resolve)
+assert callable(table_delivery.read) and callable(reconciliation.select)
+assert callable(fas.run_fas_pipeline)
+assert callable(soybean_crop_weekly_update.run_soybean_crop_weekly_update)
+for name, module in list(sys.modules.items()):
+    if name.startswith('agri_research_agent'):
+        assert Path(module.__file__).resolve().is_relative_to(root), name
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(tmp_path)], cwd=tmp_path,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    if omission is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0 and ("ModuleNotFoundError" in result.stderr or "ImportError" in result.stderr)
+
+
+@pytest.mark.parametrize("omission", [
+    None,
     "04_scripts/validate_public_increment.py",
     "03_src/agri_research_agent/pipelines/public_data_increment.py",
 ])

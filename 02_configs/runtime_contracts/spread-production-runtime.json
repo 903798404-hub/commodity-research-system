@@ -183,6 +183,9 @@
   "required_python_modules": [
     "agri_research_agent",
     "agri_research_agent.canola_exports.increment",
+    "agri_research_agent.shared.table_increment",
+    "agri_research_agent.shared.table_delivery",
+    "agri_research_agent.soybean_exports.reconciliation",
     "cryptography",
     "streamlit",
     "pandas",
@@ -1081,6 +1084,14 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/shared/table_increment.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/table_delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/shared/production_grant.py",
       "role": "runtime_configuration"
     },
@@ -1134,6 +1145,10 @@
     },
     {
       "path": "03_src/agri_research_agent/soybean_exports/research.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/reconciliation.py",
       "role": "runtime_configuration"
     },
     {

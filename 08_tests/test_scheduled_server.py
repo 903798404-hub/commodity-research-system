@@ -130,8 +130,9 @@ def test_stock_token_is_stdin_only_and_extra_secret_keys_are_rejected(runner,tmp
 def test_collectors_have_no_formal_writable_mount_or_credentials_in_args(runner,tmp_path):
     baseline=tmp_path/'run/baseline';baseline.mkdir(parents=True)
     host=runner.helpers()[1]
-    (baseline/'request.json').write_text(json.dumps({'baseline_files':{
-        host.EXPORTS_STABLE:None,host.EXPORTS_SOURCES:None}}))
+    (baseline/'request.json').write_text(json.dumps({'baseline_files':{relative:None
+        for domain in ('canola_exports','soybean_crop_progress','soybean_export_sales')
+        for relative in host.DOMAIN_CONTRACTS[domain]['baseline']}}))
     for job in runner.JOBS:
         command=runner.collector_command(config(runner,job),tmp_path/'run')
         assert '--read-only' in command and '--user' in command and '65532:65532' in command
@@ -169,6 +170,31 @@ def test_positions_baseline_keeps_only_empty_mountpoint_and_small_status(runner,
     assert (destination/host.POSITIONS_STATUS).read_bytes()==b'{}'
     assert (destination/Path(host.POSITIONS_STABLE).parent/'.position-store').is_dir()
     assert sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<256
+
+
+@pytest.mark.parametrize('job',['soybean_crop_progress','soybean_export_sales'])
+def test_table_baselines_use_only_empty_mountpoints_and_exact_readonly_binds(runner,tmp_path,job):
+    import base64
+    host=runner.helpers()[1]
+    relative_paths=host.DOMAIN_CONTRACTS[job]['baseline']
+    contents={relative:(b'x'*(1024*1024) if relative.endswith('.parquet') else b'{}')
+              for relative in relative_paths}
+    snapshot={'files':{key:{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)} for key,raw in contents.items()},
+              'contents':{key:base64.b64encode(raw).decode() for key,raw in contents.items()}}
+    work=tmp_path/'work';work.mkdir()
+    destination=work/'baseline'
+    runner.copy_snapshot(host,snapshot,destination,{'job':job,'baseline_files':snapshot['files']})
+    assert sum(path.stat().st_size for path in destination.rglob('*') if path.is_file())<16384
+    for relative in relative_paths:
+        assert (destination/relative).read_bytes()==(b'' if relative.endswith('.parquet') else b'{}')
+    configured=config(runner,job)
+    command=runner.collector_command(configured,work)
+    mounts=[command[index+1] for index,value in enumerate(command) if value=='--mount']
+    for relative in relative_paths:
+        if relative.endswith('.parquet'):
+            assert f'type=bind,src={configured["allocation_root"]}/{relative},dst=/baseline/{relative},readonly' in mounts
+    assert [mount for mount in mounts if not mount.endswith(',readonly')]==[
+        f'type=bind,src={work/"collection"},dst=/output']
 
 
 def test_positions_collector_mounts_the_protected_append_store_readonly(runner,tmp_path,monkeypatch):
@@ -338,7 +364,9 @@ def test_new_snapshot_domains_preserve_fixed_files_and_reject_incomplete_pair(ru
     contract=host.DOMAIN_CONTRACTS[domain]
     for relative in contract['baseline']:
         path=allocation/relative; path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(b'input')
-    policy={'domain':domain,'allocation_root':str(allocation),'approved_producer':{},'validation_image':{'image_id':'pinned'}}
+    policy={'policy_id':'snapshot-fixture-001','domain':domain,'allocation_root':str(allocation),
+            'approved_producer':{},'validation_image':{'image_id':'pinned'}}
+    monkeypatch.setattr(host,'EVIDENCE_ROOT',tmp_path/'evidence')
     monkeypatch.setattr(host,'_load_policy',lambda p:(policy,'a'*64))
     monkeypatch.setattr(host,'_protected',lambda p,**k:Path(p))
     monkeypatch.setattr(host,'_under',lambda p,*a,**k:Path(p))

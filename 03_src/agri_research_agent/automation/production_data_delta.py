@@ -427,6 +427,19 @@ def _host_contract(root: Path = ROOT):
 
 def parquet_identity(path: Path) -> dict:
     import pyarrow.parquet as pq
+    with path.open("rb") as handle:
+        magic = handle.read(4)
+    if magic != b"PAR1":
+        from agri_research_agent.shared.table_increment import SCHEMA, FIELDS, MAX_BYTES
+        require(path.stat().st_size <= MAX_BYTES, "table transport exceeds byte limit")
+        value = strict_json(path.read_bytes())
+        require(set(value) == FIELDS and value.get("schema_version") == SCHEMA,
+                "candidate is neither readable Parquet nor approved table transport")
+        require(type(value["row_count"]) is int and value["row_count"] > 0
+                and type(value["parquet_schema_sha256"]) is str
+                and HEX64.fullmatch(value["parquet_schema_sha256"]), "invalid virtual table identity")
+        return {**_identity(path), "row_count": value["row_count"],
+                "parquet_schema_sha256": value["parquet_schema_sha256"]}
     try:
         schema = pq.read_schema(path).remove_metadata()
         count = pq.ParquetFile(path).metadata.num_rows
@@ -544,7 +557,7 @@ def _crop_out_of_season_audit(source: Path, producer: dict) -> tuple[Path, dict]
 
 
 def collect_delta(domain: str, source: Path, candidate: Path, producer: dict,
-                  baseline: dict, *, run_id: str) -> Path:
+                  baseline: dict, *, run_id: str, baseline_root: Path | None = None) -> Path:
     host = _host_contract()
     contract = host.contract_for_domain(domain)
     if domain == "soybean_crop_progress":
@@ -590,9 +603,18 @@ def collect_delta(domain: str, source: Path, candidate: Path, producer: dict,
                 "FAS raw source evidence differs")
         from agri_research_agent.soybean_exports.fas import _business_equal, validate_fas_stable
         import pandas as pd
-        frame = pd.read_parquet(artifact)
+        from agri_research_agent.shared import table_delivery
+        from agri_research_agent.soybean_exports.fas import FAS_KEY, validate_fas_increment
+        previous = (baseline_root or source) / host.FAS_STABLE
+        expected = baseline.get(host.FAS_STABLE.removeprefix("01_data/"))
+        frame, sparse = table_delivery.read(artifact, previous if expected is not None else None,
+            baseline_sha256=expected["sha256"] if expected else None, key_columns=FAS_KEY,
+            scope_column="report_market_year_end", scope_values=metadata["fetch_scope"]["report_market_years"],
+            refresh_columns=("source_fetch_id", "batch_id", "raw_snapshot_id", "raw_snapshot_sha256",
+                             "fetch_time_utc", "source_release_time_raw", "source_release_timezone"))
         validate_fas_stable(frame)
-        previous = source / "01_data/processed/soybean_export_sales/soybean_export_sales_weekly.parquet"
+        if sparse:
+            validate_fas_increment(frame, pd.read_parquet(previous) if expected else None, metadata)
         status = "initialized" if not previous.exists() else ("no_change" if _business_equal(pd.read_parquet(previous), frame) else "updated")
     candidate.mkdir(parents=True, exist_ok=False)
     for name, path in artifacts.items():

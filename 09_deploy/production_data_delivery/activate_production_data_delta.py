@@ -804,6 +804,143 @@ def _policy_unchanged(path: str | Path, expected_sha256: str) -> None:
             "protected host policy changed during operation")
 
 
+def _fas_reconciliation_contract():
+    # Load this stdlib-only domain contract directly. Importing its package
+    # __init__ would also import pandas, which the protected host does not have.
+    import importlib.util
+    source = ROOT / "03_src/agri_research_agent/soybean_exports/reconciliation.py"
+    spec = importlib.util.spec_from_file_location("fas_reconciliation_host_contract", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _fas_reconciliation_pointer(policy):
+    return _derived(EVIDENCE_ROOT, policy, "fas-reconciliation-current", ".json")
+
+
+def _load_fas_reconciliation(policy, policy_sha, files):
+    """Verify immutable receipt attestation before reusing a monthly check.
+
+    No candidate directory must stay expanded: receive/validation/publication
+    receipts and the versioned small check preserve the complete attestation.
+    A valid check for an old business snapshot is ignored only after verifying
+    its evidence; corrupt or future checks are never silently accepted.
+    """
+    pointer_path = _fas_reconciliation_pointer(policy)
+    if not pointer_path.exists() and not pointer_path.is_symlink():
+        return None
+    pointer = read_json(_protected(pointer_path))
+    _exact(pointer, {"schema_version", "delta_id", "check_sha256"}, "FAS reconciliation pointer")
+    require(pointer["schema_version"] == "fas-reconciliation-pointer/1"
+            and type(pointer["delta_id"]) is str and SAFE_ID.fullmatch(pointer["delta_id"])
+            and type(pointer["check_sha256"]) is str and HEX64.fullmatch(pointer["check_sha256"]),
+            "FAS reconciliation pointer identity invalid")
+    key = pointer["delta_id"]
+    checkpoint_path = _protected(_derived(EVIDENCE_ROOT, policy, key, ".fas-reconciliation.json"))
+    require(sha256_file(checkpoint_path) == pointer["check_sha256"], "FAS reconciliation check SHA differs")
+    value = read_json(checkpoint_path)
+    contract = _fas_reconciliation_contract()
+    now = datetime.now(timezone.utc)
+    contract.validate(value, now=now)
+    require(value["policy_id"] == policy["policy_id"] and value["policy_sha256"] == policy_sha
+            and value["delta_id"] == key, "FAS reconciliation policy differs")
+    validation_path = _protected(_derived(EVIDENCE_ROOT, policy, key, ".validation.json"))
+    publication_path = _protected(_derived(EVIDENCE_ROOT, policy, key, ".publication.json"))
+    received_path = _protected(_derived(EVIDENCE_ROOT, policy, key, ".received.json"))
+    require(sha256_file(validation_path) == value["validation_report_sha256"]
+            and sha256_file(publication_path) == value["publication_receipt_sha256"], "FAS reconciliation receipt SHA differs")
+    validation, publication, received = (read_json(path) for path in (validation_path, publication_path, received_path))
+    for receipt in (validation, publication, received):
+        require(receipt.get("policy_id") == policy["policy_id"] and receipt.get("policy_sha256") == policy_sha
+                and receipt.get("delta_id") == key and receipt.get("domain") == "soybean_export_sales",
+                "FAS reconciliation receipt namespace differs")
+    require(validation.get("schema_version") == "production-data-delta-validation/1"
+            and validation.get("status") == "PASS" and validation.get("producer") == policy["approved_producer"]
+            and validation.get("validation_image") == policy["validation_image"]
+            and validation.get("validated_at_utc") == value["checked_at_utc"], "FAS reconciliation validation differs")
+    require(received.get("schema_version") == "production-data-delta-receive/1" and received.get("status") == "RECEIVED"
+            and received.get("producer") == policy["approved_producer"]
+            and received.get("candidate_files") == validation.get("candidate_files")
+            and received.get("transfer_manifest_sha256") == validation.get("transfer_manifest_sha256")
+            and sha256_file(received_path) == validation.get("receive_receipt_sha256"), "FAS reconciliation receive chain differs")
+    semantic = validation["semantic"]
+    require(semantic.get("status") == "PASS" and semantic.get("domain") == "soybean_export_sales"
+            and semantic.get("image") == {key: policy["validation_image"][key] for key in ("commit", "tree")}
+            and semantic["observations"].get("business_changed") is False, "FAS reconciliation semantic proof differs")
+    observed = semantic["observations"].get("reconciliation_checked")
+    expected = {key: value[key] for key in ("baseline_sha256", "manifest_sha256", "reconciliation_at_utc",
+                                          "report_market_years", "retained_report_years")}
+    require(observed == expected, "FAS reconciliation coverage/baseline proof differs")
+    require(publication.get("schema_version") == "production-data-delta-publication/1"
+            and publication.get("status") == "NO_CHANGE" and publication.get("backup_path") is None
+            and publication.get("validation_report_sha256") == value["validation_report_sha256"],
+            "FAS reconciliation NO_CHANGE publication required")
+    published = contract.timestamp(publication.get("published_at_utc"))
+    require(contract.timestamp(value["checked_at_utc"]) <= published <= now, "FAS reconciliation publication time differs")
+    formal = publication.get("formal_files")
+    require(type(formal) is dict and set(formal) == {FAS_STABLE, FAS_MANIFEST, FAS_STATUS}, "FAS reconciliation formal file set differs")
+    for item in formal.values():
+        _file_identity(item)
+    require(formal[FAS_STABLE]["sha256"] == value["baseline_sha256"]
+            and formal[FAS_MANIFEST]["sha256"] == value["manifest_sha256"], "FAS reconciliation published baseline differs")
+    if any(formal[key] != files[key] for key in (FAS_STABLE, FAS_MANIFEST)):
+        return None
+    return value
+
+
+def _check_fas_reconciliation_claim(policy, policy_sha, delta):
+    if delta["domain"] != "soybean_export_sales" or delta["domain_metadata"]["fetch_scope"].get("mode") != "incremental":
+        return
+    files = delta["baseline"]["files"]
+    require(files[FAS_MANIFEST] is not None, "incremental FAS collection requires a formal baseline")
+    manifest = read_json(_protected(Path(policy["allocation_root"]) / FAS_MANIFEST))
+    prior = manifest["fetch_scope"].get("reconciliation_at", manifest["fetch_completed_at_utc"])
+    contract = _fas_reconciliation_contract()
+    check = _load_fas_reconciliation(policy, policy_sha, files)
+    allowed = max([contract.timestamp(prior)] + ([] if check is None else [contract.timestamp(check["reconciliation_at_utc"])]))
+    require(contract.timestamp(delta["domain_metadata"]["fetch_scope"]["reconciliation_at"]) == allowed,
+            "FAS collection watermark lacks current protected evidence")
+
+
+def _record_fas_reconciliation(policy, policy_sha, delta, report, validation_sha, publication):
+    if delta["domain"] != "soybean_export_sales" or delta["domain_metadata"]["fetch_scope"].get("mode") != "reconciliation":
+        return
+    contract = _fas_reconciliation_contract()
+    observed = report["semantic"]["observations"]["reconciliation_checked"]
+    require(publication["status"] == "NO_CHANGE" and report["semantic"]["observations"]["business_changed"] is False,
+            "FAS check requires successful NO_CHANGE validation/publication")
+    publication_path = _protected(_derived(EVIDENCE_ROOT, policy, delta["delta_id"], ".publication.json"))
+    require(read_json(publication_path) == publication, "FAS reconciliation publication receipt differs")
+    value = {"schema_version": contract.SCHEMA, "policy_id": policy["policy_id"], "policy_sha256": policy_sha,
+        "delta_id": delta["delta_id"], "checked_at_utc": report["validated_at_utc"],
+        "validation_report_sha256": validation_sha, "publication_receipt_sha256": sha256_file(publication_path), **observed}
+    contract.validate(value, now=datetime.now(timezone.utc))
+    require(value["baseline_sha256"] == delta["baseline"]["files"][FAS_STABLE]["sha256"]
+            and value["manifest_sha256"] == delta["baseline"]["files"][FAS_MANIFEST]["sha256"], "FAS reconciliation snapshot differs")
+    checkpoint = _derived(EVIDENCE_ROOT, policy, delta["delta_id"], ".fas-reconciliation.json")
+    _protected(checkpoint.parent)
+    pointer = _fas_reconciliation_pointer(policy)
+    if pointer.exists() or pointer.is_symlink():
+        _load_fas_reconciliation(policy, policy_sha, delta["baseline"]["files"])
+    previous = _protected(pointer).read_bytes() if pointer.exists() or pointer.is_symlink() else None
+    _write_json_exclusive(checkpoint, value)
+    checkpoint.chmod(0o400)
+    try:
+        _atomic_json(pointer, {"schema_version": "fas-reconciliation-pointer/1", "delta_id": delta["delta_id"],
+                               "check_sha256": sha256_file(checkpoint)})
+        require(_load_fas_reconciliation(policy, policy_sha, delta["baseline"]["files"]) == value,
+                "FAS reconciliation pointer failed read-back")
+    except Exception:
+        if previous is None:
+            pointer.unlink(missing_ok=True)
+        else:
+            restore = pointer.with_name(".fas-check-restore-" + uuid.uuid4().hex)
+            _write_exclusive(restore, previous)
+            os.replace(restore, pointer)
+        raise
+
+
 def snapshot_fx_baseline(policy_path: str | Path, *, resolved_positions=False) -> dict[str, object]:
     """Return fixed approved domain bytes consistently under the allocation lock."""
     policy, policy_sha = _load_policy(policy_path)
@@ -849,6 +986,10 @@ def snapshot_fx_baseline(policy_path: str | Path, *, resolved_positions=False) -
                 "policy_sha256": policy_sha, "producer": policy["approved_producer"],
                 "image_id": policy["validation_image"]["image_id"], "allocation_root": str(allocation),
                 "files": files, "contents": contents}
+        if domain == "soybean_export_sales":
+            check = _load_fas_reconciliation(policy, policy_sha, files)
+            if check is not None:
+                result["fas_reconciliation_check"] = check
         if resolved_positions:
             require(domain == "commodity_positions" and files[POSITIONS_STABLE] is not None,
                     "resolved positions requires an initialized positions baseline")
@@ -1016,6 +1157,7 @@ def receive(policy_path: str | Path, incoming_dir: str | Path,
     require(delta["producer"] == policy["approved_producer"],
             "delta producer differs from policy")
     _check_baseline(policy, delta)
+    _check_fas_reconciliation_claim(policy, policy_sha, delta)
     incoming_files = _file_set(incoming)
     expected_names = {MANIFEST_NAME, *delta["payloads"]}
     require(set(incoming_files) == expected_names, "incoming contains missing or extra files")
@@ -1083,7 +1225,7 @@ def _inspect_image(image: dict[str, str]) -> dict[str, object]:
     return {"image_id": info["Id"], "commit": image["commit"], "tree": image["tree"]}
 
 
-def _worker(policy: dict[str, object], candidate: Path) -> dict[str, object]:
+def _worker(policy: dict[str, object], candidate: Path, *, materialization: Path | None = None) -> dict[str, object]:
     image = policy["validation_image"]
     before = _inspect_image(image)
     name = "production-data-delta-" + uuid.uuid4().hex
@@ -1102,6 +1244,14 @@ def _worker(policy: dict[str, object], candidate: Path) -> dict[str, object]:
         "_worker", "--domain", str(policy["domain"]),
         "--expected-commit", image["commit"], "--expected-tree", image["tree"],
     ]
+    if policy["domain"] in {"soybean_crop_progress", "soybean_export_sales"}:
+        index = command.index("--mount")
+        command[index:index] = ["--memory", "768m", "--memory-swap", "768m", "--cpus", "1", "--pids-limit", "96"]
+    if materialization is not None:
+        require(policy["domain"] in {"soybean_crop_progress", "soybean_export_sales"}, "invalid materializer domain")
+        index = command.index("--entrypoint")
+        command[index:index] = ["--mount", f"type=bind,src={materialization},dst=/materialized"]
+        command.append("--materialize")
     try:
         completed = subprocess.run(command, capture_output=True, timeout=300, check=False)
         require(completed.returncode == 0, "semantic validation worker failed")
@@ -1122,6 +1272,62 @@ def _worker(policy: dict[str, object], candidate: Path) -> dict[str, object]:
     return result
 
 
+def _seal_materialized(scratch, files):
+    """Seal Linux container output after its process has been removed."""
+    require(_file_set(scratch) == files, "materialization changed before sealing")
+    for name in files:
+        path = scratch / name
+        require(path.stat().st_uid == 65532, "materializer output owner differs")
+        os.chown(path, 0, 0)
+        path.chmod(0o444)
+    os.chown(scratch, 0, 0)
+    scratch.chmod(0o500)
+    _protected_tree(scratch)
+    require(_file_set(scratch) == files, "materialization changed during sealing")
+
+
+def _materialize_tables(policy, candidate, delta, report):
+    """Create only validated compatibility bytes in isolated owned scratch.
+
+    The source and production allocation remain read-only in this exact-image
+    run. No frame library is imported by the protected host. Generated files
+    are sealed after the container has exited, checked against the prior
+    independent validation, and moved into the existing controlled stage.
+    """
+    semantic = report["semantic"]
+    require(semantic.get("table_transport") is True
+            and semantic["observations"]["business_changed"] is True,
+            "only changed validated table transport can be materialized")
+    expected = semantic.get("compatibility_files")
+    require(type(expected) is dict and set(expected) == set(delta["payloads"]),
+            "compatibility file set differs from domain")
+    for name, identity in expected.items():
+        _parquet_identity(identity)
+        require(all(identity[key] == delta["payloads"][name][key]
+                    for key in ("row_count", "parquet_schema_sha256")), "compatibility schema/count differs")
+    scratch = _derived(CANDIDATE_ROOT, policy, delta["delta_id"], ".materialized-" + uuid.uuid4().hex)
+    _protected(scratch.parent)
+    require(not scratch.exists() and not scratch.is_symlink(), "materialization scratch already exists")
+    scratch.mkdir(mode=0o700)
+    os.chown(scratch, 65532, 65532)
+    # Failure evidence is retained. Never consume or clean a partial output.
+    observed = _worker(policy, candidate, materialization=scratch)
+    require(observed == semantic, "materializer differs from independent validation")
+    require(set(path.name for path in scratch.iterdir()) == set(expected), "materializer output file set differs")
+    files = _file_set(scratch)
+    require(files == {name: {key: identity[key] for key in ("sha256", "size_bytes")}
+                      for name, identity in expected.items()}, "materializer output bytes differ")
+    _seal_materialized(scratch, files)
+    require(_file_set(scratch) == files, "materialization changed during sealing")
+    evidence = _derived(EVIDENCE_ROOT, policy, delta["delta_id"], ".materialization.json")
+    _protected(evidence.parent)
+    _write_json_exclusive(evidence, {"schema_version": "production-table-materialization/1", "status": "SEALED",
+        "policy_id": policy["policy_id"], "delta_id": delta["delta_id"], "domain": delta["domain"],
+        "validation_image": policy["validation_image"], "scratch_root": str(scratch), "files": expected,
+        "transfer_manifest_sha256": sha256_file(candidate / MANIFEST_NAME), "history_versions_deleted": 0})
+    return scratch, expected
+
+
 def validate(policy_path: str | Path, delta_id: str) -> dict[str, object]:
     policy, policy_sha = _load_policy(policy_path)
     candidate = _protected_tree(_protected(_derived(CANDIDATE_ROOT, policy, delta_id)))
@@ -1135,6 +1341,7 @@ def validate(policy_path: str | Path, delta_id: str) -> dict[str, object]:
     _protected(report_path.parent)
     generated = datetime.now(timezone.utc).isoformat()
     try:
+        _check_fas_reconciliation_claim(policy, policy_sha, delta)
         semantic = _worker(policy, candidate)
         _check_baseline(policy, delta)
         require(_candidate_files(candidate, delta) == before,
@@ -1428,6 +1635,7 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
     allocation = _protected(_under(policy["allocation_root"], ALLOCATION_ROOT))
     with _lock(allocation):
         _check_baseline(policy, delta)
+        _check_fas_reconciliation_claim(policy, policy_sha, delta)
         contract = DOMAIN_CONTRACTS[delta["domain"]]
         formal = _under(allocation / contract["domain_dir"], allocation)
         status_path = _under(allocation / contract["status_path"], allocation)
@@ -1460,6 +1668,10 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             require(formal_before is None or set(formal_before) <= {"daily.json", "source_evidence.json", "status.json"},
                     "FX formal directory has unmanaged files")
         require(type(semantic_changed) is bool, "validation report lacks business comparison")
+        table_transport = report["semantic"].get("table_transport") is True
+        if table_transport:
+            require(delta["domain"] in {"soybean_crop_progress", "soybean_export_sales"},
+                    "unexpected table transport domain")
         require(delta["run"]["business_status"] != "no_change" or semantic_changed is False,
                 "no-change producer status differs from semantic validation")
         require(delta["run"]["business_status"] != "updated" or semantic_changed is True,
@@ -1521,6 +1733,7 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             }
             receipt_path = _derived(EVIDENCE_ROOT, policy, delta_id, ".publication.json")
             _write_json_exclusive(receipt_path, receipt)
+            _record_fas_reconciliation(policy, policy_sha, delta, report, validation_report_sha256, receipt)
             return {**receipt, "receipt_path": str(receipt_path),
                     "receipt_sha256": sha256_file(receipt_path)}
 
@@ -1528,6 +1741,12 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
             return _publish_positions(policy_path, policy, policy_sha, delta, candidate, report,
                 validation_report_path, validation_report_sha256, allocation, formal_before,
                 positions_archive(allocation / POSITIONS_STABLE), positions_candidate)
+
+        materialized = materialized_identities = None
+        if table_transport:
+            materialized, materialized_identities = _materialize_tables(policy, candidate, delta, report)
+            _check_baseline(policy, delta)
+            require(_candidate_files(candidate, delta) == report["candidate_files"], "candidate changed during materialization")
 
         token = uuid.uuid4().hex
         stage = formal.parent / f".{formal.name}.publishing-{token}"
@@ -1546,7 +1765,16 @@ def publish(policy_path: str | Path, delta_id: str, validation_report_path: str 
         identities = {}
         for name, target in contract["payloads"].items():
             destination = stage / Path(target).name
-            if delta["domain"] == "canola_exports":
+            if table_transport:
+                source = _protected(materialized / name)
+                identity = materialized_identities[name]
+                require(_actual_identity(source) == {key: identity[key] for key in ("sha256", "size_bytes")},
+                        "sealed compatibility file changed")
+                os.replace(source, destination)
+                require(_actual_identity(destination) == {key: identity[key] for key in ("sha256", "size_bytes")},
+                        "staged compatibility file differs")
+                identities[target] = dict(identity)
+            elif delta["domain"] == "canola_exports":
                 # Only the final compatibility view is materialized. Transport
                 # and validation reuse the baseline's immutable source objects.
                 _atomic_json(destination, export_candidate if name == "weekly.json" else export_evidence)
@@ -1901,7 +2129,7 @@ def _safe_worker_value(value: object, pandas_module) -> object:
     raise DeltaError("worker observation contains an unsupported value")
 
 
-def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> dict[str, object]:
+def worker_validate(domain: str, expected_commit: str, expected_tree: str, *, materialize_to: Path | None = None) -> dict[str, object]:
     require(domain in DOMAIN_CONTRACTS, "worker domain is invalid")
     release = read_json("/app/RELEASE.json")
     require(release.get("git_commit") == expected_commit and release.get("git_tree") == expected_tree,
@@ -1915,6 +2143,8 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
     sys.path.insert(0, "/app/03_src")
     import pandas as pd
     observations = {}
+    table_frames = {}
+    table_transports = set()
     if domain == "foreign_fx":
         from agri_research_agent.market_data.foreign_fx_delivery import observations as fx_observations
         baseline = (read_json(Path("/allocation") / FX_STABLE)
@@ -1971,35 +2201,70 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
     elif domain == "soybean_export_sales":
         from agri_research_agent.soybean_exports.fas import (FAS_KEY, FAS_STABLE_COLUMNS,
                                                              _business_equal, validate_fas_stable, validate_fas_increment)
+        from agri_research_agent.shared import table_delivery
         name = "soybean_export_sales_weekly.parquet"
-        frame = pd.read_parquet(candidate / name)
+        metadata = delta["domain_metadata"]
+        baseline_identity = delta["baseline"]["files"][FAS_STABLE]
+        baseline = Path("/allocation") / FAS_STABLE if baseline_identity is not None else None
+        frame, sparse = table_delivery.read(candidate / name, baseline,
+            baseline_sha256=baseline_identity["sha256"] if baseline_identity else None,
+            key_columns=FAS_KEY, scope_column="report_market_year_end",
+            scope_values=metadata["fetch_scope"]["report_market_years"],
+            refresh_columns=("source_fetch_id", "batch_id", "raw_snapshot_id", "raw_snapshot_sha256",
+                             "fetch_time_utc", "source_release_time_raw", "source_release_timezone"))
+        table_frames[name] = frame
+        if sparse:
+            table_transports.add(name)
         require(tuple(frame.columns) == FAS_STABLE_COLUMNS, "FAS Parquet columns mismatch")
         require(not frame.duplicated(list(FAS_KEY)).any(), "FAS business key is not unique")
         quality = validate_fas_stable(frame)
-        metadata = delta["domain_metadata"]
         require(quality["latest_week"] == metadata["source_latest_week"], "FAS latest week mismatch")
-        baseline = (Path("/allocation") / FAS_STABLE
-                    if delta["baseline"]["files"][FAS_STABLE] is not None else None)
         require(set(frame["source"].astype(str)) == {"usda_fas_esr"}, "FAS source differs")
         validate_fas_increment(frame, pd.read_parquet(baseline) if baseline is not None else None, metadata)
         business_changed = baseline is None or not _business_equal(pd.read_parquet(baseline), frame)
         observations = {**quality, "business_changed": business_changed}
+        if metadata["fetch_scope"].get("mode") == "reconciliation":
+            from agri_research_agent.soybean_exports import reconciliation
+            years = metadata["fetch_scope"]["report_market_years"]
+            retained = sorted({int(value) for value in pd.read_parquet(baseline)["report_market_year_end"]}) if baseline else []
+            reconciliation.require_complete_coverage(years, retained)
+            fresh = frame.loc[frame["report_market_year_end"].isin(years)]
+            fetched_at = pd.to_datetime(fresh["fetch_time_utc"], utc=True, errors="raise")
+            require(not fetched_at.isna().any()
+                    and fetched_at.min().to_pydatetime() >= reconciliation.timestamp(metadata["fetch_scope"]["reconciliation_at"])
+                    and fetched_at.max().to_pydatetime() <= reconciliation.timestamp(delta["generated_at_utc"]),
+                    "FAS monthly source fetch predates the reconciliation or is in the future")
+            observations["reconciliation_checked"] = {
+                "baseline_sha256": sha256_file(baseline) if baseline else None,
+                "manifest_sha256": sha256_file(Path("/allocation") / FAS_MANIFEST) if baseline else None,
+                "reconciliation_at_utc": metadata["fetch_scope"]["reconciliation_at"],
+                "report_market_years": years, "retained_report_years": retained}
     else:
         from agri_research_agent.pipelines.soybean_crop_progress import CROP_STABLE_KEY, CROP_WEEKLY_COLUMNS
         from agri_research_agent.pipelines.soybean_crop_weekly_update import (compare_business_records,
                                                                               validate_candidate_pair)
-        progress = pd.read_parquet(candidate / "soybeans_crop_progress_weekly.parquet")
-        condition = pd.read_parquet(candidate / "soybeans_crop_condition_weekly.parquet")
-        require(list(progress.columns) == CROP_WEEKLY_COLUMNS
-                and list(condition.columns) == CROP_WEEKLY_COLUMNS, "crop Parquet columns mismatch")
-        require(not progress.duplicated(CROP_STABLE_KEY).any()
-                and not condition.duplicated(CROP_STABLE_KEY).any(), "crop stable key is not unique")
+        from agri_research_agent.shared import table_delivery
         baseline_files = delta["baseline"]["files"]
         progress_base = CROP_PROGRESS if baseline_files[CROP_PROGRESS] is not None else CROP_LEGACY_PROGRESS
         condition_base = CROP_CONDITION if baseline_files[CROP_CONDITION] is not None else CROP_LEGACY_CONDITION
         baseline_progress = pd.read_parquet(Path("/allocation") / progress_base)
         baseline_condition = pd.read_parquet(Path("/allocation") / condition_base)
         metadata = delta["domain_metadata"]
+        for name, relative in (("soybeans_crop_progress_weekly.parquet", progress_base),
+                               ("soybeans_crop_condition_weekly.parquet", condition_base)):
+            frame, sparse = table_delivery.read(candidate / name, Path("/allocation") / relative,
+                baseline_sha256=baseline_files[relative]["sha256"], key_columns=CROP_STABLE_KEY,
+                scope_column="calendar_year", scope_values=[metadata["current_year"]],
+                refresh_columns=("retrieved_at_utc", "raw_snapshot"))
+            table_frames[name] = frame
+            if sparse:
+                table_transports.add(name)
+        progress = table_frames["soybeans_crop_progress_weekly.parquet"]
+        condition = table_frames["soybeans_crop_condition_weekly.parquet"]
+        require(list(progress.columns) == CROP_WEEKLY_COLUMNS
+                and list(condition.columns) == CROP_WEEKLY_COLUMNS, "crop Parquet columns mismatch")
+        require(not progress.duplicated(CROP_STABLE_KEY).any()
+                and not condition.duplicated(CROP_STABLE_KEY).any(), "crop stable key is not unique")
         observations = validate_candidate_pair(
             baseline_progress=baseline_progress, baseline_condition=baseline_condition,
             candidate_progress=progress, candidate_condition=condition,
@@ -2020,15 +2285,42 @@ def worker_validate(domain: str, expected_commit: str, expected_tree: str) -> di
         require(sha256_file(path) == identity["sha256"] and path.stat().st_size == identity["size_bytes"],
                 "worker payload byte identity mismatch")
         if domain not in {"canada_canola", "brazil_soy", "canola_exports", "commodity_positions", "foreign_fx"}:
-            require(_schema_fingerprint(path) == identity["parquet_schema_sha256"],
-                    "worker Parquet schema identity mismatch")
-            import pyarrow.parquet as pq
-            require(pq.read_metadata(path).num_rows == identity["row_count"],
-                    "worker Parquet row count mismatch")
+            if name in table_transports:
+                import pyarrow as pa
+                frame = table_frames[name]
+                schema_sha = sha256_bytes(pa.Schema.from_pandas(frame, preserve_index=False).remove_metadata().to_string().encode("utf-8"))
+                count = len(frame)
+            else:
+                schema_sha = _schema_fingerprint(path)
+                import pyarrow.parquet as pq
+                count = pq.read_metadata(path).num_rows
+            require(schema_sha == identity["parquet_schema_sha256"], "worker Parquet schema identity mismatch")
+            require(count == identity["row_count"], "worker Parquet row count mismatch")
     observations = _safe_worker_value(observations, pd)
-    return {"schema_version": "production-data-delta-worker/1", "status": "PASS",
+    result = {"schema_version": "production-data-delta-worker/1", "status": "PASS",
             "domain": domain, "image": {"commit": expected_commit, "tree": expected_tree},
             "observations": observations}
+    if table_transports:
+        from agri_research_agent.shared import table_delivery
+        table_metadata = {name: {} for name in table_frames}
+        if domain == "soybean_export_sales":
+            from agri_research_agent.soybean_exports.common import SCHEMA_VERSION as fas_schema
+            metadata = delta["domain_metadata"]
+            table_metadata["soybean_export_sales_weekly.parquet"] = {
+                "schema_version": str(fas_schema), "source": metadata["source"],
+                "batch_id": metadata["batch_id"], "git_head": delta["producer"]["commit"],
+                "raw_snapshot_sha256": metadata["raw_snapshot_sha256"], "quality_status": "passed",
+                "generated_at_utc": delta["generated_at_utc"], "source_latest_week": metadata["source_latest_week"],
+                "source_release_time_raw": metadata["source_release_time_raw"],
+                "source_release_timezone": metadata["source_release_timezone"],
+                "stable_relative_path": FAS_STABLE, "generator_version": str(fas_schema),
+            }
+        result["table_transport"] = True
+        result["compatibility_files"] = table_delivery.compatibility(table_frames, table_metadata,
+            business_changed=observations["business_changed"], output=materialize_to)
+    else:
+        require(materialize_to is None, "materialization requires sparse table transport")
+    return result
 
 
 def parser() -> argparse.ArgumentParser:
@@ -2066,6 +2358,7 @@ def parser() -> argparse.ArgumentParser:
     worker_cmd.add_argument("--domain", required=True)
     worker_cmd.add_argument("--expected-commit", required=True)
     worker_cmd.add_argument("--expected-tree", required=True)
+    worker_cmd.add_argument("--materialize", action="store_true")
     return root
 
 
@@ -2089,7 +2382,8 @@ def main(argv: list[str] | None = None) -> int:
             result = rollback(args.policy, args.publication_receipt,
                               args.publication_sha256)
         else:
-            result = worker_validate(args.domain, args.expected_commit, args.expected_tree)
+            result = worker_validate(args.domain, args.expected_commit, args.expected_tree,
+                                     materialize_to=Path("/materialized") if args.materialize else None)
         print(canonical_json_bytes(result).decode("utf-8"), end="")
         return 0
     except Exception as exc:

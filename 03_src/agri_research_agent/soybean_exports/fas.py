@@ -547,25 +547,59 @@ def run_fas_pipeline(
     batch_id: str | None = None,
     publish: bool = True,
     incremental: bool = False,
+    baseline_root: Path | None = None,
+    incremental_transport: bool = False,
+    reconciliation_check: dict | None = None,
 ) -> dict[str, Any]:
     if not _valid_git_head(git_head):
         raise PipelineError("git_head must be a full 40-character hexadecimal SHA")
+    # A separate baseline is an input only. The publisher must independently
+    # reconstruct and validate transport candidates before formal publication.
+    runtime_root = Path(runtime_root).resolve()
+    if (baseline_root is not None or incremental_transport) and publish:
+        raise PipelineError("read-only baseline and incremental transport require publish=False")
+    if incremental_transport and not incremental:
+        raise PipelineError("incremental transport requires incremental collection")
+    if reconciliation_check is not None and (publish or baseline_root is None or not incremental):
+        raise PipelineError("reconciliation check requires an isolated incremental collector")
+    if baseline_root is not None:
+        baseline_root = Path(baseline_root).resolve(strict=True)
+        if not baseline_root.is_dir() or (baseline_root == runtime_root
+                or baseline_root in runtime_root.parents or runtime_root in baseline_root.parents):
+            raise PipelineError("FAS baseline and candidate roots must be disjoint")
     selected_batch = batch_id or make_batch_id()
-    paths = fas_paths(Path(runtime_root), selected_batch)
+    paths = fas_paths(runtime_root, selected_batch)
+    baseline_paths = fas_paths(baseline_root or runtime_root, selected_batch)
     started = iso_utc(utc_now())
-    previous_success = read_last_success(paths["status"])
+    previous_success = read_last_success(baseline_paths["status"])
     try:
-        old = pd.read_parquet(paths["stable"]) if paths["stable"].exists() else None
+        baseline_sha = (sha256_file(baseline_paths["stable"]).lower()
+                        if baseline_paths["stable"].exists() else None)
+        old = pd.read_parquet(baseline_paths["stable"]) if baseline_sha is not None else None
+        if reconciliation_check is not None and old is None:
+            raise PipelineError("reconciliation check requires an initialized baseline")
+        if baseline_sha is not None and sha256_file(baseline_paths["stable"]).lower() != baseline_sha:
+            raise PipelineError("FAS baseline changed while being read")
         previous_manifest = None
         recent = 7
         reconciliation_at = started
         if incremental and old is not None:
             validate_fas_stable(old)
-            previous_manifest = json.loads(paths["stable_manifest"].read_text(encoding="utf-8"))
-            if sha256_file(paths["stable"]).lower() != previous_manifest["sha256"].lower():
+            baseline_manifest_sha = sha256_file(baseline_paths["stable_manifest"]).lower()
+            previous_manifest = json.loads(baseline_paths["stable_manifest"].read_text(encoding="utf-8"))
+            if sha256_file(baseline_paths["stable_manifest"]).lower() != baseline_manifest_sha:
+                raise PipelineError("FAS baseline manifest changed while being read")
+            if baseline_sha.lower() != previous_manifest["sha256"].lower():
                 raise PipelineError("FAS baseline manifest identity differs")
             scope = previous_manifest["fetch_scope"]
             reconciliation_at = scope.get("reconciliation_at", previous_manifest["fetch_completed_at_utc"])
+            if reconciliation_check is not None:
+                from . import reconciliation
+                reconciliation_at = reconciliation.select(reconciliation_at, reconciliation_check,
+                    baseline_sha256=baseline_sha,
+                    manifest_sha256=baseline_manifest_sha,
+                    retained_years=sorted({int(year) for year in old["report_market_year_end"]}),
+                    now=datetime.fromisoformat(started.replace("Z", "+00:00")))
             prior_check = datetime.fromisoformat(reconciliation_at.replace("Z", "+00:00"))
             if prior_check.tzinfo is None or prior_check > datetime.fromisoformat(started.replace("Z", "+00:00")):
                 raise PipelineError("FAS prior reconciliation date invalid")
@@ -614,10 +648,7 @@ def run_fas_pipeline(
             "01_data/processed/soybean_export_sales/soybean_export_sales_weekly.parquet"
         )
         candidate_path = paths["candidate_dir"] / "soybean_export_sales_weekly.parquet"
-        identity = write_parquet_atomic(
-            candidate,
-            candidate_path,
-            metadata={
+        parquet_metadata = {
                 "schema_version": SCHEMA_VERSION,
                 "source": FAS_SOURCE,
                 "batch_id": selected_batch,
@@ -630,8 +661,30 @@ def run_fas_pipeline(
                 "source_release_timezone": "America/New_York",
                 "stable_relative_path": stable_relative_path,
                 "generator_version": SCHEMA_VERSION,
-            },
-        )
+            }
+        if incremental_transport:
+            from agri_research_agent.shared import table_increment
+
+            options = dict(key_columns=FAS_KEY, scope_column="report_market_year_end",
+                           scope_values=fetched.report_market_years,
+                           refresh_columns=("source_fetch_id", "batch_id", "raw_snapshot_id",
+                               "raw_snapshot_sha256", "fetch_time_utc",
+                               "source_release_time_raw", "source_release_timezone"))
+            payload = table_increment.build(candidate, old, baseline_sha256=baseline_sha, **options)
+            resolved = table_increment.resolve(payload, old, baseline_sha256=baseline_sha, **options)
+            if not table_increment.equivalent(resolved, candidate, FAS_KEY):
+                raise PipelineError("FAS increment round-trip differs")
+            validate_fas_increment(resolved, old, dict(batch_id=selected_batch,
+                raw_snapshot_sha256=raw_manifest["raw_file_sha256"],
+                fetch_scope=dict(report_market_years=fetched.report_market_years)))
+            candidate_path = candidate_path.with_suffix(".increment.json")
+            write_json_atomic(candidate_path, payload, overwrite=False)
+            identity = dict(path=str(candidate_path), sha256=sha256_file(candidate_path),
+                            byte_size=candidate_path.stat().st_size, row_count=len(candidate),
+                            parquet_schema_sha256=payload["parquet_schema_sha256"],
+                            transport_schema=table_increment.SCHEMA, baseline_sha256=baseline_sha)
+        else:
+            identity = write_parquet_atomic(candidate, candidate_path, metadata=parquet_metadata)
         manifest = {
             **identity,
             "schema_version": SCHEMA_VERSION,
