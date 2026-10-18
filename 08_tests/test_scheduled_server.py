@@ -77,6 +77,25 @@ def test_public_job_cannot_borrow_delta_policy_or_other_credential(runner,linux_
     with pytest.raises(ValueError): runner.validate_config(host,c)
 
 
+def test_incremental_public_requires_pinned_protected_pool_and_readonly_base_mount(runner,linux_host,tmp_path):
+    c=config(runner,'akshare')
+    c.update(policy=None,policy_sha256=None,initial_baseline=str(runner.RUNTIME/'initial-baselines/test'),
+             initial_baseline_sha256='e'*64,incremental_public_packages=True,
+             public_object_pool='/var/lib/market-data/storage-hygiene/package-retention/objects')
+    runner.validate_config(linux_host,c)
+    for field,value in [('public_object_pool','/tmp/objects'),('incremental_public_packages','true'),('job','positions_foreign')]:
+        with pytest.raises((ValueError,TypeError)):
+            runner.validate_config(linux_host,{**c,field:value})
+    baseline=tmp_path/'baseline';baseline.mkdir()
+    package_id='public-current-'+'a'*24
+    (baseline/'request.json').write_text(json.dumps({'public_pointer':{'package_id':package_id}}))
+    command=runner.collector_command(c,tmp_path)
+    mounts=[command[i+1] for i,v in enumerate(command) if v=='--mount']
+    assert any(f'releases{Path("/")}{package_id}' in v and v.endswith('dst=/public-baseline,readonly') for v in mounts)
+    assert command[command.index('--network')+1]=='none'
+    assert not any('dst=/public-baseline' in v for v in runner.collector_command(c,tmp_path,public_preflight=True))
+
+
 def test_stock_api_is_explicit_domestic_only_and_requires_protected_secret(runner,linux_host):
     value=config(runner,'positions_domestic')
     runner.validate_config(linux_host,value)

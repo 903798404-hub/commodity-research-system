@@ -111,7 +111,8 @@ def test_offline_replay_rejects_tampered_increment_before_copy(fixture, tamper):
     assert not (f.output / 'project').exists()
 
 
-def test_changed_data_materializes_offline_and_keeps_history_and_other_domains(fixture, monkeypatch):
+@pytest.mark.parametrize('incremental',[False,True])
+def test_changed_data_materializes_offline_and_keeps_history_and_other_domains(fixture, monkeypatch, incremental):
     from agri_research_agent.pipelines.public_data_delivery import build_production_package, validate_production_package
     from agri_research_agent.pipelines.domestic_spread_integrity import derive_affected_spread_keys
     f = fixture
@@ -131,11 +132,22 @@ def test_changed_data_materializes_offline_and_keeps_history_and_other_domains(f
     old.to_excel(f.baseline / '01_data/historical_spread_database.xlsx', sheet_name='spread_long', index=False)
     f.request.update(public_manifest=package.manifest, public_package_relative=str(package.directory.relative_to(f.baseline)),
                      public_pointer={'package_id': package.package_id})
+    f.request['incremental_public_packages']=incremental
+    monkeypatch.setattr(f.spreads,'PUBLIC_BASELINE',package.directory)
     _, proof = check(f)
     f.request['public_preflight'] = proof
     monkeypatch.setattr(f.updater.ak, 'futures_zh_daily_sina', lambda **k: pytest.fail('offline materializer queried source'))
     result = f.spreads.materialize(f.request, f.baseline, f.output)
-    built = validate_production_package(f.output / result['package_path'])
+    if incremental:
+        from agri_research_agent.pipelines.public_data_increment import validate_increment
+        from agri_research_agent.pipelines.public_data_delivery import ProductionPackage
+        path=f.output/result['package_path']
+        assert validate_increment(path,package.directory)['status']=='PASS'
+        built=ProductionPackage(result['package_id'],path,json.loads((path/'manifest.json').read_bytes()))
+        assert not result['metrics']['full_bundle_written']
+        assert not (path/'data/public-market-data').exists()
+    else:
+        built = validate_production_package(f.output / result['package_path'])
     current = pd.read_parquet(built.directory / 'data' / built.manifest['delivery_artifacts']['domestic-spread']['package_path'])
     retained = current.loc[pd.to_datetime(current['date']).eq('2026-10-15'), old.columns].reset_index(drop=True)
     pd.testing.assert_frame_equal(retained.sort_values(['spread_name','season']).reset_index(drop=True),

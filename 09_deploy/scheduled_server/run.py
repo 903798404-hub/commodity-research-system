@@ -56,6 +56,12 @@ def helpers():
 def validate_config(host, value):
     required = {'schema_version', 'job', 'policy', 'policy_sha256', 'image_id', 'data_disk_uuid',
                 'secret_file', 'initial_baseline', 'initial_baseline_sha256', 'allocation_root', 'producer', 'public_store_owner'}
+    if isinstance(value, dict) and 'incremental_public_packages' in value:
+        required.update({'incremental_public_packages','public_object_pool'})
+        host.require(value.get('job')=='akshare' and value['incremental_public_packages'] is True,
+                     'incremental public packages require explicit public job enablement')
+        host._under(value['public_object_pool'],Path('/var/lib/market-data/storage-hygiene'))
+        host.require(Path(value['public_object_pool']).name=='objects','public object pool path invalid')
     if isinstance(value, dict) and 'partitioned_public_packages' in value:
         required.add('partitioned_public_packages')
         host.require(value.get('job') == 'akshare' and type(value['partitioned_public_packages']) is bool,
@@ -183,6 +189,12 @@ def collector_command(config, work, *, public_preflight=False):
         command[command.index('--network')+1]='none' if public_materialize else 'bridge'
         command=[arg.replace(f'src={work / "baseline"},',f'src={work / baseline},')
                     .replace(f'src={work / "collection"},',f'src={work / output},') for arg in command]
+        if public_materialize and config.get('incremental_public_packages',False):
+            request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
+            package_id=request['public_pointer']['package_id']
+            if not re.fullmatch(r'public-current-[0-9a-f]{24}',package_id):raise ValueError('public mount identity invalid')
+            source=Path(config['allocation_root'])/'01_data/public-data-server-store/releases'/package_id
+            command+=['--mount',f'type=bind,src={source},dst=/public-baseline,readonly']
     return command + ['--entrypoint','python',config['image_id'],'-I','-B','/source/09_deploy/scheduled_server/collect.py'] + (['--public-preflight'] if public_preflight else [])
 
 
@@ -243,6 +255,7 @@ def execute(fx, host, config, work, publish, business_date=None):
             'producer':config['producer'],'baseline_files':snapshot['files'],**extra}
         if config['job'] == 'akshare':
             request['partitioned_public_packages'] = config.get('partitioned_public_packages', False)
+            request['incremental_public_packages'] = config.get('incremental_public_packages',False)
             if business_date is not None:
                 selected=datetime.strptime(business_date,'%Y-%m-%d').date()
                 host.require(selected.isoformat()==business_date and selected<=now.astimezone(timezone(timedelta(hours=8))).date(), 'invalid public business date')

@@ -26,12 +26,17 @@ def assert_scope(request,manifest):
 def snapshot(host,config,work):
     allocation=host._protected(config['allocation_root'])
     store=Path(allocation)/'01_data/public-data-server-store'
-    def managed(path):
+    def managed(path,object_sha=None):
         selected=host._no_links(path)
         for entry in (selected,*selected.parents):
             if entry==store.parent:break
             info=entry.stat();owner=config['public_store_owner']
-            host.require(info.st_uid==owner['uid'] and info.st_gid==owner['gid'] and not info.st_mode & 0o022,
+            pooled=False
+            if entry==selected and object_sha and config.get('incremental_public_packages',False):
+                obj=host._no_links(Path(config['public_object_pool'])/object_sha)
+                pooled=(info.st_uid==0 and info.st_gid==0 and not info.st_mode & 0o222
+                        and obj.is_file() and os.path.samefile(selected,obj))
+            host.require(pooled or (info.st_uid==owner['uid'] and info.st_gid==owner['gid'] and not info.st_mode & 0o022),
                          'public store publisher ownership or permissions differ')
         return selected
     managed(store)
@@ -67,9 +72,15 @@ def snapshot(host,config,work):
     for item in manifest['files']:
         host.require(type(item['path']) is str and re.fullmatch(r'[A-Za-z0-9_./-]+',item['path']) and
                      not Path(item['path']).is_absolute() and '..' not in Path(item['path']).parts,'public input path unsafe')
-        add(prefix+'/data/'+item['path'],managed(package/'data'/item['path']),{k:item[k] for k in ('sha256','size_bytes')})
+        path=managed(package/'data'/item['path'],item['sha256'])
+        if config.get('incremental_public_packages',False):
+            host.require(path.stat().st_size==item['size_bytes'] and host.sha256_file(path)==item['sha256'],
+                         'read-only public input identity differs')
+        else:
+            add(prefix+'/data/'+item['path'],path,{k:item[k] for k in ('sha256','size_bytes')})
     raw=(package/'manifest.json').read_bytes()
-    add(prefix+'/manifest.json',package/'manifest.json',{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)})
+    if not config.get('incremental_public_packages',False):
+        add(prefix+'/manifest.json',package/'manifest.json',{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)})
     host.require(host.read_json(store/'current.json')==pointer,'Public Current moved while reading')
     return {'files':files,'contents':contents},{'public_pointer':pointer,'public_manifest':manifest,
         'public_manifest_sha256':host.sha256_bytes(raw),'public_package_relative':prefix}
@@ -142,17 +153,23 @@ def deliver(host,config,work,extra,publish):
                  'public publisher owner changed or equals application owner')
     upload=store/'incoming'/(candidate+'.upload-'+work.name)
     host._no_links(upload)
-    upload.mkdir(mode=0o700)
-    before=host._file_set(package)
-    for rel in before:
-        path=upload/rel; path.parent.mkdir(parents=True,exist_ok=True)
-        host._write_exclusive(path,(package/rel).read_bytes())
-    host.require(host._file_set(upload)==before and host._file_set(package)==before,'public payload changed sealing')
-    # Preserve the existing Windows basis publisher account; only this new upload changes ownership.
-    for path in (upload,*upload.rglob('*')):
-        host._no_links(path);os.chown(path,owner['uid'],owner['gid'])
-    sealed=trans._ssh(None,['sh','-c',trans._SEAL_FOR_RUNTIME_READ_SCRIPT,'seal-owned-server-upload',str(upload),str(runtime['uid'])])
-    host.require(sealed.returncode==0,'public candidate seal failed')
+    increment_storage=None
+    if config.get('incremental_public_packages',False):
+        spec=importlib.util.spec_from_file_location('scheduled_public_increment',ROOT/'09_deploy/scheduled_server/public_increment.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        increment_storage=module.prepare_upload(host,config,work,extra,package,upload,runtime,publish,invoke)
+    else:
+        upload.mkdir(mode=0o700)
+        before=host._file_set(package)
+        for rel in before:
+            path=upload/rel; path.parent.mkdir(parents=True,exist_ok=True)
+            host._write_exclusive(path,(package/rel).read_bytes())
+        host.require(host._file_set(upload)==before and host._file_set(package)==before,'public payload changed sealing')
+        # Preserve the existing Windows basis publisher account; only this new upload changes ownership.
+        for path in (upload,*upload.rglob('*')):
+            host._no_links(path);os.chown(path,owner['uid'],owner['gid'])
+        sealed=trans._ssh(None,['sh','-c',trans._SEAL_FOR_RUNTIME_READ_SCRIPT,'seal-owned-server-upload',str(upload),str(runtime['uid'])])
+        host.require(sealed.returncode==0,'public candidate seal failed')
     pre=trans._run_application_runtime_gate(None,runtime,phase='PRE_SWITCH',
         package_root=runtime['container_store']+'/incoming/'+upload.name,expected_package_id=candidate)
     host.require(pre['STATUS']=='PASS','actual application cannot read candidate')
@@ -171,6 +188,7 @@ def deliver(host,config,work,extra,publish):
     host.require(validation.get('manifest_sha256')==host.sha256_file(upload/'manifest.json') and
         'public-current-server-cas/1' in validation.get('activation_capabilities',[]),'public offline CAS identity invalid')
     receipt={'status':'CANDIDATE','package_id':candidate,'validation':validation,'application_pre_switch':pre}
+    if increment_storage is not None:receipt['increment_storage']=increment_storage
     if not publish: return receipt
     if candidate==previous:
         host.require(host.read_json(store/'current.json')==extra['public_pointer'],'unchanged public pointer moved')
@@ -193,6 +211,11 @@ def deliver(host,config,work,extra,publish):
         raise RuntimeError('application read failed; previous Current restored')
     receipt['application_post_switch']=post
     save_continuation(host,work,candidate)
+    if increment_storage is not None:
+        # The sparse increment is retained as source/replay evidence. There is no
+        # complete baseline or candidate package duplicate to remove in this run.
+        receipt['duplicate_cleanup']={'status':'NOT_NEEDED','full_bundle_written':False}
+        return receipt
     try:
         receipt['duplicate_cleanup']=release_duplicates(host,work,store,extra,candidate,upload,receipt['status']=='NO_CHANGE')
     except Exception as exc:

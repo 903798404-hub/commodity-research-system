@@ -12,6 +12,7 @@ import shutil
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
+PUBLIC_BASELINE = Path('/public-baseline')
 
 
 def load(name, relative):
@@ -99,7 +100,8 @@ def materialize(request, baseline, output):
     from agri_research_agent.pipelines.domestic_spread_integrity import (
         HistoricalMutationPolicy, HistoricalPublicationMode, validate_historical_publication)
     combined, added = replay(request, baseline)
-    public = baseline / request['public_package_relative']
+    incremental = request.get('incremental_public_packages',False)
+    public = PUBLIC_BASELINE if incremental else baseline / request['public_package_relative']
     package = validate_production_package(public)
     if package.manifest != request['public_manifest']:
         raise ValueError('public manifest differs')
@@ -138,16 +140,25 @@ def materialize(request, baseline, output):
     if not diff.changed_keys:
         return {'business_status': 'NO_CHANGE', 'continuation_changed': True,
                 'metrics': {**request['public_preflight']['metrics'], **status, 'full_bundle_written': False}}
-    result = delivery._build_public_package(project, public, output / 'packages',
-        partitioned=request.get('partitioned_public_packages', False))
+    if incremental:
+        from agri_research_agent.pipelines.public_data_increment import build_increment, validate_increment
+        result=build_increment(public,data/'historical_spread_database.parquet',output/'packages')
+        if result is None:
+            return {'business_status':'NO_CHANGE','continuation_changed':True,
+                    'metrics':{**status,'full_bundle_written':False}}
+        increment_proof=validate_increment(result.directory,public)
+    else:
+        result = delivery._build_public_package(project, public, output / 'packages',
+            partitioned=request.get('partitioned_public_packages', False))
     worker = load('scheduled_spread_cache', '09_deploy/scheduled_server/collect.py')
     load('scheduled_spread_scope', '09_deploy/scheduled_server/public.py').assert_scope(request, result.manifest)
     cache_removed = worker.clear_monthly_build_cache(output, result)
     return {'package_id': result.package_id, 'package_path': str(result.directory.relative_to(output)),
             'business_status': 'CHANGED', 'latest_date': status['latest_date'],
-            'metrics': {**request['public_preflight']['metrics'], 'full_bundle_written': True,
+            'metrics': {**request['public_preflight']['metrics'], 'full_bundle_written': not incremental,
                         'calculated_spread_rows': status['calculated_spread_rows'],
                         'historical_rows_preserved': history['history_rows'],
                         'package_bytes': sum(f['size_bytes'] for f in result.manifest['files']),
                         'package_files': result.manifest['file_count'],
-                        'temporary_monthly_cache_files_removed': cache_removed}}
+                        'temporary_monthly_cache_files_removed': cache_removed,
+                        **({'increment':increment_proof} if incremental else {})}}

@@ -773,13 +773,25 @@ def _domestic_spread_identity(path: Path, *, partitioned=False) -> dict[str, Any
         raise DeliveryError("Domestic Spread Parquet is unreadable") from exc
     missing = DOMESTIC_SPREAD_REQUIRED_COLUMNS - set(table.column_names)
     if missing:
+        raise DeliveryError(f"Domestic Spread Parquet schema is missing: {','.join(sorted(missing))}")
+    if partitioned or path.is_dir():
+        table = _partition_table(table)
+    return {
+        "size_bytes": sum(p.stat().st_size for p in path.iterdir()) if path.is_dir() else path.stat().st_size,
+        "sha256": _bundle_sha256(_file_records(path)) if path.is_dir() else _sha256_file(path),
+        **_domestic_spread_table_identity(table),
+    }
+
+
+def _domestic_spread_table_identity(table: pa.Table) -> dict[str, Any]:
+    """Validate logical rows independently of their physical partition locations."""
+    missing = DOMESTIC_SPREAD_REQUIRED_COLUMNS - set(table.column_names)
+    if missing:
         raise DeliveryError(
             f"Domestic Spread Parquet schema is missing: {','.join(sorted(missing))}"
         )
     if table.num_rows == 0:
         raise DeliveryError("Domestic Spread Parquet contains no rows")
-    if partitioned or path.is_dir():
-        table = _partition_table(table)
     if table.select(["date", "spread_name", "season"]).to_pandas().duplicated().any():
         raise DeliveryError("Domestic Spread business keys are duplicated")
     successful = table.filter(pc.equal(table["status"], "success"))
@@ -815,8 +827,6 @@ def _domestic_spread_identity(path: Path, *, partitioned=False) -> dict[str, Any
         writer.write_table(business.combine_chunks())
     business_sha = hashlib.sha256(sink.getvalue().to_pybytes()).hexdigest()
     return {
-        "size_bytes": sum(p.stat().st_size for p in path.iterdir()) if path.is_dir() else path.stat().st_size,
-        "sha256": _bundle_sha256(_file_records(path)) if path.is_dir() else _sha256_file(path),
         "business_sha256": business_sha,
         "latest_business_date": latest_text,
         "row_count": table.num_rows,
