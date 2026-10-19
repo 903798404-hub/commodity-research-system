@@ -112,3 +112,25 @@ def render_guangxi_weather_page() -> None:
         return
     st.link_button("全屏打开广西天气", url)
     components.iframe(embedded_url, height=1800, scrolling=True)
+
+
+def yunnan_weather_service_url(workspace_url: str, *, embedded: bool = False) -> str:
+    """Use the dedicated Yunnan reader on the same host, without private URL parts."""
+    validated = urlsplit(weather_service_url(workspace_url))
+    hostname = validated.hostname
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    return urlunsplit((validated.scheme, host + ":8858", "/", "embed=true" if embedded else "", ""))
+
+
+def render_yunnan_weather_page() -> None:
+    """Read the independently updated Yunnan snapshot; navigation never collects."""
+    st.title("云南甘蔗天气研究")
+    st.caption("13州市 · 26个蔗区乡镇代表点 · 2024年甘蔗面积权重 · IFS历史与2020—2024年均值 · EC/GFS预报")
+    try:
+        url = yunnan_weather_service_url(st.context.url)
+        embedded_url = yunnan_weather_service_url(st.context.url, embedded=True)
+    except ValueError as exc:
+        st.warning(str(exc))
+        return
+    st.link_button("全屏打开云南天气", url)
+    components.iframe(embedded_url, height=1800, scrolling=True)

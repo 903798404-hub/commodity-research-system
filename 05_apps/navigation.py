@@ -14,6 +14,7 @@ RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
 INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 GUANGXI_WEATHER_PAGE_TITLE = "广西甘蔗天气"
+YUNNAN_WEATHER_PAGE_TITLE = "云南甘蔗天气"
 IMPORT_PROFIT_ROUTE_ID = "import_profit"
 CANOLA_IMPORT_ROUTE_ID = "canola_import_profit"
 PALM_IMPORT_ROUTE_ID = "palm_import_profit"
@@ -162,6 +163,11 @@ NAVIGATION_GROUPS = (
                 "guangxi_weather", GUANGXI_WEATHER_PAGE_TITLE, GUANGXI_WEATHER_PAGE_TITLE,
                 "leaf", "比较广西甘蔗产区降水、气温、土壤墒情与历史同期",
                 detail_label="覆盖", detail_text="广西14市 · EC/GFS · 每日更新",
+            ),
+            NavigationItem(
+                "yunnan_weather", YUNNAN_WEATHER_PAGE_TITLE, YUNNAN_WEATHER_PAGE_TITLE,
+                "leaf", "比较云南实际蔗区降水、气温、土壤墒情与历史同期",
+                detail_label="覆盖", detail_text="云南13州市 · EC/GFS · 每日更新",
             ),
         ),
     ),
