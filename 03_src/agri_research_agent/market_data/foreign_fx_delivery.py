@@ -11,11 +11,11 @@ import io
 import json
 from pathlib import Path
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from .foreign_fx import BY_CODE, ECB_HISTORY_URL, FxDataError, bcb_url, parse_bcb, parse_ecb, validate_snapshot
-from .foreign_fx_update import MAX_RESPONSE_BYTES, collect_snapshot
+from .foreign_fx_update import MAX_RESPONSE_BYTES
 
 BCB_LEGACY_LATEST_URL = "https://ptax.bcb.gov.br/ptax_internet/consultarUltimaCotacaoDolar.do"
 BCB_LATEST_URL = "https://www.bcb.gov.br/api/servico/sitebcb/indicadorCambio"
@@ -25,6 +25,50 @@ WINDOW_EVIDENCE_SCHEMA = "foreign-fx-source-evidence/2"
 ECB_RECENT_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml"
 REVISION_LOOKBACK_DAYS = 14
 START = date(2021, 1, 1)
+PTAX_HISTORY_BASE = ('https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/'
+                     'CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)')
+
+
+def ptax_url(start, end):
+    return PTAX_HISTORY_BASE + '?' + urlencode({
+        '@dataInicial': start.strftime("'%m-%d-%Y'"),
+        '@dataFinalCotacao': end.strftime("'%m-%d-%Y'"), '$top': '10000', '$format': 'json'})
+
+
+def parse_ptax(raw, start, end):
+    """BCB daily USD closing sale quote; never use an intraday currency bulletin."""
+    def closed(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value: raise FxDataError('BCB PTAX duplicate JSON field')
+            value[key] = item
+        return value
+    try:
+        value = json.loads(raw.decode('utf-8-sig', errors='strict'), object_pairs_hook=closed)
+        exact(value, ('@odata.context', 'value'), 'BCB PTAX response')
+        if (not isinstance(value['@odata.context'], str)
+                or not value['@odata.context'].endswith('/odata$metadata#_CotacaoDolarPeriodo')
+                or not isinstance(value['value'], list) or not 0 < len(value['value']) < 10000):
+            raise FxDataError('BCB PTAX response identity or coverage invalid')
+        result, days = [], set()
+        for row in value['value']:
+            exact(row, ('cotacaoCompra', 'cotacaoVenda', 'dataHoraCotacao'), 'BCB PTAX daily quote')
+            stamp = datetime.fromisoformat(row['dataHoraCotacao'])
+            day = (stamp.astimezone(ZoneInfo('America/Sao_Paulo')).date()
+                   if stamp.tzinfo is not None else stamp.date())
+            sale = row['cotacaoVenda']
+            if (day in days or not start <= day <= end or type(sale) not in (float, int)
+                    or not 0 < float(sale) < float('inf')):
+                raise FxDataError('BCB PTAX duplicate date, range or sale quote invalid')
+            days.add(day)
+            # Stable logical series ID, not the acquisition-channel identifier.
+            # Exact official PTAX URL and unmodified bytes are recorded separately.
+            result.append(dict(currency='BRL', date=day.isoformat(),
+                               local_per_usd=float(sale), provider='BCB_SGS1'))
+        return sorted(result, key=lambda r: r['date'])
+    except (UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, FxDataError): raise
+        raise FxDataError('BCB PTAX JSON or closing quote invalid') from exc
 
 
 class FxSourceError(FxDataError):
@@ -47,13 +91,14 @@ def failure_details(exc, stage):
 def fetch_delivery_official(url):
     """Use verified direct TLS, independently of desktop proxy/CA environment."""
     import requests
-    allowed = {"api.bcb.gov.br", "www.bcb.gov.br", "www.ecb.europa.eu"}
+    allowed = {"api.bcb.gov.br", "www.bcb.gov.br", "www.ecb.europa.eu", "olinda.bcb.gov.br"}
     if urlparse(url).scheme != "https" or urlparse(url).hostname not in allowed:
         raise FxDataError("FX official URL outside allowlist")
     with requests.Session() as session:
         session.trust_env = False
         try:
-            with session.get(url, headers={"User-Agent": "AgriculturalResearch/1.0"}, timeout=45, stream=True) as response:
+            with session.get(url, headers={"User-Agent": "AgriculturalResearch/1.0"}, timeout=45,
+                             stream=True, allow_redirects=False) as response:
                 if response.status_code != 200 or response.url != url:
                     raise FxSourceError("FX official response status or destination invalid",
                                         source_url=url, http_status=response.status_code)
@@ -158,15 +203,71 @@ def _decode(record, url):
     return raw
 
 
-def collect(end: date, raw_directory: Path, *, fetcher=fetch_delivery_official):
-    snapshot = collect_snapshot(START, end, raw_directory=raw_directory, fetcher=fetcher)
+def _bcb_capture(record, start, end):
+    url = record.get('url') if isinstance(record, dict) else None
+    if url == bcb_url(start, end): parser = parse_bcb
+    elif url == ptax_url(start, end): parser = parse_ptax
+    else: raise FxDataError('BCB history official URL or date window differs')
+    raw = _decode(record, url)
+    return raw, parser(raw, start, end), url
+
+
+def _fetch_bcb(start, end, raw_directory, fetcher, baseline):
+    """Use an official same-fixing fallback only after exact overlap agreement."""
+    url = bcb_url(start, end)
+    try:
+        raw = fetcher(url)
+        (raw_directory / 'bcb_history.raw').write_bytes(raw)
+        parse_bcb(raw, start, end)
+        return url, raw
+    except (FxDataError, UnicodeError, json.JSONDecodeError) as exc:
+        if baseline is None: raise
+        failure = failure_details(exc, 'bcb_sgs_history')
+        failure['source_url'] = url
+        primary = raw_directory / 'bcb_history.raw'
+        if primary.exists():
+            body = primary.read_bytes()
+            (raw_directory / 'bcb_history_primary_failed.raw').write_bytes(body)
+            failure.update(response_sha256=hashlib.sha256(body).hexdigest(), received_bytes=len(body))
+        (raw_directory / 'bcb_primary_failure.json').write_bytes(canonical(failure))
+    url = ptax_url(start, end)
+    raw = fetcher(url)
+    (raw_directory / 'bcb_ptax.raw').write_bytes(raw)
+    parsed = parse_ptax(raw, start, end)
+    old = {r['date']: r for r in baseline['observations']
+           if r['currency'] == 'BRL' and start.isoformat() <= r['date'] <= end.isoformat()}
+    current = {r['date']: r for r in parsed}
+    if not old or any(current.get(day) != row for day, row in old.items()):
+        raise FxDataError('BCB PTAX fallback differs from published SGS1 overlap; review required')
+    (raw_directory / 'bcb_source_selection.json').write_bytes(canonical(dict(
+        channel='BCB_PTAX_OFFICIAL_FALLBACK', logical_series='BCB_SGS1', source_url=url,
+        overlap_dates_checked=len(old), overlap_changed=0, primary_failure=failure)))
+    return url, raw
+
+
+def collect(end: date, raw_directory: Path, *, fetcher=fetch_delivery_official, baseline=None):
+    if type(end) is not date or not START <= end <= date.today():
+        raise FxDataError('FX collection request date invalid')
+    raw_directory.mkdir(parents=True, exist_ok=True)
+    bcb_history_url, bcb_raw = _fetch_bcb(START, end, raw_directory, fetcher, baseline)
+    bcb_parser = parse_bcb if bcb_history_url == bcb_url(START, end) else parse_ptax
+    ecb_raw = fetcher(ECB_HISTORY_URL)
+    (raw_directory / 'ECB_CROSS.xml').write_bytes(ecb_raw)
+    rows = bcb_parser(bcb_raw, START, end) + parse_ecb(ecb_raw, START, end)
+    now = datetime.now().astimezone().isoformat()
+    snapshot = dict(schema_version='foreign-fx-daily/1', generated_at=now,
+        sources=[dict(provider=provider, url=url, raw_sha256=hashlib.sha256(raw).hexdigest(),
+                      retrieved_at=now, method=method) for provider, url, raw, method in [
+            ('BCB_SGS1', bcb_history_url, bcb_raw, 'PTAX卖出参考汇率'),
+            ('ECB_CROSS', ECB_HISTORY_URL, ecb_raw, '同日EUR/本币除以EUR/USD')]],
+        observations=sorted(rows, key=lambda row: (row['currency'], row['date'])))
     references = {"bcb_latest": (BCB_LATEST_URL, fetcher(BCB_LATEST_URL)),
                   "ecb_latest": (ECB_LATEST_URL, fetcher(ECB_LATEST_URL))}
     for key, (_url, raw) in references.items():
         (raw_directory / (key + ".raw")).write_bytes(raw)
     evidence = {"schema_version": EVIDENCE_SCHEMA, "request_start": START.isoformat(),
                 "request_end": end.isoformat(), "raw": {
-                    "bcb_history": _raw_record(bcb_url(START, end), (raw_directory / "BCB_SGS1.json").read_bytes()),
+                    "bcb_history": _raw_record(bcb_history_url, bcb_raw),
                     "ecb_history": _raw_record(ECB_HISTORY_URL, (raw_directory / "ECB_CROSS.xml").read_bytes()),
                     **{key: _raw_record(url, raw) for key, (url, raw) in references.items()}}}
     observations(snapshot, None, evidence)
@@ -190,10 +291,11 @@ def replay(snapshot, evidence):
     latest_url=records['bcb_latest'].get('url') if isinstance(records['bcb_latest'],dict) else None
     if latest_url not in (BCB_LATEST_URL,BCB_LEGACY_LATEST_URL):
         raise FxDataError("BCB latest official URL differs")
+    _, bcb_rows, _ = _bcb_capture(records['bcb_history'], START, end)
     raws = {key: _decode(records[key], url) for key, url in {
-        "bcb_history": bcb_url(START, end), "ecb_history": ECB_HISTORY_URL,
+        "ecb_history": ECB_HISTORY_URL,
         "bcb_latest": latest_url, "ecb_latest": ECB_LATEST_URL}.items()}
-    rows = sorted(parse_bcb(raws["bcb_history"], START, end) + parse_ecb(raws["ecb_history"], START, end),
+    rows = sorted(bcb_rows + parse_ecb(raws["ecb_history"], START, end),
                   key=lambda row: (row["currency"], row["date"]))
     if rows != snapshot["observations"]:
         raise FxDataError("FX observations differ from official raw replay")
@@ -253,7 +355,11 @@ def _window_rows(segments):
         if ecb_url not in {ECB_HISTORY_URL, ECB_RECENT_URL}:
             raise FxDataError("FX window ECB URL invalid")
         fresh = {}
-        for provider, key, url, parser in (("BCB_SGS1", "bcb_history", bcb_url(start, end), parse_bcb),
+        bcb_url_value = records['bcb_history'].get('url')
+        if bcb_url_value not in {bcb_url(start, end), ptax_url(start, end)}:
+            raise FxDataError('BCB window official URL differs')
+        bcb_parser = parse_bcb if bcb_url_value == bcb_url(start, end) else parse_ptax
+        for provider, key, url, parser in (("BCB_SGS1", "bcb_history", bcb_url_value, bcb_parser),
                                           ("ECB_CROSS", "ecb_history", ecb_url, parse_ecb)):
             raw = _decode(records[key], url)
             parsed = parser(raw, start, end)
@@ -323,15 +429,17 @@ def collect_incremental(end, raw_directory, *, baseline=None, baseline_evidence=
     if end < previous_end:
         raise FxDataError("FX request end retreats")
     if reconcile or (end.year, end.month) != (previous_end.year, previous_end.month):
-        snapshot, evidence = collect(end, raw_directory, fetcher=fetcher)
+        snapshot, evidence = collect(end, raw_directory, fetcher=fetcher, baseline=baseline)
         observations(snapshot, baseline, evidence)
         return snapshot, evidence
     start = max(START, min(date.fromisoformat(v) for v in latest.values()) - timedelta(days=REVISION_LOOKBACK_DAYS))
     ecb_url = ECB_RECENT_URL if start >= end - timedelta(days=85) else ECB_HISTORY_URL
     segment = {"start": start.isoformat(), "end": end.isoformat(), "raw": {}, "retrieved_at": {}}
     raw_directory.mkdir(parents=True, exist_ok=True)
-    for key, url in (("bcb_history", bcb_url(start, end)), ("ecb_history", ecb_url)):
-        raw = fetcher(url); (raw_directory / (key + ".raw")).write_bytes(raw)
+    bcb_history_url, bcb_raw = _fetch_bcb(start, end, raw_directory, fetcher, baseline)
+    for key, url in (("bcb_history", bcb_history_url), ("ecb_history", ecb_url)):
+        raw = bcb_raw if key == 'bcb_history' else fetcher(url)
+        (raw_directory / (key + ".raw")).write_bytes(raw)
         segment["raw"][key] = _raw_record(url, raw)
         segment["retrieved_at"]["BCB_SGS1" if key == "bcb_history" else "ECB_CROSS"] = datetime.now().astimezone().isoformat()
     if baseline_evidence["schema_version"] == EVIDENCE_SCHEMA:
