@@ -99,6 +99,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         "菜籽天气",
         "棕榈油天气",
         "印度作物天气",
+        "泰国甘蔗天气",
         "广西甘蔗天气",
         "云南甘蔗天气",
         "USDA供需平衡",
@@ -133,9 +134,9 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 21
+    assert cards_markup.count('class="agri-card"') == 22
     assert cards_markup.count('class="agri-card-keyword"') == 20
-    assert cards_markup.count('class="agri-card-detail-label"') == 10
+    assert cards_markup.count('class="agri-card-detail-label"') == 11
     assert "?home_target=" not in cards_markup
     assert "?workspace_page=" in cards_markup
     assert '<strong class="agri-card-keyword">跨期价差</strong>' in cards_markup
@@ -186,7 +187,7 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
         ("巴西大豆种植与生长", workspace.BRAZIL_SOY_PAGE_TITLE, None),
     ]
     assert [item.label for item in groups["天气研究"]] == [
-        "大豆天气", "菜籽天气", "棕榈油天气", "印度作物天气", "广西甘蔗天气", "云南甘蔗天气"
+        "大豆天气", "菜籽天气", "棕榈油天气", "印度作物天气", "泰国甘蔗天气", "广西甘蔗天气", "云南甘蔗天气"
     ]
     assert "美国大豆天气研究" not in [
         item.label for group in workspace.SIDEBAR_NAVIGATION for item in group.items

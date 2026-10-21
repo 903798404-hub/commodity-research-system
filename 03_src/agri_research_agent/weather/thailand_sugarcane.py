@@ -177,6 +177,7 @@ def hourly_to_daily(payload: list[dict], regions: list[dict], start, end, *, mod
         for metric, data in values.items():
             frame = pd.DataFrame({"date": days, "value": data.to_numpy()})
             frame = frame.assign(region=region["key"], metric=metric, unit=METRICS[metric],
+                                 crop="sugarcane", country="THA", timezone="Asia/Bangkok",
                                  model=model, forecast_run_at=run_at, retrieved_at_utc=fetched_at,
                                  data_type="historical_model" if model == "HISTORY" else "forecast",
                                  source_model="ecmwf_ifs" if model == "HISTORY" else
