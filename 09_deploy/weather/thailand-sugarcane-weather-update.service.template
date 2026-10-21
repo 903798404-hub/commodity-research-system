@@ -1,0 +1,20 @@
+[Unit]
+Description=Independent Thailand sugarcane weather data update
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=@THAILAND_DATA_ROOT@
+
+[Service]
+Type=oneshot
+User=@USER@
+Group=@GROUP@
+ExecStart=/usr/bin/docker run --rm --name thailand-sugarcane-weather-updater --read-only --network bridge --user @UID@:@GID@ --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,size=128m --mount type=bind,source=@THAILAND_DATA_ROOT@,target=/data @APPLICATION_IMAGE_ID@ python /app/04_scripts/weather/update_thailand_sugarcane.py --root /data --publish
+TimeoutStartSec=1800
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@THAILAND_DATA_ROOT@
+StandardOutput=journal
+StandardError=journal

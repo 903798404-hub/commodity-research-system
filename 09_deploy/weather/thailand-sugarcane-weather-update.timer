@@ -1,0 +1,11 @@
+[Unit]
+Description=Thailand sugarcane weather daily update at 08:30 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 08:30:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+Unit=thailand-sugarcane-weather-update.service
+
+[Install]
+WantedBy=timers.target

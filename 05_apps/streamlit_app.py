@@ -62,6 +62,7 @@ from navigation import (
     INTERNATIONAL_SPREAD_PAGE_TITLE,
     FOREIGN_FX_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
+    THAILAND_SUGARCANE_WEATHER_PAGE_TITLE,
     GUANGXI_WEATHER_PAGE_TITLE,
     YUNNAN_WEATHER_PAGE_TITLE,
     NAVIGATION_GROUPS,
@@ -464,6 +465,9 @@ def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -
         render_brazil_soy_page()
     elif selected_page in WEATHER_PAGE_ROUTES:
         render_weather_research_page(WEATHER_PAGE_ROUTES[selected_page])
+    elif selected_page == THAILAND_SUGARCANE_WEATHER_PAGE_TITLE:
+        from thailand_sugarcane_weather_page import render_thailand_sugarcane_weather_page
+        render_thailand_sugarcane_weather_page()
     elif selected_page == GUANGXI_WEATHER_PAGE_TITLE:
         render_guangxi_weather_page()
     elif selected_page == YUNNAN_WEATHER_PAGE_TITLE:

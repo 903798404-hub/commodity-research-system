@@ -1,0 +1,593 @@
+{
+  "schema_version": "thailand-sugarcane-config/1",
+  "crop": "sugarcane",
+  "country": "THA",
+  "timezone": "Asia/Bangkok",
+  "baseline_years": [
+    2020,
+    2024
+  ],
+  "reference_area_year": 2025,
+  "area_metric": "industrial sugarcane harvested area",
+  "area_unit": "rai",
+  "national_area_rai": 9628085,
+  "area_agency": "OCSB, reproduced by OAE Agricultural Statistics of Thailand 2025, table 1.17, pp.41-42",
+  "source_url": "https://oae.go.th/uploads/files/2026/04/02/db0b6b4ca1f024ea.pdf",
+  "source_sha256": "a4492bc95a2f2059d1524f2025cd82db066dd135476ac2f9661823558def207e",
+  "publication": "March 2026; NABC listing published June 2026",
+  "regions": [
+    {
+      "key": "udonthani",
+      "display_name": "乌隆府（Udon Thani）",
+      "province": "Udon Thani",
+      "district": "Ban Phue",
+      "latitude": 17.72175,
+      "longitude": 102.44247,
+      "area_rai": 679491,
+      "national_share": 0.07057384723961203,
+      "source_pdf_page": "68",
+      "locality_source": "https://khambong.go.th/activity-news/182",
+      "locality_source_period": "2025",
+      "locality_evidence": "Khambong municipality documents local sugarcane crop competition; a locality proxy, not a field centroid.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "17",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "kamphaengphet",
+      "display_name": "甘烹碧府（Kamphaeng Phet）",
+      "province": "Kamphaeng Phet",
+      "district": "Mueang Kamphaeng Phet",
+      "latitude": 16.41195,
+      "longitude": 99.51059,
+      "area_rai": 649576,
+      "national_share": 0.06746679116355953,
+      "source_pdf_page": "68",
+      "locality_source": "https://khlangkaset.doae.go.th/wp-content/uploads/2025/08/แผนพัฒนาอำเภอเมืองกำแพงเพชร.pdf",
+      "locality_source_period": "2025",
+      "locality_evidence": "DOAE district agricultural plan records sugarcane planted area by subdistrict.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "01",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "nakhonratchasima",
+      "display_name": "呵叻府（Nakhon Ratchasima）",
+      "province": "Nakhon Ratchasima",
+      "district": "Thepharak",
+      "latitude": 15.28935,
+      "longitude": 101.50779,
+      "area_rai": 627630,
+      "national_share": 0.06518741785100568,
+      "source_pdf_page": "69",
+      "locality_source": "https://info.doa.go.th/research/index.php?act=view_detail&id=4130",
+      "locality_source_period": "2015-2018",
+      "locality_evidence": "DOA abstract identifies farmer sugarcane trials in Thepharak; the abstract location controls over the title.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "26",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "khonkaen",
+      "display_name": "孔敬府（Khon Kaen）",
+      "province": "Khon Kaen",
+      "district": "Nong Ruea",
+      "latitude": 16.4909,
+      "longitude": 102.42911,
+      "area_rai": 590596,
+      "national_share": 0.06134096240321933,
+      "source_pdf_page": "68",
+      "locality_source": "https://www.khonkaenlink.info/read/888565/",
+      "locality_source_period": "2025-12-16",
+      "locality_evidence": "Local report describes the provincial governor visiting an actual sugarcane field at Nong Ruea; supplemental locality evidence.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "04",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "nakhonsawan",
+      "display_name": "北榄坡府（Nakhon Sawan）",
+      "province": "Nakhon Sawan",
+      "district": "Tak Fa",
+      "latitude": 15.3881,
+      "longitude": 100.47767,
+      "area_rai": 586149,
+      "national_share": 0.060879084470068554,
+      "source_pdf_page": "68",
+      "locality_source": "https://doaplant.doa.go.th/RecFront/PlantDetail/489",
+      "locality_source_period": "2022-2024",
+      "locality_evidence": "DOA varietal trial record explicitly includes farmer and company sugarcane fields in Tak Fa.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "12",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "chaiyaphum",
+      "display_name": "猜也蓬府（Chaiyaphum）",
+      "province": "Chaiyaphum",
+      "district": "Phu Khiao",
+      "latitude": 16.34715,
+      "longitude": 102.18,
+      "area_rai": 553232,
+      "national_share": 0.057460232226865464,
+      "source_pdf_page": "68",
+      "locality_source": "https://doaenews.doae.go.th/wp-content/uploads/2025/02/ข่าว-050268.pdf",
+      "locality_source_period": "2025-02-05",
+      "locality_evidence": "DOAE news digest describes a large sugarcane plot in Ban Kaeng, Phu Khiao.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "10",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "kanchanaburi",
+      "display_name": "北碧府（Kanchanaburi）",
+      "province": "Kanchanaburi",
+      "district": "Dan Makham Tia",
+      "latitude": 13.84015,
+      "longitude": 99.32554,
+      "area_rai": 523809,
+      "national_share": 0.05440427665522272,
+      "source_pdf_page": "69",
+      "locality_source": "https://www.opsmoac.go.th/kanchanaburi-news-files-471491791020",
+      "locality_source_period": "2025",
+      "locality_evidence": "Provincial agricultural plan identifies a sugarcane production expert in Dan Makham Tia; broad district proxy.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "11",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "lopburi",
+      "display_name": "华富里府（Lop Buri）",
+      "province": "Lop Buri",
+      "district": "Khok Samrong",
+      "latitude": 15.0559,
+      "longitude": 100.77911,
+      "area_rai": 495817,
+      "national_share": 0.05149694877018639,
+      "source_pdf_page": "69",
+      "locality_source": "https://www.opsmoac.go.th/lopburi-dwl-files-451491791068",
+      "locality_source_period": "2023",
+      "locality_evidence": "Provincial agriculture ministry document identifies planted sugarcane served by the Khok Samrong association.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "03",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "suphanburi",
+      "display_name": "素攀武里府（Suphanburi）",
+      "province": "Suphanburi",
+      "district": "U Thong",
+      "latitude": 14.4253,
+      "longitude": 99.88695,
+      "area_rai": 449126,
+      "national_share": 0.04664749012913783,
+      "source_pdf_page": "69",
+      "locality_source": "https://e-library.ldd.go.th/library/Ebook/bib10611.pdf",
+      "locality_source_period": "2021-2022",
+      "locality_evidence": "LDD province Agri-Map report documents the province sugarcane cultivation geography; U Thong is a district proxy.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "09",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "phetchabun",
+      "display_name": "碧差汶府（Phetchabun）",
+      "province": "Phetchabun",
+      "district": "Wichian Buri",
+      "latitude": 15.6773,
+      "longitude": 101.08801,
+      "area_rai": 441940,
+      "national_share": 0.04590113194887665,
+      "source_pdf_page": "68",
+      "locality_source": "https://wichianburi.phetchabun.doae.go.th/wp-content/uploads/2025/08/แผนพัฒนาการเกษตรระดับตำบลน้ำร้อน-2566-2570-ทบทวน68-1.pdf",
+      "locality_source_period": "2025",
+      "locality_evidence": "DOAE Nam Ron plan in Wichian Buri documents sugarcane cultivation and costs.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "05",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "kalasin",
+      "display_name": "加拉信府（Kalasin）",
+      "province": "Kalasin",
+      "district": "Kuchinarai",
+      "latitude": 16.53355,
+      "longitude": 104.05079,
+      "area_rai": 401495,
+      "national_share": 0.04170040044307877,
+      "source_pdf_page": "68",
+      "locality_source": "https://www.doa.go.th/plan/wp-content/uploads/2021/04/91.10การทดสอบชุดเทคโนโลยีที่เหมาะสมในการควบคุมโรคใบขาวอ้อยจังหวัดกาฬสินธุ์.pdf",
+      "locality_source_period": "2021",
+      "locality_evidence": "DOA research report identifies Kuchinarai among the principal sugarcane districts.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "05",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "sakaeo",
+      "display_name": "沙缴府（Sa Kaeo）",
+      "province": "Sa Kaeo",
+      "district": "Watthana Nakhon",
+      "latitude": 13.89145,
+      "longitude": 102.36526,
+      "area_rai": 340742,
+      "national_share": 0.03539042291379854,
+      "source_pdf_page": "69",
+      "locality_source": "https://doaplant.doa.go.th/RecFront/PlantDetail/489",
+      "locality_source_period": "2022-2024",
+      "locality_evidence": "DOA trial record explicitly identifies company sugarcane plots in Watthana Nakhon.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "05",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "nongbualamphu",
+      "display_name": "廊磨喃蒲府（Nong Bua Lam Phu）",
+      "province": "Nong Bua Lam Phu",
+      "district": "Na Klang",
+      "latitude": 17.31345,
+      "longitude": 102.18294,
+      "area_rai": 312300,
+      "national_share": 0.03243635676253377,
+      "source_pdf_page": "68",
+      "locality_source": "https://www.opsmoac.go.th/datacenter-news-preview-471991791878",
+      "locality_source_period": "2025-02-03",
+      "locality_evidence": "Agriculture ministry documents a large sugarcane plot at Non Mueang, Na Klang.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "02",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "loei",
+      "display_name": "黎府（Loei）",
+      "province": "Loei",
+      "district": "Wang Saphung",
+      "latitude": 17.2914,
+      "longitude": 101.72181,
+      "area_rai": 301779,
+      "national_share": 0.03134361609811297,
+      "source_pdf_page": "68",
+      "locality_source": "https://www.opsmoac.go.th/loei-strategic-files-441691791823",
+      "locality_source_period": "2022",
+      "locality_evidence": "Provincial agricultural plan identifies Wang Saphung among sugarcane cultivation districts.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "09",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "sukhothai",
+      "display_name": "素可泰府（Sukhothai）",
+      "province": "Sukhothai",
+      "district": "Si Satchanalai",
+      "latitude": 17.5887,
+      "longitude": 99.67448,
+      "area_rai": 274649,
+      "national_share": 0.028525817958607553,
+      "source_pdf_page": "68",
+      "locality_source": "https://sukhothai.doae.go.th/sisatchanalai/wp-content/uploads/2024/03/แผนพัฒนาการเกษตรอำเภอศรีสัชนาลัย-ปี-2566-70-ฉบ-1.pdf",
+      "locality_source_period": "2024",
+      "locality_evidence": "DOAE district agricultural plan describes sugarcane cultivation and harvesting.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "05",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    },
+    {
+      "key": "buriram",
+      "display_name": "武里南府（Buri Ram）",
+      "province": "Buri Ram",
+      "district": "Khu Mueang",
+      "latitude": 15.28255,
+      "longitude": 102.99539,
+      "area_rai": 247943,
+      "national_share": 0.025752057652170708,
+      "source_pdf_page": "68",
+      "locality_source": "https://www.doa.go.th/plan/wp-content/uploads/2023/08/175โครงการการพัฒนาและขยายผลเทคโนโลยี.pdf",
+      "locality_source_period": "2023",
+      "locality_evidence": "DOA project report explicitly describes ten large sugarcane farming plots in Khu Mueang.",
+      "coordinate_source": "https://gistdaportal.gistda.or.th/data/rest/services/L05_AdminBoundary/L05_Amphoe_GISTDA_50k/MapServer/0/query",
+      "district_code": "02",
+      "point_method": "district interior geographic proxy; not a verified cane-field centre",
+      "verified": true
+    }
+  ],
+  "all_province_areas": [
+    {
+      "province": "Tak",
+      "area_2024_rai": "8590",
+      "area_2025_rai": "9689",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Kamphaeng Phet",
+      "area_2024_rai": "589091",
+      "area_2025_rai": "649576",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Sukhothai",
+      "area_2024_rai": "239101",
+      "area_2025_rai": "274649",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Phrae",
+      "area_2024_rai": "3504",
+      "area_2025_rai": "3974",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Uttaradit",
+      "area_2024_rai": "86113",
+      "area_2025_rai": "101495",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Phitsanulok",
+      "area_2024_rai": "102389",
+      "area_2025_rai": "124031",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Phichit",
+      "area_2024_rai": "52506",
+      "area_2025_rai": "63067",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Nakhon Sawan",
+      "area_2024_rai": "555397",
+      "area_2025_rai": "586149",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Uthai Thani",
+      "area_2024_rai": "211860",
+      "area_2025_rai": "223877",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Phetchabun",
+      "area_2024_rai": "407719",
+      "area_2025_rai": "441940",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Loei",
+      "area_2024_rai": "303873",
+      "area_2025_rai": "301779",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Nong Bua Lam Phu",
+      "area_2024_rai": "309079",
+      "area_2025_rai": "312300",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Udon Thani",
+      "area_2024_rai": "673029",
+      "area_2025_rai": "679491",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Nong Khai",
+      "area_2024_rai": "65138",
+      "area_2025_rai": "64882",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Beung Kan",
+      "area_2024_rai": "4025",
+      "area_2025_rai": "3932",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Sakon Nakhon",
+      "area_2024_rai": "91270",
+      "area_2025_rai": "92376",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Nakhon Phanom",
+      "area_2024_rai": "14931",
+      "area_2025_rai": "15675",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Mukdahan",
+      "area_2024_rai": "198587",
+      "area_2025_rai": "189414",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Yasothon",
+      "area_2024_rai": "91141",
+      "area_2025_rai": "91981",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Amnat Charoen",
+      "area_2024_rai": "92650",
+      "area_2025_rai": "93486",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Ubon Ratchathani",
+      "area_2024_rai": "3614",
+      "area_2025_rai": "3593",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Si Sa Ket",
+      "area_2024_rai": "11104",
+      "area_2025_rai": "11788",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Surin",
+      "area_2024_rai": "127446",
+      "area_2025_rai": "129165",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Buri Ram",
+      "area_2024_rai": "245574",
+      "area_2025_rai": "247943",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Maha Sarakham",
+      "area_2024_rai": "119080",
+      "area_2025_rai": "118867",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Roi Et",
+      "area_2024_rai": "150811",
+      "area_2025_rai": "152004",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Kalasin",
+      "area_2024_rai": "397460",
+      "area_2025_rai": "401495",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Khon Kaen",
+      "area_2024_rai": "597740",
+      "area_2025_rai": "590596",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Chaiyaphum",
+      "area_2024_rai": "545197",
+      "area_2025_rai": "553232",
+      "source_pdf_page": "68"
+    },
+    {
+      "province": "Nakhon Ratchasima",
+      "area_2024_rai": "608435",
+      "area_2025_rai": "627630",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Saraburi",
+      "area_2024_rai": "97265",
+      "area_2025_rai": "107865",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Lop Buri",
+      "area_2024_rai": "453619",
+      "area_2025_rai": "495817",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Sing Buri",
+      "area_2024_rai": "14254",
+      "area_2025_rai": "15753",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Chai Nat",
+      "area_2024_rai": "103112",
+      "area_2025_rai": "108781",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Suphanburi",
+      "area_2024_rai": "415908",
+      "area_2025_rai": "449126",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Ang Thong",
+      "area_2024_rai": "14508",
+      "area_2025_rai": "16547",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Prachin Buri",
+      "area_2024_rai": "30451",
+      "area_2025_rai": "30916",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Chachoengsao",
+      "area_2024_rai": "22349",
+      "area_2025_rai": "22499",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Sa Kaeo",
+      "area_2024_rai": "337362",
+      "area_2025_rai": "340742",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Chanthaburi",
+      "area_2024_rai": "2361",
+      "area_2025_rai": "2237",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Rayong",
+      "area_2024_rai": "559",
+      "area_2025_rai": "819",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Chon Buri",
+      "area_2024_rai": "95458",
+      "area_2025_rai": "97255",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Nakhon Pathom",
+      "area_2024_rai": "57507",
+      "area_2025_rai": "60902",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Kanchanaburi",
+      "area_2024_rai": "493955",
+      "area_2025_rai": "523809",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Ratchaburi",
+      "area_2024_rai": "115284",
+      "area_2025_rai": "126293",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Phetchaburi",
+      "area_2024_rai": "27661",
+      "area_2025_rai": "30712",
+      "source_pdf_page": "69"
+    },
+    {
+      "province": "Prachuap Khiri Khan",
+      "area_2024_rai": "31795",
+      "area_2025_rai": "37936",
+      "source_pdf_page": "69"
+    }
+  ],
+  "rejected_spatial_source": "MAPSPAM2020 COG: apparent distribution mismatch under investigation; never used for point selection or weights"
+}
