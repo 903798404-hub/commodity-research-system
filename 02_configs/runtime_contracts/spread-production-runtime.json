@@ -236,6 +236,22 @@
   ],
   "source_inputs": [
     {
+      "path": "02_configs/thailand_sugarcane_weather.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/weather/thailand_sugarcane.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/weather/update_thailand_sugarcane.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/thailand_sugarcane_weather_page.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "09_deploy/runtime_identity/runtime_observation.py",
       "role": "runtime_configuration"
     },

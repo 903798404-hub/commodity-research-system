@@ -24,6 +24,10 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
     && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
 
 # Exact bound runtime inputs; candidate fixtures never enter the image.
+COPY ["02_configs/thailand_sugarcane_weather.json", "/app/02_configs/"]
+COPY ["03_src/agri_research_agent/weather/thailand_sugarcane.py", "/app/03_src/agri_research_agent/weather/"]
+COPY ["04_scripts/weather/update_thailand_sugarcane.py", "/app/04_scripts/weather/"]
+COPY ["05_apps/thailand_sugarcane_weather_page.py", "/app/05_apps/"]
 COPY ["04_scripts/runtime/precompress_streamlit_assets.py", "04_scripts/runtime/serve_spread_dashboard.py", "/app/04_scripts/runtime/"]
 COPY ["09_deploy/spread_runtime/nginx.conf", "/app/09_deploy/spread_runtime/"]
 RUN python -B /app/04_scripts/runtime/precompress_streamlit_assets.py
