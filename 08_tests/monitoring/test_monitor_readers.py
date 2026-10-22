@@ -63,18 +63,18 @@ def test_usda_monitor_uses_served_report_version_not_update_timestamp(tmp_path):
 
 def test_nass_original_preferred_path_and_common_good_excellent_week(tmp_path):
     folder=tmp_path/'processed/soybean_crop_progress';folder.mkdir(parents=True)
-    common=dict(region_name='US TOTAL',calendar_year=2026,value_pct=30)
+    common=dict(geography_level='US',region_name='US TOTAL',calendar_year=2026,value_pct=30)
     rows=[dict(**common,metric='GOOD',week_ending='2026-10-18'),
         dict(**common,metric='EXCELLENT',week_ending='2026-10-11'),
-        dict(**common,metric='GOOD',week_ending='2026-10-11')]
+        dict(**common,metric='GOOD_EXCELLENT',week_ending='2026-10-04')]
     pd.DataFrame(rows).to_parquet(folder/'soybeans_crop_condition_weekly.parquet',index=False)
     value=Reader(inputs(tmp_path),NOW).read('nass_GOOD_EXCELLENT')
-    assert value.actual=='2026-10-11'
+    assert value.actual=='2026-10-04'
 
 
 def test_nass_100_percent_completion_is_not_a_daily_update_demand(tmp_path):
     folder=tmp_path/'processed/soybean_crop_progress';folder.mkdir(parents=True)
-    pd.DataFrame([dict(region_name='US TOTAL',calendar_year=2026,metric='PLANTED',value_pct=100,
+    pd.DataFrame([dict(geography_level='US',region_name='US TOTAL',calendar_year=2026,metric='PLANTED',value_pct=100,
         week_ending='2026-06-14')]).to_parquet(folder/'soybeans_crop_progress_weekly_2021_2026.parquet',index=False)
     value=Reader(inputs(tmp_path),NOW).read('nass_PLANTED')
     assert value.actual=='2026-06-14' and value.season_complete
@@ -84,6 +84,11 @@ def test_nass_100_percent_completion_is_not_a_daily_update_demand(tmp_path):
 def test_unpublished_out_of_season_harvest_stays_blank():
     row=evaluate(BY_ID['brazil_HARVESTED'],Observation(None),NOW)
     assert row['status']=='SEASON_COMPLETE' and row['actual_date'] is None and not row['retry_eligible']
+
+
+def test_missing_in_season_data_retries_only_its_existing_producer():
+    row=evaluate(BY_ID['nass_HARVESTED'],Observation(None),NOW)
+    assert row['status']=='MISSING' and row['retry_eligible'] and row['job']=='crop'
 
 
 def test_original_user_saved_history_has_no_invented_daily_deadline():

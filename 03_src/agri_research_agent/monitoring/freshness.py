@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 SCHEMA = "page-business-date-monitor/1"
 QUIET = {"CURRENT", "EXCLUDED", "STATIC", "SEASON_COMPLETE", "REFERENCE"}
-RETRY_STATES = {"MISSED", "CHECK_DUE", "WAITING_FOR_SOURCE", "SOURCE_UNVERIFIED"}
+RETRY_STATES = {"MISSED", "MISSING", "CHECK_DUE", "WAITING_FOR_SOURCE", "SOURCE_UNVERIFIED"}
 
 
 @dataclass(frozen=True)

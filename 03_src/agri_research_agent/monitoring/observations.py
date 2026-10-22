@@ -175,10 +175,13 @@ class Reader:
                 path = folder / f"soybeans_crop_{name}_weekly.parquet"
                 if not path.exists():
                     path = folder / f"soybeans_crop_{name}_weekly_2021_2026.parquet"
-                return pd.read_parquet(path,columns=['metric','region_name','calendar_year','week_ending','value_pct'])
+                return pd.read_parquet(path,columns=['metric','geography_level','region_name','calendar_year','week_ending','value_pct'])
             frame = self.cached("nass_" + name, crop)
-            frame = frame.loc[frame.region_name.eq("US TOTAL") & frame.calendar_year.eq(self.now.astimezone(SHANGHAI).year)]
-            wanted = ["GOOD", "EXCELLENT"] if metric == "GOOD_EXCELLENT" else [metric]
+            frame = frame.loc[frame.geography_level.eq('US') & frame.region_name.eq("US TOTAL") & frame.calendar_year.eq(self.now.astimezone(SHANGHAI).year)]
+            # The page reads the producer's already-derived GOOD_EXCELLENT.
+            # Independently latest GOOD/EXCELLENT rows need not coexist in a
+            # single week and cannot stand in for that published indicator.
+            wanted = [metric]
             frame = frame.loc[frame.metric.isin(wanted)]
             if set(frame.metric) != set(wanted):
                 return Observation(None)
