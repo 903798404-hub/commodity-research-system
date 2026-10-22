@@ -103,7 +103,9 @@ def collect(baseline_path, output, *, session=None, today=None):
     """Owned output only; retain every published record and reject revisions."""
     import hashlib
     baseline = load_bundle(baseline_path); bundle = baseline; today = today or date.today()
-    current = [r['date'] for r in baseline['records'] if r['metric']=='PLANTED' and r['region']=='BR']
+    # Harvest and growth continue after planting has ended. Resume from the
+    # newest national observation rather than repeatedly replaying planting.
+    current = [r['date'] for r in baseline['records'] if r['region']=='BR']
     latest = date.fromisoformat(max(current))
     session = session or requests.Session(); output = Path(output); output.mkdir(exist_ok=True)
     links = report_links(download(SOURCE_URL, session), SOURCE_URL)

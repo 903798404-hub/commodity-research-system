@@ -46,3 +46,17 @@ def test_index_uses_official_period_and_rejects_external_host():
     rows=report_links(b'<a href="/conab/w">Acompanhamento das Lavouras - 12/10 a 18/10/26</a>','https://www.gov.br/conab/')
     assert rows[0][1].isoformat()=='2026-10-18'
     with pytest.raises(ValueError):report_links(b'<a href="https://evil.example/w">Acompanhamento das Lavouras - 12/10 a 18/10/26</a>','https://www.gov.br/conab/')
+
+
+def test_harvest_season_does_not_replay_old_planting_weeks(tmp_path,monkeypatch):
+    from datetime import date
+    from agri_research_agent.pipelines import brazil_soy_scheduled as updater
+    baseline={'records':[{'region':'BR','metric':'PLANTED','date':'2026-11-20'},
+                         {'region':'BR','metric':'HARVESTED','date':'2027-03-05'}]}
+    monkeypatch.setattr(updater,'load_bundle',lambda path:baseline)
+    monkeypatch.setattr(updater,'download',lambda *args:b'index')
+    monkeypatch.setattr(updater,'report_links',lambda *args:[('https://www.gov.br/conab/january',date(2027,1,17))])
+    monkeypatch.setattr(updater,'latest_dates',lambda bundle:{'BR/HARVESTED':'2027-03-05'})
+    monkeypatch.setattr(updater,'weekly_assets',lambda *args:pytest.fail('old planting-era report must not be replayed'))
+    bundle,evidence,semantic=updater.collect(tmp_path/'baseline',tmp_path/'owned',today=date(2027,3,10))
+    assert bundle is baseline and not semantic['business_changed'] and not evidence['sources']
