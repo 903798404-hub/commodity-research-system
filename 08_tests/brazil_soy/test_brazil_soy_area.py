@@ -139,7 +139,7 @@ def test_page_area_titles_in_both_progress_tabs_leave_growth_national(tmp_path, 
         app.run()
         assert not app.exception and len(app.get("plotly_chart")) == 13
         titles = [item.value for item in app.markdown if item.value.startswith("#### ")]
-        assert "面积覆盖约96%" in titles[0]
+        assert "CONAB主要12州" in titles[0]
         assert "面积占比7.1%" in next(title for title in titles if "马托格罗索 MT" in title)
         assert any("2025/2026" in item.value and "不随历史季切换" in item.value for item in app.caption)
     app.session_state["brazil-metric-tabs"] = "生长进度"

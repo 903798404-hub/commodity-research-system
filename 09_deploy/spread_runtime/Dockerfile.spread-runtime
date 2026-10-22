@@ -24,6 +24,10 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
     && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
 
 # Exact bound runtime inputs; candidate fixtures never enter the image.
+COPY ["02_configs/conab_growth_glyphs.json", "/app/02_configs/"]
+COPY ["03_src/agri_research_agent/pipelines/brazil_soy_update.py", "03_src/agri_research_agent/pipelines/brazil_soy_scheduled.py", "03_src/agri_research_agent/pipelines/conab_growth_chart.py", "/app/03_src/agri_research_agent/pipelines/"]
+COPY ["03_src/agri_research_agent/soybean_exports/fgis_server.py", "/app/03_src/agri_research_agent/soybean_exports/"]
+COPY ["04_scripts/soybean_exports/run_fgis_server_worker.py", "/app/04_scripts/soybean_exports/"]
 COPY ["02_configs/thailand_sugarcane_weather.json", "/app/02_configs/"]
 COPY ["03_src/agri_research_agent/weather/thailand_sugarcane.py", "/app/03_src/agri_research_agent/weather/"]
 COPY ["04_scripts/weather/update_thailand_sugarcane.py", "/app/04_scripts/weather/"]

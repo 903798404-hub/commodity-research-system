@@ -1,4 +1,4 @@
-"""Six server-owned schedules; pinned isolated collection, existing CAS publishers."""
+"""Server-owned schedules; pinned isolated collection, existing CAS publishers."""
 from __future__ import annotations
 
 import argparse
@@ -21,10 +21,12 @@ SECRET_ROOT = Path('/etc/market-data/production-input-secrets')
 JOBS = {
     'akshare': ('public_current', ['Mon..Fri *-*-* 16:30:00 Asia/Shanghai','Mon..Fri *-*-* 18:30:00 Asia/Shanghai','Mon..Fri *-*-* 22:30:00 Asia/Shanghai']),
     'canola_exports': ('canola_exports', ['*-*-* 08:30:00 Asia/Shanghai']),
-    'positions_domestic': ('commodity_positions', ['Mon..Fri *-*-* 16:35:00 Asia/Shanghai', 'Mon..Fri *-*-* 18:00:00 Asia/Shanghai']),
+    'positions_domestic': ('commodity_positions', ['Mon..Fri *-*-* 16:35:00 Asia/Shanghai', 'Mon..Fri *-*-* 18:00:00 Asia/Shanghai',
+        'Mon..Fri *-*-* 22:30:00 Asia/Shanghai', 'Tue..Sat *-*-* 08:20:00 Asia/Shanghai']),
     'positions_foreign': ('commodity_positions', ['*-*-* 07:45:00 Asia/Shanghai']),
     'soybean_crop_progress': ('soybean_crop_progress', ['Tue..Thu *-*-* 06:30:00 Asia/Shanghai']),
     'soybean_export_sales': ('soybean_export_sales', ['Sat *-*-* 06:15:00 Asia/Shanghai']),
+    'brazil_soy': ('brazil_soy', ['*-*-* 08:10:00 Asia/Shanghai']),
 }
 KEYS = {'soybean_crop_progress': 'NASS_API_KEY', 'soybean_export_sales': 'FAS_EXPORT_SALES_API_KEY'}
 

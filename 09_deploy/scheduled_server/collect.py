@@ -77,6 +77,13 @@ def prepare(request,baseline,output,credentials):
     job=request['job']
     if job=='akshare':
         return load('public_spread_materialize','09_deploy/scheduled_server/spreads.py').materialize(request,baseline,output)
+    if job=='brazil_soy':
+        from agri_research_agent.pipelines.brazil_soy_scheduled import collect
+        bundle,evidence,semantic=collect(baseline/host.BRAZIL_STABLE,output/'official-reports')
+        payloads={'soy_weekly.json':delivery.canonical_json_bytes(bundle),
+                  'source_evidence.json':delivery.canonical_json_bytes(evidence)}
+        package(request,output,payloads,semantic,host)
+        return {'observations':semantic,'source_checks':semantic['source_checks']}
     if job.startswith('positions_'):
         from agri_research_agent.automation.positions_scheduled_collection import collect_bundle
         from agri_research_agent.positions import delivery as codec

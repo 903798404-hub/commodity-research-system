@@ -1,0 +1,12 @@
+[Unit]
+Description=FGIS source checks with next-day retry
+
+[Timer]
+OnCalendar=Tue..Fri *-*-* 07:15:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=market-data-fgis.service
+
+[Install]
+WantedBy=timers.target

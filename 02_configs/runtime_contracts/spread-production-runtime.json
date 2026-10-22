@@ -1922,6 +1922,30 @@
     {
       "path": "04_scripts/update_warehouse_receipts.py",
       "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/conab_growth_glyphs.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/brazil_soy_update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/brazil_soy_scheduled.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/conab_growth_chart.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/fgis_server.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_exports/run_fgis_server_worker.py",
+      "role": "runtime_configuration"
     }
   ],
   "environment_bindings": [

@@ -945,7 +945,7 @@ def snapshot_fx_baseline(policy_path: str | Path, *, resolved_positions=False) -
     """Return fixed approved domain bytes consistently under the allocation lock."""
     policy, policy_sha = _load_policy(policy_path)
     domain = policy["domain"]
-    require(domain in {"foreign_fx", "canola_exports", "commodity_positions", "soybean_crop_progress", "soybean_export_sales"},
+    require(domain in {"foreign_fx", "canola_exports", "commodity_positions", "soybean_crop_progress", "soybean_export_sales", "brazil_soy"},
             "baseline export is restricted to the scheduled allowlist")
     allocation = _protected(_under(policy["allocation_root"], ALLOCATION_ROOT))
     contract = DOMAIN_CONTRACTS[domain]
@@ -972,7 +972,7 @@ def snapshot_fx_baseline(policy_path: str | Path, *, resolved_positions=False) -
                 require(len(raw) == identity["size_bytes"] and hashlib.sha256(raw).hexdigest() == identity["sha256"],
                         "FX baseline changed while reading")
                 contents[relative] = base64.b64encode(raw).decode("ascii")
-        if domain in {"foreign_fx", "canola_exports", "commodity_positions"}:
+        if domain in {"foreign_fx", "canola_exports", "commodity_positions", "brazil_soy"}:
             require(len({value is None for value in files.values()}) == 1, "FX baseline incomplete")
         else:
             require((files.get(CROP_PROGRESS) is None) == (files.get(CROP_CONDITION) is None), "crop baseline pair incomplete")

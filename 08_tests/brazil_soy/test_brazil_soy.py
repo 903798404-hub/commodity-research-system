@@ -201,7 +201,7 @@ def test_page_metric_tabs_show_all_states_and_growth_remains_national(tmp_path, 
     assert [tab.label for tab in app.tabs] == ["播种进度", "收割进度", "生长进度"]
     assert len(app.get("plotly_chart")) == 13
     titles = [item.value for item in app.markdown if item.value.startswith("#### ")]
-    assert len(titles) == 13 and "面积覆盖约96%" in titles[0]
+    assert len(titles) == 13 and "CONAB主要12州" in titles[0]
     assert all(name in title and "面积占比待核实" in title for name, title in zip(list(soy.REGIONS.values())[1:], titles[1:]))
     assert [item.label for item in app.expander] == ["来源与取数说明"]
     assert not any(item.label == "历史曲线地区" for item in app.selectbox)

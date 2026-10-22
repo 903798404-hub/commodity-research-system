@@ -44,10 +44,12 @@ def config(runner,job):
 @pytest.mark.parametrize('job,clocks',[
     ('akshare',['Mon..Fri *-*-* 16:30:00 Asia/Shanghai','Mon..Fri *-*-* 18:30:00 Asia/Shanghai','Mon..Fri *-*-* 22:30:00 Asia/Shanghai']),
     ('canola_exports',['*-*-* 08:30:00 Asia/Shanghai']),
-    ('positions_domestic',['Mon..Fri *-*-* 16:35:00 Asia/Shanghai','Mon..Fri *-*-* 18:00:00 Asia/Shanghai']),
+    ('positions_domestic',['Mon..Fri *-*-* 16:35:00 Asia/Shanghai','Mon..Fri *-*-* 18:00:00 Asia/Shanghai',
+        'Mon..Fri *-*-* 22:30:00 Asia/Shanghai','Tue..Sat *-*-* 08:20:00 Asia/Shanghai']),
     ('positions_foreign',['*-*-* 07:45:00 Asia/Shanghai']),
     ('soybean_crop_progress',['Tue..Thu *-*-* 06:30:00 Asia/Shanghai']),
-    ('soybean_export_sales',['Sat *-*-* 06:15:00 Asia/Shanghai'])])
+    ('soybean_export_sales',['Sat *-*-* 06:15:00 Asia/Shanghai']),
+    ('brazil_soy',['*-*-* 08:10:00 Asia/Shanghai'])])
 def test_actual_schedules_preserved_and_no_success_skip(runner,job,clocks):
     service,timer=runner.render_units(job,'/approved/source','/etc/market-data/scheduled-server/test.json')
     assert [line.split('=',1)[1] for line in timer.splitlines() if line.startswith('OnCalendar=')]==clocks
