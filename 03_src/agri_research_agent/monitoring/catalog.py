@@ -36,7 +36,7 @@ RULES = [
     Rule("oil_world", "Oil World季度版次", ("oil_world_dashboard",), "原 Oil World 人工资料交付", cadence="quarterly", period_kind="month", manual=True, deadline="00:00"),
 ]
 
-for code in ("AUD", "BRL", "CAD", "CNY", "EUR", "IDR", "INR", "MYR"):
+for code in ("AUD", "BRL", "CAD", "CNY", "THB", "IDR", "INR", "MYR"):
     RULES.append(Rule("fx_"+code, code+"日度汇率", ("foreign_fx",), "原 ECB / BCB 汇率序列；早间核对前一来源工作日", cadence="weekday_daily", deadline="10:00", business_lag_days=1, job="foreign_fx"))
 
 for metric, label, months in [

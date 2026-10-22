@@ -39,6 +39,20 @@ def test_navigation_has_explicit_dependency_coverage():
     assert all(rule.job is None or rule.job in JOBS for rule in RULES)
 
 
+def test_fx_monitor_matches_the_served_page_currency_scope():
+    from agri_research_agent.market_data.foreign_fx import BY_CODE
+    monitored = {rule.identity.removeprefix('fx_') for rule in RULES if rule.identity.startswith('fx_')}
+    assert monitored == set(BY_CODE)
+
+
+def test_removed_scope_is_not_reported_as_successful_data_backfill():
+    previous={'incidents':{'fx_EUR':{'label':'EUR日度汇率','first_seen_at':NOW.isoformat()}}}
+    result=reconcile([],previous,NOW+timedelta(minutes=15))
+    assert result['events'][0]['kind']=='SCOPE_REMOVED'
+    assert '未认定为数据补更' in result['events'][0]['reason']
+    assert result['incidents']=={}
+
+
 def test_excluded_weather_never_calls_observer_and_failed_domain_isolated(tmp_path,monkeypatch):
     called=[]
     def read(self,identity):

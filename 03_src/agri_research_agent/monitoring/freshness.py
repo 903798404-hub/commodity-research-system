@@ -187,7 +187,10 @@ def reconcile(rows: list[dict], previous: dict, now: datetime) -> dict:
             events.append(dict(kind="OPENED" if not old else "CHANGED", at=stamp, **incident))
     for key, old in prior.items():
         if key not in active:
-            events.append(dict(kind="RECOVERED", at=stamp, identity=key, label=old["label"], first_seen_at=old["first_seen_at"]))
+            event = dict(kind="RECOVERED", at=stamp, identity=key, label=old["label"], first_seen_at=old["first_seen_at"])
+            if key not in {row['identity'] for row in rows}:
+                event.update(kind='SCOPE_REMOVED', reason='此项不属于当前原页面数据范围；保留历史提醒，未认定为数据补更')
+            events.append(event)
     return {"incidents": active, "events": events,
             "recent_events": (previous.get("recent_events", []) + events)[-100:],
             "retries": previous.get("retries", {})}

@@ -106,7 +106,7 @@ def render_page_monitor(data_root: Path):
         events=[]
         for event in reversed(report.get('recent_events',[])):
             events.append({'时间':aware(event['at']).astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S'),
-                '数据项':event['label'],'变化':{'OPENED':'发现异常','CHANGED':'状态变化','RECOVERED':'已恢复'}.get(event['kind'],event['kind']),
+                '数据项':event['label'],'变化':{'OPENED':'发现异常','CHANGED':'状态变化','RECOVERED':'已恢复','SCOPE_REMOVED':'监测范围已校正'}.get(event['kind'],event['kind']),
                 '说明':event.get('reason','实际数据重新通过核验')})
         if events:
             st.dataframe(pd.DataFrame(events),hide_index=True,width='stretch')
