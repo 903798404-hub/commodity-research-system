@@ -1,5 +1,20 @@
 schema_version: 1
 modules:
+  automation.page_business_date_monitor:
+    code_paths:
+      - 03_src/agri_research_agent/monitoring
+      - 04_scripts/monitoring/observe_pages.py
+      - 05_apps/page_monitor_page.py
+      - 09_deploy/page_monitor
+    direct_tests:
+      - 08_tests/monitoring/test_page_freshness.py
+      - 08_tests/monitoring/test_monitor_integration.py
+      - 08_tests/monitoring/test_monitor_readers.py
+    impact_tests:
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
   automation.sparse_table_delivery:
     code_paths:
       - 03_src/agri_research_agent/shared/table_increment.py

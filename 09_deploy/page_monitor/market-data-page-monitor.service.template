@@ -1,0 +1,14 @@
+[Unit]
+Description=Website actual business dates and bounded existing-service retries
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -B @SOURCE_ROOT@/09_deploy/page_monitor/run.py --config @CONFIG_PATH@ --retry
+TimeoutStartSec=2100
+Nice=10
+IOSchedulingClass=idle
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true

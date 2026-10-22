@@ -1,0 +1,284 @@
+"""Pinned host monitor. Only metadata is written; retries reuse existing services."""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / '03_src'))
+from agri_research_agent.monitoring.catalog import JOBS, RULES
+from agri_research_agent.monitoring.freshness import SCHEMA, reconcile, reserve_retry, retry_plan
+
+STATE_ROOT = Path('/var/lib/market-data/production-data-automation/page-monitor')
+CONFIG_ROOT = Path('/etc/market-data/page-monitor')
+ALLOCATION_ROOT = Path('/var/lib/market-data/production-runtime')
+
+
+def command(args, *, timeout=30, diagnostic=None):
+    result = subprocess.run(args, capture_output=True, timeout=timeout)
+    if diagnostic is not None:
+        with Path(diagnostic).open('wb') as file:
+            file.write(result.stderr[-1024**2:])
+    result.check_returncode()
+    return result.stdout
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def protected(path, parent=None):
+    path = Path(path)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ValueError('Protected path identity differs')
+    if parent is not None and not path.is_relative_to(parent):
+        raise ValueError('Protected path outside approved root')
+    for item in (path, *path.parents):
+        stat = item.stat()
+        if stat.st_uid != 0 or stat.st_mode & 0o022:
+            raise ValueError('Protected path owner or permissions invalid')
+    return path
+
+
+def read_json(path):
+    if Path(path).stat().st_size > 16 * 1024**2:
+        raise ValueError('Monitor JSON too large')
+    return json.loads(Path(path).read_text(encoding='utf-8'))
+
+
+def atomic(path, value):
+    """Same-directory fsync + rename; never truncate a live report on failure."""
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False).encode('utf-8')
+    descriptor, temporary = tempfile.mkstemp(prefix='.page-monitor-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as file:
+            file.write(raw)
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, path)
+        if hasattr(os, 'O_DIRECTORY'):
+            directory = os.open(path.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def load_config(path):
+    config = read_json(protected(path, CONFIG_ROOT))
+    if set(config) != {'schema_version', 'producer', 'image_id', 'reader_id', 'data_disk_uuid', 'inputs', 'report', 'jobs'} or config['schema_version'] != 'page-monitor-config/1':
+        raise ValueError('Monitor configuration schema invalid')
+    expected = config['producer']
+    if set(expected) != {'commit', 'tree', 'origin'} or expected['origin'] not in {'https://github.com/903798404-hub/commodity-research-system.git','git@github.com:903798404-hub/commodity-research-system.git'}:
+        raise ValueError('Monitor source origin invalid')
+    for field, args in [('commit', ['rev-parse','HEAD']), ('tree',['rev-parse','HEAD^{tree}']), ('origin',['remote','get-url','origin'])]:
+        if command(['git','-C',str(protected(ROOT)),*args]).decode().strip() != expected[field]:
+            raise ValueError('Monitor source identity differs')
+    if command(['git','-C',str(ROOT),'status','--porcelain','--untracked-files=all']).strip():
+        raise ValueError('Monitor source is dirty')
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', config['image_id']) or not re.fullmatch(r'[0-9a-f]{64}', config['reader_id']):
+        raise ValueError('Monitor image/reader identity invalid')
+    image = json.loads(command(['docker','image','inspect',config['image_id']]))[0]
+    labels = image['Config']['Labels'] or {}
+    if labels.get('org.opencontainers.image.revision') != expected['commit'] or labels.get('market-data.git.tree') != expected['tree']:
+        raise ValueError('Monitor image labels differ')
+    if set(config['inputs']) != {'data','manual','usda','oil_world','guangxi','yunnan'}:
+        raise ValueError('Monitor input roles differ')
+    allocation = Path(config['inputs']['data']).parent
+    protected(allocation, ALLOCATION_ROOT)
+    if not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}',config['data_disk_uuid']):
+        raise ValueError('Monitor data disk UUID invalid')
+    if command(['findmnt','-n','-o','UUID','-T',str(allocation)]).decode().strip()!=config['data_disk_uuid']:
+        raise ValueError('Monitor data disk identity differs')
+    report = Path(config['report'])
+    if report != allocation / '01_data/update_status/page_monitor.json' or report.parent.is_symlink():
+        raise ValueError('Monitor report is outside dedicated metadata path')
+    protected(report.parent)
+    # Bind to the actual website reader and its original mount selection.
+    reader = json.loads(command(['docker','inspect',config['reader_id']]))[0]
+    if not reader['State']['Running']:
+        raise ValueError('Website reader is not running')
+    mounts = {v['Destination']:v['Source'] for v in reader['Mounts']}
+    if mounts.get('/runtime/01_data') != config['inputs']['data'] or mounts.get('/runtime/import-profit/operational/cnf') != config['inputs']['manual']:
+        raise ValueError('Website data-reader mount binding differs')
+    for role, value in config['inputs'].items():
+        path = Path(value)
+        if not path.is_absolute() or not path.is_dir() or ',' in value or '\n' in value:
+            raise ValueError('Monitor input root invalid')
+        # Runtime producers can legitimately own files; never broaden their access.
+        if path.resolve() != path:
+            raise ValueError('Monitor input root alias invalid')
+    if set(config['jobs']) != set(JOBS):
+        raise ValueError('Monitor jobs differ from fixed whitelist')
+    for job,binding in config['jobs'].items():
+        check_job(job,binding)
+    return config
+
+
+def check_job(job,binding):
+    if job not in JOBS or set(binding) != {'unit_sha256','files'} or not re.fullmatch('[0-9a-f]{64}', binding['unit_sha256']):
+        raise ValueError('Service binding invalid')
+    if digest(command(['systemctl','cat',JOBS[job]])) != binding['unit_sha256']:
+        raise ValueError('Existing producer service changed; retry must be rebound')
+    for path,sha in binding['files'].items():
+        target = producer_file(path)
+        if digest(target.read_bytes()) != sha:
+            raise ValueError('Existing producer configuration changed')
+    # Thai's approved service contains a complete immutable image ID and all
+    # arguments; its configuration is inside that image, not a mutable host file.
+    if not binding['files'] and job!='thailand':
+        raise ValueError('Producer configuration pin missing')
+
+
+def producer_file(path):
+    target = Path(path)
+    weather_anchors = [Path('/home/ubuntu/market-data-runtime')/(country+'-weather/releases') for country in ['guangxi','yunnan']]
+    weather_root = next((root for root in weather_anchors if target.is_relative_to(root)),None)
+    if weather_root is None:
+        if not (target.is_relative_to('/etc/market-data') or target.is_relative_to('/opt/market-data-releases')):
+            raise ValueError('Unexpected producer binding file')
+        return protected(target)
+    relative=target.relative_to(weather_root)
+    if len(relative.parts)<2 or not re.fullmatch('[A-Za-z0-9._-]{1,128}',relative.parts[0]):
+        raise ValueError('Weather release version invalid')
+    anchor=weather_root / relative.parts[0]
+    # Reuse the already-approved independent weather release boundary. Do not
+    # change ownership/permissions on the user's home or runtime parent folders.
+    if not target.is_absolute() or target.resolve(strict=True)!=target:
+        raise ValueError('Weather producer binding alias invalid')
+    for item in (target,*target.parents):
+        stat=item.stat()
+        if stat.st_uid!=0 or stat.st_mode & 0o022:
+            raise ValueError('Existing weather release protection differs')
+        if item==anchor:
+            return target
+    raise ValueError('Weather release boundary missing')
+
+
+def observe(config):
+    args = ['docker','run','--rm','--network','none','--read-only','--user','65532:65532',
+        '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--memory-swap','512m','--cpus','0.75',
+        '--pids-limit','64','--tmpfs','/tmp:rw,noexec,nosuid,size=32m',
+        '-e','PYTHONPATH=/app/03_src','-e','PYTHONDONTWRITEBYTECODE=1']
+    for role, source in config['inputs'].items():
+        args += ['--mount', f'type=bind,source={source},target=/inputs/{role},readonly']
+    args += [config['image_id'],'timeout','600','python','-B','04_scripts/monitoring/observe_pages.py']
+    rows = json.loads(command(args, timeout=650, diagnostic=STATE_ROOT / 'last_observer.log'))
+    if not isinstance(rows,list) or {r['identity'] for r in rows} != {r.identity for r in RULES} or len(rows) != len(RULES):
+        raise ValueError('Monitor observer coverage differs')
+    for row in rows:
+        rule = next(r for r in RULES if r.identity==row['identity'])
+        if row.get('job') != rule.job or row.get('manual')!=rule.manual or row.get('pages')!=list(rule.pages):
+            raise ValueError('Observer requested unapproved job')
+    return rows
+
+
+def producer_busy():
+    raw = command(['systemctl','show',*JOBS.values(),'--property=ActiveState','--value']).decode().splitlines()
+    states = [v for v in raw if v]
+    if len(states) != len(JOBS) or any(v not in {'active','activating','inactive','failed','deactivating','reloading'} for v in states):
+        raise ValueError('Cannot determine producer activity')
+    return any(v in {'active','activating','deactivating','reloading'} for v in states)
+
+
+def start_retry(job):
+    unit = JOBS[job]
+    # systemd coalesces a racing scheduled start into this same unit. Never
+    # spawn a second collector, change its arguments, or bypass its CAS gates.
+    try:
+        # Synchronous start waits for the actual systemd job, including fast
+        # no-op runs. Polling a previous inactive/success state can falsely
+        # report completion before a queued job has started.
+        command(['systemctl','start',unit],timeout=600)
+        return 'COMPLETED'
+    except subprocess.TimeoutExpired:
+        return 'STILL_RUNNING'  # leave original producer running; do not duplicate/stop
+    except subprocess.CalledProcessError:
+        return 'FAILED'
+
+
+def publish(config, state, rows, *, failure=None):
+    now = datetime.now(timezone.utc)
+    state.update(reconcile(rows, state, now))
+    state.update(schema_version=SCHEMA, checked_at=now.isoformat(), rows=rows,
+        monitor_error=failure, producer=config['producer'], retry_policy={'max_extra_attempts_per_job_per_day':3,'cooldown_minutes':60,'max_jobs_per_pass':1})
+    # Persist the event itself before archiving. A crash can replay that exact
+    # event without producing a second reminder or losing the recovery receipt.
+    atomic(STATE_ROOT / 'state.json', state)
+    archive_events(state.get('recent_events',[]))
+    atomic(Path(config['report']), state)
+    return state
+
+
+def archive_events(events):
+    directory=STATE_ROOT / 'events'
+    directory.mkdir(exist_ok=True)
+    for event in events:
+        raw=json.dumps(event,ensure_ascii=False,sort_keys=True,allow_nan=False).encode('utf-8')
+        path=directory / (digest(raw)+'.json')
+        if path.exists():
+            if path.read_bytes()!=raw:
+                raise ValueError('Monitor immutable event differs')
+            continue
+        # The controller holds the host lock. Atomic replacement of a fresh
+        # pathname prevents a killed writer from leaving a partial event file.
+        atomic(path,event)
+        path.chmod(0o444)
+
+
+def run(config, *, retry):
+    state_path = STATE_ROOT / 'state.json'
+    state = read_json(state_path) if state_path.exists() else {}
+    archive_events(state.get('recent_events',[]))
+    rows = observe(config)
+    state = publish(config,state,rows)
+    plan = retry_plan(rows,state,datetime.now(timezone.utc),busy=producer_busy()) if retry else []
+    for job in plan:
+        check_job(job,config['jobs'][job])
+        if producer_busy():
+            break
+        state = reserve_retry(state,job,datetime.now(timezone.utc))
+        atomic(state_path,state)
+        atomic(Path(config['report']),state)
+        try:
+            state['retries'][job]['outcome'] = start_retry(job)
+            state['retries'][job]['finished_at'] = datetime.now(timezone.utc).isoformat()
+            rows = observe(config)  # actual business dates, not a successful exit
+            state = publish(config,state,rows)
+        except Exception:
+            state['retries'][job]['outcome'] = 'CHECK_FAILED'
+            publish(config,state,rows,failure='重试后核验失败；保留上次数据日期，待下一轮重新核验')
+            raise
+    return state
+
+
+def main():
+    import fcntl
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', required=True)
+    parser.add_argument('--retry', action='store_true')
+    args = parser.parse_args()
+    config = load_config(args.config)
+    protected(STATE_ROOT)
+    with (STATE_ROOT / 'monitor.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        run(config,retry=args.retry)
+
+
+if __name__ == '__main__':
+    main()

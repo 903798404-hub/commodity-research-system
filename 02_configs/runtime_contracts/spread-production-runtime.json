@@ -182,6 +182,7 @@
   ],
   "required_python_modules": [
     "agri_research_agent",
+    "agri_research_agent.monitoring.observations",
     "agri_research_agent.canola_exports.increment",
     "agri_research_agent.shared.table_increment",
     "agri_research_agent.shared.table_delivery",
@@ -235,6 +236,30 @@
     }
   ],
   "source_inputs": [
+    {
+      "path": "03_src/agri_research_agent/monitoring/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/catalog.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/freshness.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/observations.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/monitoring/observe_pages.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/page_monitor_page.py",
+      "role": "runtime_configuration"
+    },
     {
       "path": "02_configs/thailand_sugarcane_weather.json",
       "role": "runtime_configuration"

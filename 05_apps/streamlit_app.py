@@ -380,6 +380,8 @@ def render_spread_dashboard() -> None:
 
 def render_status_page() -> None:
     st.title("日更运行状态")
+    from page_monitor_page import render_page_monitor
+    render_page_monitor(PROJECT_ROOT / "01_data")
     database_path = get_database_path()
     if not database_path.exists():
         st.warning("当前 Domestic Spread artifact 不可用。")
