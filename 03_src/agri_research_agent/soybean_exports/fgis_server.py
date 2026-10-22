@@ -12,10 +12,15 @@ DOMAIN = 'soybean_export_inspections'
 STABLE = f'01_data/processed/{DOMAIN}/soybean_export_inspections_weekly.parquet'
 MANIFEST = STABLE.replace('.parquet','.manifest.json')
 STATUS = f'01_data/update_status/{DOMAIN}.json'
-BASELINE_FILES = (STABLE, MANIFEST, STATUS)
+REVISION = f'01_data/processed/{DOMAIN}/revisions/soybean_export_inspections_revisions.parquet'
+BASELINE_FILES = (STABLE, MANIFEST, STATUS, REVISION)
 
 
 def identity(path):
+    path=Path(path)
+    if not path.exists() and not path.is_symlink():return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_nlink!=1:
+        raise ValueError('FGIS input must be a regular independent file')
     raw=Path(path).read_bytes()
     return {'sha256':hashlib.sha256(raw).hexdigest(),'size_bytes':len(raw)}
 
@@ -25,8 +30,35 @@ def seed(runtime, baseline, request):
         source=baseline/relative
         if identity(source)!=request['baseline'][relative]:
             raise ValueError('FGIS production baseline changed')
+        if request['baseline'][relative] is None:
+            if relative!=REVISION:raise ValueError('FGIS required baseline is absent')
+            continue
         target=runtime/relative;target.parent.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(source,target)
+
+
+def revision_history(runtime, baseline, *, replay=None):
+    """Keep every old audit row and independently replay the appended values."""
+    import pandas as pd
+    prior=baseline/REVISION;current=runtime/REVISION
+    old=pd.read_parquet(prior) if prior.exists() else None
+    new=pd.read_parquet(current) if current.exists() else None
+    old_count=0 if old is None else len(old)
+    if old is not None:
+        if new is None or len(new)<old_count:raise ValueError('FGIS revision history was removed')
+        pd.testing.assert_frame_equal(old.reset_index(drop=True),new.iloc[:old_count].reset_index(drop=True),check_dtype=False,check_exact=True)
+    if replay is not None:
+        expected_path=replay/'project'/REVISION
+        expected=pd.read_parquet(expected_path) if expected_path.exists() else None
+        if (expected is None)!=(new is None):raise ValueError('FGIS replay revision log differs')
+        if expected is not None:
+            if old is not None:
+                pd.testing.assert_frame_equal(old.reset_index(drop=True),expected.iloc[:old_count].reset_index(drop=True),check_dtype=False,check_exact=True)
+            # Only the newly detected timestamp differs between executions.
+            columns=[c for c in expected.columns if c!='detected_at_utc']
+            pd.testing.assert_frame_equal(expected.iloc[old_count:][columns].reset_index(drop=True),new.iloc[old_count:][columns].reset_index(drop=True),check_dtype=False,check_exact=True)
+    return {'baseline_identity':identity(prior),'baseline_rows':old_count,
+            'candidate_rows':0 if new is None else len(new),'appended_rows':0 if new is None else len(new)-old_count}
 
 
 def prepare(baseline: Path, output: Path, request: dict, *, replay: Path | None=None):
@@ -50,6 +82,7 @@ def prepare(baseline: Path, output: Path, request: dict, *, replay: Path | None=
         adapter=ArchivedAdapter()
     audit=run_fgis_pipeline(runtime_root=runtime,adapter=adapter,
         git_head=request['commit'],batch_id=request['run_id'],publish=True)
+    history=revision_history(runtime,baseline,replay=replay)
     if audit['status']=='no_change':
         result={'status':'NO_CHANGE','audit':audit,'files':{p:identity(runtime/p) for p in BASELINE_FILES}}
     else:
@@ -65,6 +98,7 @@ def prepare(baseline: Path, output: Path, request: dict, *, replay: Path | None=
             if not _business_equal(expected,df):
                 raise ValueError('FGIS offline replay differs from collected business data')
             result['offline_replay']='PASS'
+    result['revision_history']=history
     (output/'collection.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     return result
 

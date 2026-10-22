@@ -22,6 +22,8 @@ STABLE=f'01_data/processed/{DOMAIN}/soybean_export_inspections_weekly.parquet'
 MANIFEST=STABLE.replace('.parquet','.manifest.json')
 STATUS=f'01_data/update_status/{DOMAIN}.json'
 FILES=(STABLE,MANIFEST,STATUS)
+REVISION=f'01_data/processed/{DOMAIN}/revisions/soybean_export_inspections_revisions.parquet'
+BASELINE_FILES=(*FILES,REVISION)
 
 
 def require(ok,message):
@@ -29,6 +31,11 @@ def require(ok,message):
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def read(p):return json.loads(p.read_bytes().decode('utf-8','strict'))
 def identity(p):return {'sha256':sha(p),'size_bytes':p.stat().st_size}
+
+def optional_identity(p):return host_module()._actual_identity(p)
+
+def baseline_matches(allocation,request):
+    return all(optional_identity(allocation/p)==x for p,x in request['baseline'].items())
 def write(p,data):
     with p.open('x',encoding='utf-8') as f:json.dump(data,f,ensure_ascii=False,indent=2,allow_nan=False);f.flush();os.fsync(f.fileno())
 def atomic(p,data):
@@ -56,6 +63,7 @@ def validate_config(path):
     require(actual==c['data_disk_uuid'],'FGIS data disk identity differs')
     disk=os.statvfs(allocation);require(disk.f_bavail*disk.f_frsize>768*1024**2,'FGIS capacity insufficient')
     for relative in FILES:host._protected(allocation/relative)
+    if optional_identity(allocation/REVISION) is not None:host._protected(allocation/REVISION)
     return c
 
 
@@ -90,9 +98,15 @@ def remap(value):
 
 def publish(c,work,request,result):
     host=host_module();allocation=Path(c['allocation_root'])
-    require(all(identity(allocation/p)==x for p,x in request['baseline'].items()),'FGIS baseline drift before publication')
+    require(baseline_matches(allocation,request),'FGIS baseline drift before publication')
     candidate=work/'collection/project';formal=allocation/'01_data/processed'/DOMAIN
-    require(set(host._file_set(formal))=={Path(STABLE).name,Path(MANIFEST).name},'FGIS managed directory contains unexpected files')
+    revision_relative=Path(REVISION).relative_to(Path('01_data/processed')/DOMAIN).as_posix()
+    allowed={Path(STABLE).name,Path(MANIFEST).name,revision_relative}
+    require({Path(STABLE).name,Path(MANIFEST).name}<=set(host._file_set(formal))<=allowed,'FGIS managed directory contains unexpected files')
+    revision=optional_identity(candidate/REVISION)
+    require(revision==result['files'][REVISION],'FGIS sealed revision log differs')
+    require(request['baseline'][REVISION] is None or revision is not None,'FGIS revision history deletion forbidden')
+    require(result['revision_history']['baseline_identity']==request['baseline'][REVISION],'FGIS revision baseline differs')
     backup=work/'backup';backup.mkdir();old_status=(allocation/STATUS).read_bytes();(backup/'status.json').write_bytes(old_status)
     # New raw evidence is immutable and retained even if later publication rolls
     # back. No historical source, revision log or backup is removed.
@@ -106,18 +120,23 @@ def publish(c,work,request,result):
     shutil.copyfile(candidate/STABLE,stage/Path(STABLE).name)
     manifest=remap(read(candidate/MANIFEST));manifest['stable_path']='/runtime/'+STABLE
     write(stage/Path(MANIFEST).name,manifest)
+    if revision is not None:
+        target=stage/revision_relative;target.parent.mkdir(mode=0o755)
+        shutil.copyfile(candidate/REVISION,target)
+        require(optional_identity(target)==revision,'FGIS staged revision log differs')
     status=remap(read(candidate/STATUS));status['backup_dir']=str(backup)
     require(identity(stage/Path(STABLE).name)==result['files'][STABLE],'FGIS sealed stable differs')
     require(manifest['sha256'].lower()==sha(stage/Path(STABLE).name),'FGIS manifest not bound to stable')
-    require(all(identity(allocation/p)==x for p,x in request['baseline'].items()),'FGIS stale publication rejected')
+    require(baseline_matches(allocation,request),'FGIS stale publication rejected')
     seal(stage)
-    revisions=candidate/'01_data/revisions'/DOMAIN
+    revisions=candidate/'01_data/processed'/DOMAIN/'revisions'
     if revisions.exists():shutil.copytree(revisions,backup/'revision-audit')
     switched=False
     try:
         host._renameat2(stage,formal,2);switched=True
         atomic(allocation/STATUS,status)
         require(sha(formal/Path(STABLE).name)==result['files'][STABLE]['sha256'],'FGIS production stable identity mismatch')
+        require(optional_identity(allocation/REVISION)==revision,'FGIS production revision identity mismatch')
         os.rename(stage,backup/'processed')
     except Exception:
         if switched:
@@ -140,7 +159,7 @@ def run(config_path,*,publish_requested=False):
         runid='fgis-'+dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S').lower()+'-'+uuid.uuid4().hex[:10]
         work=STATE/runid;work.mkdir(mode=0o755)
         baseline=work/'baseline';baseline.mkdir()
-        request={'run_id':runid,'commit':c['commit'],'tree':c['tree'],'baseline':{p:identity(Path(c['allocation_root'])/p) for p in FILES}}
+        request={'run_id':runid,'commit':c['commit'],'tree':c['tree'],'baseline':{p:optional_identity(Path(c['allocation_root'])/p) for p in BASELINE_FILES}}
         write(baseline/'request.json',request);seal(baseline)
         outcome={'status':'FAIL','run_id':runid,'published':False}
         try:
@@ -162,13 +181,14 @@ def run(config_path,*,publish_requested=False):
                 observed=read(directory/'collection.json');seal(directory)
                 if not replay:
                     result=observed
-                    require(all(identity(Path(c['allocation_root'])/p)==x for p,x in request['baseline'].items()),'FGIS collector changed formal data')
+                    require(baseline_matches(Path(c['allocation_root']),request),'FGIS collector changed formal data')
                     if result['status']=='NO_CHANGE':
                         outcome={'status':'NO_CHANGE','published':False,'run_id':runid,
                                  'source_latest_week':read(Path(c['allocation_root'])/STATUS)['last_success']['source_latest_week'],
                                  'checked_at_utc':dt.datetime.now(dt.timezone.utc).isoformat()};break
                 else:
                     require(observed.get('offline_replay')=='PASS','FGIS offline replay incomplete')
+                    require(observed['revision_history']==result['revision_history'],'FGIS offline revision audit differs')
                     outcome={'status':'CANDIDATE','published':False,'run_id':runid,'source_latest_week':result['validation']['latest_week'],'offline_replay':'PASS'}
                     if publish_requested:
                         validate_config(config_path)
