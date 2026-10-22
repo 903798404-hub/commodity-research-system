@@ -81,7 +81,10 @@ def test_provenance_paths_only_remap_owned_runtime_prefix():
     assert host.remap({'raw':'/output/project/01_data/raw/new','unrelated':'/safe/project/keep'})=={'raw':'/runtime/01_data/raw/new','unrelated':'/safe/project/keep'}
 
 
-@pytest.mark.parametrize('with_history,failure',[(history,failure) for history in [False,True] for failure in [None,'stale','revision_stale','status','unknown']]+[(True,'revision_missing'),(True,'revision_tamper'),(False,'new_revision')])
+@pytest.mark.parametrize('with_history,failure',[
+    (False,None),(False,'stale'),(False,'revision_stale'),(False,'status'),(False,'unknown'),
+    (True,None),(True,'stale'),(True,'revision_stale'),(True,'status'),(True,'unknown'),
+    (True,'revision_missing'),(True,'revision_tamper'),(False,'new_revision')])
 def test_publication_cas_and_status_failure_restore_both_files(tmp_path,monkeypatch,with_history,failure):
     host=load('fgis_publish_test','09_deploy/fgis_server/run.py')
     allocation=tmp_path/'formal';work=tmp_path/'run';candidate=work/'collection/project'
