@@ -11,4 +11,3 @@ User=root
 ExecStart=/usr/bin/python3 -I -B @SOURCE_ROOT@/09_deploy/fgis_server/run.py --config @CONFIG_PATH@ --publish
 TimeoutStartSec=2100
 UMask=0022
-
