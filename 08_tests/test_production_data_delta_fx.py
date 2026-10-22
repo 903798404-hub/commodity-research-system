@@ -82,6 +82,21 @@ def test_protected_snapshot_exports_only_fixed_domain_bytes_and_rejects_partial_
     with pytest.raises(module.DeltaError, match="unmanaged"):
         module.snapshot_fx_baseline("policy")
     policy["domain"] = "brazil_soy"
+    cold_brazil = module.snapshot_fx_baseline("policy")
+    assert set(cold_brazil["files"]) == set(module.DOMAIN_CONTRACTS["brazil_soy"]["baseline"])
+    assert all(value is None for value in cold_brazil["files"].values())
+    for index, relative in enumerate(module.DOMAIN_CONTRACTS["brazil_soy"]["baseline"]):
+        if index:
+            with pytest.raises(module.DeltaError, match="incomplete"):
+                module.snapshot_fx_baseline("policy")
+        path = allocation / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"{}")
+    complete_brazil = module.snapshot_fx_baseline("policy")
+    assert all(value is not None for value in complete_brazil["files"].values())
+    assert set(complete_brazil["contents"]) == set(cold_brazil["files"])
+    assert set(complete_brazil["contents"]).isdisjoint(complete["contents"])
+    policy["domain"] = "canada_canola"
     with pytest.raises(module.DeltaError, match="restricted"):
         module.snapshot_fx_baseline("policy")
 
