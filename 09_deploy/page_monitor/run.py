@@ -113,6 +113,7 @@ def load_config(path):
     mounts = {v['Destination']:v['Source'] for v in reader['Mounts']}
     if mounts.get('/runtime/01_data') != config['inputs']['data'] or mounts.get('/runtime/import-profit/operational/cnf') != config['inputs']['manual']:
         raise ValueError('Website data-reader mount binding differs')
+    config['_reader_errors']=check_external_readers(config['inputs'])
     for role, value in config['inputs'].items():
         path = Path(value)
         if not path.is_absolute() or not path.is_dir() or ',' in value or '\n' in value:
@@ -125,6 +126,34 @@ def load_config(path):
     for job,binding in config['jobs'].items():
         check_job(job,binding)
     return config
+
+
+def check_external_readers(inputs):
+    # Independent weather previews legitimately replace their container each
+    # morning. Bind the current named reader's actual data mount, not its old
+    # container ID or an identically named loose directory.
+    readers=[('usda','usda-dashboard','/runtime/usda',''),
+        ('oil_world','oil-world-dashboard','/usr/share/nginx/html/oil-world/data/oil_world',''),
+        ('guangxi','guangxi-weather-preview','/workspace','live'),
+        ('yunnan','yunnan-weather-preview','/workspace','live')]
+    errors={}
+    for role,name,destination,child in readers:
+        try:
+            observed=json.loads(command(['docker','inspect',name]))
+            if len(observed)!=1:
+                raise ValueError('Independent reader inventory differs')
+            container=observed[0]
+            mounts={m['Destination']:m['Source'] for m in container['Mounts']}
+            if container['Name']!='/'+name or not container['State']['Running'] or destination not in mounts:
+                raise ValueError('Independent reader unavailable')
+            actual=Path(mounts[destination])
+            if child:
+                actual=actual/child
+            if str(actual)!=inputs[role]:
+                raise ValueError('Independent reader mount binding differs')
+        except (subprocess.SubprocessError,ValueError,KeyError,TypeError):
+            errors[role]='独立应用不可读或实际数据挂载不匹配；已停止该项核验和额外重试'
+    return errors
 
 
 def check_job(job,binding):
@@ -172,6 +201,7 @@ def observe(config):
         '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','512m','--memory-swap','512m','--cpus','0.75',
         '--pids-limit','64','--tmpfs','/tmp:rw,noexec,nosuid,size=32m',
         '-e','PYTHONPATH=/app/03_src','-e','PYTHONDONTWRITEBYTECODE=1']
+    args += ['-e','PAGE_MONITOR_BLOCKED_INPUTS='+json.dumps(config.get('_reader_errors',{}),ensure_ascii=False)]
     for role, source in config['inputs'].items():
         args += ['--mount', f'type=bind,source={source},target=/inputs/{role},readonly']
     args += [config['image_id'],'timeout','600','python','-B','04_scripts/monitoring/observe_pages.py']

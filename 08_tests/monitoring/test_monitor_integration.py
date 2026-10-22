@@ -197,9 +197,23 @@ def test_service_drift_blocks_retry_before_reservation(tmp_path,monkeypatch):
     assert not json.loads((tmp_path/'state.json').read_text(encoding='utf-8'))['retries']
 
 
+def test_independent_readers_can_restart_but_cannot_silently_rebind_data(tmp_path,monkeypatch):
+    module=host();roles=[('usda','usda-dashboard','/runtime/usda',''),
+        ('oil_world','oil-world-dashboard','/usr/share/nginx/html/oil-world/data/oil_world',''),
+        ('guangxi','guangxi-weather-preview','/workspace','live'),('yunnan','yunnan-weather-preview','/workspace','live')]
+    containers=[{'Id':'new-container-id','Name':'/'+name,'State':{'Running':True},
+        'Mounts':[{'Destination':destination,'Source':str(tmp_path/role)}]} for role,name,destination,_ in roles]
+    roots={role:str(tmp_path/role/child) if child else str(tmp_path/role) for role,_,_,child in roles}
+    monkeypatch.setattr(module,'command',lambda args:json.dumps([c for c in containers if c['Name']=='/'+args[-1]]).encode())
+    assert module.check_external_readers(roots)=={}
+    containers[-1]['Mounts'][0]['Source']=str(tmp_path/'another-yunnan-runtime')
+    assert set(module.check_external_readers(roots))=={'yunnan'}
+
+
 def test_group_timeout_does_not_hide_unrelated_pages(monkeypatch,capsys):
     module=load('monitor_worker_test',ROOT/'04_scripts/monitoring/observe_pages.py')
     monkeypatch.setattr(sys,'argv',['observe_pages.py'])
+    monkeypatch.setenv('PAGE_MONITOR_BLOCKED_INPUTS',json.dumps({'yunnan':'reader moved'}))
     called=[]
     def run(args,**kwargs):
         group=args[-1];called.append(group)
@@ -213,6 +227,8 @@ def test_group_timeout_does_not_hide_unrelated_pages(monkeypatch,capsys):
     assert len(rows)==len(RULES) and len(called)==len(set(called))
     assert next(r for r in rows if r['identity']=='brazil_PLANTED')['status']=='ERROR'
     assert next(r for r in rows if r['identity']=='guangxi')['status']=='MISSING'
+    yunnan=next(r for r in rows if r['identity']=='yunnan')
+    assert yunnan['status']=='ERROR' and not yunnan['retry_eligible'] and 'yunnan' not in called
     assert {r['identity'] for r in rows if r['status']=='EXCLUDED'}=={r.identity for r in RULES if r.excluded}
 
 
