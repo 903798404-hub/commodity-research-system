@@ -18,6 +18,17 @@ def test_network_worker_never_receives_writable_production():
         assert '--read-only' in cmd and cmd[cmd.index('--user')+1]=='65532:65532'
         assert sum('readonly' not in v for v in mounts)==1
 
+
+@pytest.mark.parametrize('origin,commit,expected',[
+    ('https://github.com/903798404-hub/commodity-research-system.git','a'*40,True),
+    ('git@github.com:903798404-hub/commodity-research-system.git','a'*40,True),
+    ('https://github.com/other/repository.git','a'*40,False),
+    ('git@github.com:903798404-hub/commodity-research-system.git','c'*40,False)])
+def test_approved_deploy_key_origin_and_exact_commit(origin,commit,expected):
+    host=load('fgis_source_test','09_deploy/fgis_server/run.py')
+    assert host.approved_source({'commit':commit,'tree':'b'*40,'origin':origin},
+        {'commit':'a'*40,'tree':'b'*40},host.host_module().CANONICAL_ORIGINS) is expected
+
 def test_fgis_preparation_and_offline_source_replay_preserve_history(tmp_path,monkeypatch):
     fixtures=load('fgis_native_fixtures','08_tests/soybean_exports/test_fgis_yearly_source.py')
     from agri_research_agent.soybean_exports import fgis_server as worker

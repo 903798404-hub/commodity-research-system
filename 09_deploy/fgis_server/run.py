@@ -38,13 +38,18 @@ def host_module():
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
 
+def approved_source(identity,c,origins):
+    return (identity['commit']==c['commit'] and identity['tree']==c['tree']
+            and identity['origin'] in origins)
+
+
 def validate_config(path):
     host=host_module();host._protected(path)
     require(path.parent==Path('/etc/market-data/fgis-server') and path.stat().st_mode&0o777==0o600,'FGIS configuration path/mode invalid')
     c=read(path)
     require(set(c)=={'schema_version','source_root','commit','tree','image_id','allocation_root','data_disk_uuid'},'FGIS config fields differ')
     require(c['schema_version']=='fgis-server/1' and Path(c['source_root'])==ROOT,'FGIS source binding differs')
-    require(host._git_identity(ROOT)=={'commit':c['commit'],'tree':c['tree'],'origin':'https://github.com/903798404-hub/commodity-research-system.git'},'FGIS approved Git identity differs')
+    require(approved_source(host._git_identity(ROOT),c,host.CANONICAL_ORIGINS),'FGIS approved Git identity differs')
     host._inspect_image({'image_id':c['image_id'],'commit':c['commit'],'tree':c['tree']})
     allocation=host._protected(host._under(c['allocation_root'],host.ALLOCATION_ROOT))
     actual=subprocess.check_output(['findmnt','-n','-o','UUID','-T',str(allocation)],text=True,timeout=15).strip()
