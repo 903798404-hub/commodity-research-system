@@ -1,6 +1,8 @@
 from pathlib import Path
 import importlib.util
 import json
+import os
+from types import SimpleNamespace
 import pytest
 import pandas as pd
 
@@ -140,3 +142,34 @@ def test_publication_cas_and_status_failure_restore_both_files(tmp_path,monkeypa
             assert (allocation/host.REVISION).read_bytes()==b'first-audit'
             assert not (work/'backup/processed/revisions').exists()
     assert (allocation/'01_data/raw'/host.DOMAIN/'fgis-run/source.csv').read_bytes()==b'official'
+
+
+@pytest.mark.parametrize('phase',['collection','publication'])
+def test_failed_update_receipt_never_reports_an_accepted_candidate(tmp_path,monkeypatch,phase):
+    host=load('fgis_failed_receipt_test','09_deploy/fgis_server/run.py')
+    allocation=tmp_path/'formal'
+    for relative in host.BASELINE_FILES:
+        p=allocation/relative;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'original-publication')
+    before={p:(allocation/p).read_bytes() for p in host.BASELINE_FILES}
+    native=host.host_module()
+    monkeypatch.setattr(host,'host_module',lambda:SimpleNamespace(_protected=lambda p:p,_actual_identity=native._actual_identity))
+    monkeypatch.setattr(host,'os',SimpleNamespace(name='posix',geteuid=lambda:0,chown=lambda *a:None,fsync=os.fsync,replace=os.replace))
+    monkeypatch.setattr(host,'fcntl',SimpleNamespace(LOCK_EX=1,LOCK_NB=2,flock=lambda *a:None))
+    monkeypatch.setattr(host,'STATE',tmp_path/'state')
+    monkeypatch.setattr(host,'validate_config',lambda p:{'allocation_root':str(allocation),'commit':'a'*40,'tree':'b'*40})
+    monkeypatch.setattr(host,'seal',lambda p:None)
+    monkeypatch.setattr(host,'worker_command',lambda c,w,replay=False:['verify' if replay else 'collect',str(w)])
+    def execute(argv,**kwargs):
+        if phase=='collection':return SimpleNamespace(returncode=1,stdout=b'',stderr=b'controlled source failure')
+        work=Path(argv[1]);replay=argv[0]=='verify'
+        result={'status':'CANDIDATE','validation':{'latest_week':'2026-10-15'},'revision_history':{'baseline_identity':host.optional_identity(allocation/host.REVISION),'baseline_rows':1,'candidate_rows':2,'appended_rows':1}}
+        if replay:result['offline_replay']='PASS'
+        (work/('verification' if replay else 'collection')/'collection.json').write_text(json.dumps(result))
+        return SimpleNamespace(returncode=0,stdout=b'',stderr=b'')
+    monkeypatch.setattr(host.subprocess,'run',execute)
+    monkeypatch.setattr(host,'publish',lambda *a:(_ for _ in ()).throw(OSError('controlled publication failure')))
+    with pytest.raises((ValueError,OSError)):host.run(tmp_path/'config.json',publish_requested=True)
+    receipt=json.loads((host.STATE/'last-run.json').read_bytes())
+    assert receipt['status']=='FAIL' and receipt['published'] is False and receipt['publication_requested'] is True
+    assert receipt['error_type']==('ValueError' if phase=='collection' else 'OSError')
+    assert receipt['failed_at_utc'] and {p:(allocation/p).read_bytes() for p in host.BASELINE_FILES}==before

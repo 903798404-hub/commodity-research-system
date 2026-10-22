@@ -193,6 +193,10 @@ def run(config_path,*,publish_requested=False):
                     if publish_requested:
                         validate_config(config_path)
                         outcome.update(publish(c,work,request,result))
+        except Exception as exc:
+            outcome.update(status='FAIL',published=False,error_type=type(exc).__name__,
+                           publication_requested=publish_requested,failed_at_utc=dt.datetime.now(dt.timezone.utc).isoformat())
+            raise
         finally:
             write(work/'result.json',outcome);atomic(STATE/'last-run.json',outcome)
         return outcome
