@@ -151,11 +151,43 @@ def test_retry_timeout_leaves_original_service_running(monkeypatch):
 
 def test_any_busy_producer_defers_extras_and_unknown_activity_fails(monkeypatch):
     module=host()
-    monkeypatch.setattr(module,'command',lambda _:b'\n'.join([b'active',*([b'inactive']*(len(JOBS)-1))]))
+    monkeypatch.setattr(module,'command',lambda _:activity_output(ActiveState='active',SubState='running',MainPID='123',ControlGroup='/system.slice/producer.service'))
     assert module.producer_busy()
     monkeypatch.setattr(module,'command',lambda _:b'unknown')
     with pytest.raises(ValueError):
         module.producer_busy()
+
+
+def activity_output(**overrides):
+    rows=[]
+    for unit in JOBS.values():
+        row=dict(Id=unit,ActiveState='inactive',SubState='dead',MainPID='0',ControlPID='0',ControlGroup='')
+        if unit==JOBS['guangxi']:row.update(overrides)
+        rows.append('\n'.join(key+'='+value for key,value in row.items()))
+    return ('\n\n'.join(rows)+'\n').encode()
+
+
+@pytest.mark.parametrize('overrides,busy',[
+    ({},False),
+    ({'ActiveState':'activating','SubState':'auto-restart'},False),
+    ({'ActiveState':'activating','SubState':'start'},True),
+    ({'ActiveState':'activating','SubState':'auto-restart','MainPID':'123'},True),
+    ({'ActiveState':'activating','SubState':'auto-restart','ControlPID':'456'},True),
+    ({'ActiveState':'activating','SubState':'auto-restart','ControlGroup':'/system.slice/producer.service'},True),
+    ({'ActiveState':'failed','ControlGroup':'/system.slice/producer.service'},True),
+])
+def test_restart_wait_only_releases_gate_after_all_workers_are_gone(monkeypatch,overrides,busy):
+    module=host();calls=[]
+    def command(args):calls.append(args);return activity_output(**overrides)
+    monkeypatch.setattr(module,'command',command)
+    assert module.producer_busy() is busy
+    assert len(calls)==1 and calls[0][:2]==['systemctl','show']
+
+
+def test_incomplete_activity_inventory_cannot_release_retry_gate(monkeypatch):
+    module=host()
+    monkeypatch.setattr(module,'command',lambda _:activity_output().replace(b'ControlPID=0\n',b'',1))
+    with pytest.raises(ValueError):module.producer_busy()
 
 
 def test_reservation_survives_crash_before_service_request(tmp_path,monkeypatch):

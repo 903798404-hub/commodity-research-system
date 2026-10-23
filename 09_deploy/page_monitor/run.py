@@ -216,11 +216,33 @@ def observe(config):
 
 
 def producer_busy():
-    raw = command(['systemctl','show',*JOBS.values(),'--property=ActiveState','--value']).decode().splitlines()
-    states = [v for v in raw if v]
-    if len(states) != len(JOBS) or any(v not in {'active','activating','inactive','failed','deactivating','reloading'} for v in states):
+    fields={'Id','ActiveState','SubState','MainPID','ControlPID','ControlGroup'}
+    raw=command(['systemctl','show',*JOBS.values(),*['--property='+key for key in sorted(fields)]]).decode()
+    observed={}
+    for block in raw.strip().split('\n\n'):
+        row={}
+        for line in block.splitlines():
+            key,separator,value=line.partition('=')
+            if not separator or key in row:
+                raise ValueError('Cannot determine producer activity')
+            row[key]=value
+        if set(row)!=fields or row['Id'] in observed:
+            raise ValueError('Cannot determine producer activity')
+        observed[row['Id']]=row
+    if set(observed)!=set(JOBS.values()) or any(
+        row['ActiveState'] not in {'active','activating','inactive','failed','deactivating','reloading'}
+        or not re.fullmatch(r'[0-9]+',row['MainPID']) or not re.fullmatch(r'[0-9]+',row['ControlPID'])
+        for row in observed.values()):
         raise ValueError('Cannot determine producer activity')
-    return any(v in {'active','activating','deactivating','reloading'} for v in states)
+    for row in observed.values():
+        idle=row['ActiveState'] in {'inactive','failed'}
+        restart_wait=row['ActiveState']=='activating' and row['SubState']=='auto-restart'
+        # systemd reports restart backoff as activating even after all workers
+        # and the unit cgroup have gone. Do not let that wait starve other jobs.
+        if (idle or restart_wait) and int(row['MainPID'])==0 and int(row['ControlPID'])==0 and not row['ControlGroup']:
+            continue
+        return True
+    return False
 
 
 def start_retry(job):
