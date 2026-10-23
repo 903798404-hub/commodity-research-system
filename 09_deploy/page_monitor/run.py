@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / '03_src'))
 from agri_research_agent.monitoring.catalog import JOBS, RULES
 from agri_research_agent.monitoring.freshness import SCHEMA, reconcile, reserve_retry, retry_plan
+from agri_research_agent.monitoring.task_ledger import (
+    SERVICE_FIELDS, TIMER_FIELDS, TASKS, parse_inventory, reconcile_tasks,
+)
 
 STATE_ROOT = Path('/var/lib/market-data/production-data-automation/page-monitor')
 CONFIG_ROOT = Path('/etc/market-data/page-monitor')
@@ -78,7 +81,14 @@ def atomic(path, value):
 
 def load_config(path):
     config = read_json(protected(path, CONFIG_ROOT))
-    if set(config) != {'schema_version', 'producer', 'image_id', 'reader_id', 'data_disk_uuid', 'inputs', 'report', 'jobs'} or config['schema_version'] != 'page-monitor-config/1':
+    fields = {'schema_version', 'producer', 'image_id', 'reader_id', 'data_disk_uuid', 'inputs', 'report', 'jobs'}
+    if config.get('schema_version') == 'page-monitor-config/2':
+        fields.add('task_ledger_enabled')
+        if config.get('task_ledger_enabled') is not True:
+            raise ValueError('Task ledger must be explicitly enabled in config/2')
+    elif config.get('schema_version') != 'page-monitor-config/1':
+        raise ValueError('Monitor configuration schema invalid')
+    if set(config) != fields:
         raise ValueError('Monitor configuration schema invalid')
     expected = config['producer']
     if set(expected) != {'commit', 'tree', 'origin'} or expected['origin'] not in {'https://github.com/903798404-hub/commodity-research-system.git','git@github.com:903798404-hub/commodity-research-system.git'}:
@@ -261,21 +271,56 @@ def start_retry(job):
         return 'FAILED'
 
 
+def observe_tasks(state, rows, now):
+    # Fixed read-only unit inventories; never execute a caller-provided name.
+    def inventory(names, fields, *, calendars=False):
+        raw = command(['systemctl', 'show', '--all', *sorted(names),
+            *['--property='+field for field in sorted(fields)]]).decode('utf-8', 'strict')
+        return parse_inventory(raw, set(names), fields, calendars=calendars)
+    services = inventory(set(JOBS.values()), SERVICE_FIELDS)
+    timers = inventory({task.timer for task in TASKS}, TIMER_FIELDS, calendars=True)
+    boot_id = Path('/proc/sys/kernel/random/boot_id').read_text(encoding='ascii').strip()
+    return reconcile_tasks(rows, services, timers, state.get('task_ledger', {}), now, boot_id)
+
+
 def publish(config, state, rows, *, failure=None):
     now = datetime.now(timezone.utc)
     state.update(reconcile(rows, state, now))
     state.update(schema_version=SCHEMA, checked_at=now.isoformat(), rows=rows,
         monitor_error=failure, producer=config['producer'], retry_policy={'max_extra_attempts_per_job_per_day':3,'cooldown_minutes':60,'max_jobs_per_pass':1})
+    if config.get('task_ledger_enabled'):
+        try:
+            state['task_ledger'] = observe_tasks(state, rows, now)
+            unverified = any(task['execution_status'] in {'UNKNOWN', 'UNAVAILABLE'}
+                or task['timer_observation']['LoadState'] != 'loaded'
+                for task in state['task_ledger']['tasks'])
+            state['task_ledger_error'] = ('部分原服务或定时器状态未核实；暂停额外补试，原定时任务不变'
+                if unverified else None)
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            # Preserve the last ledger and actual-date report. Extra retries
+            # stop until lifecycle evidence is verifiable; original timers run.
+            state['task_ledger_error'] = '任务台账核验失败；保留上次执行证据，暂停额外补试，原定时任务不变'
     # Persist the event itself before archiving. A crash can replay that exact
     # event without producing a second reminder or losing the recovery receipt.
     atomic(STATE_ROOT / 'state.json', state)
     archive_events(state.get('recent_events',[]))
+    if config.get('task_ledger_enabled'):
+        archive_task_events(state.get('task_ledger', {}).get('recent_observations', []))
     atomic(Path(config['report']), state)
     return state
 
 
 def archive_events(events):
-    directory=STATE_ROOT / 'events'
+    archive_records(STATE_ROOT / 'events', events)
+
+
+def archive_task_events(events):
+    archive_records(STATE_ROOT / 'task-events', events)
+
+
+def archive_records(directory, events):
+    if not events:
+        return
     directory.mkdir(exist_ok=True)
     for event in events:
         raw=json.dumps(event,ensure_ascii=False,sort_keys=True,allow_nan=False).encode('utf-8')
@@ -294,9 +339,12 @@ def run(config, *, retry):
     state_path = STATE_ROOT / 'state.json'
     state = read_json(state_path) if state_path.exists() else {}
     archive_events(state.get('recent_events',[]))
+    if config.get('task_ledger_enabled'):
+        archive_task_events(state.get('task_ledger', {}).get('recent_observations', []))
     rows = observe(config)
     state = publish(config,state,rows)
-    plan = retry_plan(rows,state,datetime.now(timezone.utc),busy=producer_busy()) if retry else []
+    ledger_blocked = config.get('task_ledger_enabled') and state.get('task_ledger_error')
+    plan = retry_plan(rows,state,datetime.now(timezone.utc),busy=producer_busy()) if retry and not ledger_blocked else []
     for job in plan:
         check_job(job,config['jobs'][job])
         if producer_busy():

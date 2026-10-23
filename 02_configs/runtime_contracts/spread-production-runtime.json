@@ -183,6 +183,7 @@
   "required_python_modules": [
     "agri_research_agent",
     "agri_research_agent.monitoring.observations",
+    "agri_research_agent.monitoring.task_ledger",
     "agri_research_agent.canola_exports.increment",
     "agri_research_agent.shared.table_increment",
     "agri_research_agent.shared.table_delivery",
@@ -250,6 +251,10 @@
     },
     {
       "path": "03_src/agri_research_agent/monitoring/observations.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/task_ledger.py",
       "role": "runtime_configuration"
     },
     {
