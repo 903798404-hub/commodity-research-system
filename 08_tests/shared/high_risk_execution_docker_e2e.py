@@ -102,6 +102,56 @@ def ref(path):
     return dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
+def smoke_with_failure_evidence(native_smoke, diagnostic):
+    """Preserve the original real smoke verdict even if diagnostics fail."""
+    try:
+        return native_smoke()
+    except Exception:
+        try:
+            diagnostic()
+        except Exception:
+            pass  # Diagnostic transport must never replace the original failure.
+        raise
+
+
+def capture_browser_failure(session, work):
+    """Read only the still-running synthetic candidate before native cleanup."""
+    evidence = dict(url=session.url()+'/', captured_at=datetime.now(timezone.utc).isoformat(),
+                    console=[], page_errors=[], failed_requests=[], bad_responses=[])
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                def append(key, value):
+                    if len(evidence[key]) < 100:
+                        evidence[key].append(str(value)[:2000])
+                page.on('console', lambda msg: append('console', msg.type+': '+msg.text))
+                page.on('pageerror', lambda error: append('page_errors', error))
+                page.on('requestfailed', lambda request: append('failed_requests', request.url+': '+str(request.failure)))
+                page.on('response', lambda response: append('bad_responses', str(response.status)+' '+response.url)
+                        if response.status >= 400 else None)
+                try:
+                    response = page.goto(evidence['url'], wait_until='domcontentloaded', timeout=15000)
+                    evidence['http_status'] = response.status if response else None
+                    page.wait_for_timeout(3000)
+                except Exception as exc:
+                    evidence['navigation_error'] = str(exc)[:2000]
+                evidence.update(title=page.title(), final_url=page.url, html=page.content()[:200000],
+                    body=page.locator('body').inner_text(timeout=5000)[:20000])
+                page.screenshot(path=str(work/'browser-failure.png'), timeout=10000)
+            finally:
+                browser.close()
+    except Exception as exc:
+        evidence['diagnostic_error'] = type(exc).__name__+': '+str(exc)[:2000]
+    try:
+        evidence['container_log_summary'] = session.diagnostics()
+    except Exception as exc:
+        evidence['container_log_error'] = type(exc).__name__+': '+str(exc)[:1000]
+    save(work, 'browser-failure.json', evidence)
+
+
 def additive_request_without_recovery(request):
     """Fresh synthetic review uses the same clock as the real review parser."""
     result = copy.deepcopy(request)
@@ -232,6 +282,9 @@ def collect_routine_acceptance(source, tool, work, evidence, key_path, base_sour
             key_path=str(key_path), container_port=8501),
             application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stAppViewContainer"]': 1}))
         session = routine.DockerSession(request, engine, host, binding, manifest)
+        native_smoke = session.smoke
+        session.smoke = lambda: smoke_with_failure_evidence(native_smoke,
+            lambda: capture_browser_failure(session, work))
         exact = routine.image_identity(engine, image_id, binding, manifest['service_id'])
         record = routine.candidate_acceptance(session, exact, base_commit=base['commit'],
             ci_run=os.environ['GITHUB_RUN_ID'], risk_resolution=resolved, maintainer_risk_review=review)
@@ -1064,7 +1117,7 @@ def main():
             if not scope.exists():
                 continue
             for path in sorted(p for p in scope.rglob('*') if p.is_file() and
-                               (p.suffix == '.json' or p.name in {'engine.stdout', 'engine.stderr'})):
+                               (p.suffix in {'.json', '.png'} or p.name in {'engine.stdout', 'engine.stderr'})):
                 assert not path.is_symlink()
                 relative = path.relative_to(work)
                 destination = public_evidence / relative
