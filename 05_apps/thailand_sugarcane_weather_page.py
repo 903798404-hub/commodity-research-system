@@ -35,6 +35,9 @@ def seasonal_figure(records: pd.DataFrame, region: str, metric: str, *, cumulati
     figure = _line_layout(unit, "01-01", "12-31")
     part = records[(records.region == region) & (records.metric == metric)]
     history = part[part.model.eq("HISTORY")].copy()
+    if metric == "soil_moisture":
+        # Reject the legacy IFS soil even while a V1 snapshot is still readable.
+        history = history[history.source_model.eq("era5_land") & history.source_kind.eq("reanalysis")]
     series_by_year = {}
     for year, subset in history.groupby(history.date.dt.year):
         # Calendar slots remain present. Missing rain breaks every subsequent annual total.
@@ -110,11 +113,11 @@ def render_thailand_sugarcane_weather_page() -> None:
         st.error(f"泰国天气快照暂不可用：{exc}。产区表可查看；天气图表等待后台校验通过的数据。")
         return
     st.caption(f"历史模式截至 {meta['history_end']} · EC/GFS共同起报 {meta['forecast_run_at']} · 预报 {meta['forecast_start']}—{meta['forecast_end']}")
-    st.caption(f"快照发布时间UTC：{meta['published_at_utc']} · 历史采用ECMWF IFS模式资料，非气象站实测、非ERA5再分析；固定比较基期2020—2024年。")
+    st.caption(f"快照发布时间UTC：{meta['published_at_utc']} · 降雨、气温历史采用ECMWF IFS；土墒历史及2020—2024年均线统一采用ERA5-Land再分析。均非田间或气象站直接实测。")
     if pd.Timestamp(meta["history_end"]).date() < (pd.Timestamp.now(tz="Asia/Bangkok") - pd.Timedelta(days=1)).date():
         st.warning("当前显示上一成功快照；历史截止日落后于昨日，请以页面日期判断时效。")
     if meta["null_history_values"]:
-        st.warning(f"历史含{meta['null_history_values']}条缺测，保留为空；累计降雨遇缺测后停止接续，不补零。")
+        st.warning(f"历史含{meta['null_history_values']}条缺测或尚未发布值，保留为空；不补零、不插值，累计降雨遇缺测后停止接续。")
     attempt = root / "last_attempt.json"
     if attempt.is_file():
         try:
@@ -139,7 +142,11 @@ def render_thailand_sugarcane_weather_page() -> None:
             return
         start, end = chosen
     if section == "土壤墒情":
-        st.caption("0—100厘米土层体积含水率，按7、21、72厘米厚度加权；单位%。本版仅展示历史模式资料。")
+        st.caption("ERA5-Land再分析：0—100厘米土层体积含水率，按7、21、72厘米厚度加权；单位%。仅展示历史，不与IFS拼接。")
+        if meta.get("soil_source_model") != "era5_land":
+            st.warning("当前快照的土墒尚未完成ERA5-Land重算，旧IFS土墒不参与展示或五年均线。")
+        else:
+            st.caption(f"全部产区共同有效截至 {meta['soil_history_end']}；ERA5-Land通常延迟约5天，之后日期保留空白，不影响降雨、气温及EC/GFS更新。均线要求同月日五年都有有效值。")
     _inject_weather_styles()
     current_year = pd.Timestamp(meta["history_end"]).year
     if pd.Timestamp(meta["forecast_end"]).year != current_year:
@@ -157,6 +164,8 @@ def render_thailand_sugarcane_weather_page() -> None:
     with st.expander("当前章节数据"):
         data = records[records.region.isin(selected) & records.metric.eq(metric)]
         data = data.drop(columns=["data_type"]).rename(columns={"source_kind":"资料类型"})
-        data["资料类型"] = data["资料类型"].map({"historical_model":"历史模式资料", "forecast":"模式预报"})
+        if metric == "soil_moisture":
+            data = data[data.source_model.eq("era5_land") & data["资料类型"].eq("reanalysis")]
+        data["资料类型"] = data["资料类型"].map({"historical_model":"历史模式资料", "forecast":"模式预报", "reanalysis":"ERA5-Land再分析"})
         st.dataframe(data.sort_values(["region", "date", "model"]).tail(1000), hide_index=True, width="stretch")
         st.download_button("下载完整章节数据", data.to_csv(index=False).encode("utf-8-sig"), f"thailand_{metric}.csv", "text/csv")

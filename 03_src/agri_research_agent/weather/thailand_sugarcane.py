@@ -24,6 +24,8 @@ SOIL = ("soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm", "soil_moisture_28_t
 HISTORY_API = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_API = "https://single-runs-api.open-meteo.com/v1/forecast"
 RELEASE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+SOIL_SOURCE = "era5_land"
+SNAPSHOT_SCHEMA = "thailand-sugarcane-snapshot/2"
 
 
 def sha256(path: Path) -> str:
@@ -143,7 +145,7 @@ def fetch_hourly(root: Path, endpoint: str, params: dict, session, stats: dict |
 
 
 def hourly_to_daily(payload: list[dict], regions: list[dict], start, end, *, model: str,
-                    run_at: str | None, fetched_at: str) -> pd.DataFrame:
+                    run_at: str | None, fetched_at: str, source_model: str | None = None) -> pd.DataFrame:
     """Thai local day: rain (00:00, next 00:00], other variables [00:00, 23:00]."""
     days = pd.date_range(start, end, freq="D")
     result = []
@@ -155,7 +157,10 @@ def hourly_to_daily(payload: list[dict], regions: list[dict], start, end, *, mod
                 or item.get("location_id", number) != number):
             raise ValueError("天气API位置身份或返回顺序错误")
         units = item["hourly_units"]
-        if units.get("precipitation") != "mm" or units.get("temperature_2m") != "°C":
+        soil_only = source_model == SOIL_SOURCE
+        if soil_only and model != "HISTORY":
+            raise ValueError("ERA5-Land只能作为历史再分析")
+        if not soil_only and (units.get("precipitation") != "mm" or units.get("temperature_2m") != "°C"):
             raise ValueError("天气API降雨或温度单位变化")
         hourly = pd.DataFrame(item["hourly"]).set_index("time")
         hourly.index = pd.DatetimeIndex(hourly.index)
@@ -163,33 +168,35 @@ def hourly_to_daily(payload: list[dict], regions: list[dict], start, end, *, mod
             raise ValueError("小时数据时间戳重复或未对齐")
         hours = pd.date_range(days[0], days[-1] + pd.Timedelta(days=1), freq="h")
         hourly = hourly.reindex(hours).apply(pd.to_numeric, errors="coerce")
-        rain = hourly["precipitation"].copy()
-        rain.index = rain.index - pd.Timedelta(hours=1)
-        values = {"precipitation": rain.resample("D").sum(min_count=24).reindex(days)}
-        temp = hourly["temperature_2m"].resample("D")
-        values["temperature_max"] = temp.max().where(temp.count().eq(24)).reindex(days)
-        if model == "HISTORY":
+        values = {}
+        if soil_only:
             if any(units.get(layer) != "m³/m³" for layer in SOIL):
                 raise ValueError("土壤含水率单位变化")
             layers = hourly[list(SOIL)].resample("D")
             means = layers.mean().where(layers.count().eq(24)).reindex(days)
             values["soil_moisture"] = means.mul([.07, .21, .72]).sum(axis=1, min_count=3) * 100
+        else:
+            rain = hourly["precipitation"].copy()
+            rain.index = rain.index - pd.Timedelta(hours=1)
+            values["precipitation"] = rain.resample("D").sum(min_count=24).reindex(days)
+            temp = hourly["temperature_2m"].resample("D")
+            values["temperature_max"] = temp.max().where(temp.count().eq(24)).reindex(days)
         for metric, data in values.items():
             frame = pd.DataFrame({"date": days, "value": data.to_numpy()})
             frame = frame.assign(region=region["key"], metric=metric, unit=METRICS[metric],
                                  crop="sugarcane", country="THA", timezone="Asia/Bangkok",
                                  model=model, forecast_run_at=run_at, retrieved_at_utc=fetched_at,
-                                 data_type="historical_model" if model == "HISTORY" else "forecast",
-                                 source_model="ecmwf_ifs" if model == "HISTORY" else
+                                 data_type="reanalysis" if soil_only else "historical_model" if model == "HISTORY" else "forecast",
+                                 source_model=SOIL_SOURCE if soil_only else "ecmwf_ifs" if model == "HISTORY" else
                                  ("ecmwf_ifs025" if model == "ECMWF" else "gfs_global"),
-                                 source_kind="historical_model" if model == "HISTORY" else "forecast",
+                                 source_kind="reanalysis" if soil_only else "historical_model" if model == "HISTORY" else "forecast",
                                  latitude=region["latitude"], longitude=region["longitude"])
             result.append(frame)
     return pd.concat(result, ignore_index=True)
 
 
 def validate_records(records: pd.DataFrame, config: dict, *, history_end=None,
-                     forecast_start=None, forecast_end=None) -> pd.DataFrame:
+                     forecast_start=None, forecast_end=None, require_era5_land=False) -> pd.DataFrame:
     records = records.copy()
     records["date"] = pd.to_datetime(records["date"]).dt.normalize()
     records["forecast_run_at"] = pd.to_datetime(records["forecast_run_at"], utc=True)
@@ -203,6 +210,12 @@ def validate_records(records: pd.DataFrame, config: dict, *, history_end=None,
         raise ValueError("天气产区覆盖与配置不符")
     if not set(records["model"]).issubset({"HISTORY", "ECMWF", "GFS"}):
         raise ValueError("出现未批准的天气模型")
+    if require_era5_land:
+        soil = records[records.metric.eq("soil_moisture")]
+        if (soil.empty or not {"source_model", "source_kind", "data_type"}.issubset(soil.columns)
+                or not soil.model.eq("HISTORY").all() or not soil.source_model.eq(SOIL_SOURCE).all()
+                or not soil.source_kind.eq("reanalysis").all() or not soil.data_type.eq("reanalysis").all()):
+            raise ValueError("历史土墒必须全部来自ERA5-Land再分析，不得拼接IFS")
     for metric, unit in METRICS.items():
         subset = records[records.metric.eq(metric)]
         if not subset.unit.eq(unit).all():
@@ -245,14 +258,15 @@ def load_snapshot(root: Path, config: dict) -> tuple[pd.DataFrame, dict]:
     if sha256(manifest) != pointer["manifest_sha256"]:
         raise ValueError("天气快照清单校验失败")
     meta = json.loads(manifest.read_text(encoding="utf-8"))
-    if meta.get("schema_version") != "thailand-sugarcane-snapshot/1":
+    if meta.get("schema_version") not in ("thailand-sugarcane-snapshot/1", SNAPSHOT_SCHEMA):
         raise ValueError("天气快照版本不支持")
     if meta["config_sha256"] != config["config_sha256"]:
         raise ValueError("快照产区或面积配置与页面不一致")
     records = release / "records.parquet"
     if sha256(records) != meta["records_sha256"]:
         raise ValueError("天气快照数据校验失败")
-    return validate_records(pd.read_parquet(records), config), meta
+    return validate_records(pd.read_parquet(records), config,
+                            require_era5_land=meta["schema_version"] == SNAPSHOT_SCHEMA), meta
 
 
 def refresh(root: Path, config_path: Path, *, publish: bool = False, now=None, session=None,
@@ -273,32 +287,40 @@ def refresh(root: Path, config_path: Path, *, publish: bool = False, now=None, s
         previous = pd.DataFrame()
         if (root / "current.json").exists():
             previous, meta = load_snapshot(root, config)
-            if (not rebuild and meta["history_end"] == str(history_end) and meta["forecast_run_at"] == run_at
+            if (not rebuild and meta["schema_version"] == SNAPSHOT_SCHEMA
+                    and meta.get("soil_source_model") == SOIL_SOURCE
+                    and meta["history_end"] == str(history_end) and meta["forecast_run_at"] == run_at
                     and meta["forecast_start"] == str(today) and meta["forecast_end"] == str(forecast_end)):
                 return dict(status="SKIPPED_ALREADY_CURRENT", requests=0, publications=0, release_id=meta["release_id"])
         regions = config["regions"]
         common = dict(latitude=",".join(str(r["latitude"]) for r in regions),
                       longitude=",".join(str(r["longitude"]) for r in regions), timezone="Asia/Bangkok")
-        history = previous[previous.model.eq("HISTORY")].copy() if not previous.empty and not rebuild else pd.DataFrame()
-        if not history.empty:
-            history["data_type"] = "historical_model"
-        first = pd.Timestamp("2020-01-01") if history.empty else history.date.max() + pd.Timedelta(days=1)
-        if not history.empty and history.value.isna().any():
-            # Re-query only the suffix containing a gap; immutable prior releases remain intact.
-            first = min(first, history.loc[history.value.isna(), "date"].min())
-            history = history[history.date < first]
-        chunks = [history] if not history.empty else []
+        chunks = []
         downloads = 0
         stats = dict(requests=0, cache_hits=0)
-        while first.date() <= history_end:
-            last = min(pd.Timestamp(history_end), pd.Timestamp(first.year, 12, 31))
-            params = dict(common, models="ecmwf_ifs", hourly=",".join(("precipitation", "temperature_2m", *SOIL)),
-                          start_date=str(first.date()), end_date=str((last + pd.Timedelta(days=1)).date()))
-            print(f"历史模式 {first.date()}—{last.date()}", flush=True)
-            payload, response_meta = fetch_hourly(root, HISTORY_API, params, session, stats)
-            chunks.append(hourly_to_daily(payload, regions, first, last, model="HISTORY", run_at=None, fetched_at=response_meta["downloaded_at_utc"]))
-            downloads += 1
-            first = last + pd.Timedelta(days=1)
+        for source, metrics, variables in (("ecmwf_ifs", ("precipitation", "temperature_max"), ("precipitation", "temperature_2m")),
+                                           (SOIL_SOURCE, ("soil_moisture",), SOIL)):
+            history = previous[previous.model.eq("HISTORY") & previous.metric.isin(metrics)].copy() if not previous.empty and not rebuild else pd.DataFrame()
+            if source == SOIL_SOURCE and not history.empty:
+                # V1 IFS soil remains in the old immutable release, never in the new series.
+                history = history[history.source_model.eq(SOIL_SOURCE)] if "source_model" in history else pd.DataFrame()
+            first = pd.Timestamp("2020-01-01") if history.empty else history.date.max() + pd.Timedelta(days=1)
+            if not history.empty and history.value.isna().any():
+                first = min(first, history.loc[history.value.isna(), "date"].min())
+                history = history[history.date < first]
+            if not history.empty:
+                chunks.append(history)
+            while first.date() <= history_end:
+                last = min(pd.Timestamp(history_end), pd.Timestamp(first.year, 12, 31))
+                request_end = last if source == SOIL_SOURCE else last + pd.Timedelta(days=1)
+                params = dict(common, models=source, hourly=",".join(variables),
+                              start_date=str(first.date()), end_date=str(request_end.date()))
+                print(f"{source} 历史 {first.date()}—{last.date()}", flush=True)
+                payload, response_meta = fetch_hourly(root, HISTORY_API, params, session, stats)
+                chunks.append(hourly_to_daily(payload, regions, first, last, model="HISTORY", run_at=None,
+                                             fetched_at=response_meta["downloaded_at_utc"], source_model=source))
+                downloads += 1
+                first = last + pd.Timedelta(days=1)
         for label, model in (("ECMWF", "ecmwf_ifs025"), ("GFS", "gfs_global")):
             params = dict(common, models=model, hourly="precipitation,temperature_2m", run=run.strftime("%Y-%m-%dT%H:%M"), forecast_days=16)
             print(f"{label} 共同起报 {run_at}", flush=True)
@@ -306,20 +328,29 @@ def refresh(root: Path, config_path: Path, *, publish: bool = False, now=None, s
             chunks.append(hourly_to_daily(payload, regions, today, forecast_end, model=label, run_at=run_at, fetched_at=response_meta["downloaded_at_utc"]))
             downloads += 1
         records = validate_records(pd.concat(chunks, ignore_index=True), config, history_end=history_end,
-                                   forecast_start=today, forecast_end=forecast_end)
+                                   forecast_start=today, forecast_end=forecast_end, require_era5_land=True)
         # A source latency gap does not invalidate older history, but must not be called today's complete snapshot.
-        tail = records[(records.model == "HISTORY") & (records.date == pd.Timestamp(history_end))]
+        tail = records[(records.model == "HISTORY") & records.metric.ne("soil_moisture") & (records.date == pd.Timestamp(history_end))]
         if tail.value.isna().any():
             raise ValueError("昨日历史模式资料尚不完整；保留上一成功快照")
+        soil = records[records.metric.eq("soil_moisture")]
+        soil_dates = {r["key"]: soil.loc[soil.region.eq(r["key"]) & soil.value.notna(), "date"].max()
+                      for r in regions}
+        if any(pd.isna(day) for day in soil_dates.values()):
+            raise ValueError("部分产区没有有效ERA5-Land土墒；保留上一成功快照")
         release_id = now.strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
         release = root / "releases" / release_id
         release.mkdir(parents=True, exist_ok=False)
         records.to_parquet(release / "records.parquet", index=False)
-        meta = dict(schema_version="thailand-sugarcane-snapshot/1", release_id=release_id,
+        meta = dict(schema_version=SNAPSHOT_SCHEMA, release_id=release_id,
                     config_sha256=config["config_sha256"], records_sha256=sha256(release / "records.parquet"),
                     started_at_utc=fetched_at, published_at_utc=datetime.now(timezone.utc).isoformat(),
                     history_start="2020-01-01", history_end=str(history_end),
                     history_source_model="ecmwf_ifs", history_kind="historical_model_not_station_observations",
+                    soil_source_model=SOIL_SOURCE, soil_source_kind="reanalysis",
+                    soil_history_end=str(min(soil_dates.values()).date()),
+                    soil_region_latest_valid={key: str(day.date()) for key, day in soil_dates.items()},
+                    baseline_years=[2020, 2024],
                     forecast_run_at=run_at, forecast_start=str(today), forecast_end=str(forecast_end),
                     timezone="Asia/Bangkok", point_count=len(regions),
                     null_history_values=int(records.loc[records.model.eq("HISTORY"), "value"].isna().sum()),

@@ -55,12 +55,31 @@ def test_thai_rain_interval_temperature_completeness_soil_units_and_zero():
                                      model="HISTORY", run_at=None, fetched_at="2020-01-04T00:00:00Z")
     assert records[records.metric.eq("precipitation")].value.tolist() == [300., 876.]
     assert records[records.metric.eq("temperature_max")].value.tolist() == [0., 0.]
-    assert records[records.metric.eq("soil_moisture")].value.tolist() == pytest.approx([26.5,26.5])
+    assert not records.metric.eq("soil_moisture").any()
     assert set(records.data_type) == {"historical_model"}
     missing = weather.hourly_to_daily(hourly_payload(missing_rain=True, missing_temp=True), regions, "2020-01-01", "2020-01-02",
                                      model="HISTORY", run_at=None, fetched_at="2020-01-04T00:00:00Z")
     assert missing.loc[missing.date.eq(pd.Timestamp("2020-01-01")) & missing.metric.isin(["precipitation","temperature_max"]), "value"].isna().all()
     assert missing.loc[missing.date.eq(pd.Timestamp("2020-01-02")), "value"].notna().all()
+
+
+def test_era5_soil_uses_all_three_complete_layers_and_preserves_missing_and_zero():
+    regions = [dict(key="test", latitude=16., longitude=101.)]
+    payload = hourly_payload()
+    for key in ("precipitation", "temperature_2m"):
+        del payload[0]["hourly"][key]
+        del payload[0]["hourly_units"][key]
+    args = dict(regions=regions, start="2020-01-01", end="2020-01-02", model="HISTORY",
+                source_model="era5_land", run_at=None, fetched_at="2020-01-04T00:00:00Z")
+    records = weather.hourly_to_daily(payload, **args)
+    assert records.value.tolist() == pytest.approx([26.5, 26.5])
+    assert set(records.source_model) == {"era5_land"}
+    assert set(records.source_kind) == set(records.data_type) == {"reanalysis"}
+    payload[0]["hourly"][weather.SOIL[2]][7] = None
+    for key in weather.SOIL:
+        payload[0]["hourly"][key][24:48] = [0.] * 24
+    records = weather.hourly_to_daily(payload, **args)
+    assert pd.isna(records.value.iloc[0]) and records.value.iloc[1] == 0
 
 
 def test_wrong_timezone_or_returned_coordinate_is_rejected():
@@ -87,8 +106,9 @@ def fixture_records(config, *, small=False):
                     rows.append(dict(date=date,region=region["key"],metric=metric,model=model,
                                      forecast_run_at=None if model=="HISTORY" else run,
                                      retrieved_at_utc="2026-10-21T00:00:00Z",value=1.,unit=weather.METRICS[metric],
-                                     data_type="historical_model" if model=="HISTORY" else "forecast",
-                                     source_kind="historical_model" if model=="HISTORY" else "forecast"))
+                                     data_type="reanalysis" if metric=="soil_moisture" else "historical_model" if model=="HISTORY" else "forecast",
+                                     source_kind="reanalysis" if metric=="soil_moisture" else "historical_model" if model=="HISTORY" else "forecast",
+                                     source_model="era5_land" if metric=="soil_moisture" else "ecmwf_ifs" if model=="HISTORY" else "ecmwf_ifs025" if model=="ECMWF" else "gfs_global"))
     return pd.DataFrame(rows)
 
 
@@ -100,7 +120,7 @@ def make_snapshot(root, *, small=False):
     records.to_parquet(release / "records.parquet",index=False)
     start = pd.Timestamp("2020-01-02" if small else "2026-10-21")
     run = (start-pd.Timedelta(days=1)).tz_localize("UTC")+pd.Timedelta(hours=12)
-    meta = dict(schema_version="thailand-sugarcane-snapshot/1", release_id="test",config_sha256=config["config_sha256"], records_sha256=weather.sha256(release/"records.parquet"),
+    meta = dict(schema_version=weather.SNAPSHOT_SCHEMA, soil_source_model="era5_land", soil_history_end="2020-01-01" if small else "2026-10-20", release_id="test",config_sha256=config["config_sha256"], records_sha256=weather.sha256(release/"records.parquet"),
                 history_start="2020-01-01",history_end=str((start-pd.Timedelta(days=1)).date()),
                 forecast_start=str(start.date()),forecast_end=str((start+pd.Timedelta(days=13)).date()),
                 forecast_run_at=run.isoformat(),published_at_utc="2026-10-21T00:00:00Z",null_history_values=0)
@@ -168,6 +188,77 @@ def test_cumulative_rain_and_baseline_never_bridge_missing_values():
     assert current.y[0]==1 and pd.isna(current.y[1]) and pd.isna(current.y[2])
     normal=next(t for t in fig.data if t.name=="2020—2024年均值")
     assert pd.isna(normal.y[1]) and pd.isna(normal.y[2])
+
+
+def test_soil_baseline_is_recalculated_only_from_era5_and_requires_five_values():
+    page=importlib.import_module("thailand_sugarcane_weather_page")
+    rows=[]
+    for year in range(2020,2027):
+        for day in (1,2,3):
+            rows.append(dict(date=pd.Timestamp(year,1,day),region="a",metric="soil_moisture",model="HISTORY",
+                             source_model="era5_land", source_kind="reanalysis",value=np.nan if year==2022 and day==2 else year-2000.))
+    # IFS-only dates must not enter either a historical curve or the five-year mean.
+    rows.append(dict(date=pd.Timestamp(2025,1,4),region="a",metric="soil_moisture",model="HISTORY",
+                     source_model="ecmwf_ifs",source_kind="historical_model",value=99.))
+    fig=page.seasonal_figure(pd.DataFrame(rows),"a","soil_moisture",cumulative=False,current_year=2026)
+    normal=next(t for t in fig.data if t.name=="2020—2024年均值")
+    assert normal.y[0]==22. and pd.isna(normal.y[1]) and normal.y[2]==22.
+    assert all(not t.connectgaps for t in fig.data)
+    previous=next(t for t in fig.data if t.name=="2025")
+    assert len(previous.y)==3 and 99. not in previous.y
+
+
+def test_v2_rejects_any_ifs_soil_identity():
+    config=weather.load_config(CONFIG)
+    records=fixture_records(config,small=True)
+    records.loc[records.metric.eq("soil_moisture"),"source_model"]="ecmwf_ifs"
+    with pytest.raises(ValueError,match="ERA5-Land"):
+        weather.validate_records(records,config,require_era5_land=True)
+
+
+def test_legacy_migration_recomputes_all_regions_and_latency_does_not_block_update(tmp_path,monkeypatch):
+    config=make_snapshot(tmp_path,small=True)
+    release=tmp_path/"releases/test"
+    old=pd.read_parquet(release/"records.parquet")
+    old.loc[old.metric.eq("soil_moisture"),["source_model","source_kind","data_type"]]=["ecmwf_ifs","historical_model","historical_model"]
+    old.to_parquet(release/"records.parquet",index=False)
+    meta=json.loads((release/"manifest.json").read_text())
+    meta["schema_version"]="thailand-sugarcane-snapshot/1"
+    meta.pop("soil_source_model")
+    meta["records_sha256"]=weather.sha256(release/"records.parquet")
+    weather.atomic_json(release/"manifest.json",meta)
+    weather.atomic_json(tmp_path/"current.json",dict(release_id="test",manifest_sha256=weather.sha256(release/"manifest.json")))
+    before=(release/"records.parquet").read_bytes()
+    calls=[]
+    def fake_fetch(root,endpoint,params,session,stats):
+        calls.append(params.copy());stats["requests"]+=1
+        start=params.get("start_date","2020-01-03")
+        end=params.get("end_date","2020-01-17")
+        dates=pd.date_range(start,pd.Timestamp(end)+pd.Timedelta(hours=23),freq="h")
+        soil=params["models"]=="era5_land"
+        items=[]
+        for number,r in enumerate(config["regions"]):
+            hourly={"time":dates.strftime("%Y-%m-%dT%H:%M").tolist()}
+            for k in params["hourly"].split(","):
+                hourly[k]=[None if soil and d.date()==pd.Timestamp("2020-01-02").date() else .2 if soil else 1. for d in dates]
+            items.append(dict(latitude=r["latitude"],longitude=r["longitude"],location_id=number,utc_offset_seconds=25200,
+                              hourly_units={k:"m³/m³" if soil else "mm" if k=="precipitation" else "°C" for k in hourly if k!="time"},hourly=hourly))
+        return items,dict(downloaded_at_utc="2020-01-03T03:00:00Z")
+    monkeypatch.setattr(weather,"fetch_hourly",fake_fetch)
+    now=datetime(2020,1,3,3,tzinfo=timezone.utc)
+    result=weather.refresh(tmp_path,CONFIG,publish=True,now=now)
+    assert result["status"]=="PUBLISHED"
+    records,meta=weather.load_snapshot(tmp_path,config)
+    soil=records[records.metric.eq("soil_moisture")]
+    assert len(soil)==32 and set(soil.source_model)=={"era5_land"}
+    assert soil[soil.date.eq(pd.Timestamp("2020-01-02"))].value.isna().all()
+    assert meta["history_end"]=="2020-01-02" and meta["soil_history_end"]=="2020-01-01"
+    assert len(meta["soil_region_latest_valid"])==16
+    assert next(p for p in calls if p["models"]=="era5_land")["start_date"]=="2020-01-01"
+    assert (release/"records.parquet").read_bytes()==before
+    preserved=records[records.model.eq("HISTORY")&records.metric.ne("soil_moisture")&records.date.eq(pd.Timestamp("2020-01-01"))]
+    assert preserved.value.eq(1.).all()
+    assert weather.refresh(tmp_path,CONFIG,publish=True,now=now,session=NoNetwork())["status"]=="SKIPPED_ALREADY_CURRENT"
 
 
 def test_native_main_route_four_sections_tables_and_filters_without_network(tmp_path,monkeypatch):
