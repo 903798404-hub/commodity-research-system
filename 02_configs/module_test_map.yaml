@@ -10,6 +10,7 @@ modules:
       - 08_tests/monitoring/test_page_freshness.py
       - 08_tests/monitoring/test_monitor_integration.py
       - 08_tests/monitoring/test_monitor_readers.py
+      - 08_tests/monitoring/test_task_ledger.py
     impact_tests:
       - 08_tests/test_spread_runtime_contract.py
       - 08_tests/shared/test_module_test_map.py
