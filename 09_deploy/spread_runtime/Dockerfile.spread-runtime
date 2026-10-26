@@ -39,7 +39,7 @@ COPY ["05_apps/thailand_sugarcane_weather_page.py", "/app/05_apps/"]
 COPY ["04_scripts/runtime/precompress_streamlit_assets.py", "04_scripts/runtime/serve_spread_dashboard.py", "/app/04_scripts/runtime/"]
 COPY ["09_deploy/spread_runtime/nginx.conf", "/app/09_deploy/spread_runtime/"]
 RUN python -B /app/04_scripts/runtime/precompress_streamlit_assets.py
-COPY ["03_src/agri_research_agent/sugar_import_profit/__init__.py", "03_src/agri_research_agent/sugar_import_profit/model.py", "03_src/agri_research_agent/sugar_import_profit/history.py", "03_src/agri_research_agent/sugar_import_profit/store.py", "03_src/agri_research_agent/sugar_import_profit/runtime.py", "/app/03_src/agri_research_agent/sugar_import_profit/"]
+COPY ["03_src/agri_research_agent/sugar_import_profit/__init__.py", "03_src/agri_research_agent/sugar_import_profit/model.py", "03_src/agri_research_agent/sugar_import_profit/history.py", "03_src/agri_research_agent/sugar_import_profit/store.py", "03_src/agri_research_agent/sugar_import_profit/runtime.py", "03_src/agri_research_agent/sugar_import_profit/freight.py", "/app/03_src/agri_research_agent/sugar_import_profit/"]
 COPY ["05_apps/sugar_import_profit_page.py", "/app/05_apps/"]
 COPY ["03_src/agri_research_agent/soybean_margin/latest_quotes.py", "03_src/agri_research_agent/soybean_margin/reference.py", "/app/03_src/agri_research_agent/soybean_margin/"]
 COPY ["03_src/agri_research_agent/oilseed_positions/stock_api.py", "/app/03_src/agri_research_agent/oilseed_positions/"]

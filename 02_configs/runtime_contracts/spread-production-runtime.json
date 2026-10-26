@@ -1910,6 +1910,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/sugar_import_profit/freight.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "05_apps/sugar_import_profit_page.py",
       "role": "runtime_configuration"
     },
