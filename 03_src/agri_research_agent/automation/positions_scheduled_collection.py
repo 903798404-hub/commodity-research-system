@@ -14,12 +14,15 @@ from agri_research_agent.sugar_positions.sources import OfficialSources
 from agri_research_agent.sugar_positions.storage import publish, read_snapshot
 
 
-def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, stock_source=None):
+def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, stock_source=None, incremental=False):
     today = today or date.today()
     delivery.require(markets in {"domestic", "foreign"}, "scheduled positions market scope invalid")
-    snapshots, _ = codec.validate_archive(baseline, delivery.ROOT)
+    builder = codec.IncrementBuilder(baseline, delivery.ROOT) if incremental else None
+    snapshots = builder.snapshots if builder else codec.validate_archive(baseline, delivery.ROOT)[0]
     store = assert_external_output(work / "collection")
-    codec.materialize(baseline, store)
+    if not incremental:
+        codec.materialize(baseline, store)
+    publish_rows = builder.publish if builder else publish
     sugar = delivery._module(delivery.ROOT, "04_scripts/sugar_positions/update_sugar_positions.py", "scheduled_sugar")
     oilseed = delivery._module(delivery.ROOT, "04_scripts/oilseed_positions/update_positions.py", "scheduled_oilseed")
     specs, attempts = domain_config(delivery.ROOT), []
@@ -41,6 +44,10 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, st
         years = [int(match.group(1)) for source in old["sources"].values()
                  if (match := re.search(r"(20\d{2})-01-01T00", source["url"]))]
         start_year = min(years, default=today.year - 1)
+        if incremental and cftc_annual:
+            # Annual providers are indivisible. Include the preceding year in
+            # the 35-day rollover window so late December reports are not lost.
+            start_year = (today - timedelta(days=35)).year
         existing = {row["report_date"] for row in old["domestic"]}
         start_day, end_day = domestic_window(existing, today) if markets == "domestic" else (today, today)
         windows[domain] = {"start": start_day.isoformat(), "end": end_day.isoformat(),
@@ -60,15 +67,20 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, st
             foreign.extend(more);captures.extend(raws);observed.extend(checks)
         attempts.extend({"domain": domain, **item} for item in observed)
         root = store / domain
-        (root / "last_attempt.json").write_bytes(delivery.canonical_json_bytes({"attempts": observed}))
+        if not incremental:
+            (root / "last_attempt.json").write_bytes(delivery.canonical_json_bytes({"attempts": observed}))
         if foreign or domestic:
-            publish(root, foreign, domestic, captures, observed)
+            publish_rows(root, foreign, domestic, captures, observed)
     if stock_source is not None:
-        observed, window = collect_dce(stock_source, snapshots, store, today)
+        observed, window = collect_dce(stock_source, snapshots, store, today, publish_rows=publish_rows, incremental=incremental)
         attempts.extend(observed)
         windows['dce'] = window
     bundle = assert_external_output(work / "bundle")
     (work / "collection-window.json").write_bytes(delivery.canonical_json_bytes(windows))
+    if incremental:
+        document, semantic = builder.finish(delivery.ROOT)
+        (work / "increment-observations.json").write_bytes(delivery.canonical_json_bytes(semantic))
+        return document, attempts
     bundle.mkdir()
     manifest = {"schema_version": "commodity-positions-bundle/1", "domains": {}, "files": {}}
     for domain in codec.DOMAINS:
@@ -97,7 +109,7 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, st
     return bundle, attempts
 
 
-def collect_dce(source, snapshots, store, today):
+def collect_dce(source, snapshots, store, today, *, publish_rows=publish, incremental=False):
     """Append verified all-contract disclosures; preserve same-day/manual partitions."""
     from agri_research_agent.oilseed_positions.stock_api import StockApiError
     from agri_research_agent.oilseed_positions.sources import SourceNotPublished
@@ -105,7 +117,7 @@ def collect_dce(source, snapshots, store, today):
     for domain,varieties in (('soybean',('M','Y')),('palm',('P',))):
         for variety in varieties:
             dates={r['report_date'] for r in snapshots[domain]['domestic']
-                   if r['scope'].rstrip('0123456789')==variety}
+                   if (r['scope']==variety if incremental else r['scope'].rstrip('0123456789')==variety)}
             if dates: latest.append(max(dates))
     start,end=domestic_window({min(latest)} if len(latest)==3 else set(),today)
     attempts=[];by_domain={'soybean':[],'palm':[]}
@@ -113,6 +125,17 @@ def collect_dce(source, snapshots, store, today):
     while cursor<=end:
         if cursor.weekday()<5:
             source_id=f'stockapi_DCE_{cursor:%Y%m%d}'
+            covered = all(any(r['report_date'] == cursor.isoformat() and r['scope'] == variety
+                             for r in snapshots[domain]['domestic'])
+                          for domain, varieties in (('soybean', ('M', 'Y')), ('palm', ('P',)))
+                          for variety in varieties)
+            if incremental and covered:
+                for domain in by_domain:
+                    observed = dict(domain=domain, source_id=source_id, status='no_change', rows=0,
+                                    reason='published_variety_summaries_present')
+                    attempts.append(observed); by_domain[domain].append(observed)
+                cursor += timedelta(days=1)
+                continue
             try:
                 rows,raw,url=source.holdings(cursor,('M','Y','P'))
                 delivery.require(rows and all(r['report_date']==cursor.isoformat() for r in rows),
@@ -123,7 +146,7 @@ def collect_dce(source, snapshots, store, today):
                     current=[r for r in rows if r['scope'].rstrip('0123456789') in varieties
                              and (r['scope'],r['report_date']) not in existing]
                     observed=dict(domain=domain,source_id=source_id,status='ok' if current else 'no_change',rows=len(current))
-                    if current:publish(store/domain,[],current,[(source_id,raw,url,'json')],[observed],preserve_untouched=True)
+                    if current:publish_rows(store/domain,[],current,[(source_id,raw,url,'json')],[observed],preserve_untouched=True)
                     attempts.append(observed);by_domain[domain].append(observed)
             except (StockApiError,SourceNotPublished,ValueError) as exc:
                 # Never persist arbitrary upstream exception text or authentication messages.
@@ -132,8 +155,9 @@ def collect_dce(source, snapshots, store, today):
                     observed=dict(domain=domain,source_id=source_id,status=status,error='stock_api_report_not_published' if status=='not_published' else 'stock_api_source_unavailable_or_invalid')
                     attempts.append(observed);by_domain[domain].append(observed)
         cursor+=timedelta(days=1)
-    for domain,observed in by_domain.items():
-        (store/domain/'last_attempt.json').write_bytes(delivery.canonical_json_bytes({'attempts':observed}))
+    if not incremental:
+        for domain,observed in by_domain.items():
+            (store/domain/'last_attempt.json').write_bytes(delivery.canonical_json_bytes({'attempts':observed}))
     return attempts,dict(start=start.isoformat(),end=end.isoformat(),target=today.isoformat(),catchup_remaining=end<today)
 
 

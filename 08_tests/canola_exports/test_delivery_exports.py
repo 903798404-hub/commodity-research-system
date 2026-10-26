@@ -329,12 +329,24 @@ def test_failed_manual_run_never_invokes_publication(config, monkeypatch, author
         assert len(results) == 1 and json.loads(results[0].read_text())["status"] == "FAIL"
 
 
-def test_worker_replays_sources_and_rejects_wrong_metadata_image_and_missing_evidence(tmp_path, monkeypatch):
+@pytest.mark.parametrize("transport", ["legacy", "increment_initialized", "increment_existing"])
+def test_worker_replays_sources_and_rejects_wrong_metadata_image_and_missing_evidence(tmp_path, monkeypatch, transport):
     module = host()
     candidate = tmp_path / "candidate"
     sample, sources = bundle(("2026-2027", source())), evidence()
     value = delta(module, sample, sources)
-    for name, content in {"weekly.json": sample, "source_evidence.json": sources}.items():
+    before, prior = None, None
+    if transport == "increment_existing":
+        before, prior = deepcopy(sample), deepcopy(sources)
+        for relative, content in {module.EXPORTS_STABLE:before,module.EXPORTS_SOURCES:prior,
+                                  module.EXPORTS_STATUS:{"old":True}}.items():
+            value["baseline"]["files"][relative] = module._actual_identity(write(tmp_path / "allocation" / relative,content))
+        value["run"]["business_status"] = "no_change"
+    payload, source_payload = sample, sources
+    if transport != "legacy":
+        from agri_research_agent.canola_exports.increment import build
+        payload, source_payload = build(sample, before, sources, prior)
+    for name, content in {"weekly.json": payload, "source_evidence.json": source_payload}.items():
         path = write(candidate / name, content)
         value["payloads"][name] = module._actual_identity(path)
     write(candidate / module.MANIFEST_NAME, value)
@@ -344,7 +356,7 @@ def test_worker_replays_sources_and_rejects_wrong_metadata_image_and_missing_evi
     monkeypatch.setenv("MARKET_DATA_GIT_HEAD", "a" * 40)
     monkeypatch.setenv("MARKET_DATA_GIT_TREE", "b" * 40)
     result = module.worker_validate(producer.DOMAIN, "a" * 40, "b" * 40)
-    assert result["status"] == "PASS" and result["observations"]["added"] == 5
+    assert result["status"] == "PASS" and result["observations"]["added"] == (0 if before else 5)
     with pytest.raises(ValueError, match="RELEASE identity"):
         module.worker_validate(producer.DOMAIN, "c" * 40, "b" * 40)
     value["domain_metadata"]["record_count"] += 1
@@ -354,12 +366,13 @@ def test_worker_replays_sources_and_rejects_wrong_metadata_image_and_missing_evi
     value["domain_metadata"]["record_count"] -= 1
     write(candidate / module.MANIFEST_NAME, value)
     write(candidate / "source_evidence.json", {"schema_version": delivery.EVIDENCE_SCHEMA, "sources": []})
-    with pytest.raises(ValueError, match="CSV evidence missing"):
+    with pytest.raises(ValueError, match="CSV evidence missing|increment baseline differs"):
         module.worker_validate(producer.DOMAIN, "a" * 40, "b" * 40)
 
 
+@pytest.mark.parametrize("incremental", [False, True])
 @pytest.mark.parametrize("mode", ["initialize", "update", "no_change", "status_failure", "drift"])
-def test_host_publication_keeps_other_domains_and_restores_failed_updates(tmp_path, monkeypatch, mode):
+def test_host_publication_keeps_other_domains_and_restores_failed_updates(tmp_path, monkeypatch, mode, incremental):
     module = host()
     allocation, candidate = tmp_path / "allocation", tmp_path / "package"
     contract = module.DOMAIN_CONTRACTS[producer.DOMAIN]
@@ -381,7 +394,12 @@ def test_host_publication_keeps_other_domains_and_restores_failed_updates(tmp_pa
     value = delta(module, sample, sources)
     value["baseline"]["files"] = {relative: module._actual_identity(allocation / relative) for relative in contract["baseline"]}
     value["run"]["business_status"] = "initialized" if mode == "initialize" else "no_change" if mode == "no_change" else "updated"
-    for name, content in {"weekly.json": sample, "source_evidence.json": sources}.items():
+    payload, source_payload = sample, sources
+    if incremental:
+        from agri_research_agent.canola_exports.increment import build
+        payload, source_payload = build(sample, None if mode == "initialize" else before,
+                                        sources, None if mode == "initialize" else evidence())
+    for name, content in {"weekly.json": payload, "source_evidence.json": source_payload}.items():
         value["payloads"][name] = module._actual_identity(write(candidate / name, content))
     write(candidate / module.MANIFEST_NAME, value)
     report_path = write(tmp_path / "report.json", {})
@@ -408,7 +426,10 @@ def test_host_publication_keeps_other_domains_and_restores_failed_updates(tmp_pa
 
     monkeypatch.setattr(module, "_renameat2", exchange)
     if mode == "status_failure":
+        atomic_json = module._atomic_json
         def status_error(path, value):
+            if path != allocation / module.EXPORTS_STATUS:
+                return atomic_json(path, value)
             write(path, value)
             raise OSError("status fsync failure")
         monkeypatch.setattr(module, "_atomic_json", status_error)

@@ -16,11 +16,13 @@ def domain_baseline(config, work, domain, schema):
     delivery.require(delivery._remote_hash(config, config["publisher"]) == config["publisher_sha256"]
                      and delivery._remote_hash(config, policy) == config["policy_sha256"][domain],
                      "scheduled host pins differ")
+    expanded = domain == "commodity_positions"
     result = delivery.strict_json(delivery._ssh(config, ["sudo", "-n", "python3", "-I", "-B",
-        config["publisher"], "snapshot-baseline", "--policy", policy]))
-    delivery.require(set(result) == {"schema_version", "domain", "policy_sha256", "producer",
-        "image_id", "allocation_root", "files", "contents"}
-        and result["schema_version"] == "production-domain-baseline-snapshot/1"
+        config["publisher"], "snapshot-baseline", "--policy", policy] + (["--resolved-positions"] if expanded else [])))
+    keys = {"schema_version", "domain", "policy_sha256", "producer", "image_id", "allocation_root", "files", "contents"}
+    if expanded: keys.add("resolved_positions")
+    delivery.require(set(result) == keys
+        and result["schema_version"] == ("production-domain-baseline-snapshot/2" if expanded else "production-domain-baseline-snapshot/1")
         and result["domain"] == domain and result["producer"] == {
             "commit": config["approved_commit"], "tree": config["approved_tree"], "origin": config["origin"]}
         and result["policy_sha256"] == config["policy_sha256"][domain]
@@ -52,10 +54,74 @@ def domain_baseline(config, work, domain, schema):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(raw)
-    (root / "baseline_manifest.json").write_bytes(delivery.canonical_json_bytes({
-        "schema_version": schema, "source_root": config["remote_allocation"], "files": result["files"]}))
+    manifest = {"schema_version": schema, "source_root": config["remote_allocation"], "files": result["files"]}
+    if expanded:
+        from agri_research_agent.positions import delivery as codec
+        view = result['resolved_positions']
+        codec.exact(view, ('sha256','size_bytes','bytes_base64'), 'resolved positions snapshot')
+        identity = {k:view[k] for k in ('sha256','size_bytes')}
+        host._file_identity(identity)
+        delivery.require(identity['size_bytes'] <= codec.MAX_DOCUMENT, 'resolved positions snapshot exceeds bound')
+        raw = base64.b64decode(view['bytes_base64'], validate=True)
+        delivery.require(len(raw) == identity['size_bytes'] and codec.digest(raw) == identity['sha256'],
+                         'resolved positions transfer differs')
+        (root/'resolved_positions.json').write_bytes(raw)
+        manifest['resolved_positions'] = identity
+    (root / "baseline_manifest.json").write_bytes(delivery.canonical_json_bytes(manifest))
     return {**config, "baseline_root": str(root),
             "baseline_manifest_sha256": delivery.sha256_file(root / "baseline_manifest.json")}
+
+
+def public_basis_preflight(config):
+    """Read only Current, package manifest and the pinned basis release metadata."""
+    from datetime import date
+    from agri_research_agent.pipelines.public_data_delivery import PACKAGE_SCHEMA, PARTITIONED_PACKAGE_SCHEMA
+    pointer = delivery._public_pointer(config)
+    remote = config['remote_store_root']+'/releases/'+pointer['package_id']
+    def read(relative, expected=None, limit=4*1024*1024):
+        raw = delivery._run(['ssh',*delivery.SSH_OPTIONS,'-T',config['ssh_target'],
+                             'cat -- '+remote+'/'+relative],binary=True,timeout=120).stdout
+        delivery.require(0 < len(raw) <= limit, 'public preflight metadata exceeds bound')
+        actual = {'sha256':delivery.hashlib.sha256(raw).hexdigest(),'size_bytes':len(raw)}
+        if expected is not None:
+            delivery.require(actual == expected, 'public basis metadata identity differs')
+        return delivery.strict_json(raw), actual
+    manifest, identity = read('manifest.json')
+    delivery._check_public_pointer(pointer,manifest)
+    delivery.require(manifest['schema_version'] in {PACKAGE_SCHEMA, PARTITIONED_PACKAGE_SCHEMA},
+                     'public basis package schema invalid')
+    entries = manifest['files']
+    delivery.require(type(entries) is list and 0 < len(entries) <= 4096, 'public basis file count invalid')
+    prefix = 'public-market-data/lutou-domestic-basis/'
+    def basis_file(relative):
+        matches = [item for item in entries if item.get('path') == prefix+relative]
+        delivery.require(len(matches) == 1, 'public basis metadata missing or repeated')
+        item = matches[0]
+        return read('data/'+prefix+relative,{k:item[k] for k in ('sha256','size_bytes')},256*1024)
+    current, _ = basis_file('current.json')
+    release = current['release_id']
+    delivery.require(type(release) is str and delivery.re.fullmatch(r'[A-Za-z0-9_-]{1,160}',release),
+                     'public basis release identity invalid')
+    metadata, metadata_identity = basis_file('releases/'+release+'/manifest.json')
+    declared = manifest['current_identities']['lutou-domestic-basis']
+    delivery.require(metadata['schema_version'] == 'domestic-basis-current/4'
+        and metadata['release_id'] == release == declared['release_id']
+        and current['manifest_sha256'] == declared['manifest_sha256']
+        and metadata_identity['sha256'] == current['manifest_sha256'],
+        'public basis Current declaration differs')
+    cutoff = date.fromisoformat(metadata['max_date'])
+    delivery.require(cutoff.isoformat() == metadata['max_date']
+                     and manifest['source_max_dates'].get('nutstore.domestic_basis') == cutoff.isoformat(),
+                     'public basis cutoff differs')
+    proof = {'pointer':pointer,'manifest_sha256':identity['sha256'],'cutoff':cutoff.isoformat()}
+    verify_public_preflight(config,proof)
+    return proof
+
+
+def verify_public_preflight(config, proof):
+    delivery.require(delivery._public_pointer(config) == proof['pointer'], 'public Current moved during preflight')
+    path = config['remote_store_root']+'/releases/'+proof['pointer']['package_id']+'/manifest.json'
+    delivery.require(delivery._remote_hash(config,path) == proof['manifest_sha256'], 'public manifest moved during preflight')
 
 
 def public_baseline(config, destination):

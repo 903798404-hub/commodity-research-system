@@ -9,6 +9,16 @@ from agri_research_agent.sugar_positions.storage import digest, read_snapshot
 
 
 def verified_files(root: Path, project_root: Path, domain: str) -> tuple[dict, dict]:
+    from . import formal_store
+    selected = formal_store.pointer(root.parent) if root.parent.name == "commodity_positions" else None
+    if selected is not None:
+        files = formal_store.archive_files(root.parent, selected, domain)
+        snapshot = validate_domain(read_snapshot(root), project_root, domain)
+        if not snapshot["foreign"] and not snapshot["domestic"]:
+            raise ValueError("不能导出没有已验证数据的板块")
+        if formal_store.pointer(root.parent) != selected:
+            raise ValueError("快照在导出期间发生变化")
+        return snapshot, {name.split("/", 1)[1]: raw for name, raw in files.items()}
     current = (root / "current.json").read_bytes()
     pointer = json.loads(current.decode("utf-8"))
     snapshot = validate_domain(read_snapshot(root), project_root, domain)

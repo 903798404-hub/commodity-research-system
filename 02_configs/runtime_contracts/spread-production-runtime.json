@@ -182,6 +182,12 @@
   ],
   "required_python_modules": [
     "agri_research_agent",
+    "agri_research_agent.monitoring.observations",
+    "agri_research_agent.monitoring.task_ledger",
+    "agri_research_agent.canola_exports.increment",
+    "agri_research_agent.shared.table_increment",
+    "agri_research_agent.shared.table_delivery",
+    "agri_research_agent.soybean_exports.reconciliation",
     "cryptography",
     "streamlit",
     "pandas",
@@ -231,6 +237,50 @@
     }
   ],
   "source_inputs": [
+    {
+      "path": "03_src/agri_research_agent/monitoring/__init__.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/catalog.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/freshness.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/observations.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/monitoring/task_ledger.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/monitoring/observe_pages.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/page_monitor_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/thailand_sugarcane_weather.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/weather/thailand_sugarcane.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/weather/update_thailand_sugarcane.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/thailand_sugarcane_weather_page.py",
+      "role": "runtime_configuration"
+    },
     {
       "path": "09_deploy/runtime_identity/runtime_observation.py",
       "role": "runtime_configuration"
@@ -896,6 +946,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/canola_exports/increment.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/canola_exports/update.py",
       "role": "runtime_configuration"
     },
@@ -949,6 +1003,10 @@
     },
     {
       "path": "03_src/agri_research_agent/pipelines/public_data_freshness.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/public_data_increment.py",
       "role": "runtime_configuration"
     },
     {
@@ -1072,6 +1130,14 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/shared/table_increment.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/shared/table_delivery.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/shared/production_grant.py",
       "role": "runtime_configuration"
     },
@@ -1125,6 +1191,10 @@
     },
     {
       "path": "03_src/agri_research_agent/soybean_exports/research.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/reconciliation.py",
       "role": "runtime_configuration"
     },
     {
@@ -1464,6 +1534,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "04_scripts/validate_public_increment.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "04_scripts/说明.md",
       "role": "runtime_configuration"
     },
@@ -1692,6 +1766,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/positions/formal_store.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/positions/cftc_annual.py",
       "role": "runtime_configuration"
     },
@@ -1873,6 +1951,30 @@
     },
     {
       "path": "04_scripts/update_warehouse_receipts.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "02_configs/conab_growth_glyphs.json",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/brazil_soy_update.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/brazil_soy_scheduled.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/pipelines/conab_growth_chart.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "03_src/agri_research_agent/soybean_exports/fgis_server.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "04_scripts/soybean_exports/run_fgis_server_worker.py",
       "role": "runtime_configuration"
     }
   ],

@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "05_apps"))
 import basis_page
 import soybean_crop_progress_page as crop_page
 import soybean_weekly_page as weekly_page
-from test_basis_page_formal import _formal_public_current_rows
+from test_basis_page_formal import _formal_public_current_rows, mock_public_basis_current
 
 
 def test_gap_lookup_matches_previous_mask_for_irregular_and_duplicate_calendar() -> None:
@@ -58,11 +58,9 @@ def test_cached_png_matches_existing_export_and_rebuilds_after_quote_change(monk
         basis_page.cached_seasonal_report_image.clear()
 
 
-def test_basis_switch_executes_selected_tab_only_and_retains_filters(monkeypatch) -> None:
+def test_basis_switch_executes_selected_tab_only_and_retains_filters(monkeypatch,mock_public_basis_current) -> None:
     rows = _formal_public_current_rows()
-    monkeypatch.setattr(basis_page, "load_basis_page_data", lambda root: (
-        rows.copy(), {"release_id": "performance-test", "manifest_sha256": "a" * 64},
-    ))
+    mock_public_basis_current(rows,{"release_id": "performance-test", "manifest_sha256": "a" * 64})
     calls = []
     for name, label in (("_render_basis_tab", "基差"), ("_render_cash_price_tab", "一口价"), ("_render_wholesale_spread_tab", "批发价差")):
         original = getattr(basis_page, name)
@@ -101,11 +99,9 @@ def test_weekly_switch_does_not_execute_hidden_page(monkeypatch) -> None:
     assert not app.exception and calls == ["crop", "exports"]
 
 
-def test_basis_default_does_not_load_hidden_sugar_but_fallback_still_does(monkeypatch) -> None:
+def test_basis_default_does_not_load_hidden_sugar_but_fallback_still_does(monkeypatch,mock_public_basis_current) -> None:
     rows = _formal_public_current_rows()
-    monkeypatch.setattr(basis_page, "load_basis_page_data", lambda root: (
-        rows.copy(), {"release_id": "performance-test", "manifest_sha256": "a" * 64},
-    ))
+    mock_public_basis_current(rows,{"release_id": "performance-test", "manifest_sha256": "a" * 64})
     calls = []
     monkeypatch.setattr(basis_page, "_optional_sugar_snapshot", lambda root: (calls.append(root) or None, None))
     app = AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('test-current'))", default_timeout=30).run()
@@ -124,11 +120,9 @@ def test_basis_default_does_not_load_hidden_sugar_but_fallback_still_does(monkey
     assert any("Formal Public Basis Current 暂不可用" in warning.value for warning in app.warning)
 
 
-def test_basis_details_load_on_expansion_with_original_rows_and_columns(monkeypatch) -> None:
+def test_basis_details_load_on_expansion_with_original_rows_and_columns(monkeypatch,mock_public_basis_current) -> None:
     rows = _formal_public_current_rows()
-    monkeypatch.setattr(basis_page, "load_basis_page_data", lambda root: (
-        rows.copy(), {"release_id": "detail-test", "manifest_sha256": "a" * 64},
-    ))
+    mock_public_basis_current(rows,{"release_id": "detail-test", "manifest_sha256": "a" * 64})
     app = AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('test-current'))", default_timeout=30).run()
     assert not app.exception and len(app.dataframe) == 1  # Latest quotes remain visible.
     key = "basis_report_detail_basis_华东豆粕（基差）"

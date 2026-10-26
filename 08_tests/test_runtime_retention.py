@@ -199,3 +199,98 @@ def test_restore_refuses_existing_destination(tmp_path):
 def test_minimum_retention_cannot_be_disabled(tmp_path, days, count):
     with pytest.raises(ValueError, match='minimum retention'):
         m.staged_plan(tmp_path, NOW, days, count)
+
+
+def positions_receipt(work, *, added=None):
+    path = work / 'result.json'
+    d = json.loads(path.read_text())
+    d['producer'] = {'commit': 'a' * 40, 'tree': 'b' * 40, 'origin': 'verified-origin'}
+    d['collection'].update(attempts=[{'domain': 'soybean', 'source_id': 'stockapi_DCE_20261014',
+                                      'status': 'ok', 'rows': 10}],
+                           observations={'added_partitions': added or [], 'revised_partitions': []})
+    path.write_text(json.dumps(d))
+    return d
+
+
+def test_all_success_working_copies_expire_but_evidence_and_latest_stay(tmp_path):
+    work, package = eligible(tmp_path)
+    for rel in ('collection/bundle', 'collection/collection', 'baseline'):
+        p = work / rel
+        p.mkdir(parents=True)
+        (p / 'raw.json').write_text('source evidence')
+    (work / 'collection/receipt.json').write_text('retain collection evidence')
+    (work / 'collection/unrecognized').mkdir()
+    plan = m.staged_plan(tmp_path, NOW)
+    assert {Path(x['root']).relative_to(work).as_posix() for x in plan} == {
+        'baseline', 'collection/package', 'collection/bundle', 'collection/collection'}
+    assert all(x['reason'] == 'expired_success' for x in plan)
+
+
+@pytest.mark.parametrize('status', ['FAIL', 'PARTIAL_FAILURE', 'CANDIDATE'])
+def test_verified_positions_replacement_archives_recent_failed_work_and_restores(tmp_path, status):
+    base = tmp_path / 'base'
+    old, package = job(base, 1, status=status, days=0.5)
+    new, new_package = job(base, 2, days=0.1)
+    positions_receipt(old, added=['soybean/domestic/M/2026-10-14'])
+    positions_receipt(new, added=['soybean/domestic/M/2026-10-14'])
+    original = (package / 'history.json').read_bytes()
+    plan = m.staged_plan(base, NOW)
+    assert len(plan) == 1
+    assert plan[0]['reason'] == 'superseded_positions_scope'
+    assert plan[0]['supersession_evidence'][0]['path'] == str(new / 'result.json')
+    state = tmp_path / 'state'
+    state.mkdir()
+    index = Path(m.archive(plan[0], state))
+    m.restore(index, state, tmp_path / 'restored')
+    assert (tmp_path / 'restored/history.json').read_bytes() == original
+    assert new_package.exists() and (old / 'result.json').exists()
+    assert m.staged_plan(base, NOW) == []
+
+
+@pytest.mark.parametrize('change', ['job', 'producer', 'scope', 'failed_source', 'missing_attempts',
+                                  'duplicate_source', 'new_partition', 'revision', 'older', 'future',
+                                  'not_published', 'missing_producer', 'failed_collection'])
+def test_later_success_does_not_automatically_close_other_work(tmp_path, change):
+    old, _ = job(tmp_path, 1, status='FAIL', days=2)
+    new, _ = job(tmp_path, 2, days=1)
+    od = positions_receipt(old)
+    nd = positions_receipt(new)
+    if change == 'job': nd['job'] = 'positions_foreign'
+    elif change == 'producer': nd['producer']['commit'] = 'c' * 40
+    elif change == 'scope': nd['collection']['attempts'][0]['source_id'] = 'another_date'
+    elif change == 'failed_source': od['collection']['attempts'][0]['status'] = 'failed'
+    elif change == 'missing_attempts': od['collection']['attempts'] = []
+    elif change == 'duplicate_source': od['collection']['attempts'] *= 2
+    elif change == 'new_partition': od['collection']['observations']['added_partitions'] = ['unique partition']
+    elif change == 'revision': od['collection']['observations']['revised_partitions'] = ['revised']
+    elif change == 'older': nd['checked_at'] = (NOW - timedelta(days=3)).isoformat()
+    elif change == 'future': nd['checked_at'] = (NOW + timedelta(days=1)).isoformat()
+    elif change == 'not_published': nd['published'] = False
+    elif change == 'missing_producer': od.pop('producer')
+    elif change == 'failed_collection': od['collection']['status'] = 'FAIL'
+    (old / 'result.json').write_text(json.dumps(od))
+    (new / 'result.json').write_text(json.dumps(nd))
+    assert m.staged_plan(tmp_path, NOW) == []
+
+
+def test_replacement_receipt_is_revalidated_before_removal(tmp_path):
+    old, package = job(tmp_path / 'base', 1, status='CANDIDATE')
+    new, _ = job(tmp_path / 'base', 2, days=1)
+    positions_receipt(old)
+    positions_receipt(new)
+    item = m.staged_plan(tmp_path / 'base', NOW)[0]
+    (new / 'result.json').write_text('{}')
+    state = tmp_path / 'state'
+    state.mkdir()
+    with pytest.raises(ValueError, match='replacement receipt changed'):
+        m.archive(item, state)
+    assert package.exists()
+
+
+def test_superseded_work_still_respects_runtime_and_rollback_pins(tmp_path):
+    old, package = job(tmp_path, 1, status='CANDIDATE')
+    new, _ = job(tmp_path, 2, days=1)
+    positions_receipt(old)
+    positions_receipt(new)
+    assert m.staged_plan(tmp_path, NOW, busy=[old]) == []
+    assert m.staged_plan(tmp_path, NOW, pins=[package]) == []

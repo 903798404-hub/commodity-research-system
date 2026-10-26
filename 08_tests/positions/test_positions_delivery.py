@@ -267,12 +267,25 @@ def test_invalid_input_never_invokes_publish(config, authorized, monkeypatch, fa
 
 @pytest.mark.parametrize("mode", ["initialize", "update", "no_change", "status_failure", "drift", "materialized_drift"])
 def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode):
+    _publication_is_atomic(tmp_path, monkeypatch, mode, incremental=False)
+
+
+@pytest.mark.parametrize("mode", ["update", "no_change", "status_failure", "drift", "materialized_drift"])
+def test_increment_publication_is_atomic_retains_history_and_protects_canada(tmp_path, monkeypatch, mode):
+    _publication_is_atomic(tmp_path, monkeypatch, mode, incremental=True)
+
+
+def _publication_is_atomic(tmp_path, monkeypatch, mode, incremental):
     host = producer.delivery._host_contract()
     allocation, candidate = tmp_path / "allocation", tmp_path / "package"
     contract = host.DOMAIN_CONTRACTS[producer.DOMAIN]
     formal = allocation / contract["domain_dir"]
     old = None if mode == "initialize" else archive()
     sample = archive(amount=21) if mode not in {"initialize", "no_change"} else archive()
+    transport = sample
+    if incremental:
+        from test_positions_incremental import increment
+        transport, sample = increment(old, changed=mode != 'no_change')
     write(allocation / host.EXPORTS_STABLE, {"canada": "untouched"})
     if old is not None:
         write(allocation / host.POSITIONS_STABLE, old)
@@ -281,7 +294,7 @@ def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, mon
     semantic = delivery.observations(sample, old, ROOT)
     value = delta(sample, old)
     value["baseline"]["files"] = {name: host._actual_identity(allocation / name) for name in contract["baseline"]}
-    value["payloads"]["positions_archive.json"] = host._actual_identity(write(candidate / "positions_archive.json", sample))
+    value["payloads"]["positions_archive.json"] = host._actual_identity(write(candidate / "positions_archive.json", transport))
     write(candidate / host.MANIFEST_NAME, value)
     report = write(tmp_path / "report.json", {})
     policy = {"policy_id": "positions-policy", "domain": producer.DOMAIN, "allocation_root": str(allocation), "approved_producer": value["producer"]}
@@ -304,18 +317,29 @@ def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, mon
     if mode == "status_failure":
         def status_error(path, val):
             write(path, val)
-            raise OSError("status fsync failure")
+            if path == allocation / host.POSITIONS_STATUS:
+                raise OSError("status fsync failure")
         monkeypatch.setattr(host, "_atomic_json", status_error)
     if mode == "drift": write(allocation / host.POSITIONS_STATUS, {"concurrent": True})
     if mode == "materialized_drift": (formal / "palm/current.json").write_bytes(b"corrupt")
     before = {str(p): p.read_bytes() for p in allocation.rglob("*") if p.is_file()}
+    if old is not None:
+        monkeypatch.setattr(host, "_copy_tree", lambda *a: pytest.fail("formal history cloned"))
+        monkeypatch.setattr(delivery, "materialize", lambda *a: pytest.fail("full history materialized"))
     if mode in {"status_failure", "drift", "materialized_drift"}:
         with pytest.raises((ValueError, OSError)):
             host.publish(tmp_path / "policy", value["delta_id"], report, host.sha256_file(report))
         for path, raw in before.items():
             assert Path(path).read_bytes() == raw
-        assert {str(p) for p in formal.rglob("*") if p.is_file()} == {
-            path for path in before if Path(path).is_relative_to(formal)}
+        # A failed atomic pointer commit retains sealed additions as recovery
+        # evidence. Every pre-existing byte and the old reader view stay intact.
+        extras = {p for p in formal.rglob("*") if p.is_file() and str(p) not in before}
+        from agri_research_agent.positions import formal_store
+        for path in extras:
+            assert path.is_relative_to(formal / formal_store.DIRECTORY)
+            assert path.stem == delivery.digest(path.read_bytes())
+        if mode == "status_failure":
+            assert delivery.read_archive(allocation / host.POSITIONS_STABLE) == old
     else:
         result = host.publish(tmp_path / "policy", value["delta_id"], report, host.sha256_file(report))
         assert result["status"] == ("NO_CHANGE" if mode == "no_change" else "PUBLISHED")
@@ -324,6 +348,16 @@ def test_publication_is_atomic_retains_history_and_protects_canada(tmp_path, mon
         if old is not None:
             for name, raw in delivery.decode(old).items():
                 if "/releases/" in name or "/raw/" in name: assert (formal / name).read_bytes() == raw
+        if mode == "update":
+            assert result["schema_version"] == "production-data-delta-publication/2"
+            assert result["storage_metrics"]["full_history_copies"] == 0
+            assert set(result["backup_files"]) == {"status.json", "position-view.json"}
+            assert delivery.read_archive(allocation / host.POSITIONS_STABLE) == sample
+            retained = {str(p):p.read_bytes() for p in formal.rglob("*") if p.is_file()}
+            rolled = host.rollback(tmp_path / "policy", result["receipt_path"], result["receipt_sha256"])
+            assert rolled["status"] == "ROLLED_BACK" and rolled["full_history_copies"] == 0
+            assert delivery.read_archive(allocation / host.POSITIONS_STABLE) == old
+            assert retained == {str(p):p.read_bytes() for p in formal.rglob("*") if p.is_file()}
     assert delivery.read_json(allocation / host.EXPORTS_STABLE) == {"canada": "untouched"}
 
 

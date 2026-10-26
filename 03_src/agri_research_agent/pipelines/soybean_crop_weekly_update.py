@@ -854,9 +854,19 @@ def run_soybean_crop_weekly_update(
     sleep: Callable[[float], None] | None = None,
     env: Mapping[str, str] | None = None,
     git_head: str | None = None,
+    baseline_root: Path | None = None,
+    incremental_transport: bool = False,
 ) -> dict[str, Any]:
     """Fetch one current year, validate a complete pair, and publish safely."""
 
+    project_root = Path(project_root).resolve()
+    if (baseline_root is not None or incremental_transport) and not dry_run:
+        raise SoybeanWeeklyUpdateError("read-only baseline and incremental transport require dry_run=True")
+    if baseline_root is not None:
+        baseline_root = Path(baseline_root).resolve(strict=True)
+        if not baseline_root.is_dir() or (baseline_root == project_root
+                or baseline_root in project_root.parents or project_root in baseline_root.parents):
+            raise SoybeanWeeklyUpdateError("Crop baseline and candidate roots must be disjoint")
     environment = os.environ if env is None else env
     deployment_git_head = resolve_deployment_git_head(
         project_root,
@@ -869,6 +879,7 @@ def run_soybean_crop_weekly_update(
     timestamp = started_at.strftime("%Y%m%dT%H%M%S%fZ")
     run_id = f"{current_year}-{timestamp}-{uuid.uuid4().hex[:8]}"
     paths = soybean_weekly_update_paths(project_root)
+    baseline_paths = soybean_weekly_update_paths(baseline_root or project_root)
     audit_subdir = "dry_runs" if dry_run else "updates"
     audit_dir = paths["audit_root"] / audit_subdir
     audit_json = audit_dir / f"soybeans_crop_weekly_update_{run_id}.json"
@@ -1086,9 +1097,15 @@ def run_soybean_crop_weekly_update(
 
         raw_relative = str(audit["raw_path"])
         try:
+            baseline_files = {key: path for key, path in baseline_paths.items()
+                              if key in {"stable_progress", "stable_condition", "legacy_progress", "legacy_condition"}
+                              and path.is_file()}
+            baseline_hashes = {key: _sha256(path) for key, path in baseline_files.items()}
             baseline_progress, baseline_condition, initialized, baseline_source = (
-                _read_baseline_pair(paths)
+                _read_baseline_pair(baseline_paths)
             )
+            if baseline_hashes != {key: _sha256(path) for key, path in baseline_files.items()}:
+                raise ValueError("Crop baseline changed while being read")
             audit["stable_files_initialized"] = initialized
             audit["baseline_source"] = baseline_source
             audit["progress_old_rows"] = len(baseline_progress)
@@ -1155,26 +1172,38 @@ def run_soybean_crop_weekly_update(
             candidate_condition_path = (
                 candidate_dir / "soybeans_crop_condition_weekly.parquet"
             )
-            reloaded_progress, progress_candidate_sha = (
-                _write_and_verify_candidate(
-                    candidate_progress, candidate_progress_path
-                )
-            )
-            reloaded_condition, condition_candidate_sha = (
-                _write_and_verify_candidate(
-                    candidate_condition, candidate_condition_path
-                )
-            )
+            if incremental_transport:
+                from agri_research_agent.shared import table_increment
+
+                reloaded = {}
+                identities = {}
+                selected_paths = {}
+                for family, frame, baseline, path in (
+                    ("progress", candidate_progress, baseline_progress, candidate_progress_path),
+                    ("condition", candidate_condition, baseline_condition, candidate_condition_path),
+                ):
+                    key = f"{'legacy' if initialized else 'stable'}_{family}"
+                    options = dict(baseline_sha256=baseline_hashes[key], key_columns=CROP_STABLE_KEY,
+                        scope_column="calendar_year", scope_values=[current_year],
+                        refresh_columns=("retrieved_at_utc", "raw_snapshot"))
+                    payload = table_increment.build(frame, baseline, **options)
+                    restored = table_increment.resolve(payload, baseline, **options)
+                    if not table_increment.equivalent(restored, frame, CROP_STABLE_KEY):
+                        raise ValueError("Crop increment round-trip differs")
+                    reloaded[family] = restored
+                    selected_paths[family] = path.with_suffix(".increment.json")
+                    identities[family] = payload
+                reloaded_progress, reloaded_condition = reloaded["progress"], reloaded["condition"]
+                candidate_progress_path, candidate_condition_path = selected_paths["progress"], selected_paths["condition"]
+            else:
+                reloaded_progress, progress_candidate_sha = _write_and_verify_candidate(candidate_progress, candidate_progress_path)
+                reloaded_condition, condition_candidate_sha = _write_and_verify_candidate(candidate_condition, candidate_condition_path)
             audit["candidate_progress_path"] = _relative(
                 candidate_progress_path, project_root
             )
             audit["candidate_condition_path"] = _relative(
                 candidate_condition_path, project_root
             )
-            audit["candidate_sha256"] = {
-                "progress": progress_candidate_sha,
-                "condition": condition_candidate_sha,
-            }
 
             validation = validate_candidate_pair(
                 baseline_progress=baseline_progress,
@@ -1187,6 +1216,12 @@ def run_soybean_crop_weekly_update(
                 duplicate_counts=duplicate_counts,
                 display_config=paths["display_config"],
             )
+            if incremental_transport:
+                # Only serialize after the same complete-pair domain gate passes.
+                for family, path in selected_paths.items():
+                    _atomic_write_text(path, _json_text(identities[family]))
+                progress_candidate_sha, condition_candidate_sha = _sha256(candidate_progress_path), _sha256(candidate_condition_path)
+            audit["candidate_sha256"] = {"progress": progress_candidate_sha, "condition": condition_candidate_sha}
             progress_diff = compare_business_records(
                 baseline_progress, reloaded_progress
             )

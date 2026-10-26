@@ -32,6 +32,12 @@ def preview_root(project_root: Path):
 
 
 def read_snapshot(root: Path):
+    from agri_research_agent.positions.formal_store import read_snapshot as read_formal
+    payload = read_formal(root)
+    if payload is not None:
+        unique_rows(payload["foreign"], FOREIGN_KEY)
+        unique_rows(payload["domestic"], DOMESTIC_KEY)
+        return payload
     pointer = root / "current.json"
     if not pointer.exists():
         return {"schema_version": 1, "foreign": [], "domestic": [], "sources": {}, "attempts": []}

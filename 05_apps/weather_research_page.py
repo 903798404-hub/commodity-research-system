@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from crop_weather_page import render_weather_page
 
@@ -78,3 +80,57 @@ def render_weather_research_page(page_key: str) -> None:
         return
 
     st.info("该地区天气研究页面尚未接入。")
+
+
+def weather_service_url(workspace_url: str, *, embedded: bool = False) -> str:
+    """Use the site's host and scheme; never forward queries or credentials.
+
+    The approved Guangxi service uses the standard web port on the same host.
+    Loopback development uses the retained local reader on port 8856.
+    """
+    origin = urlsplit(workspace_url)
+    if origin.scheme not in {"http", "https"} or not origin.hostname:
+        raise ValueError("当前工作台地址不可用")
+    if origin.username or origin.password:
+        raise ValueError("工作台地址不能包含身份信息")
+    hostname = origin.hostname
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        host += ":8856"
+    return urlunsplit((origin.scheme, host, "/", "embed=true" if embedded else "", ""))
+
+
+def render_guangxi_weather_page() -> None:
+    """Embed the existing live reader without collecting or copying data."""
+    st.title("广西甘蔗天气研究")
+    st.caption("14市 · 29个代表点 · 2024年甘蔗面积权重 · IFS历史与2020—2024年均值 · EC/GFS预报")
+    try:
+        url = weather_service_url(st.context.url)
+        embedded_url = weather_service_url(st.context.url, embedded=True)
+    except ValueError as exc:
+        st.warning(str(exc))
+        return
+    st.link_button("全屏打开广西天气", url)
+    components.iframe(embedded_url, height=1800, scrolling=True)
+
+
+def yunnan_weather_service_url(workspace_url: str, *, embedded: bool = False) -> str:
+    """Use the dedicated Yunnan reader on the same host, without private URL parts."""
+    validated = urlsplit(weather_service_url(workspace_url))
+    hostname = validated.hostname
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    return urlunsplit((validated.scheme, host + ":8858", "/", "embed=true" if embedded else "", ""))
+
+
+def render_yunnan_weather_page() -> None:
+    """Read the independently updated Yunnan snapshot; navigation never collects."""
+    st.title("云南甘蔗天气研究")
+    st.caption("13州市 · 26个蔗区乡镇代表点 · 2024年甘蔗面积权重 · IFS历史与2020—2024年均值 · EC/GFS预报")
+    try:
+        url = yunnan_weather_service_url(st.context.url)
+        embedded_url = yunnan_weather_service_url(st.context.url, embedded=True)
+    except ValueError as exc:
+        st.warning(str(exc))
+        return
+    st.link_button("全屏打开云南天气", url)
+    components.iframe(embedded_url, height=1800, scrolling=True)

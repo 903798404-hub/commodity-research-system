@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections import Counter
 import re
 import shutil
+import stat
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -58,9 +60,14 @@ def seal_immutable_candidate(
             if not final.is_dir():
                 raise ImmutableCandidateError("sealed candidate is not a directory")
             return final, result
-        except BaseException:
+        except BaseException as error:
             if building.exists():
-                shutil.rmtree(building)
+                try:
+                    shutil.rmtree(building)
+                except OSError:
+                    # Retain a failed private candidate rather than changing
+                    # attributes on an external history inode during cleanup.
+                    error.add_note(f"Failed candidate retained for recovery: {building}")
             raise
 
 
@@ -73,8 +80,21 @@ def _validate_tree(root: Path) -> None:
 
 
 def _fsync_tree(root: Path) -> None:
-    for path in root.rglob("*"):
-        if path.is_file():
-            with path.open("r+b") as handle:
-                handle.flush()
+    files = [path for path in root.rglob("*") if path.is_file()]
+    links = Counter((p.stat().st_dev, p.stat().st_ino) for p in files)
+    for path in files:
+        # Windows _commit needs a writable descriptor, even for unchanged
+        # bytes. All aliases must belong to this private candidate tree.
+        mode = stat.S_IMODE(path.stat().st_mode)
+        readonly_windows = os.name == "nt" and not mode & stat.S_IWRITE
+        if readonly_windows:
+            value = path.stat()
+            if value.st_nlink != links[(value.st_dev, value.st_ino)]:
+                raise ImmutableCandidateError("cannot change shared read-only candidate attributes")
+            path.chmod(mode | stat.S_IWRITE)
+        try:
+            with path.open("r+b" if os.name == "nt" else "rb") as handle:
                 os.fsync(handle.fileno())
+        finally:
+            if readonly_windows:
+                path.chmod(mode)

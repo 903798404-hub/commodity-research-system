@@ -7,7 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / '03_src'))
-from agri_research_agent.positions.delivery import read_json
+from agri_research_agent.positions.delivery import read_archive
 from agri_research_agent.positions.server_collection import collect
 from agri_research_agent.soybean_margin.api_sources import SHANGHAI
 
@@ -23,7 +23,7 @@ def main(argv=None):
     try:
         if args.date > datetime.now(SHANGHAI).date():
             parser.error('不允许请求未来持仓日期')
-        baseline = read_json(args.baseline)
+        baseline = read_archive(args.baseline)
         if (args.output.absolute().is_relative_to(args.baseline.absolute().parent)
                 or args.baseline.absolute().is_relative_to(args.output.absolute())):
             parser.error('候选不能写入基线目录')

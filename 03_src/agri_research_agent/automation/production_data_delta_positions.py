@@ -47,12 +47,19 @@ def verify_baseline(config):
     root = delivery._absolute(config["baseline_root"])
     path = delivery._unlinked(root / "baseline_manifest.json")
     delivery.require(delivery.sha256_file(path) == config["baseline_manifest_sha256"], "positions baseline pin differs")
-    manifest = positions.exact(positions.read_json(path), ("schema_version", "source_root", "files"), "positions baseline")
+    manifest = positions.read_json(path)
+    keys = ("schema_version", "source_root", "files")
+    positions.exact(manifest, (*keys, "resolved_positions") if "resolved_positions" in manifest else keys, "positions baseline")
     delivery.require(manifest["schema_version"] == BASELINE_SCHEMA and manifest["source_root"] == config["remote_allocation"],
                      "positions baseline is not server snapshot")
     files = manifest["files"]
     delivery.require(type(files) is dict and set(files) == set(host.DOMAIN_CONTRACTS[DOMAIN]["baseline"]), "positions baseline file set differs")
     expected = {"baseline_manifest.json"}
+    if "resolved_positions" in manifest:
+        host._file_identity(manifest["resolved_positions"])
+        view = delivery._unlinked(root / "resolved_positions.json")
+        delivery.require(delivery._identity(view) == manifest["resolved_positions"], "positions resolved baseline differs")
+        expected.add("resolved_positions.json")
     for relative, identity in files.items():
         host._file_identity(identity, nullable=True)
         path = delivery._unlinked(root / relative)
@@ -65,6 +72,24 @@ def verify_baseline(config):
     actual = {p.relative_to(root).as_posix() for p in root.rglob("*") if delivery._unlinked(p).is_file()}
     delivery.require(actual == expected, "positions baseline contains unexpected files")
     return files
+
+
+def load_baseline(config):
+    """Keep CAS pins on physical files while reading the active logical view."""
+    host = delivery._host_contract()
+    files = verify_baseline(config)
+    if files[host.POSITIONS_STABLE] is None: return None
+    root = Path(config["baseline_root"])
+    manifest = positions.read_json(root / "baseline_manifest.json")
+    status = positions.read_json(root / host.POSITIONS_STATUS)
+    if "resolved_positions" in manifest:
+        raw = (root / "resolved_positions.json").read_bytes()
+        selected = status.get("position_store")
+        expected = (selected["archive_sha256"] if selected is not None else
+                    positions.digest(positions.canonical(positions.read_json(root / host.POSITIONS_STABLE))))
+        delivery.require(positions.digest(raw) == expected, "positions logical view is not status-pinned")
+        return positions.strict_json(raw)
+    return positions.read_archive(root / host.POSITIONS_STABLE)
 
 
 def run_positions(config, *, publish=False):
@@ -88,7 +113,7 @@ def run_positions(config, *, publish=False):
         try:
             host = delivery._host_contract()
             baseline_files = verify_baseline(config)
-            baseline = positions.read_json(baseline_root / host.POSITIONS_STABLE) if baseline_files[host.POSITIONS_STABLE] is not None else None
+            baseline = load_baseline(config)
             manifest_path = delivery._unlinked(bundle_root / "bundle.json")
             delivery.require(delivery.sha256_file(manifest_path) == config["bundle_manifest_sha256"], "positions bundle pin differs")
             archive = positions.archive_bundle(bundle_root, delivery.ROOT)

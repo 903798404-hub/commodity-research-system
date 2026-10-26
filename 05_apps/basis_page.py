@@ -26,10 +26,13 @@ from agri_research_agent.data_sources.basis_entry import (  # noqa: E402
 )
 from agri_research_agent.market_data.public_basis_current import (  # noqa: E402
     PublicBasisCurrentError,
-    load_public_basis_current,
-    resolve_public_basis_current_identity,
 )
-from agri_research_agent.summary_engine.basis import build_basis_summary  # noqa: E402
+from agri_research_agent.summary_engine.basis import (  # noqa: E402
+    DISPLAY_COMMODITY_MAP,
+    filter_basis_display_data,
+    load_shared_basis_current,
+    load_shared_basis_summary,
+)
 from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
     configure_matplotlib_chinese_fonts,
 )
@@ -42,13 +45,6 @@ VALUE_AXIS_LABELS = {
     "basis": f"基差（{UNIT_LABEL}）",
     "cash_price": f"一口价（{UNIT_LABEL}）",
     "spread_value": f"价差（{UNIT_LABEL}）",
-}
-DISPLAY_COMMODITY_MAP = {
-    "一豆": "豆油",
-    "24度": "棕榈油",
-    "三菜": "菜油",
-    "豆粕": "豆粕",
-    "菜粕": "菜粕",
 }
 SUPPORTED_COMMODITY_CODES = set(DISPLAY_COMMODITY_MAP)
 EXCLUDED_COMMODITY_CODES = {"一葵", "一级玉米油", "葵粕"}
@@ -138,19 +134,7 @@ def _options(dataframe: pd.DataFrame, column: str) -> list[str]:
 
 
 def filter_display_data(dataframe: pd.DataFrame) -> pd.DataFrame:
-    if "commodity" not in dataframe.columns:
-        return dataframe.copy()
-    commodity_code = dataframe["commodity"].astype("string").str.strip()
-    filtered = dataframe[commodity_code.isin(SUPPORTED_COMMODITY_CODES)].copy()
-    filtered["commodity_code"] = commodity_code.loc[filtered.index]
-    filtered["commodity"] = filtered["commodity_code"].map(
-        DISPLAY_COMMODITY_MAP
-    ).astype("string")
-    if "delivery_month" in filtered.columns:
-        filtered = filtered[
-            filtered["delivery_month"].astype(str).eq("现货")
-        ].copy()
-    return filtered
+    return filter_basis_display_data(dataframe)
 
 
 def prepare_cash_price_data(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -917,29 +901,10 @@ def _render_legacy_excel_upload() -> None:
                 st.error(f"Excel 解析失败：{exc}")
 
 
-@st.cache_data(show_spinner=False)
-def _cached_public_basis_page_data(
-    public_current_root: str,
-    release_id: str,
-    manifest_sha256: str,
-) -> tuple[pd.DataFrame, dict[str, object]]:
-    snapshot = load_public_basis_current(
-        public_current_root,
-        expected_release_id=release_id,
-        expected_manifest_sha256=manifest_sha256,
-    )
-    return snapshot.records, snapshot.source_identity
-
-
 def load_basis_page_data(
     public_current_root: str | Path,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    identity = resolve_public_basis_current_identity(public_current_root)
-    return _cached_public_basis_page_data(
-        str(Path(public_current_root).resolve()),
-        identity.release_id,
-        identity.manifest_sha256,
-    )
+    return load_shared_basis_current(public_current_root)
 
 
 def _optional_sugar_snapshot(configured: Path):
@@ -974,12 +939,10 @@ def render_basis_page(public_current_root: Path, sugar_history_root: Path | None
         return
 
     try:
-        summary = build_basis_summary(
-            data,
-            source_identity=source_identity,
-            source_dataset="public_domestic_basis_current",
+        summary = load_shared_basis_summary(
+            public_current_root, view="display", expected_source_identity=source_identity,
         )
-    except (OSError, ValueError, KeyError) as exc:
+    except (PublicBasisCurrentError, OSError, ValueError, KeyError) as exc:
         st.warning(f"基差摘要暂不可用：{exc}")
         summary = None
 

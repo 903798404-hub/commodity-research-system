@@ -62,6 +62,10 @@ _SSH_OPTIONS = (
 _DEFAULT_TRANSPORT_TIMEOUT_SECONDS = 3600.0
 _APPLICATION_SERVICE_LABEL = "market-data.service=spread-dashboard"
 _APPLICATION_IDENTITY_SOURCE = "running-container:market-data.service=spread-dashboard"
+_APPLICATION_CANDIDATE_LIMIT = 32
+_APPLICATION_INSPECT_FORMAT = (
+    '{"State":{"Running":{{json .State.Running}}},"Mounts":{{json .Mounts}}}'
+)
 _APPLICATION_GATE_SCRIPT = ROOT / "04_scripts" / "application_runtime_readability_gate.py"
 _transport_deadline: float | None = None
 
@@ -244,46 +248,68 @@ def _discover_application_runtime(target: str, store: str) -> dict[str, object]:
         "--format", "{{.ID}}|{{.Names}}",
     ])
     matches = [line.split("|", 1) for line in containers.stdout.splitlines() if line.strip()]
-    if containers.returncode != 0 or len(matches) != 1 or len(matches[0]) != 2:
+    if containers.returncode != 0 or not matches or len(matches) > _APPLICATION_CANDIDATE_LIMIT:
         raise RuntimeError("exact running application container could not be resolved")
-    container_id, container_name = matches[0]
-    if not container_id or not container_name:
-        raise RuntimeError("application container identity is invalid")
-
-    inspected = _ssh(target, ["docker", "inspect", container_id])
-    try:
-        values = json.loads(inspected.stdout)
-        detail = values[0]
-    except (IndexError, KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError("application container inspection is invalid") from exc
-    if (
-        inspected.returncode != 0
-        or not isinstance(values, list)
-        or len(values) != 1
-        or not isinstance(detail, dict)
-        or not isinstance(detail.get("State"), dict)
-        or detail["State"].get("Running") is not True
-        or not isinstance(detail.get("Mounts"), list)
-    ):
-        raise RuntimeError("application container is not a single running instance")
-
     host_store = PurePosixPath(store)
-    candidates: list[tuple[int, PurePosixPath]] = []
-    for mount in detail["Mounts"]:
-        if not isinstance(mount, dict) or mount.get("Type") != "bind":
+    eligible: list[tuple[str, str, PurePosixPath]] = []
+    seen: set[str] = set()
+    for match in matches:
+        if len(match) != 2 or not all(match) or match[0] in seen:
+            raise RuntimeError("application container identity is invalid")
+        container_id, container_name = match
+        if not re.fullmatch(r"[0-9a-f]{6,64}", container_id):
+            raise RuntimeError("application container identity is invalid")
+        seen.add(container_id)
+        # Collectors inherit the image's service label. Inspect only the mount
+        # projection: never retrieve Config.Env or use image labels as proof
+        # that a container actually reads this production store.
+        inspected = _ssh(target, ["docker", "inspect", "--format", _APPLICATION_INSPECT_FORMAT, container_id])
+        if inspected.returncode != 0:
+            # A short-lived collector may exit between ps and inspect. Only
+            # ignore it after proving that this exact ID is no longer running.
+            running = _ssh(target, ["docker", "ps", "--filter", f"id={container_id}", "--format", "{{.ID}}"])
+            if running.returncode != 0 or running.stdout.strip():
+                raise RuntimeError("application container inspection failed")
             continue
         try:
-            source = PurePosixPath(str(mount["Source"]))
-            destination = PurePosixPath(str(mount["Destination"]))
-            relative = host_store.relative_to(source)
-        except (KeyError, ValueError):
+            detail = json.loads(inspected.stdout)
+        except ValueError as exc:
+            raise RuntimeError("application container inspection is invalid") from exc
+        if (
+            not isinstance(detail, dict)
+            or not isinstance(detail.get("State"), dict)
+            or type(detail["State"].get("Running")) is not bool
+            or not isinstance(detail.get("Mounts"), list)
+        ):
+            raise RuntimeError("application container inspection is invalid")
+        if not detail["State"]["Running"]:
             continue
-        if mount.get("RW") is not False:
-            raise RuntimeError("application package-store mount must be read-only")
-        candidates.append((len(source.parts), destination / relative))
-    if not candidates:
-        raise RuntimeError("application container cannot access the package store")
-    _, container_store = max(candidates, key=lambda item: item[0])
+        candidates: list[tuple[int, PurePosixPath]] = []
+        for mount in detail["Mounts"]:
+            if not isinstance(mount, dict) or mount.get("Type") != "bind":
+                continue
+            if not isinstance(mount.get("Source"), str) or not isinstance(mount.get("Destination"), str):
+                raise RuntimeError("application container mount schema is invalid")
+            source = PurePosixPath(mount["Source"])
+            destination = PurePosixPath(mount["Destination"])
+            if not source.is_absolute() or not destination.is_absolute() or ".." in source.parts or ".." in destination.parts:
+                raise RuntimeError("application container mount path is invalid")
+            try:
+                relative = host_store.relative_to(source)
+            except ValueError:
+                continue
+            if mount.get("RW") is not False:
+                raise RuntimeError("application package-store mount must be read-only")
+            candidates.append((len(source.parts), destination / relative))
+        if candidates:
+            longest = max(item[0] for item in candidates)
+            paths = {path for depth, path in candidates if depth == longest}
+            if len(paths) != 1:
+                raise RuntimeError("application package-store mount is ambiguous")
+            eligible.append((container_id, container_name, paths.pop()))
+    if len(eligible) != 1:
+        raise RuntimeError("exact running application container could not be resolved for package store")
+    container_id, container_name, container_store = eligible[0]
 
     code = (
         "import json,os;"

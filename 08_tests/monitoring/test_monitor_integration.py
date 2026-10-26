@@ -1,0 +1,306 @@
+from datetime import datetime, timedelta, timezone
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+import pandas as pd
+import pytest
+
+from agri_research_agent.monitoring import observations
+from agri_research_agent.monitoring.catalog import RULES, JOBS
+from agri_research_agent.monitoring.freshness import Observation, SCHEMA, reconcile, evaluate
+from agri_research_agent.monitoring.observations import Inputs, Reader, collect, grouped_dates, last_date, weather_observation
+
+ROOT = Path(__file__).resolve().parents[2]
+NOW = datetime(2026,10,22,8,tzinfo=timezone.utc)
+
+
+def load(name, path):
+    spec=importlib.util.spec_from_file_location(name,path)
+    module=importlib.util.module_from_spec(spec)
+    sys.modules[name]=module
+    spec.loader.exec_module(module)
+    return module
+
+
+def host():
+    return load('monitor_host_test',ROOT/'09_deploy/page_monitor/run.py')
+
+
+def inputs(tmp_path):
+    return Inputs(*([tmp_path]*7))
+
+
+def test_navigation_has_explicit_dependency_coverage():
+    navigation=load('monitor_navigation_test',ROOT/'05_apps/navigation.py')
+    keys={item.key for group in navigation.NAVIGATION_GROUPS for item in group.items}
+    assert {page for rule in RULES for page in rule.pages} == keys
+    assert all(rule.job is None or rule.job in JOBS for rule in RULES)
+
+
+def test_fx_monitor_matches_the_served_page_currency_scope():
+    from agri_research_agent.market_data.foreign_fx import BY_CODE
+    monitored = {rule.identity.removeprefix('fx_') for rule in RULES if rule.identity.startswith('fx_')}
+    assert monitored == set(BY_CODE)
+
+
+def test_removed_scope_is_not_reported_as_successful_data_backfill():
+    previous={'incidents':{'fx_EUR':{'label':'EUR日度汇率','first_seen_at':NOW.isoformat()}}}
+    result=reconcile([],previous,NOW+timedelta(minutes=15))
+    assert result['events'][0]['kind']=='SCOPE_REMOVED'
+    assert '未认定为数据补更' in result['events'][0]['reason']
+    assert result['incidents']=={}
+
+
+def test_excluded_weather_never_calls_observer_and_failed_domain_isolated(tmp_path,monkeypatch):
+    called=[]
+    def read(self,identity):
+        called.append(identity)
+        if identity=='fx_AUD':
+            raise ValueError('corrupt native input')
+        return Observation('2026-10' if identity in {'usda','oil_world'} else '2026-10-21')
+    monkeypatch.setattr(Reader,'read',read)
+    rows=collect(inputs(tmp_path),NOW)
+    assert len(rows)==len(RULES)
+    excluded={'weather_USA','weather_BRA','weather_CAN','weather_IDN','weather_MYS'}
+    assert not excluded.intersection(called)
+    assert {r['identity'] for r in rows if r['status']=='EXCLUDED'}==excluded
+    assert next(r for r in rows if r['identity']=='fx_AUD')['status']=='ERROR'
+    assert not next(r for r in rows if r['identity']=='fx_AUD')['retry_eligible']
+    assert next(r for r in rows if r['identity']=='fx_CAD')['actual_date']=='2026-10-21'
+
+
+def test_shared_source_reads_once_and_rethrows_original_failure(tmp_path):
+    reader=Reader(inputs(tmp_path),NOW);calls=[]
+    def fail():
+        calls.append(1)
+        raise ValueError('failed identity')
+    for _ in range(2):
+        with pytest.raises(ValueError,match='failed identity'):
+            reader.cached('shared',fail)
+    assert calls==[1]
+
+
+def test_independent_series_cutoff_does_not_hide_stale_region():
+    frame=pd.DataFrame({'region':['A','A','B'],'date':['2026-10-20','2026-10-21','2026-10-18']})
+    value=grouped_dates(frame,['region'],'date')
+    assert value.actual=='2026-10-18'
+    assert sorted(value.extra['series_dates'].values())==['2026-10-18','2026-10-21']
+    assert grouped_dates(frame.iloc[:0],['region'],'date').actual is None
+
+
+def test_invalid_data_dates_fail_closed():
+    with pytest.raises(ValueError):
+        last_date(['2026-10-21','not a date'])
+
+
+def test_forecast_end_in_future_is_not_proof_of_complete_14_days():
+    history=pd.DataFrame({'region':['A'],'date':['2026-10-21']})
+    forecast=pd.DataFrame({'region':['A']*14,'model':['EC']*14,
+        'date':pd.date_range('2026-10-22',periods=14)})
+    ok=weather_observation(history,forecast,'date',['region','model'],NOW)
+    assert ok.actual=='2026-10-21' and ok.error is None
+    broken=weather_observation(history,forecast.drop(index=3),'date',['region','model'],NOW)
+    assert broken.actual=='2026-10-21' and broken.error
+
+
+def test_reminders_resolve_only_after_actual_data_advances():
+    rule=next(r for r in RULES if r.identity=='fx_CNY')
+    old=evaluate(rule,Observation('2026-10-19'),NOW)
+    first=reconcile([old],{},NOW)
+    # Exit success without advancing date remains the same incident.
+    same=reconcile([old],first,NOW+timedelta(minutes=15))
+    assert not same['events'] and len(same['incidents'])==1
+    current=evaluate(rule,Observation('2026-10-22'),NOW)
+    recovered=reconcile([current],same,NOW+timedelta(minutes=30))
+    assert recovered['events'][0]['kind']=='RECOVERED'
+
+
+def test_atomic_failure_keeps_last_report_and_cleans_temp(tmp_path,monkeypatch):
+    module=host();path=tmp_path/'report.json';path.write_bytes(b'{"old":true}')
+    def reject(*args):
+        raise OSError('replace failed')
+    monkeypatch.setattr(module.os,'replace',reject)
+    with pytest.raises(OSError):
+        module.atomic(path,{'new':True})
+    assert path.read_bytes()==b'{"old":true}'
+    assert list(tmp_path.iterdir())==[path]
+
+
+def test_retry_calls_only_original_unit_and_waits_for_completion(monkeypatch):
+    module=host();calls=[]
+    def command(args,**kwargs):
+        calls.append(args)
+        assert kwargs['timeout']==600
+        return b''
+    monkeypatch.setattr(module,'command',command)
+    assert module.start_retry('brazil')=='COMPLETED'
+    assert calls==[['systemctl','start',JOBS['brazil']]]
+
+
+def test_retry_timeout_leaves_original_service_running(monkeypatch):
+    module=host();calls=[]
+    def command(args,**kwargs):
+        calls.append(args)
+        raise module.subprocess.TimeoutExpired(args,600)
+    monkeypatch.setattr(module,'command',command)
+    assert module.start_retry('guangxi')=='STILL_RUNNING'
+    assert not any('stop' in call or 'restart' in call for call in calls)
+
+
+def test_any_busy_producer_defers_extras_and_unknown_activity_fails(monkeypatch):
+    module=host()
+    monkeypatch.setattr(module,'command',lambda _:activity_output(ActiveState='active',SubState='running',MainPID='123',ControlGroup='/system.slice/producer.service'))
+    assert module.producer_busy()
+    monkeypatch.setattr(module,'command',lambda _:b'unknown')
+    with pytest.raises(ValueError):
+        module.producer_busy()
+
+
+def activity_output(**overrides):
+    rows=[]
+    for unit in JOBS.values():
+        row=dict(Id=unit,ActiveState='inactive',SubState='dead',MainPID='0',ControlPID='0',ControlGroup='')
+        if unit==JOBS['guangxi']:row.update(overrides)
+        rows.append('\n'.join(key+'='+value for key,value in row.items()))
+    return ('\n\n'.join(rows)+'\n').encode()
+
+
+@pytest.mark.parametrize('overrides,busy',[
+    ({},False),
+    ({'ActiveState':'activating','SubState':'auto-restart'},False),
+    ({'ActiveState':'activating','SubState':'start'},True),
+    ({'ActiveState':'activating','SubState':'auto-restart','MainPID':'123'},True),
+    ({'ActiveState':'activating','SubState':'auto-restart','ControlPID':'456'},True),
+    ({'ActiveState':'activating','SubState':'auto-restart','ControlGroup':'/system.slice/producer.service'},True),
+    ({'ActiveState':'failed','ControlGroup':'/system.slice/producer.service'},True),
+])
+def test_restart_wait_only_releases_gate_after_all_workers_are_gone(monkeypatch,overrides,busy):
+    module=host();calls=[]
+    def command(args):calls.append(args);return activity_output(**overrides)
+    monkeypatch.setattr(module,'command',command)
+    assert module.producer_busy() is busy
+    assert len(calls)==1 and calls[0][:2]==['systemctl','show']
+
+
+def test_incomplete_activity_inventory_cannot_release_retry_gate(monkeypatch):
+    module=host()
+    monkeypatch.setattr(module,'command',lambda _:activity_output().replace(b'ControlPID=0\n',b'',1))
+    with pytest.raises(ValueError):module.producer_busy()
+
+
+def test_reservation_survives_crash_before_service_request(tmp_path,monkeypatch):
+    module=host();monkeypatch.setattr(module,'STATE_ROOT',tmp_path)
+    row=evaluate(next(r for r in RULES if r.identity=='fx_CNY'),Observation('2026-10-19'),NOW)
+    monkeypatch.setattr(module,'observe',lambda _:[row])
+    monkeypatch.setattr(module,'producer_busy',lambda:False)
+    monkeypatch.setattr(module,'check_job',lambda *args:None)
+    class Crash(BaseException):
+        pass
+    monkeypatch.setattr(module,'start_retry',lambda _:(_ for _ in ()).throw(Crash()))
+    config={'report':str(tmp_path/'report.json'),'producer':{},'jobs':{'foreign_fx':{}}}
+    with pytest.raises(Crash):
+        module.run(config,retry=True)
+    persisted=json.loads((tmp_path/'state.json').read_text(encoding='utf-8'))
+    assert persisted['retries']['foreign_fx']['outcome']=='RESERVED'
+    assert persisted['retries']['foreign_fx']['attempts']==1
+
+
+def test_recovery_journal_replays_after_crash_without_duplicate_notification(tmp_path,monkeypatch):
+    module=host();monkeypatch.setattr(module,'STATE_ROOT',tmp_path)
+    row=evaluate(next(r for r in RULES if r.identity=='fx_CNY'),Observation('2026-10-19'),NOW)
+    monkeypatch.setattr(module,'observe',lambda _:[row])
+    archive=module.archive_events
+    def fail(_):
+        raise OSError('interrupted event archive')
+    monkeypatch.setattr(module,'archive_events',fail)
+    config={'report':str(tmp_path/'report.json'),'producer':{}}
+    with pytest.raises(OSError):
+        module.publish(config,{},[row])
+    original=json.loads((tmp_path/'state.json').read_text(encoding='utf-8'))['recent_events'][0]
+    monkeypatch.setattr(module,'archive_events',archive)
+    result=module.run(config,retry=False)
+    assert result['recent_events']==[original]
+    assert len(list((tmp_path/'events').glob('*.json')))==1
+    module.run(config,retry=False)
+    assert len(list((tmp_path/'events').glob('*.json')))==1
+
+
+def test_service_drift_blocks_retry_before_reservation(tmp_path,monkeypatch):
+    module=host();monkeypatch.setattr(module,'STATE_ROOT',tmp_path)
+    row=evaluate(next(r for r in RULES if r.identity=='fx_CNY'),Observation('2026-10-19'),NOW)
+    monkeypatch.setattr(module,'observe',lambda _:[row])
+    monkeypatch.setattr(module,'producer_busy',lambda:False)
+    def reject(*args):
+        raise ValueError('producer config changed')
+    monkeypatch.setattr(module,'check_job',reject)
+    started=[];monkeypatch.setattr(module,'start_retry',lambda job:started.append(job))
+    config={'report':str(tmp_path/'report.json'),'producer':{},'jobs':{'foreign_fx':{}}}
+    with pytest.raises(ValueError,match='config changed'):
+        module.run(config,retry=True)
+    assert not started
+    assert not json.loads((tmp_path/'state.json').read_text(encoding='utf-8'))['retries']
+
+
+def test_independent_readers_can_restart_but_cannot_silently_rebind_data(tmp_path,monkeypatch):
+    module=host();roles=[('usda','usda-dashboard','/runtime/usda',''),
+        ('oil_world','oil-world-dashboard','/usr/share/nginx/html/oil-world/data/oil_world',''),
+        ('guangxi','guangxi-weather-preview','/workspace','live'),('yunnan','yunnan-weather-preview','/workspace','live')]
+    containers=[{'Id':'new-container-id','Name':'/'+name,'State':{'Running':True},
+        'Mounts':[{'Destination':destination,'Source':str(tmp_path/role)}]} for role,name,destination,_ in roles]
+    roots={role:str(tmp_path/role/child) if child else str(tmp_path/role) for role,_,_,child in roles}
+    monkeypatch.setattr(module,'command',lambda args:json.dumps([c for c in containers if c['Name']=='/'+args[-1]]).encode())
+    assert module.check_external_readers(roots)=={}
+    containers[-1]['Mounts'][0]['Source']=str(tmp_path/'another-yunnan-runtime')
+    assert set(module.check_external_readers(roots))=={'yunnan'}
+
+
+def test_group_timeout_does_not_hide_unrelated_pages(monkeypatch,capsys):
+    module=load('monitor_worker_test',ROOT/'04_scripts/monitoring/observe_pages.py')
+    monkeypatch.setattr(sys,'argv',['observe_pages.py'])
+    monkeypatch.setenv('PAGE_MONITOR_BLOCKED_INPUTS',json.dumps({'yunnan':'reader moved'}))
+    called=[]
+    def run(args,**kwargs):
+        group=args[-1];called.append(group)
+        if group=='brazil_':
+            raise module.subprocess.TimeoutExpired(args,120)
+        rows=[evaluate(rule,Observation(None),NOW) for rule in RULES if module.group(rule.identity)==group]
+        return type('Result',(),{'stdout':json.dumps(rows).encode(),'stderr':b''})()
+    monkeypatch.setattr(module.subprocess,'run',run)
+    module.main()
+    rows=json.loads(capsys.readouterr().out)
+    assert len(rows)==len(RULES) and len(called)==len(set(called))
+    assert next(r for r in rows if r['identity']=='brazil_PLANTED')['status']=='ERROR'
+    assert next(r for r in rows if r['identity']=='guangxi')['status']=='MISSING'
+    yunnan=next(r for r in rows if r['identity']=='yunnan')
+    assert yunnan['status']=='ERROR' and not yunnan['retry_eligible'] and 'yunnan' not in called
+    assert {r['identity'] for r in rows if r['status']=='EXCLUDED'}=={r.identity for r in RULES if r.excluded}
+
+
+@pytest.mark.parametrize('age,stale',[(10,False),(61,True)])
+def test_website_detects_its_own_stale_monitor(tmp_path,age,stale,monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT/'05_apps'))
+    module=load('monitor_ui_test',ROOT/'05_apps/page_monitor_page.py')
+    path=tmp_path/'report.json'
+    path.write_text(json.dumps({'schema_version':SCHEMA,'checked_at':(NOW-timedelta(minutes=age)).isoformat(),
+        'rows':[{'identity':rule.identity,'status':'CURRENT'} for rule in RULES]}),encoding='utf-8')
+    assert module.load_report(path,NOW)[1] is stale
+
+
+def test_monitor_render_shows_real_date_and_exclusions(tmp_path,monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    monkeypatch.syspath_prepend(str(ROOT/'05_apps'))
+    folder=tmp_path/'update_status';folder.mkdir()
+    now=datetime.now(timezone.utc)
+    rows=[evaluate(rule,Observation(now.date().isoformat()[:7] if rule.period_kind=='month' else now.date().isoformat()),now) for rule in RULES]
+    (folder/'page_monitor.json').write_text(json.dumps({'schema_version':SCHEMA,'checked_at':now.isoformat(),'rows':rows}),encoding='utf-8')
+    script='from pathlib import Path\nfrom page_monitor_page import render_page_monitor\nrender_page_monitor(Path('+repr(str(tmp_path))+'))'
+    app=AppTest.from_string(script).run()
+    assert not app.exception
+    assert any('最近核验' in item.value for item in app.caption)
+    app.checkbox[0].uncheck().run()
+    assert not app.exception
+    table=app.dataframe[0].value
+    assert '按要求暂缓' in set(table['状态'])
+    assert '实际数据日期' in table

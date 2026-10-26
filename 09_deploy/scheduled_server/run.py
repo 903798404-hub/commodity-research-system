@@ -1,4 +1,4 @@
-"""Six server-owned schedules; pinned isolated collection, existing CAS publishers."""
+"""Server-owned schedules; pinned isolated collection, existing CAS publishers."""
 from __future__ import annotations
 
 import argparse
@@ -19,12 +19,14 @@ RUNTIME = Path('/var/lib/market-data/production-data-automation/scheduled')
 CONFIG_ROOT = Path('/etc/market-data/scheduled-server')
 SECRET_ROOT = Path('/etc/market-data/production-input-secrets')
 JOBS = {
-    'akshare': ('public_current', ['Mon..Fri *-*-* 16:30:00 Asia/Shanghai']),
+    'akshare': ('public_current', ['Mon..Fri *-*-* 16:30:00 Asia/Shanghai','Mon..Fri *-*-* 18:30:00 Asia/Shanghai','Mon..Fri *-*-* 22:30:00 Asia/Shanghai']),
     'canola_exports': ('canola_exports', ['*-*-* 08:30:00 Asia/Shanghai']),
-    'positions_domestic': ('commodity_positions', ['Mon..Fri *-*-* 16:35:00 Asia/Shanghai', 'Mon..Fri *-*-* 18:00:00 Asia/Shanghai']),
+    'positions_domestic': ('commodity_positions', ['Mon..Fri *-*-* 16:35:00 Asia/Shanghai', 'Mon..Fri *-*-* 18:00:00 Asia/Shanghai',
+        'Mon..Fri *-*-* 22:30:00 Asia/Shanghai', 'Tue..Sat *-*-* 08:20:00 Asia/Shanghai']),
     'positions_foreign': ('commodity_positions', ['*-*-* 07:45:00 Asia/Shanghai']),
     'soybean_crop_progress': ('soybean_crop_progress', ['Tue..Thu *-*-* 06:30:00 Asia/Shanghai']),
     'soybean_export_sales': ('soybean_export_sales', ['Sat *-*-* 06:15:00 Asia/Shanghai']),
+    'brazil_soy': ('brazil_soy', ['*-*-* 08:10:00 Asia/Shanghai']),
 }
 KEYS = {'soybean_crop_progress': 'NASS_API_KEY', 'soybean_export_sales': 'FAS_EXPORT_SALES_API_KEY'}
 
@@ -56,6 +58,12 @@ def helpers():
 def validate_config(host, value):
     required = {'schema_version', 'job', 'policy', 'policy_sha256', 'image_id', 'data_disk_uuid',
                 'secret_file', 'initial_baseline', 'initial_baseline_sha256', 'allocation_root', 'producer', 'public_store_owner'}
+    if isinstance(value, dict) and 'incremental_public_packages' in value:
+        required.update({'incremental_public_packages','public_object_pool'})
+        host.require(value.get('job')=='akshare' and value['incremental_public_packages'] is True,
+                     'incremental public packages require explicit public job enablement')
+        host._under(value['public_object_pool'],Path('/var/lib/market-data/storage-hygiene'))
+        host.require(Path(value['public_object_pool']).name=='objects','public object pool path invalid')
     if isinstance(value, dict) and 'partitioned_public_packages' in value:
         required.add('partitioned_public_packages')
         host.require(value.get('job') == 'akshare' and type(value['partitioned_public_packages']) is bool,
@@ -145,7 +153,17 @@ def copy_snapshot(host, snapshot, destination, request):
         host.require(total <= 256 * 1024**2 and dict(sha256=host.sha256_bytes(raw),size_bytes=len(raw)) == identity, 'baseline copy differs')
         path = destination / relative
         path.parent.mkdir(parents=True,exist_ok=True)
-        host._write_exclusive(path, raw)
+        # Large positions/CGC baseline files are mounted read-only as exact files.
+        # Keep only a mountpoint placeholder in the per-run baseline directory.
+        mounted = (request['job'].startswith('positions_') and relative == host.POSITIONS_STABLE) or (
+            request['job']=='canola_exports' and relative in {host.EXPORTS_STABLE,host.EXPORTS_SOURCES}) or (
+            request['job']=='soybean_crop_progress' and relative in {host.CROP_PROGRESS,host.CROP_CONDITION,
+                host.CROP_LEGACY_PROGRESS,host.CROP_LEGACY_CONDITION}) or (
+            request['job']=='soybean_export_sales' and relative == host.FAS_STABLE)
+        host._write_exclusive(path, b'' if mounted else raw)
+        if mounted and request['job'].startswith('positions_'):
+            # Nested bind target must exist before the baseline becomes read-only.
+            (path.parent/'.position-store').mkdir(mode=0o755)
     host._write_json_exclusive(destination / 'request.json',request)
     host._make_tree_readonly(destination,public_read=True)
 
@@ -162,24 +180,63 @@ def disk_budget(host, config, snapshot, stats=None):
     return {'baseline_bytes':size,'required_free_bytes':required,'available_bytes':available,'reserved_bytes':reserve}
 
 
-def collector_command(config, work):
-    return ['docker','run','--rm','-i','--name',work.name,'--pull','never','--network','bridge',
+def collector_command(config, work, *, public_preflight=False):
+    public_materialize=config['job']=='akshare' and not public_preflight
+    baseline='preflight-baseline' if public_preflight else 'baseline'
+    output='preflight' if public_preflight else 'collection'
+    command = ['docker','run','--rm','-i','--name',work.name,'--pull','never','--network','bridge',
         '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user','65532:65532',
         '--memory','1024m' if config['job']=='akshare' else '768m','--cpus','1','--pids-limit','96',
         '--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=128m','--env','TZ=Asia/Shanghai',
         '--mount',f'type=bind,src={ROOT},dst=/source,readonly',
         '--mount',f'type=bind,src={work / "baseline"},dst=/baseline,readonly',
-        '--mount',f'type=bind,src={work / "collection"},dst=/output',
-        '--entrypoint','python',config['image_id'],'-I','-B','/source/09_deploy/scheduled_server/collect.py']
+        '--mount',f'type=bind,src={work / "collection"},dst=/output']
+    if config['job'].startswith('positions_'):
+        relative='01_data/processed/commodity_positions/positions_archive.json'
+        command += ['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
+        # Host launcher is stdlib-only; the pinned image interprets this store.
+        DIRECTORY='.position-store'
+        pool=Path(config['allocation_root'])/Path(relative).parent/DIRECTORY
+        if pool.exists():
+            host=helpers()[1]
+            host._protected_tree(pool)
+            command+=['--mount',f'type=bind,src={pool},dst=/baseline/{Path(relative).parent/DIRECTORY},readonly']
+    if config['job']=='canola_exports':
+        request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
+        for relative in ('01_data/processed/canola_exports/weekly.json',
+                         '01_data/processed/canola_exports/source_evidence.json'):
+            if request['baseline_files'][relative] is not None:
+                command+=['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
+    if config['job'] in {'soybean_crop_progress','soybean_export_sales'}:
+        request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
+        relative_paths = ('01_data/processed/soybean_export_sales/soybean_export_sales_weekly.parquet',) if config['job']=='soybean_export_sales' else (
+            '01_data/processed/soybean_crop_progress/soybeans_crop_progress_weekly.parquet',
+            '01_data/processed/soybean_crop_progress/soybeans_crop_condition_weekly.parquet',
+            '01_data/processed/soybean_crop_progress/soybeans_crop_progress_weekly_2021_2026.parquet',
+            '01_data/processed/soybean_crop_progress/soybeans_crop_condition_weekly_2021_2026.parquet')
+        for relative in relative_paths:
+            if request['baseline_files'][relative] is not None:
+                command+=['--mount',f'type=bind,src={config["allocation_root"]}/{relative},dst=/baseline/{relative},readonly']
+    if config['job']=='akshare':
+        command[command.index('--network')+1]='none' if public_materialize else 'bridge'
+        command=[arg.replace(f'src={work / "baseline"},',f'src={work / baseline},')
+                    .replace(f'src={work / "collection"},',f'src={work / output},') for arg in command]
+        if public_materialize and config.get('incremental_public_packages',False):
+            request=json.loads((work/'baseline/request.json').read_text(encoding='utf-8'))
+            package_id=request['public_pointer']['package_id']
+            if not re.fullmatch(r'public-current-[0-9a-f]{24}',package_id):raise ValueError('public mount identity invalid')
+            source=Path(config['allocation_root'])/'01_data/public-data-server-store/releases'/package_id
+            command+=['--mount',f'type=bind,src={source},dst=/public-baseline/{package_id},readonly']
+    return command + ['--entrypoint','python',config['image_id'],'-I','-B','/source/09_deploy/scheduled_server/collect.py'] + (['--public-preflight'] if public_preflight else [])
 
 
-def collect(host, config, work):
-    output=work/'collection'; output.mkdir(mode=0o700); os.chown(output,65532,65532)
-    credential=secret_input(host,config)
+def collect(host, config, work, *, public_preflight=False, input_data=None):
+    output=work/('preflight' if public_preflight else 'collection'); output.mkdir(mode=0o700); os.chown(output,65532,65532)
+    credential=secret_input(host,config) if input_data is None else input_data
     try:
-        completed=subprocess.run(collector_command(config,work),input=credential,capture_output=True,timeout=2400)
+        completed=subprocess.run(collector_command(config,work,public_preflight=public_preflight),input=credential,capture_output=True,timeout=2400)
         # No provider dumps or credential-bearing exception strings cross the boundary.
-        host._write_json_exclusive(work/'collector-exit.json',{'exit_code':completed.returncode})
+        host._write_json_exclusive(work/('preflight-exit.json' if public_preflight else 'collector-exit.json'),{'exit_code':completed.returncode})
         path=host._no_links(output/'collection-result.json')
         host.require(path.is_file() and path.stat().st_size <= 256*1024, 'collector result absent or oversized')
         result=host.read_json(path)
@@ -210,7 +267,7 @@ def seal_delta(host, config, work):
     return host.validate(config['policy'],work.name)
 
 
-def execute(fx, host, config, work, publish):
+def execute(fx, host, config, work, publish, business_date=None):
     now=datetime.now(timezone.utc)
     result={'schema_version':'scheduled-server-result/1','job':config['job'],'run_id':work.name,
         'producer':config['producer'],'execution_host':'server','status':'FAIL','published':False,'checked_at':now.isoformat()}
@@ -228,11 +285,37 @@ def execute(fx, host, config, work, publish):
         request={'job':config['job'],'run_id':work.name,'checked_at':now.isoformat(),
             'business_date':now.astimezone(timezone(timedelta(hours=8))).date().isoformat(),
             'producer':config['producer'],'baseline_files':snapshot['files'],**extra}
+        if config['job']=='soybean_export_sales' and snapshot.get('fas_reconciliation_check') is not None:
+            request['fas_reconciliation_check']=snapshot['fas_reconciliation_check']
         if config['job'] == 'akshare':
             request['partitioned_public_packages'] = config.get('partitioned_public_packages', False)
+            request['incremental_public_packages'] = config.get('incremental_public_packages',False)
+            if business_date is not None:
+                selected=datetime.strptime(business_date,'%Y-%m-%d').date()
+                host.require(selected.isoformat()==business_date and selected<=now.astimezone(timezone(timedelta(hours=8))).date(), 'invalid public business date')
+                request['business_date']=business_date
         if config['job'] == 'positions_domestic':
             request['positions_stock_api'] = config.get('positions_stock_api', False)
         result['disk_budget']=disk_budget(host,config,snapshot)
+        if config['job']=='akshare':
+            # No historical files are persisted for this network-only phase.
+            phase=work/'preflight-baseline'; phase.mkdir(mode=0o755)
+            host._write_json_exclusive(phase/'request.json',request)
+            host._make_tree_readonly(phase,public_read=True)
+            stage='source_preflight'
+            checked=collect(host,config,work,public_preflight=True,
+                input_data=json.dumps({'price_baseline':snapshot['contents']['01_data/historical_price_long.xlsx']}).encode('utf-8'))
+            result['preflight']=checked
+            proof=public.read_preflight(host,work,request,checked)
+            host._make_tree_readonly(work/'preflight')
+            if checked['business_status']=='SOURCE_FAILED':
+                raise ValueError('public source request failed')
+            if checked['business_status']=='WAITING_FOR_SOURCE':
+                result.update(status='WAITING_FOR_SOURCE',published=False); return result
+            if checked['business_status']=='NO_CHANGE':
+                receipt=public.unchanged(host,config,extra,publish)
+                result.update(status=receipt['status'],receipt=receipt,published=False); return result
+            request['public_preflight']=proof
         copy_snapshot(host,snapshot,work/'baseline',request)
         stage='collect_sources'; collected=collect(host,config,work); result['collection']=collected
         if collected.get('out_of_season'):
@@ -261,12 +344,13 @@ def execute(fx, host, config, work, publish):
     return result
 
 
-def run(config_path,publish=False):
+def run(config_path,publish=False,business_date=None):
     fx,host=helpers()
     host.require(sys.platform=='linux' and os.geteuid()==0 and sys.flags.isolated and sys.dont_write_bytecode,
                  'protected Linux Python -I -B required')
     path=host._protected(host._under(config_path,CONFIG_ROOT))
     config=validate_config(host,host.read_json(path)); digest=host.sha256_file(path)
+    host.require(business_date is None or config['job']=='akshare','business date override is public-only')
     fx.check_mount(host,config); check_identity(host,config); host._protected(RUNTIME)
     import fcntl
     lock=host._no_links(RUNTIME/(JOBS[config['job']][0]+'.lock'))
@@ -279,15 +363,16 @@ def run(config_path,publish=False):
             host.require(host.sha256_file(path)==digest,'config changed during admission')
             name=config['job'].replace('_','-')+'-server-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S').lower()+'-'+uuid.uuid4().hex[:12]
             work=RUNTIME/name; work.mkdir(mode=0o755)
-            return execute(fx,host,config,work,publish)
+            return execute(fx,host,config,work,publish,business_date)
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',required=True,type=Path); parser.add_argument('--publish',action='store_true')
+    parser.add_argument('--business-date',help='Explicit bounded public-market business date for an authorized retry')
     args=parser.parse_args()
     try:
-        result=run(args.config,args.publish); print(json.dumps(result,ensure_ascii=False))
+        result=run(args.config,args.publish,args.business_date); print(json.dumps(result,ensure_ascii=False))
         return 2 if result['status']=='PARTIAL_FAILURE' else 0
     except Exception as exc:
         print(json.dumps({'status':'FAIL','error_type':type(exc).__name__}),file=sys.stderr); return 1

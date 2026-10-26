@@ -42,12 +42,14 @@ def config(runner,job):
 
 
 @pytest.mark.parametrize('job,clocks',[
-    ('akshare',['Mon..Fri *-*-* 16:30:00 Asia/Shanghai']),
+    ('akshare',['Mon..Fri *-*-* 16:30:00 Asia/Shanghai','Mon..Fri *-*-* 18:30:00 Asia/Shanghai','Mon..Fri *-*-* 22:30:00 Asia/Shanghai']),
     ('canola_exports',['*-*-* 08:30:00 Asia/Shanghai']),
-    ('positions_domestic',['Mon..Fri *-*-* 16:35:00 Asia/Shanghai','Mon..Fri *-*-* 18:00:00 Asia/Shanghai']),
+    ('positions_domestic',['Mon..Fri *-*-* 16:35:00 Asia/Shanghai','Mon..Fri *-*-* 18:00:00 Asia/Shanghai',
+        'Mon..Fri *-*-* 22:30:00 Asia/Shanghai','Tue..Sat *-*-* 08:20:00 Asia/Shanghai']),
     ('positions_foreign',['*-*-* 07:45:00 Asia/Shanghai']),
     ('soybean_crop_progress',['Tue..Thu *-*-* 06:30:00 Asia/Shanghai']),
-    ('soybean_export_sales',['Sat *-*-* 06:15:00 Asia/Shanghai'])])
+    ('soybean_export_sales',['Sat *-*-* 06:15:00 Asia/Shanghai']),
+    ('brazil_soy',['*-*-* 08:10:00 Asia/Shanghai'])])
 def test_actual_schedules_preserved_and_no_success_skip(runner,job,clocks):
     service,timer=runner.render_units(job,'/approved/source','/etc/market-data/scheduled-server/test.json')
     assert [line.split('=',1)[1] for line in timer.splitlines() if line.startswith('OnCalendar=')]==clocks
@@ -75,6 +77,25 @@ def test_public_job_cannot_borrow_delta_policy_or_other_credential(runner,linux_
     runner.validate_config(host,c)
     c['secret_file']='/etc/market-data/production-input-secrets/nass.env'
     with pytest.raises(ValueError): runner.validate_config(host,c)
+
+
+def test_incremental_public_requires_pinned_protected_pool_and_readonly_base_mount(runner,linux_host,tmp_path):
+    c=config(runner,'akshare')
+    c.update(policy=None,policy_sha256=None,initial_baseline=str(runner.RUNTIME/'initial-baselines/test'),
+             initial_baseline_sha256='e'*64,incremental_public_packages=True,
+             public_object_pool='/var/lib/market-data/storage-hygiene/package-retention/objects')
+    runner.validate_config(linux_host,c)
+    for field,value in [('public_object_pool','/tmp/objects'),('incremental_public_packages','true'),('job','positions_foreign')]:
+        with pytest.raises((ValueError,TypeError)):
+            runner.validate_config(linux_host,{**c,field:value})
+    baseline=tmp_path/'baseline';baseline.mkdir()
+    package_id='public-current-'+'a'*24
+    (baseline/'request.json').write_text(json.dumps({'public_pointer':{'package_id':package_id}}))
+    command=runner.collector_command(c,tmp_path)
+    mounts=[command[i+1] for i,v in enumerate(command) if v=='--mount']
+    assert any(f'releases{Path("/")}{package_id}' in v and v.endswith(f'dst=/public-baseline/{package_id},readonly') for v in mounts)
+    assert command[command.index('--network')+1]=='none'
+    assert not any('dst=/public-baseline' in v for v in runner.collector_command(c,tmp_path,public_preflight=True))
 
 
 def test_stock_api_is_explicit_domestic_only_and_requires_protected_secret(runner,linux_host):
@@ -109,13 +130,24 @@ def test_stock_token_is_stdin_only_and_extra_secret_keys_are_rejected(runner,tmp
 
 
 def test_collectors_have_no_formal_writable_mount_or_credentials_in_args(runner,tmp_path):
+    baseline=tmp_path/'run/baseline';baseline.mkdir(parents=True)
+    host=runner.helpers()[1]
+    (baseline/'request.json').write_text(json.dumps({'baseline_files':{relative:None
+        for domain in ('canola_exports','soybean_crop_progress','soybean_export_sales')
+        for relative in host.DOMAIN_CONTRACTS[domain]['baseline']}}))
     for job in runner.JOBS:
         command=runner.collector_command(config(runner,job),tmp_path/'run')
         assert '--read-only' in command and '--user' in command and '65532:65532' in command
         assert '--pull' in command and 'never' in command and '-i' in command
         mounts=[command[i+1] for i,x in enumerate(command) if x=='--mount']
-        assert len(mounts)==3 and sum(m.endswith(',readonly') for m in mounts)==2
-        assert not any('production-runtime' in m or 'secrets' in m for m in mounts)
+        extra = int(job.startswith('positions_'))
+        assert len(mounts)==3+extra and sum(m.endswith(',readonly') for m in mounts)==2+extra
+        if extra:
+            assert mounts[-1] == ('type=bind,src='+config(runner,job)['allocation_root']+
+                '/01_data/processed/commodity_positions/positions_archive.json,dst=/baseline/'
+                '01_data/processed/commodity_positions/positions_archive.json,readonly')
+        assert not any('secrets' in m for m in mounts)
+        assert not any('production-runtime' in m for m in (mounts[:-1] if extra else mounts))
         assert not any('API_KEY' in x or 'docker.sock' in x for x in command)
 
 
@@ -125,6 +157,61 @@ def test_corrupt_or_extra_baseline_content_rejected_before_network(runner,tmp_pa
     with pytest.raises(ValueError): runner.copy_snapshot(host,value,tmp_path/'corrupt',{})
     value['contents']['other']='unexpected'
     with pytest.raises(ValueError): runner.copy_snapshot(host,value,tmp_path/'extra',{})
+
+
+def test_positions_baseline_keeps_only_empty_mountpoint_and_small_status(runner, tmp_path):
+    import base64
+    host=runner.helpers()[1]
+    raw=b'x'*(1024*1024)
+    contents={host.POSITIONS_STABLE:raw,host.POSITIONS_STATUS:b'{}'}
+    snapshot={'files':{k:{'sha256':host.sha256_bytes(v),'size_bytes':len(v)} for k,v in contents.items()},
+              'contents':{k:base64.b64encode(v).decode() for k,v in contents.items()}}
+    destination=tmp_path/'baseline'
+    runner.copy_snapshot(host,snapshot,destination,{'job':'positions_domestic'})
+    assert (destination/host.POSITIONS_STABLE).read_bytes()==b''
+    assert (destination/host.POSITIONS_STATUS).read_bytes()==b'{}'
+    assert (destination/Path(host.POSITIONS_STABLE).parent/'.position-store').is_dir()
+    assert sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<256
+
+
+@pytest.mark.parametrize('job',['soybean_crop_progress','soybean_export_sales'])
+def test_table_baselines_use_only_empty_mountpoints_and_exact_readonly_binds(runner,tmp_path,job):
+    import base64
+    host=runner.helpers()[1]
+    relative_paths=host.DOMAIN_CONTRACTS[job]['baseline']
+    contents={relative:(b'x'*(1024*1024) if relative.endswith('.parquet') else b'{}')
+              for relative in relative_paths}
+    snapshot={'files':{key:{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)} for key,raw in contents.items()},
+              'contents':{key:base64.b64encode(raw).decode() for key,raw in contents.items()}}
+    work=tmp_path/'work';work.mkdir()
+    destination=work/'baseline'
+    runner.copy_snapshot(host,snapshot,destination,{'job':job,'baseline_files':snapshot['files']})
+    assert sum(path.stat().st_size for path in destination.rglob('*') if path.is_file())<16384
+    for relative in relative_paths:
+        assert (destination/relative).read_bytes()==(b'' if relative.endswith('.parquet') else b'{}')
+    configured=config(runner,job)
+    command=runner.collector_command(configured,work)
+    mounts=[command[index+1] for index,value in enumerate(command) if value=='--mount']
+    for relative in relative_paths:
+        if relative.endswith('.parquet'):
+            assert f'type=bind,src={configured["allocation_root"]}/{relative},dst=/baseline/{relative},readonly' in mounts
+    assert [mount for mount in mounts if not mount.endswith(',readonly')]==[
+        f'type=bind,src={work/"collection"},dst=/output']
+
+
+def test_positions_collector_mounts_the_protected_append_store_readonly(runner,tmp_path,monkeypatch):
+    c=config(runner,'positions_domestic')
+    c['allocation_root']=str(tmp_path/'allocation')
+    pool=Path(c['allocation_root'])/'01_data/processed/commodity_positions/.position-store'
+    pool.mkdir(parents=True)
+    fx,host=runner.helpers()
+    checks=[]
+    monkeypatch.setattr(host,'_protected_tree',lambda p:checks.append(p) or p)
+    monkeypatch.setattr(runner,'helpers',lambda:(fx,host))
+    command=runner.collector_command(c,tmp_path/'work')
+    mounts=[command[i+1] for i,v in enumerate(command) if v=='--mount']
+    assert checks==[pool]
+    assert f'type=bind,src={pool},dst=/baseline/{Path("01_data/processed/commodity_positions/.position-store")},readonly' in mounts
 
 
 def test_domain_policy_drift_and_wrong_source_block_before_collection(runner,monkeypatch):
@@ -150,6 +237,7 @@ def test_network_worker_builds_domain_package_after_collection(monkeypatch,tmp_p
     from agri_research_agent.automation import positions_scheduled_collection,production_data_delta_exports
     from agri_research_agent.positions import delivery as positions_codec
     from agri_research_agent.canola_exports import delivery as exports_codec
+    from agri_research_agent.canola_exports import increment as exports_increment
     collector=load('candidate_collect_package','09_deploy/scheduled_server/collect.py')
     host=delivery._host_contract()
     baseline=tmp_path/'baseline'; baseline.mkdir()
@@ -158,14 +246,17 @@ def test_network_worker_builds_domain_package_after_collection(monkeypatch,tmp_p
     for relative in (host.POSITIONS_STABLE,host.EXPORTS_STABLE,host.EXPORTS_SOURCES):
         p=baseline/relative; p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(previous))
     candidate=tmp_path/'weekly.json';candidate.write_text(json.dumps({'candidate':'collected'}))
-    monkeypatch.setattr(positions_scheduled_collection,'collect_bundle',lambda *a,**k:(tmp_path/'bundle',[]))
-    monkeypatch.setattr(positions_codec,'archive_bundle',lambda *a:{'candidate':'collected'})
+    monkeypatch.setattr(positions_scheduled_collection,'collect_bundle',lambda *a,**k:({'objects':{},'updates':{}},[]))
+    monkeypatch.setattr(positions_codec,'resolve_increment',lambda *a:{'candidate':'collected'})
     monkeypatch.setattr(positions_codec,'observations',lambda *a:{'business_changed':False})
     monkeypatch.setattr(production_data_delta_exports,'_collect',lambda *a:(candidate,{'source':'verified'}))
     monkeypatch.setattr(exports_codec,'observations',lambda *a:{'business_changed':False})
+    monkeypatch.setattr(exports_increment,'build',lambda *a:({'updates':[]},{'sources':[]}))
     calls=[]
     monkeypatch.setattr(collector,'package',lambda request,output,payloads,semantic,host:calls.append((request['job'],payloads,semantic)))
-    request={'job':job,'business_date':'2026-10-11','baseline_files':{}}
+    request={'job':job,'business_date':'2026-10-11','baseline_files':{
+        name:delivery._identity(baseline/name) for name in (host.EXPORTS_STABLE,host.EXPORTS_SOURCES)}
+        if job=='canola_exports' else {}}
     result=collector.prepare(request,baseline,output,{})
     assert len(calls)==1 and calls[0][0]==job
     assert set(calls[0][1])==({'positions_archive.json'} if job.startswith('positions_') else {'weekly.json','source_evidence.json'})
@@ -275,7 +366,9 @@ def test_new_snapshot_domains_preserve_fixed_files_and_reject_incomplete_pair(ru
     contract=host.DOMAIN_CONTRACTS[domain]
     for relative in contract['baseline']:
         path=allocation/relative; path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(b'input')
-    policy={'domain':domain,'allocation_root':str(allocation),'approved_producer':{},'validation_image':{'image_id':'pinned'}}
+    policy={'policy_id':'snapshot-fixture-001','domain':domain,'allocation_root':str(allocation),
+            'approved_producer':{},'validation_image':{'image_id':'pinned'}}
+    monkeypatch.setattr(host,'EVIDENCE_ROOT',tmp_path/'evidence')
     monkeypatch.setattr(host,'_load_policy',lambda p:(policy,'a'*64))
     monkeypatch.setattr(host,'_protected',lambda p,**k:Path(p))
     monkeypatch.setattr(host,'_under',lambda p,*a,**k:Path(p))

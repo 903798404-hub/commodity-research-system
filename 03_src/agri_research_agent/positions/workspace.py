@@ -27,7 +27,8 @@ def data_root(project_root: Path, domain: str) -> Path:
         raise ValueError("持仓板块无效")
     configured = os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip()
     formal = Path(configured or project_root / "01_data") / STABLE_RELATIVE_ROOT / domain
-    if configured or (formal / "current.json").exists() or not (project_root / ".git").is_file():
+    from .formal_store import pointer
+    if configured or (formal / "current.json").exists() or pointer(formal.parent) is not None or not (project_root / ".git").is_file():
         return formal
     return local_root(project_root, domain)
 

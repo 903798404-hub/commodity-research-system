@@ -2,7 +2,7 @@
 
 No prune, no business/runtime/rollback deletion. Successful staging expires into
 verified content-addressed gzip objects; receipts and complete restore indexes
-remain. Unknown, failed, mounted and pinned resources fail closed.
+remain. Unresolved, unknown, mounted and pinned resources fail closed.
 """
 from __future__ import annotations
 
@@ -103,42 +103,117 @@ def inventory(root):
     return rows
 
 
+def successful(d):
+    return (d.get('collection', {}).get('status') == 'PASS' and (
+        (d.get('status') in {'PUBLISHED', 'SYNCED'} and d.get('published') is True)
+        or (d.get('status') == 'NO_CHANGE' and d.get('published') is False)))
+
+
+def same_positions_scope(old, new):
+    """A later success alone is not proof that a failed request was replaced.
+
+    Positions receipts expose source attempts and exact added partition keys.
+    Unknown jobs, changed producers, unresolved sources and revisions stay put.
+    All bytes (including unique source evidence) are still archived, not dropped.
+    """
+    if (old.get('job') not in {'positions_domestic', 'positions_foreign'}
+            or old.get('job') != new.get('job')
+            or old.get('status') not in {'FAIL', 'PARTIAL_FAILURE', 'CANDIDATE'}
+            or old.get('published') is not False or not successful(new)):
+        return False
+    producer = old.get('producer', {})
+    if (not all(isinstance(producer.get(k), str) and producer[k] for k in ('origin', 'commit', 'tree'))
+            or producer != new.get('producer')):
+        return False
+    old_c, new_c = old.get('collection', {}), new.get('collection', {})
+    if old_c.get('status') != 'PASS':
+        return False
+    attempts = []
+    for collection in (old_c, new_c):
+        rows = collection.get('attempts')
+        if not isinstance(rows, list) or not rows:
+            return False
+        if any(not isinstance(r, dict) or not r.get('domain') or not r.get('source_id')
+               or r.get('status') not in {'ok', 'no_change', 'not_published'} for r in rows):
+            return False
+        identities = [(r['domain'], r['source_id']) for r in rows]
+        if len(set(identities)) != len(identities):
+            return False
+        attempts.append(sorted(json.dumps(r, sort_keys=True) for r in rows))
+    if attempts[0] != attempts[1]:
+        return False
+    added = []
+    for collection in (old_c, new_c):
+        observations = collection.get('observations', {})
+        if observations.get('revised_partitions') != []:
+            return False
+        keys = observations.get('added_partitions')
+        if not isinstance(keys, list) or any(not isinstance(k, str) or not k for k in keys):
+            return False
+        added.append(set(keys))
+    return added[0] <= added[1]
+
+
 def staged_plan(base, now, keep_days=3, keep_count=2, busy=(), pins=()):
     require(keep_days >= 3 and keep_count >= 2, 'minimum retention is 3 days and 2 successful runs')
     base = safe(base)
     scheduled = base / 'production-data-automation/scheduled'
     groups = defaultdict(list)
+    unresolved = []
     for receipt in sorted(scheduled.glob('*/result.json')):
         safe(receipt)
         d = read(receipt)
         if not RUN.fullmatch(receipt.parent.name) or d.get('run_id') != receipt.parent.name:
             continue
-        published = d.get('status') in {'PUBLISHED', 'SYNCED'} and d.get('published') is True
-        unchanged = d.get('status') == 'NO_CHANGE' and d.get('published') is False
-        if not (published or unchanged) or d.get('collection', {}).get('status') != 'PASS':
+        if not successful(d) and d.get('status') not in {'FAIL', 'PARTIAL_FAILURE', 'CANDIDATE'}:
             continue
         when = datetime.fromisoformat(d['checked_at'].replace('Z', '+00:00'))
         require(when.tzinfo is not None, 'receipt timezone absent')
-        groups[d['job']].append((when, receipt, d))
-    plan = []
+        if when > now:
+            continue
+        if successful(d):
+            groups[d['job']].append((when, receipt, d))
+        else:
+            unresolved.append((when, receipt, d))
+    selected = []
     for entries in groups.values():
         for when, receipt, d in sorted(entries, reverse=True)[keep_count:]:
-            if when > now - timedelta(days=keep_days):
+            if when <= now - timedelta(days=keep_days):
+                selected.append((receipt, d, 'expired_success', []))
+    for when, receipt, d in unresolved:
+        for later, replacement, success in sorted(groups.get(d.get('job'), []), reverse=True):
+            if later > when and same_positions_scope(d, success):
+                selected.append((receipt, d, 'superseded_positions_scope', [
+                    {'path': str(replacement), 'sha256': sha(replacement)}]))
+                break
+    plan = []
+    for receipt, d, reason, evidence in selected:
+        run = d['run_id']
+        roots = [receipt.parent / p for p in (
+            'baseline', 'collection/package', 'collection/bundle', 'collection/collection')]
+        # These admitted collectors also expand retained source history into
+        # private work trees. Keep the same successful-receipt, age, mount,
+        # pin and recoverable-archive gates as for transport copies.
+        expanded = {
+            'canola_exports': 'collection/01_data',
+            'soybean_crop_progress': 'collection/project',
+            'soybean_export_sales': 'collection/project',
+        }.get(d.get('job'))
+        if expanded and run.startswith(d['job'].replace('_', '-') + '-server-'):
+            roots.append(receipt.parent / expanded)
+        roots.append(base / 'production-data-uploads' / run)
+        for family in ('production-data-candidates', 'production-data-incoming'):
+            roots.extend(sorted((base / family).glob('*/' + run)))
+        for root in roots:
+            if not root.exists():
                 continue
-            run = d['run_id']
-            roots = [receipt.parent / 'baseline', receipt.parent / 'collection/package',
-                     base / 'production-data-uploads' / run]
-            for family in ('production-data-candidates', 'production-data-incoming'):
-                roots.extend(sorted((base / family).glob('*/' + run)))
-            for root in roots:
-                if not root.exists():
-                    continue
-                if any(overlap(root, Path(p)) for p in (*busy, *pins)):
-                    continue
-                rows = inventory(root)
-                if rows:
-                    plan.append({'root': str(root), 'receipt': str(receipt),
-                                 'receipt_sha256': sha(receipt), 'files': rows})
+            if any(overlap(root, Path(p)) for p in (*busy, *pins)):
+                continue
+            rows = inventory(root)
+            if rows:
+                plan.append({'root': str(root), 'receipt': str(receipt),
+                             'receipt_sha256': sha(receipt), 'files': rows,
+                             'reason': reason, 'supersession_evidence': evidence})
     return plan
 
 
@@ -158,11 +233,17 @@ def verify_object(path, expected, size):
     require(count == size and h.hexdigest() == expected, 'archive verification failed')
 
 
+def verify_receipts(item):
+    require(sha(Path(item['receipt'])) == item['receipt_sha256'], 'receipt changed')
+    for evidence in item.get('supersession_evidence', []):
+        require(sha(Path(evidence['path'])) == evidence['sha256'], 'replacement receipt changed')
+
+
 def archive(item, state):
     """Prepare and verify every recovery object before removing any file."""
     state = safe(state)
     root = safe(item['root'])
-    require(sha(Path(item['receipt'])) == item['receipt_sha256'], 'receipt changed')
+    verify_receipts(item)
     require(inventory(root) == item['files'], 'stale staging plan')
     objects = state / 'objects'
     objects.mkdir(exist_ok=True)
@@ -183,7 +264,7 @@ def archive(item, state):
             sync_directory(objects)
         verify_object(target, row['sha256'], row['bytes'])
     require(inventory(root) == item['files'], 'staging changed during archive')
-    require(sha(Path(item['receipt'])) == item['receipt_sha256'], 'receipt changed during archive')
+    verify_receipts(item)
     indexes = state / 'indexes'
     indexes.mkdir(exist_ok=True)
     index = indexes / (uuid.uuid4().hex + '.json')

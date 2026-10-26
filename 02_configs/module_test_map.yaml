@@ -1,5 +1,56 @@
 schema_version: 1
 modules:
+  automation.page_business_date_monitor:
+    code_paths:
+      - 03_src/agri_research_agent/monitoring
+      - 04_scripts/monitoring/observe_pages.py
+      - 05_apps/page_monitor_page.py
+      - 09_deploy/page_monitor
+    direct_tests:
+      - 08_tests/monitoring/test_page_freshness.py
+      - 08_tests/monitoring/test_monitor_integration.py
+      - 08_tests/monitoring/test_monitor_readers.py
+      - 08_tests/monitoring/test_task_ledger.py
+    impact_tests:
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
+  automation.sparse_table_delivery:
+    code_paths:
+      - 03_src/agri_research_agent/shared/table_increment.py
+      - 03_src/agri_research_agent/shared/table_delivery.py
+      - 03_src/agri_research_agent/soybean_exports/reconciliation.py
+      - 03_src/agri_research_agent/soybean_exports/fas.py
+      - 03_src/agri_research_agent/pipelines/soybean_crop_weekly_update.py
+      - 03_src/agri_research_agent/automation/production_data_delta.py
+      - 09_deploy/production_data_delivery/activate_production_data_delta.py
+      - 09_deploy/scheduled_server/collect.py
+      - 09_deploy/scheduled_server/run.py
+    direct_tests:
+      - 08_tests/shared/test_table_increment.py
+      - 08_tests/shared/test_table_delivery.py
+      - 08_tests/soybean_exports/test_fas_table_transport.py
+      - 08_tests/soybean_exports/test_fas_reconciliation.py
+      - 08_tests/soybean_crop_progress/test_crop_table_transport.py
+      - 08_tests/test_table_delta_worker.py
+      - 08_tests/test_fas_reconciliation_host.py
+    impact_tests:
+      - 08_tests/soybean_exports/test_fas_incremental.py
+      - 08_tests/soybean_exports/test_fas_data_layer.py
+      - 08_tests/soybean_crop_progress/test_soybean_crop_weekly_update.py
+      - 08_tests/test_production_data_delta.py
+      - 08_tests/test_production_data_delta_activation.py
+      - 08_tests/test_production_data_delta_fx.py
+      - 08_tests/test_scheduled_server.py
+      - 08_tests/test_first_batch_scheduled.py
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/soybean_exports/test_host_runtime_entrypoints.py
+      - 08_tests/soybean_exports/test_soybean_exports_page.py
+      - 08_tests/soybean_crop_progress/test_soybean_crop_progress_page.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: []
+    full_regression_when_changed: true
   automation.incremental_updates:
     code_paths:
       - 03_src/agri_research_agent/soybean_exports/fas.py
@@ -45,6 +96,7 @@ modules:
     direct_tests:
       - 08_tests/test_public_package_retention.py
       - 08_tests/test_runtime_retention.py
+      - 08_tests/shared/test_expanded_collector_retention.py
     impact_tests:
       - 08_tests/pipelines/test_public_data_delivery.py
       - 08_tests/pipelines/test_public_data_transport.py
@@ -55,9 +107,13 @@ modules:
   automation.scheduled_server:
     code_paths:
       - 09_deploy/scheduled_server
+      - 03_src/agri_research_agent/canola_exports/increment.py
+      - 03_src/agri_research_agent/canola_exports/delivery.py
+      - 03_src/agri_research_agent/automation/production_data_delta_exports.py
       - 04_scripts/transfer_public_data_package.py
     direct_tests:
       - 08_tests/test_scheduled_server.py
+      - 08_tests/canola_exports/test_incremental_delivery.py
     impact_tests:
       - 08_tests/test_foreign_fx_server.py
       - 08_tests/test_production_data_delta_activation.py
@@ -194,6 +250,7 @@ modules:
     direct_tests:
       - 08_tests/positions/test_workspace.py
       - 08_tests/positions/test_positions_delivery.py
+      - 08_tests/positions/test_formal_store.py
       - 08_tests/positions/test_cftc_annual.py
     impact_tests:
       - 08_tests/sugar_positions/test_positions.py
@@ -609,11 +666,14 @@ modules:
       - 08_tests/pipelines/test_lutou_domestic_basis_formal_current.py
       - 08_tests/pipelines/test_public_data_domestic_basis_provider.py
       - 08_tests/market_data/test_public_basis_current.py
+      - 08_tests/summary_engine/test_basis_shared.py
     impact_tests:
       - 08_tests/test_basis_sql_loader.py
       - 08_tests/test_update_basis_from_sql.py
       - 08_tests/summary_engine/test_summary_engine.py
       - 08_tests/test_basis_page_formal.py
+      - 08_tests/summary_engine/test_weather_overview.py
+      - 08_tests/alerts/test_notification.py
       - 08_tests/pipelines/test_public_data_refresh.py
       - 08_tests/pipelines/test_lutou_goal_b.py
       - 08_tests/pipelines/test_lutou_weather.py

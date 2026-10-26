@@ -1,0 +1,13 @@
+[Unit]
+Description=FGIS official Yearly CSV collection and verified data publication
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/market-data
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B @SOURCE_ROOT@/09_deploy/fgis_server/run.py --config @CONFIG_PATH@ --publish
+TimeoutStartSec=2100
+UMask=0022

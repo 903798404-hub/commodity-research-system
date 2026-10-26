@@ -65,13 +65,13 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str, are
     stale = overview.loc[overview["最新"].isna() & (overview["日期"] != "—")]
     if not stale.empty:
         st.caption("本期缺报，最新列留空：" + "；".join(f"{row['地区']}最近观测为{row['日期']}" for _, row in stale.iterrows()))
-    st.caption("全国汇总直接采用 CONAB 主要12州合计口径，现代报告覆盖约96%种植面积。最新列只展示本期观测；日期较早的州不沿用旧值。")
+    st.caption("全国汇总直接采用 CONAB 主要12州合计口径，面积覆盖率以当期报告为准。最新列只展示本期观测；日期较早的州不沿用旧值。")
     st.caption("数值为%；较上季、较均值为百分点。较均值红色表示高于、蓝色表示低于，不能直接判断单产或价格方向。")
     st.caption(MATCHING_NOTE + "表格官方参考均值与图中的历史计算均值分开标示。")
     st.subheader("全国与各州历史对比")
     if area_reference:
         st.caption(f"标题面积占比：CONAB {area_reference['season']}季各州种植面积 ÷ 巴西全国种植面积；"
-                   f"面积表发布于{area_reference['published_at']}。全国覆盖率采用周报约96%口径；面积参考不随历史季切换，不用于重算进度。")
+                   f"面积表发布于{area_reference['published_at']}。全国覆盖率采用当期周报口径；面积参考不随历史季切换，不用于重算进度。")
     extra = _history_years(frame, season, f"brazil-years-{metric}")
     with st.container(key="brazil-history-charts"):
         regions = list(REGIONS)
@@ -80,7 +80,7 @@ def _progress_tab(frame: pd.DataFrame, metric: str, label: str, season: str, are
                 with column:
                     title = '全国汇总' if region == 'BR' else REGIONS[region]
                     if region == 'BR':
-                        title += " :gray[（面积覆盖约96%）]"
+                        title += " :gray[（CONAB主要12州）]"
                     elif area_reference:
                         title += f" :gray[（面积占比{area_share(area_reference, region):.1f}%）]"
                     else:

@@ -178,6 +178,8 @@ def test_one_missing_overview_module_does_not_hide_the_other_two() -> None:
 
 
 def test_basis_overview_uses_shared_public_current_reader(monkeypatch) -> None:
+    from agri_research_agent.summary_engine import basis
+    from agri_research_agent.market_data import public_basis_current as basis_reader
     identity = SimpleNamespace(
         release_id="formal-release", manifest_sha256="a" * 64,
     )
@@ -193,16 +195,16 @@ def test_basis_overview_uses_shared_public_current_reader(monkeypatch) -> None:
     )
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        research_overview_page, "resolve_public_basis_current_identity",
+        basis_reader, "resolve_public_basis_current_identity",
         lambda _root: identity,
     )
     monkeypatch.setattr(
-        research_overview_page, "load_public_basis_current",
+        basis_reader, "load_public_basis_current",
         lambda root, *, expected_release_id, expected_manifest_sha256: (
             calls.append((root, expected_release_id, expected_manifest_sha256)) or snapshot
         ),
     )
-    research_overview_page._cached_basis_overview_summary.clear()
+    basis.clear_shared_basis_cache()
     summary = research_overview_page.load_basis_overview_summary()
     assert calls and calls[0][1:] == ("formal-release", "a" * 64)
     assert summary.source_dataset == "public_domestic_basis_current"

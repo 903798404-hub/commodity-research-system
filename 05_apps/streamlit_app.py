@@ -62,6 +62,9 @@ from navigation import (
     INTERNATIONAL_SPREAD_PAGE_TITLE,
     FOREIGN_FX_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
+    THAILAND_SUGARCANE_WEATHER_PAGE_TITLE,
+    GUANGXI_WEATHER_PAGE_TITLE,
+    YUNNAN_WEATHER_PAGE_TITLE,
     NAVIGATION_GROUPS,
     PALM_OIL_WEATHER_PAGE_TITLE,
     RAPESEED_WEATHER_PAGE_TITLE,
@@ -75,7 +78,7 @@ from soybean_weekly_page import render_soybean_weekly_page
 from canada_canola_weekly_page import render_canada_canola_weekly_page
 from brazil_soy_page import render_brazil_soy_page
 from ui_theme import inject_workspace_theme, render_sidebar_navigation
-from weather_research_page import render_weather_research_page
+from weather_research_page import render_guangxi_weather_page, render_yunnan_weather_page, render_weather_research_page
 from research_overview_page import render_research_overview
 from warehouse_receipts_page import render_warehouse_receipts
 
@@ -377,6 +380,8 @@ def render_spread_dashboard() -> None:
 
 def render_status_page() -> None:
     st.title("日更运行状态")
+    from page_monitor_page import render_page_monitor
+    render_page_monitor(PROJECT_ROOT / "01_data")
     database_path = get_database_path()
     if not database_path.exists():
         st.warning("当前 Domestic Spread artifact 不可用。")
@@ -462,6 +467,13 @@ def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -
         render_brazil_soy_page()
     elif selected_page in WEATHER_PAGE_ROUTES:
         render_weather_research_page(WEATHER_PAGE_ROUTES[selected_page])
+    elif selected_page == THAILAND_SUGARCANE_WEATHER_PAGE_TITLE:
+        from thailand_sugarcane_weather_page import render_thailand_sugarcane_weather_page
+        render_thailand_sugarcane_weather_page()
+    elif selected_page == GUANGXI_WEATHER_PAGE_TITLE:
+        render_guangxi_weather_page()
+    elif selected_page == YUNNAN_WEATHER_PAGE_TITLE:
+        render_yunnan_weather_page()
     elif selected_page == USDA_PAGE_TITLE:
         render_usda_page()
     elif selected_page == "运行监控":

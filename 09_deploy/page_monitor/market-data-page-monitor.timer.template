@@ -1,0 +1,11 @@
+[Unit]
+Description=Check website business-date freshness every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+AccuracySec=15s
+Unit=market-data-page-monitor.service
+
+[Install]
+WantedBy=timers.target

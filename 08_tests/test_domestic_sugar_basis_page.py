@@ -14,6 +14,7 @@ from basis_page import YEAR_COLORS,FALLBACK_COLORS,missing_trading_days_between
 from domestic_sugar_basis import build_sugar_seasonal_figure,sugar_chart_rows
 from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history
 from agri_research_agent.pipelines.domestic_sugar_history import prepare_sugar_history
+from test_basis_page_formal import mock_public_basis_current
 
 pytest_plugins=["data_sources.test_domestic_sugar_history"]
 
@@ -68,12 +69,12 @@ def test_sugar_renders_when_other_formal_current_is_missing(prepared_root,monkey
     assert not app.exception and any("至少一个" in i.value for i in app.info)
 
 
-def test_actual_basis_page_adds_sugar_tab_without_changing_existing_oil_rows(prepared_root,monkeypatch):
+def test_actual_basis_page_adds_sugar_tab_without_changing_existing_oil_rows(prepared_root,monkeypatch,mock_public_basis_current):
     import basis_page
     monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT",str(prepared_root))
     oil=pd.DataFrame([dict(date=pd.Timestamp(day),commodity="豆粕",region="华东",quote_type="基差报价",
         delivery_month="现货",futures_contract="2609",cash_price=8000,futures_price=7900,basis=basis,source_sheet="formal") for day,basis in [("2026-08-18",100),("2026-08-19",110)]])
-    monkeypatch.setattr(basis_page,"load_basis_page_data",lambda root:(oil.copy(),dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4")))
+    mock_public_basis_current(oil,dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4"))
     app=AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('formal-current'))",default_timeout=35).run()
     assert not app.exception
     assert [t.label for t in app.tabs]==["基差","一口价","批发价差","白糖（柳州）"]
@@ -98,12 +99,12 @@ def test_actual_basis_page_adds_sugar_tab_without_changing_existing_oil_rows(pre
         assert [app.multiselect[0].options[i] for i in app.multiselect[0].proto.default] == [str(year) for year in selected]
 
 
-def test_invalid_sugar_does_not_break_existing_oil_current(prepared_root,monkeypatch):
+def test_invalid_sugar_does_not_break_existing_oil_current(prepared_root,monkeypatch,mock_public_basis_current):
     import basis_page
     monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT",str(prepared_root))
     (prepared_root/"current.json").write_text('{}')
     oil=pd.DataFrame([dict(date=pd.Timestamp("2026-08-19"),commodity="豆粕",region="华东",quote_type="基差报价",delivery_month="现货",futures_contract="2609",cash_price=8000,futures_price=7900,basis=110,source_sheet="formal")])
-    monkeypatch.setattr(basis_page,"load_basis_page_data",lambda root:(oil.copy(),dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4")))
+    mock_public_basis_current(oil,dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4"))
     app=AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('formal-current'))",default_timeout=35).run()
     assert not app.exception and len(app.dataframe)>0
     assert not app.warning

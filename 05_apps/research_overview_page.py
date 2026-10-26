@@ -7,13 +7,13 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from agri_research_agent.summary_engine.basis import build_basis_summary
+from agri_research_agent.summary_engine.basis import (
+    load_shared_basis_summary,
+)
 from agri_research_agent.summary_engine.crop import build_crop_summary
 from agri_research_agent.summary_engine.io import file_identity
 from agri_research_agent.market_data.public_basis_current import (
     PublicBasisCurrentError,
-    load_public_basis_current,
-    resolve_public_basis_current_identity,
 )
 from agri_research_agent.market_data.public_weather_current import PublicWeatherCurrentError
 from agri_research_agent.market_data.activated_runtime import resolve_public_data_root
@@ -97,30 +97,8 @@ def load_weather_overview_summaries() -> tuple[dict[str, list[object]], list[str
     return groups, warnings
 
 
-@st.cache_data(show_spinner=False)
-def _cached_basis_overview_summary(
-    public_current_root: str,
-    release_id: str,
-    manifest_sha256: str,
-) -> object:
-    snapshot = load_public_basis_current(
-        public_current_root,
-        expected_release_id=release_id,
-        expected_manifest_sha256=manifest_sha256,
-    )
-    return build_basis_summary(
-        snapshot.records,
-        source_identity=snapshot.source_identity,
-        source_dataset="public_domestic_basis_current",
-    )
-
-
 def load_basis_overview_summary() -> object:
-    current_root = _public_basis_current_root()
-    identity = resolve_public_basis_current_identity(current_root)
-    return _cached_basis_overview_summary(
-        str(current_root.resolve()), identity.release_id, identity.manifest_sha256
-    )
+    return load_shared_basis_summary(_public_basis_current_root())
 
 
 def load_crop_overview_summary() -> object | None:

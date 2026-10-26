@@ -295,7 +295,7 @@ def test_application_runtime_identity_is_discovered_from_running_container(
 ) -> None:
     responses = iter([
         _completed([], stdout="abc123|spread-dashboard\n"),
-        _completed([], stdout=json.dumps([{
+        _completed([], stdout=json.dumps({
             "State": {"Running": True},
             "Mounts": [{
                 "Type": "bind",
@@ -303,7 +303,7 @@ def test_application_runtime_identity_is_discovered_from_running_container(
                 "Destination": "/runtime/01_data",
                 "RW": False,
             }],
-        }])),
+        })),
         _completed([], stdout=json.dumps({"uid": 7123, "gid": 8123, "groups": [8123]})),
     ])
     monkeypatch.setattr(transport, "_ssh", lambda *_args, **_kwargs: next(responses))
@@ -323,6 +323,86 @@ def test_unresolved_application_runtime_identity_fails_closed(
     )
     with pytest.raises(RuntimeError, match="application container"):
         ORIGINAL_DISCOVER_APPLICATION_RUNTIME("trusted-host", "/safe/store")
+
+
+def _runtime_mount(source="/safe", destination="/runtime", *, writable=False):
+    return {"Type": "bind", "Source": source, "Destination": destination, "RW": writable}
+
+
+def _discovery_probe(monkeypatch, mounts_by_id, *, exited=(), inspection_failure=()):
+    calls = []
+
+    def ssh(_target, command):
+        calls.append(command)
+        if command[:2] == ["docker", "ps"]:
+            if any(part.startswith("id=") for part in command):
+                identity = next(part[3:] for part in command if part.startswith("id="))
+                return _completed(command, stdout="" if identity in exited else identity)
+            return _completed(command, stdout="\n".join(f"{key}|instance-{key}" for key in mounts_by_id))
+        if command[:2] == ["docker", "inspect"]:
+            assert command[2:4] == ["--format", transport._APPLICATION_INSPECT_FORMAT]
+            assert "Config" not in command[3]
+            if command[-1] in exited or command[-1] in inspection_failure:
+                return _completed(command, code=1)
+            return _completed(command, stdout=json.dumps({"State": {"Running": True}, "Mounts": mounts_by_id[command[-1]]}))
+        assert command[:2] == ["docker", "exec"]
+        return _completed(command, stdout=json.dumps({"uid": 7123, "gid": 8123, "groups": [8123]}))
+
+    monkeypatch.setattr(transport, "_ssh", ssh)
+    return calls
+
+
+@pytest.mark.parametrize("worker_first", [True, False])
+def test_runtime_discovery_ignores_same_image_collector_for_another_store(monkeypatch, worker_first):
+    app = ("a" * 12, [_runtime_mount()])
+    worker = ("b" * 12, [_runtime_mount("/isolated/collection", "/runtime")])
+    calls = _discovery_probe(monkeypatch, dict([worker, app] if worker_first else [app, worker]))
+    runtime = ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")
+    assert runtime["container_id"] == app[0]
+    assert runtime["uid"] == 7123 and runtime["container_store"] == "/runtime/store"
+    assert [item[2] for item in calls if item[:2] == ["docker", "exec"]] == [app[0]]
+
+
+def test_runtime_discovery_rejects_two_readers_of_exact_store(monkeypatch):
+    calls = _discovery_probe(monkeypatch, {"a" * 12: [_runtime_mount()], "b" * 12: [_runtime_mount()]})
+    with pytest.raises(RuntimeError, match="exact running application container"):
+        ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")
+    assert not any(command[:2] == ["docker", "exec"] for command in calls)
+
+
+def test_runtime_discovery_does_not_ignore_writable_matching_store(monkeypatch):
+    _discovery_probe(monkeypatch, {"a" * 12: [_runtime_mount()], "b" * 12: [_runtime_mount(writable=True)]})
+    with pytest.raises(RuntimeError, match="must be read-only"):
+        ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")
+
+
+def test_runtime_discovery_uses_most_specific_readonly_mount(monkeypatch):
+    _discovery_probe(monkeypatch, {"a" * 12: [_runtime_mount(), _runtime_mount("/safe/store", "/exact")]})
+    assert ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")["container_store"] == "/exact"
+
+
+def test_runtime_discovery_rejects_ambiguous_mount_projection(monkeypatch):
+    _discovery_probe(monkeypatch, {"a" * 12: [_runtime_mount(), _runtime_mount("/safe", "/elsewhere")]})
+    with pytest.raises(RuntimeError, match="mount is ambiguous"):
+        ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")
+
+
+def test_runtime_discovery_handles_collector_exit_between_ps_and_inspect(monkeypatch):
+    _discovery_probe(monkeypatch, {"b" * 12: [], "a" * 12: [_runtime_mount()]}, exited={"b" * 12})
+    assert ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")["container_id"] == "a" * 12
+
+
+def test_runtime_discovery_cannot_ignore_uninspectable_running_container(monkeypatch):
+    _discovery_probe(monkeypatch, {"b" * 12: [], "a" * 12: [_runtime_mount()]}, inspection_failure={"b" * 12})
+    with pytest.raises(RuntimeError, match="inspection failed"):
+        ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")
+
+
+@pytest.mark.parametrize("listing", ["abc123|one\nabc123|one", "abc123|", "invalid|name", "a" * 12 + "|name\n" * 33])
+def test_runtime_discovery_rejects_invalid_or_unbounded_inventory(monkeypatch, listing):
+    monkeypatch.setattr(transport, "_ssh", lambda *_a: _completed([], stdout=listing))
+    with pytest.raises(RuntimeError, match="application container"):
+        ORIGINAL_DISCOVER_APPLICATION_RUNTIME("host", "/safe/store")
 
 
 def test_root_only_readability_regression_fails_before_current_switch(

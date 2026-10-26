@@ -377,6 +377,35 @@ def test_hosted_baseline_cache_initialized_by_real_nonroot_command_before_preser
     assert source.index('    backend.accept(seed,') < source.index('    evidence, recovery_policy, fresh, sandbox, network = rehearsal(')
 
 
+@pytest.mark.parametrize('diagnostic_fails', [False, True])
+def test_hosted_smoke_diagnostics_preserve_original_failure(diagnostic_fails):
+    fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '_test_original_smoke_failure_' + str(diagnostic_fails))
+    calls = []
+    original = TimeoutError('real application DOM did not become visible')
+    def smoke():
+        calls.append('native-smoke')
+        raise original
+    def diagnostic():
+        calls.append('diagnostic')
+        if diagnostic_fails:
+            raise OSError('diagnostic transport unavailable')
+    with pytest.raises(TimeoutError) as caught:
+        fixture.smoke_with_failure_evidence(smoke, diagnostic)
+    assert caught.value is original and calls == ['native-smoke', 'diagnostic']
+
+
+def test_hosted_smoke_success_never_invokes_diagnostic_or_changes_verdict():
+    fixture = execution.load(ROOT, '08_tests/shared/high_risk_execution_docker_e2e.py',
+        '_test_original_smoke_success')
+    calls = []
+    def smoke():
+        calls.append('native-smoke')
+        return 'PASS'
+    assert fixture.smoke_with_failure_evidence(smoke, lambda: pytest.fail('unexpected diagnostic')) == 'PASS'
+    assert calls == ['native-smoke']
+
+
 def plan():
     ref = dict(path='/protected/evidence.json', sha256='1' * 64)
     asset = dict(commit='2' * 40, tree='3' * 40, image_id='sha256:' + '4' * 64)

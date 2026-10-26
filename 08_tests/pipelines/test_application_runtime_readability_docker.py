@@ -134,6 +134,9 @@ def test_real_docker_runtime_uid_and_root_only_acl_before_current_switch(
         docker_args.extend(["--mount", "type=bind,src=/usr/share/fonts,dst=/usr/share/fonts,readonly"])
     docker_args.extend(["python:3.12-slim", "sleep", "600"])
     _run(*docker_args)
+    collector_name = f"readability-collector-{uuid.uuid4().hex[:12]}"
+    collector_store = tmp_path / "collector-store"
+    collector_store.mkdir()
     evidence: dict[str, object] = {
         "schema_version": "application-runtime-incident-linux/1",
         "root_probe_uid": 0,
@@ -148,11 +151,18 @@ def test_real_docker_runtime_uid_and_root_only_acl_before_current_switch(
         # discovery function still executes real docker ps/inspect/exec.
         transport = _load_transport()
         monkeypatch.setattr(transport, "_ssh", lambda _target, command: _run(*command, check=False))
+        # Same image-level service label, different actual data store: a live
+        # collector must not prevent selecting this exact application reader.
+        _run("docker", "run", "--detach", "--name", collector_name,
+             "--label", "market-data.service=spread-dashboard",
+             "--mount", f"type=bind,src={collector_store.resolve()},dst={container_store},readonly",
+             "python:3.12-slim", "sleep", "600")
         discovered = transport._discover_application_runtime("localhost", str(store.resolve()))
         assert discovered["uid"] == application_uid
         assert discovered["gid"] == application_gid
         assert discovered["container_store"] == container_store
         evidence["discovered_uid"] = discovered["uid"]
+        evidence["same_label_concurrent_collector"] = "PASS"
         evidence["discovered_gid"] = discovered["gid"]
         evidence["container_id"] = discovered["container_id"]
 
@@ -312,3 +322,4 @@ def test_real_docker_runtime_uid_and_root_only_acl_before_current_switch(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         _run("docker", "rm", "--force", name, check=False)
+        _run("docker", "rm", "--force", collector_name, check=False)

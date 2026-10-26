@@ -26,12 +26,17 @@ def assert_scope(request,manifest):
 def snapshot(host,config,work):
     allocation=host._protected(config['allocation_root'])
     store=Path(allocation)/'01_data/public-data-server-store'
-    def managed(path):
+    def managed(path,object_sha=None):
         selected=host._no_links(path)
         for entry in (selected,*selected.parents):
             if entry==store.parent:break
             info=entry.stat();owner=config['public_store_owner']
-            host.require(info.st_uid==owner['uid'] and info.st_gid==owner['gid'] and not info.st_mode & 0o022,
+            pooled=False
+            if entry==selected and object_sha and config.get('incremental_public_packages',False):
+                obj=host._no_links(Path(config['public_object_pool'])/object_sha)
+                pooled=(info.st_uid==0 and info.st_gid==0 and not info.st_mode & 0o222
+                        and obj.is_file() and os.path.samefile(selected,obj))
+            host.require(pooled or (info.st_uid==owner['uid'] and info.st_gid==owner['gid'] and not info.st_mode & 0o022),
                          'public store publisher ownership or permissions differ')
         return selected
     managed(store)
@@ -67,9 +72,15 @@ def snapshot(host,config,work):
     for item in manifest['files']:
         host.require(type(item['path']) is str and re.fullmatch(r'[A-Za-z0-9_./-]+',item['path']) and
                      not Path(item['path']).is_absolute() and '..' not in Path(item['path']).parts,'public input path unsafe')
-        add(prefix+'/data/'+item['path'],managed(package/'data'/item['path']),{k:item[k] for k in ('sha256','size_bytes')})
+        path=managed(package/'data'/item['path'],item['sha256'])
+        if config.get('incremental_public_packages',False):
+            host.require(path.stat().st_size==item['size_bytes'] and host.sha256_file(path)==item['sha256'],
+                         'read-only public input identity differs')
+        else:
+            add(prefix+'/data/'+item['path'],path,{k:item[k] for k in ('sha256','size_bytes')})
     raw=(package/'manifest.json').read_bytes()
-    add(prefix+'/manifest.json',package/'manifest.json',{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)})
+    if not config.get('incremental_public_packages',False):
+        add(prefix+'/manifest.json',package/'manifest.json',{'sha256':host.sha256_bytes(raw),'size_bytes':len(raw)})
     host.require(host.read_json(store/'current.json')==pointer,'Public Current moved while reading')
     return {'files':files,'contents':contents},{'public_pointer':pointer,'public_manifest':manifest,
         'public_manifest_sha256':host.sha256_bytes(raw),'public_package_relative':prefix}
@@ -125,6 +136,11 @@ def release_duplicates(host,work,store,extra,candidate,upload,no_change):
 
 def deliver(host,config,work,extra,publish):
     result=host.read_json(work/'collection/collection-result.json')
+    if result.get('business_status')=='NO_CHANGE':
+        receipt=unchanged(host,config,extra,publish)
+        if publish and result.get('continuation_changed'):
+            save_continuation(host,work,extra['public_pointer']['package_id'])
+        return receipt
     host.require(re.fullmatch(r'packages/public-current-[0-9a-f]{24}',result['package_path']), 'public candidate path invalid')
     package=host._no_links(work/'collection'/result['package_path'])
     manifest=host.read_json(package/'manifest.json'); assert_scope(extra,manifest)
@@ -137,17 +153,23 @@ def deliver(host,config,work,extra,publish):
                  'public publisher owner changed or equals application owner')
     upload=store/'incoming'/(candidate+'.upload-'+work.name)
     host._no_links(upload)
-    upload.mkdir(mode=0o700)
-    before=host._file_set(package)
-    for rel in before:
-        path=upload/rel; path.parent.mkdir(parents=True,exist_ok=True)
-        host._write_exclusive(path,(package/rel).read_bytes())
-    host.require(host._file_set(upload)==before and host._file_set(package)==before,'public payload changed sealing')
-    # Preserve the existing Windows basis publisher account; only this new upload changes ownership.
-    for path in (upload,*upload.rglob('*')):
-        host._no_links(path);os.chown(path,owner['uid'],owner['gid'])
-    sealed=trans._ssh(None,['sh','-c',trans._SEAL_FOR_RUNTIME_READ_SCRIPT,'seal-owned-server-upload',str(upload),str(runtime['uid'])])
-    host.require(sealed.returncode==0,'public candidate seal failed')
+    increment_storage=None
+    if config.get('incremental_public_packages',False):
+        spec=importlib.util.spec_from_file_location('scheduled_public_increment',ROOT/'09_deploy/scheduled_server/public_increment.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        increment_storage=module.prepare_upload(host,config,work,extra,package,upload,runtime,publish,invoke)
+    else:
+        upload.mkdir(mode=0o700)
+        before=host._file_set(package)
+        for rel in before:
+            path=upload/rel; path.parent.mkdir(parents=True,exist_ok=True)
+            host._write_exclusive(path,(package/rel).read_bytes())
+        host.require(host._file_set(upload)==before and host._file_set(package)==before,'public payload changed sealing')
+        # Preserve the existing Windows basis publisher account; only this new upload changes ownership.
+        for path in (upload,*upload.rglob('*')):
+            host._no_links(path);os.chown(path,owner['uid'],owner['gid'])
+        sealed=trans._ssh(None,['sh','-c',trans._SEAL_FOR_RUNTIME_READ_SCRIPT,'seal-owned-server-upload',str(upload),str(runtime['uid'])])
+        host.require(sealed.returncode==0,'public candidate seal failed')
     pre=trans._run_application_runtime_gate(None,runtime,phase='PRE_SWITCH',
         package_root=runtime['container_store']+'/incoming/'+upload.name,expected_package_id=candidate)
     host.require(pre['STATUS']=='PASS','actual application cannot read candidate')
@@ -166,6 +188,7 @@ def deliver(host,config,work,extra,publish):
     host.require(validation.get('manifest_sha256')==host.sha256_file(upload/'manifest.json') and
         'public-current-server-cas/1' in validation.get('activation_capabilities',[]),'public offline CAS identity invalid')
     receipt={'status':'CANDIDATE','package_id':candidate,'validation':validation,'application_pre_switch':pre}
+    if increment_storage is not None:receipt['increment_storage']=increment_storage
     if not publish: return receipt
     if candidate==previous:
         host.require(host.read_json(store/'current.json')==extra['public_pointer'],'unchanged public pointer moved')
@@ -187,6 +210,21 @@ def deliver(host,config,work,extra,publish):
         host._write_json_exclusive(work/'public-rollback.json',{'rollback':rollback,'readback':readback})
         raise RuntimeError('application read failed; previous Current restored')
     receipt['application_post_switch']=post
+    save_continuation(host,work,candidate)
+    if increment_storage is not None:
+        # The sparse increment is retained as source/replay evidence. There is no
+        # complete baseline or candidate package duplicate to remove in this run.
+        receipt['duplicate_cleanup']={'status':'NOT_NEEDED','full_bundle_written':False}
+        return receipt
+    try:
+        receipt['duplicate_cleanup']=release_duplicates(host,work,store,extra,candidate,upload,receipt['status']=='NO_CHANGE')
+    except Exception as exc:
+        # Publication and continuation already succeeded; retain any unverified inputs.
+        receipt['duplicate_cleanup']={'status':'FAILED','error_type':type(exc).__name__}
+    return receipt
+
+
+def save_continuation(host,work,candidate):
     saved=RUNTIME/'continuations'/work.name
     saved.mkdir(mode=0o700,parents=True)
     entries={}
@@ -197,12 +235,50 @@ def deliver(host,config,work,extra,publish):
     from_run=importlib.util.spec_from_file_location('scheduled_fx_state',ROOT/'09_deploy/foreign_fx_server/run.py')
     state_module=importlib.util.module_from_spec(from_run); from_run.loader.exec_module(state_module)
     state_module.write_state(host,RUNTIME/'akshare-continuation.json',{'directory':str(saved),'files':entries,'package_id':candidate})
-    try:
-        receipt['duplicate_cleanup']=release_duplicates(host,work,store,extra,candidate,upload,receipt['status']=='NO_CHANGE')
-    except Exception as exc:
-        # Publication and continuation already succeeded; retain any unverified inputs.
-        receipt['duplicate_cleanup']={'status':'FAILED','error_type':type(exc).__name__}
-    return receipt
+
+
+def read_preflight(host,work,request,collected):
+    path=host._no_links(work/'preflight/preflight.json')
+    host.require(path.is_file() and path.stat().st_size <= 8*1024**2,'public preflight absent or oversized')
+    proof=host.read_json(path)
+    host.require(proof['schema_version']=='public-spread-preflight/1'
+        and proof['baseline_files']==request['baseline_files']
+        and proof['public_pointer']==request['public_pointer']
+        and proof['business_date']==request['business_date']
+        and proof['outcome']==collected['business_status']
+        and proof['outcome'] in {'CHANGED','NO_CHANGE','WAITING_FOR_SOURCE','SOURCE_FAILED'},
+        'public preflight identity differs')
+    required=set(proof['required_contracts']); present=set(proof['present_contracts'])
+    host.require(required and present<=required and set(proof['missing_contracts'])==required-present,
+                 'public preflight contract coverage differs')
+    host.require(len(proof['new_rows'])==proof['metrics']['to_append_rows'], 'public increment count differs')
+    if proof['outcome'] in {'CHANGED','NO_CHANGE'}:
+        host.require(required==present and proof['endpoint_failure_contracts']==0,'public preflight incomplete')
+        host.require(bool(proof['new_rows'])==(proof['outcome']=='CHANGED'),'public preflight change differs')
+    collected['proof_sha256']=host.sha256_file(path)
+    collected['source_evidence_sha256']=host.sha256_file(host._no_links(work/'preflight/source-evidence.xlsx'))
+    return proof
+
+
+def unchanged(host,config,extra,publish):
+    """Validate the retained immutable release and CAS; allocate no upload or package."""
+    store=Path(config['allocation_root'])/'01_data/public-data-server-store'
+    pointer=extra['public_pointer']; package=store/'releases'/pointer['package_id']
+    host.require(host.read_json(store/'current.json')==pointer,'unchanged public pointer moved')
+    host.require(host.sha256_file(host._no_links(package/'manifest.json'))==extra['public_manifest_sha256'],
+                 'unchanged public manifest differs')
+    for entry in extra['public_manifest']['files']:
+        path=host._no_links(package/'data'/entry['path'])
+        host.require(path.stat().st_size==entry['size_bytes'] and host.sha256_file(path)==entry['sha256'],
+                     'unchanged public file differs')
+    trans=transport(); runtime=trans._discover_application_runtime(None,str(store))
+    gate=trans._run_application_runtime_gate(None,runtime,phase='PRE_SWITCH',
+        package_root=runtime['container_store']+'/releases/'+pointer['package_id'],expected_package_id=pointer['package_id'])
+    host.require(gate['STATUS']=='PASS','actual application cannot read unchanged Current')
+    host.require(host.read_json(store/'current.json')==pointer,'unchanged public pointer moved during verification')
+    return {'status':'NO_CHANGE' if publish else 'CANDIDATE','package_id':pointer['package_id'],
+            'business_status':'NO_CHANGE','application_pre_switch':gate,
+            'full_bundle_written':False,'upload_created':False,'history_versions_deleted':0}
 
 
 import re
