@@ -1206,10 +1206,6 @@
       "role": "runtime_configuration"
     },
     {
-      "path": "03_src/agri_research_agent/summary_engine/basis_cache.py",
-      "role": "runtime_configuration"
-    },
-    {
       "path": "03_src/agri_research_agent/summary_engine/crop.py",
       "role": "runtime_configuration"
     },

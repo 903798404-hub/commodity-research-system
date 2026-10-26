@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from agri_research_agent.summary_engine.basis_cache import (
+from agri_research_agent.summary_engine.basis import (
     build_shared_basis_summary,
     load_shared_basis_current,
 )

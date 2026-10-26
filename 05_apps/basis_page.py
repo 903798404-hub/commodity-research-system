@@ -27,7 +27,7 @@ from agri_research_agent.data_sources.basis_entry import (  # noqa: E402
 from agri_research_agent.market_data.public_basis_current import (  # noqa: E402
     PublicBasisCurrentError,
 )
-from agri_research_agent.summary_engine.basis_cache import (  # noqa: E402
+from agri_research_agent.summary_engine.basis import (  # noqa: E402
     build_shared_basis_summary,
     load_shared_basis_current,
 )

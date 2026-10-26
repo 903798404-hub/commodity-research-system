@@ -650,7 +650,6 @@ modules:
       - 03_src/agri_research_agent/pipelines/public_data_refresh.py
       - 03_src/agri_research_agent/pipelines/public_data_providers.py
       - 03_src/agri_research_agent/summary_engine/basis.py
-      - 03_src/agri_research_agent/summary_engine/basis_cache.py
       - 04_scripts/refresh_public_data.py
       - 05_apps/basis_page.py
       - 05_apps/research_overview_page.py

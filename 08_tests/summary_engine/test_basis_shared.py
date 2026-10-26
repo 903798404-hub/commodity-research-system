@@ -14,7 +14,8 @@ from streamlit.testing.v1 import AppTest
 from agri_research_agent.market_data.public_basis_current import (
     PublicBasisCurrentError, PublicBasisCurrentErrorCode,
 )
-from agri_research_agent.summary_engine import basis_cache as shared
+from agri_research_agent.summary_engine import basis as shared
+from agri_research_agent.market_data import public_basis_current as basis_reader
 from agri_research_agent.summary_engine.basis import build_basis_summary
 from agri_research_agent.summary_engine.rules import DEFAULT_CONFIG, load_summary_rules
 
@@ -59,8 +60,8 @@ def fake_current(monkeypatch, records, identity):
         calls.append((root, expected_release_id, expected_manifest_sha256))
         assert (expected_release_id, expected_manifest_sha256) == (identity['release_id'], identity['manifest_sha256'])
         return SimpleNamespace(records=records.copy(deep=True), source_identity=dict(identity))
-    monkeypatch.setattr(shared, 'resolve_public_basis_current_identity', resolve)
-    monkeypatch.setattr(shared, 'load_public_basis_current', load)
+    monkeypatch.setattr(basis_reader, 'resolve_public_basis_current_identity', resolve)
+    monkeypatch.setattr(basis_reader, 'load_public_basis_current', load)
     return calls
 
 
@@ -92,7 +93,7 @@ def test_removed_pointer_never_falls_back_to_warm_cache(monkeypatch, tmp_path, r
     shared.load_shared_basis_current(tmp_path)
     def missing(_root):
         raise PublicBasisCurrentError(PublicBasisCurrentErrorCode.PUBLIC_CURRENT_UNAVAILABLE, 'fixture missing')
-    monkeypatch.setattr(shared, 'resolve_public_basis_current_identity', missing)
+    monkeypatch.setattr(basis_reader, 'resolve_public_basis_current_identity', missing)
     with pytest.raises(PublicBasisCurrentError, match='fixture missing'):
         shared.load_shared_basis_current(tmp_path)
 
@@ -102,7 +103,7 @@ def test_pointer_switch_during_cache_hit_fails_closed(monkeypatch, tmp_path, rec
     shared.load_shared_basis_current(tmp_path)
     versions = iter([SimpleNamespace(**{k:identity[k] for k in ['release_id','manifest_sha256']}),
                      SimpleNamespace(release_id='next-current', manifest_sha256='b' * 64)])
-    monkeypatch.setattr(shared, 'resolve_public_basis_current_identity', lambda _: next(versions))
+    monkeypatch.setattr(basis_reader, 'resolve_public_basis_current_identity', lambda _: next(versions))
     with pytest.raises(PublicBasisCurrentError, match='CURRENT_IDENTITY_MISMATCH'):
         shared.load_shared_basis_current(tmp_path)
     assert len(calls) == 1
