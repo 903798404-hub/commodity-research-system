@@ -75,11 +75,11 @@ class HistoricalMatch:
     method: str
 
 
-def load_display_config(path: str | Path) -> dict[str, Any]:
+def load_display_config(path: str | Path, *, source_bytes: bytes | None = None) -> dict[str, Any]:
     """Load and validate the display-only state ordering configuration."""
 
-    with Path(path).open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+    body = Path(path).read_bytes() if source_bytes is None else source_bytes
+    config = yaml.safe_load(body.decode("utf-8", "strict"))
     if not isinstance(config, dict):
         raise ValueError("Soybean crop display config must be a mapping")
     required_metadata = {

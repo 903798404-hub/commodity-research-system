@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timezone
+from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import pandas as pd
 
@@ -14,9 +16,11 @@ from agri_research_agent.pipelines.soybean_crop_comparison import (
     determine_current_year,
     load_display_config,
     round_half_up,
+    metric_definitions,
 )
 
-from .rules import freshness_status, load_summary_rules
+from .rules import DEFAULT_CONFIG, freshness_status, load_summary_rules
+from .io import file_identity
 from .schema import Summary
 
 
@@ -525,8 +529,11 @@ def build_crop_summary(
     source_identity: Mapping[str, Any],
     generated_at: datetime | None = None,
     display_config: Mapping[str, Any] | None = None,
+    rules: Mapping[str, Any] | None = None,
+    today: date | None = None,
+    comparison_builder: Callable[..., MetricComparison] | None = None,
 ) -> Summary:
-    rules = load_summary_rules()
+    rules = load_summary_rules() if rules is None else rules
     crop_rules = rules["soybean_crop"]
     config = dict(display_config) if display_config is not None else load_display_config(DEFAULT_DISPLAY_CONFIG)
     current_year = determine_current_year(progress, condition)
@@ -539,7 +546,7 @@ def build_crop_summary(
         metric = str(metric)
         source_name = _source_for_metric(metric)
         definition = MetricDefinition(metric, source_name, names[metric], names[metric])
-        comparison = build_metric_comparison(
+        comparison = (comparison_builder or build_metric_comparison)(
             sources[source_name], definition, config, current_year
         )
         comparisons[metric] = comparison
@@ -587,10 +594,121 @@ def build_crop_summary(
         generated_at=generated_at,
         calculation_version=rules["calculation_version"],
         rule_version=rules["rule_version"],
-        freshness_status=freshness_status("soybean_crop", latest, rules),
+        freshness_status=freshness_status("soybean_crop", latest, rules, today=today),
         facts=facts,
         classifications=[str(stage["name"]), progress_direction],
         headline="美豆种植生长最新变化",
         detail_text=detail,
         short_text=short,
     )
+
+
+def _crop_pair_identity(progress_path: str | Path, condition_path: str | Path) -> dict[str, Any]:
+    return {"progress": file_identity(Path(progress_path)), "condition": file_identity(Path(condition_path))}
+
+
+def _canonical_crop_identity(identity):
+    return {role: {**value, 'path': str(Path(value['path']).resolve())} for role, value in identity.items()}
+
+
+@lru_cache(maxsize=1)
+def _shared_crop_services():
+    # Pure summary consumers retain their existing imports and calculations.
+    import streamlit as st
+    import yaml
+
+    @st.cache_data(show_spinner=False, max_entries=8)
+    def read_pair(identity: dict[str, Any]):
+        progress = pd.read_parquet(identity['progress']['path'])
+        condition = pd.read_parquet(identity['condition']['path'])
+        if _crop_pair_identity(identity['progress']['path'], identity['condition']['path']) != identity:
+            raise ValueError('Crop input pair changed during shared read')
+        return progress, condition
+
+    @st.cache_data(show_spinner=False, max_entries=128)
+    def compare(identity: dict[str, Any], display_body: bytes, metric: str, source: str,
+                current_year: int, _frame: pd.DataFrame, _config: dict[str, Any]):
+        # Only verified service inputs reach this cache. Presentation labels
+        # do not affect the original numeric comparator; restore them below.
+        return build_metric_comparison(_frame, MetricDefinition(metric, source, metric, metric),
+                                       _config, current_year)
+
+    def comparator(identity, display_body):
+        def build(frame, definition, config, current_year):
+            result = compare(identity, display_body, definition.metric, definition.source,
+                             current_year, _frame=frame, _config=config)
+            return replace(result, definition=definition)
+        return build
+
+    @st.cache_data(show_spinner=False, max_entries=32)
+    def dashboard(identity: dict[str, Any], display_body: bytes):
+        config = load_display_config(DEFAULT_DISPLAY_CONFIG, source_bytes=display_body)
+        progress, condition = read_pair(identity)
+        sources = {'progress': progress, 'condition': condition}
+        current_year = determine_current_year(progress, condition)
+        build = comparator(identity, display_body)
+        results = []
+        for definition in metric_definitions(config):
+            if definition.source not in sources:
+                raise ValueError(f'Unknown crop metric source: {definition.source}')
+            results.append(build(sources[definition.source], definition, config, current_year))
+        return results
+
+    @st.cache_data(show_spinner=False, max_entries=32)
+    def summarize(identity: dict[str, Any], source_identity: dict[str, Any],
+                  display_body: bytes, rules_body: bytes, utc_day: str):
+        config = load_display_config(DEFAULT_DISPLAY_CONFIG, source_bytes=display_body)
+        rules = yaml.safe_load(rules_body.decode('utf-8', 'strict'))
+        if not isinstance(rules, dict) or rules.get('schema_version') != 1 or not rules.get('rule_version'):
+            raise ValueError('Summary规则配置版本无效')
+        progress, condition = read_pair(identity)
+        return build_crop_summary(progress, condition, source_identity=source_identity,
+            display_config=config, rules=rules, today=date.fromisoformat(utc_day),
+            comparison_builder=comparator(identity, display_body))
+
+    return read_pair, compare, dashboard, summarize
+
+
+def _shared_crop_read(progress_path, condition_path, operation, expected_source_identity=None):
+    before = _crop_pair_identity(progress_path, condition_path)
+    if expected_source_identity is not None and before != expected_source_identity:
+        raise ValueError('Crop inputs differ from the loaded page version')
+    result = operation(before)
+    if _crop_pair_identity(progress_path, condition_path) != before:
+        raise ValueError('Crop input pair changed during shared operation')
+    return result
+
+
+def load_shared_crop_data(progress_path: str | Path, condition_path: str | Path):
+    return _shared_crop_read(progress_path, condition_path,
+        lambda identity: _shared_crop_services()[0](_canonical_crop_identity(identity)))
+
+
+def load_shared_crop_snapshot(progress_path: str | Path, condition_path: str | Path):
+    return _shared_crop_read(progress_path, condition_path,
+        lambda identity: (*_shared_crop_services()[0](_canonical_crop_identity(identity)), identity))
+
+
+def load_shared_crop_comparisons(progress_path: str | Path, condition_path: str | Path,
+                                display_config_path: str | Path = DEFAULT_DISPLAY_CONFIG, *,
+                                expected_source_identity: Mapping[str, Any] | None = None):
+    body = Path(display_config_path).read_bytes()
+    return _shared_crop_read(progress_path, condition_path,
+        lambda identity: _shared_crop_services()[2](_canonical_crop_identity(identity), body), expected_source_identity)
+
+
+def load_shared_crop_summary(progress_path: str | Path, condition_path: str | Path, *,
+                             display_config_path: str | Path = DEFAULT_DISPLAY_CONFIG,
+                             rules_path: str | Path = DEFAULT_CONFIG, today: date | None = None,
+                             expected_source_identity: Mapping[str, Any] | None = None):
+    display_body = Path(display_config_path).read_bytes()
+    rules_body = Path(rules_path).read_bytes()
+    day = (today or datetime.now(timezone.utc).date()).isoformat()
+    return _shared_crop_read(progress_path, condition_path,
+        lambda identity: _shared_crop_services()[3](_canonical_crop_identity(identity), identity,
+                                                   display_body, rules_body, day), expected_source_identity)
+
+
+def clear_shared_crop_cache() -> None:
+    for service in _shared_crop_services():
+        service.clear()

@@ -21,7 +21,10 @@ from agri_research_agent.pipelines.soybean_crop_comparison import (  # noqa: E40
     load_display_config,
     style_comparison_table,
 )
-from agri_research_agent.summary_engine.crop import build_crop_summary  # noqa: E402
+from agri_research_agent.summary_engine.crop import (  # noqa: E402
+    build_crop_summary, load_shared_crop_data, load_shared_crop_snapshot,
+    load_shared_crop_comparisons, load_shared_crop_summary,
+)
 from agri_research_agent.summary_engine.io import file_identity  # noqa: E402
 from agri_research_agent.summary_engine.rules import DEFAULT_CONFIG as SUMMARY_RULES_FILE  # noqa: E402
 from agri_research_agent.summary_engine.schema import Summary  # noqa: E402
@@ -48,7 +51,6 @@ MATCHING_METHODOLOGY_NOTE = (
 )
 
 
-@st.cache_data(show_spinner=False)
 def load_processed_crop_data(
     progress_path: str,
     progress_mtime_ns: int,
@@ -58,10 +60,9 @@ def load_processed_crop_data(
     """Read approved Parquets; mtimes are part of the cache key."""
 
     del progress_mtime_ns, condition_mtime_ns
-    return pd.read_parquet(progress_path), pd.read_parquet(condition_path)
+    return load_shared_crop_data(progress_path, condition_path)
 
 
-@st.cache_data(show_spinner=False)
 def load_crop_display_config(
     config_path: str, config_mtime_ns: int
 ) -> dict[str, object]:
@@ -154,20 +155,18 @@ def render_soybean_crop_progress_page() -> None:
     progress_file, condition_file = resolve_processed_crop_paths(config)
     if not _require_page_inputs(progress_file, condition_file):
         return
-    progress, condition = load_processed_crop_data(
-        str(progress_file),
-        progress_file.stat().st_mtime_ns,
-        str(condition_file),
-        condition_file.stat().st_mtime_ns,
-    )
-    source_identity = {
-        "progress": file_identity(progress_file), "condition": file_identity(condition_file),
-    }
-    comparisons = cached_crop_comparisons(progress, condition, config, source_identity)
     try:
-        render_summary_panel(cached_crop_summary(
-            progress, condition, config, source_identity, file_identity(SUMMARY_RULES_FILE),
-            datetime.now(timezone.utc).date().isoformat(),
+        progress, condition, source_identity = load_shared_crop_snapshot(progress_file, condition_file)
+        comparisons = load_shared_crop_comparisons(
+            progress_file, condition_file, DISPLAY_CONFIG_FILE, expected_source_identity=source_identity,
+        )
+    except (OSError, ValueError, KeyError) as exc:
+        st.error(f"美豆种植生长数据暂不可用：{exc}")
+        return
+    try:
+        render_summary_panel(load_shared_crop_summary(
+            progress_file, condition_file, display_config_path=DISPLAY_CONFIG_FILE,
+            rules_path=SUMMARY_RULES_FILE, expected_source_identity=source_identity,
         ))
     except (OSError, ValueError) as exc:
         st.warning(f"美豆种植生长摘要暂不可用：{exc}")
