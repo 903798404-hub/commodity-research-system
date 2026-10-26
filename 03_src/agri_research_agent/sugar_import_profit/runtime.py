@@ -58,6 +58,43 @@ def monthly_capture_enabled():
     return not deployed() or os.getenv('SUGAR_IMPORT_ALLOW_CAPTURE') == '1'
 
 
+def yahoo_text(url):
+    """Bounded read of the exact ICE contract; Yahoo requires a browser user agent."""
+    import time
+    import requests
+    deadline = time.monotonic() + 20
+    try:
+        with requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=(5, 8),
+                          stream=True, allow_redirects=False) as response:
+            response.raise_for_status()
+            if response.status_code != 200: raise ValueError('备用行情响应异常')
+            raw = bytearray()
+            for part in response.iter_content(8192):
+                raw.extend(part)
+                if len(raw) > 131072 or time.monotonic() > deadline:
+                    raise ValueError('备用行情超时或超出上限')
+        return raw.decode('utf-8', errors='strict')
+    except (requests.RequestException, UnicodeError):
+        raise ValueError('备用行情连接或解析失败') from None
+
+
+def yahoo_ice_quote(meta, code, now):
+    from datetime import datetime
+    import math
+    from .model import TZ
+    from agri_research_agent.commodity_import_margin.live import source_time
+    if (meta.get('symbol') != code + '.NYB' or meta.get('currency') != 'USX'
+            or meta.get('exchangeName') != 'NYB' or meta.get('instrumentType') != 'FUTURE'):
+        raise ValueError('备用原糖合约、交易所或美分单位不符')
+    price = meta.get('regularMarketPrice')
+    if isinstance(price, bool) or not isinstance(price, (float, int)) or not math.isfinite(price) or price <= 0:
+        raise ValueError('备用原糖最新报价无效')
+    stamp = datetime.fromtimestamp(meta['regularMarketTime'], TZ)
+    source_time(stamp, now)
+    return dict(price=price, contract=code, provider='Yahoo Finance', quoted_at=stamp.isoformat(),
+        time_kind='exchange_quote', source_url='https://query1.finance.yahoo.com/v8/finance/chart/' + code + '.NYB?interval=1d&range=5d', raw=meta)
+
+
 def validate_monthly_market(value, day):
     from datetime import datetime
     import math
@@ -79,6 +116,11 @@ def validate_monthly_market(value, day):
             if price is None: continue
             if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
                 raise ValueError('行情价格无效')
+            if kind == 'ice' and item.get('provider') == 'Yahoo Finance':
+                expected_item = yahoo_ice_quote(item.get('raw') or {}, code, captured)
+                if any(item.get(k) != expected_item[k] for k in ('price', 'quoted_at', 'contract', 'source_url', 'time_kind')):
+                    raise ValueError('备用原糖价格或时间凭证不符')
+                continue
             if item.get('provider') != provider or item.get('contract') != code or not item.get('raw'):
                 raise ValueError('行情合约来源凭证缺失')
             if kind == 'ice':
@@ -150,6 +192,16 @@ def capture_monthly_market(day, quotes):
                     quoted_at=stamp.isoformat(), time_kind='provider_update', source_url=em_url, raw=raw)
             except (ValueError, TypeError, KeyError, OverflowError): result['errors'][code] = '原糖最新价或有效来源时间缺失'
     except (ValueError, TypeError, KeyError): result['errors']['ice'] = '原糖列表不可用，价格留空'
+    missing_ice = [c for c in ice_codes if result['ice'][c]['price'] is None]
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        jobs = {c: pool.submit(yahoo_text, 'https://query1.finance.yahoo.com/v8/finance/chart/' + c + '.NYB?interval=1d&range=5d') for c in missing_ice}
+        for code, job in jobs.items():
+            try:
+                meta = json.loads(job.result())['chart']['result'][0]['meta']
+                result['ice'][code] = yahoo_ice_quote(meta, code, datetime.now(TZ))
+                result['errors'].pop(code, None)
+            except (ValueError, TypeError, KeyError, IndexError, OverflowError):
+                result['errors'][code] = '原糖具体合约两来源均无有效报价，留空'
     try:
         import re
         text = bodies.get('domestic', '')

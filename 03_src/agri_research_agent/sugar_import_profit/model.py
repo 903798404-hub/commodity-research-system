@@ -77,6 +77,12 @@ QUOTE_MODES = ('升贴水（美分/磅，不含运费）', 'CNF升贴水（美�
 MONTH_CODES = {3: 'H', 5: 'K', 7: 'N', 10: 'V'}
 MONTHLY_PARAMETERS = dict(polarization=1.042, conversion=22.046, tariff_in=.15,
     tariff_out=.50, vat=.13, loss=.04, loss_mode='成本加成', processing=400., other=0.)
+RESEARCH_VERSION = 'sugar-monthly/2'
+RESEARCH_PARAMETERS = dict(polarization=1.04, conversion=22.046, tariff_in=.15,
+    tariff_out=.50, vat=.13, loss=.02, loss_mode='成本加成', processing=500., other=0.,
+    insurance_rate=.004616, bank_rate=.00125, agency_rate=.01, interest=25.)
+LABELS.update(insurance_rate='海运保险费率', bank_rate='银行手续费率',
+              agency_rate='外贸代理费率', interest='利息及劳务费')
 
 
 def month_periods(day):
@@ -100,6 +106,7 @@ def default_mapping(period):
 def monthly_rows(payload):
     """Partial calculation: actual margins require insurance; estimates name the omission."""
     market, params = payload.get('market') or {}, payload['parameters']
+    research = payload['schema_version'] == RESEARCH_VERSION
     rows = []
     for item in payload['quotes']:
         r = dict(item)
@@ -117,7 +124,7 @@ def monthly_rows(payload):
             if mode == QUOTE_MODES[2]:
                 cfr = quote
             elif ice is not None:
-                cfr = (ice + quote) * params['polarization'] * params['conversion']
+                cfr = (ice + quote) * (1 if research else params['polarization']) * params['conversion']
                 if mode == QUOTE_MODES[0]:
                     cfr = cfr + r['freight'] if r['freight'] is not None else None
         if cfr is not None and cfr <= 0: cfr = None
@@ -128,15 +135,25 @@ def monthly_rows(payload):
         if quote is not None and cfr is None and ice is not None and r['freight'] is not None: missing.append('有效到岸价格')
         if fx is None: missing.append('汇率')
         if sr is None: missing.append('郑糖行情')
+        if research:
+            fob = (ice + quote) * params['conversion'] if ice is not None and quote is not None else None
+            r['insurance'] = fob * params['insurance_rate'] if fob is not None and fob > 0 else None
+            if fob is not None and fob <= 0: cfr = None
+        else:
+            fob = None
         if r['insurance'] is None: missing.append('保险')
-        r.update(ice=ice, sr=sr, fx=fx, cfr_usd=cfr, status='缺' + '、'.join(missing) if missing else '输入完整')
+        r.update(ice=ice, sr=sr, fx=fx, fob_usd=fob, cfr_usd=cfr, status='缺' + '、'.join(missing) if missing else '输入完整')
         for quota in ('in', 'out'):
             factor = (1 + params['tariff_' + quota]) * (1 + params['vat'])
             def cost(usd):
                 if usd is None or fx is None: return None
                 taxed = usd * fx * factor
-                return (taxed / (1 - params['loss']) if params['loss_mode'] == '实际损耗'
-                        else taxed * (1 + params['loss'])) + params['processing'] + params['other']
+                adjusted = (taxed / (1 - params['loss']) if params['loss_mode'] == '实际损耗'
+                            else taxed * (1 + params['loss']))
+                if research:
+                    adjusted *= (1 + params['bank_rate']) * (1 + params['agency_rate']) * params['polarization']
+                    adjusted += params['interest']
+                return adjusted + params['processing'] + params['other']
             estimate = cost(cfr)
             actual = cost(cfr + r['insurance']) if cfr is not None and r['insurance'] is not None else None
             r['cost_' + quota] = actual
@@ -151,17 +168,20 @@ def monthly_rows(payload):
 def validate_monthly(payload):
     import re
     from copy import deepcopy
-    if not isinstance(payload, dict) or payload.get('schema_version') != MONTHLY_VERSION:
+    if not isinstance(payload, dict) or payload.get('schema_version') not in (MONTHLY_VERSION, RESEARCH_VERSION):
         raise ValueError('月份记录版本无效')
     value = deepcopy(payload)
+    research = value['schema_version'] == RESEARCH_VERSION
     day = date.fromisoformat(value['date'])
     if day.isoformat() > today(): raise ValueError('不能保存未来业务日')
     if value.get('country') not in COUNTRIES or value.get('quote_mode') not in QUOTE_MODES:
         raise ValueError('国家或报价口径无效，请先选择CNF口径')
+    if research and value['quote_mode'] != QUOTE_MODES[0]:
+        raise ValueError('新公式使用FOB升贴水与单列海运费')
     if not isinstance(value.get('source'), str) or not value['source'].strip() or len(value['source']) > 4000:
         raise ValueError('请填写CNF及人工参数来源')
     params = value.get('parameters', {})
-    if set(params) != set(MONTHLY_PARAMETERS): raise ValueError('计算参数集合无效')
+    if set(params) != set(RESEARCH_PARAMETERS if research else MONTHLY_PARAMETERS): raise ValueError('计算参数集合无效')
     for key, v in params.items():
         if key == 'loss_mode':
             if v not in ('成本加成', '实际损耗'): raise ValueError('损耗口径无效')
@@ -170,12 +190,15 @@ def validate_monthly(payload):
     if any(not 0 <= params[k] < 1 for k in ('tariff_in', 'tariff_out', 'vat', 'loss')):
         raise ValueError('税率及损耗应小于100%')
     if params['polarization'] <= 0 or params['conversion'] <= 0: raise ValueError('换算系数必须为正')
+    if research and any(params[k] >= 1 for k in ('insurance_rate', 'bank_rate', 'agency_rate')):
+        raise ValueError('费率应小于100%')
     quotes = value.get('quotes')
     if not isinstance(quotes, list) or len(quotes) != 12 or {r['period'] for r in quotes} != set(month_periods(day)):
         raise ValueError('必须保存完整12个月船期')
     for r in quotes:
-        if not re.fullmatch(r'SB[HKNV]\d{2}', r.get('ice_contract', '')) or not re.fullmatch(r'SR\d{2}(?:01|05|09)', r.get('sr_contract', '')):
-            raise ValueError('须使用完整ICE和郑糖1/5/9合约')
+        sr_pattern = r'SR\d{2}(?:01|05|09)'
+        if not re.fullmatch(r'SB[HKNV]\d{2}', r.get('ice_contract', '')) or not re.fullmatch(sr_pattern, r.get('sr_contract', '')):
+            raise ValueError('须使用完整ICE和郑糖具体合约')
         ice_month = {v: k for k, v in MONTH_CODES.items()}[r['ice_contract'][2]]
         if (2000 + int(r['ice_contract'][-2:]), ice_month) <= (day.year, day.month):
             raise ValueError('ICE合约已进入交割月或已到期，请核对年份')

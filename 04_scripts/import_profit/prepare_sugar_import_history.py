@@ -31,7 +31,9 @@ def prepare(source_file: Path, source_sha256: str, database: Path, database_sha2
             raise ValueError("本机白糖数据库损坏")
         tables = {row[0] for row in source_db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         legacy = {"records", "revisions", "settings"}
-        if tables not in (legacy, legacy | {"monthly_records", "monthly_revisions"}):
+        monthly = {"monthly_records", "monthly_revisions"}
+        research = {"monthly_records_v2", "monthly_revisions_v2"}
+        if tables not in (legacy, legacy | monthly, legacy | research, legacy | monthly | research):
             raise ValueError("本机白糖数据库结构不符")
         if source_db.execute("SELECT count(*) FROM records WHERE model_version != ?", (MODEL_VERSION,)).fetchone()[0]:
             raise ValueError("本机白糖记录模型版本未支持")
