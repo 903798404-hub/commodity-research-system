@@ -46,14 +46,14 @@ def fetch(url, limit=4 * 1024 * 1024):
 
 
 def discover(root):
-    url = BASE + '/home/searchCatetoryAndArticle?keyWord=' + requests.utils.quote('食糖进口成本')
-    path = root / 'search-all.json'
+    url = BASE + '/home/searchCatetoryAndArticle?keyWord=' + requests.utils.quote('进口成本')
+    path = root / 'search-import-cost.json'
     raw = path.read_bytes() if path.exists() else fetch(url)
     response = json.loads(raw.decode('utf-8'))
     if response.get('code') != 0: raise ValueError('Public search failed')
     path.write_bytes(raw)
     rows = [r for group in response['data'] for r in group['list']
-            if re.match(r'\d{4}', r.get('title', '')) and '食糖进口成本' in r['title']]
+            if re.match(r'\d{4}', r.get('title', '')) and '进口成本' in r['title']]
     if len({r['id'] for r in rows}) != len(rows): raise ValueError('Duplicate article identity')
     (root / 'articles.json').write_text(packed(rows), encoding='utf-8')
     return rows
@@ -115,7 +115,7 @@ def collect(root, workers=4):
                 failures.append(dict(id=row['id'], title=row['title'], error=type(exc).__name__ + ': ' + str(exc)))
             if i % 50 == 0: print(f'Fetched {i}/{len(rows)} articles; failures {len(failures)}', flush=True)
     manifest = dict(schema_version='hisugar-public-capture/1', search_url=BASE + '/home/searchCatetoryAndArticle',
-        keyword='食糖进口成本', search_sha256=hashlib.sha256((root / 'search-all.json').read_bytes()).hexdigest(),
+        keyword='进口成本', search_sha256=hashlib.sha256((root / 'search-import-cost.json').read_bytes()).hexdigest(),
         discovered=len(rows), collected=len(receipts), failures=failures,
         articles=sorted(receipts, key=lambda r: r['article_date']))
     (root / 'capture.json').write_text(packed(manifest), encoding='utf-8')
