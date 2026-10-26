@@ -10,7 +10,7 @@ import streamlit as st
 from agri_research_agent.summary_engine.basis import (
     load_shared_basis_summary,
 )
-from agri_research_agent.summary_engine.crop import build_crop_summary
+from agri_research_agent.summary_engine.crop import load_shared_crop_summary
 from agri_research_agent.summary_engine.io import file_identity
 from agri_research_agent.market_data.public_basis_current import (
     PublicBasisCurrentError,
@@ -111,14 +111,7 @@ def load_crop_overview_summary() -> object | None:
         condition = crop_root / "soybeans_crop_condition_weekly_2021_2026.parquet"
     if not progress.is_file() or not condition.is_file():
         return None
-    return build_crop_summary(
-        pd.read_parquet(progress),
-        pd.read_parquet(condition),
-        source_identity={
-            "progress": file_identity(progress),
-            "condition": file_identity(condition),
-        },
-    )
+    return load_shared_crop_summary(progress, condition)
 
 
 def load_research_overview_summaries() -> tuple[list[object], list[str]]:
