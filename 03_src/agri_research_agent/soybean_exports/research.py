@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -637,3 +639,120 @@ def _status_health(status: Mapping[str, Any]) -> str:
     if status.get("status") == "failed":
         return "warning" if isinstance(status.get("last_success"), dict) else "unavailable"
     return "success" if status else "warning"
+
+
+class _ExportInputChanged(ValueError):
+    """An input changed while preparing a process-local cached result."""
+
+
+def _export_file_identity(path: Path) -> dict[str, Any]:
+    # Missing or unreadable sources retain the original per-source degradation.
+    try:
+        if not path.is_file():
+            return {"path": str(path), "missing": True}
+        stat = path.stat()
+        return {"path": str(path), "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns, "sha256": sha256_file(path)}
+    except OSError as exc:
+        return {"path": str(path), "error": type(exc).__name__, "errno": exc.errno}
+
+
+def _export_source_identity(paths: Mapping[str, Path]) -> tuple[dict[str, Any], ...]:
+    return tuple(_export_file_identity(Path(paths[name]))
+                 for name in ("stable", "stable_manifest", "status"))
+
+
+def _export_psd_identity(usda_project_root: Path) -> tuple[Any, ...]:
+    root = usda_project_root / "public/data"
+    version = root / "report_version.json"
+    snapshot = None
+    try:
+        month = json.loads(version.read_text(encoding="utf-8")).get("currentReportMonth")
+        if isinstance(month, str) and len(month) == 7:
+            snapshot = root / "snapshots/usda_psd" / month / "matrix/2222000_US.json"
+    except (OSError, ValueError, AttributeError):
+        pass
+    return (_export_file_identity(version),
+            _export_file_identity(root / "matrix/2222000_US.json"),
+            None if snapshot is None else _export_file_identity(snapshot))
+
+
+def _export_input_identity(runtime_root: Path, usda_project_root: Path) -> dict[str, Any]:
+    return {"fgis": _export_source_identity(fgis_paths(runtime_root, "page-read")),
+            "fas": _export_source_identity(fas_paths(runtime_root, "page-read")),
+            "psd": _export_psd_identity(usda_project_root)}
+
+
+@lru_cache(maxsize=1)
+def _shared_export_payload_service():
+    # Pipeline and pure builder imports do not initialize Streamlit.
+    import streamlit as st
+
+    @st.cache_data(show_spinner=False, max_entries=8)
+    def load(runtime_root: str, usda_project_root: str, identity: dict[str, Any]):
+        root, usda = Path(runtime_root), Path(usda_project_root)
+        if _export_input_identity(root, usda) != identity:
+            raise _ExportInputChanged("Export inputs changed before shared read")
+        payload = load_soybean_export_page_payload(root, usda_project_root=usda)
+        if _export_input_identity(root, usda) != identity:
+            raise _ExportInputChanged("Export inputs changed during shared read")
+        return payload
+
+    return load
+
+
+def _load_export_partial_snapshot(runtime_root: Path, usda_project_root: Path) -> dict[str, Any]:
+    """Bounded uncached fallback: changing sources cannot hide a valid peer."""
+    values = {}
+    for role, paths, validator in [
+        ("fgis", fgis_paths(runtime_root, "page-read"), validate_fgis_stable),
+        ("fas", fas_paths(runtime_root, "page-read"), validate_fas_stable),
+    ]:
+        before = _export_source_identity(paths)
+        loaded = _load_published_source(paths, validator)
+        if _export_source_identity(paths) != before:
+            loaded = (None, {}, {}, f"{role.upper()} published inputs changed during read")
+        values[role] = loaded
+    psd_before = _export_psd_identity(usda_project_root)
+    fgis, fas = values["fgis"], values["fas"]
+    payload = build_soybean_export_page_payload(
+        fgis_stable=fgis[0], fas_stable=fas[0], usda_project_root=usda_project_root,
+        fgis_manifest=fgis[1], fas_manifest=fas[1], fgis_status=fgis[2], fas_status=fas[2],
+        fgis_error=fgis[3], fas_error=fas[3],
+    )
+    if payload["fas"] and _export_psd_identity(usda_project_root) != psd_before:
+        current = payload["fas"]["current_summary"]
+        current.update(sales_progress_pct=None, sales_progress_denominator=None,
+                       sales_progress_null_reason=SALES_PROGRESS_NULL_REASON)
+        payload["kpis"]["current_my_sales_progress_pct"] = None
+        payload["kpi_reasons"]["current_my_sales_progress_pct"] = SALES_PROGRESS_NULL_REASON
+        payload["errors"]["psd"] = "USDA soybean denominator inputs changed during read"
+    return payload
+
+
+def load_shared_export_page_snapshot(
+    runtime_root: Path, *, usda_project_root: Path,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Reuse original facts by complete file identity, including on warm hits.
+
+    No cache artifact is written. Two bounded attempts precede independently
+    guarded source reads; unstable fallback results never enter either cache.
+    """
+    root, usda = Path(runtime_root), Path(usda_project_root)
+    for _ in range(2):
+        identity = _export_input_identity(root, usda)
+        try:
+            payload = _shared_export_payload_service()(str(root), str(usda), identity)
+        except _ExportInputChanged:
+            continue
+        if _export_input_identity(root, usda) == identity:
+            return payload, identity
+    return _load_export_partial_snapshot(root, usda), None
+
+
+def load_shared_export_page_payload(runtime_root: Path, *, usda_project_root: Path) -> dict[str, Any]:
+    return load_shared_export_page_snapshot(runtime_root, usda_project_root=usda_project_root)[0]
+
+
+def clear_shared_export_cache() -> None:
+    _shared_export_payload_service().clear()

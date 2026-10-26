@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ from agri_research_agent.soybean_exports.research import (  # noqa: E402
     format_export_wan as _format_wan,
     format_soybean_export_weekly_observation,
     load_soybean_export_page_payload,
+    load_shared_export_page_payload,
+    load_shared_export_page_snapshot,
 )
 
 
@@ -51,7 +54,6 @@ def resolve_export_runtime_root() -> Path:
     return Path(configured).resolve() if configured else PROJECT_ROOT
 
 
-@st.cache_data(show_spinner=False)
 def load_export_page_payload(
     runtime_root: str,
     fgis_mtime_ns: int | None,
@@ -71,7 +73,7 @@ def load_export_page_payload(
         fas_status_mtime_ns,
         psd_version_mtime_ns,
     )
-    return load_soybean_export_page_payload(
+    return load_shared_export_page_payload(
         Path(runtime_root), usda_project_root=USDA_PROJECT_ROOT
     )
 
@@ -79,9 +81,21 @@ def load_export_page_payload(
 def load_current_export_page_payload() -> dict[str, Any]:
     """Load the current page payload through the one identity-aware cache."""
 
-    runtime_root = resolve_export_runtime_root()
-    paths = _consumer_paths(runtime_root)
-    return load_export_page_payload(str(runtime_root), *(_mtime(path) for path in paths))
+    return load_current_export_page_snapshot()[0]
+
+
+def load_current_export_page_snapshot():
+    return load_shared_export_page_snapshot(
+        resolve_export_runtime_root(), usda_project_root=USDA_PROJECT_ROOT,
+    )
+
+
+@lru_cache(maxsize=1)
+def _shared_export_figure_service():
+    @st.cache_data(show_spinner=False, max_entries=16)
+    def figures(identity, role, _section):
+        return build_fgis_figures(_section) if role == "fgis" else build_fas_figures(_section)
+    return figures
 
 
 def render_soybean_exports_page(payload: dict[str, Any] | None = None) -> None:
@@ -92,8 +106,9 @@ def render_soybean_exports_page(payload: dict[str, Any] | None = None) -> None:
     st.caption(
         "USDA FGIS 出口检验与 FAS 出口销售的周度研究视图；两个来源独立更新、独立降级。"
     )
+    identity = None
     if payload is None:
-        payload = load_current_export_page_payload()
+        payload, identity = load_current_export_page_snapshot()
 
     _render_source_status(payload)
     _render_kpis(payload)
@@ -103,14 +118,18 @@ def render_soybean_exports_page(payload: dict[str, Any] | None = None) -> None:
     if fgis:
         st.markdown("## 出口检验 · FGIS")
         st.caption("美国大豆出口检验及中国大陆接收进度的历史同期比较。")
-        figures = build_fgis_figures(fgis)
+        figures = (build_fgis_figures(fgis) if identity is None else
+                   _shared_export_figure_service()(identity["fgis"], "fgis", _section=fgis))
         _render_two_column_figures(figures)
     else:
         st.warning("出口检验数据暂不可用；出口销售内容仍可继续使用。")
 
     fas = payload.get("fas")
     if fas:
-        current_figures, next_figures, execution_figure = build_fas_figures(fas)
+        current_figures, next_figures, execution_figure = (
+            build_fas_figures(fas) if identity is None else
+            _shared_export_figure_service()((identity["fas"], identity["psd"]), "fas", _section=fas)
+        )
         st.markdown("## 本年度销售 · FAS")
         st.caption(
             "Export Sales Reporting 本年度总销售及中国大陆采购的历史同期比较。"
