@@ -181,6 +181,58 @@ def monthly_payload(day=date(2026, 10, 15)):
                      freight=30., insurance=None, rizhao=None, rizhao_date='') for p in model.month_periods(day)])
 
 
+def research_payload():
+    value = monthly_payload()
+    value.update(schema_version=model.RESEARCH_VERSION, parameters=dict(model.RESEARCH_PARAMETERS))
+    return value
+
+
+def test_reference_screenshot_formula_and_fee_order():
+    payload = research_payload()
+    item = payload['quotes'][10]
+    item.update(quote=-.9, freight=54.)
+    payload['market'] = dict(fx_curve={'0': 6.6807}, ice={item['ice_contract']: {'price': 20.59}},
+                             domestic={item['sr_contract']: {'price': 6500.}})
+    row = model.monthly_rows(payload)[0]
+    assert row['fob_usd'] == pytest.approx(434.08574)
+    assert row['insurance'] == pytest.approx(434.08574 * .004616)
+    expected = ((434.08574 * 1.004616 + 54) * 6.6807 * 1.5 * 1.13
+                * 1.02 * 1.00125 * 1.01 * 1.04 + 25 + 500)
+    assert row['cost_out'] == pytest.approx(expected)
+    assert round(expected, 2) == 6478.39
+    assert row['margin_out'] == pytest.approx(6500 - expected)
+    item['freight'] = None
+    assert model.monthly_rows(payload)[0]['cost_out'] is None
+    item.update(freight=0., quote=0.)
+    assert model.monthly_rows(payload)[0]['margin_out'] is not None
+
+
+def test_mapping_ice_march_sr_159_all_twelve_and_rollover():
+    expected_sr = (5, 5, 5, 9, 9, 9, 9, 1, 1, 1, 1, 5)
+    for month, sr_month in enumerate(expected_sr, 1):
+        ice, sr = model.default_mapping(f'2027-{month:02}')
+        assert int(sr[-2:]) == sr_month
+        assert int(sr[2:4]) == (28 if month >= 8 else 27)
+    assert model.default_mapping('2027-01') == ('SBH27', 'SR2705')
+    assert model.default_mapping('2027-12') == ('SBH28', 'SR2805')
+
+
+def test_research_version_validation_and_legacy_record_preservation(tmp_path):
+    payload = research_payload()
+    model.validate_monthly(payload)
+    store = Store(tmp_path / 'own.sqlite3', lambda _: None)
+    old = monthly_payload()
+    version = store.save_monthly(old, expected_version=None)
+    store.save_monthly(payload, expected_version=None)
+    assert store.monthly_records()[0]['payload']['parameters'] == model.RESEARCH_PARAMETERS
+    with sqlite3.connect(store.path) as db:
+        raw = db.execute('SELECT payload FROM monthly_records').fetchone()[0]
+    assert json.loads(raw) == old
+    payload['quotes'][0]['sr_contract'] = 'SR2703'
+    with pytest.raises(ValueError, match='合约'):
+        model.validate_monthly(payload)
+
+
 def test_monthly_fixed_skeleton_rollover_and_partial_insurance_and_spot():
     payload = monthly_payload()
     validated = model.validate_monthly(payload)
@@ -320,9 +372,54 @@ def test_prepare_preserves_monthly_tables_and_legacy_without_source_mutation(tmp
     version = store.save_monthly(payload, expected_version=None)
     payload['quotes'][0]['quote'] = -.2
     store.save_monthly(payload, expected_version=version)
+    research = research_payload()
+    research_version = store.save_monthly(research, expected_version=None)
+    research['parameters']['processing'] = 510.
+    store.save_monthly(research, expected_version=research_version)
     digest = hashlib.sha256(db.read_bytes()).hexdigest()
     dest = tmp_path / '01_data/candidates/sugar_import_profit/monthly'
     report = module.prepare(src, hashlib.sha256(src.read_bytes()).hexdigest(), db, digest, dest)
     assert report['sqlite_counts']['monthly_records'] == report['sqlite_counts']['monthly_revisions'] == 1
+    assert report['sqlite_counts']['monthly_records_v2'] == report['sqlite_counts']['monthly_revisions_v2'] == 1
     assert Store(dest / 'sugar-import.sqlite3', lambda _: None).monthly_records() == store.monthly_records()
     assert hashlib.sha256(db.read_bytes()).hexdigest() == digest
+
+
+@pytest.fixture(autouse=True)
+def no_real_yahoo_requests(monkeypatch):
+    def unavailable(url):
+        raise ValueError('test source unavailable')
+    monkeypatch.setattr(runtime, 'yahoo_text', unavailable)
+
+
+def test_ice_fallback_preserves_contract_unit_time_and_detects_tampering(monkeypatch):
+    from datetime import datetime
+    from copy import deepcopy
+    from agri_research_agent.commodity_import_margin import live
+    now = datetime.now(model.TZ)
+    day = now.date()
+    code, sr = model.default_mapping(model.month_periods(day)[0])
+    def unavailable(url, **kwargs):
+        raise ValueError('primary unavailable')
+    monkeypatch.setattr(live, 'get_text', unavailable)
+    monkeypatch.setattr(runtime, 'deployed', lambda: False)
+    meta = dict(symbol=code+'.NYB', currency='USX', exchangeName='NYB', instrumentType='FUTURE',
+                regularMarketPrice=20.26, regularMarketTime=int(now.timestamp()))
+    monkeypatch.setattr(runtime, 'yahoo_text', lambda url: json.dumps(dict(chart=dict(result=[dict(meta=meta)]))))
+    snapshot = runtime.capture_monthly_market(day, [dict(ice_contract=code, sr_contract=sr)])
+    assert snapshot['ice'][code]['price'] == 20.26
+    assert snapshot['ice'][code]['provider'] == 'Yahoo Finance'
+    assert snapshot['ice'][code]['quoted_at'] == datetime.fromtimestamp(meta['regularMarketTime'], model.TZ).isoformat()
+    runtime.validate_monthly_market(snapshot, day)
+    forged = deepcopy(snapshot)
+    forged['ice'][code]['raw']['currency'] = 'USD'
+    with pytest.raises(ValueError, match='单位'):
+        runtime.validate_monthly_market(forged, day)
+    forged = deepcopy(snapshot)
+    forged['ice'][code]['price'] = 30.
+    with pytest.raises(ValueError, match='凭证'):
+        runtime.validate_monthly_market(forged, day)
+    forged = deepcopy(snapshot)
+    forged['ice'][code]['raw']['symbol'] = 'SB=F'
+    with pytest.raises(ValueError, match='合约'):
+        runtime.validate_monthly_market(forged, day)

@@ -124,9 +124,12 @@ class Store:
     def monthly_records(self):
         from .model import validate_monthly
         with self.read() as db:
-            if not db or not db.execute("SELECT 1 FROM sqlite_master WHERE name='monthly_records'").fetchone():
+            if not db:
                 return []
-            rows = db.execute("SELECT date,country,CASE WHEN length(CAST(payload AS BLOB))<=262144 THEN payload END AS payload,sha256,saved_at FROM monthly_records ORDER BY date DESC,country LIMIT 4097").fetchall()
+            rows = []
+            for table in ('monthly_records_v2', 'monthly_records'):
+                if db.execute('SELECT 1 FROM sqlite_master WHERE name=?', (table,)).fetchone():
+                    rows.extend(db.execute(f"SELECT date,country,CASE WHEN length(CAST(payload AS BLOB))<=262144 THEN payload END AS payload,sha256,saved_at FROM {table} ORDER BY date DESC,country LIMIT 4097").fetchall())
         if len(rows) > 4096: raise ValueError('月份历史超过读取上限')
         result, size = [], 0
         for row in rows:
@@ -140,25 +143,28 @@ class Store:
             if payload['date'] != row['date'] or payload['country'] != row['country']:
                 raise ValueError('月份记录业务键不符')
             result.append(dict(payload=payload, version=digest, saved_at=row['saved_at']))
-        return result
+        return sorted(result, key=lambda r: (r['payload']['date'], r['payload']['schema_version']), reverse=True)
 
     def save_monthly(self, raw, *, expected_version):
-        from .model import validate_monthly
+        from .model import validate_monthly, RESEARCH_VERSION
         payload = validate_monthly(raw)
         text = packed(payload)
         if len(text.encode('utf-8')) > 262144: raise ValueError('月份记录超过大小上限')
         digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        suffix = '_v2' if payload['schema_version'] == RESEARCH_VERSION else ''
+        records_table, revisions_table = 'monthly_records' + suffix, 'monthly_revisions' + suffix
         with self.write() as db:
-            for statement in MONTHLY_DDL.split(';'):
+            ddl = MONTHLY_DDL.replace('monthly_records', records_table).replace('monthly_revisions', revisions_table)
+            for statement in ddl.split(';'):
                 if statement.strip(): db.execute(statement)
             key = (payload['date'], payload['country'])
-            old = db.execute('SELECT * FROM monthly_records WHERE date=? AND country=?', key).fetchone()
+            old = db.execute(f'SELECT * FROM {records_table} WHERE date=? AND country=?', key).fetchone()
             if (old['sha256'] if old else None) != expected_version:
                 raise ValueError('月份记录已被另一会话修改，请重新载入后保存')
             if old and old['payload'] == text: return digest
             if old:
-                db.execute('INSERT INTO monthly_revisions(date,country,payload,sha256,saved_at) VALUES(?,?,?,?,?)',
+                db.execute(f'INSERT INTO {revisions_table}(date,country,payload,sha256,saved_at) VALUES(?,?,?,?,?)',
                            (*key, old['payload'], old['sha256'], old['saved_at']))
-            db.execute('INSERT INTO monthly_records VALUES(?,?,?,?,?) ON CONFLICT(date,country) DO UPDATE SET payload=excluded.payload,sha256=excluded.sha256,saved_at=excluded.saved_at',
+            db.execute(f'INSERT INTO {records_table} VALUES(?,?,?,?,?) ON CONFLICT(date,country) DO UPDATE SET payload=excluded.payload,sha256=excluded.sha256,saved_at=excluded.saved_at',
                        (*key, text, digest, timestamp()))
         return digest
