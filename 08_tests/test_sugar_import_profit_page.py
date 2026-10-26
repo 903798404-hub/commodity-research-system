@@ -19,7 +19,8 @@ def page(tmp_path, monkeypatch, *, formal=False):
     return app.run(), db
 
 
-def test_page_without_vendor_history_switches_country_and_keeps_nulls(tmp_path, monkeypatch):
+def test_real_page_four_charts_switch_sources_and_country_without_writes(tmp_path, monkeypatch):
+    """Retain the original read-only/switching test identity for the replacement twelve-chart page."""
     app, db = page(tmp_path, monkeypatch)
     assert not app.exception and not db.exists()
     assert len(app.get('plotly_chart')) == 12
@@ -29,7 +30,7 @@ def test_page_without_vendor_history_switches_country_and_keeps_nulls(tmp_path, 
     assert not app.exception and len(app.get('plotly_chart')) == 12 and not db.exists()
 
 
-def test_formal_route_save_idempotence_stale_cas_and_history_does_not_fetch(tmp_path, monkeypatch):
+def test_formal_route_save_idempotence_and_stale_widget_cas(tmp_path, monkeypatch):
     app, db = page(tmp_path, monkeypatch, formal=True)
     assert not app.exception and len(app.get('plotly_chart')) == 12
     key = 'sugar-month:巴西:' + today()
