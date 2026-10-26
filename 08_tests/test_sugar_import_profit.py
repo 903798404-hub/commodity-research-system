@@ -506,3 +506,21 @@ def test_public_report_discovery_retains_dated_titles_without_sugar_word(tmp_pat
     assert [r['id'] for r in module.discover(tmp_path)] == ['a','b']
     assert len(module.discover(tmp_path)) == 2 and len(calls) == 1
     assert '%E8%BF%9B%E5%8F%A3%E6%88%90%E6%9C%AC' in calls[0]
+
+
+def test_deployed_capture_switch_is_declared_and_independent_from_saving(monkeypatch):
+    import yaml
+    root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((root / '02_configs/runtime_contracts/spread-production-runtime.json').read_text(encoding='utf-8'))
+    compose = yaml.safe_load((root / '09_deploy/spread_runtime/compose.yml').read_text(encoding='utf-8'))
+    name = 'SUGAR_IMPORT_ALLOW_CAPTURE'
+    assert name in manifest['required_environment']
+    assert compose['services']['spread-dashboard']['environment'][name] == '${SUGAR_IMPORT_ALLOW_CAPTURE:-0}'
+    assert next(r for r in manifest['environment_bindings'] if r['name'] == name) == dict(
+        name=name, kind='deployment', value_type='nonempty', candidate_value='1')
+    monkeypatch.setattr(runtime, 'deployed', lambda: True)
+    monkeypatch.setenv('SUGAR_IMPORT_ALLOW_SAVE', '1')
+    monkeypatch.delenv(name, raising=False)
+    assert not runtime.monthly_capture_enabled()
+    monkeypatch.setenv(name, '1')
+    assert runtime.monthly_capture_enabled()
