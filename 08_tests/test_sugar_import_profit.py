@@ -423,3 +423,69 @@ def test_ice_fallback_preserves_contract_unit_time_and_detects_tampering(monkeyp
     forged['ice'][code]['raw']['symbol'] = 'SB=F'
     with pytest.raises(ValueError, match='合约'):
         runtime.validate_monthly_market(forged, day)
+
+
+def test_public_freight_integrity_exact_dates_and_missing_zero(tmp_path):
+    from copy import deepcopy
+    from agri_research_agent.sugar_import_profit.freight import (
+        SCHEMA, DEFINITION, load_freight, reference_on, provenance, validate_provenance)
+    assert load_freight(tmp_path) == [] and not list(tmp_path.iterdir())
+    source = dict(article_url='https://www.hisugar.com/home/articleContent?id=2025010308000000000000',
+        image_url='https://www.hisugar.com/image/20250103/table.png', image_sha256='a'*64,
+        published_at='2025-01-03T08:00:00+08:00')
+    row = dict(date='2025-01-02', country='巴西', freight_usd_per_tonne=54., sources=[source])
+    bundle = dict(schema_version=SCHEMA, provider='HiSugar', unit='USD/tonne', definition=DEFINITION, observations=[row])
+    def write(value, count=1):
+        raw = json.dumps(value, ensure_ascii=False).encode()
+        (tmp_path / 'freight.json').write_bytes(raw)
+        (tmp_path / 'current.json').write_text(json.dumps(dict(schema_version=SCHEMA, file='freight.json',
+            row_count=count, sha256=hashlib.sha256(raw).hexdigest())), encoding='utf-8')
+    write(bundle)
+    rows = load_freight(tmp_path)
+    assert reference_on(rows, '2025-01-02', '巴西') == row
+    assert reference_on(rows, '2025-01-03', '巴西') is None
+    assert reference_on(rows, '2025-01-02', '泰国') is None
+    assert provenance(row, 0.)['kind'] == 'manual'
+    assert provenance(row, None) == {'kind':'missing'}
+    origin = provenance(row, 54.)
+    validate_provenance(origin, 54., date(2025, 1, 2))
+    with pytest.raises(ValueError, match='日期'):
+        validate_provenance(origin, 54., date(2025, 1, 3))
+    (tmp_path / 'freight.json').write_bytes(b'{}')
+    with pytest.raises(ValueError, match='校验'):
+        load_freight(tmp_path)
+    duplicate = deepcopy(bundle)
+    duplicate['observations'].append(row)
+    write(duplicate, count=2)
+    with pytest.raises(ValueError, match='日期'):
+        load_freight(tmp_path)
+    wrong = dict(bundle, unit='USD/day')
+    write(wrong)
+    with pytest.raises(ValueError, match='单位'):
+        load_freight(tmp_path)
+
+
+def test_hisugar_ocr_conflicts_and_unrecognized_values_are_not_observations(tmp_path):
+    script = Path(__file__).resolve().parents[1] / '04_scripts/import_profit/collect_hisugar_freight.py'
+    spec = importlib.util.spec_from_file_location('sugar_public_collect', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    articles, jobs, ocr = [], [], []
+    for identity, values in [('1', [('20250102', '54.5'), ('20250103', '55'), ('20250106', '5S')]),
+                             ('2', [('20250102', '54.5'), ('20250103', '56'), ('20250107', '53')])]:
+        articles.append(dict(id=identity, title='巴西食糖进口成本估算', published_at='2025-01-06 08:00:00',
+            article_url='https://www.hisugar.com/home/articleContent?id='+identity, retrieved_at='2025-01-06T10:00:00+08:00',
+            images=[dict(url='https://www.hisugar.com/image/table.png', sha256='a'*64)], html_sha256='b'*64))
+        jobs.append(dict(id=identity, cells=[{} for _ in values]))
+        words = [dict(text=text, x=x, y=index*100+10, height=20) for index, pair in enumerate(values)
+                 for x, text in zip((10, 650), pair)]
+        ocr.append(dict(id=identity, text='巴西 海运费 美元/吨', words=words))
+    (tmp_path / 'capture.json').write_text(json.dumps(dict(articles=articles)), encoding='utf-8')
+    (tmp_path / 'ocr-jobs.json').write_text(json.dumps(jobs), encoding='utf-8')
+    (tmp_path / 'ocr-results.jsonl').write_text('\n'.join(map(json.dumps, ocr)), encoding='utf-8')
+    module.parse_ocr(tmp_path)
+    review = json.loads((tmp_path / 'extracted-review.json').read_text(encoding='utf-8'))
+    assert [(r['date'], r['freight_usd_per_tonne']) for r in review['observations']] == [('2025-01-02', 54.5)]
+    assert len(review['observations'][0]['sources']) == 2
+    assert [r['date'] for r in review['conflicts']] == ['2025-01-03']
+    assert {r['reason'] for r in review['rejected']} == {'Unrecognized freight number', 'Future source date'}

@@ -80,3 +80,52 @@ def test_seasonal_alignment_retains_leap_day_and_relative_year(monkeypatch):
     assert _seasonal_x(date(2024, 2, 29), 2025) == _seasonal_x(date(2028, 2, 29), 2029)
     assert _seasonal_x(date(2024, 3, 1), 2025) - _seasonal_x(date(2024, 2, 29), 2025) == 1
     assert _seasonal_x(date(2023, 12, 31), 2024) + 1 == _seasonal_x(date(2024, 1, 1), 2024)
+
+
+def _seed_public_freight(tmp_path, value=54.):
+    import hashlib, json
+    from agri_research_agent.sugar_import_profit.freight import SCHEMA, DEFINITION
+    root = tmp_path / 'absent/hisugar_freight'
+    root.mkdir(parents=True, exist_ok=True)
+    source = dict(article_url='https://www.hisugar.com/home/articleContent?id=2025010308000000000000',
+        image_url='https://www.hisugar.com/image/20250103/table.png', image_sha256='a'*64,
+        published_at='2025-01-03T08:00:00+08:00')
+    row = dict(date='2025-01-02', country='巴西', freight_usd_per_tonne=value, sources=[source])
+    raw = json.dumps(dict(schema_version=SCHEMA, provider='HiSugar', unit='USD/tonne',
+        definition=DEFINITION, observations=[row]), ensure_ascii=False).encode()
+    (root / 'freight.json').write_bytes(raw)
+    (root / 'current.json').write_text(json.dumps(dict(schema_version=SCHEMA, file='freight.json',
+        sha256=hashlib.sha256(raw).hexdigest(), row_count=1)), encoding='utf-8')
+    return row
+
+
+def test_public_reference_does_not_overwrite_saved_zero_or_clear_and_never_fills_next_day(tmp_path, monkeypatch):
+    row = _seed_public_freight(tmp_path)
+    app, db = page(tmp_path, monkeypatch)
+    assert not app.exception and len(app.get('plotly_chart')) == 13
+    app.date_input(key='sugar-month-day').set_value(date(2025, 1, 2)).run()
+    key = 'sugar-month:巴西:2025-01-02'
+    app.button(key=key + ':save').click().run()
+    store = Store(db, lambda _: None)
+    saved = store.monthly_records()[0]['payload']
+    assert all(r['freight'] == 54. and r['freight_origin']['kind'] == 'hisugar_reference' for r in saved['quotes'])
+    assert all(r['cost_in'] is None for r in __import__('agri_research_agent.sugar_import_profit.model', fromlist=['monthly_rows']).monthly_rows(saved))
+    app.session_state[key + ':editor'] = dict(edited_rows={'0': {'海运费（美元/吨）':0.}, '1': {'海运费（美元/吨）':None}}, added_rows=[], deleted_rows=[])
+    app.button(key=key + ':save').click().run()
+    _seed_public_freight(tmp_path, value=56.)
+    app, _ = page(tmp_path, monkeypatch)
+    app.date_input(key='sugar-month-day').set_value(date(2025, 1, 2)).run()
+    app.button(key=key + ':save').click().run()
+    saved = store.monthly_records()[0]['payload']
+    assert saved['quotes'][0]['freight'] == 0. and saved['quotes'][0]['freight_origin']['kind'] == 'manual'
+    assert saved['quotes'][1]['freight'] is None and saved['quotes'][1]['freight_origin']['kind'] == 'missing'
+    assert all(r['freight'] == 54. for r in saved['quotes'][2:])
+    app.date_input(key='sugar-month-day').set_value(date(2025, 1, 3)).run()
+    app.button(key='sugar-month:巴西:2025-01-03:save').click().run()
+    missing = next(r['payload'] for r in store.monthly_records() if r['payload']['date'] == '2025-01-03')
+    assert all(r['freight'] is None for r in missing['quotes'])
+    from sugar_import_profit_page import _freight_grid, _freight_source
+    grid = _freight_grid([row])
+    assert grid.iloc[0].freight_usd_per_tonne == 54. and grid.iloc[1].isna().freight_usd_per_tonne
+    assert _freight_source(saved['quotes'][0])['运费来源'] == '人工'
+    assert _freight_source(saved['quotes'][2])['运费来源链接'] == row['sources'][0]['article_url']

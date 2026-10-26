@@ -209,6 +209,9 @@ def validate_monthly(payload):
             if v is not None and (isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v)
                                   or (k != 'quote' and v < 0) or (k == 'quote' and value['quote_mode'] == QUOTE_MODES[2] and v <= 0)):
                 raise ValueError('报价须为有限数值，费用不能为负；空值请留空')
+        if 'freight_origin' in r:
+            from .freight import validate_provenance
+            validate_provenance(r['freight_origin'], r.get('freight'), day)
         if r.get('rizhao') is not None:
             if not isinstance(r.get('rizhao_date'), str) or date.fromisoformat(r['rizhao_date']) > day:
                 raise ValueError('日照现货需填写实际报价日期')

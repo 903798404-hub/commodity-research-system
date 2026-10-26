@@ -162,6 +162,8 @@ modules:
       - 03_src/agri_research_agent/sugar_import_profit
       - 05_apps/sugar_import_profit_page.py
       - 04_scripts/import_profit/prepare_sugar_import_history.py
+      - 04_scripts/import_profit/collect_hisugar_freight.py
+      - 04_scripts/import_profit/ocr_hisugar_tables.ps1
     direct_tests:
       - 08_tests/test_sugar_import_profit.py
       - 08_tests/test_sugar_import_profit_page.py
