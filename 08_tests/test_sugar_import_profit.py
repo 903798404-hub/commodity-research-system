@@ -489,3 +489,20 @@ def test_hisugar_ocr_conflicts_and_unrecognized_values_are_not_observations(tmp_
     assert len(review['observations'][0]['sources']) == 2
     assert [r['date'] for r in review['conflicts']] == ['2025-01-03']
     assert {r['reason'] for r in review['rejected']} == {'Unrecognized freight number', 'Future source date'}
+
+
+def test_public_report_discovery_retains_dated_titles_without_sugar_word(tmp_path, monkeypatch):
+    script = Path(__file__).resolve().parents[1] / '04_scripts/import_profit/collect_hisugar_freight.py'
+    spec = importlib.util.spec_from_file_location('sugar_public_discovery', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calls = []
+    response = dict(code=0, data=[dict(list=[dict(id='a',title='20230203进口成本估算'),
+        dict(id='b',title='20261023食糖进口成本及利润估算'), dict(id='c',title='进口成本研判')])])
+    def fetch(url):
+        calls.append(url)
+        return json.dumps(response, ensure_ascii=False).encode()
+    monkeypatch.setattr(module, 'fetch', fetch)
+    assert [r['id'] for r in module.discover(tmp_path)] == ['a','b']
+    assert len(module.discover(tmp_path)) == 2 and len(calls) == 1
+    assert '%E8%BF%9B%E5%8F%A3%E6%88%90%E6%9C%AC' in calls[0]
