@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -10,6 +11,23 @@ from streamlit.testing.v1 import AppTest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FORMAL_ENTRY = PROJECT_ROOT / "05_apps" / "streamlit_app.py"
+
+
+@pytest.fixture
+def mock_public_basis_current(monkeypatch):
+    from agri_research_agent.market_data import public_basis_current as reader
+    from agri_research_agent.summary_engine import basis
+    basis.clear_shared_basis_cache()
+    def bind(rows, identity):
+        def resolve(_root):
+            return SimpleNamespace(release_id=identity['release_id'],manifest_sha256=identity['manifest_sha256'])
+        def load(_root,*,expected_release_id,expected_manifest_sha256):
+            assert (expected_release_id,expected_manifest_sha256)==(identity['release_id'],identity['manifest_sha256'])
+            return SimpleNamespace(records=rows.copy(deep=True),source_identity=dict(identity))
+        monkeypatch.setattr(reader,'resolve_public_basis_current_identity',resolve)
+        monkeypatch.setattr(reader,'load_public_basis_current',load)
+    yield bind
+    basis.clear_shared_basis_cache()
 
 
 def _formal_public_current_rows() -> pd.DataFrame:
@@ -35,21 +53,16 @@ def _formal_public_current_rows() -> pd.DataFrame:
 def test_basis_page_uses_formal_database_and_renders_modules(
     monkeypatch: pytest.MonkeyPatch,
     nutstore: bool,
+    mock_public_basis_current,
 ) -> None:
     apps_dir = str(PROJECT_ROOT / "05_apps")
     if apps_dir not in sys.path:
         sys.path.insert(0, apps_dir)
     basis_page = __import__("basis_page")
     rows = _formal_public_current_rows()
-    monkeypatch.setattr(
-        basis_page,
-        "load_basis_page_data",
-        lambda _root: (
-            rows.copy(),
-            {"release_id": "required-test-current", "manifest_sha256": "a" * 64,
-             "schema_version": "domestic-basis-current/4" if nutstore else "lutou-domestic-basis-current/3"},
-        ),
-    )
+    mock_public_basis_current(rows,
+        {"release_id": "required-test-current", "manifest_sha256": "a" * 64,
+         "schema_version": "domestic-basis-current/4" if nutstore else "lutou-domestic-basis-current/3"})
 
     app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=40).run()
     app.session_state["selected_workspace_page"] = "基差/一口价"

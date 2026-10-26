@@ -8,8 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from agri_research_agent.summary_engine.basis import (
-    build_shared_basis_summary,
-    load_shared_basis_current,
+    load_shared_basis_summary,
 )
 from agri_research_agent.summary_engine.crop import build_crop_summary
 from agri_research_agent.summary_engine.io import file_identity
@@ -99,12 +98,7 @@ def load_weather_overview_summaries() -> tuple[dict[str, list[object]], list[str
 
 
 def load_basis_overview_summary() -> object:
-    current_root = _public_basis_current_root()
-    records, identity = load_shared_basis_current(current_root)
-    return build_shared_basis_summary(
-        records, source_identity=identity,
-        source_dataset="public_domestic_basis_current",
-    )
+    return load_shared_basis_summary(_public_basis_current_root())
 
 
 def load_crop_overview_summary() -> object | None:

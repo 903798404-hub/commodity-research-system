@@ -28,8 +28,10 @@ from agri_research_agent.market_data.public_basis_current import (  # noqa: E402
     PublicBasisCurrentError,
 )
 from agri_research_agent.summary_engine.basis import (  # noqa: E402
-    build_shared_basis_summary,
+    DISPLAY_COMMODITY_MAP,
+    filter_basis_display_data,
     load_shared_basis_current,
+    load_shared_basis_summary,
 )
 from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
     configure_matplotlib_chinese_fonts,
@@ -43,13 +45,6 @@ VALUE_AXIS_LABELS = {
     "basis": f"基差（{UNIT_LABEL}）",
     "cash_price": f"一口价（{UNIT_LABEL}）",
     "spread_value": f"价差（{UNIT_LABEL}）",
-}
-DISPLAY_COMMODITY_MAP = {
-    "一豆": "豆油",
-    "24度": "棕榈油",
-    "三菜": "菜油",
-    "豆粕": "豆粕",
-    "菜粕": "菜粕",
 }
 SUPPORTED_COMMODITY_CODES = set(DISPLAY_COMMODITY_MAP)
 EXCLUDED_COMMODITY_CODES = {"一葵", "一级玉米油", "葵粕"}
@@ -139,19 +134,7 @@ def _options(dataframe: pd.DataFrame, column: str) -> list[str]:
 
 
 def filter_display_data(dataframe: pd.DataFrame) -> pd.DataFrame:
-    if "commodity" not in dataframe.columns:
-        return dataframe.copy()
-    commodity_code = dataframe["commodity"].astype("string").str.strip()
-    filtered = dataframe[commodity_code.isin(SUPPORTED_COMMODITY_CODES)].copy()
-    filtered["commodity_code"] = commodity_code.loc[filtered.index]
-    filtered["commodity"] = filtered["commodity_code"].map(
-        DISPLAY_COMMODITY_MAP
-    ).astype("string")
-    if "delivery_month" in filtered.columns:
-        filtered = filtered[
-            filtered["delivery_month"].astype(str).eq("现货")
-        ].copy()
-    return filtered
+    return filter_basis_display_data(dataframe)
 
 
 def prepare_cash_price_data(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -956,12 +939,10 @@ def render_basis_page(public_current_root: Path, sugar_history_root: Path | None
         return
 
     try:
-        summary = build_shared_basis_summary(
-            data,
-            source_identity=source_identity,
-            source_dataset="public_domestic_basis_current",
+        summary = load_shared_basis_summary(
+            public_current_root, view="display", expected_source_identity=source_identity,
         )
-    except (OSError, ValueError, KeyError) as exc:
+    except (PublicBasisCurrentError, OSError, ValueError, KeyError) as exc:
         st.warning(f"基差摘要暂不可用：{exc}")
         summary = None
 

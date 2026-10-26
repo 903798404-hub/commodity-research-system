@@ -14,6 +14,22 @@ from .schema import Summary
 
 
 BASE_KEY = ["commodity", "region", "quote_type", "delivery_month", "futures_contract"]
+DISPLAY_COMMODITY_MAP = {
+    "一豆": "豆油", "24度": "棕榈油", "三菜": "菜油", "豆粕": "豆粕", "菜粕": "菜粕",
+}
+
+
+def filter_basis_display_data(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """The original Basis page view, also used by its versioned summary."""
+    if "commodity" not in dataframe.columns:
+        return dataframe.copy()
+    commodity_code = dataframe["commodity"].astype("string").str.strip()
+    filtered = dataframe[commodity_code.isin(DISPLAY_COMMODITY_MAP)].copy()
+    filtered["commodity_code"] = commodity_code.loc[filtered.index]
+    filtered["commodity"] = filtered["commodity_code"].map(DISPLAY_COMMODITY_MAP).astype("string")
+    if "delivery_month" in filtered.columns:
+        filtered = filtered[filtered["delivery_month"].astype(str).eq("现货")].copy()
+    return filtered
 def _comparison_key(frame: pd.DataFrame, rules: Mapping[str, Any]) -> list[str]:
     fields = rules["basis"].get("optional_quote_point_fields", [])
     point = next((column for column in fields if column in frame.columns), None)
@@ -122,7 +138,23 @@ def _shared_basis_services():
         )
 
 
-    return _load_basis_versioned, _summarize_basis_versioned
+    @st.cache_data(show_spinner=False, max_entries=64)
+    def _summarize_current_versioned(
+        root: str, release_id: str, manifest_sha256: str, view: str,
+        rules_sha256: str, as_of_utc_day: str, _rules: Mapping[str, Any],
+    ) -> Summary:
+        # Only this strict, immutable published version supplies the frame.
+        # A warm summary does not deserialize or hash the full dataset again.
+        del rules_sha256
+        records, identity = _load_basis_versioned(root, release_id, manifest_sha256)
+        if view == "display":
+            records = filter_basis_display_data(records)
+        return build_basis_summary(
+            records, source_identity=identity, source_dataset="public_domestic_basis_current",
+            rules=_rules, today=date.fromisoformat(as_of_utc_day),
+        )
+
+    return _load_basis_versioned, _summarize_basis_versioned, _summarize_current_versioned
 
 
 def load_shared_basis_current(
@@ -179,7 +211,50 @@ def build_shared_basis_summary(
     )
 
 
+def load_shared_basis_summary(
+    public_current_root: str | Path, *, view: str = "public",
+    expected_source_identity: Mapping[str, Any] | None = None,
+    rules_path: str | Path = DEFAULT_CONFIG, today: date | None = None,
+) -> Summary:
+    """Reuse a strict published-version summary without rehashing page frames.
+
+    Published versions are immutable and validated by the existing reader.
+    Arbitrary caller-owned frames still use build_shared_basis_summary and its
+    full-content digest. The two entry points cannot exchange cached results.
+    """
+    import yaml
+    from agri_research_agent.market_data.public_basis_current import (
+        PublicBasisCurrentError, PublicBasisCurrentErrorCode, resolve_public_basis_current_identity,
+    )
+    if view not in {"public", "display"}:
+        raise ValueError("Unknown Basis summary view")
+    root = str(Path(public_current_root).resolve())
+    before = resolve_public_basis_current_identity(root)
+    key = before.release_id, before.manifest_sha256
+    if expected_source_identity is not None and key != (
+        expected_source_identity.get("release_id"), expected_source_identity.get("manifest_sha256"),
+    ):
+        raise PublicBasisCurrentError(
+            PublicBasisCurrentErrorCode.CURRENT_IDENTITY_MISMATCH,
+            "Domestic Basis Current differs from the page data version",
+        )
+    body = Path(rules_path).read_bytes()
+    rules = yaml.safe_load(body.decode("utf-8", "strict"))
+    if not isinstance(rules, dict) or rules.get("schema_version") != 1 or not rules.get("rule_version"):
+        raise ValueError("Summary规则配置版本无效")
+    summary = _shared_basis_services()[2](
+        root, *key, view, sha256(body).hexdigest(),
+        (today or datetime.now(timezone.utc).date()).isoformat(), _rules=rules,
+    )
+    after = resolve_public_basis_current_identity(root)
+    if (after.release_id, after.manifest_sha256) != key:
+        raise PublicBasisCurrentError(
+            PublicBasisCurrentErrorCode.CURRENT_IDENTITY_MISMATCH,
+            "Domestic Basis Current changed during shared summary read",
+        )
+    return summary
+
+
 def clear_shared_basis_cache() -> None:
-    read, summarize = _shared_basis_services()
-    read.clear()
-    summarize.clear()
+    for service in _shared_basis_services():
+        service.clear()

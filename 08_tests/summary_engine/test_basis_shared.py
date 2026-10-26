@@ -216,10 +216,101 @@ def test_invalid_summary_rules_never_return_a_warm_result(tmp_path,records,ident
 
 def test_basis_page_filter_rerun_reuses_summary_and_preserves_display(monkeypatch,records,identity):
     calls=count_calculations(monkeypatch)
-    monkeypatch.setattr(basis_page,'load_basis_page_data',lambda _: (records.copy(),dict(identity)))
+    fake_current(monkeypatch,records,identity)
     app=AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('fixture-shared-current'))",default_timeout=30).run()
     assert not app.exception and len(calls)==1
     before=app.dataframe[0].value.copy(deep=True)
     app.selectbox(key='basis_matrix_commodity').set_value('豆油').run()
     assert not app.exception and len(calls)==1
     pd.testing.assert_frame_equal(app.dataframe[0].value,before)
+
+
+def test_published_summary_hot_path_avoids_full_frame_hash(monkeypatch,tmp_path,records,identity):
+    reads=fake_current(monkeypatch,records,identity);calls=count_calculations(monkeypatch)
+    def unexpected_hash(_):raise AssertionError('Published summary must use the verified immutable version')
+    monkeypatch.setattr(shared,'_records_sha256',unexpected_hash)
+    options=dict(view='display',expected_source_identity=identity,today=date(2026,8,20))
+    first=shared.load_shared_basis_summary(tmp_path,**options)
+    second=shared.load_shared_basis_summary(tmp_path,**options)
+    reference=build_basis_summary(basis_page.filter_display_data(records),source_identity=identity,
+        source_dataset='public_domestic_basis_current',today=options['today'])
+    assert first.to_dict()==second.to_dict()==reference.to_dict()
+    assert len(reads)==len(calls)==1
+
+
+def test_published_summary_preserves_distinct_original_page_scopes(monkeypatch,tmp_path,records,identity):
+    hidden=records.iloc[[0]].copy();hidden['commodity']='一葵';hidden['date']=pd.Timestamp('2026-08-21')
+    frame=pd.concat([records,hidden],ignore_index=True)
+    reads=fake_current(monkeypatch,frame,identity);calls=count_calculations(monkeypatch)
+    display=shared.load_shared_basis_summary(tmp_path,view='display')
+    full=shared.load_shared_basis_summary(tmp_path)
+    assert display.source_date=='2026-08-20' and full.source_date=='2026-08-21'
+    for view,actual in [('display',display),('public',full)]:
+        reference=build_basis_summary(basis_page.filter_display_data(frame) if view=='display' else frame,
+            source_identity=identity,source_dataset='public_domestic_basis_current')
+        assert actual.to_dict()==reference.to_dict()
+    assert len(reads)==1 and len(calls)==2
+
+
+@pytest.mark.parametrize('field,value',[('release_id','revised-current'),('manifest_sha256','b'*64)])
+def test_published_revision_invalidates_the_summary(monkeypatch,tmp_path,records,identity,field,value):
+    reads=fake_current(monkeypatch,records,identity);calls=count_calculations(monkeypatch)
+    first=shared.load_shared_basis_summary(tmp_path)
+    identity[field]=value;records.loc[records.date.eq('2026-08-20'),'basis']=25.
+    second=shared.load_shared_basis_summary(tmp_path)
+    assert len(reads)==len(calls)==2 and first.facts!=second.facts
+    assert second.source_identity[field]==value
+
+
+def test_published_summary_rejects_a_different_page_version(monkeypatch,tmp_path,records,identity):
+    reads=fake_current(monkeypatch,records,identity)
+    previous=dict(identity);identity['release_id']='new-current'
+    with pytest.raises(PublicBasisCurrentError,match='CURRENT_IDENTITY_MISMATCH'):
+        shared.load_shared_basis_summary(tmp_path,view='display',expected_source_identity=previous)
+    assert not reads
+
+
+def test_published_summary_warm_pointer_switch_fails_closed(monkeypatch,tmp_path,records,identity):
+    reads=fake_current(monkeypatch,records,identity)
+    shared.load_shared_basis_summary(tmp_path)
+    versions=iter([SimpleNamespace(release_id=identity['release_id'],manifest_sha256=identity['manifest_sha256']),
+                   SimpleNamespace(release_id='next-current',manifest_sha256='b'*64)])
+    monkeypatch.setattr(basis_reader,'resolve_public_basis_current_identity',lambda _:next(versions))
+    with pytest.raises(PublicBasisCurrentError,match='CURRENT_IDENTITY_MISMATCH'):
+        shared.load_shared_basis_summary(tmp_path)
+    assert len(reads)==1
+
+
+def test_published_summary_missing_pointer_never_uses_warm_result(monkeypatch,tmp_path,records,identity):
+    fake_current(monkeypatch,records,identity);shared.load_shared_basis_summary(tmp_path)
+    def missing(_):raise PublicBasisCurrentError(PublicBasisCurrentErrorCode.PUBLIC_CURRENT_UNAVAILABLE,'fixture missing')
+    monkeypatch.setattr(basis_reader,'resolve_public_basis_current_identity',missing)
+    with pytest.raises(PublicBasisCurrentError,match='fixture missing'):
+        shared.load_shared_basis_summary(tmp_path)
+
+
+def test_published_summary_rules_and_utc_day_remain_dependencies(monkeypatch,tmp_path,records,identity):
+    reads=fake_current(monkeypatch,records,identity);calls=count_calculations(monkeypatch)
+    path=tmp_path/'rules.yaml';rules=load_summary_rules();rules['freshness_days']['basis']=7
+    path.write_text(yaml.safe_dump(rules,allow_unicode=True),encoding='utf-8');stat=path.stat()
+    options=dict(rules_path=path,today=date(2026,8,27))
+    assert shared.load_shared_basis_summary(tmp_path,**options).freshness_status=='fresh'
+    rules['freshness_days']['basis']=6
+    path.write_text(yaml.safe_dump(rules,allow_unicode=True),encoding='utf-8');os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+    assert shared.load_shared_basis_summary(tmp_path,**options).freshness_status=='stale'
+    shared.load_shared_basis_summary(tmp_path,rules_path=path,today=date(2026,8,28))
+    assert len(reads)==1 and len(calls)==3
+    path.write_text('schema_version: 99\nrule_version: invalid\n',encoding='utf-8')
+    with pytest.raises(ValueError,match='规则配置版本无效'):shared.load_shared_basis_summary(tmp_path,**options)
+    assert len(calls)==3
+
+
+def test_published_summary_caller_mutations_do_not_change_cached_facts(monkeypatch,tmp_path,records,identity):
+    fake_current(monkeypatch,records,identity)
+    first=shared.load_shared_basis_summary(tmp_path);first.facts['quotes'][0]['current_basis']=9999.
+    assert shared.load_shared_basis_summary(tmp_path).facts['quotes'][0]['current_basis']==20.
+
+
+def test_published_summary_requires_a_known_view(tmp_path):
+    with pytest.raises(ValueError,match='Unknown Basis summary view'):
+        shared.load_shared_basis_summary(tmp_path,view='caller-supplied-filter')
