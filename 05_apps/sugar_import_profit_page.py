@@ -11,6 +11,36 @@ from agri_research_agent.sugar_import_profit.runtime import storage_context
 from agri_research_agent.sugar_import_profit.store import Store
 
 
+@st.cache_data(show_spinner=False, max_entries=4)
+def _cached_freight(root, identity):
+    from agri_research_agent.sugar_import_profit.freight import load_freight
+    return load_freight(root)
+
+
+def _public_freight(root):
+    """Read the sealed source once per artifact change, with no page-time downloads."""
+    pointer = root / 'current.json'
+    if not pointer.exists(): return []
+    from pathlib import Path
+    if pointer.stat().st_size > 16384: raise ValueError('泛糖运费索引无效')
+    manifest = json.loads(pointer.read_text(encoding='utf-8'))
+    if not isinstance(manifest, dict): raise ValueError('泛糖运费索引无效')
+    name = manifest.get('file')
+    if not isinstance(name, str) or Path(name).name != name: raise ValueError('泛糖运费文件名无效')
+    target = root / name
+    stat = target.stat()
+    return _cached_freight(root, (pointer.read_bytes(), stat.st_mtime_ns, stat.st_size))
+
+
+def _freight_source(row):
+    origin = row.get('freight_origin') or {}
+    kind = origin.get('kind', 'missing' if row.get('freight') is None else 'manual')
+    source = (origin.get('sources') or [{}])[0]
+    return dict(运费来源={'missing':'缺失', 'manual':'人工', 'hisugar_reference':'泛糖公开参考'}[kind],
+        运费原始日期=origin.get('quote_date', ''), 运费来源链接=source.get('article_url', ''),
+        运费原图校验值=source.get('image_sha256', ''))
+
+
 def monthly_table(rows):
     return pd.DataFrame([dict(船期=r['period'], 原糖合约=r['ice_contract'],
         原糖价格=r['ice'], 升贴水=r['quote'], 海运费=r['freight'], 汇率=r['fx'],
@@ -39,16 +69,59 @@ def monthly_html(rows, country='巴西', day=''):
     return result + '</tbody></table></div><footer>原糖与升贴水：美分/磅；海运费：美元/吨；成本、利润：元/吨。进口利润 = 对应郑糖合约价格 − 进口加工后成本。<br>保险、利息、手续费、税率与加工费见下方固定参数；缺少报价或具体合约行情时留空。</footer></section>'
 
 
-def _monthly(store, enabled):
+def _freight_grid(rows):
+    observed = pd.DataFrame([dict(date=r['date'], freight_usd_per_tonne=r['freight_usd_per_tonne'],
+        published_at=r['sources'][0]['published_at'], article_url=r['sources'][0]['article_url'],
+        image_url=r['sources'][0]['image_url'], image_sha256=r['sources'][0]['image_sha256']) for r in rows])
+    return pd.DataFrame({'date': pd.date_range(rows[0]['date'], today()).strftime('%Y-%m-%d')}).merge(observed, on='date', how='left')
+
+
+def _freight_history(rows):
+    """Original daily reference observations, separate from calculated profit history."""
+    st.subheader('泛糖公开运费历史 · 巴西')
+    st.caption('泛糖测算采用运费，单位美元/吨；不是SYCAC00或逐月船期成交报价。没有原始数值的日期留空，不用利润反推运费。')
+    if not rows:
+        st.info('尚无已交付的公开运费历史；可继续手工录入。')
+        return
+    grid = _freight_grid(rows)
+    from agri_research_agent.shared.chart_style import CURRENT_YEAR_COLOR, GRID_COLOR
+    chart = go.Figure(go.Scatter(x=grid.date, y=grid.freight_usd_per_tonne, mode='lines+markers',
+        connectgaps=False, line=dict(color=CURRENT_YEAR_COLOR, width=2)))
+    chart.update_layout(height=300, yaxis_title='美元/吨', plot_bgcolor='white',
+        xaxis=dict(gridcolor=GRID_COLOR), yaxis=dict(gridcolor=GRID_COLOR), margin=dict(l=30,r=10,t=10,b=30))
+    st.plotly_chart(chart, width='stretch', key='sugar-public-freight-history')
+    st.caption(f"已取得{len(rows)}个原始日期，范围{rows[0]['date']}—{rows[-1]['date']}；日历中的空白不表示零运费。")
+    st.dataframe(grid.sort_values('date', ascending=False), hide_index=True, width='stretch')
+    st.download_button('导出泛糖公开运费历史（含空白日期及来源）', _csv(grid), 'hisugar-freight-history.csv', 'text/csv', key='sugar-public-freight-export')
+
+
+def _monthly(store, enabled, freight_root=None):
     import hashlib
     from agri_research_agent.sugar_import_profit.model import (
         RESEARCH_VERSION, RESEARCH_PARAMETERS, QUOTE_MODES, month_periods, default_mapping,
         monthly_rows, validate_monthly)
     from agri_research_agent.sugar_import_profit.runtime import capture_monthly_market
+    from agri_research_agent.sugar_import_profit.freight import reference_on, provenance
+    try:
+        public_freight = _public_freight(freight_root) if freight_root else []
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.warning('公开运费暂不可用，手工测算仍可使用：' + str(exc))
+        public_freight = []
     st.caption('未来12个月船期 · 当月表示次年同月 · 原糖和郑糖按具体合约取价')
     controls = st.columns([1, 2])
     country = controls[0].radio('产地', COUNTRIES, horizontal=True, key='sugar-month-country')
     day = controls[1].date_input('报价日期', date.fromisoformat(today()), max_value=date.fromisoformat(today()), key='sugar-month-day')
+    reference = reference_on(public_freight, day.isoformat(), country)
+    if reference:
+        st.caption(f"{day} 泛糖公开参考运费：{reference['freight_usd_per_tonne']:g}美元/吨。新录价默认将其作为各船期统一测算假设，未视作远期实际报价；手工值优先。")
+        st.markdown('[查看原始来源](' + reference['sources'][0]['article_url'] + ')')
+    elif country == '巴西':
+        st.caption('该报价日期没有泛糖公开运费，默认留空；不借用邻日数据。仍可在录价区手工填写。')
+        if public_freight:
+            latest = public_freight[-1]
+            st.caption(f"仅供核对：最近原始记录{latest['date']}为{latest['freight_usd_per_tonne']:g}美元/吨，不自动带入本日。")
+    with st.expander('查看泛糖公开运费历史与来源'):
+        _freight_history(public_freight)
     key = f'sugar-month:{country}:{day}'
     records = store.monthly_records()
     current = next((r for r in records if r['payload']['date'] == day.isoformat() and r['payload']['country'] == country and r['payload']['schema_version'] == RESEARCH_VERSION), None)
@@ -60,7 +133,9 @@ def _monthly(store, enabled):
         payload = current['payload'] if current and current['payload']['schema_version'] == RESEARCH_VERSION else dict(schema_version=RESEARCH_VERSION, date=day.isoformat(), country=country,
             quote_mode=QUOTE_MODES[0], source='人工录入升贴水及海运费', parameters=dict(next((r['payload']['parameters'] for r in records if r['payload']['country'] == country and r['payload']['schema_version'] == RESEARCH_VERSION and r['payload']['date'] < day.isoformat()), RESEARCH_PARAMETERS)), market=None,
             quotes=[dict(period=p, ice_contract=default_mapping(p)[0], sr_contract=default_mapping(p)[1],
-                         quote=None, freight=None, insurance=None, rizhao=None, rizhao_date='') for p in month_periods(day)])
+                         quote=None, freight=reference['freight_usd_per_tonne'] if reference else None,
+                         freight_origin=provenance(reference, reference['freight_usd_per_tonne'] if reference else None),
+                         insurance=None, rizhao=None, rizhao_date='') for p in month_periods(day)])
         st.session_state[key + ':initial'] = payload
         st.session_state[key + ':version'] = current['version'] if current else None
         st.session_state[key + ':market'] = payload['market']
@@ -75,7 +150,16 @@ def _monthly(store, enabled):
             column_config={name: st.column_config.NumberColumn(name, min_value=0. if field == 'freight' else None, format='%.4f')
                            for field, name in fields.items() if field in ('quote', 'freight')})
     quotes = edited.rename(columns={v: k for k, v in fields.items()}).astype(object).where(pd.notna(edited.rename(columns={v: k for k, v in fields.items()})), None).to_dict('records')
-    quotes = [dict(r, insurance=None, rizhao=None, rizhao_date='') for r in quotes]
+    initial_quotes = {r['period']: r for r in initial['quotes']}
+    for r in quotes:
+        old = initial_quotes[r['period']]
+        if r['freight'] is None:
+            r['freight_origin'] = provenance(None, None)
+        elif r['freight'] == old.get('freight'):
+            r['freight_origin'] = old.get('freight_origin') or provenance(None, r['freight'])
+        else:
+            r['freight_origin'] = provenance(None, r['freight'])
+        r.update(insurance=None, rizhao=None, rizhao_date='')
     params = dict(initial['parameters'])
     with st.expander('固定参数与计算公式（可修改）'):
         st.caption('按你提供的参考图设定，不需每日重复填写；每次保存同时保留参数。税费为研究假设。')
@@ -126,6 +210,7 @@ def _monthly(store, enabled):
             st.json(dict(在岸汇率曲线=market['fx_curve'], CFETS原始凭证=market['fx_raw']))
         else: st.info('尚无当日已存或新获取的行情；历史日期不获取当前价格。')
         st.dataframe(pd.DataFrame([dict(船期=r['period'], 状态=r['status']) for r in rows]), hide_index=True)
+        st.dataframe(pd.DataFrame([dict(船期=r['period'], **_freight_source(r)) for r in rows]), hide_index=True)
     if st.button('保存当日报价与测算', key=key + ':save', disabled=not enabled):
         try:
             st.session_state[key + ':version'] = store.save_monthly(payload, expected_version=st.session_state[key + ':version'])
@@ -133,6 +218,7 @@ def _monthly(store, enabled):
             st.success('月份报价已保存，行情、参数和来源随记录保留。')
         except (ValueError, TypeError, KeyError, sqlite3.Error) as exc: st.warning(str(exc))
     exported = monthly_table(rows)
+    exported = pd.concat([exported, pd.DataFrame([_freight_source(r) for r in rows])], axis=1)
     for name, value in reversed([('报价日', day.isoformat()), ('国家', country), ('报价口径', mode), ('人工来源', source)]):
         exported.insert(0, name, value)
     st.download_button('导出月份盘面表 CSV', _csv(exported), 'sugar-monthly.csv', 'text/csv', key=key + ':export')
@@ -205,9 +291,9 @@ def _csv(frame):
 def render_sugar_import_profit_page():
     st.title('中国进口白糖盘面利润')
     try:
-        path, _, authorize, enabled = storage_context()
+        path, history_root, authorize, enabled = storage_context()
         store = Store(path, authorize)
-        _monthly(store, enabled)
+        _monthly(store, enabled, history_root / 'hisugar_freight')
         with st.expander('旧版自算记录（原公式，只读）'):
             old = store.records()
             from agri_research_agent.sugar_import_profit.model import MONTHLY_VERSION
