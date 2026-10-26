@@ -650,6 +650,7 @@ modules:
       - 03_src/agri_research_agent/pipelines/public_data_refresh.py
       - 03_src/agri_research_agent/pipelines/public_data_providers.py
       - 03_src/agri_research_agent/summary_engine/basis.py
+      - 03_src/agri_research_agent/summary_engine/basis_cache.py
       - 04_scripts/refresh_public_data.py
       - 05_apps/basis_page.py
       - 05_apps/research_overview_page.py
@@ -666,11 +667,14 @@ modules:
       - 08_tests/pipelines/test_lutou_domestic_basis_formal_current.py
       - 08_tests/pipelines/test_public_data_domestic_basis_provider.py
       - 08_tests/market_data/test_public_basis_current.py
+      - 08_tests/summary_engine/test_basis_shared.py
     impact_tests:
       - 08_tests/test_basis_sql_loader.py
       - 08_tests/test_update_basis_from_sql.py
       - 08_tests/summary_engine/test_summary_engine.py
       - 08_tests/test_basis_page_formal.py
+      - 08_tests/summary_engine/test_weather_overview.py
+      - 08_tests/alerts/test_notification.py
       - 08_tests/pipelines/test_public_data_refresh.py
       - 08_tests/pipelines/test_lutou_goal_b.py
       - 08_tests/pipelines/test_lutou_weather.py

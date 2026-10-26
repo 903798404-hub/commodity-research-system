@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Mapping
 
 import pandas as pd
@@ -26,8 +26,11 @@ def build_basis_summary(
     source_identity: Mapping[str, Any],
     generated_at: datetime | None = None,
     source_dataset: str = "basis_quotes",
+    rules: Mapping[str, Any] | None = None,
+    today: date | None = None,
 ) -> Summary:
-    rules = load_summary_rules(); data = frame.copy(); data["date"] = pd.to_datetime(data["date"], errors="raise")
+    rules = load_summary_rules() if rules is None else rules
+    data = frame.copy(); data["date"] = pd.to_datetime(data["date"], errors="raise")
     key = _comparison_key(data, rules)
     display_names = rules["basis"].get("display_names", {})
     data["commodity"] = data["commodity"].replace(display_names)
@@ -73,6 +76,6 @@ def build_basis_summary(
     return Summary.create(module="basis", source_dataset=source_dataset, source_identity=source_identity,
         source_date=latest_date.date().isoformat(), comparison_identity={"key": key, "method": "previous_valid_quote"},
         generated_at=generated_at, calculation_version=rules["calculation_version"], rule_version=rules["rule_version"],
-        freshness_status=freshness_status("basis", latest_date.date().isoformat(), rules), facts={"quotes": quotes, "top_changes": top},
+        freshness_status=freshness_status("basis", latest_date.date().isoformat(), rules, today=today), facts={"quotes": quotes, "top_changes": top},
         classifications=["basis_up" if q["change"] > 0 else "basis_down" if q["change"] < 0 else "basis_unchanged" for q in top],
         headline="今日主要基差变化", detail_text=detail, short_text=f"基差（{latest_date:%Y-%m-%d}）：{detail}")
