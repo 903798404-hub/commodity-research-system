@@ -1,5 +1,4 @@
 from datetime import date
-from dataclasses import dataclass
 import importlib
 import json
 from pathlib import Path
@@ -120,6 +119,52 @@ def test_large_or_unserializable_values_remain_functional_and_uncached(monkeypat
     assert calculate(value)==calculate(value)==value and len(calls)==5
 
 
+def test_payload_byte_budget_evicts_individual_lru_results(monkeypatch):
+    monkeypatch.setattr(cache,'MAX_CACHE_BYTES',280)
+    calls=[]
+    @cache.cache_computation
+    def calculate(key):calls.append(key);return key+'x'*100
+    calculate('a');calculate('b');calculate('b');calculate('c')
+    assert calls==['a','b','c']
+    assert cache._budget_bytes<=280
+    calculate('b')
+    assert calls==['a','b','c']
+    calculate('a')
+    assert calls==['a','b','c','a']
+
+
+def test_entry_growth_remains_bounded_even_when_native_storage_evicts_first():
+    calls=[]
+    @cache.cache_computation
+    def calculate(value):calls.append(value);return value
+    for value in range(cache.MAX_ENTRIES+10):assert calculate(value)==value
+    assert len(cache._budget_entries)<=cache.MAX_ENTRIES
+    assert cache._budget_bytes<=cache.MAX_CACHE_BYTES
+    before=len(calls)
+    assert calculate(0)==0 and len(calls)==before+1
+
+
+def test_same_input_concurrent_requests_compute_once_without_blocking_other_keys():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    entered=Event();release=Event();calls=[]
+    @cache.cache_computation
+    def calculate(value):
+        calls.append(value)
+        if value=='slow':entered.set();assert release.wait(timeout=5)
+        return [value]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        first=pool.submit(calculate,'slow')
+        assert entered.wait(timeout=3)
+        second=pool.submit(calculate,'slow')
+        other=pool.submit(calculate,'other')
+        try:assert other.result(timeout=3)==['other']
+        finally:release.set()
+        left,right=first.result(timeout=3),second.result(timeout=3)
+    assert left==right==['slow'] and left is not right
+    assert calls.count('slow')==1 and calls.count('other')==1
+
+
 def test_pure_import_does_not_initialize_streamlit():
     root=Path(__file__).resolve().parents[1]
     code="import sys; sys.path.insert(0,sys.argv[1]); import computation_cache; assert 'streamlit' not in sys.modules"
@@ -177,3 +222,36 @@ def test_sugar_quotas_months_and_historical_gaps_are_preserved(monkeypatch):
             if month==1:
                 assert list(figure.data[0].y)==([0,None,5] if quota=='配额内' else [None,None,-2])
             else:assert not figure.data
+
+
+def test_brazil_tab_roundtrip_reuses_already_built_figures(monkeypatch,tmp_path):
+    from streamlit.testing.v1 import AppTest
+    from agri_research_agent.pipelines import brazil_soy as domain
+    import brazil_soy_page as page
+    stamp='2026-10-07T00:00:00+00:00'
+    records=[]
+    for year in range(2021,2027):
+        season=f'{year}/{year+1}'
+        for metric in domain.METRICS:
+            for region in domain.REGIONS:
+                records.append(domain.observation(season,region,metric,date(year,10,2),10.,source_url=domain.SOURCE_URL,
+                    source_sha256='a'*64,locator='synthetic cache fixture',retrieved_at=stamp))
+        for metric in domain.STAGES:
+            records.append(domain.observation(season,'BR',metric,date(year,10,2),10.,source_url=domain.SOURCE_URL,
+                source_sha256='a'*64,locator='synthetic cache fixture',retrieved_at=stamp))
+    path=tmp_path/domain.STABLE_RELATIVE_PATH;path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(dict(schema_version=domain.SCHEMA,generated_at=stamp,records=records,import_notes=[])),encoding='utf-8')
+    monkeypatch.setenv('PUBLIC_MARKET_DATA_RUNTIME_ROOT',str(tmp_path))
+    counts=[]
+    original=page.seasonal_figure.__wrapped__
+    def observed(*args,**kwargs):counts.append((args[1],args[2]));return original(*args,**kwargs)
+    monkeypatch.setattr(page,'seasonal_figure',cache.cache_computation(observed))
+    app=AppTest.from_string('from brazil_soy_page import render_brazil_soy_page\nrender_brazil_soy_page()',default_timeout=90).run()
+    assert not app.exception and len(counts)==13
+    for tab in ['收割进度','生长进度']:
+        app.session_state['brazil-metric-tabs']=tab;app.run(timeout=90)
+        assert not app.exception
+    before=len(counts)
+    app.session_state['brazil-metric-tabs']='播种进度';app.run(timeout=90)
+    assert not app.exception and len(app.get('plotly_chart'))==13
+    assert len(counts)==before,'Returning to unchanged planting view rebuilt its figures'

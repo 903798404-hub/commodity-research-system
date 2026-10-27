@@ -7,6 +7,7 @@ mutable inputs. No persistent file or business state is created here.
 from __future__ import annotations
 
 from functools import lru_cache, wraps
+from collections import OrderedDict
 from hashlib import sha256
 from io import BytesIO
 import marshal
@@ -15,11 +16,15 @@ from threading import Lock
 from uuid import uuid4
 from weakref import WeakKeyDictionary
 
-MAX_ENTRIES = 48
+MAX_ENTRIES = 256
+MAX_CACHE_BYTES = 64 * 1024 * 1024
 MAX_INPUT_BYTES = 16 * 1024 * 1024
 MAX_RESULT_BYTES = 4 * 1024 * 1024
 _namespaces = WeakKeyDictionary()
 _lock = Lock()
+_budget_entries = OrderedDict()
+_budget_bytes = 0
+_budget_generation = 0
 
 
 def _restore_plotly_figure(figure_type, props, grid_ref, grid_str):
@@ -106,16 +111,53 @@ are not cached, and every successful hit returns an independent result.
             return function(*args, **kwargs)
         if len(body) > MAX_INPUT_BYTES:
             return function(*args, **kwargs)
+        with _lock:
+            generation = _budget_generation
+        digest = sha256(body).hexdigest()
         try:
-            result = _service()(namespace, sha256(body).hexdigest(), body, function)
+            service = _service()
+            result = service(namespace, digest, body, function)
         except _UncachedResult as exc:
             return exc.value
+        _account_for_result(service, namespace, digest, result, generation)
         return pickle.loads(result)
 
     return shared
 
 
+def _account_for_result(service, namespace, digest, result, generation):
+    """Bound serialized payload bytes while retaining many inexpensive facts.
+
+Streamlit still coordinates per-key computation. Its own entry-count bound is
+retained; this index adds the payload byte bound. A native eviction can leave
+an overestimate in this index, which is safe. Delete outside the index lock so
+nested computations and other sessions cannot deadlock during eviction.
+"""
+    global _budget_bytes
+    key = (namespace, digest)
+    evicted = []
+    with _lock:
+        if generation != _budget_generation:
+            evicted.append(key)
+        else:
+            _budget_bytes -= _budget_entries.pop(key, 0)
+            _budget_entries[key] = len(result)
+            _budget_bytes += len(result)
+            while _budget_bytes > MAX_CACHE_BYTES or len(_budget_entries) > MAX_ENTRIES:
+                old_key, size = _budget_entries.popitem(last=False)
+                _budget_bytes -= size
+                evicted.append(old_key)
+    for old_namespace, old_digest in evicted:
+        # The last two arguments are explicitly unhashed by the native cache.
+        service.clear(old_namespace, old_digest, b'', None)
+
+
 def clear_computation_cache():
     """Explicit diagnostics hook; normal invalidation follows input contents."""
+    global _budget_bytes, _budget_generation
+    with _lock:
+        _budget_entries.clear()
+        _budget_bytes = 0
+        _budget_generation += 1
     if _service.cache_info().currsize:
         _service().clear()
