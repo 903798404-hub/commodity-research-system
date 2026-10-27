@@ -19,6 +19,15 @@ from sugar_positions_page import (
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+metrics = cache_computation(metrics)
+domestic_metrics = cache_computation(domestic_metrics)
+trend = cache_computation(trend)
+movements = cache_computation(movements)
+
+
 def provider_label(provider):
     return {'stock_api':'用户指定 Tushare 兼容服务','eastmoney':'东方财富排名',
             'sina':'新浪排名'}.get(provider,'原始来源排名')
@@ -31,6 +40,7 @@ def fmt(value, signed=False):
     return format(int(number), "+," if signed else ",") if number.is_integer() else format(number, "+,.2f" if signed else ",.2f")
 
 
+@cache_computation
 def series_figure(data, title, group):
     figure = trend(data, title, {group: "基金"})
     if data[0].get("unit") == "delta_equivalent_contracts":

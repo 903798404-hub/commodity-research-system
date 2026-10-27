@@ -28,6 +28,7 @@ RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes 
 COPY ["03_src/agri_research_agent/monitoring/__init__.py", "03_src/agri_research_agent/monitoring/catalog.py", "03_src/agri_research_agent/monitoring/freshness.py", "03_src/agri_research_agent/monitoring/observations.py", "03_src/agri_research_agent/monitoring/task_ledger.py", "/app/03_src/agri_research_agent/monitoring/"]
 COPY ["04_scripts/monitoring/observe_pages.py", "/app/04_scripts/monitoring/"]
 COPY ["05_apps/page_monitor_page.py", "/app/05_apps/"]
+COPY ["05_apps/computation_cache.py", "/app/05_apps/"]
 COPY ["02_configs/conab_growth_glyphs.json", "/app/02_configs/"]
 COPY ["03_src/agri_research_agent/pipelines/brazil_soy_update.py", "03_src/agri_research_agent/pipelines/brazil_soy_scheduled.py", "03_src/agri_research_agent/pipelines/conab_growth_chart.py", "/app/03_src/agri_research_agent/pipelines/"]
 COPY ["03_src/agri_research_agent/soybean_exports/fgis_server.py", "/app/03_src/agri_research_agent/soybean_exports/"]

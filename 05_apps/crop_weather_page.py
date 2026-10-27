@@ -7,6 +7,7 @@ import os
 import sys
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -48,6 +49,9 @@ FIXTURE_ENV = "SOYBEAN_WEATHER_FIXTURE_PATH"
 NORMAL_FIXTURE_ENV = "SOYBEAN_WEATHER_NORMAL_FIXTURE_PATH"
 PUBLIC_RUNTIME_ROOT_ENV = "PUBLIC_MARKET_DATA_RUNTIME_ROOT"
 PAGE_TITLE = "美国大豆天气研究"
+
+
+from computation_cache import cache_computation
 
 
 def _public_weather_current_root(project_root: Path = PROJECT_ROOT) -> Path:
@@ -625,6 +629,7 @@ def _wide_row(
     return f'<tr class="{"row-forecast" if forecast else ""}">{"".join(cells)}</tr>'
 
 
+@cache_computation
 def _build_weekly_wide_table(
     records: pd.DataFrame,
     normals: pd.DataFrame,
@@ -848,6 +853,7 @@ def _add_line(
     )
 
 
+@cache_computation
 def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region: object, *, kind: str, metric: str | None = None) -> go.Figure:
     legacy_windows = {
         "cumulative_rain": ("04-15", "11-20", "累计降水（mm）"),
@@ -927,6 +933,7 @@ def _region_line_figure(records: pd.DataFrame, config: dict[str, object], region
     return figure
 
 
+@cache_computation
 def _daily_rain_figure(
     records: pd.DataFrame,
     region: object,
@@ -1004,6 +1011,8 @@ def _render_grid(records: pd.DataFrame, config: dict[str, object], *, kind: str,
     for start in range(0, len(regions), columns):
         grid = st.columns(columns, gap="small")
         for index, (column, region) in enumerate(zip(grid, regions.iloc[start:start + columns].itertuples(index=False), strict=False)):
+            # Preserve all row fields in a serializable value object for reuse.
+            region = SimpleNamespace(**region._asdict())
             with column:
                 card_key = (
                     f"daily-rain-card-{'selected-' if kind == 'daily_rain' and start == 0 and index == 0 else ''}{region.key}"

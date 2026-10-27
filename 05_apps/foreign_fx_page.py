@@ -21,6 +21,13 @@ from agri_research_agent.shared.chart_style import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+overview = cache_computation(overview)
+strength_comparison = cache_computation(strength_comparison)
+
+
 def snapshot_path(project_root: Path = PROJECT_ROOT) -> Path:
     configured = os.environ.get("FOREIGN_FX_SNAPSHOT_FILE", "").strip()
     return Path(configured) if configured else project_root / "01_data/processed/foreign_fx/daily.json"
@@ -41,6 +48,7 @@ def _scope_table() -> pd.DataFrame:
                           "关联品种": c.commodities, "研究含义": c.meaning} for c in CURRENCIES])
 
 
+@cache_computation
 def build_seasonality_figure(frame: pd.DataFrame, code: str, years: list[int], *,
                              current_year: int, normalize: bool = False) -> go.Figure:
     rows, average = seasonality(frame, code, years, current_year=current_year, normalize=normalize)

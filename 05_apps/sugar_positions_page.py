@@ -20,6 +20,15 @@ RANKED_NET_NOTICE = ("榜内净仓＝已披露多仓－已披露空仓；未披�
     "不代表实际零仓位或多空平衡。进出排名也会影响榜内净变化。")
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+foreign_metrics = cache_computation(foreign_metrics)
+domestic_metrics = cache_computation(domestic_metrics)
+trend = cache_computation(trend)
+movements = cache_computation(movements)
+
+
 def chart_pair(first, second, *, keys):
     """Keep related charts visible together, stacking on narrow screens."""
     key = f"position-charts-{keys[0]}"
@@ -58,6 +67,7 @@ def display_attempt(value):
     return value
 
 
+@cache_computation
 def detail(rows):
     return pd.DataFrame([{
         "日期": chinese_date(r["report_date"]), "对象": r.get("label", GROUPS.get(r["group"], r["group"])),
@@ -68,6 +78,7 @@ def detail(rows):
     } for r in rows]).convert_dtypes()
 
 
+@cache_computation
 def domestic_detail(rows):
     table = detail(rows).rename(columns={"净持仓（手）": "榜内净持仓（手）",
         "净变化（手）": "榜内净变化（手）", "持仓情绪": "榜内持仓倾向"})

@@ -150,6 +150,7 @@ def test_image_copies_exact_code_inputs_and_excludes_candidate_fixtures():
     "03_src/agri_research_agent/canola_exports/update.py",
     "05_apps/canada_canola_weekly_page.py",
     "05_apps/canola_exports_page.py",
+    "05_apps/computation_cache.py",
 ])
 def test_canola_page_and_offline_worker_import_from_image_inputs_only(tmp_path, omission):
     manifest = contract()
@@ -162,6 +163,7 @@ def test_canola_page_and_offline_worker_import_from_image_inputs_only(tmp_path, 
         "03_src/agri_research_agent/canola_exports/update.py",
         "05_apps/canada_canola_weekly_page.py",
         "05_apps/canola_exports_page.py",
+        "05_apps/computation_cache.py",
     }
     assert_runtime_import_closure(required, {x["path"] for x in manifest["source_inputs"]}, copied)
     assert "agri_research_agent.canola_exports.increment" in manifest["required_python_modules"]

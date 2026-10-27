@@ -20,6 +20,14 @@ ROOT = Path(__file__).resolve().parents[1]
 MATCHING_NOTE = "同期按目标月日及此前7天内最近观测匹配，不插值、不延续更早记录。均值仅使用所选年份之前五年；不足五年时显示实际样本数。"
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+compare_metric = cache_computation(compare_metric)
+comparison_table = cache_computation(comparison_table)
+seasonal_figure = cache_computation(seasonal_figure)
+
+
 def data_path() -> Path:
     root = Path(os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip() or ROOT / "01_data")
     return root / STABLE_RELATIVE_PATH

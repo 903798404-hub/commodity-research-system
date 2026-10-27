@@ -108,6 +108,9 @@ WEATHER_PAGE_ROUTES = {
 WORKSPACE_PAGES = list(internal_workspace_pages())
 SIDEBAR_NAVIGATION = NAVIGATION_GROUPS
 
+from computation_cache import cache_computation
+
+
 def get_database_path() -> Path:
     return resolve_domestic_spread_path(DATA_DIR)
 
@@ -200,6 +203,7 @@ def validate_five_year_mean_trace(fig: go.Figure) -> None:
     assert not forbidden_traces, f"图中出现了旧均值 trace：{forbidden_traces}"
 
 
+@cache_computation
 def build_figure(
     data: pd.DataFrame,
     chart_title: str,
@@ -281,6 +285,7 @@ def build_figure(
     return fig
 
 
+@cache_computation
 def latest_metrics(data: pd.DataFrame, mean_source_data: pd.DataFrame | None = None) -> pd.DataFrame:
     summary = latest_summary(data, mean_source_data)
     if summary is None:

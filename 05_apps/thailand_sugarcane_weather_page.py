@@ -20,6 +20,9 @@ SECTIONS = {"累计降雨": "precipitation", "单日降雨": "precipitation",
             "最高气温": "temperature_max", "土壤墒情": "soil_moisture"}
 
 
+from computation_cache import cache_computation
+
+
 @st.cache_data(show_spinner=False, max_entries=4)
 def _read(root: str, pointer: str, config_path: str, config_sha256: str):
     del pointer
@@ -29,6 +32,7 @@ def _read(root: str, pointer: str, config_path: str, config_sha256: str):
     return load_snapshot(Path(root), config)
 
 
+@cache_computation
 def seasonal_figure(records: pd.DataFrame, region: str, metric: str, *, cumulative: bool,
                     current_year: int, baseline=(2020, 2024)) -> go.Figure:
     unit = {"precipitation": "累计降雨（mm）", "temperature_max": "最高气温（℃）", "soil_moisture": "0—100厘米土壤含水率（%）"}[metric]
@@ -75,6 +79,7 @@ def seasonal_figure(records: pd.DataFrame, region: str, metric: str, *, cumulati
     return figure
 
 
+@cache_computation
 def daily_figure(records: pd.DataFrame, region: str, start, end) -> go.Figure:
     figure = go.Figure()
     part = records[(records.region == region) & records.metric.eq("precipitation") & records.date.between(pd.Timestamp(start), pd.Timestamp(end))]

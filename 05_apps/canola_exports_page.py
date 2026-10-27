@@ -18,6 +18,12 @@ CHARTS = (("weekly_mt", "周度出口"), ("cumulative_mt", "作物年度累计�
           ("four_week_mt", "近四周出口合计"))
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+page_payload = cache_computation(page_payload)
+
+
 def data_root() -> Path:
     return Path(os.getenv("CANOLA_EXPORT_RUNTIME_ROOT", "").strip()
                 or os.getenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", "").strip() or ROOT / "01_data")
@@ -51,6 +57,7 @@ def seasonal_date(value: str | None) -> str | None:
     return actual.replace(year=1999 if actual.month >= 8 else 2000).isoformat()
 
 
+@cache_computation
 def build_figures(payload: dict) -> list[go.Figure]:
     figures = []
     for metric, title in CHARTS:

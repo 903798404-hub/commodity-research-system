@@ -1631,6 +1631,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "05_apps/computation_cache.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "05_apps/brazil_soy_page.py",
       "role": "runtime_configuration"
     },

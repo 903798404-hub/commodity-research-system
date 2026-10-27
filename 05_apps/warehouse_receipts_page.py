@@ -13,6 +13,12 @@ from agri_research_agent.warehouse_receipts.charts import build_figure
 from agri_research_agent.warehouse_receipts.model import PRODUCTS, ReceiptError, load_snapshot, sha256
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+build_figure = cache_computation(build_figure)
+
+
 def default_receipt_root(project_root: Path) -> Path:
     explicit = os.getenv("WAREHOUSE_RECEIPTS_ROOT", "").strip()
     return Path(explicit) if explicit else Path(os.getenv("SPREAD_DATA_ROOT", str(project_root / "01_data"))) / "processed/warehouse_receipts"

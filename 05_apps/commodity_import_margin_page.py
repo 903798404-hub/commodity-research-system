@@ -19,6 +19,14 @@ from agri_research_agent.commodity_import_margin.store import (
 from agri_research_agent.commodity_import_margin.runtime import storage_context, capture_enabled
 
 
+from computation_cache import cache_computation
+
+# Reuse only already-validated, pure value computations; readers/writers stay unchanged.
+daily_rows = cache_computation(daily_rows)
+build_seasonal_charts = cache_computation(build_seasonal_charts)
+seasonal_figure = cache_computation(seasonal_figure)
+
+
 def _live_key(commodity, day):
     return f"commodity-import-live-{commodity}-{day}"
 

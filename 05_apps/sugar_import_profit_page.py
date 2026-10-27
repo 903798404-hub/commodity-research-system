@@ -6,6 +6,7 @@ import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from computation_cache import cache_computation
 from agri_research_agent.sugar_import_profit.model import COUNTRIES, LABELS, today
 from agri_research_agent.sugar_import_profit.runtime import storage_context
 from agri_research_agent.sugar_import_profit.store import Store
@@ -241,40 +242,46 @@ def _seasonal_x(stamp, shipment_year):
     return (stamp.year - shipment_year) * 366 + (date(2000, stamp.month, stamp.day) - date(2000, 1, 1)).days
 
 
-def _seasonal_charts(observations, country, key):
+@cache_computation
+def build_sugar_seasonal_figure(observations, month, quota):
     from agri_research_agent.shared.chart_style import (CURRENT_YEAR_COLOR, CURRENT_LINE_WIDTH,
         HISTORY_LINE_WIDTH, GRID_COLOR, historical_year_color)
+    metric = 'margin_out' if quota == '配额外' else 'margin_in'
+    figure = go.Figure()
+    selected = [r for r in observations if int(r['period'][-2:]) == month]
+    periods = sorted({r['period'] for r in selected})
+    for period in periods:
+        shipment_year = int(period[:4])
+        x, y, labels, last = [], [], [], None
+        for row in sorted((r for r in selected if r['period'] == period), key=lambda r: r['date']):
+            stamp = date.fromisoformat(row['date'])
+            # Normalize relative to shipment year, retaining the original date in hover.
+            anchor = _seasonal_x(stamp, shipment_year)
+            if last and (stamp - last).days > 10:
+                x.append(anchor); y.append(None); labels.append('')
+            x.append(anchor); y.append(row[metric]); labels.append(row['date']); last = stamp
+        latest = period == periods[-1]
+        figure.add_trace(go.Scatter(x=x, y=y, customdata=labels, name=period[:4], mode='lines+markers', connectgaps=False,
+            line=dict(color=CURRENT_YEAR_COLOR if latest else historical_year_color(shipment_year),
+                      width=CURRENT_LINE_WIDTH if latest else HISTORY_LINE_WIDTH),
+            hovertemplate='%{customdata}<br>%{y:.2f}元/吨<extra>%{fullData.name}年船期</extra>'))
+    figure.update_layout(title=f'{month}月船期 · {quota}', height=280, yaxis_title='元/吨',
+        plot_bgcolor='white', xaxis=dict(gridcolor=GRID_COLOR, tickmode='array',
+            tickvals=[offset * 366 + (date(2000, m, 1) - date(2000, 1, 1)).days for offset in (-1, 0) for m in range(1, 13, 2)],
+            ticktext=[f'{m:02}/01' for _ in (-1, 0) for m in range(1, 13, 2)]),
+        yaxis=dict(gridcolor=GRID_COLOR, zeroline=True), legend=dict(orientation='h'),
+        margin=dict(l=35, r=10, t=45, b=30))
+    return figure
+
+
+def _seasonal_charts(observations, country, key):
     st.subheader('白糖进口利润 · ' + country)
     quota = st.radio('利润口径', ('配额外', '配额内'), horizontal=True, key=key + ':chart-quota')
-    metric = 'margin_out' if quota == '配额外' else 'margin_in'
     if not observations:
         st.info('尚无新公式的已存历史；从实际录价日开始积累，缺失数据留空。')
     for start in range(1, 13, 3):
         for month, column in zip(range(start, start + 3), st.columns(3)):
-            figure = go.Figure()
-            selected = [r for r in observations if int(r['period'][-2:]) == month]
-            periods = sorted({r['period'] for r in selected})
-            for period in periods:
-                shipment_year = int(period[:4])
-                x, y, labels, last = [], [], [], None
-                for row in sorted((r for r in selected if r['period'] == period), key=lambda r: r['date']):
-                    stamp = date.fromisoformat(row['date'])
-                    # Normalize relative to shipment year, retaining the original date in hover.
-                    anchor = _seasonal_x(stamp, shipment_year)
-                    if last and (stamp - last).days > 10:
-                        x.append(anchor); y.append(None); labels.append('')
-                    x.append(anchor); y.append(row[metric]); labels.append(row['date']); last = stamp
-                latest = period == periods[-1]
-                figure.add_trace(go.Scatter(x=x, y=y, customdata=labels, name=period[:4], mode='lines+markers', connectgaps=False,
-                    line=dict(color=CURRENT_YEAR_COLOR if latest else historical_year_color(shipment_year),
-                              width=CURRENT_LINE_WIDTH if latest else HISTORY_LINE_WIDTH),
-                    hovertemplate='%{customdata}<br>%{y:.2f}元/吨<extra>%{fullData.name}年船期</extra>'))
-            figure.update_layout(title=f'{month}月船期 · {quota}', height=280, yaxis_title='元/吨',
-                plot_bgcolor='white', xaxis=dict(gridcolor=GRID_COLOR, tickmode='array',
-                    tickvals=[offset * 366 + (date(2000, m, 1) - date(2000, 1, 1)).days for offset in (-1, 0) for m in range(1, 13, 2)],
-                    ticktext=[f'{m:02}/01' for _ in (-1, 0) for m in range(1, 13, 2)]),
-                yaxis=dict(gridcolor=GRID_COLOR, zeroline=True), legend=dict(orientation='h'),
-                margin=dict(l=35, r=10, t=45, b=30))
+            figure = build_sugar_seasonal_figure(observations, month, quota)
             with column:
                 st.plotly_chart(figure, width='stretch', key=key + f':chart-{month}')
 
