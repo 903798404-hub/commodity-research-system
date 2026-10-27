@@ -56,7 +56,9 @@ def _page_module():
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.syspath_prepend(str(ROOT / "05_apps"))
+        spec.loader.exec_module(module)
     return module
 
 
