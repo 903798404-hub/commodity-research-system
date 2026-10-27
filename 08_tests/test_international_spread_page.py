@@ -289,3 +289,46 @@ def test_unavailable_reference_degrades_without_internal_path(monkeypatch, tmp_p
     assert len(app.warning) == 1
     assert "PUBLIC_CURRENT_UNAVAILABLE" in app.warning[0].value
     assert str(tmp_path) not in app.warning[0].value
+
+
+def test_seasonality_reuses_full_metric_and_invalidates_same_date_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+    import json
+
+    page = _page_module()
+    day = date(2026, 8, 17)
+    observation = SeasonalityObservation(day, 2026, "2026 YTD", "08-17", Decimal("0"))
+    metric = MetricPayload(
+        "spread", "spread.cache-behavior", "缓存回归", "USD/T", 1, 1,
+        (observation,), (2026,), day, Decimal("0"), day, "Reuters", "A - B",
+        (), (), "USER_APPROVED_BUSINESS_DEFINITION", MetricStatus.READY,
+        "same-date revision must remain visible",
+    )
+    calls = []
+    original_reference = page._reference_date
+
+    def reference(value):
+        calls.append(value)
+        return original_reference(value)
+
+    monkeypatch.setattr(page, "_reference_date", reference)
+    first = page.build_seasonality_figure(metric)
+    expected = first.to_json()
+    first.data[0].y = [999]
+    again = page.build_seasonality_figure(metric)
+    assert calls == [day]
+    assert again.to_json() == expected
+    assert tuple(again.data[0].y) == (0.0,)
+
+    revised = replace(
+        metric, observations=(replace(observation, value=Decimal("-1.25")),),
+        latest_value=Decimal("-1.25"),
+    )
+    updated = page.build_seasonality_figure(revised)
+    assert calls == [day, day]
+    assert tuple(updated.data[0].y) == (-1.25,)
+    assert json.loads(updated.to_json()) == json.loads(
+        page.build_seasonality_figure.__wrapped__(revised).to_json()
+    )

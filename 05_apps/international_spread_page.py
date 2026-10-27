@@ -37,6 +37,9 @@ MONTH_LABELS = [f"{month}月" for month in range(1, 13)]
 GRID_COLUMN_COUNT = 3
 
 
+from computation_cache import cache_computation
+
+
 def _public_current_root(project_root: Path) -> Path:
     configured = os.getenv(PUBLIC_RUNTIME_ROOT_ENV, "").strip()
     runtime_root = Path(configured) if configured else project_root
@@ -85,6 +88,7 @@ def load_international_spread_payload(
     )
 
 
+@cache_computation
 def build_seasonality_figure(metric: MetricPayload) -> go.Figure:
     """Render calendar-year observations without filling or altering any value."""
 
