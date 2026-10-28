@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -304,3 +305,45 @@ def test_monitor_render_shows_real_date_and_exclusions(tmp_path,monkeypatch):
     table=app.dataframe[0].value
     assert '按要求暂缓' in set(table['状态'])
     assert '实际数据日期' in table
+
+
+def test_periodic_monitor_refresh_reads_new_receipt_instead_of_old_argument(tmp_path,monkeypatch):
+    """Fire the registered timer callback without rerunning its parent page."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+    from functools import wraps
+    callbacks=[]
+    def periodic(*,run_every):
+        def decorate(function):
+            @wraps(function)
+            def start(*args,**kwargs):
+                callbacks.append(lambda:function(*args,**kwargs))
+                return function(*args,**kwargs)
+            return start
+        return decorate
+    monkeypatch.syspath_prepend(str(ROOT/'05_apps'))
+    monkeypatch.setattr(st,'fragment',periodic)
+    module=load('monitor_periodic_receipt_regression',ROOT/'05_apps/page_monitor_page.py')
+    folder=tmp_path/'update_status';folder.mkdir();path=folder/'page_monitor.json'
+    now=datetime.now(timezone.utc)
+    rows=[evaluate(rule,Observation(now.date().isoformat()[:7] if rule.period_kind=='month' else now.date().isoformat()),now) for rule in RULES]
+    payload={'schema_version':SCHEMA,'checked_at':now.isoformat(),'rows':rows,
+        'task_dispatcher':{'schema_version':'task-dispatcher-state/1','checked_at':now.isoformat(),
+            'jobs':{'fgis':{'pending':None,'active':None,'last':None,'retries':{}}},'blocked_jobs':{}}}
+    path.write_text(json.dumps(payload),encoding='utf-8')
+    script='from pathlib import Path\nimport monitor_periodic_receipt_regression as ui\nui.render_page_monitor(Path('+repr(str(tmp_path))+'))'
+    first=AppTest.from_string(script).run();assert not first.exception
+    assert len(callbacks)==1
+    assert not any('后台任务待处理' in item.value for item in first.warning)
+    saved_callback=callbacks[0]
+    updated=now+timedelta(seconds=1)
+    payload['checked_at']=payload['task_dispatcher']['checked_at']=updated.isoformat()
+    payload['task_dispatcher']['jobs']['fgis']['last']={'status':'FAILED','finished_at':updated.isoformat()}
+    path.write_text(json.dumps(payload),encoding='utf-8')
+    module.fire_saved_timer=saved_callback
+    refreshed=AppTest.from_string('import monitor_periodic_receipt_regression as ui\nui.fire_saved_timer()').run()
+    assert not refreshed.exception
+    expected=updated.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')
+    assert any('最近核验：'+expected in item.value for item in refreshed.caption)
+    assert any('后台任务待处理：fgis' in item.value for item in refreshed.warning)
+    assert json.loads(path.read_text(encoding='utf-8'))['rows']==rows
