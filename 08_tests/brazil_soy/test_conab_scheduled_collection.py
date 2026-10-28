@@ -115,4 +115,3 @@ def test_unknown_or_multiple_growth_sheets_still_rejected(titles):
     raw=BytesIO();book.save(raw);book.close()
     with pytest.raises(ValueError,match='workbook layout changed'):
         parse_growth(raw.getvalue(),{})
-
