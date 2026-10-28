@@ -141,3 +141,23 @@ def test_basis_native_memory_cache_invalidation_covers_all_large_frame_rows(monk
         frame.iloc[59997,0]+=1
         assert basis.cached_seasonal_report_image(frame,**options)!=before and len(calls)==2
     finally:basis.cached_seasonal_report_image.clear()
+
+
+def test_derived_png_identity_includes_original_matplotlib_style():
+    import basis_page as basis
+    import matplotlib as mpl
+    frame=pd.DataFrame({'value':[0,1.]})
+    first=cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})
+    with mpl.rc_context({'font.size':mpl.rcParams['font.size']+1}):
+        assert cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})!=first
+
+
+def test_derived_brazil_identity_includes_current_plotly_template():
+    from agri_research_agent.pipelines.brazil_soy import seasonal_figure
+    import plotly.io as pio
+    first=cache._derived_key(seasonal_figure,('arguments',),{})
+    previous=pio.templates.default
+    try:
+        pio.templates.default='plotly_dark' if previous!='plotly_dark' else 'plotly_white'
+        assert cache._derived_key(seasonal_figure,('arguments',),{})!=first
+    finally:pio.templates.default=previous

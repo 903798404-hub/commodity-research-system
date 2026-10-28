@@ -204,7 +204,15 @@ def _derived_key(function,args,kwargs):
     # never pickles. The exact image also binds dependencies, fonts and options.
     original=inspect.unwrap(function)
     if original.__closure__ is not None:raise _UnsupportedDerived('Closure input is not persistent')
-    body=_serialize((args,kwargs))
+    context=None
+    if original.__module__=='basis_page' and original.__name__=='cached_seasonal_report_image':
+        import matplotlib as mpl
+        context=dict(mpl.rcParams);context['backend']=mpl.get_backend()
+    elif original.__module__=='agri_research_agent.pipelines.brazil_soy' and original.__name__=='seasonal_figure':
+        import plotly.io as pio
+        name=pio.templates.default
+        context=(name,pio.templates[name].to_plotly_json() if name else None)
+    body=_serialize((args,kwargs,context))
     if len(body)>MAX_INPUT_BYTES:raise _UnsupportedDerived('Derived input exceeds bound')
     function_id=f'{original.__module__}.{original.__qualname__}'
     version=sha256(marshal.dumps(original.__code__)+_serialize((original.__defaults__,original.__kwdefaults__))).hexdigest()
