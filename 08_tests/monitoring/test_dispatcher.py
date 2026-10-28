@@ -122,6 +122,16 @@ def test_one_changed_binding_does_not_block_an_independent_weather_job():
     assert set(starts)=={'brazil','guangxi'} and result['blocked_jobs']=={'fgis':'configuration changed'}
 
 
+def test_quarantine_and_rebind_events_are_deduplicated_without_claiming_data_recovery():
+    state=queue.empty_state(queue.SERVICES);obs=observations()
+    state,_=queue.advance(state,obs,'boot',NOW,blocked={'fgis':'changed'})
+    count=len(state['events'])
+    state,_=queue.advance(state,obs,'boot',NOW+timedelta(seconds=30),blocked={'fgis':'changed'})
+    assert len(state['events'])==count
+    state,_=queue.advance(state,obs,'boot',NOW+timedelta(seconds=60))
+    assert state['events'][-1]['kind']=='TASK_REBOUND' and state['jobs']['fgis']['last'] is None
+
+
 def test_timer_migration_changes_target_only_without_inventing_a_calendar():
     for job in queue.JOBS:
         text=queue.timer_dropin(job)

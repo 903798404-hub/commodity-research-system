@@ -101,6 +101,11 @@ def advance(state,observations,boot_id,now,*,blocked=None):
     blocked=dict(blocked or {})
     if not set(blocked)<=set(state['jobs']):raise ValueError('Unknown quarantined task')
     blocked.update({job:'原服务执行状态未核实' for job,status in statuses.items() if status in {'UNKNOWN','UNAVAILABLE'}})
+    previous_blocked=state.get('blocked_jobs',{})
+    for job in sorted(set(blocked)|set(previous_blocked)):
+        if blocked.get(job)!=previous_blocked.get(job):
+            event(state,job,'TASK_QUARANTINED' if job in blocked else 'TASK_REBOUND',now,
+                reason=blocked.get(job,'任务身份与执行状态已重新核实；数据日期仍单独检查'))
     state['blocked_jobs']=blocked
     for job,row in state['jobs'].items():
         if job in blocked:continue
@@ -196,6 +201,7 @@ def locked_run(config_path,*,job=None,reason='scheduled'):
         path=STATE_ROOT/'state.json'
         state=host.read_json(host.protected(path)) if path.exists() else empty_state(config['jobs'])
         if state.get('schema_version')!=SCHEMA or set(state['jobs'])!=set(config['jobs']):raise ValueError('Dispatcher state inventory differs')
+        archive_events(host,state)  # replay persisted events before truncating the recent window
         now=datetime.now(timezone.utc)
         if job is not None:
             state,outcome=enqueue(state,job,reason,now);host.atomic(path,state)
