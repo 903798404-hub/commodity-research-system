@@ -125,6 +125,144 @@ class CsvSession:
         return self.response
 
 
+class RangeResponse(CsvResponse):
+    def __init__(self, content, **kwargs):
+        super().__init__(content, **kwargs)
+        self.closed = False
+        self.body_read = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.closed = True
+
+    def iter_content(self, chunk_size):
+        self.body_read = True
+        yield self.content
+
+
+class RangeSession:
+    def __init__(self, raw, *, faults=(), final_etag=None):
+        self.raw = raw
+        self.faults = list(faults)
+        self.final_etag = final_etag
+        self.calls = []
+        self.responses = []
+        self.heads = 0
+
+    def head(self, url, **kwargs):
+        self.calls.append(("HEAD", url, kwargs))
+        response = RangeResponse(b"", declared_content_length=len(self.raw))
+        response.headers["Accept-Ranges"] = "bytes"
+        self.heads += 1
+        if self.heads > 1 and self.final_etag:
+            response.headers["ETag"] = self.final_etag
+        self.responses.append(response)
+        return response
+
+    def get(self, url, **kwargs):
+        self.calls.append(("GET", url, kwargs))
+        start, end = map(int, kwargs["headers"]["Range"][6:].split("-"))
+        response = RangeResponse(self.raw[start:end + 1], status=206)
+        response.headers["Content-Range"] = f"bytes {start}-{end}/{len(self.raw)}"
+        if self.faults:
+            fault = self.faults.pop(0)
+            if fault == "ignored":
+                response.status_code = 200
+                response.content = self.raw
+            elif fault == "precondition":
+                response.status_code = 412
+            elif fault == "replica":
+                response.headers["ETag"] = '"other-replica"'
+            elif fault == "short":
+                response.content = response.content[:-1]
+            elif fault == "long":
+                response.content += b"x"
+            elif fault == "range":
+                response.headers["Content-Range"] = f"bytes {start + 1}-{end}/{len(self.raw)}"
+            elif fault == "length":
+                response.headers["Content-Length"] = "1"
+            elif fault == "encoding":
+                response.headers["Content-Encoding"] = "gzip"
+            elif fault == "weak":
+                response.headers["ETag"] = 'W/"weak"'
+        self.responses.append(response)
+        return response
+
+
+def test_versioned_ranges_equal_complete_original_csv_and_aggregation(monkeypatch):
+    from agri_research_agent.soybean_exports import fgis
+    monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
+    raw = csv_bytes([yearly_row(), yearly_row(destination="JAPAN", mt="20"),
+                     yearly_row(grain="CORN", mt="500")])
+    session = RangeSession(raw, faults=["ignored", "precondition", "replica", "short"])
+    actual = fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
+                                       chunk_bytes=200).fetch_soybeans()
+    expected = FgisYearlyAdapter(session=CsvSession(CsvResponse(raw)),
+                                calendar_year=2026).fetch_soybeans()
+    assert actual.records == expected.records
+    assert actual.source_bytes == expected.source_bytes == raw
+    assert actual.source_sha256 == expected.source_sha256
+    lineage = dict(batch_id="same-batch", raw_snapshot_id="same-snapshot",
+                   raw_snapshot_sha256=actual.source_sha256,
+                   fetch_time_utc="2026-10-28T00:00:00Z", dataset_updated_at=actual.dataset_updated_at)
+    pd.testing.assert_frame_equal(normalize_fgis_records(actual.records, **lineage),
+                                  normalize_fgis_records(expected.records, **lineage), check_exact=True)
+    assert actual.query_scope["complete_calendar_year_file"] is True
+    assert actual.query_scope["delivery"] == "https_versioned_ranges"
+    receipts = actual.query_scope["range_receipts"]
+    assert sum(r["size_bytes"] for r in receipts) == len(raw)
+    assert all(r["http_status"] == 206 for r in receipts)
+    assert all(r.closed for r in session.responses)
+    assert all(not r.body_read for r in session.responses[:4])
+    for method, url, kwargs in session.calls:
+        assert url == "https://fgisonline.ams.usda.gov/exportgrainreport/CY2026.csv"
+        assert kwargs["allow_redirects"] is False
+        assert "verify" not in kwargs  # requests' strict TLS default stays enabled.
+        assert kwargs["headers"]["Accept-Encoding"] == "identity"
+        if method == "GET":
+            assert kwargs["stream"] is True
+            assert kwargs["headers"]["If-Match"] == '"yearly-etag"'
+
+
+@pytest.mark.parametrize("fault", ["range", "length", "long", "encoding", "weak"])
+def test_versioned_ranges_reject_invalid_bounds_or_metadata(fault):
+    from agri_research_agent.soybean_exports.fgis import FgisYearlyRangeAdapter
+    session = RangeSession(csv_bytes([yearly_row()]), faults=[fault])
+    with pytest.raises(FgisAdapterError):
+        FgisYearlyRangeAdapter(session=session, calendar_year=2026).fetch_soybeans()
+    assert all(r.closed for r in session.responses)
+
+
+@pytest.mark.parametrize("fault", ["short", "replica", "precondition", "ignored"])
+def test_versioned_ranges_cannot_publish_partial_or_mixed_versions(monkeypatch, fault):
+    from agri_research_agent.soybean_exports import fgis
+    monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
+    session = RangeSession(csv_bytes([yearly_row()]), faults=[fault] * 2)
+    with pytest.raises(FgisAdapterError, match="retries exhausted"):
+        fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
+                                   max_attempts=2).fetch_soybeans()
+    assert len([c for c in session.calls if c[0] == "GET"]) == 2
+    assert all(r.closed for r in session.responses)
+
+
+def test_versioned_ranges_reject_final_version_change_and_expired_deadline(monkeypatch):
+    from agri_research_agent.soybean_exports import fgis
+    monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
+    session = RangeSession(csv_bytes([yearly_row()]), final_etag='"changed"')
+    with pytest.raises(FgisAdapterError, match="retries exhausted"):
+        fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
+                                   max_attempts=2).fetch_soybeans()
+    ticks = iter([0, 2])
+    monkeypatch.setattr(fgis.time, "monotonic", lambda: next(ticks))
+    session = RangeSession(csv_bytes([yearly_row()]))
+    with pytest.raises(FgisAdapterError, match="deadline exceeded"):
+        fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
+                                   deadline_seconds=1).fetch_soybeans()
+    assert not session.calls
+
+
 class RetrySession(CsvSession):
     def __init__(self, response: CsvResponse) -> None:
         super().__init__(response)

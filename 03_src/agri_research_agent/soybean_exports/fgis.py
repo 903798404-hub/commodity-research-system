@@ -397,6 +397,135 @@ class FgisYearlyAdapter:
         )
 
 
+class FgisYearlyRangeAdapter(FgisYearlyAdapter):
+    """Receive the same complete CSV in version-locked, bounded HTTPS ranges.
+
+    USDA replicas can expose different strong ETags. A response from another
+    replica is never appended; retries keep the original version and offset.
+    The original parser, weekly aggregation and publication checks are shared.
+    """
+
+    def __init__(self, *, chunk_bytes: int = 512 * 1024,
+                 deadline_seconds: float = 540, max_attempts: int = 10,
+                 **kwargs: Any) -> None:
+        super().__init__(max_attempts=max_attempts, **kwargs)
+        if not 1 <= chunk_bytes <= 1024 * 1024 or deadline_seconds <= 0:
+            raise ValueError("invalid Yearly range transfer bounds")
+        self.chunk_bytes = chunk_bytes
+        self.deadline_seconds = deadline_seconds
+
+    def fetch_soybeans(self, *, cert_date_start: date | None = None,
+                       cert_date_end: date | None = None) -> FgisFetchResult:
+        if cert_date_start is not None or cert_date_end is not None:
+            raise FgisAdapterError("Yearly range fetch requires the complete calendar-year file")
+        year = self.calendar_year or date.today().year
+        filename = f"CY{year}.csv"
+        url = f"{FGIS_YEARLY_BASE_URL}/{filename}"
+        fetched_at = iso_utc(utc_now())
+        deadline = time.monotonic() + self.deadline_seconds
+        headers = {"Accept": "text/csv, application/octet-stream", "Accept-Encoding": "identity"}
+        retryable = (requests.ConnectionError, requests.Timeout,
+                     requests.exceptions.ChunkedEncodingError, IncompleteRead,
+                     _FgisYearlyTransferError)
+
+        def timeout() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise FgisAdapterError("FGIS Yearly range transfer deadline exceeded")
+            return min(30, self.timeout_seconds, remaining)
+
+        def retry(operation):
+            for attempt in range(self.max_attempts):
+                timeout()
+                try:
+                    return operation()
+                except retryable as exc:
+                    if attempt + 1 == self.max_attempts:
+                        raise FgisAdapterError("FGIS Yearly range retries exhausted") from exc
+                    time.sleep(min(0.25, timeout()))
+
+        def metadata(response):
+            media = (_response_header(response, "Content-Type") or "").split(";", 1)[0].lower().strip()
+            etag = _response_header(response, "ETag") or ""
+            modified = _response_header(response, "Last-Modified") or ""
+            encoding = _response_header(response, "Content-Encoding")
+            try:
+                valid_modified = parsedate_to_datetime(modified).tzinfo is not None
+            except (TypeError, ValueError, OverflowError):
+                valid_modified = False
+            if (media not in self._CONTENT_TYPES or
+                not re.fullmatch(r'"[^"\r\n]+"', etag) or
+                not valid_modified or
+                encoding not in (None, "identity")):
+                raise FgisAdapterError("FGIS Yearly range source metadata is invalid")
+            return etag, modified
+
+        def head(expected=None):
+            with self.session.head(url, headers=headers, timeout=timeout(), allow_redirects=False) as response:
+                if response.status_code != 200:
+                    raise FgisAdapterError(f"FGIS Yearly HEAD status {response.status_code}")
+                version = metadata(response)
+                length = _response_header(response, "Content-Length") or ""
+                if not length.isdecimal() or not 0 < int(length) <= 64 * 1024 * 1024:
+                    raise FgisAdapterError("FGIS Yearly range total length is invalid")
+                if (_response_header(response, "Accept-Ranges") or "").lower() != "bytes":
+                    raise FgisAdapterError("FGIS Yearly range transfer is unsupported")
+                result = (*version, int(length))
+                if expected is not None and result != expected:
+                    raise _FgisYearlyTransferError("FGIS Yearly metadata version changed")
+                return result
+
+        version = retry(head)
+        etag, modified, total = version
+        chunks = []
+        receipts = []
+        for start in range(0, total, self.chunk_bytes):
+            end = min(total, start + self.chunk_bytes) - 1
+            expected_range = f"bytes {start}-{end}/{total}"
+
+            def receive():
+                request_headers = {**headers, "Range": f"bytes={start}-{end}", "If-Match": etag}
+                with self.session.get(url, headers=request_headers, timeout=timeout(),
+                                      stream=True, allow_redirects=False) as response:
+                    # Close a full-body/other-version response before reading it.
+                    if response.status_code in (200, 412):
+                        raise _FgisYearlyTransferError("FGIS Yearly range version unavailable")
+                    if response.status_code != 206:
+                        raise FgisAdapterError(f"FGIS Yearly range HTTP status {response.status_code}")
+                    if metadata(response) != (etag, modified):
+                        raise _FgisYearlyTransferError("FGIS Yearly range version mismatch")
+                    if (_response_header(response, "Content-Range") != expected_range or
+                        _response_header(response, "Content-Length") != str(end - start + 1)):
+                        raise FgisAdapterError("FGIS Yearly range bounds identity mismatch")
+                    parts = []
+                    size = 0
+                    for part in response.iter_content(chunk_size=64 * 1024):
+                        timeout()
+                        size += len(part)
+                        if size > end - start + 1:
+                            raise FgisAdapterError("FGIS Yearly range body exceeds bounds")
+                        parts.append(part)
+                    if size != end - start + 1:
+                        raise _FgisYearlyTransferError("FGIS Yearly range body is incomplete")
+                    return b"".join(parts)
+
+            chunk = retry(receive)
+            chunks.append(chunk)
+            receipts.append({"http_status": 206, "content_range": expected_range,
+                             "size_bytes": len(chunk), "sha256": sha256_bytes(chunk),
+                             "etag": etag, "last_modified": modified})
+        after = retry(lambda: head(version))
+        content = b"".join(chunks)
+        return _parse_yearly_source(
+            content=content, calendar_year=year, source_file=filename, source_url=url,
+            fetched_at=fetched_at, http_status=200, content_length=total,
+            etag=etag, last_modified=modified, delivery="https_versioned_ranges",
+            delivery_metadata={"metadata_http_status": 200,
+                               "metadata_method": "HEAD", "version_after": list(after),
+                               "range_receipts": receipts},
+        )
+
+
 class FgisYearlyFileAdapter:
     """Read a host-verified USDA FGIS Yearly CSV without making HTTP requests."""
 

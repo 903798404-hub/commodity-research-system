@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 import shutil
 
-from .fgis import FgisYearlyAdapter, run_fgis_pipeline, _parse_yearly_source, _business_equal, validate_fgis_stable
+from .fgis import FgisYearlyRangeAdapter as FgisYearlyAdapter
+from .fgis import run_fgis_pipeline, _parse_yearly_source, _business_equal, validate_fgis_stable
 
 DOMAIN = 'soybean_export_inspections'
 STABLE = f'01_data/processed/{DOMAIN}/soybean_export_inspections_weekly.parquet'
