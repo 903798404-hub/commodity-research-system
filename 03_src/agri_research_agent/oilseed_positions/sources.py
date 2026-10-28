@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
 from zipfile import BadZipFile, ZipFile
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 import requests
@@ -225,9 +226,10 @@ def parse_sina(content, requested_day, contract, source_url, stamp):
 
 
 class Sources:
-    def __init__(self, timeout=20):
+    def __init__(self, timeout=20, *, clock=None):
         self.session = requests.Session()
         self.timeout = timeout
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def _response(self, method, url, **kwargs):
         response = self.session.request(method, url, timeout=self.timeout,
@@ -247,6 +249,15 @@ class Sources:
             market=market, expected_code=spec["code"], expected_name=spec["name"]), response.content, response.url
 
     def euronext(self, published):
+        # The provider publishes on Wednesday afternoon in Europe. Noon is
+        # only the earliest eligibility bound, never a promised release time.
+        # Do not turn an uncreated future report's 403 into a transport failure.
+        now=self.clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError('Euronext publication clock must be timezone aware')
+        local=now.astimezone(ZoneInfo('Europe/Paris'))
+        if published>local.date() or (published==local.date() and local.hour<12):
+            raise SourceNotPublished('Euronext 周三下午发布窗口尚未开始；保留实际持仓截止日')
         url = f"https://live.euronext.com/sites/default/files/commodities_reporting/{published:%Y/%m/%d}/en/cdwpr_ECO_{published:%Y%m%d}.html"
         response = self._response("GET", url)
         return parse_euronext(response.content, published, url, datetime.now(timezone.utc).isoformat()), response.content, url
