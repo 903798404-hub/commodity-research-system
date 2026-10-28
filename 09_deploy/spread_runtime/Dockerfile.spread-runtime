@@ -21,7 +21,11 @@ RUN sed -i \
 # requirements.txt is the hash-locked production input.  Development tools are
 # deliberately isolated in requirements-dev.txt and must never enter this image.
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \
+# Bound a stalled regional mirror, then fetch the same hash-locked artifacts
+# from the official index. Neither path may relax package or hash checks.
+RUN (timeout 300s python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \
+        || timeout 600s python -m pip install --force-reinstall --index-url=https://pypi.org/simple \
+            --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt) \
     && rm -rf /root/.cache/pip /tmp/pip-* /tmp/wheels
 
 # Exact bound runtime inputs; candidate fixtures never enter the image.
