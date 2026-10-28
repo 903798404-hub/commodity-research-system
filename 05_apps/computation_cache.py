@@ -62,7 +62,31 @@ def _serialize(value):
 
 def complete_value_identity(value):
     """Full native-cache dependency identity, including every dataframe row."""
-    return sha256(_serialize(value)).hexdigest()
+    return sha256(_serialize(_canonical_inputs(value))).hexdigest()
+
+
+def _canonical_inputs(value):
+    """Ignore pandas block fragmentation while retaining complete value inputs.
+
+    DataFrame.copy can consolidate identical columns into different internal
+    blocks. That allocation history must not turn equal values into cache misses.
+    """
+    import pandas as pd
+    if type(value) is pd.DataFrame:
+        def index_metadata(index):
+            return (type(index).__module__,type(index).__qualname__,str(index.dtype),
+                tuple(index.names),getattr(index,'freqstr',None),str(getattr(index,'tz',None)))
+        dtypes=[]
+        for dtype in value.dtypes:
+            category=(dtype.categories.tolist(),dtype.ordered) if isinstance(dtype,pd.CategoricalDtype) else None
+            dtypes.append((str(dtype),repr(dtype),category))
+        return ('dataframe',index_metadata(value.index),index_metadata(value.columns),dtypes,
+            value.flags.allows_duplicate_labels,_canonical_inputs(value.attrs),
+            _canonical_inputs(value.to_dict(orient='split')))
+    if isinstance(value,tuple):return ('tuple',tuple(_canonical_inputs(v) for v in value))
+    if isinstance(value,list):return ('list',tuple(_canonical_inputs(v) for v in value))
+    if isinstance(value,dict):return ('dict',tuple((_canonical_inputs(k),_canonical_inputs(v)) for k,v in value.items()))
+    return ('value',value)
 
 
 class _UncachedResult(Exception):
@@ -212,7 +236,7 @@ def _derived_key(function,args,kwargs):
         import plotly.io as pio
         name=pio.templates.default
         context=(name,pio.templates[name].to_plotly_json() if name else None)
-    body=_serialize((args,kwargs,context))
+    body=_serialize(_canonical_inputs((args,kwargs,context)))
     if len(body)>MAX_INPUT_BYTES:raise _UnsupportedDerived('Derived input exceeds bound')
     function_id=f'{original.__module__}.{original.__qualname__}'
     version=sha256(marshal.dumps(original.__code__)+_serialize((original.__defaults__,original.__kwdefaults__))).hexdigest()

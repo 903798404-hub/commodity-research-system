@@ -39,6 +39,18 @@ def test_complete_input_revision_options_types_and_missingness_change_keys():
     assert cache._derived_key(pure_png,(pd.DataFrame({'value':[None]}),),{})!=cache._derived_key(pure_png,(pd.DataFrame({'value':[0.]}),),{})
 
 
+def test_equal_dataframe_copies_reuse_keys_despite_internal_block_consolidation():
+    frame=pd.DataFrame({'date':pd.to_datetime(['2026-10-22','2026-10-23'])})
+    frame['value']=[0.,1.];frame['other']=[2.,3.]
+    frame.attrs['source']={'version':'original'}
+    copied=frame.copy()
+    pd.testing.assert_frame_equal(frame,copied)
+    assert cache.complete_value_identity(frame)==cache.complete_value_identity(copied)
+    assert cache._derived_key(pure_png,(frame,),{})==cache._derived_key(pure_png,(copied,),{})
+    copied.attrs['source']={'version':'revised'}
+    assert cache.complete_value_identity(frame)!=cache.complete_value_identity(copied)
+
+
 @pytest.mark.parametrize('change',['result','hash','schema','key','image'])
 def test_corrupt_or_wrong_version_never_becomes_a_hit(tmp_path,change):
     key='c'*64;path=tmp_path/(key+'.json');cache._record_derived(path,IMAGE,key,b'original')
