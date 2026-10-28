@@ -140,8 +140,13 @@ def load_config(path):
             raise ValueError('Monitor input root alias invalid')
     if set(config['jobs']) != set(JOBS):
         raise ValueError('Monitor jobs differ from fixed whitelist')
+    blocked={}
     for job,binding in config['jobs'].items():
-        check_job(job,binding)
+        try:check_job(job,binding)
+        except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
+            if config['schema_version']!='page-monitor-config/3':raise
+            blocked[job]='原服务或配置身份未核实，暂停此任务'
+    if config['schema_version']=='page-monitor-config/3':config['_blocked_jobs']=blocked
     return config
 
 
@@ -365,11 +370,13 @@ def run(config, *, retry):
         archive_task_events(state.get('task_ledger', {}).get('recent_observations', []))
     rows = observe(config)
     state = publish(config,state,rows)
-    ledger_blocked = config.get('task_ledger_enabled') and state.get('task_ledger_error')
-    plan = retry_plan(rows,state,datetime.now(timezone.utc),busy=producer_busy()) if retry and not ledger_blocked else []
+    controlled=bool(config.get('dispatcher'))
+    ledger_blocked = not controlled and config.get('task_ledger_enabled') and state.get('task_ledger_error')
+    eligible=[row for row in rows if row.get('job') not in config.get('_blocked_jobs',{})]
+    plan = retry_plan(eligible,state,datetime.now(timezone.utc),busy=False if controlled else producer_busy()) if retry and not ledger_blocked else []
     for job in plan:
-        check_job(job,config['jobs'][job])
-        if producer_busy():
+        if not controlled:check_job(job,config['jobs'][job])
+        if not controlled and producer_busy():
             break
         state = reserve_retry(state,job,datetime.now(timezone.utc))
         atomic(state_path,state)

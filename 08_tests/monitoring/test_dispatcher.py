@@ -106,9 +106,20 @@ def test_boot_change_never_reuses_previous_success():
     assert not starts and state['jobs']['fgis']['last']['status']=='INTERRUPTED'
 
 
-def test_unknown_original_service_stops_all_additional_starts():
+def test_unknown_original_service_is_quarantined_without_stopping_other_modules():
     state=queue.empty_state(queue.SERVICES);obs=observations();obs['fgis']['LoadState']='not-found'
-    with pytest.raises(ValueError,match='Unverified'):queue.advance(state,obs,'boot',NOW)
+    state,_=queue.enqueue(state,'fgis','scheduled',NOW)
+    state,_=queue.enqueue(state,'brazil','scheduled',NOW)
+    result,starts=queue.advance(state,obs,'boot',NOW)
+    assert starts==['brazil'] and 'fgis' in result['blocked_jobs']
+    assert result['jobs']['fgis']['pending'] is not None
+
+
+def test_one_changed_binding_does_not_block_an_independent_weather_job():
+    state=queue.empty_state(queue.SERVICES)
+    for job in ['fgis','brazil','guangxi']:state,_=queue.enqueue(state,job,'scheduled',NOW)
+    result,starts=queue.advance(state,observations(),'boot',NOW,blocked={'fgis':'configuration changed'})
+    assert set(starts)=={'brazil','guangxi'} and result['blocked_jobs']=={'fgis':'configuration changed'}
 
 
 def test_timer_migration_changes_target_only_without_inventing_a_calendar():

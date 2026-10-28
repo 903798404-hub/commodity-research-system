@@ -135,12 +135,13 @@ def render_dispatcher(report):
         for job,row in queue['jobs'].items():
             last=row['last'] or {};pending=row['pending'];active=row['active']
             status='等待原更新器启动或执行中' if active else '已排队' if pending else labels.get(last.get('status'),'等待原定时计划')
+            if job in queue.get('blocked_jobs',{}):status='此任务身份或状态未核实，已隔离'
             rows.append({'任务':names.get(job,'页面预计算' if job=='precompute' else job),'调度状态':status,
                 '额外重试次数':row['retries'].get('attempts',0),'重试统计日':row['retries'].get('day','—'),
                 '排队时间':(pending or active or {}).get('enqueued_at','—'),'最近执行完成':last.get('finished_at','—')})
         st.caption('定时触发与漏更补试进入同一队列；普通更新和独立天气各限一个工作进程。以下为最近监测快照，完成状态不代替上方实际数据日期核验。')
         st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
-        failed=[row['任务'] for row in rows if row['调度状态'] in {'执行失败','主机中断，待重试','未确认启动，待重试'}]
+        failed=[row['任务'] for row in rows if row['调度状态'] in {'执行失败','主机中断，待重试','未确认启动，待重试','此任务身份或状态未核实，已隔离'}]
         if failed:st.warning('后台任务待处理：'+'、'.join(failed))
     except (AttributeError,ValueError,KeyError,TypeError):
         st.warning('后台调度回执尚未完整核实，上方原任务及数据日期监测继续显示。')

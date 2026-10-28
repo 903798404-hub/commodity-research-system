@@ -87,7 +87,7 @@ def enqueue(state,job,reason,now):
     return state,'QUEUED'
 
 
-def advance(state,observations,boot_id,now):
+def advance(state,observations,boot_id,now,*,blocked=None):
     """Plan starts after reconciling actual invocation evidence, without IO.
 
     Caller must persist every claim before asking systemd to start anything.
@@ -98,9 +98,12 @@ def advance(state,observations,boot_id,now):
     if state.get('schema_version')!=SCHEMA or set(observations)!=set(state['jobs']):
         raise ValueError('Queue observation scope differs')
     statuses={job:execution_state(value) for job,value in observations.items()}
-    if any(status in {'UNKNOWN','UNAVAILABLE'} for status in statuses.values()):
-        raise ValueError('Unverified original service; no queue starts allowed')
+    blocked=dict(blocked or {})
+    if not set(blocked)<=set(state['jobs']):raise ValueError('Unknown quarantined task')
+    blocked.update({job:'原服务执行状态未核实' for job,status in statuses.items() if status in {'UNKNOWN','UNAVAILABLE'}})
+    state['blocked_jobs']=blocked
     for job,row in state['jobs'].items():
+        if job in blocked:continue
         observed=observations[job];active=row['active'];status=statuses[job]
         if active is not None:
             changed=bool(observed['InvocationID']) and observed['InvocationID']!=active['baseline_invocation']
@@ -125,10 +128,13 @@ def advance(state,observations,boot_id,now):
             row['pending']={'id':uuid4().hex,'reason':'retry','enqueued_at':now.isoformat()}
             event(state,job,'ENQUEUED',now,reason='retry')
     occupied={lane(job) for job,status in statuses.items() if status in BUSY}
+    occupied.update(lane(job) for job,value in observations.items() if job in blocked and
+        (value['MainPID']!='0' or value['ControlPID']!='0' or value['ControlGroup'] or value['Job']))
     occupied.update(lane(job) for job,row in state['jobs'].items() if row['active'])
     pending=sorted((job for job,row in state['jobs'].items() if row['pending']),
         key=lambda job:(job=='precompute',lane(job)!='weather',state['jobs'][job]['pending']['enqueued_at'],job))
     for job in pending:
+        if job in blocked:continue
         row=state['jobs'][job];category=lane(job)
         if category in occupied or statuses[job] in BUSY:continue
         request=row['pending']
@@ -167,13 +173,18 @@ def load_config(path):
     host.protected(STATE_ROOT)
     if host.command(['findmnt','-n','-o','UUID','-T',str(STATE_ROOT)]).decode().strip()!=config['data_disk_uuid']:
         raise ValueError('Dispatcher data disk identity differs')
+    blocked={}
     for job,binding in config['jobs'].items():
-        if job in JOBS:host.check_job(job,binding)
-        else:
-            if set(binding)!={'unit_sha256','files'} or not binding['files']:raise ValueError('Precompute binding invalid')
-            if host.digest(host.command(['systemctl','cat',SERVICES[job]]))!=binding['unit_sha256']:raise ValueError('Precompute service changed')
-            for filename,digest in binding['files'].items():
-                if host.digest(host.protected(filename,Path('/etc/market-data')).read_bytes())!=digest:raise ValueError('Precompute config changed')
+        try:
+            if job in JOBS:host.check_job(job,binding)
+            else:
+                if set(binding)!={'unit_sha256','files'} or not binding['files']:raise ValueError('Precompute binding invalid')
+                if host.digest(host.command(['systemctl','cat',SERVICES[job]]))!=binding['unit_sha256']:raise ValueError('Precompute service changed')
+                for filename,digest in binding['files'].items():
+                    if host.digest(host.protected(filename,Path('/etc/market-data')).read_bytes())!=digest:raise ValueError('Precompute config changed')
+        except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
+            blocked[job]='原服务或配置身份未核实，暂停此任务'
+    config['_blocked_jobs']=blocked
     return host,config
 
 
@@ -194,7 +205,7 @@ def locked_run(config_path,*,job=None,reason='scheduled'):
         inventory=parse_inventory(raw,units,SERVICE_FIELDS)
         observations={task:inventory[SERVICES[task]] for task in config['jobs']}
         boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-        state,requests=advance(state,observations,boot,now)
+        state,requests=advance(state,observations,boot,now,blocked=config['_blocked_jobs'])
         host.atomic(path,state)  # crash-safe reservation before any start
         archive_events(host,state)
         for task in requests:
