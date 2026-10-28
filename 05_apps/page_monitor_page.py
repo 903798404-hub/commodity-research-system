@@ -118,7 +118,6 @@ def render_task_ledger(report, names, keys):
         st.dataframe(pd.DataFrame(registry),hide_index=True,width='stretch')
 
 
-@st.fragment(run_every=60)
 def render_dispatcher(report):
     queue=report.get('task_dispatcher')
     if queue is None and not report.get('task_dispatcher_error'):return
@@ -147,6 +146,7 @@ def render_dispatcher(report):
         st.warning('后台调度回执尚未完整核实，上方原任务及数据日期监测继续显示。')
 
 
+@st.fragment(run_every=60)
 def render_page_monitor(data_root: Path):
     st.subheader('全部页面 · 实际数据日期监测')
     st.caption('数据日期取自网页原输入。多序列列出共同截止日，逐序列日期见明细；检查时间和更新器成功时间不代表数据已更新。人工录价仍按原流程交付。')
