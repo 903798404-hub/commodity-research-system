@@ -38,6 +38,7 @@ from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
 )
 from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError  # noqa: E402
 from domestic_sugar_basis import load_sugar_page_data, render_sugar_history  # noqa: E402
+from computation_cache import precomputed_chart
 
 
 UNIT_LABEL = "元/吨"
@@ -441,6 +442,7 @@ def _card_pairs(dataframe: pd.DataFrame) -> list[tuple[str, str]]:
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
+@precomputed_chart
 def cached_seasonal_report_image(
     dataframe: pd.DataFrame,
     *,

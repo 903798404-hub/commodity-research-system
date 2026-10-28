@@ -18,13 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 MATCHING_NOTE = "历史同期取相同季节月日及此前7天内最近观测，不插值、不延续更早记录；均值为前五个作物季，有效样本不足时显示n/5。"
 
 
-from computation_cache import cache_computation
+from computation_cache import cache_computation, precomputed_chart
 
 # Reuse only already-validated, pure value computations; readers/writers stay unchanged.
 compare_metric = cache_computation(compare_metric)
 comparison_table = cache_computation(comparison_table)
 regional_comparison_table = cache_computation(regional_comparison_table)
-seasonal_figure = cache_computation(seasonal_figure)
+seasonal_figure = precomputed_chart(cache_computation(seasonal_figure))
 
 
 def data_path() -> Path:

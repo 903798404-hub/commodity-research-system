@@ -82,10 +82,17 @@ def atomic(path, value):
 def load_config(path):
     config = read_json(protected(path, CONFIG_ROOT))
     fields = {'schema_version', 'producer', 'image_id', 'reader_id', 'data_disk_uuid', 'inputs', 'report', 'jobs'}
-    if config.get('schema_version') == 'page-monitor-config/2':
+    if config.get('schema_version') in {'page-monitor-config/2','page-monitor-config/3'}:
         fields.add('task_ledger_enabled')
         if config.get('task_ledger_enabled') is not True:
             raise ValueError('Task ledger must be explicitly enabled in config/2')
+        if config['schema_version']=='page-monitor-config/3':
+            fields.add('dispatcher')
+            binding=config.get('dispatcher')
+            if not isinstance(binding,dict) or set(binding)!={'config','sha256'}:
+                raise ValueError('Dispatcher binding invalid')
+            path=protected(binding['config'],Path('/etc/market-data/task-dispatcher'))
+            if digest(path.read_bytes())!=binding['sha256']:raise ValueError('Dispatcher configuration changed')
     elif config.get('schema_version') != 'page-monitor-config/1':
         raise ValueError('Monitor configuration schema invalid')
     if set(config) != fields:
@@ -255,7 +262,14 @@ def producer_busy():
     return False
 
 
-def start_retry(job):
+def start_retry(job, dispatcher=None):
+    if dispatcher is not None:
+        if digest(protected(dispatcher['config'],Path('/etc/market-data/task-dispatcher')).read_bytes())!=dispatcher['sha256']:
+            raise ValueError('Dispatcher configuration changed before enqueue')
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('_monitor_task_dispatcher',ROOT/'09_deploy/page_monitor/dispatcher.py')
+        queue=importlib.util.module_from_spec(spec);spec.loader.exec_module(queue)
+        return queue.locked_run(dispatcher['config'],job=job,reason='retry')['status']
     unit = JOBS[job]
     # systemd coalesces a racing scheduled start into this same unit. Never
     # spawn a second collector, change its arguments, or bypass its CAS gates.
@@ -300,6 +314,14 @@ def publish(config, state, rows, *, failure=None):
             # Preserve the last ledger and actual-date report. Extra retries
             # stop until lifecycle evidence is verifiable; original timers run.
             state['task_ledger_error'] = '任务台账核验失败；保留上次执行证据，暂停额外补试，原定时任务不变'
+    if config.get('dispatcher'):
+        try:
+            queue=read_json(protected('/var/lib/market-data/production-data-automation/task-dispatcher/state.json'))
+            if queue.get('schema_version')!='task-dispatcher-state/1' or not set(JOBS)<=set(queue.get('jobs',{})):
+                raise ValueError('Dispatcher state invalid')
+            state['task_dispatcher']=queue;state['task_dispatcher_error']=None
+        except (OSError,ValueError,KeyError,TypeError):
+            state['task_dispatcher_error']='后台调度状态未核实；保留上次证据，不认定数据已补更新'
     # Persist the event itself before archiving. A crash can replay that exact
     # event without producing a second reminder or losing the recovery receipt.
     atomic(STATE_ROOT / 'state.json', state)
@@ -353,7 +375,7 @@ def run(config, *, retry):
         atomic(state_path,state)
         atomic(Path(config['report']),state)
         try:
-            state['retries'][job]['outcome'] = start_retry(job)
+            state['retries'][job]['outcome'] = (start_retry(job,config['dispatcher']) if config.get('dispatcher') else start_retry(job))
             state['retries'][job]['finished_at'] = datetime.now(timezone.utc).isoformat()
             rows = observe(config)  # actual business dates, not a successful exit
             state = publish(config,state,rows)

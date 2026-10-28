@@ -15,6 +15,12 @@ import pickle
 from threading import Lock
 from uuid import uuid4
 from weakref import WeakKeyDictionary
+import base64
+import inspect
+import json
+import os
+from pathlib import Path
+import stat
 
 MAX_ENTRIES = 256
 MAX_CACHE_BYTES = 64 * 1024 * 1024
@@ -161,3 +167,121 @@ def clear_computation_cache():
         _budget_generation += 1
     if _service.cache_info().currsize:
         _service().clear()
+
+
+def _derived_release():
+    """Image-baked identity; environment variables cannot claim another image."""
+    release=json.loads((Path(__file__).resolve().parents[1]/'RELEASE.json').read_bytes())
+    identity={key:release[key] for key in ('git_commit','git_tree')}
+    if any(len(value)!=40 or any(c not in '0123456789abcdef' for c in value) for value in identity.values()):
+        raise ValueError('Invalid derived-cache image identity')
+    return identity
+
+
+def _derived_key(function,args,kwargs):
+    # Hash locally generated serialization only. Persisted objects are JSON/PNG,
+    # never pickles. The exact image also binds dependencies, fonts and options.
+    original=inspect.unwrap(function)
+    body=_serialize((args,kwargs))
+    if len(body)>MAX_INPUT_BYTES:raise ValueError('Derived input exceeds bound')
+    function_id=f'{original.__module__}.{original.__qualname__}'
+    version=sha256(marshal.dumps(original.__code__)+_serialize((original.__defaults__,original.__kwdefaults__))).hexdigest()
+    return sha256(function_id.encode()+version.encode()+sha256(body).digest()).hexdigest()
+
+
+def _encode_derived(value):
+    if type(value) is bytes:
+        return {'kind':'bytes','body':base64.b64encode(value).decode('ascii')}
+    if type(value).__module__=='plotly.graph_objs._figure' and value._grid_ref is None:
+        import plotly.io as pio
+        return {'kind':'plotly','body':json.loads(pio.to_json(value,validate=True,remove_uids=False))}
+    raise ValueError('Unsupported derived result')
+
+
+def _decode_derived(value):
+    if not isinstance(value,dict) or set(value)!={'kind','body'}:
+        raise ValueError('Invalid derived result envelope')
+    if value['kind']=='bytes':return base64.b64decode(value['body'],validate=True)
+    if value['kind']=='plotly':
+        import plotly.graph_objects as go
+        return go.Figure(value['body'],skip_invalid=False)
+    raise ValueError('Unsupported derived result')
+
+
+def _json_bytes(value):
+    return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
+
+
+def _derived_path(release,key,*,record=False):
+    if record:
+        root=Path(os.environ['MARKET_DATA_PRECOMPUTE_OUTPUT'])
+    else:
+        configured=os.getenv('PUBLIC_MARKET_DATA_RUNTIME_ROOT','').strip()
+        if not configured:return None
+        root=Path(configured)/'cache/page-precomputations'
+    if not root.is_absolute() or root.resolve()!=root:
+        raise ValueError('Derived-cache root alias invalid')
+    return root/release['git_commit']/(key+'.json')
+
+
+def _read_derived(path,release,key):
+    if path is None:return None
+    # Production derived inputs are root-published under the existing RO data
+    # mount. A writer-controlled path, alias or partial result is just a miss.
+    if os.name!='posix' or not os.statvfs(path.parent).f_flag & os.ST_RDONLY:
+        return None
+    for item in (path,*path.parents):
+        info=item.lstat()
+        if stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022:
+            return None
+    if not path.is_file() or path.stat().st_size>MAX_RESULT_BYTES:return None
+    raw=path.read_bytes()
+    payload=json.loads(raw)
+    if (set(payload)!={'schema_version','image','key','result','result_sha256'}
+        or payload['schema_version']!='page-precomputation/1'
+        or payload['image']!=release or payload['key']!=key
+        or sha256(_json_bytes(payload['result'])).hexdigest()!=payload['result_sha256']):
+        return None
+    return _decode_derived(payload['result'])
+
+
+def _record_derived(path,release,key,value):
+    result=_encode_derived(value)
+    payload={'schema_version':'page-precomputation/1','image':release,'key':key,'result':result,
+             'result_sha256':sha256(_json_bytes(result)).hexdigest()}
+    raw=_json_bytes(payload)
+    if len(raw)>MAX_RESULT_BYTES:return
+    path.parent.mkdir(parents=True,exist_ok=True)
+    existing=list(path.parent.glob('*.json'))
+    if len(existing)>=MAX_ENTRIES or sum(p.stat().st_size for p in existing)+len(raw)>MAX_CACHE_BYTES:
+        raise ValueError('Derived output exceeds cache budget')
+    temporary=path.with_name('.'+path.name+'.'+uuid4().hex)
+    try:
+        with temporary.open('xb') as handle:
+            handle.write(raw);handle.flush();os.fsync(handle.fileno())
+        os.replace(temporary,path)
+    finally:temporary.unlink(missing_ok=True)
+
+
+def precomputed_chart(function):
+    """Optional safe persistent result; authoritative readers still run first.
+
+    Only the isolated background worker records outputs. Website misses,
+    unsupported objects, corruption and version changes use the original body.
+    """
+    @wraps(function)
+    def prepared(*args,**kwargs):
+        record=os.getenv('MARKET_DATA_PRECOMPUTE_MODE')=='record'
+        try:
+            release=_derived_release();key=_derived_key(function,args,kwargs)
+            path=_derived_path(release,key,record=record)
+            if not record:
+                result=_read_derived(path,release,key)
+                if result is not None:return result
+        except (OSError,ValueError,TypeError,KeyError,pickle.PickleError,AttributeError):
+            if record:raise
+            path=None
+        result=function(*args,**kwargs)
+        if record and path is not None:_record_derived(path,release,key,result)
+        return result
+    return prepared

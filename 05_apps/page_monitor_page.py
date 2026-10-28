@@ -54,7 +54,7 @@ def load_report(path: Path, now=None):
 
 def render_task_ledger(report, names, keys):
     st.subheader('统一任务台账')
-    st.caption('原更新入口逐项接入同一台账；原定时器、采集、校验和发布流程保持不变。执行完成与实际数据是否更新分别核对。')
+    st.caption('原更新入口逐项接入同一台账；定时计划、采集、校验和发布口径保持不变。执行完成与实际数据是否更新分别核对。')
     if report.get('task_ledger_error'):
         st.warning(report['task_ledger_error'])
     ledger = report.get('task_ledger')
@@ -119,6 +119,33 @@ def render_task_ledger(report, names, keys):
 
 
 @st.fragment(run_every=60)
+def render_dispatcher(report):
+    queue=report.get('task_dispatcher')
+    if queue is None and not report.get('task_dispatcher_error'):return
+    st.subheader('后台排队与预计算')
+    if report.get('task_dispatcher_error'):st.warning(report['task_dispatcher_error'])
+    try:
+        if queue.get('schema_version')!='task-dispatcher-state/1':raise ValueError('queue schema')
+        checked=aware(queue['checked_at'])
+        if checked>aware(report['checked_at'])+timedelta(minutes=1):raise ValueError('future queue observation')
+        if aware(report['checked_at'])-checked>timedelta(minutes=3):st.warning('监测时后台调度器已超过3分钟未刷新，请检查调度服务。')
+        names={task['task_id']:task['label'] for task in report.get('task_ledger',{}).get('tasks',[])}
+        labels={'SUCCEEDED':'执行完成','FAILED':'执行失败','INTERRUPTED':'主机中断，待重试','START_UNCONFIRMED':'未确认启动，待重试'}
+        rows=[]
+        for job,row in queue['jobs'].items():
+            last=row['last'] or {};pending=row['pending'];active=row['active']
+            status='等待原更新器启动或执行中' if active else '已排队' if pending else labels.get(last.get('status'),'等待原定时计划')
+            rows.append({'任务':names.get(job,'页面预计算' if job=='precompute' else job),'调度状态':status,
+                '额外重试次数':row['retries'].get('attempts',0),'重试统计日':row['retries'].get('day','—'),
+                '排队时间':(pending or active or {}).get('enqueued_at','—'),'最近执行完成':last.get('finished_at','—')})
+        st.caption('定时触发与漏更补试进入同一队列；普通更新和独立天气各限一个工作进程。以下为最近监测快照，完成状态不代替上方实际数据日期核验。')
+        st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
+        failed=[row['任务'] for row in rows if row['调度状态'] in {'执行失败','主机中断，待重试','未确认启动，待重试'}]
+        if failed:st.warning('后台任务待处理：'+'、'.join(failed))
+    except (AttributeError,ValueError,KeyError,TypeError):
+        st.warning('后台调度回执尚未完整核实，上方原任务及数据日期监测继续显示。')
+
+
 def render_page_monitor(data_root: Path):
     st.subheader('全部页面 · 实际数据日期监测')
     st.caption('数据日期取自网页原输入。多序列列出共同截止日，逐序列日期见明细；检查时间和更新器成功时间不代表数据已更新。人工录价仍按原流程交付。')
@@ -170,6 +197,7 @@ def render_page_monitor(data_root: Path):
         st.info('当前筛选下没有待处理项。')
     st.caption('额外重试：每个已有更新器每天最多3次，间隔至少60分钟，每轮最多1个；其他更新器运行时顺延。暂缓的美国、加拿大、巴西与棕榈油天气不参与监测或重试。')
     render_task_ledger(report,names,keys)
+    render_dispatcher(report)
     with st.expander('提醒与恢复记录'):
         events=[]
         for event in reversed(report.get('recent_events',[])):
