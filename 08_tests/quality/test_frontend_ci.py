@@ -25,7 +25,13 @@ def test_frontend_workflow_freezes_dependencies_and_requires_same_run_job():
     final = workflow['jobs']['final']
     assert 'frontend' in final['needs']
     assert 'needs.frontend.result' in json.dumps(final)
-    assert any(s.get('with', {}).get('name') == 'platform-frontend' for s in final['steps'])
+    artifact='platform-frontend-${{ github.run_id }}-${{ github.run_attempt }}'
+    producer=next(s for s in job['steps'] if s.get('uses','').startswith('actions/upload-artifact@'))
+    consumers=[s for s in final['steps'] if s.get('with',{}).get('name')==artifact]
+    assert producer['with']['name']==artifact and len(consumers)==1
+    assert consumers[0]['if']=="needs.plan.outputs.frontend == 'true'"
+    assert consumers[0]['with']['path']=='${{ runner.temp }}/platform-results/frontend'
+    assert 'pattern' not in consumers[0]['with'] and 'merge-multiple' not in consumers[0]['with']
 
 
 def junit(path, source, *, outcome=None, summary=None):
