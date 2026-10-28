@@ -17,6 +17,22 @@ from quality import main_admission as admission
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_execution_artifacts_never_merge_receipts_from_an_earlier_attempt():
+    workflow=yaml.safe_load((ROOT/admission.WORKFLOW).read_text(encoding='utf-8'))
+    jobs=workflow['jobs'];final=jobs['final']['steps']
+    for lane in ('linux','windows','frontend'):
+        expected='platform-'+lane+'-${{ github.run_id }}-${{ github.run_attempt }}'
+        producer=next(s for s in jobs[lane]['steps'] if s.get('uses','').startswith('actions/upload-artifact@'))
+        consumers=[s for s in final if s.get('uses','').startswith('actions/download-artifact@') and s.get('with',{}).get('name')==expected]
+        assert producer['with']['name']==expected and len(consumers)==1
+        assert consumers[0]['if']=="needs.plan.outputs."+lane+" == 'true'"
+        assert consumers[0]['with']['path']=='${{ runner.temp }}/platform-results/'+lane
+        assert 'pattern' not in consumers[0]['with'] and 'merge-multiple' not in consumers[0]['with']
+    expected='full-candidate-${{ github.run_id }}-${{ github.run_attempt }}'
+    assert next(s for s in jobs['full']['steps'] if s.get('uses','').startswith('actions/upload-artifact@'))['with']['name']==expected
+    assert len([s for s in final if s.get('with',{}).get('name')==expected])==1
+
+
 def git(repo, *args):
     return subprocess.check_output(["git", *args], cwd=repo).decode("utf-8").strip()
 

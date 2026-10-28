@@ -1,7 +1,9 @@
 """Hosted synthetic-trust exercise of the SAME HIGH_RISK execution entry.
 
-Historical/current application sources get ONLY test public trust and a test
-localhost port/project. The tool gets ONLY test public trust. Those disposable
+Historical application sources get test public trust, a test localhost
+port/project, and an explicitly recorded hash-locked download transport.
+Historical application/control code and dependency locks are unchanged.
+The tool gets ONLY test public trust. Those disposable
 Git identities are reported separately from the admitted candidate, never as
 production approval or acceptance. No production key/data is available.
 """
@@ -169,6 +171,30 @@ def save(root, name, value):
     return path
 
 
+def historical_download_transport(source):
+    """Change only a known historical build download command, never a Gate.
+
+    This is a synthetic Git variant, not the original historical image. The
+    original application, validator, issuer and rollback code still execute.
+    Keep runtime ENV and every locked package/hash; record both Dockerfiles.
+    """
+    relative='09_deploy/spread_runtime/Dockerfile.spread-runtime'
+    path=source/relative
+    if path.is_symlink() or path.resolve()!=path:raise ValueError('Historical Dockerfile alias')
+    original=path.read_bytes();lock=source/'requirements.txt';lock_sha=hashlib.sha256(lock.read_bytes()).hexdigest()
+    before=b'RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \\\n'
+    after=b'RUN timeout 600s python -m pip install --index-url=https://pypi.org/simple --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \\\n'
+    if original.count(before)!=1:raise ValueError('Unrecognized historical locked installer')
+    updated=original.replace(before,after)
+    path.write_bytes(updated)
+    assert path.read_bytes()==updated and hashlib.sha256(lock.read_bytes()).hexdigest()==lock_sha
+    return dict(path=relative,original_sha256=hashlib.sha256(original).hexdigest(),
+                synthetic_sha256=hashlib.sha256(updated).hexdigest(),requirements_sha256=lock_sha,
+                changed_instruction='Only the existing hash-locked pip RUN gains an official index and a total timeout.',
+                historical_application_and_control_code_changed=False,runtime_environment_changed=False,
+                dependency_versions_or_hashes_changed=False,production_acceptance=False)
+
+
 def clone(work, name, commit, trust, project=None):
     source = work / name
     run('git', 'clone', '--local', '--no-hardlinks', '--no-checkout', str(ROOT), str(source))
@@ -182,9 +208,12 @@ def clone(work, name, commit, trust, project=None):
         compose['services']['spread-dashboard']['ports'] = ['127.0.0.1:18571:8501']
         path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding='utf-8')
         changed.append('09_deploy/spread_runtime/compose.yml')
+        transport=historical_download_transport(source)
+        changed.append(transport['path'])
+        save(work,name+'-build-transport.json',dict(original_commit=commit,**transport))
     run('git', '-C', str(source), 'add', *changed)
     run('git', '-C', str(source), '-c', 'user.name=Hosted synthetic fixture',
-        '-c', 'user.email=fixture@invalid', 'commit', '-m', 'Synthetic trust and isolated port only; NOT release approval')
+        '-c', 'user.email=fixture@invalid', 'commit', '-m', 'Synthetic trust, isolated port and recorded locked build transport; NOT release approval')
     assert sorted(run('git', '-C', str(source), 'diff', '--name-only', commit, 'HEAD').splitlines()) == sorted(changed)
     return source
 
@@ -1053,6 +1082,8 @@ def main():
         original_base = clone(work, 'original-base', 'c8d83d60c5b9a1e99148beecbaa13b68045d65fa', trust, project)
         target_source = clone(work, 'target-source', TARGET, trust, project)
         tool = clone(work, 'tool-source', candidate['commit'], trust)
+        receipt['historical_build_transports']={name:json.loads((work/(name+'-build-transport.json')).read_bytes())
+            for name in ('old-source','original-base','target-source')}
         for source in (old_source, target_source):
             run('git', '-C', str(tool), 'fetch', str(source), identity(source)['commit'])
         # Current-main freshness is checked against a protected disposable local

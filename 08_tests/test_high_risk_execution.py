@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 import pytest
 
@@ -14,6 +15,40 @@ spec = importlib.util.spec_from_file_location('_test_high_risk_execution', ROOT 
 execution = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = execution
 spec.loader.exec_module(execution)
+
+
+@pytest.mark.parametrize('commit',['88df880127bea4308ee752a37a59884b9198b2ce',
+    'c8d83d60c5b9a1e99148beecbaa13b68045d65fa','0d7b86ddafbed0e7b063ae1097d7e07ee36e9f00'])
+def test_historical_locked_transport_preserves_real_application_build_inputs(tmp_path,commit):
+    fixture=execution.load(ROOT,'08_tests/shared/high_risk_execution_docker_e2e.py','_test_historical_transport_'+commit)
+    relative='09_deploy/spread_runtime/Dockerfile.spread-runtime'
+    source=tmp_path/'source';docker=source/relative;docker.parent.mkdir(parents=True)
+    before=subprocess.check_output(['git','-C',str(ROOT),'show',commit+':'+relative])
+    lock=subprocess.check_output(['git','-C',str(ROOT),'show',commit+':requirements.txt'])
+    docker.write_bytes(before);(source/'requirements.txt').write_bytes(lock)
+    result=fixture.historical_download_transport(source)
+    after=docker.read_bytes()
+    assert (source/'requirements.txt').read_bytes()==lock
+    assert result['requirements_sha256']==hashlib.sha256(lock).hexdigest()
+    assert result['original_sha256']==hashlib.sha256(before).hexdigest()
+    assert result['synthetic_sha256']==hashlib.sha256(after).hexdigest()
+    changed=[(a,b) for a,b in zip(before.splitlines(),after.splitlines()) if a!=b]
+    assert len(changed)==1 and len(before.splitlines())==len(after.splitlines())
+    assert changed[0][0].startswith(b'RUN python -m pip install ')
+    assert changed[0][1].startswith(b'RUN timeout 600s python -m pip install --index-url=https://pypi.org/simple ')
+    assert b'--require-hashes -r requirements.txt' in changed[0][1]
+    assert not result['historical_application_and_control_code_changed'] and not result['runtime_environment_changed']
+    assert not result['dependency_versions_or_hashes_changed'] and not result['production_acceptance']
+
+
+def test_historical_transport_refuses_unknown_or_unlocked_installer_without_writing(tmp_path):
+    fixture=execution.load(ROOT,'08_tests/shared/high_risk_execution_docker_e2e.py','_test_unknown_historical_transport')
+    docker=tmp_path/'09_deploy/spread_runtime/Dockerfile.spread-runtime';docker.parent.mkdir(parents=True)
+    original=b'RUN python -m pip install -r requirements.txt\n';docker.write_bytes(original)
+    (tmp_path/'requirements.txt').write_bytes(b'unchanged lock')
+    with pytest.raises(ValueError,match='Unrecognized historical locked installer'):
+        fixture.historical_download_transport(tmp_path)
+    assert docker.read_bytes()==original
 
 
 def private_output_host(monkeypatch, output, *, mode=0o700, uid=0, gid=0):

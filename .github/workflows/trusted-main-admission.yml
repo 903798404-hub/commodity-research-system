@@ -264,7 +264,7 @@ jobs:
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
-        name: platform-linux
+        name: platform-linux-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/platform-results/linux
         if-no-files-found: error
         retention-days: 14
@@ -308,7 +308,7 @@ jobs:
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
-        name: platform-windows
+        name: platform-windows-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/platform-results/windows
         if-no-files-found: error
         retention-days: 14
@@ -357,7 +357,7 @@ jobs:
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
-        name: platform-frontend
+        name: platform-frontend-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/platform-results/frontend
         if-no-files-found: error
         retention-days: 14
@@ -393,19 +393,19 @@ jobs:
         name: platform-plan
         path: ${{ runner.temp }}/platform-plan
     - uses: actions/download-artifact@v4
+      if: needs.plan.outputs.linux == 'true'
       with:
-        pattern: platform-linux
+        name: platform-linux-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/platform-results/linux
-        merge-multiple: true
     - uses: actions/download-artifact@v4
+      if: needs.plan.outputs.windows == 'true'
       with:
-        pattern: platform-windows
+        name: platform-windows-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/platform-results/windows
-        merge-multiple: true
     - uses: actions/download-artifact@v4
       if: needs.plan.outputs.frontend == 'true'
       with:
-        name: platform-frontend
+        name: platform-frontend-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/platform-results/frontend
     - name: Require plan and fresh main
       env:
@@ -422,7 +422,7 @@ jobs:
     - uses: actions/download-artifact@v4
       if: needs.plan.outputs.full == 'true'
       with:
-        name: full-candidate
+        name: full-candidate-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/full-results/candidate
     - name: Require all-green candidate full regression
       if: needs.plan.outputs.full == 'true'
@@ -507,7 +507,7 @@ jobs:
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
-        name: full-candidate
+        name: full-candidate-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/full-results
         if-no-files-found: error
         retention-days: 14
