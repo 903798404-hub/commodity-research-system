@@ -61,6 +61,32 @@ def test_equal_values_reuse_persistent_keys_despite_object_aliasing():
     assert cache._derived_key(pure_png,(shared,),{})==cache._derived_key(pure_png,(separate,),{})
 
 
+def test_brazil_original_chart_execution_keeps_persistent_identity_stable():
+    from agri_research_agent.pipelines.brazil_soy import seasonal_figure
+    frame=pd.DataFrame({'region':['BR'],'metric':['PLANTED'],'season':['2026/2027'],
+                        'date':pd.to_datetime(['2026-10-23']),'value':[39.7]})
+    args=(frame,'BR','PLANTED','2026/2027',[])
+    before=cache._derived_key(seasonal_figure,args,{})
+    figure=seasonal_figure(*args)
+    assert len(figure.data)==2
+    assert cache._derived_key(seasonal_figure,args,{})==before
+
+
+def test_persistent_function_body_and_defaults_still_invalidate_keys():
+    from types import FunctionType
+    frame=pd.DataFrame({'value':[0.,1.]})
+    before=cache._derived_key(pure_png,(frame,),{})
+    code=pure_png.__code__.replace(co_consts=tuple(b'REVISED' if x==b'PNG' else x for x in pure_png.__code__.co_consts))
+    revised=FunctionType(code,pure_png.__globals__)
+    revised.__kwdefaults__=dict(pure_png.__kwdefaults__)
+    assert revised(frame)!=pure_png(frame)
+    assert cache._derived_key(revised,(frame,),{})!=before
+    defaults=FunctionType(pure_png.__code__,pure_png.__globals__)
+    defaults.__kwdefaults__={'mode':'changed'}
+    assert defaults(frame)!=pure_png(frame)
+    assert cache._derived_key(defaults,(frame,),{})!=before
+
+
 @pytest.mark.parametrize('change',['result','hash','schema','key','image'])
 def test_corrupt_or_wrong_version_never_becomes_a_hit(tmp_path,change):
     key='c'*64;path=tmp_path/(key+'.json');cache._record_derived(path,IMAGE,key,b'original')

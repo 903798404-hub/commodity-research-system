@@ -22,6 +22,7 @@ import json
 import os
 from pathlib import Path
 import stat
+from types import CodeType
 
 MAX_ENTRIES = 256
 MAX_CACHE_BYTES = 64 * 1024 * 1024
@@ -228,6 +229,22 @@ def _derived_release():
     return identity
 
 
+def _code_value(value):
+    """Stable complete code values without marshal's reference-count flags."""
+    if type(value) is CodeType:
+        fields=('co_argcount','co_posonlyargcount','co_kwonlyargcount',
+                'co_nlocals','co_stacksize','co_flags','co_code','co_names',
+                'co_varnames','co_freevars','co_cellvars','co_filename',
+                'co_name','co_qualname','co_firstlineno','co_linetable',
+                'co_exceptiontable')
+        return ('code',tuple((name,getattr(value,name,None)) for name in fields),
+                _code_value(value.co_consts))
+    if type(value) is tuple:return ('tuple',tuple(_code_value(item) for item in value))
+    if type(value) is frozenset:
+        return ('frozenset',tuple(sorted(_serialize(_code_value(item),memoize=False) for item in value)))
+    return ('literal',value)
+
+
 def _derived_key(function,args,kwargs):
     # Hash locally generated serialization only. Persisted objects are JSON/PNG,
     # never pickles. The exact image also binds dependencies, fonts and options.
@@ -244,7 +261,8 @@ def _derived_key(function,args,kwargs):
     body=_serialize(_canonical_inputs((args,kwargs,context)),memoize=False)
     if len(body)>MAX_INPUT_BYTES:raise _UnsupportedDerived('Derived input exceeds bound')
     function_id=f'{original.__module__}.{original.__qualname__}'
-    version=sha256(marshal.dumps(original.__code__)+_serialize((original.__defaults__,original.__kwdefaults__))).hexdigest()
+    version=sha256(_serialize((_code_value(original.__code__),original.__defaults__,
+                              original.__kwdefaults__),memoize=False)).hexdigest()
     return sha256(function_id.encode()+version.encode()+sha256(body).digest()).hexdigest()
 
 
