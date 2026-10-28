@@ -7,7 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
@@ -22,6 +22,20 @@ MAX_BYTES=64*1024**2
 
 
 def sha(raw):return hashlib.sha256(raw).hexdigest()
+
+
+def worker_environment(config,reader_env):
+    """Use the exact served package selector; never fall back to loose data."""
+    data=config['container_data_root']
+    result={'PUBLIC_MARKET_DATA_RUNTIME_ROOT':data}
+    store=reader_env.get('PUBLIC_DATA_SERVER_STORE_ROOT','').strip()
+    if store:
+        path=PurePosixPath(store)
+        if not path.is_absolute() or '..' in path.parts or not path.is_relative_to(PurePosixPath(data)):
+            raise ValueError('Activated public store is outside the verified RO input')
+        result['PUBLIC_DATA_SERVER_STORE_ROOT']=store
+    if reader_env.get('TZ'):result['TZ']=reader_env['TZ']
+    return result
 
 
 def render_units(source,config):
@@ -113,7 +127,7 @@ def config_value(host,path):
         or mounts[0]['Source']!=config['data_root'] or mounts[0]['RW']
         or env.get('PUBLIC_MARKET_DATA_RUNTIME_ROOT')!=config['container_data_root']):
         raise ValueError('Precompute current reader or input binding differs')
-    return config,env.get('TZ')
+    return config,worker_environment(config,env)
 
 
 def validate_outputs(directory,result,config):
@@ -173,7 +187,7 @@ def publish_outputs(host,directory,result,config):
 
 def run(config_path,*,publish=False):
     import fcntl
-    host=host_module();config,tz=config_value(host,config_path)
+    host=host_module();config,worker_env=config_value(host,config_path)
     with (RUN_ROOT/'precompute.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         run_id=datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%S')+'-'+uuid4().hex[:10]
@@ -185,9 +199,9 @@ def run(config_path,*,publish=False):
                 '--cpus','0.75','--pids-limit','96','--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=128m',
                 '--mount',f'type=bind,src={config["data_root"]},dst={config["container_data_root"]},readonly',
                 '--mount',f'type=bind,src={out},dst=/output','--mount',f'type=bind,src={Path(__file__).resolve()},dst=/worker.py,readonly',
-                '--env','PUBLIC_MARKET_DATA_RUNTIME_ROOT='+config['container_data_root'],'--env','MARKET_DATA_PRECOMPUTE_MODE=record',
+                '--env','MARKET_DATA_PRECOMPUTE_MODE=record',
                 '--env','MARKET_DATA_PRECOMPUTE_OUTPUT=/output','--env','MPLCONFIGDIR=/tmp/matplotlib']
-            if tz:command+=['--env','TZ='+tz]
+            for key,value in worker_env.items():command+=['--env',key+'='+value]
             command+=['--entrypoint','python',config['image_id'],'-I','-B','/worker.py','--worker','--output','/output']
             with (scope/'worker.stdout').open('xb') as stdout,(scope/'worker.stderr').open('xb') as stderr:
                 process=subprocess.run(command,stdout=stdout,stderr=stderr,timeout=1200)

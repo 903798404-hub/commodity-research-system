@@ -51,3 +51,24 @@ def test_precompute_template_only_queues_derived_work_and_preserves_clock():
     assert 'Unit=market-data-task-enqueue@precompute.service' in units['market-data-page-precompute.timer']
     assert '--publish' in units['market-data-page-precompute.service']
     with pytest.raises(ValueError):host.render_units('/opt/path with spaces','/etc/market-data/config.json')
+
+
+def test_worker_retains_the_actual_activated_package_selector(monkeypatch,tmp_path):
+    from agri_research_agent.market_data import activated_runtime as reader
+    env=host.worker_environment({'container_data_root':'/runtime/01_data'},
+        {'PUBLIC_DATA_SERVER_STORE_ROOT':'/runtime/01_data/public-data-server-store','TZ':'Asia/Shanghai','UNRELATED_SECRET':'not forwarded'})
+    assert env=={'PUBLIC_MARKET_DATA_RUNTIME_ROOT':'/runtime/01_data',
+        'PUBLIC_DATA_SERVER_STORE_ROOT':'/runtime/01_data/public-data-server-store','TZ':'Asia/Shanghai'}
+    activated=tmp_path/'actual-activated-package'
+    def resolve(path):
+        assert path=='/runtime/01_data/public-data-server-store'
+        return activated
+    monkeypatch.setattr(reader,'resolve_server_current_data_root',resolve)
+    monkeypatch.setenv('PUBLIC_DATA_SERVER_STORE_ROOT',env['PUBLIC_DATA_SERVER_STORE_ROOT'])
+    assert reader.resolve_public_data_root('/loose-directory-must-not-be-used')==activated
+
+
+def test_unmounted_store_is_rejected_instead_of_substituting_another_source():
+    with pytest.raises(ValueError,match='outside'):
+        host.worker_environment({'container_data_root':'/runtime/01_data'},
+            {'PUBLIC_DATA_SERVER_STORE_ROOT':'/unmounted/other-source'})
