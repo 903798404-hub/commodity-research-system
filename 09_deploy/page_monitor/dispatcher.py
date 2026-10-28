@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from uuid import uuid4
@@ -37,6 +38,21 @@ def stamp(value):
 
 
 def lane(job):return 'weather' if job in {'guangxi','yunnan','thailand'} else 'standard'
+
+
+def render_units(source,config):
+    if any(not re.fullmatch(r'/[A-Za-z0-9_./-]+',p) or '..' in p.split('/') for p in [source,config]):
+        raise ValueError('Dispatcher unit path invalid')
+    command=f'/usr/bin/python3 -I -B {source}/09_deploy/page_monitor/dispatcher.py --config {config}'
+    service='[Unit]\nDescription=Bounded admission to original market-data writers\nAfter=docker.service\nRequires=docker.service\n\n[Service]\nType=oneshot\nExecStart='+command+'\nTimeoutStartSec=90\nNice=10\nNoNewPrivileges=true\nPrivateTmp=true\nUMask=0022\n'
+    enqueue='[Unit]\nDescription=Queue original market-data task %i\n\n[Service]\nType=oneshot\nExecStart='+command+' --enqueue %i\nTimeoutStartSec=90\nNoNewPrivileges=true\nPrivateTmp=true\nUMask=0022\n'
+    timer='[Unit]\nDescription=Reconcile persisted market-data queue\n\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=30s\nAccuracySec=1s\nUnit=market-data-task-dispatcher.service\n\n[Install]\nWantedBy=timers.target\n'
+    return {'market-data-task-dispatcher.service':service,'market-data-task-dispatcher.timer':timer,'market-data-task-enqueue@.service':enqueue}
+
+
+def timer_dropin(job):
+    if job not in SERVICES:raise ValueError('Unknown queue task')
+    return '[Timer]\nUnit=market-data-task-enqueue@'+job+'.service\n'
 
 
 def empty_state(jobs):

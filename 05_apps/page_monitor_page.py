@@ -129,7 +129,7 @@ def render_dispatcher(report):
         checked=aware(queue['checked_at'])
         if checked>aware(report['checked_at'])+timedelta(minutes=1):raise ValueError('future queue observation')
         if aware(report['checked_at'])-checked>timedelta(minutes=3):st.warning('监测时后台调度器已超过3分钟未刷新，请检查调度服务。')
-        names={task['task_id']:task['label'] for task in report.get('task_ledger',{}).get('tasks',[])}
+        names={task['identity']:task['label'] for task in report.get('task_ledger',{}).get('tasks',[])}
         labels={'SUCCEEDED':'执行完成','FAILED':'执行失败','INTERRUPTED':'主机中断，待重试','START_UNCONFIRMED':'未确认启动，待重试'}
         rows=[]
         for job,row in queue['jobs'].items():

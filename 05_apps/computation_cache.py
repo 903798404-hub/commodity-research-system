@@ -2,7 +2,8 @@
 
 Call only after the owning reader has validated its data. Do not wrap readers,
 authorization, clocks, collection, saving, renderers or functions with hidden
-mutable inputs. No persistent file or business state is created here.
+mutable inputs. The optional background recorder writes derived charts only;
+website consumers use the existing read-only data mount and never publish.
 """
 from __future__ import annotations
 
@@ -169,6 +170,10 @@ def clear_computation_cache():
         _service().clear()
 
 
+class _UnsupportedDerived(ValueError):
+    pass
+
+
 def _derived_release():
     """Image-baked identity; environment variables cannot claim another image."""
     release=json.loads((Path(__file__).resolve().parents[1]/'RELEASE.json').read_bytes())
@@ -182,8 +187,9 @@ def _derived_key(function,args,kwargs):
     # Hash locally generated serialization only. Persisted objects are JSON/PNG,
     # never pickles. The exact image also binds dependencies, fonts and options.
     original=inspect.unwrap(function)
+    if original.__closure__ is not None:raise _UnsupportedDerived('Closure input is not persistent')
     body=_serialize((args,kwargs))
-    if len(body)>MAX_INPUT_BYTES:raise ValueError('Derived input exceeds bound')
+    if len(body)>MAX_INPUT_BYTES:raise _UnsupportedDerived('Derived input exceeds bound')
     function_id=f'{original.__module__}.{original.__qualname__}'
     version=sha256(marshal.dumps(original.__code__)+_serialize((original.__defaults__,original.__kwdefaults__))).hexdigest()
     return sha256(function_id.encode()+version.encode()+sha256(body).digest()).hexdigest()
@@ -195,7 +201,7 @@ def _encode_derived(value):
     if type(value).__module__=='plotly.graph_objs._figure' and value._grid_ref is None:
         import plotly.io as pio
         return {'kind':'plotly','body':json.loads(pio.to_json(value,validate=True,remove_uids=False))}
-    raise ValueError('Unsupported derived result')
+    raise _UnsupportedDerived('Unsupported derived result')
 
 
 def _decode_derived(value):
@@ -235,7 +241,11 @@ def _read_derived(path,release,key):
         if stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022:
             return None
     if not path.is_file() or path.stat().st_size>MAX_RESULT_BYTES:return None
-    raw=path.read_bytes()
+    return _parse_derived(path.read_bytes(),release,key)
+
+
+def _parse_derived(raw,release,key):
+    if len(raw)>MAX_RESULT_BYTES:return None
     payload=json.loads(raw)
     if (set(payload)!={'schema_version','image','key','result','result_sha256'}
         or payload['schema_version']!='page-precomputation/1'
@@ -278,10 +288,14 @@ def precomputed_chart(function):
             if not record:
                 result=_read_derived(path,release,key)
                 if result is not None:return result
-        except (OSError,ValueError,TypeError,KeyError,pickle.PickleError,AttributeError):
+        except _UnsupportedDerived:
+            path=None
+        except (OSError,ValueError,TypeError,KeyError,pickle.PickleError,AttributeError,RecursionError,OverflowError):
             if record:raise
             path=None
         result=function(*args,**kwargs)
-        if record and path is not None:_record_derived(path,release,key,result)
+        if record and path is not None:
+            try:_record_derived(path,release,key,result)
+            except _UnsupportedDerived:pass
         return result
     return prepared
