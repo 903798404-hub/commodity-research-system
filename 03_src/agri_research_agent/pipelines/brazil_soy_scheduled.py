@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 import json
 from pathlib import Path
@@ -19,6 +20,58 @@ from .conab_growth_chart import read_growth_chart
 
 MONTHS = {'janeiro':1,'fevereiro':2,'março':3,'abril':4,'maio':5,'junho':6,
           'julho':7,'agosto':8,'setembro':9,'outubro':10,'novembro':11,'dezembro':12}
+
+GROWTH_STAGES = (('Emergência','EMERGENCE'),('Desenvolvimento vegetativo','VEGETATIVE'),
+    ('Floração','FLOWERING'),('Enchimento de grãos','GRAIN_FILLING'),
+    ('Maturação','MATURING'),('Colheita','STAGE_HARVEST'))
+
+
+def native_growth_values(sheet, start):
+    """Read the official chart's bound cells at its declared display precision.
+
+    Hidden labels stay absent, as with the older printed-image reader. Never
+    derive values from chart geometry, formulas or an unverified cache alone.
+    """
+    charts=[c for c in sheet._charts if start+4 <= c.anchor._from.row+1 < start+23]
+    if len(charts)!=1 or charts[0].tagname!='doughnutChart' or len(charts[0].series)!=1:
+        raise ValueError('CONAB native soybean chart ambiguous')
+    series=charts[0].series[0]
+    prefix=f"'{sheet.title}'!"
+    cat=series.cat.strRef if series.cat else None
+    val=series.val.numRef if series.val else None
+    if (cat is None or val is None or cat.f!=prefix+f'$J${start}:$J${start+5}'
+        or val.f!=prefix+f'$K${start}:$K${start+5}' or cat.strCache is None
+        or val.numCache is None or val.numCache.formatCode!='0.0%'):
+        raise ValueError('CONAB native soybean chart bindings changed')
+    if cat.strCache.ptCount!=6 or val.numCache.ptCount!=6:
+        raise ValueError('CONAB native soybean chart cache incomplete')
+    labels={p.idx:p.v for p in cat.strCache.pt};numbers={p.idx:p.v for p in val.numCache.pt}
+    if set(labels)!=set(range(6)) or set(numbers)!=set(range(6)):
+        raise ValueError('CONAB native soybean chart cache indices changed')
+    display=series.dLbls
+    if display is None or display.showVal is not True:
+        raise ValueError('CONAB native soybean chart value labels changed')
+    overrides={label.idx:label for label in display.dLbl}
+    if len(overrides)!=len(display.dLbl) or not set(overrides)<=set(range(6)):
+        raise ValueError('CONAB native soybean chart label indices changed')
+    values={};locations={}
+    for index,(label,metric) in enumerate(GROWTH_STAGES):
+        name=sheet.cell(start+index,10);cell=sheet.cell(start+index,11)
+        if (name.value!=label or labels[index]!=label or cell.data_type!='n'
+            or type(cell.value) not in (int,float) or cell.number_format!='0.0%'):
+            raise ValueError('CONAB native soybean source cell changed')
+        value=Decimal(str(cell.value));cached=Decimal(str(numbers[index]))
+        if (not value.is_finite() or not cached.is_finite() or not 0<=value<=1
+            or abs(value-cached)>Decimal('0.000000000001')):
+            raise ValueError('CONAB native soybean source/cache mismatch')
+        override=overrides.get(index)
+        if override is not None and override.showVal is False:
+            continue
+        values[metric]=float((value*100).quantize(Decimal('0.1'),rounding=ROUND_HALF_UP))
+        locations[metric]=f'{sheet.title}!{name.coordinate}:{cell.coordinate};chart_row={charts[0].anchor._from.row+1};display_format=0.0%'
+    if not values or not 99.5<=sum(values.values())<=100.5:
+        raise ValueError('CONAB native soybean displayed labels incomplete')
+    return values,locations
 
 
 def download(url, session):
@@ -75,7 +128,7 @@ def weekly_assets(raw, base):
 def parse_growth(raw, source):
     book = load_workbook(BytesIO(raw), data_only=False)
     try:
-        if book.sheetnames != ['Progresso de safra']:
+        if book.sheetnames not in (['Progresso de safra'], ['Fenologia das Lavouras']):
             raise ValueError('CONAB growth workbook layout changed')
         sheet = book.active
         headers = [(row[1].row, str(row[1].value)) for row in sheet.iter_rows()
@@ -88,12 +141,16 @@ def parse_growth(raw, source):
         if m is None or m.group(2) not in MONTHS:
             raise ValueError('CONAB growth cutoff missing')
         cutoff = date(int(m.group(3)),MONTHS[m.group(2)],int(m.group(1)))
-        charts = [img for img in sheet._images if start+4 <= img.anchor._from.row+1 < start+23 and img.width>900]
-        if len(charts) != 1:
-            raise ValueError('CONAB soybean growth image ambiguous')
-        chart = charts[0]; values = read_growth_chart(chart._data())
+        if sheet.title=='Fenologia das Lavouras':
+            values,locations=native_growth_values(sheet,start)
+        else:
+            charts = [img for img in sheet._images if start+4 <= img.anchor._from.row+1 < start+23 and img.width>900]
+            if len(charts) != 1:
+                raise ValueError('CONAB soybean growth image ambiguous')
+            chart = charts[0]; values = read_growth_chart(chart._data())
+            locations={metric:f'{sheet.title}!B{start}:B{start+4};chart_row={chart.anchor._from.row+1};printed_label={metric}' for metric in values}
         return [observation(season,'BR',metric,cutoff,value,source_url=source['source_url'],
-            source_sha256=source['sha256'],locator=f'Progresso de safra!B{start}:B{start+4};chart_row={chart.anchor._from.row+1};printed_label={metric}',
+            source_sha256=source['sha256'],locator=locations[metric],
             retrieved_at=source['retrieved_at'],published_at=source['published_at']) for metric,value in values.items()]
     finally:
         book.close()
