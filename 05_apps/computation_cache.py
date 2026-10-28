@@ -174,9 +174,20 @@ class _UnsupportedDerived(ValueError):
     pass
 
 
+def _strict_derived_json(raw):
+    def pairs(items):
+        result={}
+        for key,value in items:
+            if key in result:raise ValueError('Duplicate derived JSON field')
+            result[key]=value
+        return result
+    def nonfinite(value):raise ValueError('Non-finite derived JSON value')
+    return json.loads(raw,object_pairs_hook=pairs,parse_constant=nonfinite)
+
+
 def _derived_release():
     """Image-baked identity; environment variables cannot claim another image."""
-    release=json.loads((Path(__file__).resolve().parents[1]/'RELEASE.json').read_bytes())
+    release=_strict_derived_json((Path(__file__).resolve().parents[1]/'RELEASE.json').read_bytes())
     identity={key:release[key] for key in ('git_commit','git_tree')}
     if any(len(value)!=40 or any(c not in '0123456789abcdef' for c in value) for value in identity.values()):
         raise ValueError('Invalid derived-cache image identity')
@@ -246,7 +257,7 @@ def _read_derived(path,release,key):
 
 def _parse_derived(raw,release,key):
     if len(raw)>MAX_RESULT_BYTES:return None
-    payload=json.loads(raw)
+    payload=_strict_derived_json(raw)
     if (set(payload)!={'schema_version','image','key','result','result_sha256'}
         or payload['schema_version']!='page-precomputation/1'
         or payload['image']!=release or payload['key']!=key

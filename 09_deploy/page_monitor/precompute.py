@@ -89,6 +89,9 @@ def config_value(host,path):
     if config['container_data_root']!='/runtime/01_data':raise ValueError('Precompute container data scope differs')
     producer=config['producer']
     if set(producer)!={'commit','tree','origin'}:raise ValueError('Precompute producer invalid')
+    if producer['origin'] not in {'https://github.com/903798404-hub/commodity-research-system.git','git@github.com:903798404-hub/commodity-research-system.git'}:
+        raise ValueError('Precompute origin invalid')
+    if not re.fullmatch(r'[0-9a-f]{64}',config['reader_id']):raise ValueError('Exact precompute reader ID required')
     for key,args in [('commit',['rev-parse','HEAD']),('tree',['rev-parse','HEAD^{tree}']),('origin',['remote','get-url','origin'])]:
         if host.command(['git','-C',str(host.protected(ROOT)),*args]).decode().strip()!=producer[key]:raise ValueError('Precompute source differs')
     if host.command(['git','-C',str(ROOT),'status','--porcelain','--untracked-files=all']).strip():raise ValueError('Precompute source dirty')
@@ -106,7 +109,7 @@ def config_value(host,path):
     reader=json.loads(host.command(['docker','inspect',config['reader_id']]))[0]
     mounts=[m for m in reader['Mounts'] if m['Destination']==config['container_data_root']]
     env=dict(item.split('=',1) for item in reader['Config']['Env'])
-    if (not reader['State']['Running'] or reader['Image']!=config['image_id'] or len(mounts)!=1
+    if (reader['Id']!=config['reader_id'] or not reader['State']['Running'] or reader['Image']!=config['image_id'] or len(mounts)!=1
         or mounts[0]['Source']!=config['data_root'] or mounts[0]['RW']
         or env.get('PUBLIC_MARKET_DATA_RUNTIME_ROOT')!=config['container_data_root']):
         raise ValueError('Precompute current reader or input binding differs')
@@ -121,8 +124,9 @@ def validate_outputs(directory,result,config):
         raise ValueError('Precompute output inventory differs')
     total=0
     for name in expected:
+        if not re.fullmatch(r'[0-9a-f]{64}\.json',name):raise ValueError('Precompute output name unsafe')
         p=directory/name;info=p.lstat()
-        if not re.fullmatch(r'[0-9a-f]{64}\.json',name) or not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_size>4*1024**2:
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_size>4*1024**2:
             raise ValueError('Precompute output unsafe')
         raw=p.read_bytes();total+=len(raw);payload=json.loads(raw)
         if (total>MAX_BYTES or sha(raw)!=result['files'][name]

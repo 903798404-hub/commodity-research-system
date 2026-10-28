@@ -89,3 +89,34 @@ def test_oversized_record_is_not_retained(tmp_path,monkeypatch):
     monkeypatch.setattr(cache,'MAX_RESULT_BYTES',200)
     path=tmp_path/('c'*64+'.json');cache._record_derived(path,IMAGE,'c'*64,b'x'*1000)
     assert not path.exists()
+
+
+def test_original_basis_default_display_paths_record_real_pngs_without_browser(tmp_path,monkeypatch):
+    import basis_page as basis
+    from io import BytesIO
+    from PIL import Image
+    monkeypatch.setenv('MARKET_DATA_PRECOMPUTE_MODE','record')
+    monkeypatch.setenv('MARKET_DATA_PRECOMPUTE_OUTPUT',str(tmp_path))
+    monkeypatch.setattr(cache,'_derived_release',lambda:IMAGE)
+    basis.cached_seasonal_report_image.clear()
+    rows=[]
+    for commodity,offset in [('豆粕',0),('菜粕',10),('豆油',100)]:
+        for day in ['2026-10-22','2026-10-23']:
+            rows.append(dict(date=pd.Timestamp(day),commodity=commodity,region='华东',quote_type='基差报价',
+                delivery_month='现货',futures_contract='2701',cash_price=8000+offset,futures_price=7900+offset,basis=100.))
+    frame=pd.DataFrame(rows);years=basis._latest_three_years(frame)
+    try:
+        basis._render_basis_tab(frame,years)
+        basis._render_cash_price_tab(frame,years)
+        basis._render_wholesale_spread_tab(frame,years)
+        files=list((tmp_path/IMAGE['git_commit']).glob('*.json'))
+        assert len(files)>=7
+        for path in files:
+            raw=cache._parse_derived(path.read_bytes(),IMAGE,path.stem)
+            with Image.open(BytesIO(raw)) as png:assert png.format=='PNG' and png.width>100 and png.height>100
+    finally:basis.cached_seasonal_report_image.clear()
+
+
+@pytest.mark.parametrize('raw',[b'{"key":1,"key":2}',b'{"value":NaN}',b'{"value":Infinity}'])
+def test_ambiguous_or_nonfinite_derived_json_is_rejected(raw):
+    with pytest.raises(ValueError):cache._strict_derived_json(raw)
