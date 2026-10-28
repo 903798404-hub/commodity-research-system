@@ -51,6 +51,16 @@ def test_equal_dataframe_copies_reuse_keys_despite_internal_block_consolidation(
     assert cache.complete_value_identity(frame)!=cache.complete_value_identity(copied)
 
 
+def test_equal_values_reuse_persistent_keys_despite_object_aliasing():
+    text='same source identity that is not an interned literal'
+    shared=pd.DataFrame({'value':[0.,1.], 'source':pd.Series([text,text],dtype=object)})
+    separate=pd.DataFrame({'value':[0.,1.], 'source':pd.Series([text.encode().decode(),text.encode().decode()],dtype=object)})
+    assert shared.source.iloc[0] is shared.source.iloc[1]
+    assert separate.source.iloc[0] is not separate.source.iloc[1]
+    pd.testing.assert_frame_equal(shared,separate)
+    assert cache._derived_key(pure_png,(shared,),{})==cache._derived_key(pure_png,(separate,),{})
+
+
 @pytest.mark.parametrize('change',['result','hash','schema','key','image'])
 def test_corrupt_or_wrong_version_never_becomes_a_hit(tmp_path,change):
     key='c'*64;path=tmp_path/(key+'.json');cache._record_derived(path,IMAGE,key,b'original')

@@ -54,9 +54,14 @@ class _ValuePickler(pickle.Pickler):
         return NotImplemented
 
 
-def _serialize(value):
+def _serialize(value, *, memoize=True):
     buffer = BytesIO()
-    _ValuePickler(buffer, protocol=5).dump(value)
+    serializer = _ValuePickler(buffer, protocol=5)
+    # Persistent identities describe values, not whether independently loaded
+    # equal strings/metadata happen to share a Python object. The canonical
+    # input is a value tree; unsupported recursive objects still fall back.
+    serializer.fast = not memoize
+    serializer.dump(value)
     return buffer.getvalue()
 
 
@@ -236,7 +241,7 @@ def _derived_key(function,args,kwargs):
         import plotly.io as pio
         name=pio.templates.default
         context=(name,pio.templates[name].to_plotly_json() if name else None)
-    body=_serialize(_canonical_inputs((args,kwargs,context)))
+    body=_serialize(_canonical_inputs((args,kwargs,context)),memoize=False)
     if len(body)>MAX_INPUT_BYTES:raise _UnsupportedDerived('Derived input exceeds bound')
     function_id=f'{original.__module__}.{original.__qualname__}'
     version=sha256(marshal.dumps(original.__code__)+_serialize((original.__defaults__,original.__kwdefaults__))).hexdigest()
