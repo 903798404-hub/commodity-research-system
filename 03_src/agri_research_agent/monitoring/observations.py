@@ -175,7 +175,10 @@ class Reader:
                 path = folder / f"soybeans_crop_{name}_weekly.parquet"
                 if not path.exists():
                     path = folder / f"soybeans_crop_{name}_weekly_2021_2026.parquet"
-                return pd.read_parquet(path,columns=['metric','geography_level','region_name','calendar_year','week_ending','value_pct'])
+                # A short-lived read-only observer must finish Arrow IO before
+                # interpreter teardown; background prefetch can abort at exit.
+                return pd.read_parquet(path,columns=['metric','geography_level','region_name','calendar_year','week_ending','value_pct'],
+                                       use_threads=False,pre_buffer=False)
             frame = self.cached("nass_" + name, crop)
             frame = frame.loc[frame.geography_level.eq('US') & frame.region_name.eq("US TOTAL") & frame.calendar_year.eq(self.now.astimezone(SHANGHAI).year)]
             # The page reads the producer's already-derived GOOD_EXCELLENT.
