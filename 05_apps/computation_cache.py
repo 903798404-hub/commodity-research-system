@@ -60,6 +60,11 @@ def _serialize(value):
     return buffer.getvalue()
 
 
+def complete_value_identity(value):
+    """Full native-cache dependency identity, including every dataframe row."""
+    return sha256(_serialize(value)).hexdigest()
+
+
 class _UncachedResult(Exception):
     def __init__(self, value):
         self.value = value

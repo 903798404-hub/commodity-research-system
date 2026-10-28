@@ -120,3 +120,24 @@ def test_original_basis_default_display_paths_record_real_pngs_without_browser(t
 @pytest.mark.parametrize('raw',[b'{"key":1,"key":2}',b'{"value":NaN}',b'{"value":Infinity}'])
 def test_ambiguous_or_nonfinite_derived_json_is_rejected(raw):
     with pytest.raises(ValueError):cache._strict_derived_json(raw)
+
+
+def test_basis_native_memory_cache_invalidation_covers_all_large_frame_rows(monkeypatch):
+    import basis_page as basis
+    import matplotlib.pyplot as plt
+    calls=[]
+    def build(frame,**kwargs):
+        value=frame.value.sum();calls.append(value);figure=plt.figure()
+        figure.savefig=lambda output,**options:output.write(str(value).encode())
+        return figure
+    monkeypatch.delenv('MARKET_DATA_PRECOMPUTE_MODE',raising=False)
+    monkeypatch.setattr(basis,'build_seasonal_report_figure',build)
+    frame=pd.DataFrame({'value':range(60000)})
+    options=dict(value_col='value',title='full-frame revision',years=(2026,),zero_line=True,trading_calendar_bytes=b'calendar')
+    basis.cached_seasonal_report_image.clear()
+    try:
+        before=basis.cached_seasonal_report_image(frame,**options)
+        assert basis.cached_seasonal_report_image(frame,**options)==before and len(calls)==1
+        frame.iloc[59997,0]+=1
+        assert basis.cached_seasonal_report_image(frame,**options)!=before and len(calls)==2
+    finally:basis.cached_seasonal_report_image.clear()
