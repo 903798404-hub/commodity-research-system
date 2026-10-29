@@ -435,14 +435,18 @@ class FgisYearlyRangeAdapter(FgisYearlyAdapter):
                 raise FgisAdapterError("FGIS Yearly range transfer deadline exceeded")
             return min(30, self.timeout_seconds, remaining)
 
+        class RangeRetriesExhausted(FgisAdapterError):
+            pass
+
         def retry(operation):
             for attempt in range(self.max_attempts):
                 timeout()
                 try:
                     return operation()
                 except retryable as exc:
+                    timeout()
                     if attempt + 1 == self.max_attempts:
-                        raise FgisAdapterError("FGIS Yearly range retries exhausted") from exc
+                        raise RangeRetriesExhausted("FGIS Yearly range retries exhausted") from exc
                     time.sleep(min(0.25, timeout()))
 
         def metadata(response):
@@ -531,18 +535,28 @@ class FgisYearlyRangeAdapter(FgisYearlyAdapter):
                            "etag": etag, "last_modified": modified}
                 return chunk, observed, receipt
 
-        first, version, first_receipt = retry(lambda: receive(0, self.chunk_bytes - 1))
-        etag, modified, total = version
-        if (total + self.chunk_bytes - 1) // self.chunk_bytes > 256:
-            raise FgisAdapterError("FGIS Yearly range receipt limit exceeded")
-        chunks, receipts = [first], [first_receipt]
-        for start in range(len(first), total, self.chunk_bytes):
-            chunk, _, receipt = retry(lambda: receive(start, min(total, start + self.chunk_bytes) - 1, version))
-            chunks.append(chunk);receipts.append(receipt)
-        verification, after, verification_receipt = retry(lambda: receive(0, 0, version))
-        content = b"".join(chunks)
-        if verification != content[:1]:
-            raise FgisAdapterError("FGIS Yearly final version probe differs")
+        # A selected replica can disappear while another remains available.
+        # Restart once from byte zero, discarding every old byte and receipt.
+        # Both attempts share the original deadline; invalid metadata is fatal.
+        for transfer_attempt in range(2):
+            try:
+                first, version, first_receipt = retry(lambda: receive(0, self.chunk_bytes - 1))
+                etag, modified, total = version
+                if (total + self.chunk_bytes - 1) // self.chunk_bytes > 256:
+                    raise FgisAdapterError("FGIS Yearly range receipt limit exceeded")
+                chunks, receipts = [first], [first_receipt]
+                for start in range(len(first), total, self.chunk_bytes):
+                    chunk, _, receipt = retry(lambda: receive(start, min(total, start + self.chunk_bytes) - 1, version))
+                    chunks.append(chunk);receipts.append(receipt)
+                verification, after, verification_receipt = retry(lambda: receive(0, 0, version))
+                content = b"".join(chunks)
+                if verification != content[:1]:
+                    raise FgisAdapterError("FGIS Yearly final version probe differs")
+                break
+            except RangeRetriesExhausted:
+                if transfer_attempt == 1:
+                    raise
+                timeout()
         return _parse_yearly_source(
             content=content, calendar_year=year, source_file=filename, source_url=url,
             fetched_at=fetched_at, http_status=206, content_length=total,
@@ -550,6 +564,7 @@ class FgisYearlyRangeAdapter(FgisYearlyAdapter):
             delivery_metadata={"metadata_http_status": 206,
                                "metadata_method": "GET", "version_after": list(after),
                                "full_transfer_error": full_error,
+                               "version_restarts": transfer_attempt,
                                "verification_receipt": verification_receipt,
                                "range_receipts": receipts},
         )

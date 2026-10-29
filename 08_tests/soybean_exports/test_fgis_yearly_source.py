@@ -245,12 +245,12 @@ def test_versioned_ranges_reject_invalid_bounds_or_metadata(fault):
 def test_versioned_ranges_cannot_publish_partial_or_mixed_versions(monkeypatch, fault):
     from agri_research_agent.soybean_exports import fgis
     monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
-    faults = (["ok"] if fault=="replica" else []) + [fault] * 2
+    faults = ((["ok"] if fault=="replica" else []) + [fault] * 2) * 2
     session = RangeSession(csv_bytes([yearly_row()]), faults=faults)
     with pytest.raises(FgisAdapterError, match="retries exhausted"):
         fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
                                    max_attempts=2).fetch_soybeans()
-    assert len([c for c in session.calls if "Range" in c[2]["headers"]]) == (3 if fault=="replica" else 2)
+    assert len([c for c in session.calls if "Range" in c[2]["headers"]]) == (6 if fault=="replica" else 4)
     assert all(r.closed for r in session.responses)
 
 
@@ -871,3 +871,49 @@ def test_exhausted_yearly_transfer_retries_preserve_stable_and_create_no_artifac
     assert paths["stable"].read_bytes() == stable_bytes
     assert not (runtime / "01_data/raw/soybean_export_inspections/failed-download").exists()
     assert not paths["candidate_dir"].exists()
+
+
+def test_replica_loss_restarts_from_zero_without_reusing_old_bytes(monkeypatch):
+    from agri_research_agent.soybean_exports import fgis
+    monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
+    raw = csv_bytes([yearly_row(), yearly_row(destination="JAPAN", mt="20")])
+
+    class SwitchingReplica(RangeSession):
+        def get(self, url, **kwargs):
+            response = super().get(url, **kwargs)
+            ranges = [c for c in self.calls if "Range" in c[2]["headers"]]
+            # First replica vanishes after its first chunk. The replacement
+            # carries a different CSV value as well as a different identity.
+            if len(ranges) > 1:
+                response.headers["ETag"] = '"replacement"'
+                response.content = response.content.replace(b"JAPAN", b"KOREA")
+            return response
+
+    session = SwitchingReplica(raw)
+    result = fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
+        chunk_bytes=200, max_attempts=2).fetch_soybeans()
+    assert result.source_bytes == raw.replace(b"JAPAN", b"KOREA")
+    assert result.etag == '"replacement"'
+    assert result.query_scope["version_restarts"] == 1
+    assert all(r["etag"] == '"replacement"' for r in result.query_scope["range_receipts"])
+    assert fgis._valid_yearly_http_transfer(result)
+    assert len([c for c in session.calls if c[2]["headers"].get("Range") == "bytes=0-199"]) == 2
+
+
+def test_replica_restart_keeps_original_transfer_deadline(monkeypatch):
+    from agri_research_agent.soybean_exports import fgis
+    clock = [0.0]
+    monkeypatch.setattr(fgis.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
+
+    class DeadlineReplica(RangeSession):
+        def get(self, url, **kwargs):
+            if "Range" in kwargs["headers"]:
+                clock[0] += 0.6
+            return super().get(url, **kwargs)
+
+    session = DeadlineReplica(csv_bytes([yearly_row()]), faults=["ignored"] * 4)
+    with pytest.raises(FgisAdapterError, match="deadline exceeded"):
+        fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
+            deadline_seconds=1, max_attempts=1).fetch_soybeans()
+    assert len([c for c in session.calls if "Range" in c[2]["headers"]]) == 2
