@@ -143,29 +143,33 @@ class RangeResponse(CsvResponse):
 
 
 class RangeSession:
-    def __init__(self, raw, *, faults=(), final_etag=None):
+    def __init__(self, raw, *, faults=(), final_etag=None, full_mode="interrupted"):
         self.raw = raw
         self.faults = list(faults)
         self.final_etag = final_etag
+        self.full_mode = full_mode
         self.calls = []
         self.responses = []
         self.heads = 0
 
     def head(self, url, **kwargs):
-        self.calls.append(("HEAD", url, kwargs))
-        response = RangeResponse(b"", declared_content_length=len(self.raw))
-        response.headers["Accept-Ranges"] = "bytes"
-        self.heads += 1
-        if self.heads > 1 and self.final_etag:
-            response.headers["ETag"] = self.final_etag
-        self.responses.append(response)
-        return response
+        raise AssertionError("HEAD can select an unreachable replica; it must not select the GET version")
 
     def get(self, url, **kwargs):
         self.calls.append(("GET", url, kwargs))
+        if "Range" not in kwargs["headers"]:
+            if self.full_mode == "interrupted":
+                raise requests.exceptions.ChunkedEncodingError("original full body was interrupted")
+            response = RangeResponse(self.raw, status=200)
+            if self.full_mode == "short":response.content = self.raw[:-1]
+            self.responses.append(response)
+            return response
         start, end = map(int, kwargs["headers"]["Range"][6:].split("-"))
+        end = min(end, len(self.raw) - 1)
         response = RangeResponse(self.raw[start:end + 1], status=206)
         response.headers["Content-Range"] = f"bytes {start}-{end}/{len(self.raw)}"
+        if self.final_etag and start==end==0 and "If-Match" in kwargs["headers"]:
+            response.headers["ETag"] = self.final_etag
         if self.faults:
             fault = self.faults.pop(0)
             if fault == "ignored":
@@ -196,7 +200,7 @@ def test_versioned_ranges_equal_complete_original_csv_and_aggregation(monkeypatc
     monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
     raw = csv_bytes([yearly_row(), yearly_row(destination="JAPAN", mt="20"),
                      yearly_row(grain="CORN", mt="500")])
-    session = RangeSession(raw, faults=["ignored", "precondition", "replica", "short"])
+    session = RangeSession(raw, faults=["ignored", "precondition", "short", "ok", "replica", "short"])
     actual = fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
                                        chunk_bytes=200).fetch_soybeans()
     expected = FgisYearlyAdapter(session=CsvSession(CsvResponse(raw)),
@@ -215,7 +219,8 @@ def test_versioned_ranges_equal_complete_original_csv_and_aggregation(monkeypatc
     assert sum(r["size_bytes"] for r in receipts) == len(raw)
     assert all(r["http_status"] == 206 for r in receipts)
     assert all(r.closed for r in session.responses)
-    assert all(not r.body_read for r in session.responses[:4])
+    assert all(not r.body_read for r in session.responses if r.status_code in {200,412})
+    assert actual.http_status == 206 and fgis._valid_yearly_http_transfer(actual)
     for method, url, kwargs in session.calls:
         assert url == "https://fgisonline.ams.usda.gov/exportgrainreport/CY2026.csv"
         assert kwargs["allow_redirects"] is False
@@ -223,7 +228,8 @@ def test_versioned_ranges_equal_complete_original_csv_and_aggregation(monkeypatc
         assert kwargs["headers"]["Accept-Encoding"] == "identity"
         if method == "GET":
             assert kwargs["stream"] is True
-            assert kwargs["headers"]["If-Match"] == '"yearly-etag"'
+            if "If-Match" in kwargs["headers"]:
+                assert kwargs["headers"]["If-Match"] == '"yearly-etag"'
 
 
 @pytest.mark.parametrize("fault", ["range", "length", "long", "encoding", "weak"])
@@ -239,11 +245,12 @@ def test_versioned_ranges_reject_invalid_bounds_or_metadata(fault):
 def test_versioned_ranges_cannot_publish_partial_or_mixed_versions(monkeypatch, fault):
     from agri_research_agent.soybean_exports import fgis
     monkeypatch.setattr(fgis.time, "sleep", lambda _: None)
-    session = RangeSession(csv_bytes([yearly_row()]), faults=[fault] * 2)
+    faults = (["ok"] if fault=="replica" else []) + [fault] * 2
+    session = RangeSession(csv_bytes([yearly_row()]), faults=faults)
     with pytest.raises(FgisAdapterError, match="retries exhausted"):
         fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
                                    max_attempts=2).fetch_soybeans()
-    assert len([c for c in session.calls if c[0] == "GET"]) == 2
+    assert len([c for c in session.calls if "Range" in c[2]["headers"]]) == (3 if fault=="replica" else 2)
     assert all(r.closed for r in session.responses)
 
 
@@ -254,13 +261,57 @@ def test_versioned_ranges_reject_final_version_change_and_expired_deadline(monke
     with pytest.raises(FgisAdapterError, match="retries exhausted"):
         fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
                                    max_attempts=2).fetch_soybeans()
-    ticks = iter([0, 2])
+    ticks = iter([0, 2, 2, 2, 2])
     monkeypatch.setattr(fgis.time, "monotonic", lambda: next(ticks))
     session = RangeSession(csv_bytes([yearly_row()]))
     with pytest.raises(FgisAdapterError, match="deadline exceeded"):
         fgis.FgisYearlyRangeAdapter(session=session, calendar_year=2026,
                                    deadline_seconds=1).fetch_soybeans()
     assert not session.calls
+
+
+@pytest.mark.parametrize("full_mode", ["complete", "short", "interrupted"])
+def test_complete_response_preferred_and_interrupted_response_falls_back(full_mode):
+    from agri_research_agent.soybean_exports import fgis
+    raw=csv_bytes([yearly_row()]);session=RangeSession(raw,full_mode=full_mode)
+    result=fgis.FgisYearlyRangeAdapter(session=session,calendar_year=2026).fetch_soybeans()
+    assert result.source_bytes==raw and fgis._valid_yearly_http_transfer(result)
+    assert result.http_status==(200 if full_mode=='complete' else 206)
+    assert len(session.calls)==(1 if full_mode=='complete' else 3)
+    assert all(r.closed for r in session.responses)
+
+
+@pytest.mark.parametrize("tamper", ["gap","overlap","etag","hash","length","verification","status","delivery","complete"])
+def test_partial_response_requires_complete_immutable_byte_proof(tamper):
+    import copy
+    from dataclasses import replace
+    from agri_research_agent.soybean_exports import fgis
+    result=fgis.FgisYearlyRangeAdapter(session=RangeSession(csv_bytes([yearly_row()])),calendar_year=2026,chunk_bytes=200).fetch_soybeans()
+    scope=copy.deepcopy(result.query_scope)
+    if tamper=='gap':scope['range_receipts'].pop(0)
+    elif tamper=='overlap':scope['range_receipts'].insert(0,copy.deepcopy(scope['range_receipts'][0]))
+    elif tamper=='etag':scope['range_receipts'][0]['etag']='"other"'
+    elif tamper=='hash':scope['range_receipts'][0]['sha256']='0'*64
+    elif tamper=='length':scope['range_receipts'][0]['size_bytes']-=1
+    elif tamper=='verification':scope['verification_receipt']['sha256']='0'*64
+    elif tamper=='status':scope['range_receipts'][0]['http_status']=200
+    elif tamper=='delivery':scope['delivery']='https'
+    else:scope['complete_calendar_year_file']=False
+    assert not fgis._valid_yearly_http_transfer(replace(result,query_scope=scope))
+    assert not fgis._valid_yearly_http_transfer(replace(result,http_status=201))
+
+
+def test_range_and_full_transport_publish_identical_business_values(tmp_path):
+    from agri_research_agent.soybean_exports import fgis
+    raw=csv_bytes([yearly_row(),yearly_row(destination='JAPAN',mt='20')])
+    full=FgisYearlyAdapter(session=CsvSession(CsvResponse(raw)),calendar_year=2026)
+    ranged=fgis.FgisYearlyRangeAdapter(session=RangeSession(raw),calendar_year=2026,chunk_bytes=200)
+    for key,adapter in [('full',full),('range',ranged)]:
+        audit=run_fgis_pipeline(runtime_root=tmp_path/key,adapter=adapter,git_head=GIT_HEAD,batch_id='fgis-'+key,publish=True)
+        assert audit['published'] and audit['source_sha256']==fgis.sha256_bytes(raw)
+    a=pd.read_parquet(fgis_paths(tmp_path/'full','fgis-full')['stable'])
+    b=pd.read_parquet(fgis_paths(tmp_path/'range','fgis-range')['stable'])
+    assert fgis._business_equal(a,b)
 
 
 class RetrySession(CsvSession):

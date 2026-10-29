@@ -400,8 +400,9 @@ class FgisYearlyAdapter:
 class FgisYearlyRangeAdapter(FgisYearlyAdapter):
     """Receive the same complete CSV in version-locked, bounded HTTPS ranges.
 
-    USDA replicas can expose different strong ETags. A response from another
-    replica is never appended; retries keep the original version and offset.
+    Prefer a complete ordinary response. After an interrupted transfer, pin
+    the version of the first successful range GET, never a different HEAD
+    replica. A response from another version is never appended.
     The original parser, weekly aggregation and publication checks are shared.
     """
 
@@ -460,70 +461,140 @@ class FgisYearlyRangeAdapter(FgisYearlyAdapter):
                 raise FgisAdapterError("FGIS Yearly range source metadata is invalid")
             return etag, modified
 
-        def head(expected=None):
-            with self.session.head(url, headers=headers, timeout=timeout(), allow_redirects=False) as response:
+        def body(response, expected, *, wall_deadline=None):
+            parts, size = [], 0
+            for part in response.iter_content(chunk_size=64 * 1024):
+                timeout()
+                if wall_deadline is not None and time.monotonic() >= wall_deadline:
+                    raise _FgisYearlyTransferError("FGIS Yearly complete GET exceeded its time budget")
+                size += len(part)
+                if size > expected:
+                    raise FgisAdapterError("FGIS Yearly response body exceeds bounds")
+                parts.append(part)
+            if size != expected:
+                raise _FgisYearlyTransferError("FGIS Yearly response body is incomplete")
+            return b"".join(parts)
+
+        # Healthy transfers retain the original HTTP 200 path and one download.
+        # Only an incomplete/failed transport permits the range fallback.
+        timeout()
+        full_deadline = min(deadline, time.monotonic() + self.timeout_seconds)
+        try:
+            with self.session.get(url, headers=headers, timeout=timeout(),
+                                  stream=True, allow_redirects=False) as response:
                 if response.status_code != 200:
-                    raise FgisAdapterError(f"FGIS Yearly HEAD status {response.status_code}")
-                version = metadata(response)
+                    raise FgisAdapterError(f"FGIS Yearly HTTP status {response.status_code}")
+                media = (_response_header(response, "Content-Type") or "").split(";", 1)[0].lower().strip()
+                if media not in self._CONTENT_TYPES:
+                    raise FgisAdapterError("FGIS Yearly unexpected Content-Type")
                 length = _response_header(response, "Content-Length") or ""
                 if not length.isdecimal() or not 0 < int(length) <= 64 * 1024 * 1024:
+                    raise FgisAdapterError("FGIS Yearly complete response length is invalid")
+                content = body(response, int(length), wall_deadline=full_deadline)
+                return _parse_yearly_source(
+                    content=content, calendar_year=year, source_file=filename, source_url=url,
+                    fetched_at=fetched_at, http_status=200, content_length=int(length),
+                    etag=_response_header(response, "ETag"),
+                    last_modified=_response_header(response, "Last-Modified"), delivery="https",
+                )
+        except retryable as exc:
+            full_error = type(exc).__name__
+
+        def receive(start, end, version=None):
+            request_headers = {**headers, "Range": f"bytes={start}-{end}"}
+            if version is not None:
+                request_headers["If-Match"] = version[0]
+            with self.session.get(url, headers=request_headers, timeout=timeout(),
+                                  stream=True, allow_redirects=False) as response:
+                if response.status_code in (200, 412):
+                    raise _FgisYearlyTransferError("FGIS Yearly range version unavailable")
+                if response.status_code != 206:
+                    raise FgisAdapterError(f"FGIS Yearly range HTTP status {response.status_code}")
+                etag, modified = metadata(response)
+                match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)",
+                                     _response_header(response, "Content-Range") or "")
+                if match is None:
+                    raise FgisAdapterError("FGIS Yearly range bounds identity mismatch")
+                first, last, total = map(int, match.groups())
+                if not 0 < total <= 64 * 1024 * 1024:
                     raise FgisAdapterError("FGIS Yearly range total length is invalid")
-                if (_response_header(response, "Accept-Ranges") or "").lower() != "bytes":
-                    raise FgisAdapterError("FGIS Yearly range transfer is unsupported")
-                result = (*version, int(length))
-                if expected is not None and result != expected:
-                    raise _FgisYearlyTransferError("FGIS Yearly metadata version changed")
-                return result
+                expected_end = min(end, total - 1)
+                if (first != start or last != expected_end or
+                    _response_header(response, "Content-Length") != str(last - first + 1)):
+                    raise FgisAdapterError("FGIS Yearly range bounds identity mismatch")
+                observed = (etag, modified, total)
+                if version is not None and observed != version:
+                    raise _FgisYearlyTransferError("FGIS Yearly range version mismatch")
+                chunk = body(response, last - first + 1)
+                receipt = {"http_status": 206, "content_range": f"bytes {first}-{last}/{total}",
+                           "size_bytes": len(chunk), "sha256": sha256_bytes(chunk),
+                           "etag": etag, "last_modified": modified}
+                return chunk, observed, receipt
 
-        version = retry(head)
+        first, version, first_receipt = retry(lambda: receive(0, self.chunk_bytes - 1))
         etag, modified, total = version
-        chunks = []
-        receipts = []
-        for start in range(0, total, self.chunk_bytes):
-            end = min(total, start + self.chunk_bytes) - 1
-            expected_range = f"bytes {start}-{end}/{total}"
-
-            def receive():
-                request_headers = {**headers, "Range": f"bytes={start}-{end}", "If-Match": etag}
-                with self.session.get(url, headers=request_headers, timeout=timeout(),
-                                      stream=True, allow_redirects=False) as response:
-                    # Close a full-body/other-version response before reading it.
-                    if response.status_code in (200, 412):
-                        raise _FgisYearlyTransferError("FGIS Yearly range version unavailable")
-                    if response.status_code != 206:
-                        raise FgisAdapterError(f"FGIS Yearly range HTTP status {response.status_code}")
-                    if metadata(response) != (etag, modified):
-                        raise _FgisYearlyTransferError("FGIS Yearly range version mismatch")
-                    if (_response_header(response, "Content-Range") != expected_range or
-                        _response_header(response, "Content-Length") != str(end - start + 1)):
-                        raise FgisAdapterError("FGIS Yearly range bounds identity mismatch")
-                    parts = []
-                    size = 0
-                    for part in response.iter_content(chunk_size=64 * 1024):
-                        timeout()
-                        size += len(part)
-                        if size > end - start + 1:
-                            raise FgisAdapterError("FGIS Yearly range body exceeds bounds")
-                        parts.append(part)
-                    if size != end - start + 1:
-                        raise _FgisYearlyTransferError("FGIS Yearly range body is incomplete")
-                    return b"".join(parts)
-
-            chunk = retry(receive)
-            chunks.append(chunk)
-            receipts.append({"http_status": 206, "content_range": expected_range,
-                             "size_bytes": len(chunk), "sha256": sha256_bytes(chunk),
-                             "etag": etag, "last_modified": modified})
-        after = retry(lambda: head(version))
+        if (total + self.chunk_bytes - 1) // self.chunk_bytes > 256:
+            raise FgisAdapterError("FGIS Yearly range receipt limit exceeded")
+        chunks, receipts = [first], [first_receipt]
+        for start in range(len(first), total, self.chunk_bytes):
+            chunk, _, receipt = retry(lambda: receive(start, min(total, start + self.chunk_bytes) - 1, version))
+            chunks.append(chunk);receipts.append(receipt)
+        verification, after, verification_receipt = retry(lambda: receive(0, 0, version))
         content = b"".join(chunks)
+        if verification != content[:1]:
+            raise FgisAdapterError("FGIS Yearly final version probe differs")
         return _parse_yearly_source(
             content=content, calendar_year=year, source_file=filename, source_url=url,
-            fetched_at=fetched_at, http_status=200, content_length=total,
+            fetched_at=fetched_at, http_status=206, content_length=total,
             etag=etag, last_modified=modified, delivery="https_versioned_ranges",
-            delivery_metadata={"metadata_http_status": 200,
-                               "metadata_method": "HEAD", "version_after": list(after),
+            delivery_metadata={"metadata_http_status": 206,
+                               "metadata_method": "GET", "version_after": list(after),
+                               "full_transfer_error": full_error,
+                               "verification_receipt": verification_receipt,
                                "range_receipts": receipts},
         )
+
+
+def _valid_yearly_http_transfer(fetched: FgisFetchResult) -> bool:
+    """Keep HTTP 200 support; accept 206 only with complete pinned byte proof."""
+    if fetched.http_status == 200:
+        return True
+    if fetched.http_status != 206:
+        return False
+    try:
+        scope = fetched.query_scope
+        content = fetched.source_bytes
+        total = len(content)
+        if (scope['delivery'] != 'https_versioned_ranges' or
+            scope['metadata_method'] != 'GET' or scope['metadata_http_status'] != 206 or
+            scope['complete_calendar_year_file'] is not True or scope['source_size'] != total or
+            not re.fullmatch(r'"[^"\r\n]+"', fetched.etag) or
+            parsedate_to_datetime(fetched.last_modified).tzinfo is None or
+            not 0 < total <= 64 * 1024 * 1024 or fetched.content_length != total or
+            scope['version_after'] != [fetched.etag, fetched.last_modified, total]):
+            return False
+        receipts = scope['range_receipts']
+        if not isinstance(receipts, list) or not 1 <= len(receipts) <= 256:
+            return False
+        offset = 0
+        for item in receipts:
+            match = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)', item['content_range'])
+            if match is None:
+                return False
+            start, end, size = map(int, match.groups())
+            if (size != total or start != offset or not start <= end < total or
+                item['http_status'] != 206 or item['etag'] != fetched.etag or
+                item['last_modified'] != fetched.last_modified or
+                item['size_bytes'] != end - start + 1 or
+                item['sha256'] != sha256_bytes(content[start:end + 1])):
+                return False
+            offset = end + 1
+        expected = {'http_status': 206, 'content_range': f'bytes 0-0/{total}',
+                    'size_bytes': 1, 'sha256': sha256_bytes(content[:1]),
+                    'etag': fetched.etag, 'last_modified': fetched.last_modified}
+        return offset == total and scope['verification_receipt'] == expected
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+        return False
 
 
 class FgisYearlyFileAdapter:
@@ -1404,7 +1475,7 @@ def run_fgis_pipeline(
                     fetched.source_file,
                     fetched.source_url,
                     fetched.source_sha256,
-                    fetched.http_status == 200,
+                    _valid_yearly_http_transfer(fetched),
                     fetched.source_bytes is not None,
                 )
             ):
