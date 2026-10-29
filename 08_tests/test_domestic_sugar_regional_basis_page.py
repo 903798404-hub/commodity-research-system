@@ -37,6 +37,7 @@ def test_existing_liuzhou_metrics_and_year_filter_are_unchanged(regional_root, p
     assert not app.exception
     assert [(m.label, m.value) for m in app.metric] == [("柳州现货（元/吨）", "5,330"), ("SR2701 基差", "-211"), ("SR2705 基差", "-288"), ("SR2709 基差", "-370")]
     assert any("三地白糖主力基差" in h.value for h in app.subheader)
+    assert app.date_input[0].value.isoformat() == "2025-01-01"
     assert list(app.multiselect[0].options) == ["2023", "2024", "2026"]
     app.multiselect[0].set_value([]).run()
     assert not app.exception and any("三地白糖主力基差" in h.value for h in app.subheader)

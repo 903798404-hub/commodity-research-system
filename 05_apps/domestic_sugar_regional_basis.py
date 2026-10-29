@@ -83,7 +83,7 @@ def render_regional_sugar_history(*, missing_trading_days, root: Path | None = N
         return
     daily = snapshot.daily
     lower, upper = daily.business_date.min().date(), daily.business_date.max().date()
-    default_start = max(lower, (pd.Timestamp(upper) - pd.DateOffset(years=5)).date())
+    default_start = max(lower, min(upper, pd.Timestamp("2025-01-01").date()))
     left, right = st.columns(2)
     with left:
         start = st.date_input("开始日期", value=default_start, min_value=lower, max_value=upper,
@@ -104,7 +104,7 @@ def render_regional_sugar_history(*, missing_trading_days, root: Path | None = N
     st.pyplot(figure, width="stretch"); plt.close(figure)
     quote_date = daily.loc[daily.cash_price.notna(), "business_date"].max()
     paired_date = daily.loc[daily.basis.notna(), "business_date"].max()
-    st.caption(f"现货最新 {quote_date:%Y-%m-%d}｜同日配对最新 {paired_date:%Y-%m-%d}｜默认近五年，可调整起止日期查看全部历史。")
+    st.caption(f"现货最新 {quote_date:%Y-%m-%d}｜同日配对最新 {paired_date:%Y-%m-%d}｜默认从2025年1月开始，可调整起止日期。")
     with st.expander("三地基差明细与下载", expanded=False):
         detail = selected[["business_date", "region", "ts_code", "cash_price", "futures_price", "basis", "source_cell"]]
         st.dataframe(detail.sort_values(["business_date", "region"], ascending=[False, True]).head(300),
