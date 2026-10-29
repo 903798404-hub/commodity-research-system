@@ -95,6 +95,69 @@ def yahoo_ice_quote(meta, code, now):
         time_kind='exchange_quote', source_url='https://query1.finance.yahoo.com/v8/finance/chart/' + code + '.NYB?interval=1d&range=5d', raw=meta)
 
 
+def daily_close_url(code, now):
+    """Request completed daily bars for this exact contract, never a continuous series."""
+    import re
+    from datetime import timedelta, time
+    from zoneinfo import ZoneInfo
+    if not re.fullmatch(r'SB[HKNV]\d{2}', code) or now.utcoffset() is None:
+        raise ValueError('收盘价合约或时间无效')
+    local = now.astimezone(ZoneInfo('America/New_York'))
+    # https://www.ice.com/products/23/Sugar-No-11-Futures (Trading Hours)
+    # ICE SB normally closes at 13:00 New York time. Allow publication latency;
+    # an early-close holiday is conservatively excluded until this same cutoff.
+    cutoff = local.date() - timedelta(days=local.time() < time(13, 30))
+    symbol = f'SB{code[-2:]}{code[2]}'
+    return ('https://push2his.eastmoney.com/api/qt/stock/kline/get'
+            f'?secid=108.{symbol}&klt=101&fqt=0&lmt=15&end={cutoff:%Y%m%d}'
+            '&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61')
+
+
+def daily_close_text(url):
+    from agri_research_agent.commodity_import_margin.live import get_text
+    return get_text(url, encoding='utf-8', max_bytes=32768)
+
+
+def eastmoney_daily_close(body, code, now):
+    """Validate contract identity, completed-session date, OHLC and traded volume."""
+    from datetime import date, datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    from agri_research_agent.soybean_margin.model import number
+    url = daily_close_url(code, now)
+    symbol = f'SB{code[-2:]}{code[2]}'
+    if not isinstance(body, dict) or not isinstance(body.get('data'), dict):
+        raise ValueError('原糖收盘价响应结构无效')
+    data = body.get('data') or {}
+    if (body.get('rc') != 0 or data.get('code') != symbol or data.get('market') != 108
+            or data.get('decimal') != 2 or not str(data.get('name', '')).startswith('糖11号')):
+        raise ValueError('原糖收盘价合约、市场或单位不符')
+    bars = data.get('klines')
+    if not isinstance(bars, list) or not 1 <= len(bars) <= 15:
+        raise ValueError('原糖收盘价日线缺失或超限')
+    ny = ZoneInfo('America/New_York')
+    local = now.astimezone(ny)
+    cutoff = local.date() - timedelta(days=local.time() < time(13, 30))
+    candidates, dates = [], set()
+    for text in bars:
+        if not isinstance(text, str): raise ValueError('原糖收盘价日线结构无效')
+        fields = text.split(',')
+        if len(fields) != 11: raise ValueError('原糖收盘价日线结构无效')
+        day = date.fromisoformat(fields[0])
+        if day in dates or day > cutoff or day.weekday() >= 5: raise ValueError('原糖收盘价日期重复或尚未收盘')
+        dates.add(day)
+        opening, closing, high, low, volume = map(number, fields[1:6])
+        if (any(v is None or v <= 0 for v in (opening, closing, high, low))
+                or not low <= min(opening, closing) <= max(opening, closing) <= high
+                or volume is None or volume < 0):
+            raise ValueError('原糖收盘价日线价格或成交量无效')
+        if volume > 0 and timedelta(0) <= local - datetime.combine(day, time(13), ny) <= timedelta(days=7):
+            candidates.append((day, closing))
+    if not candidates: raise ValueError('具体合约最近7天没有有效已收盘成交')
+    day, price = max(candidates)
+    return dict(price=price, contract=code, provider='Eastmoney', quoted_at=day.isoformat(),
+                quote_date=day.isoformat(), time_kind='daily_close', source_url=url, raw=body)
+
+
 def validate_monthly_market(value, day):
     from datetime import datetime
     import math
@@ -116,6 +179,11 @@ def validate_monthly_market(value, day):
             if price is None: continue
             if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
                 raise ValueError('行情价格无效')
+            if kind == 'ice' and item.get('time_kind') == 'daily_close':
+                expected_item = eastmoney_daily_close(item.get('raw') or {}, code, captured)
+                if any(item.get(k) != expected_item[k] for k in expected_item):
+                    raise ValueError('原糖收盘价或日期凭证不符')
+                continue
             if kind == 'ice' and item.get('provider') == 'Yahoo Finance':
                 expected_item = yahoo_ice_quote(item.get('raw') or {}, code, captured)
                 if any(item.get(k) != expected_item[k] for k in ('price', 'quoted_at', 'contract', 'source_url', 'time_kind')):
@@ -202,6 +270,17 @@ def capture_monthly_market(day, quotes):
                 result['errors'].pop(code, None)
             except (ValueError, TypeError, KeyError, IndexError, OverflowError):
                 result['errors'][code] = '原糖具体合约两来源均无有效报价，留空'
+    missing_ice = [c for c in ice_codes if result['ice'][c]['price'] is None]
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        jobs = {c: pool.submit(daily_close_text, daily_close_url(c, datetime.now(TZ))) for c in missing_ice}
+        for code, job in jobs.items():
+            try:
+                result['ice'][code] = eastmoney_daily_close(json.loads(job.result()), code, datetime.now(TZ))
+                result['errors'].pop(code, None)
+            except (ValueError, TypeError, KeyError, IndexError, OverflowError, AttributeError):
+                result['errors'][code] = '原糖最新价及最近7天具体合约收盘价均不可用，留空'
+    if all(result['ice'][c]['price'] is not None for c in ice_codes):
+        result['errors'].pop('ice', None)
     try:
         import re
         text = bodies.get('domestic', '')

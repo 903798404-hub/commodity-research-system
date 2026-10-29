@@ -342,6 +342,7 @@ def test_monthly_capture_exact_available_quotes_and_detect_tampered_evidence(mon
         raise ValueError('CFETS not supplied by this test fixture')
     monkeypatch.setattr(live, 'get_text', source)
     monkeypatch.setattr(runtime, 'deployed', lambda: False)
+    monkeypatch.setattr(runtime, 'daily_close_text', lambda url: pytest.fail('有效最新价不应回退收盘价'))
     snapshot = runtime.capture_monthly_market(day, [dict(ice_contract=ice_code, sr_contract=sr_code)])
     assert snapshot['ice'][ice_code]['price'] == 20.
     assert snapshot['domestic'][sr_code]['price'] == 6000.
@@ -390,6 +391,7 @@ def no_real_yahoo_requests(monkeypatch):
     def unavailable(url):
         raise ValueError('test source unavailable')
     monkeypatch.setattr(runtime, 'yahoo_text', unavailable)
+    monkeypatch.setattr(runtime, 'daily_close_text', unavailable)
 
 
 def test_ice_fallback_preserves_contract_unit_time_and_detects_tampering(monkeypatch):
@@ -423,6 +425,71 @@ def test_ice_fallback_preserves_contract_unit_time_and_detects_tampering(monkeyp
     forged['ice'][code]['raw']['symbol'] = 'SB=F'
     with pytest.raises(ValueError, match='合约'):
         runtime.validate_monthly_market(forged, day)
+
+
+def daily_body(code='SB27H', day='2026-10-27', closing='19.20', volume='81465'):
+    return dict(rc=0, data=dict(code=code, market=108, name='糖11号2703', decimal=2,
+        klines=[f'{day},19.10,{closing},19.42,19.03,{volume},0.00,2.04,0.52,0.10,0.00']))
+
+
+def test_daily_close_asof_excludes_the_unfinished_new_york_session_and_handles_dst():
+    from datetime import datetime
+    now = datetime.fromisoformat('2026-10-28T16:25:17+08:00')
+    item = runtime.eastmoney_daily_close(daily_body(), 'SBH27', now)
+    assert item['price'] == 19.20 and item['quote_date'] == item['quoted_at'] == '2026-10-27'
+    assert item['time_kind'] == 'daily_close'
+    assert 'secid=108.SB27H' in item['source_url'] and 'end=20261027' in item['source_url']
+    with pytest.raises(ValueError, match='尚未收盘'):
+        runtime.eastmoney_daily_close(daily_body(day='2026-10-28'), 'SBH27', now)
+    for stamp, expected in [('2026-10-29T01:29:00+08:00', '20261027'),
+                            ('2026-10-29T01:30:00+08:00', '20261028'),
+                            ('2026-11-03T02:29:00+08:00', '20261101'),
+                            ('2026-11-03T02:30:00+08:00', '20261102')]:
+        assert 'end=' + expected in runtime.daily_close_url('SBH27', datetime.fromisoformat(stamp))
+
+
+@pytest.mark.parametrize('body', [daily_body(code='SB00Y'), daily_body(code='SB27K'),
+    daily_body(day='2026-10-15'), daily_body(volume='0'), daily_body(closing='99'),
+    daily_body(day='2026-10-25'), dict(rc=0, data=None)])
+def test_daily_close_rejects_wrong_contract_stale_untraded_or_invalid_bars(body):
+    from datetime import datetime
+    with pytest.raises(ValueError):
+        runtime.eastmoney_daily_close(body, 'SBH27', datetime.fromisoformat('2026-10-28T16:25:17+08:00'))
+
+
+def test_capture_recovers_missing_latest_using_dated_close_and_verifies_saved_evidence(monkeypatch):
+    from datetime import datetime, timedelta
+    from copy import deepcopy
+    from agri_research_agent.commodity_import_margin import live
+    now = datetime.now(model.TZ)
+    day = now.date()
+    code, sr = model.default_mapping(model.month_periods(day)[0])
+    # Use a completed weekday session that is valid at any time this test runs.
+    closed_day = now.astimezone(__import__('zoneinfo').ZoneInfo('America/New_York')).date() - timedelta(days=1)
+    while closed_day.weekday() >= 5: closed_day -= timedelta(days=1)
+    body = daily_body(code=f'SB{code[-2:]}{code[2]}', day=closed_day.isoformat())
+    primary = dict(dm=f'SB{code[-2:]}{code[2]}', uid=f'NYBOT|SB{code[-2:]}{code[2]}',
+                   p='-', qrspj=19.36, zjsj=19.34, utime=int(now.timestamp()))
+    monkeypatch.setattr(live, 'get_text', lambda url, **k: json.dumps(dict(total=1, list=[primary])) if 'NYBOT' in url else '{}')
+    monkeypatch.setattr(runtime, 'deployed', lambda: False)
+    calls = []
+    monkeypatch.setattr(runtime, 'daily_close_text', lambda url: calls.append(url) or json.dumps(body))
+    snapshot = runtime.capture_monthly_market(day, [dict(ice_contract=code, sr_contract=sr)])
+    assert len(calls) == 1 and snapshot['ice'][code]['price'] == 19.2
+    assert not {'ice', code}.intersection(snapshot['errors'])
+    runtime.validate_monthly_market(snapshot, day)
+    forged = deepcopy(snapshot)
+    forged['ice'][code]['price'] = 19.3
+    with pytest.raises(ValueError, match='凭证'): runtime.validate_monthly_market(forged, day)
+    forged = deepcopy(snapshot)
+    forged['ice'][code]['quote_date'] = day.isoformat()
+    with pytest.raises(ValueError, match='凭证'): runtime.validate_monthly_market(forged, day)
+    payload = monthly_payload(day)
+    payload.update(schema_version=model.RESEARCH_VERSION, parameters=dict(model.RESEARCH_PARAMETERS), market=snapshot)
+    row = next(r for r in model.monthly_rows(payload) if r['ice_contract'] == code)
+    assert row['ice_quote_date'] == closed_day.isoformat() and row['ice_price_kind'] == '收盘价'
+    # Missing FX/domestic prices remain missing even after ICE recovers.
+    assert row['cost_out'] is None and row['margin_out'] is None
 
 
 def test_public_freight_integrity_exact_dates_and_missing_zero(tmp_path):

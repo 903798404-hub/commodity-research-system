@@ -83,6 +83,19 @@ def test_seasonal_alignment_retains_leap_day_and_relative_year(monkeypatch):
     assert _seasonal_x(date(2023, 12, 31), 2024) + 1 == _seasonal_x(date(2024, 1, 1), 2024)
 
 
+def test_monthly_table_and_export_visibly_identify_close_date(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / '05_apps'))
+    from sugar_import_profit_page import monthly_table, monthly_html
+    row = dict(period='2026-11', ice_contract='SBH27', ice=19.2, ice_price_kind='收盘价',
+        ice_quote_date='2026-10-27', quote=-.85, freight=54.5, fx=6.66685, sr_contract='SR2701',
+        sr=5278., cost_in=4000., cost_out=5000., margin_in=1278., margin_out=278.)
+    table = monthly_table([row])
+    assert table.iloc[0]['原糖口径'] == '收盘价' and table.iloc[0]['原糖价格日期'] == '2026-10-27'
+    html = monthly_html([row], day='2026-10-28')
+    assert '收盘价' in html and '2026-10-27' in html and '不代表实时价格' in html
+    assert '2026-10-27' in table.to_csv(index=False)
+
+
 def _seed_public_freight(tmp_path, value=54.):
     import hashlib, json
     from agri_research_agent.sugar_import_profit.freight import SCHEMA, DEFINITION
