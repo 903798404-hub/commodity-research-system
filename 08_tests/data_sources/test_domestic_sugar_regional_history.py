@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import sys
 from pathlib import Path
 
 import openpyxl
@@ -14,6 +15,8 @@ from agri_research_agent.data_sources.domestic_sugar_regional_history import (
 )
 from agri_research_agent.pipelines.domestic_sugar_regional_history import prepare_regional_sugar_history
 
+# Collection can start in this directory before pytest has imported root tests.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 pytest_plugins = ["data_sources.test_domestic_sugar_history"]
 
 
