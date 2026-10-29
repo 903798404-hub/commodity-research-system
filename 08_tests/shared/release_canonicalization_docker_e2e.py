@@ -87,6 +87,37 @@ def recovery_environment(values, old_mounts, recovery_mounts):
     return {key: replacements.get(value, value) for key, value in values.items()}
 
 
+def copy_quiesced_fixture(host, recovery, policy, receipt):
+    """Freeze only the disposable Hosted baseline while native copy checks run.
+
+    Streamlit startup can still create caches after docker start returns. The
+    native copier correctly rejects a changing source; keep that gate intact
+    and quiesce its synthetic writer for the bounded snapshot operation.
+    """
+    assert receipt['evidence_class'] == 'HOSTED_SYNTHETIC_TRUST_NOT_PRODUCTION_REHEARSAL'
+    assert policy['approved_commit'] == receipt['synthetic_commit']
+    cid = policy['recovery']['production_container_id']
+    before = host.docker_inspect(cid)
+    assert before['Image'] == receipt['image_adapter']['image_id']
+    assert before['State']['Running'] is True and before['State']['Paused'] is False
+    identity = recovery.production_identity(host, before)
+    assert identity == policy['recovery']['production_observation_sha256']
+    run('docker', 'pause', cid)
+    try:
+        paused = host.docker_inspect(cid)
+        assert paused['State']['Running'] is True and paused['State']['Paused'] is True
+        assert recovery.production_identity(host, paused) == identity
+        built = recovery.build_sandbox(host, policy)
+    finally:
+        run('docker', 'unpause', cid)
+    after = host.docker_inspect(cid)
+    assert after['State']['Running'] is True and after['State']['Paused'] is False
+    assert recovery.production_identity(host, after) == identity
+    receipt['synthetic_copy_quiescence'] = dict(container_id=cid,
+        paused_during_native_copy=True, resumed=True, identity_unchanged=True)
+    return built
+
+
 def exercise(work, receipt):
     source = work / 'test-source'
     candidate = run('git', '-C', str(ROOT), 'rev-parse', 'HEAD')
@@ -248,7 +279,7 @@ def exercise(work, receipt):
                 uid=UID, gid=GID, mode=0o755) for i, s in enumerate(writable)]))
         projected = recovery.sandbox_mounts(host, recovered, policy, check_files=False)
         recovered['mounts'] = [dict(m, source=str(grants)) if m['target'] == '/run/market-data-grants' else m for m in projected]
-        built = recovery.build_sandbox(host, recovered)
+        built = copy_quiesced_fixture(host, recovery, recovered, receipt)
         recovery_env = work / 'recovery.env'
         recovery_values = recovery_environment(values, policy['mounts'], recovered['mounts'])
         write(recovery_env, ''.join(f'{k}={v}\n' for k, v in recovery_values.items()).encode())
