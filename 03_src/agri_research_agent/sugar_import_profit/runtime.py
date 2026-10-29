@@ -154,12 +154,12 @@ def eastmoney_daily_close(body, code, now):
             candidates.append((day, closing))
     if not candidates: raise ValueError('具体合约最近7天没有有效已收盘成交')
     day, price = max(candidates)
-    return dict(price=price, contract=code, provider='Eastmoney', quoted_at=day.isoformat(),
+    return dict(price=price, contract=code, provider='Eastmoney', quoted_at=day.isoformat(), asof=now.isoformat(),
                 quote_date=day.isoformat(), time_kind='daily_close', source_url=url, raw=body)
 
 
 def validate_monthly_market(value, day):
-    from datetime import datetime
+    from datetime import datetime, timedelta
     import math
     import re
     from .model import TZ
@@ -179,11 +179,6 @@ def validate_monthly_market(value, day):
             if price is None: continue
             if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
                 raise ValueError('行情价格无效')
-            if kind == 'ice' and item.get('time_kind') == 'daily_close':
-                expected_item = eastmoney_daily_close(item.get('raw') or {}, code, captured)
-                if any(item.get(k) != expected_item[k] for k in expected_item):
-                    raise ValueError('原糖收盘价或日期凭证不符')
-                continue
             if kind == 'ice' and item.get('provider') == 'Yahoo Finance':
                 expected_item = yahoo_ice_quote(item.get('raw') or {}, code, captured)
                 if any(item.get(k) != expected_item[k] for k in ('price', 'quoted_at', 'contract', 'source_url', 'time_kind')):
@@ -205,6 +200,17 @@ def validate_monthly_market(value, day):
                 actual_stamp = datetime.strptime(raw[17] + ' ' + raw[1].zfill(6), '%Y-%m-%d %H%M%S').replace(tzinfo=TZ).isoformat()
                 if item.get('quoted_at') != actual_stamp: raise ValueError('郑糖来源时间不符')
             source_time(datetime.fromisoformat(item['quoted_at']), captured)
+    closes = value.get('ice_closes', {})
+    if not isinstance(closes, dict) or set(closes) - set(value['ice']):
+        raise ValueError('原糖收盘价合约集合无效')
+    for code, item in closes.items():
+        if not isinstance(item, dict): raise ValueError('原糖收盘价结构无效')
+        requested = datetime.fromisoformat(item.get('asof', ''))
+        if requested.utcoffset() is None or not timedelta(0) <= captured - requested <= timedelta(minutes=1):
+            raise ValueError('原糖收盘价取价时点无效')
+        expected_item = eastmoney_daily_close(item.get('raw') or {}, code, requested)
+        if any(item.get(k) != expected_item[k] for k in expected_item):
+            raise ValueError('原糖收盘价或日期凭证不符')
     # Reuse palm's validation of CFETS raw spot/swap evidence and tenor policy.
     from agri_research_agent.commodity_import_margin.live import parse_fx
     curve, _, _ = parse_fx(value.get('fx_raw', {}), captured)
@@ -271,15 +277,18 @@ def capture_monthly_market(day, quotes):
             except (ValueError, TypeError, KeyError, IndexError, OverflowError):
                 result['errors'][code] = '原糖具体合约两来源均无有效报价，留空'
     missing_ice = [c for c in ice_codes if result['ice'][c]['price'] is None]
+    close_asof = datetime.now(TZ)
     with ThreadPoolExecutor(max_workers=5) as pool:
-        jobs = {c: pool.submit(daily_close_text, daily_close_url(c, datetime.now(TZ))) for c in missing_ice}
+        jobs = {c: pool.submit(daily_close_text, daily_close_url(c, close_asof)) for c in missing_ice}
         for code, job in jobs.items():
             try:
-                result['ice'][code] = eastmoney_daily_close(json.loads(job.result()), code, datetime.now(TZ))
+                # Keep the original latest-price slot readable by retained images.
+                result.setdefault('ice_closes', {})[code] = eastmoney_daily_close(json.loads(job.result()), code, close_asof)
                 result['errors'].pop(code, None)
             except (ValueError, TypeError, KeyError, IndexError, OverflowError, AttributeError):
                 result['errors'][code] = '原糖最新价及最近7天具体合约收盘价均不可用，留空'
-    if all(result['ice'][c]['price'] is not None for c in ice_codes):
+    from .model import ice_quote
+    if all(ice_quote(result, c).get('price') is not None for c in ice_codes):
         result['errors'].pop('ice', None)
     try:
         import re

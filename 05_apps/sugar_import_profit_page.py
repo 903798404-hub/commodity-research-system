@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from computation_cache import cache_computation
-from agri_research_agent.sugar_import_profit.model import COUNTRIES, LABELS, today
+from agri_research_agent.sugar_import_profit.model import COUNTRIES, LABELS, today, ice_quote
 from agri_research_agent.sugar_import_profit.runtime import storage_context
 from agri_research_agent.sugar_import_profit.store import Store
 
@@ -207,7 +207,8 @@ def _monthly(store, enabled, freight_root=None):
         if market:
             st.caption('获取时间：' + market['captured_at'] + '；报价最多7天。原糖收盘价标注实际交易日；原糖最新价时间为供应商更新时间。')
             for kind in ('ice', 'domestic'):
-                st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 价格口径='收盘价' if r.get('time_kind') == 'daily_close' else '最新价', 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in market[kind].items()]), hide_index=True)
+                items = {c: ice_quote(market, c) for c in market[kind]} if kind == 'ice' else market[kind]
+                st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 价格口径='收盘价' if r.get('time_kind') == 'daily_close' else '最新价', 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in items.items()]), hide_index=True)
             if market['errors']: st.warning('；'.join(f'{c}: {e}' for c, e in market['errors'].items()))
             st.json(dict(在岸汇率曲线=market['fx_curve'], CFETS原始凭证=market['fx_raw']))
         else: st.info('尚无当日已存或新获取的行情；历史日期不获取当前价格。')
