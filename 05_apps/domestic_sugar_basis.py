@@ -14,6 +14,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from agri_research_agent.data_sources.domestic_sugar_history import (
     SugarHistorySnapshot, file_sha256, load_sugar_history, resolve_sugar_history,
 )
+from domestic_sugar_regional_basis import render_regional_sugar_history
 
 
 @st.cache_data(show_spinner=False)
@@ -164,6 +165,7 @@ def render_sugar_history(snapshot: SugarHistorySnapshot, *, year_colors: dict[in
     st.caption("现货和主力按自然年；固定 01/05/09 合约按上年下一月至交割月排列。所有曲线使用完整日数据。")
     if not selected:
         st.info("请选择至少一个对比年份。")
+        render_regional_sugar_history(missing_trading_days=missing_trading_days)
         return
     columns = st.columns(2)
     for index, (kind, title) in enumerate((("spot", "柳州现货季节性"), ("01", "柳州 SR01 基差"), ("05", "柳州 SR05 基差"), ("09", "柳州 SR09 基差"), ("main", "柳州主力基差（辅助）"))):
@@ -175,3 +177,4 @@ def render_sugar_history(snapshot: SugarHistorySnapshot, *, year_colors: dict[in
         st.write("另一条一级糖含税车板价独立保存，不与主序列拼接。期货来自已确认的Tushare兼容网关，使用close而非settle或复权价。")
         st.write("主力依据SR.ZCE实际合约映射，保留换月跳变；历史中03、07月主力使用对应原始行情。")
         st.write("当前为一次性历史快照，尚未开启自动更新。")
+    render_regional_sugar_history(missing_trading_days=missing_trading_days)

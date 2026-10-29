@@ -635,6 +635,10 @@ modules:
     full_regression_when_changed: false
   market_data.domestic_basis:
     code_paths:
+      - 03_src/agri_research_agent/data_sources/domestic_sugar_regional_history.py
+      - 03_src/agri_research_agent/pipelines/domestic_sugar_regional_history.py
+      - 04_scripts/prepare_domestic_sugar_regional_history.py
+      - 05_apps/domestic_sugar_regional_basis.py
       - 03_src/agri_research_agent/data_sources/domestic_sugar_history.py
       - 03_src/agri_research_agent/pipelines/domestic_sugar_history.py
       - 04_scripts/prepare_domestic_sugar_history.py
@@ -657,6 +661,8 @@ modules:
       - 05_apps/research_overview_page.py
       - 05_apps/streamlit_app.py
     direct_tests:
+      - 08_tests/data_sources/test_domestic_sugar_regional_history.py
+      - 08_tests/test_domestic_sugar_regional_basis_page.py
       - 08_tests/data_sources/test_domestic_sugar_history.py
       - 08_tests/test_domestic_sugar_basis_page.py
       - 08_tests/market_data/test_basis_contract.py
