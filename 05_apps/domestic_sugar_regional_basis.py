@@ -41,6 +41,7 @@ def load_regional_page_data(root: Path) -> RegionalSugarHistory:
 def build_regional_basis_figure(daily: pd.DataFrame, *, missing_trading_days) -> Figure:
     figure = Figure(figsize=(12, 4.2), dpi=120); FigureCanvasAgg(figure)
     axis = figure.subplots()
+    endpoints = []
     for region in REGIONS:
         selected = daily.loc[daily.region.eq(region)].sort_values("business_date")
         xs, ys = [], []; previous = None
@@ -52,6 +53,12 @@ def build_regional_basis_figure(daily: pd.DataFrame, *, missing_trading_days) ->
             previous = row.business_date
         axis.plot(xs, ys, label=region, color=REGION_COLORS[region], linewidth=1.6,
                   linestyle="--" if region == "乌鲁木齐" else "-")
+        valid = selected.loc[selected.basis.notna()]
+        if not valid.empty:
+            latest = valid.iloc[-1]
+            endpoints.append((region, latest.business_date, float(latest.basis)))
+            axis.scatter([latest.business_date], [latest.basis], s=16,
+                         color=REGION_COLORS[region], zorder=4, clip_on=False)
     axis.axhline(0, color="#333333", linewidth=.9)
     axis.set_ylabel("基差（元/吨）", fontsize=10)
     axis.grid(True, color=GRID_COLOR, linewidth=.6)
@@ -65,7 +72,28 @@ def build_regional_basis_figure(daily: pd.DataFrame, *, missing_trading_days) ->
         first, last = daily.business_date.min(), daily.business_date.max()
         if first < last:
             axis.set_xlim(first, last)
-    figure.tight_layout()
+    figure.tight_layout(rect=(0, 0, .87, 1))
+    if endpoints:
+        latest_date = max(date for _, date, _ in endpoints)
+        axis.text(1, 1.025, f"最新有效值：{latest_date:%Y年%m月%d日}",
+                  transform=axis.transAxes, ha="right", va="bottom", fontsize=8, color=MEAN_COLOR)
+        # Space labels vertically while leaders still point to each actual dated observation.
+        ordered = sorted(endpoints, key=lambda item: item[2])
+        lower, upper = axis.get_ylim()
+        spacing = .10 if any(date != latest_date for _, date, _ in ordered) else .07
+        positions = []
+        for _, _, value in ordered:
+            desired = max(.06, (value - lower) / (upper - lower))
+            positions.append(max(desired, positions[-1] + spacing) if positions else desired)
+        shift = max(0, positions[-1] - .94)
+        for (region, date, value), position in zip(ordered, positions):
+            label = f"{region} {value:+,.0f}"
+            if date != latest_date:
+                label += f"\n{date:%Y年%m月%d日}"
+            axis.annotate(label, xy=(date, value), xytext=(1.015, position - shift),
+                          textcoords=axis.transAxes, ha="left", va="center", fontsize=9,
+                          color=REGION_COLORS[region], annotation_clip=False,
+                          arrowprops=dict(arrowstyle="-", color=REGION_COLORS[region], lw=.7))
     return figure
 
 

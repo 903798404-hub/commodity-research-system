@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.text import Annotation
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
@@ -26,6 +27,26 @@ def test_chart_has_three_stable_regions_real_dates_and_zero_line(regional_root):
     assert all(pd.Timestamp(line.get_xdata()[0]).year == 2023 for line in lines)
     assert all(pd.isna(line.get_ydata()[-1]) for line in lines)  # Future pairing absent, not carried forward.
     assert any(list(line.get_ydata()) == [0, 0] for line in axis.lines if line.get_label() not in REGIONS)
+    fig.canvas.draw(); plt.close(fig)
+
+
+def test_endpoint_labels_use_latest_valid_values_and_separate_close_labels(regional_root):
+    daily = load_regional_history(regional_root).daily
+    # Missing latest prices must not be labelled as today's zero or carried forward.
+    daily.loc[daily.region.eq("乌鲁木齐") & daily.business_date.eq("2026-10-09"), "basis"] = float("nan")
+    daily.loc[daily.region.eq("昆明") & daily.business_date.eq("2026-10-09"), "basis"] = -210
+    fig = build_regional_basis_figure(daily, missing_trading_days=missing_trading_days_between)
+    labels = [item for item in fig.axes[0].texts if isinstance(item, Annotation)]
+    assert len(labels) == 3
+    positions = sorted(item.get_position()[1] for item in labels)
+    assert min(b - a for a, b in zip(positions, positions[1:])) >= .099
+    for region in REGIONS:
+        latest = daily.loc[daily.region.eq(region) & daily.basis.notna()].iloc[-1]
+        label = next(item for item in labels if item.get_text().startswith(region))
+        assert label.xy == (latest.business_date, latest.basis)
+        assert label.get_text().startswith(f"{region} {latest.basis:+,.0f}")
+        if region == "乌鲁木齐":
+            assert latest.business_date.strftime("%Y年%m月%d日") in label.get_text()
     fig.canvas.draw(); plt.close(fig)
 
 
