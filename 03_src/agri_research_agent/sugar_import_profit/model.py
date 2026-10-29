@@ -103,6 +103,12 @@ def default_mapping(period):
     return f'SB{MONTH_CODES[ice_month]}{ice_year % 100:02}', f'SR{sr_year % 100:02}{sr_month:02}'
 
 
+def ice_quote(market, code):
+    """Old readers retain the original nullable latest quote; closes are additive evidence."""
+    latest = market.get('ice', {}).get(code) or {}
+    return latest if latest.get('price') is not None else market.get('ice_closes', {}).get(code) or latest
+
+
 def monthly_rows(payload):
     """Partial calculation: actual margins require insurance; estimates name the omission."""
     market, params = payload.get('market') or {}, payload['parameters']
@@ -116,7 +122,7 @@ def monthly_rows(payload):
         tenor = (year - day.year) * 12 + month - day.month
         from agri_research_agent.commodity_import_margin.model import select_fx
         fx = select_fx(market.get('fx_curve', {}), tenor)[0]
-        ice_item = market.get('ice', {}).get(r['ice_contract']) or {}
+        ice_item = ice_quote(market, r['ice_contract'])
         ice = ice_item.get('price')
         r['ice_price_kind'] = ('收盘价' if ice_item.get('time_kind') == 'daily_close' else '最新价') if ice is not None else ''
         r['ice_quote_date'] = (ice_item.get('quote_date') or ice_item.get('quoted_at') or '')[:10]

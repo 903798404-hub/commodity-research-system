@@ -457,7 +457,20 @@ def test_daily_close_rejects_wrong_contract_stale_untraded_or_invalid_bars(body)
         runtime.eastmoney_daily_close(body, 'SBH27', datetime.fromisoformat('2026-10-28T16:25:17+08:00'))
 
 
-def test_capture_recovers_missing_latest_using_dated_close_and_verifies_saved_evidence(monkeypatch):
+def test_daily_close_cutoff_is_bound_to_request_across_the_close_boundary():
+    from datetime import datetime
+    requested = datetime.fromisoformat('2026-10-29T01:29:59+08:00')
+    captured = datetime.fromisoformat('2026-10-29T01:30:01+08:00')
+    value = dict(schema_version='sugar-monthly-market/1', date='2026-10-29', captured_at=captured.isoformat(),
+        units=dict(ice='US_cents/lb', domestic='CNY/tonne', fx='CNY_per_USD'),
+        ice={'SBH27':dict(price=None)}, domestic={}, fx_raw={}, fx_curve={}, errors={},
+        ice_closes={'SBH27':runtime.eastmoney_daily_close(daily_body(), 'SBH27', requested)})
+    runtime.validate_monthly_market(value, captured.date())
+    value['ice_closes']['SBH27']['asof'] = '2026-10-29T01:30:02+08:00'
+    with pytest.raises(ValueError, match='取价时点'): runtime.validate_monthly_market(value, captured.date())
+
+
+def test_capture_recovers_missing_latest_using_dated_close_and_verifies_saved_evidence(monkeypatch, tmp_path):
     from datetime import datetime, timedelta
     from copy import deepcopy
     from agri_research_agent.commodity_import_margin import live
@@ -475,14 +488,15 @@ def test_capture_recovers_missing_latest_using_dated_close_and_verifies_saved_ev
     calls = []
     monkeypatch.setattr(runtime, 'daily_close_text', lambda url: calls.append(url) or json.dumps(body))
     snapshot = runtime.capture_monthly_market(day, [dict(ice_contract=code, sr_contract=sr)])
-    assert len(calls) == 1 and snapshot['ice'][code]['price'] == 19.2
+    assert len(calls) == 1 and snapshot['ice_closes'][code]['price'] == 19.2
+    assert snapshot['ice'][code]['price'] is None  # retained readers still accept the original snapshot
     assert not {'ice', code}.intersection(snapshot['errors'])
     runtime.validate_monthly_market(snapshot, day)
     forged = deepcopy(snapshot)
-    forged['ice'][code]['price'] = 19.3
+    forged['ice_closes'][code]['price'] = 19.3
     with pytest.raises(ValueError, match='凭证'): runtime.validate_monthly_market(forged, day)
     forged = deepcopy(snapshot)
-    forged['ice'][code]['quote_date'] = day.isoformat()
+    forged['ice_closes'][code]['quote_date'] = day.isoformat()
     with pytest.raises(ValueError, match='凭证'): runtime.validate_monthly_market(forged, day)
     payload = monthly_payload(day)
     payload.update(schema_version=model.RESEARCH_VERSION, parameters=dict(model.RESEARCH_PARAMETERS), market=snapshot)
@@ -490,6 +504,11 @@ def test_capture_recovers_missing_latest_using_dated_close_and_verifies_saved_ev
     assert row['ice_quote_date'] == closed_day.isoformat() and row['ice_price_kind'] == '收盘价'
     # Missing FX/domestic prices remain missing even after ICE recovers.
     assert row['cost_out'] is None and row['margin_out'] is None
+    store = Store(tmp_path / 'daily-close.sqlite3', lambda _: None)
+    version = store.save_monthly(payload, expected_version=None)
+    assert store.monthly_records()[0]['payload']['market'] == snapshot
+    assert store.save_monthly(payload, expected_version=version) == version
+    assert model.ice_quote(dict(ice={code:dict(price=20.)}, ice_closes=snapshot['ice_closes']), code)['price'] == 20.
 
 
 def test_public_freight_integrity_exact_dates_and_missing_zero(tmp_path):
