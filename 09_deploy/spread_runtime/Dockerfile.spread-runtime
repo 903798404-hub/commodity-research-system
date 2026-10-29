@@ -33,6 +33,8 @@ COPY ["03_src/agri_research_agent/monitoring/__init__.py", "03_src/agri_research
 COPY ["04_scripts/monitoring/observe_pages.py", "/app/04_scripts/monitoring/"]
 COPY ["05_apps/page_monitor_page.py", "/app/05_apps/"]
 COPY ["05_apps/computation_cache.py", "/app/05_apps/"]
+COPY ["05_apps/domestic_sugar_regional_basis.py", "/app/05_apps/"]
+COPY ["03_src/agri_research_agent/data_sources/domestic_sugar_regional_history.py", "/app/03_src/agri_research_agent/data_sources/"]
 COPY ["02_configs/conab_growth_glyphs.json", "/app/02_configs/"]
 COPY ["03_src/agri_research_agent/pipelines/brazil_soy_update.py", "03_src/agri_research_agent/pipelines/brazil_soy_scheduled.py", "03_src/agri_research_agent/pipelines/conab_growth_chart.py", "/app/03_src/agri_research_agent/pipelines/"]
 COPY ["03_src/agri_research_agent/soybean_exports/fgis_server.py", "/app/03_src/agri_research_agent/soybean_exports/"]
