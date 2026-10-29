@@ -160,6 +160,17 @@ def test_timer_migration_preserves_unrelated_sections_comments_and_final_newline
     assert result==original.removesuffix('original.service')+'market-data-task-enqueue@fgis.service'
 
 
+def test_dispatcher_retains_real_service_observations_without_starting_producers():
+    units=queue.render_units('/opt/market-data/source','/etc/market-data/task-dispatcher/accepted.json')
+    keep=units['market-data-task-observations.target']
+    assert keep.splitlines()==['[Unit]','Description=Retain original task execution observations','After='+' '.join(queue.SERVICES.values())]
+    assert 'Requires=' not in keep and 'Wants=' not in keep and 'ExecStart=' not in keep
+    controller=units['market-data-task-dispatcher.service']
+    assert 'Requires=docker.service market-data-task-observations.target\n' in controller
+    assert 'After=docker.service market-data-task-observations.target\n' in controller
+    assert all(name not in controller for name in queue.SERVICES.values())
+
+
 def test_daily_retry_budget_resets_on_beijing_day_without_ignoring_cooldown():
     state=queue.empty_state(queue.SERVICES);row=state['jobs']['fgis']
     row['retries']={'day':'2026-10-28','attempts':3,'reserved_at':'2026-10-28T15:30:00+00:00'}
