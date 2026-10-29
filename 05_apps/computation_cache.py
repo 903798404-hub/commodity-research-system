@@ -253,7 +253,12 @@ def _derived_key(function,args,kwargs):
     context=None
     if original.__module__=='basis_page' and original.__name__=='cached_seasonal_report_image':
         import matplotlib as mpl
-        context=dict(mpl.rcParams);context['backend']=mpl.get_backend()
+        context=dict(mpl.rcParams)
+        backend=mpl.get_backend()
+        # Cold Streamlit script threads select "Agg", while the bare worker
+        # selects "agg". Only this known alias names the same renderer; retain
+        # every other backend and rcParam distinction in the identity.
+        context['backend']='agg' if backend.casefold()=='agg' else backend
     elif original.__module__=='agri_research_agent.pipelines.brazil_soy' and original.__name__=='seasonal_figure':
         import plotly.io as pio
         name=pio.templates.default

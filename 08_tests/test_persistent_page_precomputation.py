@@ -200,6 +200,49 @@ def test_derived_png_identity_includes_original_matplotlib_style():
         assert cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})!=first
 
 
+def test_agg_case_alias_reuses_png_identity_but_keeps_other_render_dependencies():
+    import basis_page as basis
+    import matplotlib as mpl
+    frame=pd.DataFrame({'value':[0,1.]})
+    previous=mpl.rcParams['backend']
+    try:
+        mpl.rcParams['backend']='agg'
+        first=cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})
+        mpl.rcParams['backend']='Agg'
+        assert cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})==first
+        with mpl.rc_context({'backend_fallback':not mpl.rcParams['backend_fallback']}):
+            assert cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})!=first
+        mpl.rcParams['backend']='svg'
+        assert cache._derived_key(basis.cached_seasonal_report_image,(frame,),{})!=first
+    finally:
+        mpl.rcParams['backend']=previous
+
+
+def test_agg_alias_preserves_original_png_bytes_and_recorded_result_lookup(tmp_path):
+    import inspect
+    import basis_page as basis
+    import matplotlib as mpl
+    frame=pd.DataFrame({'date':pd.to_datetime(['2026-10-22','2026-10-23']),
+                        'basis':[0.,12.]})
+    options=dict(value_col='basis',title='原口径',years=(2026,),zero_line=True,
+                 trading_calendar_bytes=b'unchanged calendar dependency')
+    original=inspect.unwrap(basis.cached_seasonal_report_image)
+    previous=mpl.rcParams['backend']
+    try:
+        mpl.rcParams['backend']='agg'
+        worker_key=cache._derived_key(original,(frame,),options)
+        worker_png=original(frame,**options)
+        path=tmp_path/(worker_key+'.json')
+        cache._record_derived(path,IMAGE,worker_key,worker_png)
+        mpl.rcParams['backend']='Agg'
+        website_key=cache._derived_key(original,(frame,),options)
+        website_png=original(frame,**options)
+        assert website_key==worker_key and website_png==worker_png
+        assert cache._parse_derived(path.read_bytes(),IMAGE,website_key)==website_png
+    finally:
+        mpl.rcParams['backend']=previous
+
+
 def test_derived_brazil_identity_includes_current_plotly_template():
     from agri_research_agent.pipelines.brazil_soy import seasonal_figure
     import plotly.io as pio
