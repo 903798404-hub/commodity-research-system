@@ -58,7 +58,7 @@ def build_regional_basis_figure(daily: pd.DataFrame, *, missing_trading_days) ->
     axis.spines[["top", "right"]].set_visible(False)
     locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
     axis.xaxis.set_major_locator(locator)
-    axis.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    axis.xaxis.set_major_formatter(mdates.DateFormatter("%Y年%m月"))
     axis.legend(loc="upper left", bbox_to_anchor=(0, 1.12), ncol=3, frameon=False, fontsize=10)
     axis.tick_params(labelsize=9)
     if not daily.empty:
