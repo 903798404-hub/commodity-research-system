@@ -116,7 +116,10 @@ def monthly_rows(payload):
         tenor = (year - day.year) * 12 + month - day.month
         from agri_research_agent.commodity_import_margin.model import select_fx
         fx = select_fx(market.get('fx_curve', {}), tenor)[0]
-        ice = (market.get('ice', {}).get(r['ice_contract']) or {}).get('price')
+        ice_item = market.get('ice', {}).get(r['ice_contract']) or {}
+        ice = ice_item.get('price')
+        r['ice_price_kind'] = ('收盘价' if ice_item.get('time_kind') == 'daily_close' else '最新价') if ice is not None else ''
+        r['ice_quote_date'] = (ice_item.get('quote_date') or ice_item.get('quoted_at') or '')[:10]
         sr = (market.get('domestic', {}).get(r['sr_contract']) or {}).get('price')
         quote, mode = r['quote'], payload['quote_mode']
         cfr = None

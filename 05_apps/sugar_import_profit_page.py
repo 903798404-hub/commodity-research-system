@@ -44,7 +44,8 @@ def _freight_source(row):
 
 def monthly_table(rows):
     return pd.DataFrame([dict(船期=r['period'], 原糖合约=r['ice_contract'],
-        原糖价格=r['ice'], 升贴水=r['quote'], 海运费=r['freight'], 汇率=r['fx'],
+        原糖价格=r['ice'], 原糖口径=r.get('ice_price_kind', ''), 原糖价格日期=r.get('ice_quote_date', ''),
+        升贴水=r['quote'], 海运费=r['freight'], 汇率=r['fx'],
         郑糖合约=r['sr_contract'], 郑糖价格=r['sr'], 配额内成本=r['cost_in'],
         配额外成本=r['cost_out'], 配额内进口利润=r['margin_in'], 配额外进口利润=r['margin_out'])
         for r in rows]).rename(columns={'原糖价格':'原糖（美分/磅）', '升贴水':'升贴水（美分/磅）',
@@ -67,7 +68,7 @@ def monthly_html(rows, country='巴西', day=''):
             else: text = _cell(value, profit='利润' in key)
             cells.append('<td>' + text + '</td>')
         result += '<tr>' + ''.join(cells) + '</tr>'
-    return result + '</tbody></table></div><footer>原糖与升贴水：美分/磅；海运费：美元/吨；成本、利润：元/吨。进口利润 = 对应郑糖合约价格 − 进口加工后成本。<br>保险、利息、手续费、税率与加工费见下方固定参数；缺少报价或具体合约行情时留空。</footer></section>'
+    return result + '</tbody></table></div><footer>原糖与升贴水：美分/磅；海运费：美元/吨；成本、利润：元/吨。进口利润 = 对应郑糖合约价格 − 进口加工后成本。<br>原糖最新价不可用时采用同一合约最近7天已收盘日线，实际交易日见“原糖价格日期”；收盘价不代表实时价格。<br>保险、利息、手续费、税率与加工费见下方固定参数；缺少报价或具体合约行情时留空。</footer></section>'
 
 
 def _freight_grid(rows):
@@ -204,9 +205,9 @@ def _monthly(store, enabled, freight_root=None):
     market = payload['market']
     with st.expander('行情时间、来源与缺失原因'):
         if market:
-            st.caption('获取时间：' + market['captured_at'] + '；来源最新可用报价，最多7天；原糖时间为供应商更新时间。')
+            st.caption('获取时间：' + market['captured_at'] + '；报价最多7天。原糖收盘价标注实际交易日；原糖最新价时间为供应商更新时间。')
             for kind in ('ice', 'domestic'):
-                st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in market[kind].items()]), hide_index=True)
+                st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 价格口径='收盘价' if r.get('time_kind') == 'daily_close' else '最新价', 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in market[kind].items()]), hide_index=True)
             if market['errors']: st.warning('；'.join(f'{c}: {e}' for c, e in market['errors'].items()))
             st.json(dict(在岸汇率曲线=market['fx_curve'], CFETS原始凭证=market['fx_raw']))
         else: st.info('尚无当日已存或新获取的行情；历史日期不获取当前价格。')
