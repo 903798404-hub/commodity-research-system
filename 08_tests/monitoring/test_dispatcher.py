@@ -133,11 +133,31 @@ def test_quarantine_and_rebind_events_are_deduplicated_without_claiming_data_rec
 
 
 def test_timer_migration_changes_target_only_without_inventing_a_calendar():
+    original='[Unit]\r\nDescription=原更新入口\r\n[Timer]\r\n# 原始日历\r\nOnCalendar=*-*-* 08:30:00 Asia/Shanghai\r\nPersistent=true\r\nAccuracySec=1s\r\n Unit = original.service \r\n[Install]\r\nWantedBy=timers.target\r\n'
     for job in queue.JOBS:
-        text=queue.timer_dropin(job)
-        assert text=='[Timer]\nUnit=market-data-task-enqueue@'+job+'.service\n'
-        assert 'OnCalendar' not in text
-    with pytest.raises(ValueError):queue.timer_dropin('weather_USA')
+        text=queue.retarget_timer_unit(original,job)
+        assert text.replace('market-data-task-enqueue@'+job+'.service','original.service')==original
+        assert text.count('Unit = ')==1
+    with pytest.raises(ValueError):queue.retarget_timer_unit(original,'weather_USA')
+
+
+@pytest.mark.parametrize('original',[
+    '[Timer]\nOnCalendar=daily\n',
+    '[Timer]\nUnit=one.service\nUnit=two.service\n',
+    '[Timer]\nUnit=one.service\n[Timer]\nOnCalendar=daily\n',
+    '[Service]\nUnit=one.service\n',
+    '[Timer]\nUnit=one.service two.service\n',
+    '[Timer]\nUnit=../one.service\n',
+    '[Timer]\nUnit=one.service\x00\n',
+])
+def test_timer_migration_rejects_ambiguous_or_invalid_fragments(original):
+    with pytest.raises(ValueError):queue.retarget_timer_unit(original,'fgis')
+
+
+def test_timer_migration_preserves_unrelated_sections_comments_and_final_newline():
+    original='[Unit]\n# Unit=comment.service\nDescription=unchanged\n[Timer]\nOnCalendar=Tue..Fri *-*-* 07:15:00 Asia/Shanghai\nPersistent=yes\nUnit=original.service'
+    result=queue.retarget_timer_unit(original,'fgis')
+    assert result==original.removesuffix('original.service')+'market-data-task-enqueue@fgis.service'
 
 
 def test_daily_retry_budget_resets_on_beijing_day_without_ignoring_cooldown():

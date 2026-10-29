@@ -50,9 +50,30 @@ def render_units(source,config):
     return {'market-data-task-dispatcher.service':service,'market-data-task-dispatcher.timer':timer,'market-data-task-enqueue@.service':enqueue}
 
 
-def timer_dropin(job):
+def retarget_timer_unit(original,job):
+    """Replace the sole explicit timer target, preserving all other bytes.
+
+    systemd249 ignores a second Unit=, even an empty reset in a drop-in.
+    Operators must back up and atomically replace the original fragment, then
+    verify its actual target, calendar and persistent trigger history.
+    """
     if job not in SERVICES:raise ValueError('Unknown queue task')
-    return '[Timer]\nUnit=market-data-task-enqueue@'+job+'.service\n'
+    if not isinstance(original,str) or '\x00' in original:raise ValueError('Invalid timer fragment')
+    lines=original.splitlines(keepends=True);section=None;targets=[];timer_sections=0
+    for index,line in enumerate(lines):
+        value=line.strip()
+        if not value or value.startswith(('#',';')):continue
+        if value.startswith('[') and value.endswith(']'):
+            section=value
+            if section=='[Timer]':timer_sections+=1
+        elif section=='[Timer]' and re.match(r'Unit\s*=',value):
+            match=re.fullmatch(r'(\s*Unit\s*=\s*)([A-Za-z0-9_@.:-]+\.service)([ \t]*)(\r?\n)?',line)
+            if not match:raise ValueError('Invalid explicit timer target')
+            targets.append((index,match))
+    if timer_sections!=1 or len(targets)!=1:raise ValueError('Ambiguous or missing timer target')
+    index,match=targets[0]
+    lines[index]=match[1]+'market-data-task-enqueue@'+job+'.service'+match[3]+(match[4] or '')
+    return ''.join(lines)
 
 
 def empty_state(jobs):
