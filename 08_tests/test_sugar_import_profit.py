@@ -656,3 +656,62 @@ def test_freight_carry_manual_zero_clear_and_original_date_survive_repeat_saves(
     assert freight_default([], records, '2026-10-28', '泰国', '2027-01')[0] is None
     assert freight_default([], records, '2026-10-28', '巴西', '2028-01')[0] is None
     assert records == before
+
+
+def historical_evidence():
+    """The later retrieval includes a US session unavailable on the Chinese quote date."""
+    from datetime import datetime
+    return dict(schema_version='sugar-historical-close/1', date='2026-10-29',
+        retrieved_at='2026-10-30T16:00:00+08:00', fx_policy='ECB_SPOT_ESTIMATE', spot_estimate_authorized=True,
+        ice={'SBH27':dict(source_url=runtime.daily_close_url('SBH27', datetime.fromisoformat('2026-10-30T08:00:00+08:00')),
+            raw=dict(rc=0,data=dict(code='SB27H',market=108,decimal=2,name='糖11号2703',klines=[
+                '2026-10-28,19.31,19.36,19.51,19.20,78081,0,0,0,0,0',
+                '2026-10-29,19.39,19.52,19.80,19.34,64696,0,0,0,0,0'])))},
+        domestic={'SR2701':dict(source_url='https://stock2.finance.sina.com.cn/futures/api/json.php/InnerFuturesNewService.getDailyKLine?symbol=SR2701',
+            raw=dict(d='2026-10-29',o='5278',h='5285',l='5249',c='5267',v='262225',s='5267'))},
+        fx=dict(source_url='https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml',
+            raw_xml='<Envelope xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref"><Cube><Cube time="2026-10-29"><Cube currency="USD" rate="1.113"/><Cube currency="CNY" rate="7.4144"/></Cube></Cube></Envelope>'))
+
+
+def test_historical_close_uses_available_session_and_actual_retrieval_preserving_nulls_and_cas(tmp_path):
+    from copy import deepcopy
+    h=historical_evidence()
+    market=runtime.historical_market(h,date(2026,10,29))
+    assert model.ice_quote(market,'SBH27')['price']==19.36
+    assert model.ice_quote(market,'SBH27')['quote_date']=='2026-10-28'
+    assert market['captured_at']=='2026-10-30T16:00:00+08:00'
+    payload=monthly_payload(date(2026,10,29))
+    payload.update(schema_version=model.RESEARCH_VERSION,parameters=dict(model.RESEARCH_PARAMETERS),market=None,historical_market=h)
+    for r in payload['quotes']:
+        r.update(quote=None,freight=None)
+    next(r for r in payload['quotes'] if r['period']=='2026-11').update(quote=0.,freight=54.5)
+    original=deepcopy(payload)
+    rows=model.monthly_rows(model.validate_monthly(payload))
+    first=rows[0]
+    assert first['fx']==pytest.approx(7.4144/1.113) and first['fx_kind']=='即期汇率估算'
+    assert first['sr']==5267. and first['sr_price_kind']=='收盘价' and first['sr_quote_date']=='2026-10-29'
+    assert first['margin_out'] is not None and all(r['margin_out'] is None for r in rows[1:])
+    assert payload==original  # Never fabricate or mutate the saved raw documents.
+    store=Store(tmp_path/'history.sqlite3',lambda _:None)
+    version=store.save_monthly(payload,expected_version=None)
+    assert store.monthly_records()[0]['payload']==payload
+    assert store.save_monthly(payload,expected_version=version)==version
+    with pytest.raises(ValueError,match='另一会话'):store.save_monthly(payload,expected_version=None)
+    payload['market']={}
+    with pytest.raises(ValueError,match='混用'):model.validate_monthly(payload)
+
+
+@pytest.mark.parametrize('change',[
+    lambda h:h.update(spot_estimate_authorized=False),
+    lambda h:h.update(date='2026-10-28'),
+    lambda h:h.update(retrieved_at='2026-10-28T12:00:00+08:00'),
+    lambda h:h['ice']['SBH27']['raw']['data'].update(code='SB27K'),
+    lambda h:h['ice']['SBH27']['raw']['data'].update(klines=['2026-10-29,19.39,19.52,19.80,19.34,64696,0,0,0,0,0']),
+    lambda h:h['domestic']['SR2701']['raw'].update(d='2026-10-30'),
+    lambda h:h['domestic']['SR2701']['raw'].update(c='9000'),
+    lambda h:h['fx'].update(raw_xml=historical_evidence()['fx']['raw_xml'].replace('2026-10-29','2026-10-28')),
+    lambda h:h['fx'].update(raw_xml=historical_evidence()['fx']['raw_xml'].replace('7.4144','NaN')),
+])
+def test_historical_evidence_rejects_wrong_dates_contracts_prices_or_missing_consent(change):
+    h=historical_evidence();change(h)
+    with pytest.raises((ValueError,KeyError)):runtime.historical_market(h,date(2026,10,29))

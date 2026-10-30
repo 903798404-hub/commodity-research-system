@@ -48,8 +48,8 @@ def _freight_source(row):
 def monthly_table(rows):
     return pd.DataFrame([dict(船期=r['period'], 原糖合约=r['ice_contract'],
         原糖价格=r['ice'], 原糖口径=r.get('ice_price_kind', ''), 原糖价格日期=r.get('ice_quote_date', ''),
-        升贴水=r['quote'], 海运费=r['freight'], 汇率=r['fx'],
-        郑糖合约=r['sr_contract'], 郑糖价格=r['sr'], 配额内成本=r['cost_in'],
+        升贴水=r['quote'], 海运费=r['freight'], 汇率=r['fx'], 汇率口径=r.get('fx_kind', ''), 汇率日期=r.get('fx_quote_date', ''),
+        郑糖合约=r['sr_contract'], 郑糖价格=r['sr'], 郑糖口径=r.get('sr_price_kind', ''), 郑糖日期=r.get('sr_quote_date', ''), 配额内成本=r['cost_in'],
         配额外成本=r['cost_out'], 配额内进口利润=r['margin_in'], 配额外进口利润=r['margin_out'])
         for r in rows]).rename(columns={'原糖价格':'原糖（美分/磅）', '升贴水':'升贴水（美分/磅）',
         '海运费':'海运费（美元/吨）', '郑糖价格':'郑糖（元/吨）'})
@@ -181,6 +181,8 @@ def _monthly(store, enabled, freight_root=None):
         source = st.text_area('报价备注（选填）', initial['source'], key=key + ':source')
     payload = dict(schema_version=RESEARCH_VERSION, date=day.isoformat(), country=country, quote_mode=mode,
                    source=source or '人工录入升贴水及海运费', parameters=params, quotes=quotes, market=st.session_state[key + ':market'])
+    if initial.get('historical_market') is not None and payload['market'] is None:
+        payload['historical_market'] = initial['historical_market']
     # Validation before any network request prevents malformed user-controlled symbols.
     try:
         validate_monthly(dict(payload, source=source or '会话试算，来源待填写'))
@@ -203,10 +205,17 @@ def _monthly(store, enabled, freight_root=None):
             st.warning('行情获取或校验失败；会话旧行情已撤下，相关计算保持空值。')
     st.session_state[key + ':signature'] = signature
     payload['market'] = st.session_state[key + ':market']
+    if payload['market'] is not None:
+        payload.pop('historical_market', None)
     rows = monthly_rows(payload)
+    if payload.get('historical_market') is not None:
+        st.info('即期汇率估算：各船期统一采用当日ECB参考即期交叉汇率，未计远期掉期点。原糖采用中国报价日结束前已完成的日线；郑糖采用同日报价日收盘价。')
     st.iframe(monthly_html(rows, country, day), height=650, width='stretch')
     st.caption('配额内与配额外分别计算；保险按FOB×费率自动计入，无须逐月填保险金额。')
     market = payload['market']
+    if payload.get('historical_market') is not None:
+        from agri_research_agent.sugar_import_profit.runtime import historical_market
+        market = historical_market(payload['historical_market'], day)
     with st.expander('行情时间、来源与缺失原因'):
         if market:
             st.caption('获取时间：' + market['captured_at'] + '；报价最多7天。原糖收盘价标注实际交易日；原糖最新价时间为供应商更新时间。')
@@ -214,7 +223,10 @@ def _monthly(store, enabled, freight_root=None):
                 items = {c: ice_quote(market, c) for c in market[kind]} if kind == 'ice' else market[kind]
                 st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 价格口径='收盘价' if r.get('time_kind') == 'daily_close' else '最新价', 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in items.items()]), hide_index=True)
             if market['errors']: st.warning('；'.join(f'{c}: {e}' for c, e in market['errors'].items()))
-            st.json(dict(在岸汇率曲线=market['fx_curve'], CFETS原始凭证=market['fx_raw']))
+            if payload.get('historical_market') is not None:
+                st.json(payload['historical_market'])
+            else:
+                st.json(dict(在岸汇率曲线=market['fx_curve'], CFETS原始凭证=market['fx_raw']))
         else: st.info('尚无当日已存或新获取的行情；历史日期不获取当前价格。')
         st.dataframe(pd.DataFrame([dict(船期=r['period'], 状态=r['status']) for r in rows]), hide_index=True)
         st.dataframe(pd.DataFrame([dict(船期=r['period'], **_freight_source(r)) for r in rows]), hide_index=True)
@@ -238,9 +250,10 @@ def _monthly(store, enabled, freight_root=None):
         st.subheader('历史报价与利润')
         recent = frame[frame.date.isin(sorted(frame.date.unique(), reverse=True)[:12])].copy()
         recent['船期月'] = recent.period.str[-2:] + '月'
+        recent['日期口径'] = recent.date + recent.fx_kind.map(lambda v: '（即期估算）' if v == '即期汇率估算' else '')
         for metric, title in (('quote', '升贴水（美分/磅）'), ('freight', '海运费（美元/吨）'), ('margin_in', '配额内进口利润'), ('margin_out', '配额外进口利润')):
             with st.expander(title):
-                st.dataframe(recent.pivot(index='date', columns='船期月', values=metric).sort_index(ascending=False), width='stretch')
+                st.dataframe(recent.pivot(index='日期口径', columns='船期月', values=metric).sort_index(ascending=False), width='stretch')
 
 
 def _seasonal_x(stamp, shipment_year):
@@ -256,18 +269,21 @@ def build_sugar_seasonal_figure(observations, month, quota):
     figure = go.Figure()
     selected = [r for r in observations if int(r['period'][-2:]) == month]
     periods = sorted({r['period'] for r in selected})
-    for period in periods:
+    groups = [(period, estimated) for period in periods for estimated in (False, True)
+              if any(r['period'] == period and (r.get('fx_kind') == '即期汇率估算') == estimated for r in selected)]
+    for period, estimated in groups:
         shipment_year = int(period[:4])
         x, y, labels, last = [], [], [], None
-        for row in sorted((r for r in selected if r['period'] == period), key=lambda r: r['date']):
+        for row in sorted((r for r in selected if r['period'] == period and (r.get('fx_kind') == '即期汇率估算') == estimated), key=lambda r: r['date']):
             stamp = date.fromisoformat(row['date'])
             # Normalize relative to shipment year, retaining the original date in hover.
             anchor = _seasonal_x(stamp, shipment_year)
             if last and (stamp - last).days > 10:
                 x.append(anchor); y.append(None); labels.append('')
-            x.append(anchor); y.append(row[metric]); labels.append(row['date']); last = stamp
+            x.append(anchor); y.append(row[metric]); labels.append(row['date'] + (' · 即期汇率估算' if estimated else '')); last = stamp
         latest = period == periods[-1]
-        figure.add_trace(go.Scatter(x=x, y=y, customdata=labels, name=period[:4], mode='lines+markers', connectgaps=False,
+        figure.add_trace(go.Scatter(x=x, y=y, customdata=labels, name=period[:4] + (' · 即期估算' if estimated else ''), mode='lines+markers', connectgaps=False,
+            marker=dict(symbol='diamond' if estimated else 'circle'),
             line=dict(color=CURRENT_YEAR_COLOR if latest else historical_year_color(shipment_year),
                       width=CURRENT_LINE_WIDTH if latest else HISTORY_LINE_WIDTH),
             hovertemplate='%{customdata}<br>%{y:.2f}元/吨<extra>%{fullData.name}年船期</extra>'))
