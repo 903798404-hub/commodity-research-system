@@ -122,10 +122,20 @@ class Reader:
             frame = frame.loc[frame.commodity.isin(['一豆','24度','三菜','豆粕','菜粕'])]
             return grouped_dates(frame, ["series_id"], "business_date")
         if identity == "sugar_basis":
-            from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history
+            from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history, reconcile_regional_history
             snapshot = load_sugar_history(root / "processed/domestic_sugar_history")
-            dates = {name: last_date(getattr(snapshot, name).business_date) for name in ['spot','fixed_basis','main_basis','nearest_basis']}
-            return Observation(min(v for v in dates.values() if v is not None), extra={"series_dates":dates})
+            regional_root = root / "processed/domestic_sugar_regional_history"
+            if regional_root.exists():
+                from agri_research_agent.data_sources.domestic_sugar_regional_history import load_regional_history
+                snapshot = reconcile_regional_history(snapshot, load_regional_history(regional_root))
+            dates = {"spot": last_date(snapshot.spot.loc[snapshot.spot.cash_price.notna(), "business_date"]),
+                     "main_basis": last_date(snapshot.main_basis.loc[snapshot.main_basis.basis.notna(), "business_date"])}
+            for month in (1, 5, 9):
+                rows = snapshot.fixed_basis
+                dates[f"fixed_{month:02d}"] = last_date(rows.loc[rows.delivery_month.eq(month) & rows.basis.notna(), "business_date"])
+            # A fresh spot quote cannot conceal a missing or older contract close.
+            actual = min(dates.values()) if all(value is not None for value in dates.values()) else None
+            return Observation(actual, extra={"series_dates":dates})
         if identity.startswith("fx_"):
             from agri_research_agent.market_data.foreign_fx import load_snapshot, load_update_status
             path = root / "processed/foreign_fx/daily.json"
