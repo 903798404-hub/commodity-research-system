@@ -101,6 +101,8 @@ def _freight_history(rows):
 
 
 def _monthly(store, enabled, freight_root=None):
+    import hashlib
+    from agri_research_agent.sugar_import_profit.store import packed
     from agri_research_agent.sugar_import_profit.model import (
         RESEARCH_VERSION, RESEARCH_PARAMETERS, QUOTE_MODES, month_periods, default_mapping,
         monthly_rows, validate_monthly)
@@ -145,6 +147,10 @@ def _monthly(store, enabled, freight_root=None):
         if payload['market'] is None and payload.get('historical_market') is None and archived is not None:
             st.session_state[key + ':market'] = archived['payload']
             st.session_state[key + ':archive-version'] = archived['version']
+        elif payload['market'] is not None and payload['market'].get('archive_policy'):
+            reference = payload.get('market_archive_version')
+            st.session_state[key + ':archive-version'] = (reference if reference is not None else
+                hashlib.sha256(packed(payload['market']).encode('utf-8')).hexdigest())
     initial = st.session_state[key + ':initial']
     fields = dict(period='船期', quote='升贴水（美分/磅）', freight='海运费（美元/吨）', ice_contract='ICE合约', sr_contract='郑糖合约')
     mode = QUOTE_MODES[0]

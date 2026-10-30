@@ -143,6 +143,28 @@ def test_page_late_quote_binds_only_selected_day_archive_without_network(tmp_pat
     assert store.daily_market(date(2026, 10, 28)) is None
 
 
+def test_upgrade_restores_optional_reference_dropped_by_retained_page_without_refetch(tmp_path, monkeypatch):
+    from test_sugar_import_profit_page import page
+    from test_sugar_import_profit import monthly_payload
+    app, db = page(tmp_path, monkeypatch)
+    store = Store(db, lambda _: None)
+    snapshot = daily_snapshot()
+    version = store.save_daily_market(snapshot, expected_version=None)
+    payload = monthly_payload(date(2026, 10, 29))
+    payload.update(schema_version=model.RESEARCH_VERSION, parameters=dict(model.RESEARCH_PARAMETERS), market=snapshot)
+    # A retained old UI builds a fresh top-level object, losing the optional new
+    # reference while preserving the complete dated market and original archive.
+    store.save_monthly(payload, expected_version=None)
+    assert 'market_archive_version' not in store.monthly_records()[0]['payload']
+    monkeypatch.setattr(runtime, 'capture_monthly_market', lambda *_: pytest.fail('upgrade fetched live data'))
+    app.date_input(key='sugar-month-day').set_value(date(2026, 10, 29)).run()
+    app.button(key='sugar-month:巴西:2026-10-29:save').click().run()
+    assert not app.exception
+    saved = store.monthly_records()[0]['payload']
+    assert saved['market_archive_version'] == version and saved['market'] == snapshot
+    assert store.daily_market(date(2026, 10, 29))['payload'] == snapshot
+
+
 def test_timer_has_fixed_shanghai_time_and_no_late_catchup():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / '09_deploy/sugar_market'
