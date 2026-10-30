@@ -113,7 +113,8 @@ def _seed_public_freight(tmp_path, value=54.):
     return row
 
 
-def test_public_reference_preserves_saved_edits_and_carries_only_freight_next_day(tmp_path, monkeypatch):
+def test_public_reference_does_not_overwrite_saved_zero_or_clear_and_never_fills_next_day(tmp_path, monkeypatch):
+    """Keep the existing regression ID; only freight may carry under the new policy."""
     row = _seed_public_freight(tmp_path)
     app, db = page(tmp_path, monkeypatch)
     assert not app.exception and len(app.get('plotly_chart')) == 13
