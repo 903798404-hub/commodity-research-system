@@ -309,7 +309,9 @@ def collect_routine_acceptance(source, tool, work, evidence, key_path, base_sour
             policy_template=str(template), policy_output=str(work/'instance-policy.json'),
             writable_root=scope['candidate_host_root'], grant_directory=str(grants),
             key_path=str(key_path), container_port=8501),
-            application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stAppViewContainer"]': 1}))
+            # The layout wrapper can use display:contents; require the rendered
+            # homepage heading to be visible instead of its boxless ancestor.
+            application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stMain"] h1': 1}))
         session = routine.DockerSession(request, engine, host, binding, manifest)
         native_smoke = session.smoke
         session.smoke = lambda: smoke_with_failure_evidence(native_smoke,
@@ -451,7 +453,7 @@ def instance(work, name, source, evidence, record, host, engine, allocation, sou
         policy_output=str(role_dir / 'issued-policy.json'), writable_root=str(allocation), grant_directory=str(grants),
         key_path=str(key_path), container_port=8501)
     document = dict(source_root=str(source), policy=ref(template), transport=transport,
-                    application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stAppViewContainer"]': 1}))
+                    application_smoke=dict(kind='dom', path='/', selectors={'[data-testid="stMain"] h1': 1}))
     return save(role_dir, 'instance.json', document), policy
 
 
