@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import os
 import tempfile
 from io import BytesIO
 from functools import lru_cache
@@ -36,8 +35,7 @@ from agri_research_agent.summary_engine.basis import (  # noqa: E402
 from agri_research_agent.utils.matplotlib_config import (  # noqa: E402
     configure_matplotlib_chinese_fonts,
 )
-from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError  # noqa: E402
-from domestic_sugar_basis import load_sugar_page_data, render_sugar_history  # noqa: E402
+from basis_interactive_charts import seasonal_chart, PLOTLY_CONFIG
 from computation_cache import precomputed_chart, complete_value_identity
 
 
@@ -481,15 +479,16 @@ def _render_report_card(
             st.markdown(f"#### {title}")
             st.info("缺少对应数据。")
             return
-        image = cached_seasonal_report_image(
-            dataframe,
-            value_col=value_col,
-            title=title,
-            years=tuple(years),
-            zero_line=zero_line,
-            trading_calendar_bytes=china_futures_trading_days().asi8.tobytes(),
-        )
-        st.image(image, width="stretch")
+        rows = pd.DataFrame({"business_date": pd.to_datetime(dataframe["date"], errors="coerce"),
+                             "value": pd.to_numeric(dataframe[value_col], errors="coerce")}).dropna(subset=["business_date"])
+        rows["chart_year"] = rows.business_date.dt.year
+        if "futures_contract" in dataframe:
+            rows["ts_code"] = dataframe.loc[rows.index, "futures_contract"].fillna("").astype(str)
+        figure = seasonal_chart(rows, title=title, years=years, year_colors=YEAR_COLORS,
+            fallback_colors=FALLBACK_COLORS, unit=VALUE_AXIS_LABELS.get(value_col, UNIT_LABEL),
+            zero_line=zero_line, missing_trading_days=missing_trading_days_between)
+        st.plotly_chart(figure, width="stretch", config=PLOTLY_CONFIG,
+                        key=f"basis_chart_{value_col}_{title}")
         detail_panel = st.expander(
             "查看明细", expanded=False, on_change="rerun",
             key=f"basis_report_detail_{value_col}_{title}",
@@ -909,35 +908,16 @@ def load_basis_page_data(
     return load_shared_basis_current(public_current_root)
 
 
-def _optional_sugar_snapshot(configured: Path):
-    sugar_snapshot = None
-    sugar_error = None
-    if (configured / "current.json").exists():
-        try:
-            sugar_snapshot = load_sugar_page_data(configured)
-        except (SugarHistoryError, OSError, ValueError, KeyError):
-            sugar_error = "柳州历史快照校验失败，白糖图表暂停显示。"
-    return sugar_snapshot, sugar_error
-
-
-def render_basis_page(public_current_root: Path, sugar_history_root: Path | None = None,
-                      *, default_tab: str | None = None) -> None:
+def render_basis_page(public_current_root: Path, *, default_tab: str | None = None) -> None:
     st.markdown(
         "<h1 style='text-align:center;'>国内基差研究</h1>",
         unsafe_allow_html=True,
     )
-    configured = sugar_history_root or Path(os.environ.get("DOMESTIC_SUGAR_HISTORY_ROOT", str(PROJECT_ROOT / "01_data" / "processed" / "domestic_sugar_history")))
     try:
         data, source_identity = load_basis_page_data(public_current_root)
         data = filter_display_data(data)
     except (PublicBasisCurrentError, OSError, ValueError, KeyError):
         st.warning("Formal Public Basis Current 暂不可用。")
-        sugar_snapshot, sugar_error = _optional_sugar_snapshot(configured)
-        if sugar_snapshot is not None:
-            render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
-                                 missing_trading_days=missing_trading_days_between)
-        elif sugar_error:
-            st.warning(sugar_error)
         return
 
     try:
@@ -967,14 +947,16 @@ def render_basis_page(public_current_root: Path, sugar_history_root: Path | None
     years = _latest_three_years(data)
 
     # Retain only hidden-tab filters; visible widgets keep their ordinary state.
+    if st.session_state.get("basis_research_tab", "基差") not in {"基差", "一口价", "批发价差"}:
+        st.session_state["basis_research_tab"] = "基差"
     active_tab = st.session_state.get("basis_research_tab", default_tab or "基差")
     filter_tabs = {"basis_matrix_": "基差", "cash_matrix_": "一口价", "spread_matrix_": "批发价差"}
     for key in list(st.session_state):
         hidden_filter = any(key.startswith(prefix) and active_tab != label for prefix, label in filter_tabs.items())
-        if hidden_filter or (key == "sugar_history_years" and active_tab != "白糖（柳州）"):
+        if hidden_filter:
             st.session_state[key] = st.session_state[key]
-    basis_tab, cash_tab, spread_tab, sugar_tab = st.tabs(
-        ["基差", "一口价", "批发价差", "白糖（柳州）"], default=default_tab,
+    basis_tab, cash_tab, spread_tab = st.tabs(
+        ["基差", "一口价", "批发价差"], default=default_tab,
         key="basis_research_tab", on_change="rerun",
     )
     if basis_tab.open:
@@ -986,13 +968,3 @@ def render_basis_page(public_current_root: Path, sugar_history_root: Path | None
     if spread_tab.open:
         with spread_tab:
             _render_wholesale_spread_tab(data, years)
-    if sugar_tab.open:
-        with sugar_tab:
-            sugar_snapshot, sugar_error = _optional_sugar_snapshot(configured)
-            if sugar_snapshot is not None:
-                render_sugar_history(sugar_snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
-                                     missing_trading_days=missing_trading_days_between)
-            elif sugar_error:
-                st.warning(sugar_error)
-            else:
-                st.info("柳州历史快照尚未配置。")

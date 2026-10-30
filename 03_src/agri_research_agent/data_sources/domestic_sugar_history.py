@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -202,3 +202,75 @@ def load_sugar_history(root: str | Path) -> SugarHistorySnapshot:
         raise SugarHistoryError("柳州历史指针在读取期间发生变化")
     return SugarHistorySnapshot(str(manifest["snapshot_id"]), str(manifest["database_sha256"]), manifest,
         frames["spot_daily"], frames["basis_fixed_contract"], frames["basis_main_continuous"], frames["basis_nearest_month"])
+
+
+def reconcile_regional_history(base: SugarHistorySnapshot, regional) -> SugarHistorySnapshot:
+    """A read-only combined view; never mutate either sealed source snapshot.
+
+    The later regional capture uses the same Liuzhou trader-average definition.
+    Its actual mapped contract close may extend that contract's fixed-month view;
+    no other delivery month or date can borrow that price.
+    """
+    if regional.metadata["main_source_snapshot_id"] != base.snapshot_id:
+        raise SugarHistoryError("三地来源未绑定当前柳州历史，拒绝合并")
+    newer = regional.daily.loc[regional.daily.region.eq("柳州")].copy()
+    for old, fields in ((base.spot, ["cash_price"]),
+                        (base.main_basis, ["ts_code", "futures_price"])):
+        common = old.merge(newer, on="business_date", suffixes=("_old", "_new"), validate="one_to_one")
+        for field in fields:
+            left, right = common[field + "_old"], common[field + "_new"]
+            if (left.notna() & right.notna() & left.ne(right)).any():
+                raise SugarHistoryError("三地来源与柳州历史存在重叠冲突，拒绝合并")
+
+    source = regional.metadata["source_workbook"]
+    spot = newer[["business_date", "cash_price", "source_cell"]].copy()
+    spot["series_id"] = SPOT_SERIES
+    spot["source_sheet"] = source["sheet"]
+    spot["source_sha256"] = source["sha256"]
+    spot["status"] = np.where(spot.cash_price.notna(), "OBSERVED", "SOURCE_NULL")
+    spot = pd.concat([base.spot.loc[~base.spot.business_date.isin(spot.business_date)], spot], ignore_index=True)
+    spot = spot.sort_values("business_date").reset_index(drop=True)
+    spot_values = spot.set_index("business_date").cash_price
+
+    main = newer[["business_date", "ts_code", "cash_price", "futures_price", "basis"]].copy()
+    main["price_field"] = "close"
+    main["spot_source_sha256"] = source["sha256"]
+    main["source_cell"] = newer.source_cell
+    main["futures_source_sha256"] = regional.snapshot_id
+    main["mapping_source_sha256"] = regional.snapshot_id
+    main = pd.concat([base.main_basis.loc[~base.main_basis.business_date.isin(main.business_date)], main], ignore_index=True)
+    main = main.sort_values("business_date").reset_index(drop=True)
+
+    fixed = base.fixed_basis.copy()
+    extra = newer.loc[newer.ts_code.fillna("").str.fullmatch(r"SR\d{2}(01|05|09)\.ZCE")
+                      & newer.futures_price.notna()].copy()
+    extra["delivery_year"] = 2000 + extra.ts_code.str[2:4].astype(int)
+    extra["delivery_month"] = extra.ts_code.str[4:6].astype(int)
+    extra["series_id"] = SPOT_SERIES
+    extra["futures_price_field"] = "close"
+    extra["spot_source_sha256"] = source["sha256"]
+    extra["futures_source_sha256"] = regional.snapshot_id
+    # Reject contradictory non-null closes before using the newer exact quote.
+    keys = ["business_date", "ts_code"]
+    overlap = fixed.merge(extra, on=keys, suffixes=("_old", "_new"))
+    if (overlap.futures_price_old.notna() & overlap.futures_price_new.notna()
+            & overlap.futures_price_old.ne(overlap.futures_price_new)).any():
+        raise SugarHistoryError("三地收盘价与固定合约历史冲突，拒绝合并")
+    fixed = pd.concat([extra.reindex(columns=fixed.columns), fixed], ignore_index=True).drop_duplicates(keys)
+    fixed["cash_price"] = fixed.business_date.map(spot_values)
+    fixed["basis"] = fixed.cash_price - fixed.futures_price
+    fixed = fixed.sort_values(["business_date", "ts_code"]).reset_index(drop=True)
+
+    # Each latest spot date has all three month slots; absent exact closes stay NULL.
+    pairs = []
+    for day in spot.business_date:
+        for month in (1, 5, 9):
+            year = day.year + int(month < day.month)
+            pairs.append(dict(business_date=day, delivery_month=month, ts_code=f"SR{year % 100:02d}{month:02d}.ZCE"))
+    nearest = pd.DataFrame(pairs).merge(fixed[keys + ["futures_price"]], on=keys, how="left", validate="one_to_one")
+    nearest["cash_price"] = nearest.business_date.map(spot_values)
+    nearest["basis"] = nearest.cash_price - nearest.futures_price
+    manifest = {**base.manifest, "regional_view_snapshot_id": regional.snapshot_id,
+                "regional_source_workbook": source}
+    return replace(base, manifest=manifest, spot=spot, main_basis=main,
+                   fixed_basis=fixed, nearest_basis=nearest)

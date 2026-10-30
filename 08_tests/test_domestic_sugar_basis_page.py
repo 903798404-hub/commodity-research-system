@@ -12,6 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"05_apps"))
 from basis_page import YEAR_COLORS,FALLBACK_COLORS,missing_trading_days_between
 from domestic_sugar_basis import build_sugar_seasonal_figure,sugar_chart_rows
+from basis_interactive_charts import seasonal_chart
 from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history
 from agri_research_agent.pipelines.domestic_sugar_history import prepare_sugar_history
 from test_basis_page_formal import mock_public_basis_current
@@ -57,59 +58,46 @@ def test_older_year_color_does_not_change_when_selected_with_other_years(prepare
     assert colors[0]==colors[1]
 
 
-def test_sugar_renders_when_other_formal_current_is_missing(prepared_root,monkeypatch,tmp_path):
-    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT",str(prepared_root))
-    script=f"from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path({str(tmp_path/'missing-oil-current')!r}))"
-    app=AppTest.from_string(script,default_timeout=35).run()
+def test_interactive_seasonality_keeps_leap_day_null_gaps_and_exact_contract(prepared_root):
+    rows = sugar_chart_rows(load_sugar_history(prepared_root), "01")
+    figure = seasonal_chart(rows, title="SR01", years=[2024], year_colors=YEAR_COLORS,
+        fallback_colors=FALLBACK_COLORS, unit="元/吨", zero_line=True,
+        missing_trading_days=missing_trading_days_between, start_month=2, cycle_labels=True)
+    trace = figure.data[0]
+    assert trace.name == "2024/25" and trace.line.color == YEAR_COLORS[2024]
+    assert list(trace.x)[:2] == [29, 30] and list(trace.y)[:2] == [1000, None]
+    assert trace.customdata[0] == ["2024-02-29", "SR2501.ZCE"]
+    assert trace.connectgaps is False and figure.layout.dragmode == "zoom"
+
+
+def test_sugar_page_is_independent_and_displays_exact_quote_date(prepared_root, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT", str(prepared_root))
+    monkeypatch.setenv("DOMESTIC_SUGAR_REGIONAL_HISTORY_ROOT", str(tmp_path / "missing"))
+    app = AppTest.from_string("from domestic_sugar_basis import render_sugar_basis_page\nrender_sugar_basis_page()", default_timeout=35).run()
     assert not app.exception
-    assert [(m.label,m.value) for m in app.metric]==[("柳州现货（元/吨）","5,330"),("SR2701 基差","-211"),("SR2705 基差","-288"),("SR2709 基差","-370")]
-    assert len(app.dataframe)>=3
-    assert any("完整日数据" in c.value for c in app.caption)
+    assert app.title[0].value == "白糖基差"
+    assert [(m.label, m.value) for m in app.metric] == [("柳州现货（元/吨）", "5,330"), ("SR2701 基差", "—"), ("SR2705 基差", "—"), ("SR2709 基差", "—")]
+    assert len(app.get("plotly_chart")) == 5
+    assert any("2026-10-10 缺少同日收盘价" in item.value for item in app.caption)
     app.multiselect[0].set_value([]).run()
-    assert not app.exception and any("至少一个" in i.value for i in app.info)
+    assert not app.exception and any("至少一个" in item.value for item in app.info)
 
 
-def test_actual_basis_page_adds_sugar_tab_without_changing_existing_oil_rows(prepared_root,monkeypatch,mock_public_basis_current):
-    import basis_page
-    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT",str(prepared_root))
-    oil=pd.DataFrame([dict(date=pd.Timestamp(day),commodity="豆粕",region="华东",quote_type="基差报价",
-        delivery_month="现货",futures_contract="2609",cash_price=8000,futures_price=7900,basis=basis,source_sheet="formal") for day,basis in [("2026-08-18",100),("2026-08-19",110)]])
-    mock_public_basis_current(oil,dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4"))
-    app=AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('formal-current'))",default_timeout=35).run()
+def test_oilseed_page_has_only_its_three_tabs(prepared_root, monkeypatch, mock_public_basis_current):
+    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT", str(prepared_root))
+    oil = pd.DataFrame([dict(date=pd.Timestamp("2026-08-19"),commodity="豆粕",region="华东",quote_type="基差报价",delivery_month="现货",futures_contract="2609",cash_price=8000,futures_price=7900,basis=110,source_sheet="formal")])
+    mock_public_basis_current(oil, dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4"))
+    app = AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('formal-current'))", default_timeout=35).run()
     assert not app.exception
-    assert [t.label for t in app.tabs]==["基差","一口价","批发价差","白糖（柳州）"]
-    assert list(app.dataframe[0].value["品种"])==["豆粕"]
-    assert not app.metric
-    app.session_state["basis_research_tab"] = "白糖（柳州）"
-    app.run()
-    assert not app.exception
-    assert list(app.dataframe[0].value["品种"])==["豆粕"]
-    assert any("5,330"==m.value for m in app.metric)
-    # Real browser remounts use the declared default, even when the server kept
-    # the hidden widget's state. Keep both frontend selection and server value.
-    for selected in ([2023,2026],[]):
-        app.multiselect[0].set_value(selected).run()
-        assert not app.exception
-        app.session_state["basis_research_tab"] = "基差"
-        app.run()
-        app.session_state["basis_research_tab"] = "白糖（柳州）"
-        app.run()
-        assert not app.exception
-        assert app.multiselect[0].value == selected
-        assert [app.multiselect[0].options[i] for i in app.multiselect[0].proto.default] == [str(year) for year in selected]
+    assert [t.label for t in app.tabs] == ["基差", "一口价", "批发价差"]
+    assert list(app.dataframe[0].value["品种"]) == ["豆粕"]
+    assert not app.metric and len(app.get("plotly_chart")) > 0
 
 
-def test_invalid_sugar_does_not_break_existing_oil_current(prepared_root,monkeypatch,mock_public_basis_current):
-    import basis_page
-    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT",str(prepared_root))
-    (prepared_root/"current.json").write_text('{}')
-    oil=pd.DataFrame([dict(date=pd.Timestamp("2026-08-19"),commodity="豆粕",region="华东",quote_type="基差报价",delivery_month="现货",futures_contract="2609",cash_price=8000,futures_price=7900,basis=110,source_sheet="formal")])
-    mock_public_basis_current(oil,dict(release_id="test-oil",manifest_sha256="a"*64,schema_version="domestic-basis-current/4"))
-    app=AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('formal-current'))",default_timeout=35).run()
-    assert not app.exception and len(app.dataframe)>0
-    assert not app.warning
-    app.session_state["basis_research_tab"] = "白糖（柳州）"
-    app.run()
-    assert not app.exception and len(app.dataframe)>0
-    assert any("白糖图表暂停" in w.value for w in app.warning)
-    assert not app.metric
+def test_invalid_sugar_stays_on_its_own_page(prepared_root, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT", str(prepared_root))
+    monkeypatch.setenv("DOMESTIC_SUGAR_REGIONAL_HISTORY_ROOT", str(tmp_path / "missing"))
+    (prepared_root / "current.json").write_text('{}', encoding="utf-8")
+    app = AppTest.from_string("from domestic_sugar_basis import render_sugar_basis_page\nrender_sugar_basis_page()", default_timeout=35).run()
+    assert not app.exception and not app.metric
+    assert any("白糖图表暂停" in item.value for item in app.warning)

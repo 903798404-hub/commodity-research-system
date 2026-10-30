@@ -92,6 +92,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         "国际价差",
         "价差动态",
         "国内现货（基差与一口价）",
+        "白糖基差",
         "美豆周度跟踪",
         "加拿大菜籽周度跟踪",
         "巴西大豆种植与生长",
@@ -134,7 +135,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 22
+    assert cards_markup.count('class="agri-card"') == 23
     assert cards_markup.count('class="agri-card-keyword"') == 20
     assert cards_markup.count('class="agri-card-detail-label"') == 11
     assert "?home_target=" not in cards_markup

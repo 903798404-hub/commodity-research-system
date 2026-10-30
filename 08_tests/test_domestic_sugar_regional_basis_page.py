@@ -11,10 +11,23 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "05_apps"))
 from basis_page import missing_trading_days_between
-from domestic_sugar_regional_basis import REGION_COLORS, build_regional_basis_figure
+from domestic_sugar_regional_basis import REGION_COLORS, build_regional_basis_figure, build_regional_basis_interactive
 from agri_research_agent.data_sources.domestic_sugar_regional_history import REGIONS, load_regional_history
 
 pytest_plugins = ["data_sources.test_domestic_sugar_regional_history"]
+
+
+def test_interactive_regions_preserve_exact_dates_values_contracts_and_missingness(regional_root):
+    daily = load_regional_history(regional_root).daily
+    figure = build_regional_basis_interactive(daily, missing_trading_days=missing_trading_days_between)
+    assert [trace.name for trace in figure.data] == list(REGIONS)
+    for trace in figure.data:
+        assert trace.line.color == REGION_COLORS[trace.name]
+        assert trace.connectgaps is False and trace.y[-1] is None
+        index = list(trace.x).index(pd.Timestamp("2026-10-09"))
+        assert trace.customdata[index][0] == "SR2701.ZCE"
+    assert figure.layout.xaxis.rangeslider.visible
+    assert len(figure.layout.annotations) == 3
 
 
 def test_chart_has_three_stable_regions_real_dates_and_zero_line(regional_root):
@@ -53,10 +66,11 @@ def test_endpoint_labels_use_latest_valid_values_and_separate_close_labels(regio
 def test_existing_liuzhou_metrics_and_year_filter_are_unchanged(regional_root, prepared_root, monkeypatch, tmp_path):
     monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT", str(prepared_root))
     monkeypatch.setenv("DOMESTIC_SUGAR_REGIONAL_HISTORY_ROOT", str(regional_root))
-    script = f"from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path({str(tmp_path/'missing-oil')!r}))"
+    script = f"from pathlib import Path\nfrom domestic_sugar_basis import render_sugar_basis_page\nrender_sugar_basis_page()"
     app = AppTest.from_string(script, default_timeout=40).run()
     assert not app.exception
-    assert [(m.label, m.value) for m in app.metric] == [("柳州现货（元/吨）", "5,330"), ("SR2701 基差", "-211"), ("SR2705 基差", "-288"), ("SR2709 基差", "-370")]
+    assert len(app.get("plotly_chart")) == 6
+    assert [(m.label, m.value) for m in app.metric] == [("柳州现货（元/吨）", "5,330"), ("SR2701 基差", "—"), ("SR2705 基差", "—"), ("SR2709 基差", "—")]
     assert any("三地白糖主力基差" in h.value for h in app.subheader)
     assert app.date_input[0].value.isoformat() == "2025-01-01"
     assert list(app.multiselect[0].options) == ["2023", "2024", "2026"]
@@ -71,6 +85,6 @@ def test_corrupt_regional_dataset_does_not_break_old_liuzhou(regional_root, prep
     monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT", str(prepared_root))
     monkeypatch.setenv("DOMESTIC_SUGAR_REGIONAL_HISTORY_ROOT", str(regional_root))
     (regional_root / "current.json").write_text("{}", encoding="utf-8")
-    app = AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('missing-oil'))", default_timeout=40).run()
+    app = AppTest.from_string("from pathlib import Path\nfrom domestic_sugar_basis import render_sugar_basis_page\nrender_sugar_basis_page()", default_timeout=40).run()
     assert not app.exception and app.metric[0].value == "5,330"
     assert any("三地白糖历史快照校验失败" in warning.value for warning in app.warning)
