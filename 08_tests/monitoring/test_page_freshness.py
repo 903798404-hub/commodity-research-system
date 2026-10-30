@@ -13,6 +13,26 @@ def rule(**kwargs):
     return Rule("series", "测试", ("page",), "原来源", **kwargs)
 
 
+def test_retired_source_is_paused_with_real_cutoff_and_never_retried():
+    r = rule(source_paused=True, job="old_source")
+    row = evaluate(r, Observation("2026-08-31"), NOW)
+    assert row['status'] == 'SOURCE_PAUSED'
+    assert row['actual_date'] == '2026-08-31' and row['expected_check_date'] is None
+    assert not row['retry_eligible'] and retry_plan([row], {}, NOW) == []
+    failed = evaluate(r, Observation(None, error="原历史损坏"), NOW)
+    assert not failed['retry_eligible'] and failed['status'] == 'SOURCE_UNVERIFIED'
+
+
+def test_pausing_an_old_incident_does_not_claim_the_data_recovered():
+    initial = evaluate(rule(job="old_source"), Observation("2026-08-31"), NOW)
+    previous = reconcile([initial], {}, NOW)
+    paused = evaluate(rule(source_paused=True), Observation("2026-08-31"), NOW)
+    changed = reconcile([paused], previous, NOW + timedelta(minutes=15))
+    assert changed['incidents'] == {} and changed['events'][0]['kind'] == 'SOURCE_PAUSED'
+    assert all(event['kind'] != 'RECOVERED' for event in changed['events'])
+    assert not reconcile([paused], changed, NOW + timedelta(minutes=30))['events']
+
+
 def test_trading_calendar_holiday_and_deadline():
     r=rule(cadence="china_daily",deadline="18:00")
     assert expected_period(r,NOW,DAYS)=="2026-10-21"

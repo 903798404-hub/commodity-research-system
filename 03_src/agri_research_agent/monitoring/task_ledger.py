@@ -67,7 +67,7 @@ BY_TASK = {task.identity: task for task in TASKS}
 def dataset_catalog():
     records = []
     for rule in RULES:
-        mode = ('EXCLUDED' if rule.excluded else 'STATIC' if rule.cadence == 'static'
+        mode = ('EXCLUDED' if rule.excluded else 'SOURCE_PAUSED' if rule.source_paused else 'STATIC' if rule.cadence == 'static'
             else 'MANUAL' if rule.manual else 'AUTOMATIC' if rule.job else 'NO_UPDATER')
         # Preserve the exact original policy, including season and period grain.
         records.append(dict(**asdict(rule), mode=mode, task_id=rule.job))

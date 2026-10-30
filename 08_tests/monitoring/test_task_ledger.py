@@ -63,6 +63,10 @@ def test_inventory_preserves_all_original_policies_and_excludes_old_weather():
     records=dataset_catalog()
     assert set(BY_TASK)==set(JOBS) and len(TASKS)==13
     assert len(records)==len(RULES)==84
+    paused={'public_market','public_fx','international_palm','international_soy','international_rape',
+        'weather_ARG','weather_AUS','weather_EU','weather_RUS','weather_UKR','weather_IND_COTTON','weather_IND_SUGARCANE'}
+    assert {row['identity'] for row in records if row['mode']=='SOURCE_PAUSED'} == paused
+    assert all(row['task_id'] is None for row in records if row['mode']=='SOURCE_PAUSED')
     assert {row['identity'] for row in records if row['mode']=='EXCLUDED'}=={
         'weather_USA','weather_CAN','weather_BRA','weather_IDN','weather_MYS'}
     assert all(row['task_id'] is None for row in records if row['mode'] in {'EXCLUDED','MANUAL','NO_UPDATER','STATIC'})

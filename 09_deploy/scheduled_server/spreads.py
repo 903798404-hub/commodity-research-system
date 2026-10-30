@@ -113,7 +113,12 @@ def materialize(request, baseline, output):
     data.mkdir(parents=True)
     shutil.copyfile(baseline / '01_data/historical_spread_database.xlsx', data / 'historical_spread_database.xlsx')
     history = delivery.adopt_public_spread_history(data, public, expected_manifest=request['public_manifest'])
-    combined.to_excel(data / 'historical_price_long.xlsx', sheet_name='price_long', index=False)
+    from agri_research_agent.shared.excel_tables import write_tables
+    write_tables(data / 'historical_price_long.xlsx', [('price_long', combined)])
+    # Replay has already proved the exact changed dates. Do not retain a full
+    # price history while loading the spread history and writing its workbook.
+    earliest_added = added['date'].min().date()
+    del combined, added
     server = load('scheduled_spread_materializer', '04_scripts/server_update_spreads.py')
     status, _, affected = server.apply_direct_incremental_materialization(
         price_baseline=baseline / '01_data/historical_price_long.xlsx',
@@ -122,7 +127,7 @@ def materialize(request, baseline, output):
         spread_workbook=data / 'historical_spread_database.xlsx',
         config_file=ROOT / '02_configs/historical_spread_config.xlsx')
     policy = HistoricalMutationPolicy(HistoricalPublicationMode.NORMAL,
-        added['date'].min().date(), date.fromisoformat(request['business_date']), frozenset(), affected)
+        earliest_added, date.fromisoformat(request['business_date']), frozenset(), affected)
     diff = validate_historical_publication(artifact, data / 'historical_spread_database.parquet', policy)
     import logging
     summaries = server.validate_database_outputs(data / 'historical_spread_database.xlsx',

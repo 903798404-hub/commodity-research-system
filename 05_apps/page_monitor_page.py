@@ -18,6 +18,7 @@ STATUS_LABELS = {
     'SOURCE_UNVERIFIED':'来源未核实', 'WAITING_MANUAL':'等待人工资料',
     'MISSING':'数据缺失', 'ERROR':'读者校验异常',
     'REFERENCE':'按需更新 · 保留截止日',
+    'SOURCE_PAUSED':'原来源停用 · 暂停更新',
 }
 OUTCOMES = {'RESERVED':'已登记，执行结果待核实','COMPLETED':'更新器执行完成，已重新核对日期',
     'FAILED':'更新器执行失败','STILL_RUNNING':'最近一次等待超时；按最新数据日期判断恢复','CHECK_FAILED':'重试后核验失败'}
@@ -110,7 +111,7 @@ def render_task_ledger(report, names, keys):
         else:
             st.info('暂无执行状态观察记录。')
     with st.expander('数据与任务登记范围'):
-        modes={'AUTOMATIC':'已接入原更新器','MANUAL':'原人工或按需交付','NO_UPDATER':'尚无独立更新入口','EXCLUDED':'按要求暂缓','STATIC':'静态内容'}
+        modes={'AUTOMATIC':'已接入原更新器','MANUAL':'原人工或按需交付','NO_UPDATER':'尚无独立更新入口','EXCLUDED':'按要求暂缓','STATIC':'静态内容','SOURCE_PAUSED':'原来源已弃用，暂停自动更新'}
         registry=[{'数据项':row['label'],'接入方式':modes[row['mode']],
             '原来源':row['source'],'原业务核对周期':row['cadence'],'原业务核对窗口':row['deadline'],
             '页面':'、'.join(names.get(key,key) for key in row['pages'])}
@@ -203,7 +204,7 @@ def render_page_monitor(data_root: Path):
         events=[]
         for event in reversed(report.get('recent_events',[])):
             events.append({'时间':aware(event['at']).astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S'),
-                '数据项':event['label'],'变化':{'OPENED':'发现异常','CHANGED':'状态变化','RECOVERED':'已恢复','SCOPE_REMOVED':'监测范围已校正'}.get(event['kind'],event['kind']),
+                '数据项':event['label'],'变化':{'OPENED':'发现异常','CHANGED':'状态变化','RECOVERED':'已恢复','SCOPE_REMOVED':'监测范围已校正','SOURCE_PAUSED':'原来源停用，未认定恢复'}.get(event['kind'],event['kind']),
                 '说明':event.get('reason','实际数据重新通过核验')})
         if events:
             st.dataframe(pd.DataFrame(events),hide_index=True,width='stretch')

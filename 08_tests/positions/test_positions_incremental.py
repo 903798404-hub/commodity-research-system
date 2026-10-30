@@ -48,6 +48,19 @@ def test_noop_proof_has_no_objects_or_rows_and_reconstructs_exact_baseline():
     assert codec.canonical(resolved) == codec.canonical(baseline)
 
 
+@pytest.mark.parametrize("value", [
+    {"地区": "柳州", "price": 0, "missing": None, "flag": False},
+    {"b": [{"value": 1.25e-12}, "引号\"与换行\n"], "a": -0.0},
+])
+def test_streaming_archive_digest_is_the_exact_existing_canonical_identity(value):
+    assert codec.canonical_sha256(value) == codec.digest(codec.canonical(value))
+
+
+def test_streaming_archive_digest_rejects_nonfinite_payload():
+    with pytest.raises(ValueError):
+        codec.canonical_sha256({"value": float("nan")})
+
+
 def test_noop_replays_the_pinned_archive_once_without_skipping_validation(monkeypatch):
     baseline=archive()
     document,resolved=increment(baseline,changed=False)

@@ -144,7 +144,7 @@ def archive_files(formal, selected=None, domain=None):
     files = {name: _file(formal, item, cache) for name, item in value["files"].items()
              if domain is None or name.startswith(domain + "/")}
     if domain is None:
-        codec.require(codec.digest(codec.canonical(codec.encode(files))) == value["archive_sha256"],
+        codec.require(codec.canonical_sha256(codec.encode(files)) == value["archive_sha256"],
                       "positions logical archive identity differs")
     return files
 
@@ -242,7 +242,7 @@ def prepare(formal, baseline, document, resolved):
         return {"schema_version": POINTER_SCHEMA, "index_sha256": item["sha256"],
                 "index_size_bytes": item["size_bytes"], "archive_sha256": value["archive_sha256"]}
     def seed(archive):
-        return {"schema_version": INDEX_SCHEMA, "archive_sha256": codec.digest(codec.canonical(archive)),
+        return {"schema_version": INDEX_SCHEMA, "archive_sha256": codec.canonical_sha256(archive),
                 "files": {name: {"kind": "object", **put(raw)} for name, raw in codec.decode(archive).items()}}
     previous = index(formal)
     if previous is None and baseline is not None:
@@ -250,7 +250,7 @@ def prepare(formal, baseline, document, resolved):
         save(previous)
         metrics["bootstrap_object_bytes"] = metrics["new_object_bytes"]
     if previous is not None:
-        codec.require(baseline is not None and previous["archive_sha256"] == codec.digest(codec.canonical(baseline)),
+        codec.require(baseline is not None and previous["archive_sha256"] == codec.canonical_sha256(baseline),
                       "positions store baseline differs")
     files, cache = {}, {}
     for name, entry in resolved["files"].items():
@@ -273,7 +273,7 @@ def prepare(formal, baseline, document, resolved):
         else:
             raw = codec.decode({"schema_version": codec.SCHEMA, "files": {name: entry}})[name]
             files[name] = {"kind": "object", **put(raw)}
-    value = {"schema_version": INDEX_SCHEMA, "archive_sha256": codec.digest(codec.canonical(resolved)), "files": files}
+    value = {"schema_version": INDEX_SCHEMA, "archive_sha256": codec.canonical_sha256(resolved), "files": files}
     selected = save(value)
     codec.require(read_archive(formal, selected) == resolved, "positions stored archive differs")
     metrics["increment_object_bytes"] = metrics["new_object_bytes"] - metrics["bootstrap_object_bytes"]

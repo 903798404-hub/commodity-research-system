@@ -1127,6 +1127,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/shared/excel_tables.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/shared/file_identity.py",
       "role": "runtime_configuration"
     },

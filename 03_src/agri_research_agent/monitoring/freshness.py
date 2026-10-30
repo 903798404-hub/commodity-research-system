@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 SCHEMA = "page-business-date-monitor/1"
-QUIET = {"CURRENT", "EXCLUDED", "STATIC", "SEASON_COMPLETE", "REFERENCE"}
+QUIET = {"CURRENT", "EXCLUDED", "STATIC", "SEASON_COMPLETE", "REFERENCE", "SOURCE_PAUSED"}
 RETRY_STATES = {"MISSED", "MISSING", "CHECK_DUE", "WAITING_FOR_SOURCE", "SOURCE_UNVERIFIED"}
 
 
@@ -30,6 +30,7 @@ class Rule:
     active_months: tuple[int, ...] = ()
     period_kind: str = "date"
     business_lag_days: int = 0
+    source_paused: bool = False
 
     def __post_init__(self):
         if self.cadence not in {"daily","static","on_demand","china_daily","weekly","monthly","quarterly","weekday_daily","weather"}:
@@ -137,6 +138,8 @@ def evaluate(rule: Rule, observation: Observation, now: datetime, trading_days: 
         if observation.error:
             row.update(status="SOURCE_UNVERIFIED" if observation.retry_safe else "ERROR",
                        reason=observation.error)
+        elif rule.source_paused:
+            row.update(status="SOURCE_PAUSED", reason="原数据源已弃用，按用户要求暂停自动更新；保留原历史和实际截止日")
         elif rule.cadence == 'on_demand' and (source is None or actual is not None and source <= actual):
             row.update(status='REFERENCE',reason='原设计为按需交付或保存；展示实际截止日，不虚构每日更新要求')
         elif actual is None and rule.active_months and now.astimezone(SHANGHAI).month not in rule.active_months:
@@ -163,7 +166,7 @@ def evaluate(rule: Rule, observation: Observation, now: datetime, trading_days: 
                 row.update(status="CHECK_DUE", reason="超过常规检查窗口，需重试核实来源；尚未确认漏更")
     except (ValueError, TypeError, OverflowError):
         row.update(status="ERROR", reason="日期或时间身份校验失败")
-    row["retry_eligible"] = bool(rule.job and not rule.manual and observation.retry_safe and row["status"] in RETRY_STATES)
+    row["retry_eligible"] = bool(not rule.source_paused and rule.job and not rule.manual and observation.retry_safe and row["status"] in RETRY_STATES)
     row["severity"] = "error" if row["status"] in {"ERROR", "MISSING", "MISSED"} else "info" if row["status"] in QUIET else "warning"
     return row
 
@@ -190,6 +193,8 @@ def reconcile(rows: list[dict], previous: dict, now: datetime) -> dict:
             event = dict(kind="RECOVERED", at=stamp, identity=key, label=old["label"], first_seen_at=old["first_seen_at"])
             if key not in {row['identity'] for row in rows}:
                 event.update(kind='SCOPE_REMOVED', reason='此项不属于当前原页面数据范围；保留历史提醒，未认定为数据补更')
+            elif any(row['identity']==key and row['status']=='SOURCE_PAUSED' for row in rows):
+                event.update(kind='SOURCE_PAUSED', reason='原数据源已弃用，按要求暂停；未认定为数据补更或恢复')
             events.append(event)
     return {"incidents": active, "events": events,
             "recent_events": (previous.get("recent_events", []) + events)[-100:],

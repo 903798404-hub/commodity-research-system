@@ -37,6 +37,17 @@ def canonical(value):
                        separators=(",", ":")) + "\n").encode("utf-8")
 
 
+def canonical_sha256(value):
+    """Same canonical identity without allocating a second complete archive."""
+    digest = hashlib.sha256()
+    encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=False, allow_nan=False,
+                               separators=(",", ":"))
+    for chunk in encoder.iterencode(value):
+        digest.update(chunk.encode("utf-8"))
+    digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def strict_json(raw):
     require(len(raw) <= MAX_DOCUMENT, "positions JSON size bound exceeded")
     def pairs(items):
@@ -304,7 +315,9 @@ def validate_archive(archive, project_root):
 
 
 def observations(candidate, baseline, project_root):
-    snapshots, _ = validate_archive(candidate, project_root)
+    # Source replay still runs completely. Its raw byte dictionary is not needed
+    # while the second independently validated snapshot is being reconstructed.
+    snapshots = validate_archive(candidate, project_root)[0]
     previous = (snapshots if candidate is baseline else validate_archive(baseline, project_root)[0]) if baseline is not None else {}
     added, revised, total, dates = [], [], 0, {}
     for domain, snapshot in snapshots.items():
@@ -420,7 +433,7 @@ def resolve_increment(document, baseline):
     exact(document, ("schema_version", "baseline_sha256", "updates", "objects"), "positions increment")
     require(document["schema_version"] == INCREMENT_SCHEMA and baseline is not None,
             "positions increment requires a baseline")
-    require(digest(canonical(baseline)) == document["baseline_sha256"], "positions increment baseline differs")
+    require(canonical_sha256(baseline) == document["baseline_sha256"], "positions increment baseline differs")
     updates, objects = document["updates"], document["objects"]
     require(type(updates) is dict and set(updates) <= set(DOMAINS), "positions increment domains invalid")
     require(type(objects) is dict and len(objects) <= MAX_FILES, "positions increment objects invalid")
@@ -485,9 +498,10 @@ class IncrementBuilder:
 
     def __init__(self, baseline, project_root):
         self.baseline = baseline
-        self.snapshots, self.files = validate_archive(baseline, project_root)
-        self.retained_hashes = {digest(raw) for name, raw in self.files.items() if "/raw/" in name}
-        self.document = dict(schema_version=INCREMENT_SCHEMA, baseline_sha256=digest(canonical(baseline)),
+        self.snapshots, files = validate_archive(baseline, project_root)
+        self.retained_hashes = {digest(raw) for name, raw in files.items() if "/raw/" in name}
+        del files
+        self.document = dict(schema_version=INCREMENT_SCHEMA, baseline_sha256=canonical_sha256(baseline),
                              updates={}, objects={})
 
     def publish(self, root, foreign, domestic, captures, attempts, **_kwargs):

@@ -30,8 +30,8 @@ RULES = [
     Rule("brazil_PLANTED", "巴西大豆播种", ("brazil_soy",), "CONAB 全国原值", cadence="weekly", deadline="10:00", publish_weekday=5, data_lag_days=1, job="brazil", active_months=(8,9,10,11,12,1,2)),
     Rule("brazil_HARVESTED", "巴西大豆收割", ("brazil_soy",), "CONAB 全国原值", cadence="weekly", deadline="10:00", publish_weekday=5, data_lag_days=1, job="brazil", active_months=(1,2,3,4,5,6,7,8,9)),
     Rule("brazil_growth", "巴西大豆全国生长阶段", ("brazil_soy",), "CONAB 全国原值", cadence="weekly", deadline="10:00", publish_weekday=5, data_lag_days=1, job="brazil", active_months=(9,10,11,12,1,2,3,4,5,6)),
-    Rule("public_market", "美豆榨利盘面输入", ("import_profit",), "页面原 Tankan Public Current", cadence="weekday_daily", deadline="12:00",business_lag_days=1),
-    Rule("public_fx", "美豆榨利汇率输入", ("import_profit",), "页面原 Tankan FX", cadence="weekday_daily", deadline="12:00"),
+    Rule("public_market", "美豆榨利盘面输入", ("import_profit",), "页面原 Tankan Public Current", cadence="weekday_daily", deadline="12:00",business_lag_days=1,source_paused=True),
+    Rule("public_fx", "美豆榨利汇率输入", ("import_profit",), "页面原 Tankan FX", cadence="weekday_daily", deadline="12:00",source_paused=True),
     Rule("usda", "USDA报告版次", ("usda_dashboard",), "原 USDA 人工报告交付", cadence="monthly", period_kind="month", manual=True, deadline="00:00"),
     Rule("oil_world", "Oil World季度版次", ("oil_world_dashboard",), "原 Oil World 人工资料交付", cadence="quarterly", period_kind="month", manual=True, deadline="00:00"),
 ]
@@ -61,7 +61,7 @@ RULES.append(Rule("foreign_positions_euronext_rapeseed", "Euronext 菜籽持仓"
 RULES.append(Rule("foreign_positions_palm", "棕榈油FCPO持仓（原预留入口）", ("foreign_seats",), "原入口尚无正式报告或已接入更新器", manual=True, deadline="10:00"))
 
 for oil, label in [("palm","棕榈油"),("soy","豆油"),("rape","菜油")]:
-    RULES.append(Rule("international_"+oil, label+"国际价差输入", ("international_spread",), "原 Public Current 国际现货及关联价格", cadence="weekday_daily", deadline="12:00"))
+    RULES.append(Rule("international_"+oil, label+"国际价差输入", ("international_spread",), "原 Public Current 国际现货及关联价格", cadence="weekday_daily", deadline="12:00",source_paused=True))
 for commodity,page in zip(("soybean","canola","palm","sugar"),PROFIT_PAGES):
     RULES.append(Rule("manual_"+commodity, commodity+("自算保存记录" if commodity=='sugar' else "人工录价"), (page,), "原人工CNF/报价；不改用户输入", cadence="on_demand" if commodity=='sugar' else "weekday_daily", deadline="21:00", manual=True))
 for commodity,page in [("canola","canola_import_profit"),("palm","palm_import_profit")]:
@@ -79,7 +79,7 @@ WEATHER = [
 ]
 for country,label,page,excluded in WEATHER:
     pages=(page,"research_overview") if country=="USA" else (page,)
-    RULES.append(Rule("weather_"+country,label+"天气",pages,"原 Public Weather Current",cadence="weather",deadline="10:00",excluded=excluded))
+    RULES.append(Rule("weather_"+country,label+"天气",pages,"原 Public Weather Current",cadence="weather",deadline="10:00",excluded=excluded,source_paused=not excluded))
 for identity,label,page in [("guangxi","广西甘蔗","guangxi_weather"),("yunnan","云南甘蔗","yunnan_weather"),("thailand","泰国甘蔗","thailand_sugarcane_weather")]:
     RULES.append(Rule(identity,label+"天气",(page,),"原独立历史与共同起报快照",cadence="weather",deadline="09:30",job=identity))
 

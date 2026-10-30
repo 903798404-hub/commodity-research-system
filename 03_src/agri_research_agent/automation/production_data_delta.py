@@ -727,12 +727,12 @@ def adopt_public_spread_history(data: Path, public: Path, *, expected_manifest=N
     history = pd.read_parquet(artifact)
     workbook = _unlinked(data / "historical_spread_database.xlsx")
     destination = _unlinked(data / "historical_spread_database.parquet")
-    sheets = pd.read_excel(workbook, sheet_name=None)
-    require("spread_long" in sheets, "producer workbook lacks spread_long")
-    sheets["spread_long"] = history
+    from agri_research_agent.shared.excel_tables import rewritten_tables, write_tables
     history.to_parquet(destination, index=False)
-    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
-        for name, frame in sheets.items(): frame.to_excel(writer, sheet_name=name, index=False)
+    temporary = workbook.with_name(workbook.stem + ".adopted.tmp.xlsx")
+    require(not temporary.exists(), "producer temporary workbook already exists")
+    write_tables(temporary, rewritten_tables(workbook, {"spread_long": history}))
+    os.replace(temporary, workbook)
     return {"package_id": package.package_id, "history_rows": len(history)}
 
 

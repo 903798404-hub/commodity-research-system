@@ -1,5 +1,18 @@
 schema_version: 1
 modules:
+  shared.generated_excel_tables:
+    code_paths:
+      - 03_src/agri_research_agent/shared/excel_tables.py
+    direct_tests:
+      - 08_tests/shared/test_excel_tables.py
+    impact_tests:
+      - 08_tests/test_incremental_collection_contracts.py
+      - 08_tests/pipelines/test_direct_incremental_spreads.py
+      - 08_tests/test_scheduled_server.py
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/shared/test_module_test_map.py
+    dependents: [automation.incremental_updates]
+    full_regression_when_changed: true
   automation.page_business_date_monitor:
     code_paths:
       - 03_src/agri_research_agent/monitoring

@@ -223,11 +223,11 @@ def write_incremental_spread_outputs(
 ) -> None:
     """Replace the calculated relation while preserving workbook evidence."""
 
-    sheets = pd.read_excel(database_file, sheet_name=None)
-    if "spread_long" not in sheets:
-        raise ValueError("Domestic Spread workbook is missing spread_long")
-    sheets["spread_long"] = spread_long
-    if "summary" in sheets and {"metric", "value"} <= set(sheets["summary"].columns):
+    from agri_research_agent.shared.excel_tables import rewritten_tables, write_tables
+
+    def update_summary(frame):
+        if not {"metric", "value"} <= set(frame.columns):
+            return frame
         status_counts = spread_long["status"].value_counts(dropna=False).to_dict()
         summary_values = {
             "spread_long_rows": len(spread_long),
@@ -236,8 +236,9 @@ def write_incremental_spread_outputs(
             "suspicious_zero_rows": int(status_counts.get("suspicious_zero", 0)),
         }
         for metric, value in summary_values.items():
-            mask = sheets["summary"]["metric"].eq(metric)
-            sheets["summary"].loc[mask, "value"] = value
+            mask = frame["metric"].eq(metric)
+            frame.loc[mask, "value"] = value
+        return frame
 
     tmp_excel = database_file.with_name(f"{database_file.stem}.incremental.tmp.xlsx")
     tmp_parquet = parquet_file.with_name(f"{parquet_file.stem}.incremental.tmp.parquet")
@@ -245,9 +246,8 @@ def write_incremental_spread_outputs(
         if temporary.exists():
             temporary.unlink()
     try:
-        with pd.ExcelWriter(tmp_excel, engine="openpyxl") as writer:
-            for sheet_name, frame in sheets.items():
-                frame.to_excel(writer, sheet_name=sheet_name, index=False)
+        write_tables(tmp_excel, rewritten_tables(database_file, {"spread_long": spread_long},
+                                                {"summary": update_summary}))
         spread_long.to_parquet(tmp_parquet, index=False)
         os.replace(tmp_excel, database_file)
         os.replace(tmp_parquet, parquet_file)
