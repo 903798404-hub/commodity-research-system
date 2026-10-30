@@ -463,6 +463,6 @@ def collect(inputs: Inputs, now: datetime, identities=None):
                 print(rule.identity + ": " + traceback.format_exc(), file=sys.stderr)
                 observation = Observation(None, error="原读者或文件身份校验失败，已停止该项自动重试", retry_safe=False)
         row = evaluate(rule, observation, now, trading_days)
-        row["retry_blocked_reason"] = ("" if row["retry_eligible"] else "原人工资料或录价，需按原流程交付" if rule.manual else "该来源没有已授权的独立服务器更新器" if not rule.job and rule.cadence != "static" and not rule.excluded else "")
+        row["retry_blocked_reason"] = ("原数据源已弃用，按要求暂停更新" if rule.source_paused else "" if row["retry_eligible"] else "原人工资料或录价，需按原流程交付" if rule.manual else "该来源没有已授权的独立服务器更新器" if not rule.job and rule.cadence != "static" and not rule.excluded else "")
         rows.append(row)
     return rows

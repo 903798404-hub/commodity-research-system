@@ -19,6 +19,7 @@ def prepare_upload(host, config, work, extra, package, upload, runtime, publish,
     mounted_baseline = '/baseline/' + baseline.name
     proof = invoke(['docker', 'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', '1024m', '--cpus', '1',
+        '--log-driver', 'json-file', '--log-opt', 'max-size=20m', '--log-opt', 'max-file=5',
         '--pids-limit', '96', '--user', '65532:65532',
         '--mount', f'type=bind,src={package},dst=/increment,readonly',
         '--mount', f'type=bind,src={baseline},dst={mounted_baseline},readonly',

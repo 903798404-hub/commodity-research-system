@@ -1,5 +1,19 @@
 schema_version: 1
 modules:
+  infrastructure.public_https_entrypoint:
+    code_paths:
+      - 09_deploy/https_entrypoint
+    direct_tests:
+      - 08_tests/test_https_entrypoint.py
+    impact_tests:
+      - 08_tests/test_guangxi_weather_page.py
+      - 08_tests/test_yunnan_weather_page.py
+      - 08_tests/test_scheduled_server.py
+      - 08_tests/test_spread_runtime_contract.py
+      - 08_tests/usda_release/test_usda_compose_isolation.py
+      - 08_tests/oil_world_release/test_oil_world_release_contract.py
+    dependents: [automation.page_business_date_monitor]
+    full_regression_when_changed: true
   shared.generated_excel_tables:
     code_paths:
       - 03_src/agri_research_agent/shared/excel_tables.py

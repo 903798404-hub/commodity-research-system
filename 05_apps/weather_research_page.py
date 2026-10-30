@@ -97,7 +97,8 @@ def weather_service_url(workspace_url: str, *, embedded: bool = False) -> str:
     host = f"[{hostname}]" if ":" in hostname else hostname
     if hostname in {"localhost", "127.0.0.1", "::1"}:
         host += ":8856"
-    return urlunsplit((origin.scheme, host, "/", "embed=true" if embedded else "", ""))
+    path = "/guangxi-weather/" if origin.scheme == "https" and hostname not in {"localhost", "127.0.0.1", "::1"} else "/"
+    return urlunsplit((origin.scheme, host, path, "embed=true" if embedded else "", ""))
 
 
 def render_guangxi_weather_page() -> None:
@@ -119,6 +120,8 @@ def yunnan_weather_service_url(workspace_url: str, *, embedded: bool = False) ->
     validated = urlsplit(weather_service_url(workspace_url))
     hostname = validated.hostname
     host = f"[{hostname}]" if ":" in hostname else hostname
+    if validated.scheme == "https" and hostname not in {"localhost", "127.0.0.1", "::1"}:
+        return urlunsplit((validated.scheme, host, "/yunnan-weather/", "embed=true" if embedded else "", ""))
     return urlunsplit((validated.scheme, host + ":8858", "/", "embed=true" if embedded else "", ""))
 
 
