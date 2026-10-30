@@ -1,0 +1,12 @@
+[Unit]
+Description=Sugar market snapshot daily at 15:15 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 15:15:00 Asia/Shanghai
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=market-data-sugar-market.service
+
+[Install]
+WantedBy=timers.target

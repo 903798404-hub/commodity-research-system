@@ -54,6 +54,7 @@ def test_formal_route_save_idempotence_and_stale_widget_cas(tmp_path, monkeypatc
 
 
 def test_manual_zero_quote_triggers_once_clearing_remains_null(tmp_path, monkeypatch):
+    """Retain the regression identity: quote edits now read archives and never fetch."""
     from agri_research_agent.sugar_import_profit import runtime
     calls = []
     monkeypatch.setattr(runtime, 'capture_monthly_market', lambda day, quotes: calls.append((day, quotes)))
@@ -63,7 +64,7 @@ def test_manual_zero_quote_triggers_once_clearing_remains_null(tmp_path, monkeyp
     for _ in range(2):
         app.session_state[key + ':editor'] = state
         app.run()
-    assert not app.exception and len(calls) == 1
+    assert not app.exception and len(calls) == 0
     app.session_state[key + ':editor'] = state
     app.button(key=key + ':save').click().run()
     saved = Store(db, lambda _: None).monthly_records()[0]['payload']
@@ -71,7 +72,7 @@ def test_manual_zero_quote_triggers_once_clearing_remains_null(tmp_path, monkeyp
     app.session_state[key + ':editor'] = dict(edited_rows={'0': {'升贴水（美分/磅）': None}}, added_rows=[], deleted_rows=[])
     app.run()
     app.button(key=key + ':save').click().run()
-    assert not app.exception and len(calls) == 1
+    assert not app.exception and len(calls) == 0
     assert all(r['quote'] is None for r in Store(db, lambda _: None).monthly_records()[0]['payload']['quotes'])
 
 

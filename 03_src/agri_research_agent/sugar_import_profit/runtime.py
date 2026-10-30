@@ -418,3 +418,113 @@ def capture_monthly_market(day, quotes):
     if datetime.now(TZ).date() != day: raise ValueError('获取行情跨越业务日期，请重新获取')
     validate_monthly_market(result, day)
     return result
+
+
+DAILY_POLICY = 'sugar-domestic-close-1515/1'
+
+
+def validate_daily_market(value):
+    """An archive is a dated input, independent of whether any basis was entered."""
+    from datetime import date, datetime, time
+    from .model import TZ
+    from agri_research_agent.commodity_import_margin.live import parse_fx
+    day = date.fromisoformat(value['date'])
+    validate_monthly_market(value, day)
+    captured = datetime.fromisoformat(value['captured_at']).astimezone(TZ)
+    expected = datetime.combine(day, time(15, 15), TZ).isoformat()
+    calendar = value.get('calendar') or {}
+    if (value.get('archive_policy') != DAILY_POLICY or value.get('scheduled_at') != expected
+            or not time(15, 15) <= captured.time() <= time(15, 30)
+            or calendar.get('provider') != 'AkShare/Sina'
+            or calendar.get('trading_day') != day.isoformat()
+            or date.fromisoformat(calendar['covered_through']) < day):
+        raise ValueError('15:15行情归档时段或交易日历不符')
+    if day.weekday() >= 5: raise ValueError('周末不能作为国内收盘归档日')
+    for row in value['domestic'].values():
+        if row.get('price') is None: continue
+        stamp = datetime.fromisoformat(row['quoted_at']).astimezone(TZ)
+        if stamp.date() != day or not time(15) <= stamp.time() <= time(15, 10) or row.get('time_kind') != 'daily_close':
+            raise ValueError('郑糖归档必须为同日15点收盘报价')
+    if value['fx_curve']:
+        _, source, _ = parse_fx(value['fx_raw'], captured)
+        if any(datetime.fromisoformat(t).astimezone(TZ).date() != day for t in source['published_at']):
+            raise ValueError('归档汇率必须与报价日相同')
+    return value
+
+
+def capture_daily_market(*, now=None, calendar=None, capture=None, extra_quotes=()):
+    """Only the scheduled current-day window may collect; no historical clock override in CLI."""
+    from datetime import date, datetime, time
+    from .model import TZ, month_periods, default_mapping
+    now = now or datetime.now(TZ)
+    if now.utcoffset() is None: raise ValueError('归档时钟必须包含时区')
+    now = now.astimezone(TZ)
+    day = now.date()
+    if not time(15, 15) <= now.time() <= time(15, 30):
+        raise ValueError('已错过当日15:15归档窗口，不以当前行情补造历史')
+    if day.weekday() >= 5:
+        return None
+    if calendar is None:
+        from agri_research_agent.soybean_margin.api_sources import _worker
+        calendar = _worker('calendar', 35)
+    dates = {date.fromisoformat(d) for d in calendar}
+    if not dates or day > max(dates): raise ValueError('交易日历覆盖不足，停止归档')
+    if day not in dates: return None
+    quotes = [dict(ice_contract=default_mapping(p)[0], sr_contract=default_mapping(p)[1]) for p in month_periods(day)]
+    quotes.extend(extra_quotes)
+    value = (capture or capture_monthly_market)(day, quotes)
+    value.update(archive_policy=DAILY_POLICY, scheduled_at=datetime.combine(day, time(15, 15), TZ).isoformat(),
+                 calendar=dict(provider='AkShare/Sina', trading_day=day.isoformat(), covered_through=max(dates).isoformat()))
+    # The broad interactive reader permits delayed quotes; a dated archive does not.
+    for code, row in value['domestic'].items():
+        if row.get('price') is None: continue
+        stamp = datetime.fromisoformat(row['quoted_at']).astimezone(TZ)
+        if stamp.date() != day or not time(15) <= stamp.time() <= time(15, 10):
+            value['domestic'][code] = dict(price=None)
+            value['errors'][code] = '未取得同日15点收盘价，留空'
+        else:
+            row['time_kind'] = 'daily_close'
+    if value['fx_curve']:
+        from agri_research_agent.commodity_import_margin.live import parse_fx
+        _, source, _ = parse_fx(value['fx_raw'], datetime.fromisoformat(value['captured_at']))
+        if any(datetime.fromisoformat(t).astimezone(TZ).date() != day for t in source['published_at']):
+            value.update(fx_curve={}, fx_raw={})
+            value['errors']['fx_archive'] = '未取得同日汇率，留空'
+    validate_daily_market(value)
+    if not (value.get('ice_closes') or value['fx_curve'] or any(r.get('price') is not None for kind in ('ice', 'domestic') for r in value[kind].values())):
+        raise ValueError('本次未取得有效行情，不生成空白归档')
+    return value
+
+
+def archive_main(argv=None):
+    """Small server entry point used by the independent 15:15 systemd timer."""
+    import argparse
+    import json
+    from datetime import datetime
+    from .model import TZ
+    from .store import Store
+    parser = argparse.ArgumentParser(description='白糖每日15:15行情归档，后补报价按所属日读取')
+    parser.add_argument('--check', action='store_true', help='只检查运行身份和已存行情，不采集、不写入')
+    args = parser.parse_args(argv)
+    try:
+        path, _, authorize, enabled = storage_context()
+        if not enabled or not monthly_capture_enabled(): raise ValueError('白糖保存或采集尚未启用')
+        store = Store(path, authorize)
+        day = datetime.now(TZ).date()
+        existing = store.daily_market(day)
+        if args.check or existing:
+            print(json.dumps(dict(status='CHECK_ONLY' if args.check else 'ALREADY_ARCHIVED', date=day.isoformat(),
+                                  version=existing['version'] if existing else None), ensure_ascii=False))
+            return 0
+        extra = [q for r in store.monthly_records() if r['payload']['date'] == day.isoformat() for q in r['payload']['quotes']]
+        value = capture_daily_market(extra_quotes=extra)
+        if value is None:
+            print(json.dumps(dict(status='NON_TRADING_DAY', date=day.isoformat())))
+            return 0
+        version = store.save_daily_market(value, expected_version=None)
+        print(json.dumps(dict(status='ARCHIVED_WITH_MISSING' if value['errors'] else 'ARCHIVED', date=day.isoformat(),
+            version=version, captured_at=value['captured_at'], errors=value['errors']), ensure_ascii=False))
+        return 0
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        print(json.dumps(dict(status='FAILED', error=str(exc)), ensure_ascii=False))
+        return 2

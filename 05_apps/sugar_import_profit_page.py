@@ -1,4 +1,4 @@
-"""Brazil/Thailand sugar import-profit workbench; manual basis/freight and explicit exact-contract market capture."""
+"""Brazil/Thailand sugar import profits with dated market archives and late quote input."""
 from __future__ import annotations
 from datetime import date
 import json
@@ -101,11 +101,9 @@ def _freight_history(rows):
 
 
 def _monthly(store, enabled, freight_root=None):
-    import hashlib
     from agri_research_agent.sugar_import_profit.model import (
         RESEARCH_VERSION, RESEARCH_PARAMETERS, QUOTE_MODES, month_periods, default_mapping,
         monthly_rows, validate_monthly)
-    from agri_research_agent.sugar_import_profit.runtime import capture_monthly_market
     from agri_research_agent.sugar_import_profit.freight import latest_reference, freight_default, provenance
     try:
         public_freight = _public_freight(freight_root) if freight_root else []
@@ -115,7 +113,8 @@ def _monthly(store, enabled, freight_root=None):
     st.caption('未来12个月船期 · 当月表示次年同月 · 原糖和郑糖按具体合约取价')
     controls = st.columns([1, 2])
     country = controls[0].radio('产地', COUNTRIES, horizontal=True, key='sugar-month-country')
-    day = controls[1].date_input('报价日期', date.fromisoformat(today()), max_value=date.fromisoformat(today()), key='sugar-month-day')
+    day = controls[1].date_input('报价所属日期（可补录历史）', date.fromisoformat(today()), max_value=date.fromisoformat(today()), key='sugar-month-day')
+    st.caption('每日北京时间15:15先保存行情，再补录该日升贴水。晚收到的报价选择其所属日期，匹配该日归档；本次录入日期为' + today() + '。')
     reference = latest_reference(public_freight, day.isoformat(), country)
     st.caption('海运费沿用最近报价，无需每天重填；人工修改或主动清空优先。沿用值为测算假设，原始运费历史仍保留真实日期和空白。')
     if reference:
@@ -128,6 +127,7 @@ def _monthly(store, enabled, freight_root=None):
     key = f'sugar-month:{country}:{day}'
     records = store.monthly_records()
     current = next((r for r in records if r['payload']['date'] == day.isoformat() and r['payload']['country'] == country and r['payload']['schema_version'] == RESEARCH_VERSION), None)
+    archived = store.daily_market(day)
     if st.button('重新载入月份记录', key=key + ':reload'):
         for name in list(st.session_state):
             if name.startswith(key + ':') and name != key + ':reload': del st.session_state[name]
@@ -142,6 +142,9 @@ def _monthly(store, enabled, freight_root=None):
         st.session_state[key + ':initial'] = payload
         st.session_state[key + ':version'] = current['version'] if current else None
         st.session_state[key + ':market'] = payload['market']
+        if payload['market'] is None and payload.get('historical_market') is None and archived is not None:
+            st.session_state[key + ':market'] = archived['payload']
+            st.session_state[key + ':archive-version'] = archived['version']
     initial = st.session_state[key + ':initial']
     fields = dict(period='船期', quote='升贴水（美分/磅）', freight='海运费（美元/吨）', ice_contract='ICE合约', sr_contract='郑糖合约')
     mode = QUOTE_MODES[0]
@@ -183,7 +186,11 @@ def _monthly(store, enabled, freight_root=None):
                    source=source or '人工录入升贴水及海运费', parameters=params, quotes=quotes, market=st.session_state[key + ':market'])
     if initial.get('historical_market') is not None and payload['market'] is None:
         payload['historical_market'] = initial['historical_market']
-    # Validation before any network request prevents malformed user-controlled symbols.
+    if st.session_state.get(key + ':archive-version') is not None:
+        payload['market_archive_version'] = st.session_state[key + ':archive-version']
+    elif initial.get('market_archive_version') is not None:
+        payload['market_archive_version'] = initial['market_archive_version']
+    # Validate edits before calculating or saving; page actions never fetch market data.
     try:
         validate_monthly(dict(payload, source=source or '会话试算，来源待填写'))
     except (ValueError, TypeError, KeyError) as exc:
@@ -191,23 +198,25 @@ def _monthly(store, enabled, freight_root=None):
         skeleton = dict(initial, market=None, quotes=[dict(r, quote=None) for r in initial['quotes']])
         st.iframe(monthly_html(monthly_rows(skeleton), country, day), height=650, width='stretch')
         return
-    signature = hashlib.sha256(json.dumps([(r['period'], r['quote'], r['ice_contract'], r['sr_contract']) for r in quotes], allow_nan=False).encode()).hexdigest()
-    if key + ':signature' not in st.session_state:
-        st.session_state[key + ':signature'] = signature if current else None
-    refresh = st.button('刷新原糖、郑糖与汇率', key=key + ':refresh', disabled=day.isoformat() != today())
-    changed = st.session_state[key + ':signature'] != signature
-    if refresh or (changed and any(r['quote'] is not None for r in quotes) and day.isoformat() == today()):
-        st.session_state[key + ':market'] = None
-        try:
-            with st.spinner('获取具体合约价格和汇率…'):
-                st.session_state[key + ':market'] = capture_monthly_market(day, quotes)
-        except (ValueError, TypeError, KeyError):
-            st.warning('行情获取或校验失败；会话旧行情已撤下，相关计算保持空值。')
-    st.session_state[key + ':signature'] = signature
+    refresh = st.button('载入该日已归档行情', key=key + ':refresh', disabled=archived is None)
+    if refresh:
+        st.session_state[key + ':market'] = archived['payload']
+        st.session_state[key + ':archive-version'] = archived['version']
     payload['market'] = st.session_state[key + ':market']
+    if st.session_state.get(key + ':archive-version') is not None:
+        payload['market_archive_version'] = st.session_state[key + ':archive-version']
+    elif initial.get('market_archive_version') is not None and payload['market'] == initial['market']:
+        payload['market_archive_version'] = initial['market_archive_version']
     if payload['market'] is not None:
         payload.pop('historical_market', None)
     rows = monthly_rows(payload)
+    if payload['market'] and payload['market'].get('archive_policy'):
+        st.info('已匹配' + day.isoformat() + '归档行情，实际获取时间：' + payload['market']['captured_at'] +
+                ('；待录报价。' if all(r['quote'] is None for r in quotes) else '；计算使用该日已存行情。'))
+        if payload['market']['errors']:
+            st.warning('该日归档存在缺项，相关成本和利润保持空白；可展开“行情时间、来源与缺失原因”查看。')
+    elif payload['market'] is None and payload.get('historical_market') is None:
+        st.info('尚无该日已归档行情。报价可先保存，待行情补齐后再载入计算；不会获取今天价格代替。')
     if payload.get('historical_market') is not None:
         st.info('即期汇率估算：各船期统一采用当日ECB参考即期交叉汇率，未计远期掉期点。原糖采用中国报价日结束前已完成的日线；郑糖采用同日报价日收盘价。')
     st.iframe(monthly_html(rows, country, day), height=650, width='stretch')

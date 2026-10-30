@@ -239,6 +239,14 @@ def validate_monthly(payload):
         from .runtime import historical_market
         historical_market(value['historical_market'], day)
     if market is not None:
-        from .runtime import validate_monthly_market
+        from .runtime import validate_monthly_market, validate_daily_market
         validate_monthly_market(market, day)
+        if market.get('archive_policy') is not None:
+            validate_daily_market(market)
+            from .store import packed
+            import hashlib
+            if value.get('market_archive_version') != hashlib.sha256(packed(market).encode('utf-8')).hexdigest():
+                raise ValueError('归档行情内容与引用版本不符')
+    if value.get('market_archive_version') is not None and (market is None or market.get('archive_policy') is None):
+        raise ValueError('归档版本必须引用归档行情')
     return value

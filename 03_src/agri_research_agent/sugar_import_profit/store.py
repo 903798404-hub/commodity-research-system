@@ -81,6 +81,41 @@ class Store:
             row = db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone() if db else None
         return json.loads(row["value"]) if row else default
 
+    def daily_market(self, day):
+        from .runtime import validate_daily_market
+        key = day.isoformat()
+        with self.read() as db:
+            if db is None or not db.execute("SELECT 1 FROM sqlite_master WHERE name='sugar_daily_markets'").fetchone():
+                return None
+            row = db.execute("SELECT CASE WHEN length(CAST(payload AS BLOB))<=262144 THEN payload END AS payload,sha256 FROM sugar_daily_markets WHERE date=?", (key,)).fetchone()
+        if row is None: return None
+        raw = row['payload']
+        if raw is None or hashlib.sha256(raw.encode('utf-8')).hexdigest() != row['sha256']:
+            raise ValueError('每日行情内容校验失败')
+        value = validate_daily_market(json.loads(raw))
+        if value['date'] != key: raise ValueError('每日行情业务日期不符')
+        return dict(payload=value, version=row['sha256'])
+
+    def save_daily_market(self, raw, *, expected_version):
+        from .runtime import validate_daily_market
+        payload = validate_daily_market(raw)
+        text = packed(payload)
+        if len(text.encode('utf-8')) > 262144: raise ValueError('每日行情超过大小上限')
+        digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        with self.write() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS sugar_daily_markets(date TEXT PRIMARY KEY,payload TEXT NOT NULL,sha256 TEXT NOT NULL,saved_at TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS sugar_daily_market_revisions(id INTEGER PRIMARY KEY,date TEXT NOT NULL,payload TEXT NOT NULL,sha256 TEXT NOT NULL,saved_at TEXT NOT NULL)')
+            old = db.execute('SELECT * FROM sugar_daily_markets WHERE date=?', (payload['date'],)).fetchone()
+            if old and old['sha256'] == digest: return digest
+            if (old['sha256'] if old else None) != expected_version:
+                raise ValueError('每日行情已变化，禁止无版本覆盖')
+            if old:
+                db.execute('INSERT INTO sugar_daily_market_revisions(date,payload,sha256,saved_at) VALUES(?,?,?,?)',
+                           (old['date'], old['payload'], old['sha256'], old['saved_at']))
+            db.execute('INSERT INTO sugar_daily_markets VALUES(?,?,?,?) ON CONFLICT(date) DO UPDATE SET payload=excluded.payload,sha256=excluded.sha256,saved_at=excluded.saved_at',
+                       (payload['date'], text, digest, timestamp()))
+        return digest
+
     def save_note(self, value, expected):
         if not isinstance(value, dict) or not isinstance(value.get("text"), str) or len(value["text"]) > 10000:
             raise ValueError("研究笔记无效")

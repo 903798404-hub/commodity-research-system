@@ -1,0 +1,16 @@
+[Unit]
+Description=Archive exact sugar contracts and same-day FX after China close
+RequiresMountsFor=/var/lib/market-data
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/docker exec spread-dashboard python -I -B -c "import sys; sys.path.insert(0, '/app/03_src'); from agri_research_agent.sugar_import_profit.runtime import archive_main; raise SystemExit(archive_main())"
+TimeoutStartSec=180
+UMask=0077
+Nice=10
+StandardOutput=journal
+StandardError=journal
