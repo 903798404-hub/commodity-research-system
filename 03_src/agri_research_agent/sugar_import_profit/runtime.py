@@ -426,9 +426,10 @@ DAILY_POLICY = 'sugar-domestic-close-1515/1'
 def validate_daily_market(value):
     """An archive is a dated input, independent of whether any basis was entered."""
     from datetime import date, datetime, time
-    from .model import TZ
+    from .model import TZ, today
     from agri_research_agent.commodity_import_margin.live import parse_fx
     day = date.fromisoformat(value['date'])
+    if day.isoformat() > today(): raise ValueError('不能保存未来归档日')
     validate_monthly_market(value, day)
     captured = datetime.fromisoformat(value['captured_at']).astimezone(TZ)
     expected = datetime.combine(day, time(15, 15), TZ).isoformat()
@@ -449,6 +450,8 @@ def validate_daily_market(value):
         _, source, _ = parse_fx(value['fx_raw'], captured)
         if any(datetime.fromisoformat(t).astimezone(TZ).date() != day for t in source['published_at']):
             raise ValueError('归档汇率必须与报价日相同')
+    if not (value.get('ice_closes') or value['fx_curve'] or any(r.get('price') is not None for kind in ('ice', 'domestic') for r in value[kind].values())):
+        raise ValueError('本次未取得有效行情，不生成空白归档')
     return value
 
 
@@ -491,8 +494,6 @@ def capture_daily_market(*, now=None, calendar=None, capture=None, extra_quotes=
             value.update(fx_curve={}, fx_raw={})
             value['errors']['fx_archive'] = '未取得同日汇率，留空'
     validate_daily_market(value)
-    if not (value.get('ice_closes') or value['fx_curve'] or any(r.get('price') is not None for kind in ('ice', 'domestic') for r in value[kind].values())):
-        raise ValueError('本次未取得有效行情，不生成空白归档')
     return value
 
 

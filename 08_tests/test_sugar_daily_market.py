@@ -114,6 +114,14 @@ def test_cli_check_and_repeat_do_not_collect_or_write(tmp_path, monkeypatch, cap
     assert 'ALREADY_ARCHIVED' in capsys.readouterr().out
 
 
+def test_empty_archive_cannot_block_later_valid_capture(tmp_path):
+    value = daily_snapshot()
+    value.update(ice={}, domestic={}, fx_curve={}, fx_raw={})
+    store = Store(tmp_path / 'never.sqlite3', lambda _: None)
+    with pytest.raises(ValueError, match='空白归档'): store.save_daily_market(value, expected_version=None)
+    assert not store.path.exists()
+
+
 def test_page_late_quote_binds_only_selected_day_archive_without_network(tmp_path, monkeypatch):
     from test_sugar_import_profit_page import page
     app, db = page(tmp_path, monkeypatch)
