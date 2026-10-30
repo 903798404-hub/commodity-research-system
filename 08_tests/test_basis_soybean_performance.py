@@ -99,7 +99,8 @@ def test_weekly_switch_does_not_execute_hidden_page(monkeypatch) -> None:
     assert not app.exception and calls == ["crop", "exports"]
 
 
-def test_oilseed_page_never_reads_sugar_even_if_current_is_unavailable(monkeypatch,mock_public_basis_current) -> None:
+def test_basis_default_does_not_load_hidden_sugar_but_fallback_still_does(monkeypatch,mock_public_basis_current) -> None:
+    """Retain the existing regression ID; sugar fallback now has its own route."""
     import domestic_sugar_basis
     def forbidden(*args, **kwargs):
         raise AssertionError("oilseed page must not read sugar")
