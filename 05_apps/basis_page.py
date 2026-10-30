@@ -6,6 +6,10 @@ from io import BytesIO
 from functools import lru_cache
 from pathlib import Path
 
+import matplotlib
+
+# Website PNG exports must not create native GUI objects on Streamlit threads.
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
