@@ -233,6 +233,8 @@ def reconcile_regional_history(base: SugarHistorySnapshot, regional) -> SugarHis
     spot_values = spot.set_index("business_date").cash_price
 
     main = newer[["business_date", "ts_code", "cash_price", "futures_price", "basis"]].copy()
+    main["series_id"] = SPOT_SERIES
+    main["continuous_code"] = "SR.ZCE"
     main["price_field"] = "close"
     main["spot_source_sha256"] = source["sha256"]
     main["source_cell"] = newer.source_cell
