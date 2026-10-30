@@ -38,6 +38,11 @@ def test_navigation_has_explicit_dependency_coverage():
     keys={item.key for group in navigation.NAVIGATION_GROUPS for item in group.items}
     assert {page for rule in RULES for page in rule.pages} == keys
     assert all(rule.job is None or rule.job in JOBS for rule in RULES)
+    by_id = {rule.identity: rule for rule in RULES}
+    for identity in ('weather_IND_COTTON', 'weather_IND_SUGARCANE', 'guangxi', 'yunnan', 'thailand'):
+        assert by_id[identity].pages == ('sugar_weather',)
+    assert {key: by_id[key].job for key in ('guangxi', 'yunnan', 'thailand')} == {
+        'guangxi': 'guangxi', 'yunnan': 'yunnan', 'thailand': 'thailand'}
 
 
 def test_fx_monitor_matches_the_served_page_currency_scope():
