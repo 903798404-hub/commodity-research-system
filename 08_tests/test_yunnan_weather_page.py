@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT / "05_apps"))
 
 @pytest.mark.parametrize(("origin", "expected"), [
     ("http://research.example:8501/?token=private#fragment", "http://research.example:8858/"),
-    ("https://research.example/workbench/", "https://research.example:8858/"),
+    ("https://research.example/workbench/", "https://research.example/yunnan-weather/"),
+    ("https://124.222.106.25/?private=yes", "https://124.222.106.25/yunnan-weather/"),
     ("http://localhost:8501/", "http://localhost:8858/"),
     ("http://[::1]:8501/", "http://[::1]:8858/"),
 ])

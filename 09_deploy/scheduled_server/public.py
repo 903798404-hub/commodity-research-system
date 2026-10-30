@@ -176,6 +176,7 @@ def deliver(host,config,work,extra,publish):
     mounted='/runtime/public-data-server-store'
     common=['docker','run','--rm','--pull','never','--network','none','--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges','--memory','768m','--cpus','1','--pids-limit','96',
+        '--log-driver','json-file','--log-opt','max-size=20m','--log-opt','max-file=5',
         '--user',f'{owner["uid"]}:{owner["gid"]}',
         '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m',
         '--env',f'PUBLIC_DATA_SERVER_STORE_ROOT={mounted}',

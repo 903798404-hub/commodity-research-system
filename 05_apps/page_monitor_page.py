@@ -53,6 +53,67 @@ def load_report(path: Path, now=None):
     return value, now - checked > timedelta(minutes=60)
 
 
+def load_https_report(path, now=None):
+    now = now or datetime.now(timezone.utc)
+    if path.is_symlink() or path.stat().st_size > 65536:
+        raise ValueError('HTTPS回执文件身份或大小异常')
+    value = json.loads(path.read_text(encoding='utf8'))
+    fields = {'schema_version','checked_at','status','public_url','access','certificate','logs','errors','legacy_ports_restricted'}
+    if set(value) != fields or value['schema_version'] != 'public-https-status/1' or value['access'] != 'PUBLIC_READ_WRITE':
+        raise ValueError('HTTPS回执结构异常')
+    if value['status'] not in {'CURRENT','ATTENTION'} or not isinstance(value['errors'],list) or any(not isinstance(e,str) for e in value['errors']):
+        raise ValueError('HTTPS回执状态异常')
+    from urllib.parse import urlsplit
+    from ipaddress import IPv4Address
+    url = urlsplit(value['public_url'])
+    if url.scheme != 'https' or url.username or url.password or url.port or url.path != '/' or url.query or url.fragment or not IPv4Address(url.hostname).is_global:
+        raise ValueError('HTTPS回执地址异常')
+    checked = aware(value['checked_at'])
+    if checked > now + timedelta(minutes=5):
+        raise ValueError('HTTPS回执时间异常')
+    expected = {'spread-dashboard','usda-dashboard','oil-world-dashboard','guangxi-weather-preview','yunnan-weather-preview','market-data-https-entrypoint'}
+    if not isinstance(value['logs'],list) or len(value['logs']) != len(expected) or {r.get('service') for r in value['logs']} != expected:
+        raise ValueError('HTTPS日志预算覆盖异常')
+    for row in value['logs']:
+        if set(row) != {'service','bounded','maximum_megabytes'} or type(row['bounded']) is not bool or type(row['maximum_megabytes']) is not int or row['maximum_megabytes'] != 100:
+            raise ValueError('HTTPS日志预算异常')
+    certificate = value['certificate']
+    if type(value['legacy_ports_restricted']) is not bool:
+        raise ValueError('HTTPS入口范围异常')
+    if certificate is not None:
+        import re
+        if set(certificate) != {'sha256','expires_at'} or not re.fullmatch(r'[0-9a-f]{64}',certificate['sha256']):
+            raise ValueError('HTTPS证书身份异常')
+        aware(certificate['expires_at'])
+    if value['status']=='CURRENT' and (value['errors'] or certificate is None or not value['legacy_ports_restricted'] or not all(r['bounded'] for r in value['logs'])):
+        raise ValueError('HTTPS成功回执与实际检查不符')
+    return value, now - checked > timedelta(hours=8)
+
+
+def render_https_status(data_root):
+    path = data_root / 'update_status/https_entrypoint.json'
+    if not path.exists():
+        return
+    st.subheader('HTTPS与日志预算')
+    now = datetime.now(timezone.utc)
+    try:
+        value, stale = load_https_report(path, now)
+        st.caption('网站公开浏览、修改和保存；原数据校验和版本保护继续有效。')
+        certificate = value['certificate']
+        if stale or value['status'] != 'CURRENT' or certificate is None or aware(certificate['expires_at']) < now + timedelta(hours=36):
+            st.warning('HTTPS证书或日志轮转需要核查；监测时间和证书有效期见下方。')
+        else:
+            st.success('HTTPS证书和六个运行容器的日志轮转已核验。')
+        st.caption('最近核验：'+aware(value['checked_at']).astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S'))
+        if certificate:
+            st.caption('证书有效期至：'+aware(certificate['expires_at']).astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S')+'；服务器每6小时检查续期。')
+        for error in value['errors']:
+            st.warning(error)
+        st.caption('每个容器最多5份20MB日志，六个容器合计约600MB。历史日志及业务原始资料分别保留。')
+    except (OSError,ValueError,KeyError,TypeError,AttributeError,OverflowError):
+        st.warning('HTTPS与日志回执尚未通过核验，不能确认入口维护状态。')
+
+
 def render_task_ledger(report, names, keys):
     st.subheader('统一任务台账')
     st.caption('原更新入口逐项接入同一台账；定时计划、采集、校验和发布口径保持不变。执行完成与实际数据是否更新分别核对。')
@@ -150,6 +211,7 @@ def render_dispatcher(report):
 @st.fragment(run_every=60)
 def render_page_monitor(data_root: Path):
     st.subheader('全部页面 · 实际数据日期监测')
+    render_https_status(data_root)
     st.caption('数据日期取自网页原输入。多序列列出共同截止日，逐序列日期见明细；检查时间和更新器成功时间不代表数据已更新。人工录价仍按原流程交付。')
     try:
         report, stale = load_report(data_root / 'update_status/page_monitor.json')

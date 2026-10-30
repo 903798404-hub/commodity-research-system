@@ -16,6 +16,11 @@ services:
         target: /usr/share/nginx/html/oil-world/data/oil_world
         read_only: true
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     networks:
       - oil-world-network
 

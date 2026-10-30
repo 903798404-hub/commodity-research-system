@@ -109,6 +109,11 @@ services:
     - source: market-data-service
       target: /run/secrets/market-data-service.json
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 secrets:
   tankan-reader:
     file: ${TANKAN_SECRET_FILE:?TANKAN_SECRET_FILE is required}
