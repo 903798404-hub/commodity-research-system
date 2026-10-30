@@ -117,6 +117,11 @@ def test_historical_spot_estimate_is_visible_and_survives_page_resave(tmp_path, 
     assert set(frame['汇率口径'])=={'即期汇率估算'}
     assert set(frame['汇率日期'])=={'2026-10-29'}
     assert frame.iloc[0]['郑糖日期']=='2026-10-29'
+    observations=[dict(r,date='2026-10-29') for r in monthly_rows(saved)]
+    figure=sugar_import_profit_page.build_sugar_seasonal_figure(observations,11,'配额外')
+    assert len(figure.data)==1 and '即期估算' in figure.data[0].name
+    assert figure.data[0].marker.symbol=='diamond'
+    assert all('即期汇率估算' in text for text in figure.data[0].customdata)
 
 
 def _seed_public_freight(tmp_path, value=54.):

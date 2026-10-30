@@ -133,7 +133,7 @@ def monthly_rows(payload):
         r['ice_quote_date'] = (ice_item.get('quote_date') or ice_item.get('quoted_at') or '')[:10]
         sr = (market.get('domestic', {}).get(r['sr_contract']) or {}).get('price')
         domestic = market.get('domestic', {}).get(r['sr_contract']) or {}
-        r.update(fx_kind=market.get('fx_policy', '远期汇率'), fx_quote_date=market.get('fx_quote_date', ''),
+        r.update(fx_kind=market.get('fx_policy', '即期汇率' if tenor <= 2 else '远期汇率'), fx_quote_date=market.get('fx_quote_date', ''),
                  sr_price_kind='收盘价' if domestic.get('time_kind') == 'daily_close' else '',
                  sr_quote_date=(domestic.get('quote_date') or domestic.get('quoted_at') or '')[:10])
         quote, mode = r['quote'], payload['quote_mode']
