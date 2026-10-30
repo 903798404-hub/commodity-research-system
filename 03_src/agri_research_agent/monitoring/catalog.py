@@ -23,7 +23,7 @@ RULES = [
     Rule("monitor", "监测进程", ("status",), "服务器监测回执", cadence="static"),
     Rule("domestic_spread", "国内月差及跨品种价差", ("spreads_dashboard",), "原正式价差及18个合约", cadence="china_daily", deadline="19:00", job="spreads"),
     Rule("basis", "国内基差与一口价", ("basis_domestic", "research_overview"), "坚果云原人工报价 / Formal Public Basis Current", cadence="china_daily", deadline="21:00", manual=True),
-    Rule("sugar_basis", "白糖柳州现货与基差", ("basis_domestic",), "原柳州历史快照交付", cadence="china_daily", deadline="21:00", manual=True),
+    Rule("sugar_basis", "白糖柳州现货与基差", ("sugar_basis",), "柳州历史与较新三地快照；人工截图核验交付", cadence="china_daily", deadline="21:00", manual=True),
     Rule("fgis", "美豆出口检验", ("soybean_weekly", "research_overview"), "USDA FGIS", cadence="weekly", deadline="09:00", publish_weekday=1, data_lag_days=5, job="fgis"),
     Rule("fas", "美豆出口销售", ("soybean_weekly", "research_overview"), "USDA FAS", cadence="weekly", deadline="07:00", publish_weekday=4, data_lag_days=8, job="fas"),
     Rule("canola_exports", "加拿大菜籽周度出口", ("canada_canola",), "CGC 原当前作物年来源", cadence="weekly", deadline="10:00", publish_weekday=4, data_lag_days=5, job="canola_exports"),

@@ -86,6 +86,23 @@ def test_reconciliation_does_not_fill_a_new_capture_null_from_old_quotes(regiona
     assert result.fixed_basis.loc[result.fixed_basis.business_date.eq("2026-10-09"), "basis"].isna().all()
 
 
+def test_monitor_uses_same_source_view_and_keeps_contract_dates_independent(regional_root, prepared_root, tmp_path):
+    import shutil
+    from datetime import datetime, timezone
+    from agri_research_agent.monitoring.observations import Inputs, Reader
+    from agri_research_agent.monitoring.catalog import BY_ID
+    data = tmp_path / "monitor-data"
+    shutil.copytree(prepared_root, data / "processed/domestic_sugar_history")
+    shutil.copytree(regional_root, data / "processed/domestic_sugar_regional_history")
+    reader = Reader(Inputs(data, *([tmp_path] * 6)), datetime(2026, 10, 13, tzinfo=timezone.utc))
+    observation = reader.read("sugar_basis")
+    assert observation.extra["series_dates"] == {"spot": "2026-10-12", "main_basis": "2026-10-09",
+                                                "fixed_01": "2026-10-09", "fixed_05": "2026-10-09", "fixed_09": "2026-10-09"}
+    assert observation.actual == "2026-10-09"
+    assert BY_ID["sugar_basis"].pages == ("sugar_basis",)
+    assert BY_ID["sugar_basis"].manual and BY_ID["sugar_basis"].job is None
+
+
 @pytest.mark.parametrize("field,value", [("cash_price", 5281), ("futures_price", 5492), ("ts_code", "SR2705.ZCE")])
 def test_reconciliation_rejects_conflicting_source_history(regional_root, prepared_root, field, value):
     from dataclasses import replace
