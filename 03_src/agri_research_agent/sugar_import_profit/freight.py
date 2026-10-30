@@ -1,4 +1,4 @@
-"""Read-only, dated public freight references; no HTTP requests or gap filling."""
+"""Dated observations and explicit last-quote assumptions; no source gap filling."""
 from __future__ import annotations
 
 from datetime import date
@@ -72,13 +72,61 @@ def reference_on(rows, day: str, country: str):
     return next((r for r in rows if r['date'] == day and r['country'] == country), None)
 
 
-def provenance(reference, value):
+def latest_reference(rows, day: str, country: str):
+    return max((r for r in rows if r['country'] == country and r['date'] <= day),
+               key=lambda r: r['date'], default=None)
+
+
+def provenance(reference, value, day=None):
     """Manual null/zero/edits remain explicit and never resurrect a public default."""
     if value is None: return dict(kind='missing')
     if reference is not None and value == reference['freight_usd_per_tonne']:
         return dict(kind='hisugar_reference', quote_date=reference['date'],
                     value=value, basis='generic_daily_reference_not_forward', sources=reference['sources'][:1])
-    return dict(kind='manual', basis='user_entered')
+    return dict(kind='manual', basis='user_entered', **({'quote_date': day} if day else {}))
+
+
+def freight_default(rows, records, day: str, country: str, period: str):
+    """Reuse freight only for a new daily record, preserving manual overrides.
+
+    The existing manual family also represents the user's standing carry policy;
+    source_kind and original evidence distinguish it from a newly entered price.
+    Older readers can still read these snapshots without a schema migration.
+    """
+    from .model import RESEARCH_VERSION
+    from copy import deepcopy
+    prior = sorted((r['payload'] for r in records
+                    if r['payload']['country'] == country and r['payload']['date'] < day
+                    and r['payload']['schema_version'] == RESEARCH_VERSION),
+                   key=lambda p: p['date'], reverse=True)
+    saved_reference = None
+    for payload in prior:
+        row = next((r for r in payload['quotes'] if r['period'] == period), None)
+        if row is None:
+            continue
+        value, origin = row.get('freight'), row.get('freight_origin') or {}
+        if value is None:
+            if origin.get('explicit_clear'):
+                return None, deepcopy(origin)
+            continue
+        source_kind = origin.get('source_kind', origin.get('kind', 'manual'))
+        original_date = origin.get('quote_date', payload['date'])
+        if source_kind == 'manual':
+            return value, dict(kind='manual', basis='last_known_freight', source_kind='manual',
+                               quote_date=original_date, value=value, sources=[])
+        saved_reference = dict(date=original_date, country=country,
+                               freight_usd_per_tonne=value, sources=deepcopy(origin['sources']))
+        break
+    reference = latest_reference(rows, day, country)
+    if saved_reference and (reference is None or saved_reference['date'] > reference['date']):
+        reference = saved_reference
+    if reference is None:
+        return None, provenance(None, None)
+    value = reference['freight_usd_per_tonne']
+    if reference['date'] == day:
+        return value, provenance(reference, value)
+    return value, dict(kind='manual', basis='last_known_freight', source_kind='hisugar_reference',
+                       quote_date=reference['date'], value=value, sources=deepcopy(reference['sources'][:1]))
 
 
 def validate_provenance(origin, value, day):
@@ -88,6 +136,13 @@ def validate_provenance(origin, value, day):
         if origin['kind'] != 'missing': raise ValueError('空运费不能保留有效报价标记')
         return
     if origin['kind'] == 'missing': raise ValueError('有效运费不能标为缺失')
+    if origin.get('basis') == 'last_known_freight':
+        if (origin['kind'] != 'manual' or origin.get('source_kind') not in ('manual', 'hisugar_reference')
+                or origin.get('value') != value or date.fromisoformat(origin['quote_date']) > day):
+            raise ValueError('沿用运费原始日期、来源或数值不符')
+        if origin['source_kind'] == 'hisugar_reference':
+            if not origin.get('sources') or any(not _valid_source(s) for s in origin['sources']):
+                raise ValueError('沿用泛糖运费缺少原始凭证')
     if origin['kind'] == 'hisugar_reference':
         if (origin.get('value') != value or origin.get('basis') != 'generic_daily_reference_not_forward'
                 or date.fromisoformat(origin['quote_date']) != day or not origin.get('sources')):

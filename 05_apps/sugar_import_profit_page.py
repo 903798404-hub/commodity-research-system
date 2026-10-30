@@ -37,7 +37,10 @@ def _freight_source(row):
     origin = row.get('freight_origin') or {}
     kind = origin.get('kind', 'missing' if row.get('freight') is None else 'manual')
     source = (origin.get('sources') or [{}])[0]
-    return dict(运费来源={'missing':'缺失', 'manual':'人工', 'hisugar_reference':'泛糖公开参考'}[kind],
+    label = {'missing':'缺失', 'manual':'人工', 'hisugar_reference':'泛糖公开参考'}[kind]
+    if origin.get('basis') == 'last_known_freight':
+        label = '沿用泛糖公开参考' if origin['source_kind'] == 'hisugar_reference' else '沿用人工报价'
+    return dict(运费来源=label,
         运费原始日期=origin.get('quote_date', ''), 运费来源链接=source.get('article_url', ''),
         运费原图校验值=source.get('image_sha256', ''))
 
@@ -103,7 +106,7 @@ def _monthly(store, enabled, freight_root=None):
         RESEARCH_VERSION, RESEARCH_PARAMETERS, QUOTE_MODES, month_periods, default_mapping,
         monthly_rows, validate_monthly)
     from agri_research_agent.sugar_import_profit.runtime import capture_monthly_market
-    from agri_research_agent.sugar_import_profit.freight import reference_on, provenance
+    from agri_research_agent.sugar_import_profit.freight import latest_reference, freight_default, provenance
     try:
         public_freight = _public_freight(freight_root) if freight_root else []
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -113,15 +116,13 @@ def _monthly(store, enabled, freight_root=None):
     controls = st.columns([1, 2])
     country = controls[0].radio('产地', COUNTRIES, horizontal=True, key='sugar-month-country')
     day = controls[1].date_input('报价日期', date.fromisoformat(today()), max_value=date.fromisoformat(today()), key='sugar-month-day')
-    reference = reference_on(public_freight, day.isoformat(), country)
+    reference = latest_reference(public_freight, day.isoformat(), country)
+    st.caption('海运费沿用最近报价，无需每天重填；人工修改或主动清空优先。沿用值为测算假设，原始运费历史仍保留真实日期和空白。')
     if reference:
-        st.caption(f"{day} 泛糖公开参考运费：{reference['freight_usd_per_tonne']:g}美元/吨。新录价默认将其作为各船期统一测算假设，未视作远期实际报价；手工值优先。")
+        st.caption(f"最近泛糖公开参考：{reference['date']}，{reference['freight_usd_per_tonne']:g}美元/吨；无人工报价时作为各船期统一测算参考。")
         st.markdown('[查看原始来源](' + reference['sources'][0]['article_url'] + ')')
     elif country == '巴西':
-        st.caption('该报价日期没有泛糖公开运费，默认留空；不借用邻日数据。仍可在录价区手工填写。')
-        if public_freight:
-            latest = public_freight[-1]
-            st.caption(f"仅供核对：最近原始记录{latest['date']}为{latest['freight_usd_per_tonne']:g}美元/吨，不自动带入本日。")
+        st.caption('该日期之前尚无泛糖公开运费；无已保存人工报价时留空。')
     with st.expander('查看泛糖公开运费历史与来源'):
         _freight_history(public_freight)
     key = f'sugar-month:{country}:{day}'
@@ -132,11 +133,11 @@ def _monthly(store, enabled, freight_root=None):
             if name.startswith(key + ':') and name != key + ':reload': del st.session_state[name]
         st.rerun()
     if key + ':initial' not in st.session_state:
+        defaults = {p: freight_default(public_freight, records, day.isoformat(), country, p) for p in month_periods(day)} if current is None else {}
         payload = current['payload'] if current and current['payload']['schema_version'] == RESEARCH_VERSION else dict(schema_version=RESEARCH_VERSION, date=day.isoformat(), country=country,
             quote_mode=QUOTE_MODES[0], source='人工录入升贴水及海运费', parameters=dict(next((r['payload']['parameters'] for r in records if r['payload']['country'] == country and r['payload']['schema_version'] == RESEARCH_VERSION and r['payload']['date'] < day.isoformat()), RESEARCH_PARAMETERS)), market=None,
             quotes=[dict(period=p, ice_contract=default_mapping(p)[0], sr_contract=default_mapping(p)[1],
-                         quote=None, freight=reference['freight_usd_per_tonne'] if reference else None,
-                         freight_origin=provenance(reference, reference['freight_usd_per_tonne'] if reference else None),
+                         quote=None, freight=defaults[p][0], freight_origin=defaults[p][1],
                          insurance=None, rizhao=None, rizhao_date='') for p in month_periods(day)])
         st.session_state[key + ':initial'] = payload
         st.session_state[key + ':version'] = current['version'] if current else None
@@ -145,7 +146,9 @@ def _monthly(store, enabled, freight_root=None):
     fields = dict(period='船期', quote='升贴水（美分/磅）', freight='海运费（美元/吨）', ice_contract='ICE合约', sr_contract='郑糖合约')
     mode = QUOTE_MODES[0]
     with st.expander('录入升贴水和海运费'):
-        st.caption('只填变化的升贴水和海运费，平水填0，无报价留空。合约可按实际报价调整。')
+        st.caption('升贴水按日报价填写；海运费只在有新报价时修改并保存，后续日期自动沿用。平水填0，无依据留空。')
+        st.dataframe(pd.DataFrame([dict(船期=r['period'], **_freight_source(r)) for r in initial['quotes']]),
+                     hide_index=True, width='stretch')
         st.caption('巴西按船期加2个月匹配首个郑糖1/5/9月：1月→5月；ICE取船期后首个3/5/7/10月合约：1月→3月。此为研究映射，可修改。')
         edited = st.data_editor(pd.DataFrame(initial['quotes'])[['period', 'quote', 'freight', 'ice_contract', 'sr_contract']].sort_values('period').rename(columns=fields),
             hide_index=True, disabled=['船期'], num_rows='fixed', height=460, key=key + ':editor',
@@ -156,11 +159,12 @@ def _monthly(store, enabled, freight_root=None):
     for r in quotes:
         old = initial_quotes[r['period']]
         if r['freight'] is None:
-            r['freight_origin'] = provenance(None, None)
+            r['freight_origin'] = (dict(kind='missing', explicit_clear=True, quote_date=day.isoformat())
+                if old.get('freight') is not None else old.get('freight_origin') or provenance(None, None))
         elif r['freight'] == old.get('freight'):
             r['freight_origin'] = old.get('freight_origin') or provenance(None, r['freight'])
         else:
-            r['freight_origin'] = provenance(None, r['freight'])
+            r['freight_origin'] = provenance(None, r['freight'], day.isoformat())
         r.update(insurance=None, rizhao=None, rizhao_date='')
     params = dict(initial['parameters'])
     with st.expander('固定参数与计算公式（可修改）'):

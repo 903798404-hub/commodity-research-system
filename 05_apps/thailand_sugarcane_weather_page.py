@@ -16,8 +16,8 @@ from crop_weather_page import (
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "02_configs/thailand_sugarcane_weather.json"
-SECTIONS = {"累计降雨": "precipitation", "单日降雨": "precipitation",
-            "最高气温": "temperature_max", "土壤墒情": "soil_moisture"}
+SECTIONS = {"单日降雨": "precipitation", "土壤墒情": "soil_moisture",
+            "累计降雨": "precipitation", "最高气温": "temperature_max"}
 
 
 from computation_cache import cache_computation
@@ -131,7 +131,7 @@ def render_thailand_sugarcane_weather_page() -> None:
                 st.warning("最近一次后台更新失败，页面继续显示上次成功快照。")
         except (OSError, ValueError):
             st.warning("最近更新状态暂不可读取，请以快照截止日判断时效。")
-    section = st.radio("页面章节", list(SECTIONS), horizontal=True, key="tha_weather_section")
+    section = st.radio("页面章节", list(SECTIONS), horizontal=True, key="tha_weather_section_daily_first")
     labels = {r["key"]:r["display_name"] for r in regions}
     selected = st.multiselect("显示产区", list(labels), default=list(labels), format_func=labels.get, key="tha_weather_regions")
     if not selected:

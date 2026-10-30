@@ -113,7 +113,7 @@ def _seed_public_freight(tmp_path, value=54.):
     return row
 
 
-def test_public_reference_does_not_overwrite_saved_zero_or_clear_and_never_fills_next_day(tmp_path, monkeypatch):
+def test_public_reference_preserves_saved_edits_and_carries_only_freight_next_day(tmp_path, monkeypatch):
     row = _seed_public_freight(tmp_path)
     app, db = page(tmp_path, monkeypatch)
     assert not app.exception and len(app.get('plotly_chart')) == 13
@@ -137,7 +137,11 @@ def test_public_reference_does_not_overwrite_saved_zero_or_clear_and_never_fills
     app.date_input(key='sugar-month-day').set_value(date(2025, 1, 3)).run()
     app.button(key='sugar-month:巴西:2025-01-03:save').click().run()
     missing = next(r['payload'] for r in store.monthly_records() if r['payload']['date'] == '2025-01-03')
-    assert all(r['freight'] is None for r in missing['quotes'])
+    assert missing['quotes'][0]['freight'] == 0.
+    assert missing['quotes'][1]['freight'] is None
+    assert all(r['freight'] == 56. for r in missing['quotes'][2:])
+    assert all(r['quote'] is None for r in missing['quotes'])
+    assert missing['quotes'][2]['freight_origin']['quote_date'] == '2025-01-02'
     from sugar_import_profit_page import _freight_grid, _freight_source
     grid = _freight_grid([row])
     assert grid.iloc[0].freight_usd_per_tonne == 54. and grid.iloc[1].isna().freight_usd_per_tonne

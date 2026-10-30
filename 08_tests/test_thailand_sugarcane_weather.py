@@ -271,6 +271,8 @@ def test_native_main_route_four_sections_tables_and_filters_without_network(tmp_
     assert not app.exception and not app.error
     assert not app.get("iframe")
     assert len(app.get("plotly_chart"))==16 and len(app.dataframe)==2
+    sections = next(r for r in app.radio if r.label=="页面章节")
+    assert sections.options[:2] == ["单日降雨", "土壤墒情"] and sections.value == "单日降雨"
     for section in ("单日降雨","最高气温","土壤墒情"):
         next(r for r in app.radio if r.label=="页面章节").set_value(section).run(timeout=45)
         assert not app.exception and not app.error

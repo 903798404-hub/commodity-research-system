@@ -1096,6 +1096,9 @@ def render_weather_page(route_key: str = "USA") -> None:
     # Minimum temperature is opt-in: historic country configurations predate
     # this optional chart and must retain their approved module set.
     module_keys = [key for key in MODULES if bool(enabled.get(key, key != "minimum_temperature"))]
+    if route_key == "IND_SUGARCANE":
+        first = [key for key in ("daily_rainfall", "soil_moisture") if key in module_keys]
+        module_keys = first + [key for key in module_keys if key not in first]
     if not module_keys:
         st.info("当前国家尚未配置可展示的天气研究模块。")
         return
@@ -1117,7 +1120,7 @@ def render_weather_page(route_key: str = "USA") -> None:
         module_keys,
         format_func=lambda key: MODULES[key][0],
         horizontal=True,
-        key=f"weather_module_{config.get('route_key', config['country'])}",
+        key=f"weather_module_{config.get('route_key', config['country'])}" + ("_daily_first" if route_key == "IND_SUGARCANE" else ""),
     )
     module_name, kind, metric = MODULES[module_key]
     try:
