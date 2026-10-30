@@ -1555,6 +1555,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "05_apps/basis_interactive_charts.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "05_apps/domestic_sugar_basis.py",
       "role": "runtime_configuration"
     },
