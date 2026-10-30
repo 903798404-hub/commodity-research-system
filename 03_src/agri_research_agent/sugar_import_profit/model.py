@@ -112,6 +112,11 @@ def ice_quote(market, code):
 def monthly_rows(payload):
     """Partial calculation: actual margins require insurance; estimates name the omission."""
     market, params = payload.get('market') or {}, payload['parameters']
+    historical = payload.get('historical_market')
+    if historical is not None:
+        if payload.get('market') is not None: raise ValueError('历史补录与实时快照不能混用')
+        from .runtime import historical_market
+        market = historical_market(historical, date.fromisoformat(payload['date']))
     research = payload['schema_version'] == RESEARCH_VERSION
     rows = []
     for item in payload['quotes']:
@@ -121,12 +126,16 @@ def monthly_rows(payload):
         day = date.fromisoformat(payload['date'])
         tenor = (year - day.year) * 12 + month - day.month
         from agri_research_agent.commodity_import_margin.model import select_fx
-        fx = select_fx(market.get('fx_curve', {}), tenor)[0]
+        fx = market.get('fx_spot') if historical is not None else select_fx(market.get('fx_curve', {}), tenor)[0]
         ice_item = ice_quote(market, r['ice_contract'])
         ice = ice_item.get('price')
         r['ice_price_kind'] = ('收盘价' if ice_item.get('time_kind') == 'daily_close' else '最新价') if ice is not None else ''
         r['ice_quote_date'] = (ice_item.get('quote_date') or ice_item.get('quoted_at') or '')[:10]
         sr = (market.get('domestic', {}).get(r['sr_contract']) or {}).get('price')
+        domestic = market.get('domestic', {}).get(r['sr_contract']) or {}
+        r.update(fx_kind=market.get('fx_policy', '远期汇率'), fx_quote_date=market.get('fx_quote_date', ''),
+                 sr_price_kind='收盘价' if domestic.get('time_kind') == 'daily_close' else '',
+                 sr_quote_date=(domestic.get('quote_date') or domestic.get('quoted_at') or '')[:10])
         quote, mode = r['quote'], payload['quote_mode']
         cfr = None
         if quote is not None:
@@ -225,6 +234,10 @@ def validate_monthly(payload):
             if not isinstance(r.get('rizhao_date'), str) or date.fromisoformat(r['rizhao_date']) > day:
                 raise ValueError('日照现货需填写实际报价日期')
     market = value.get('market')
+    if value.get('historical_market') is not None:
+        if market is not None: raise ValueError('历史补录与实时快照不能混用')
+        from .runtime import historical_market
+        historical_market(value['historical_market'], day)
     if market is not None:
         from .runtime import validate_monthly_market
         validate_monthly_market(market, day)

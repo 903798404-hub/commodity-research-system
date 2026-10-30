@@ -96,6 +96,29 @@ def test_monthly_table_and_export_visibly_identify_close_date(monkeypatch):
     assert '2026-10-27' in table.to_csv(index=False)
 
 
+def test_historical_spot_estimate_is_visible_and_survives_page_resave(tmp_path, monkeypatch):
+    from test_sugar_import_profit import historical_evidence, monthly_payload
+    from agri_research_agent.sugar_import_profit.model import RESEARCH_PARAMETERS, monthly_rows
+    app, db = page(tmp_path, monkeypatch)
+    payload=monthly_payload(date(2026,10,29))
+    payload.update(schema_version=RESEARCH_VERSION,parameters=dict(RESEARCH_PARAMETERS),market=None,
+                   historical_market=historical_evidence())
+    store=Store(db,lambda _:None)
+    store.save_monthly(payload,expected_version=None)
+    app.date_input(key='sugar-month-day').set_value(date(2026,10,29)).run()
+    assert not app.exception
+    assert any('即期汇率估算' in str(e.value) and '未计远期掉期点' in str(e.value) for e in app.info)
+    app.button(key='sugar-month:巴西:2026-10-29:save').click().run()
+    assert not app.exception
+    saved=next(r['payload'] for r in store.monthly_records() if r['payload']['date']=='2026-10-29')
+    assert saved['historical_market']==payload['historical_market']
+    import sugar_import_profit_page
+    frame=sugar_import_profit_page.monthly_table(monthly_rows(saved))
+    assert set(frame['汇率口径'])=={'即期汇率估算'}
+    assert set(frame['汇率日期'])=={'2026-10-29'}
+    assert frame.iloc[0]['郑糖日期']=='2026-10-29'
+
+
 def _seed_public_freight(tmp_path, value=54.):
     import hashlib, json
     from agri_research_agent.sugar_import_profit.freight import SCHEMA, DEFINITION

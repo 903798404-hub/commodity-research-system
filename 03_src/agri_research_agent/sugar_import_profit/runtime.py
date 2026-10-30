@@ -58,6 +58,101 @@ def monthly_capture_enabled():
     return not deployed() or os.getenv('SUGAR_IMPORT_ALLOW_CAPTURE') == '1'
 
 
+def historical_market(value, day):
+    """Validate retrieved historical evidence without inventing a past capture time.
+
+    This optional top-level payload leaves the original market snapshot untouched.
+    Older readers ignore it and retain their original, possibly blank, calculation.
+    """
+    from datetime import date, datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    import math
+    import re
+    import xml.etree.ElementTree as ET
+    from .model import TZ
+    if (not isinstance(value, dict) or value.get('schema_version') != 'sugar-historical-close/1'
+            or value.get('date') != day.isoformat()
+            or value.get('fx_policy') != 'ECB_SPOT_ESTIMATE'
+            or value.get('spot_estimate_authorized') is not True):
+        raise ValueError('历史行情日期、版本或即期估算授权无效')
+    retrieved = datetime.fromisoformat(value['retrieved_at'])
+    if retrieved.utcoffset() is None or retrieved.astimezone(TZ).date() < day:
+        raise ValueError('历史行情实际获取时间无效')
+    # A Chinese quote-date snapshot can only use sessions completed by that day.
+    asof = datetime.combine(day, time(23, 59, 59), TZ)
+    local = asof.astimezone(ZoneInfo('America/New_York'))
+    cutoff = local.date() - timedelta(days=local.time() < time(13, 30))
+    def positive(v):
+        if isinstance(v, bool): raise ValueError('历史价格无效')
+        n = float(v)
+        if not math.isfinite(n) or n <= 0: raise ValueError('历史价格无效')
+        return n
+    result = dict(ice={}, ice_closes={}, domestic={}, errors={}, captured_at=value['retrieved_at'],
+                  fx_curve={}, fx_raw={}, fx_policy='即期汇率估算', fx_quote_date=day.isoformat())
+    if not isinstance(value.get('ice'), dict) or not isinstance(value.get('domestic'), dict):
+        raise ValueError('历史合约证据无效')
+    for code, item in value['ice'].items():
+        if not re.fullmatch(r'SB[HKNV]\d{2}', code): raise ValueError('历史原糖必须使用具体合约')
+        body = item['raw']
+        data = body['data']
+        expected = f'SB{code[-2:]}{code[2]}'
+        source = daily_close_url(code, datetime.combine(day + timedelta(days=1), time(8), TZ))
+        if (item.get('source_url') != source or body.get('rc') != 0 or data.get('code') != expected
+                or data.get('market') != 108 or data.get('decimal') != 2
+                or not str(data.get('name', '')).startswith('糖11号')):
+            raise ValueError('历史原糖合约、单位或来源不符')
+        bars = data.get('klines')
+        if not isinstance(bars, list) or not 1 <= len(bars) <= 15: raise ValueError('历史原糖日线无效')
+        candidates, seen = [], set()
+        for bar in bars:
+            fields = bar.split(',')
+            if len(fields) != 11: raise ValueError('历史原糖日线结构无效')
+            d = date.fromisoformat(fields[0])
+            opening, closing, high, low = map(positive, fields[1:5])
+            volume = float(fields[5])
+            if (d in seen or d.weekday() >= 5 or not math.isfinite(volume) or volume < 0
+                    or not low <= min(opening, closing) <= max(opening, closing) <= high):
+                raise ValueError('历史原糖日期、OHLC或成交量无效')
+            seen.add(d)
+            if d <= cutoff and volume > 0 and timedelta(0) <= cutoff - d <= timedelta(days=7):
+                candidates.append((d, closing))
+        if not candidates: raise ValueError('历史原糖缺少已完成且有成交的近期日线')
+        d, price = max(candidates)
+        result['ice'][code] = dict(price=None)
+        result['ice_closes'][code] = dict(price=price, quote_date=d.isoformat(), quoted_at=d.isoformat(),
+            time_kind='daily_close', provider='Eastmoney', contract=code, source_url=source)
+    for code, item in value['domestic'].items():
+        if not re.fullmatch(r'SR\d{2}(?:01|05|09)', code): raise ValueError('历史郑糖必须使用具体合约')
+        source = 'https://stock2.finance.sina.com.cn/futures/api/json.php/InnerFuturesNewService.getDailyKLine?symbol=' + code
+        raw = item['raw']
+        if item.get('source_url') != source or raw.get('d') != day.isoformat():
+            raise ValueError('历史郑糖日期或来源不符')
+        opening, closing, high, low, volume = map(positive, (raw[k] for k in ('o', 'c', 'h', 'l', 'v')))
+        if not low <= min(opening, closing) <= max(opening, closing) <= high:
+            raise ValueError('历史郑糖OHLC无效')
+        result['domestic'][code] = dict(price=closing, contract=code, provider='Sina',
+            time_kind='daily_close', quote_date=day.isoformat(), quoted_at=day.isoformat(), source_url=source)
+    fx = value['fx']
+    if fx.get('source_url') != 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml':
+        raise ValueError('历史汇率来源不符')
+    xml = fx['raw_xml']
+    if (not isinstance(xml, str) or len(xml.encode('utf-8')) > 131072
+            or '<!DOCTYPE' in xml.upper() or '<!ENTITY' in xml.upper()):
+        raise ValueError('历史汇率XML无效')
+    ns = {'e': 'http://www.ecb.int/vocabulary/2002-08-01/eurofxref'}
+    try:
+        tree = ET.fromstring(xml)
+    except ET.ParseError:
+        raise ValueError('历史汇率XML无效') from None
+    matches = [r for r in tree.findall('.//e:Cube[@time]', ns) if r.get('time') == day.isoformat()]
+    if len(matches) != 1: raise ValueError('历史汇率没有唯一同日观察值')
+    rates = {r.get('currency'): positive(r.get('rate')) for r in matches[0]}
+    if len(rates) != len(matches[0]): raise ValueError('历史汇率币种重复')
+    result['fx_spot'] = rates['CNY'] / rates['USD']
+    result['fx_source'] = 'ECB同日参考汇率交叉计算（CNY/EUR ÷ USD/EUR）'
+    return result
+
+
 def yahoo_text(url):
     """Bounded read of the exact ICE contract; Yahoo requires a browser user agent."""
     import time
