@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError, file_sha256
+from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history, reconcile_regional_history
 from agri_research_agent.data_sources.domestic_sugar_regional_history import (
     REGIONS, build_regional_basis, load_regional_history, resolve_regional_history,
 )
@@ -43,6 +44,56 @@ def regional_root(regional_workbook, prepared_root, tmp_path):
     root = tmp_path / "regional"
     prepare_regional_sugar_history(regional_workbook, file_sha256(regional_workbook), prepared_root, root)
     return root
+
+
+def test_reconciliation_updates_spot_without_inventing_futures_or_mutating_sources(regional_root, prepared_root):
+    base = load_sugar_history(prepared_root)
+    regional = load_regional_history(regional_root)
+    before = {str(p): file_sha256(p) for root in (prepared_root, regional_root) for p in root.rglob("*") if p.is_file()}
+    combined = reconcile_regional_history(base, regional)
+    assert combined.spot.iloc[-1].business_date == pd.Timestamp("2026-10-12")
+    assert combined.spot.iloc[-1].cash_price == 5330
+    latest = combined.nearest_basis.loc[combined.nearest_basis.business_date.eq("2026-10-12")]
+    assert len(latest) == 3 and latest.basis.isna().all()
+    assert base.spot.iloc[-1].business_date == pd.Timestamp("2026-10-10")
+    assert before == {str(p): file_sha256(p) for root in (prepared_root, regional_root) for p in root.rglob("*") if p.is_file()}
+
+
+def test_reconciliation_uses_only_actual_mapped_contract_close(regional_root, prepared_root):
+    from dataclasses import replace
+    regional = load_regional_history(regional_root)
+    rows = regional.daily.copy()
+    mask = rows.business_date.eq("2026-10-12")
+    rows.loc[mask, "ts_code"] = "SR2701.ZCE"
+    rows.loc[mask, "futures_price"] = 5330
+    rows.loc[mask, "basis"] = rows.loc[mask, "cash_price"] - 5330
+    result = reconcile_regional_history(load_sugar_history(prepared_root), replace(regional, daily=rows))
+    latest = result.nearest_basis.loc[result.nearest_basis.business_date.eq("2026-10-12")].set_index("delivery_month")
+    assert latest.loc[1, "basis"] == 0
+    assert latest.loc[[5, 9], "basis"].isna().all()
+    assert result.main_basis.iloc[-1].basis == 0
+    assert result.fixed_basis.loc[result.fixed_basis.business_date.eq("2026-10-12"), "ts_code"].tolist() == ["SR2701.ZCE"]
+
+
+def test_reconciliation_does_not_fill_a_new_capture_null_from_old_quotes(regional_root, prepared_root):
+    from dataclasses import replace
+    regional = load_regional_history(regional_root)
+    rows = regional.daily.copy()
+    mask = rows.business_date.eq("2026-10-09") & rows.region.eq("柳州")
+    rows.loc[mask, ["cash_price", "basis"]] = float("nan")
+    result = reconcile_regional_history(load_sugar_history(prepared_root), replace(regional, daily=rows))
+    assert result.spot.loc[result.spot.business_date.eq("2026-10-09"), "cash_price"].isna().all()
+    assert result.fixed_basis.loc[result.fixed_basis.business_date.eq("2026-10-09"), "basis"].isna().all()
+
+
+@pytest.mark.parametrize("field,value", [("cash_price", 5281), ("futures_price", 5492), ("ts_code", "SR2705.ZCE")])
+def test_reconciliation_rejects_conflicting_source_history(regional_root, prepared_root, field, value):
+    from dataclasses import replace
+    regional = load_regional_history(regional_root)
+    rows = regional.daily.copy()
+    rows.loc[rows.business_date.eq("2026-10-09") & rows.region.eq("柳州"), field] = value
+    with pytest.raises(SugarHistoryError, match="冲突"):
+        reconcile_regional_history(load_sugar_history(prepared_root), replace(regional, daily=rows))
 
 
 def test_exact_same_day_shared_contract_and_missing_weekend(regional_root):

@@ -23,6 +23,7 @@ SUGAR_IMPORT_ROUTE_ID = "sugar_import_profit"
 INTERNATIONAL_SPREAD_PAGE_TITLE = "国际价差"
 RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
 FOREIGN_FX_PAGE_TITLE = "外盘汇率"
+SUGAR_BASIS_PAGE_TITLE = "白糖基差"
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,10 @@ NAVIGATION_GROUPS = (
                 "基差/一口价",
                 "quote",
                 "查看国内油脂油料现货基差、一口价与地区报价",
+            ),
+            NavigationItem(
+                "sugar_basis", SUGAR_BASIS_PAGE_TITLE, SUGAR_BASIS_PAGE_TITLE, "quote",
+                "比较柳州白糖现货、01/05/09合约基差与三地主力基差",
             ),
         ),
     ),

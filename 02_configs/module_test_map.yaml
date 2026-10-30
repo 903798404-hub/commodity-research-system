@@ -657,6 +657,7 @@ modules:
       - 04_scripts/prepare_domestic_sugar_history.py
       - 05_apps/domestic_sugar_basis.py
       - 05_apps/domestic_sugar_basis_preview.py
+      - 05_apps/basis_interactive_charts.py
       - 02_configs/lutou_domestic_basis.yaml
       - 03_src/agri_research_agent/market_data/basis.py
       - 03_src/agri_research_agent/data_sources/lutou/domestic_basis.py

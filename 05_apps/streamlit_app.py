@@ -61,6 +61,7 @@ from navigation import (
     SUGAR_IMPORT_ROUTE_ID,
     INTERNATIONAL_SPREAD_PAGE_TITLE,
     FOREIGN_FX_PAGE_TITLE,
+    SUGAR_BASIS_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
     THAILAND_SUGARCANE_WEATHER_PAGE_TITLE,
     GUANGXI_WEATHER_PAGE_TITLE,
@@ -453,6 +454,11 @@ def main() -> None:
 def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -> None:
     """Dispatch one validated workspace route without preloading others."""
 
+    if selected_page != SUGAR_BASIS_PAGE_TITLE:
+        for key in list(st.session_state):
+            if key == "sugar_history_years" or key.startswith(("sugar_regional_start_", "sugar_regional_end_")):
+                st.session_state[key] = st.session_state[key]
+
     if selected_page == "首页":
         if workspace_page is None:
             render_home(REPORT_CATALOG_FILE)
@@ -464,6 +470,9 @@ def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -
         render_foreign_fx_page(project_root=PROJECT_ROOT)
     elif selected_page == "基差/一口价":
         render_basis_page(get_public_basis_current_root())
+    elif selected_page == SUGAR_BASIS_PAGE_TITLE:
+        from domestic_sugar_basis import render_sugar_basis_page
+        render_sugar_basis_page()
     elif selected_page == SOYBEAN_CROP_PAGE_TITLE:
         render_soybean_weekly_page()
     elif selected_page == CANADA_CANOLA_PAGE_TITLE:

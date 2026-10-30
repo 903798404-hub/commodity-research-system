@@ -99,24 +99,21 @@ def test_weekly_switch_does_not_execute_hidden_page(monkeypatch) -> None:
     assert not app.exception and calls == ["crop", "exports"]
 
 
-def test_basis_default_does_not_load_hidden_sugar_but_fallback_still_does(monkeypatch,mock_public_basis_current) -> None:
+def test_oilseed_page_never_reads_sugar_even_if_current_is_unavailable(monkeypatch,mock_public_basis_current) -> None:
+    import domestic_sugar_basis
+    def forbidden(*args, **kwargs):
+        raise AssertionError("oilseed page must not read sugar")
+    monkeypatch.setattr(domestic_sugar_basis, "load_sugar_page_data", forbidden)
     rows = _formal_public_current_rows()
     mock_public_basis_current(rows,{"release_id": "performance-test", "manifest_sha256": "a" * 64})
-    calls = []
-    monkeypatch.setattr(basis_page, "_optional_sugar_snapshot", lambda root: (calls.append(root) or None, None))
     app = AppTest.from_string("from pathlib import Path\nfrom basis_page import render_basis_page\nrender_basis_page(Path('test-current'))", default_timeout=30).run()
-    assert not app.exception and not calls
-    app.session_state["basis_research_tab"] = "白糖（柳州）"
-    app.run()
-    assert not app.exception and len(calls) == 1
-    assert any("柳州历史快照尚未配置" in info.value for info in app.info)
-    # Use the real typed exception raised by the Current reader.
+    assert not app.exception
     from agri_research_agent.market_data.public_basis_current import PublicBasisCurrentErrorCode
     def unavailable(root):
         raise basis_page.PublicBasisCurrentError(PublicBasisCurrentErrorCode.PUBLIC_CURRENT_UNAVAILABLE, "test unavailable")
     monkeypatch.setattr(basis_page, "load_basis_page_data", unavailable)
     app.run()
-    assert not app.exception and len(calls) == 2
+    assert not app.exception and not app.metric
     assert any("Formal Public Basis Current 暂不可用" in warning.value for warning in app.warning)
 
 
