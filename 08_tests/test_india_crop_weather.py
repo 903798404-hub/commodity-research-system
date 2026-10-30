@@ -209,4 +209,9 @@ def test_india_crop_weather_routes_render_from_the_formal_workspace_entry(monkey
     assert not app.exception
     assert any(item.value == "印度甘蔗天气研究" for item in app.title)
     section_radio = next(item for item in app.radio if item.label == "页面章节")
-    assert section_radio.options == ["单日降雨", "累计降雨", "最高气温", "土壤墒情"]
+    assert section_radio.options == ["单日降雨", "土壤墒情", "累计降雨", "最高气温"]
+    app.session_state["selected_workspace_page"] = "白糖天气"
+    app.run(timeout=30)
+    assert not app.exception
+    assert app.radio(key="sugar_weather_region").value == "印度"
+    assert next(r for r in app.radio if r.label == "页面章节").options[:2] == ["单日降雨", "土壤墒情"]

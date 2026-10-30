@@ -99,10 +99,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         "大豆天气",
         "菜籽天气",
         "棕榈油天气",
-        "印度作物天气",
-        "泰国甘蔗天气",
-        "广西甘蔗天气",
-        "云南甘蔗天气",
+        "白糖天气",
         "USDA供需平衡",
         "Oil World供需平衡",
         "大豆进口榨利",
@@ -127,7 +124,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         item for group in workspace.SIDEBAR_NAVIGATION if group.title != "工作台" for item in group.items
     ]
     assert research_items == sidebar_research_items
-    assert set(workspace.WORKSPACE_PAGES) == {
+    assert set(workspace.WORKSPACE_PAGES) == {"印度作物天气", "泰国甘蔗天气", "广西甘蔗天气", "云南甘蔗天气"} | {
         item.target
         for group in workspace.SIDEBAR_NAVIGATION
         for item in group.items
@@ -135,9 +132,9 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 23
-    assert cards_markup.count('class="agri-card-keyword"') == 20
-    assert cards_markup.count('class="agri-card-detail-label"') == 11
+    assert cards_markup.count('class="agri-card"') == 20
+    assert cards_markup.count('class="agri-card-keyword"') == 18
+    assert cards_markup.count('class="agri-card-detail-label"') == 8
     assert "?home_target=" not in cards_markup
     assert "?workspace_page=" in cards_markup
     assert '<strong class="agri-card-keyword">跨期价差</strong>' in cards_markup
@@ -145,7 +142,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     assert '<span class="agri-card-detail-label">包含：</span>' in cards_markup
     assert '<strong class="agri-card-keyword">种植进度</strong>' in cards_markup
     assert '<strong class="agri-card-keyword">美国</strong>' in cards_markup
-    assert '<strong class="agri-card-keyword">棉花</strong>' in cards_markup
+    assert '印度 · 泰国 · 广西 · 云南' in cards_markup
     for forbidden in (
         "需要关注", "数据状态概览", "核心研究入口", "最新业务日", "自动更新",
         "每周更新", "数据可用", "Cron", "天气数据更新至",
@@ -174,7 +171,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     assert details["大豆天气"] == "美国 · 巴西 · 阿根廷"
     assert details["菜籽天气"] == "加拿大 · 澳大利亚 · 欧盟 · 俄罗斯 · 乌克兰"
     assert details["棕榈油天气"] == "印度尼西亚 · 马来西亚"
-    assert details["印度作物天气"] == "棉花 · 甘蔗"
+    assert details["白糖天气"] == "印度 · 泰国 · 广西 · 云南"
 
 
 def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) -> None:
@@ -188,7 +185,7 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
         ("巴西大豆种植与生长", workspace.BRAZIL_SOY_PAGE_TITLE, None),
     ]
     assert [item.label for item in groups["天气研究"]] == [
-        "大豆天气", "菜籽天气", "棕榈油天气", "印度作物天气", "泰国甘蔗天气", "广西甘蔗天气", "云南甘蔗天气"
+        "大豆天气", "菜籽天气", "棕榈油天气", "白糖天气"
     ]
     assert "美国大豆天气研究" not in [
         item.label for group in workspace.SIDEBAR_NAVIGATION for item in group.items
@@ -527,3 +524,23 @@ def test_basis_page_reads_three_rows_and_formulas_are_correct() -> None:
 
     expected_rows = len(filter_display_data(data))
     assert expected_rows == 2
+
+
+
+def test_unified_sugar_weather_renders_only_selected_existing_region(monkeypatch):
+    page = importlib.import_module('weather_research_page')
+    import thailand_sugarcane_weather_page as thai
+    calls = []
+    monkeypatch.setattr(page, 'render_weather_research_page', lambda key: calls.append(key))
+    monkeypatch.setattr(page, 'render_guangxi_weather_page', lambda: calls.append('guangxi'))
+    monkeypatch.setattr(page, 'render_yunnan_weather_page', lambda: calls.append('yunnan'))
+    monkeypatch.setattr(thai, 'render_thailand_sugarcane_weather_page', lambda: calls.append('thailand'))
+    app = AppTest.from_file(str(FORMAL_ENTRY), default_timeout=30)
+    app.query_params['workspace_page'] = '白糖天气'
+    app.run()
+    assert not app.exception and calls == ['india_crop_weather']
+    assert app.session_state['weather_country_india_crop_weather'] == '印度甘蔗'
+    assert app.radio(key='sugar_weather_region').options == ['印度', '泰国', '广西', '云南']
+    for label, expected in [('泰国', 'thailand'), ('广西', 'guangxi'), ('云南', 'yunnan')]:
+        calls.clear();app.radio(key='sugar_weather_region').set_value(label).run()
+        assert not app.exception and calls == [expected]

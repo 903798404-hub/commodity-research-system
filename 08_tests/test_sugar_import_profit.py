@@ -610,3 +610,49 @@ def test_deployed_capture_switch_is_declared_and_independent_from_saving(monkeyp
     assert not runtime.monthly_capture_enabled()
     monkeypatch.setenv(name, '1')
     assert runtime.monthly_capture_enabled()
+
+
+
+def test_freight_carry_reuses_only_past_country_and_preserves_source_and_gaps():
+    from copy import deepcopy
+    from agri_research_agent.sugar_import_profit.freight import freight_default, reference_on, validate_provenance
+    source = dict(article_url='https://www.hisugar.com/home/articleContent?id=2026101508000000000000',
+                  image_url='https://www.hisugar.com/image/20261015/table.png', image_sha256='a'*64)
+    rows = [dict(date=stamp, country='巴西', freight_usd_per_tonne=value, sources=[source])
+            for stamp, value in [('2026-10-15', 54.), ('2026-10-22', 56.), ('2026-10-29', 57.)]]
+    original = deepcopy(rows)
+    value, origin = freight_default(rows, [], '2026-10-21', '巴西', '2027-01')
+    assert value == 54. and origin['quote_date'] == '2026-10-15'
+    assert origin['source_kind'] == 'hisugar_reference' and origin['sources'] == [source]
+    validate_provenance(origin, value, date(2026, 10, 21))
+    assert freight_default(rows, [], '2026-10-28', '巴西', '2027-01')[0] == 56.
+    assert freight_default(rows, [], '2026-10-28', '泰国', '2027-01')[0] is None
+    assert freight_default(rows, [], '2026-10-14', '巴西', '2027-01')[0] is None
+    assert reference_on(rows, '2026-10-21', '巴西') is None and rows == original
+    with pytest.raises(ValueError, match='沿用'):
+        validate_provenance(dict(origin, value=55.), 54., date(2026, 10, 21))
+    with pytest.raises(ValueError, match='沿用'):
+        validate_provenance(dict(origin, quote_date='2026-10-22'), 54., date(2026, 10, 21))
+
+
+def test_freight_carry_manual_zero_clear_and_original_date_survive_repeat_saves():
+    from copy import deepcopy
+    from agri_research_agent.sugar_import_profit.freight import freight_default, validate_provenance
+    payload = research_payload()
+    for r in payload['quotes']:
+        r.update(freight=0., freight_origin=dict(kind='manual', basis='user_entered', quote_date=payload['date']))
+    records = [dict(payload=payload)]
+    before = deepcopy(records)
+    value, origin = freight_default([], records, '2026-10-22', '巴西', '2027-01')
+    assert value == 0. and origin['quote_date'] == '2026-10-15'
+    copied = deepcopy(payload);copied['date'] = '2026-10-22'
+    for r in copied['quotes']:r.update(freight=value, freight_origin=origin)
+    value2, origin2 = freight_default([], [dict(payload=copied)] + records, '2026-10-28', '巴西', '2027-01')
+    assert value2 == 0. and origin2['quote_date'] == '2026-10-15'
+    validate_provenance(origin2, value2, date(2026, 10, 28))
+    cleared = deepcopy(copied)
+    for r in cleared['quotes']:r.update(freight=None, freight_origin=dict(kind='missing', explicit_clear=True, quote_date='2026-10-22'))
+    assert freight_default([], [dict(payload=cleared)] + records, '2026-10-28', '巴西', '2027-01')[0] is None
+    assert freight_default([], records, '2026-10-28', '泰国', '2027-01')[0] is None
+    assert freight_default([], records, '2026-10-28', '巴西', '2028-01')[0] is None
+    assert records == before

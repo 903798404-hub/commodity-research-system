@@ -12,6 +12,7 @@ BRAZIL_SOY_PAGE_TITLE = "巴西大豆种植与生长"
 SOYBEAN_WEATHER_PAGE_TITLE = "大豆天气"
 RAPESEED_WEATHER_PAGE_TITLE = "菜籽天气"
 PALM_OIL_WEATHER_PAGE_TITLE = "棕榈油天气"
+SUGAR_WEATHER_PAGE_TITLE = "白糖天气"
 INDIA_CROP_WEATHER_PAGE_TITLE = "印度作物天气"
 THAILAND_SUGARCANE_WEATHER_PAGE_TITLE = "泰国甘蔗天气"
 GUANGXI_WEATHER_PAGE_TITLE = "广西甘蔗天气"
@@ -157,28 +158,9 @@ NAVIGATION_GROUPS = (
                 detail_text="印度尼西亚 · 马来西亚",
             ),
             NavigationItem(
-                "india_crop_weather",
-                "印度作物天气",
-                INDIA_CROP_WEATHER_PAGE_TITLE,
-                "leaf",
-                "跟踪印度主要农作物产区天气变化",
-                detail_label="包含",
-                detail_text="棉花 · 甘蔗",
-            ),
-            NavigationItem(
-                "thailand_sugarcane_weather", THAILAND_SUGARCANE_WEATHER_PAGE_TITLE, THAILAND_SUGARCANE_WEATHER_PAGE_TITLE,
-                "leaf", "比较泰国主要甘蔗产区降雨、气温与土壤墒情",
-                detail_label="覆盖", detail_text="16个主产省 · 2025年收获面积 · EC/GFS",
-            ),
-            NavigationItem(
-                "guangxi_weather", GUANGXI_WEATHER_PAGE_TITLE, GUANGXI_WEATHER_PAGE_TITLE,
-                "leaf", "比较广西甘蔗产区降水、气温、土壤墒情与历史同期",
-                detail_label="覆盖", detail_text="广西14市 · EC/GFS · 每日更新",
-            ),
-            NavigationItem(
-                "yunnan_weather", YUNNAN_WEATHER_PAGE_TITLE, YUNNAN_WEATHER_PAGE_TITLE,
-                "leaf", "比较云南实际蔗区降水、气温、土壤墒情与历史同期",
-                detail_label="覆盖", detail_text="云南13州市 · EC/GFS · 每日更新",
+                "sugar_weather", SUGAR_WEATHER_PAGE_TITLE, SUGAR_WEATHER_PAGE_TITLE,
+                "leaf", "比较白糖主要甘蔗产区天气及历史同期变化",
+                detail_label="覆盖", detail_text="印度 · 泰国 · 广西 · 云南",
             ),
         ),
     ),
@@ -258,4 +240,5 @@ def internal_workspace_pages() -> tuple[str, ...]:
         for group in NAVIGATION_GROUPS
         for item in group.items
         if not item.external_env
-    )
+    ) + (INDIA_CROP_WEATHER_PAGE_TITLE, THAILAND_SUGARCANE_WEATHER_PAGE_TITLE,
+         GUANGXI_WEATHER_PAGE_TITLE, YUNNAN_WEATHER_PAGE_TITLE)

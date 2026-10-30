@@ -82,6 +82,24 @@ def render_weather_research_page(page_key: str) -> None:
     st.info("该地区天气研究页面尚未接入。")
 
 
+def render_sugar_weather_page() -> None:
+    """One navigation entry; render only the selected existing regional reader."""
+    st.title("白糖天气")
+    region = st.radio("产区", ("印度", "泰国", "广西", "云南"),
+                      horizontal=True, key="sugar_weather_region")
+    if region == "印度":
+        if "weather_country_india_crop_weather" not in st.session_state:
+            st.session_state["weather_country_india_crop_weather"] = "印度甘蔗"
+        render_weather_research_page("india_crop_weather")
+    elif region == "泰国":
+        from thailand_sugarcane_weather_page import render_thailand_sugarcane_weather_page
+        render_thailand_sugarcane_weather_page()
+    elif region == "广西":
+        render_guangxi_weather_page()
+    else:
+        render_yunnan_weather_page()
+
+
 def weather_service_url(workspace_url: str, *, embedded: bool = False) -> str:
     """Use the site's host and scheme; never forward queries or credentials.
 

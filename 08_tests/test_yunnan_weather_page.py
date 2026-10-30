@@ -43,4 +43,5 @@ def test_yunnan_navigation_reads_dedicated_service_without_collection(monkeypatc
     assert app.get("link_button")[0].proto.url == "http://research.example:8858/"
     nav = importlib.import_module("navigation")
     group = next(group for group in nav.NAVIGATION_GROUPS if group.title == "天气研究")
-    assert [item.target for item in group.items][-2:] == ["广西甘蔗天气", "云南甘蔗天气"]
+    assert [item.target for item in group.items][-1:] == ["白糖天气"]
+    assert "云南甘蔗天气" in nav.internal_workspace_pages()
