@@ -1,6 +1,7 @@
 """Only legacy public Docker entry ports; no global firewall replacement."""
 import json
 import re
+import shlex
 import socket
 import ssl
 import subprocess
@@ -38,10 +39,19 @@ def tls_health(ip):
                 raise ValueError('Trusted HTTPS is not healthy')
 
 
+def public_jump_first(dev):
+    result = call(['iptables','-S','DOCKER-USER'],check=False)
+    rows = [shlex.split(line) for line in result.stdout.splitlines() if line.startswith('-A ')]
+    return result.returncode == 0 and bool(rows) and rows[0] == ['-A','DOCKER-USER','-i',dev,'-j',CHAIN]
+
+
 def confirmed():
     try:
         dev = interface()
-        if call(['iptables','-C','DOCKER-USER','-i',dev,'-j',CHAIN],check=False).returncode:
+        if not public_jump_first(dev):
+            return False
+        own = call(['iptables','-S',CHAIN],check=False)
+        if own.returncode or sum(line.startswith('-A ') for line in own.stdout.splitlines()) != len(PORTS):
             return False
         return all(call(['iptables','-C',CHAIN,*rule],check=False).returncode == 0 for rule in rules())
     except (OSError,ValueError,subprocess.SubprocessError):
@@ -73,7 +83,9 @@ def install(ip):
     # The rule applies only to incoming public-interface ORIGINAL connections.
     # Loopback, gateway bridge traffic, replies, SSH, 80/443 and other ports stay
     # under their original policies; existing chains are not flushed or saved over.
-    if call(['iptables','-C','DOCKER-USER','-i',dev,'-j',CHAIN],check=False).returncode:
+    if not public_jump_first(dev):
+        if call(['iptables','-C','DOCKER-USER','-i',dev,'-j',CHAIN],check=False).returncode == 0:
+            call(['iptables','-D','DOCKER-USER','-i',dev,'-j',CHAIN])
         call(['iptables','-I','DOCKER-USER','1','-i',dev,'-j',CHAIN])
     if not confirmed():
         raise ValueError('Legacy entrypoint firewall validation failed')

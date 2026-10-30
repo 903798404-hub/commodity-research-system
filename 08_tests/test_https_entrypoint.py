@@ -92,6 +92,21 @@ def test_backend_rules_leave_replies_and_unrelated_services_outside_scope():
     assert all('--ctdir' in row and 'ORIGINAL' in row and '--ctorigdstport' in row for row in module.rules())
 
 
+@pytest.mark.parametrize('case', ['unreachable_jump','unknown_own_rule'])
+def test_existing_rules_do_not_falsely_confirm_effective_public_isolation(monkeypatch, case):
+    module=load('firewall');monkeypatch.setattr(module,'interface',lambda:'eth0')
+    def call(args,**_kwargs):
+        if args==['iptables','-S','DOCKER-USER']:
+            text='-A DOCKER-USER -i eth0 -j MARKET_HTTPS_ONLY\n'
+            if case=='unreachable_jump':text='-A DOCKER-USER -j RETURN\n'+text
+            return SimpleNamespace(stdout=text,returncode=0)
+        if args==['iptables','-S',module.CHAIN]:
+            return SimpleNamespace(stdout='-A MARKET_HTTPS_ONLY -j DROP\n'*6,returncode=0)
+        return SimpleNamespace(stdout='',returncode=0)
+    monkeypatch.setattr(module,'call',call)
+    assert module.confirmed() is False
+
+
 def report():
     names=['spread-dashboard','usda-dashboard','oil-world-dashboard','guangxi-weather-preview','yunnan-weather-preview','market-data-https-entrypoint']
     return dict(schema_version='public-https-status/1',checked_at=datetime.now(timezone.utc).isoformat(),status='CURRENT',
@@ -119,3 +134,12 @@ def test_renewal_units_have_bounded_retries_and_no_shell_hooks():
     assert 'StartLimitBurst=3' in units['market-data-https-renew.service']
     assert '00,06,12,18:15:00' in units['market-data-https-renew.timer']
     with pytest.raises(ValueError):module.render_units('/opt/example;cmd','/etc/example.json')
+
+
+def test_host_cli_import_preserves_the_existing_application_runtime_namespace(monkeypatch):
+    before=list(sys.path)
+    load('runtime')
+    assert sys.path==before
+    monkeypatch.syspath_prepend(str(ROOT/'04_scripts'))
+    from runtime import serve_spread_dashboard
+    assert Path(serve_spread_dashboard.__file__).resolve()==ROOT/'04_scripts/runtime/serve_spread_dashboard.py'

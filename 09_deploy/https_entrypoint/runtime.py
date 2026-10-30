@@ -14,10 +14,18 @@ import sys
 import tempfile
 
 SOURCE = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import certificates
-import configuration
-import firewall
+
+
+def sibling(name):
+    spec = importlib.util.spec_from_file_location('_market_https_' + name, Path(__file__).resolve().with_name(name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+certificates = sibling('certificates')
+firewall = sibling('firewall')
 
 CONFIG_ROOT = Path('/etc/market-data/https-entrypoint')
 APPS = ('spread-dashboard', 'usda-dashboard', 'oil-world-dashboard',
