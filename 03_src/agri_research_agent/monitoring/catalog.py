@@ -75,12 +75,12 @@ WEATHER = [
     ("AUS","澳大利亚菜籽","rapeseed_weather",False), ("EU","欧盟菜籽","rapeseed_weather",False),
     ("RUS","俄罗斯菜籽","rapeseed_weather",False), ("UKR","乌克兰菜籽","rapeseed_weather",False),
     ("IDN","印尼棕榈油","palm_oil_weather",True), ("MYS","马来西亚棕榈油","palm_oil_weather",True),
-    ("IND_COTTON","印度棉花","india_crop_weather",False), ("IND_SUGARCANE","印度甘蔗","india_crop_weather",False),
+    ("IND_COTTON","印度棉花","sugar_weather",False), ("IND_SUGARCANE","印度甘蔗","sugar_weather",False),
 ]
 for country,label,page,excluded in WEATHER:
     pages=(page,"research_overview") if country=="USA" else (page,)
     RULES.append(Rule("weather_"+country,label+"天气",pages,"原 Public Weather Current",cadence="weather",deadline="10:00",excluded=excluded,source_paused=not excluded))
-for identity,label,page in [("guangxi","广西甘蔗","guangxi_weather"),("yunnan","云南甘蔗","yunnan_weather"),("thailand","泰国甘蔗","thailand_sugarcane_weather")]:
+for identity,label,page in [("guangxi","广西甘蔗","sugar_weather"),("yunnan","云南甘蔗","sugar_weather"),("thailand","泰国甘蔗","sugar_weather")]:
     RULES.append(Rule(identity,label+"天气",(page,),"原独立历史与共同起报快照",cadence="weather",deadline="09:30",job=identity))
 
 RULES = tuple(RULES)
