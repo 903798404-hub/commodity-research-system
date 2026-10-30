@@ -1,8 +1,8 @@
 """Fixed-route configuration for the independent public HTTPS gateway."""
 from ipaddress import IPv4Address
 
-NGINX_IMAGE='sha256:43a775095fde460e747cc4799d2060c1953d588f6b896443051acccab1bb355f'
-CERTBOT_IMAGE='sha256:f0cfa0056d76325c6a2d3f4dc4dc41449763a9ee1000ed11caf8dc180450144d'
+NGINX_IMAGE='sha256:88f52f3d58a505b7e1ad96ca6969478517bcccb58418e75a54223271a64da7df'
+CERTBOT_IMAGE='sha256:276e40ec7d66eb505a01efdaaf0c842059bc8bb344feae70e254cb05b3fd30fc'
 ROUTES={'/usda/':(8080,False),'/oil-world/':(8081,False),'/guangxi-weather/':(8856,True),'/yunnan-weather/':(8858,True),'/':(8501,False)}
 
 def routes():

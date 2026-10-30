@@ -4,7 +4,7 @@ from datetime import datetime,timezone
 import hashlib,ipaddress,json,os,ssl,subprocess
 
 ROOT=Path('/var/lib/market-data/https-entrypoint')
-CERTBOT='sha256:f0cfa0056d76325c6a2d3f4dc4dc41449763a9ee1000ed11caf8dc180450144d'
+CERTBOT='sha256:276e40ec7d66eb505a01efdaaf0c842059bc8bb344feae70e254cb05b3fd30fc'
 GATEWAY='market-data-https-entrypoint'
 
 def public_ip(value):

@@ -30,8 +30,10 @@ HTTPS根路径代理原主站；`/usda/`、`/oil-world/`保持原原生路径；
 时非交互注册；账户私钥与证书私钥只在受保护主机目录保留，不进入Git、镜像、网页或操作输出。
 
 固定镜像的原始registry index、linux/amd64 manifest、config与解压层SHA传输证据单独封存。
-Nginx 1.28.2-alpine Image ID为`sha256:43a775095fde460e747cc4799d2060c1953d588f6b896443051acccab1bb355f`；
-Certbot v5.4.0为`sha256:f0cfa0056d76325c6a2d3f4dc4dc41449763a9ee1000ed11caf8dc180450144d`。
+Nginx 1.30.6-alpine Image ID为`sha256:88f52f3d58a505b7e1ad96ca6969478517bcccb58418e75a54223271a64da7df`；
+Certbot v5.9.0为`sha256:276e40ec7d66eb505a01efdaaf0c842059bc8bb344feae70e254cb05b3fd30fc`。
+网关版本按[官方稳定版](https://nginx.org/en/download.html)和
+[安全公告](https://nginx.org/en/security_advisories.html)核对后固定。
 不在服务器临时安装Certbot或其他依赖；跨环境导入必须逐层验证解压SHA和最终Image ID。
 
 每6小时检查续期，失败15分钟后重试，一小时最多3次。使用系统CA验证信任链、IP SAN、
