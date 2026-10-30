@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import tempfile
 from io import BytesIO
 from functools import lru_cache
@@ -482,6 +483,13 @@ def _render_report_card(
         if dataframe.empty:
             st.markdown(f"#### {title}")
             st.info("缺少对应数据。")
+            return
+        # Preserve the existing batch export contract used by the precompute
+        # worker. Interactive website views do not build or record PNGs.
+        if os.environ.get("MARKET_DATA_PRECOMPUTE_MODE") == "record":
+            cached_seasonal_report_image(dataframe, value_col=value_col, title=title,
+                years=tuple(years), zero_line=zero_line,
+                trading_calendar_bytes=china_futures_trading_days().asi8.tobytes())
             return
         rows = pd.DataFrame({"business_date": pd.to_datetime(dataframe["date"], errors="coerce"),
                              "value": pd.to_numeric(dataframe[value_col], errors="coerce")}).dropna(subset=["business_date"])
