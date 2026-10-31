@@ -187,6 +187,56 @@ def research_payload():
     return value
 
 
+def month_end_fx_evidence():
+    from test_sugar_daily_market import daily_snapshot
+    from agri_research_agent.commodity_import_margin.live import parse_fx
+    from datetime import datetime
+    raw = daily_snapshot()['fx_raw']
+    for body in raw.values(): body['data']['showDateCN'] = '2026-10-31 03:00:00'
+    raw['swap']['records'][0].update(label_3M='-100/-100', label_6M='-400/-400', label_9M='-700/-700')
+    captured = datetime.fromisoformat('2026-10-31T08:45:00+08:00')
+    curve, _, _ = parse_fx(raw, captured)
+    return dict(schema_version='sugar-fx-override/1', policy='CURRENT_CFETS', authorized=True,
+        captured_at=captured.isoformat(), fx_raw=raw, fx_curve=curve)
+
+
+def test_month_end_current_fx_uses_soybean_tenors_without_changing_original_prices():
+    from copy import deepcopy
+    payload = monthly_payload(date(2026, 10, 29))
+    payload.update(schema_version=model.RESEARCH_VERSION, parameters=dict(model.RESEARCH_PARAMETERS),
+        historical_market=historical_evidence(), fx_override=month_end_fx_evidence())
+    original = deepcopy(payload)
+    model.validate_monthly(payload)
+    rows = {r['period']: r for r in model.monthly_rows(payload)}
+    assert rows['2026-11']['fx'] == pytest.approx(6.67)
+    assert rows['2026-12']['fx'] == pytest.approx(6.67)
+    assert rows['2027-01']['fx'] == pytest.approx(6.66)
+    assert rows['2027-02']['fx'] == pytest.approx(6.65)
+    assert rows['2027-05']['fx'] == pytest.approx(6.62)
+    assert rows['2027-01']['fx_kind'] == '远期汇率'
+    assert rows['2026-11']['ice_quote_date'] == '2026-10-28'
+    assert rows['2026-11']['sr_quote_date'] == '2026-10-29'
+    assert payload == original
+    no_forward = deepcopy(payload)
+    no_forward['fx_override']['fx_raw'].pop('swap')
+    from agri_research_agent.commodity_import_margin.live import parse_fx
+    from datetime import datetime
+    no_forward['fx_override']['fx_curve'] = parse_fx(no_forward['fx_override']['fx_raw'],
+        datetime.fromisoformat(no_forward['fx_override']['captured_at']))[0]
+    with pytest.raises(ValueError): model.validate_monthly(no_forward)
+
+
+def test_month_end_current_fx_rejects_other_dates_missing_authorization_and_modified_rates():
+    from copy import deepcopy
+    evidence = month_end_fx_evidence()
+    for day in (date(2026, 10, 25), date(2026, 10, 31), date(2026, 11, 2)):
+        with pytest.raises(ValueError): model.month_end_fx(evidence, day)
+    for edit in (dict(authorized=False), dict(captured_at='2026-10-30T08:45:00+08:00'),
+                 dict(fx_curve={'0': 7.})):
+        invalid = deepcopy(evidence); invalid.update(edit)
+        with pytest.raises(ValueError): model.month_end_fx(invalid, date(2026, 10, 29))
+
+
 def test_reference_screenshot_formula_and_fee_order():
     payload = research_payload()
     item = payload['quotes'][10]

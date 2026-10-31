@@ -60,7 +60,7 @@ def monthly_html(rows, country='巴西', day=''):
     from pathlib import Path
     from soybean_margin_page import _cell
     css = (Path(__file__).parent / 'soybean_margin_assets/tables.css').read_text(encoding='utf-8')
-    frame = monthly_table(rows)
+    frame = monthly_table(rows).drop(columns=['原糖口径', '汇率口径', '汇率日期', '郑糖日期'])
     result = f'<style>{css}</style><section class="panel"><header>中国进口白糖盘面利润 · {escape(country)}<small>{escape(str(day))} · 元/吨</small></header><div class="scroll"><table class="terminal-table"><thead><tr>'
     result += ''.join('<th>' + escape(c) + '</th>' for c in frame.columns) + '</tr></thead><tbody>'
     for row in frame.to_dict('records'):
@@ -117,6 +117,7 @@ def _monthly(store, enabled, freight_root=None):
     country = controls[0].radio('产地', COUNTRIES, horizontal=True, key='sugar-month-country')
     day = controls[1].date_input('报价所属日期（可补录历史）', date.fromisoformat(today()), max_value=date.fromisoformat(today()), key='sugar-month-day')
     st.caption('每日北京时间15:15先保存行情，再补录该日升贴水。晚收到的报价选择其所属日期，匹配该日归档；本次录入日期为' + today() + '。')
+    st.caption('汇率同大豆自动选择：近1—2个月用即期，3个月起用对应期限远期；标准期限之间插值，不外推，缺少对应汇率时留空。')
     reference = latest_reference(public_freight, day.isoformat(), country)
     st.caption('海运费沿用最近报价，无需每天重填；人工修改或主动清空优先。沿用值为测算假设，原始运费历史仍保留真实日期和空白。')
     if reference:
@@ -192,6 +193,8 @@ def _monthly(store, enabled, freight_root=None):
                    source=source or '人工录入升贴水及海运费', parameters=params, quotes=quotes, market=st.session_state[key + ':market'])
     if initial.get('historical_market') is not None and payload['market'] is None:
         payload['historical_market'] = initial['historical_market']
+    if initial.get('fx_override') is not None:
+        payload['fx_override'] = initial['fx_override']
     if st.session_state.get(key + ':archive-version') is not None:
         payload['market_archive_version'] = st.session_state[key + ':archive-version']
     elif initial.get('market_archive_version') is not None:
@@ -223,7 +226,7 @@ def _monthly(store, enabled, freight_root=None):
             st.warning('该日归档存在缺项，相关成本和利润保持空白；可展开“行情时间、来源与缺失原因”查看。')
     elif payload['market'] is None and payload.get('historical_market') is None:
         st.info('尚无该日已归档行情。报价可先保存，待行情补齐后再载入计算；不会获取今天价格代替。')
-    if payload.get('historical_market') is not None:
+    if payload.get('historical_market') is not None and payload.get('fx_override') is None:
         st.info('即期汇率估算：各船期统一采用当日ECB参考即期交叉汇率，未计远期掉期点。原糖采用中国报价日结束前已完成的日线；郑糖采用同日报价日收盘价。')
     st.iframe(monthly_html(rows, country, day), height=650, width='stretch')
     st.caption('配额内与配额外分别计算；保险按FOB×费率自动计入，无须逐月填保险金额。')
@@ -239,9 +242,14 @@ def _monthly(store, enabled, freight_root=None):
                 st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 价格口径='收盘价' if r.get('time_kind') == 'daily_close' else '最新价', 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in items.items()]), hide_index=True)
             if market['errors']: st.warning('；'.join(f'{c}: {e}' for c, e in market['errors'].items()))
             if payload.get('historical_market') is not None:
-                st.json(payload['historical_market'])
+                historical = payload['historical_market']
+                st.json(dict(原糖历史凭证=historical['ice'], 郑糖历史凭证=historical['domestic'])
+                    if payload.get('fx_override') is not None else historical)
             else:
                 st.json(dict(在岸汇率曲线=market['fx_curve'], CFETS原始凭证=market['fx_raw']))
+        if payload.get('fx_override') is not None:
+            fx = payload['fx_override']
+            st.json(dict(在岸汇率曲线=fx['fx_curve'], CFETS原始凭证=fx['fx_raw']))
         else: st.info('尚无当日已存或新获取的行情；历史日期不获取当前价格。')
         st.dataframe(pd.DataFrame([dict(船期=r['period'], 状态=r['status']) for r in rows]), hide_index=True)
         st.dataframe(pd.DataFrame([dict(船期=r['period'], **_freight_source(r)) for r in rows]), hide_index=True)

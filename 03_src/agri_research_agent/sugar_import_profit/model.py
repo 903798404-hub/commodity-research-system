@@ -109,6 +109,22 @@ def ice_quote(market, code):
     return latest if latest.get('price') is not None else market.get('ice_closes', {}).get(code) or latest
 
 
+def month_end_fx(value, day):
+    """One authorized October catch-up uses the real October 31 CFETS curve."""
+    from agri_research_agent.commodity_import_margin.live import parse_fx
+    if (not isinstance(value, dict) or value.get('schema_version') != 'sugar-fx-override/1'
+            or value.get('policy') != 'CURRENT_CFETS' or value.get('authorized') is not True
+            or not date(2026, 10, 26) <= day <= date(2026, 10, 30)):
+        raise ValueError('月底补录汇率授权或日期范围无效')
+    captured = datetime.fromisoformat(value['captured_at'])
+    if captured.utcoffset() is None or captured.astimezone(TZ).date() != date(2026, 10, 31):
+        raise ValueError('月底补录必须使用10月31日实际取得的汇率')
+    curve, source, errors = parse_fx(value.get('fx_raw', {}), captured)
+    if not curve or curve != value.get('fx_curve') or errors:
+        raise ValueError('月底补录汇率与CFETS原始凭证不符')
+    return curve, source
+
+
 def monthly_rows(payload):
     """Partial calculation: actual margins require insurance; estimates name the omission."""
     market, params = payload.get('market') or {}, payload['parameters']
@@ -117,6 +133,9 @@ def monthly_rows(payload):
         if payload.get('market') is not None: raise ValueError('历史补录与实时快照不能混用')
         from .runtime import historical_market
         market = historical_market(historical, date.fromisoformat(payload['date']))
+    fx_override = payload.get('fx_override')
+    override_curve, override_source = (month_end_fx(fx_override, date.fromisoformat(payload['date']))
+        if fx_override is not None else ({}, {}))
     research = payload['schema_version'] == RESEARCH_VERSION
     rows = []
     for item in payload['quotes']:
@@ -127,6 +146,8 @@ def monthly_rows(payload):
         tenor = (year - day.year) * 12 + month - day.month
         from agri_research_agent.commodity_import_margin.model import select_fx
         fx = market.get('fx_spot') if historical is not None else select_fx(market.get('fx_curve', {}), tenor)[0]
+        if fx_override is not None:
+            fx = select_fx(override_curve, tenor)[0]
         ice_item = ice_quote(market, r['ice_contract'])
         ice = ice_item.get('price')
         r['ice_price_kind'] = ('收盘价' if ice_item.get('time_kind') == 'daily_close' else '最新价') if ice is not None else ''
@@ -136,6 +157,9 @@ def monthly_rows(payload):
         r.update(fx_kind=market.get('fx_policy', '即期汇率' if tenor <= 2 else '远期汇率'), fx_quote_date=market.get('fx_quote_date', ''),
                  sr_price_kind='收盘价' if domestic.get('time_kind') == 'daily_close' else '',
                  sr_quote_date=(domestic.get('quote_date') or domestic.get('quoted_at') or '')[:10])
+        if fx_override is not None:
+            r.update(fx_kind='即期汇率' if tenor <= 2 else '远期汇率',
+                fx_quote_date=override_source['published_at'][0][:10])
         quote, mode = r['quote'], payload['quote_mode']
         cfr = None
         if quote is not None:
@@ -253,4 +277,7 @@ def validate_monthly(payload):
                 raise ValueError('归档行情内容与引用版本不符')
     if value.get('market_archive_version') is not None and (market is None or market.get('archive_policy') is None):
         raise ValueError('归档版本必须引用归档行情')
+    if value.get('fx_override') is not None:
+        if not research: raise ValueError('月底补录汇率仅用于新公式记录')
+        month_end_fx(value['fx_override'], day)
     return value

@@ -23,6 +23,7 @@ def test_real_page_four_charts_switch_sources_and_country_without_writes(tmp_pat
     """Retain the original read-only/switching test identity for the replacement twelve-chart page."""
     app, db = page(tmp_path, monkeypatch)
     assert not app.exception and not db.exists()
+    assert any('汇率同大豆自动选择' in e.value and '3个月起用对应期限远期' in e.value for e in app.caption)
     assert len(app.get('plotly_chart')) == 12
     assert len(app.tabs) == 0
     assert not any('钢联' in str(e.value) for e in list(app.caption) + list(app.info))
@@ -94,6 +95,10 @@ def test_monthly_table_and_export_visibly_identify_close_date(monkeypatch):
     assert table.iloc[0]['原糖口径'] == '收盘价' and table.iloc[0]['原糖价格日期'] == '2026-10-27'
     html = monthly_html([row], day='2026-10-28')
     assert '收盘价' in html and '2026-10-27' in html and '不代表实时价格' in html
+    for removed in ('原糖口径', '汇率口径', '汇率日期', '郑糖日期'):
+        assert '<th>' + removed + '</th>' not in html
+    for retained in ('原糖价格日期', '汇率', '郑糖口径', '配额内进口利润', '配额外进口利润'):
+        assert '<th>' + retained + '</th>' in html
     assert '2026-10-27' in table.to_csv(index=False)
 
 
@@ -123,6 +128,30 @@ def test_historical_spot_estimate_is_visible_and_survives_page_resave(tmp_path, 
     assert len(figure.data)==1 and '即期估算' in figure.data[0].name
     assert figure.data[0].marker.symbol=='diamond'
     assert all('即期汇率估算' in text for text in figure.data[0].customdata)
+
+
+def test_authorized_current_fx_is_preserved_on_page_save_without_estimate_notice(tmp_path, monkeypatch):
+    from test_sugar_import_profit import historical_evidence, monthly_payload, month_end_fx_evidence
+    from agri_research_agent.sugar_import_profit.model import RESEARCH_PARAMETERS, monthly_rows
+    app, db = page(tmp_path, monkeypatch)
+    payload = monthly_payload(date(2026, 10, 29))
+    payload.update(schema_version=RESEARCH_VERSION, parameters=dict(RESEARCH_PARAMETERS),
+        historical_market=historical_evidence(), fx_override=month_end_fx_evidence())
+    for row in payload['quotes']:
+        row['freight_origin'] = dict(kind='manual', basis='user_entered')
+    payload['quotes'].sort(key=lambda row: row['period'])
+    store = Store(db, lambda _: None)
+    store.save_monthly(payload, expected_version=None)
+    app.date_input(key='sugar-month-day').set_value(date(2026, 10, 29)).run()
+    assert not app.exception
+    assert not any('即期汇率估算' in str(e.value) for e in app.info)
+    app.button(key='sugar-month:巴西:2026-10-29:save').click().run()
+    assert not app.exception
+    saved = next(r['payload'] for r in store.monthly_records() if r['payload']['date'] == '2026-10-29')
+    assert saved['fx_override'] == payload['fx_override']
+    assert saved['historical_market'] == payload['historical_market']
+    assert saved['quotes'] == payload['quotes']
+    assert monthly_rows(saved) == monthly_rows(payload)
 
 
 def _seed_public_freight(tmp_path, value=54.):
