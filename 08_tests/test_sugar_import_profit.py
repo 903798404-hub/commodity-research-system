@@ -723,6 +723,50 @@ def historical_evidence():
             raw_xml='<Envelope xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref"><Cube><Cube time="2026-10-29"><Cube currency="USD" rate="1.113"/><Cube currency="CNY" rate="7.4144"/></Cube></Cube></Envelope>'))
 
 
+def cfets_historical_evidence():
+    h = historical_evidence()
+    h.update(date='2026-10-30', retrieved_at='2026-11-01T18:00:00+08:00',
+        fx_policy='CFETS_CURVE', fx=month_end_fx_evidence())
+    h.pop('spot_estimate_authorized')
+    h['domestic']['SR2701']['raw'].update(d='2026-10-30', c='5263')
+    return h
+
+
+def test_historical_cfets_curve_preserves_real_close_sources_and_all_forward_tenors(tmp_path):
+    from copy import deepcopy
+    h = cfets_historical_evidence()
+    market = runtime.historical_market(h, date(2026, 10, 30))
+    assert model.ice_quote(market, 'SBH27')['price'] == 19.52
+    assert model.ice_quote(market, 'SBH27')['quote_date'] == '2026-10-29'
+    assert model.ice_quote(market, 'SBH27')['source_url'] == h['ice']['SBH27']['source_url']
+    assert market['domestic']['SR2701']['price'] == 5263.
+    assert market['fx_curve'] == h['fx']['fx_curve'] and 'fx_spot' not in market
+    payload = monthly_payload(date(2026, 10, 30))
+    payload.update(schema_version=model.RESEARCH_VERSION, parameters=dict(model.RESEARCH_PARAMETERS),
+        historical_cfets_market=h, fx_override=deepcopy(h['fx']))
+    for r in payload['quotes']: r.update(quote=None, freight=54.5)
+    original = deepcopy(payload)
+    rows = {r['period']: r for r in model.monthly_rows(model.validate_monthly(payload))}
+    assert rows['2026-11']['fx'] == pytest.approx(6.67)
+    assert rows['2027-01']['fx'] == pytest.approx(6.66)
+    assert rows['2027-02']['fx'] == pytest.approx(6.65)
+    assert rows['2027-05']['fx'] == pytest.approx(6.62)
+    assert all(r['margin_in'] is None and r['margin_out'] is None for r in rows.values())
+    assert payload == original
+    store = Store(tmp_path/'cfets.sqlite3', lambda _: None)
+    version = store.save_monthly(payload, expected_version=None)
+    assert store.monthly_records()[0]['payload'] == original
+    assert store.save_monthly(payload, expected_version=version) == version
+    bad = deepcopy(payload); bad['historical_market'] = bad.pop('historical_cfets_market')
+    with pytest.raises(ValueError, match='旧历史字段'): model.validate_monthly(bad)
+    bad = deepcopy(payload); bad['fx_override']['fx_curve']['0'] = 7.
+    with pytest.raises(ValueError): model.validate_monthly(bad)
+    bad = deepcopy(h); bad['domestic']['SR2701']['raw']['d'] = '2026-10-29'
+    with pytest.raises(ValueError): runtime.historical_market(bad, date(2026, 10, 30))
+    bad = deepcopy(h); bad['ice']['SBH27']['source_url'] = bad['ice']['SBH27']['source_url'].replace('end=20261029', 'end=20261031')
+    with pytest.raises(ValueError): runtime.historical_market(bad, date(2026, 10, 30))
+
+
 def test_historical_close_uses_available_session_and_actual_retrieval_preserving_nulls_and_cas(tmp_path):
     from copy import deepcopy
     h=historical_evidence()

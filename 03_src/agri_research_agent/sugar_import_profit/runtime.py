@@ -70,10 +70,11 @@ def historical_market(value, day):
     import re
     import xml.etree.ElementTree as ET
     from .model import TZ
+    policy = value.get('fx_policy') if isinstance(value, dict) else None
     if (not isinstance(value, dict) or value.get('schema_version') != 'sugar-historical-close/1'
             or value.get('date') != day.isoformat()
-            or value.get('fx_policy') != 'ECB_SPOT_ESTIMATE'
-            or value.get('spot_estimate_authorized') is not True):
+            or policy not in ('ECB_SPOT_ESTIMATE', 'CFETS_CURVE')
+            or (policy == 'ECB_SPOT_ESTIMATE' and value.get('spot_estimate_authorized') is not True)):
         raise ValueError('历史行情日期、版本或即期估算授权无效')
     retrieved = datetime.fromisoformat(value['retrieved_at'])
     if retrieved.utcoffset() is None or retrieved.astimezone(TZ).date() < day:
@@ -88,7 +89,8 @@ def historical_market(value, day):
         if not math.isfinite(n) or n <= 0: raise ValueError('历史价格无效')
         return n
     result = dict(ice={}, ice_closes={}, domestic={}, errors={}, captured_at=value['retrieved_at'],
-                  fx_curve={}, fx_raw={}, fx_policy='即期汇率估算', fx_quote_date=day.isoformat())
+                  fx_curve={}, fx_raw={}, fx_quote_date=day.isoformat())
+    if policy == 'ECB_SPOT_ESTIMATE': result['fx_policy'] = '即期汇率估算'
     if not isinstance(value.get('ice'), dict) or not isinstance(value.get('domestic'), dict):
         raise ValueError('历史合约证据无效')
     for code, item in value['ice'].items():
@@ -96,8 +98,10 @@ def historical_market(value, day):
         body = item['raw']
         data = body['data']
         expected = f'SB{code[-2:]}{code[2]}'
-        source = daily_close_url(code, datetime.combine(day + timedelta(days=1), time(8), TZ))
-        if (item.get('source_url') != source or body.get('rc') != 0 or data.get('code') != expected
+        sources = {daily_close_url(code, datetime.combine(day + timedelta(days=1), time(8), TZ))}
+        if policy == 'CFETS_CURVE': sources.add(daily_close_url(code, asof))
+        source = item.get('source_url')
+        if (source not in sources or body.get('rc') != 0 or data.get('code') != expected
                 or data.get('market') != 108 or data.get('decimal') != 2
                 or not str(data.get('name', '')).startswith('糖11号')):
             raise ValueError('历史原糖合约、单位或来源不符')
@@ -133,6 +137,11 @@ def historical_market(value, day):
         result['domestic'][code] = dict(price=closing, contract=code, provider='Sina',
             time_kind='daily_close', quote_date=day.isoformat(), quoted_at=day.isoformat(), source_url=source)
     fx = value['fx']
+    if policy == 'CFETS_CURVE':
+        from .model import month_end_fx
+        curve, source = month_end_fx(fx, day)
+        result.update(fx_curve=curve, fx_raw=fx['fx_raw'], fx_quote_date=source['published_at'][0][:10])
+        return result
     if fx.get('source_url') != 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml':
         raise ValueError('历史汇率来源不符')
     xml = fx['raw_xml']

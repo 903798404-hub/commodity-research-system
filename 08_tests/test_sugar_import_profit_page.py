@@ -154,6 +154,31 @@ def test_authorized_current_fx_is_preserved_on_page_save_without_estimate_notice
     assert monthly_rows(saved) == monthly_rows(payload)
 
 
+def test_full_cfets_history_survives_page_save_without_estimate_notice_or_network(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from test_sugar_import_profit import cfets_historical_evidence, monthly_payload
+    from agri_research_agent.sugar_import_profit.model import RESEARCH_PARAMETERS, monthly_rows
+    from agri_research_agent.sugar_import_profit import runtime
+    calls = []
+    monkeypatch.setattr(runtime, 'capture_monthly_market', lambda *args: calls.append(args))
+    app, db = page(tmp_path, monkeypatch)
+    h = cfets_historical_evidence()
+    payload = monthly_payload(date(2026, 10, 30))
+    payload.update(schema_version=RESEARCH_VERSION, parameters=dict(RESEARCH_PARAMETERS),
+        historical_cfets_market=h, fx_override=deepcopy(h['fx']))
+    for r in payload['quotes']: r.update(quote=None, freight_origin=dict(kind='manual', basis='user_entered'))
+    payload['quotes'].sort(key=lambda r: r['period'])
+    store = Store(db, lambda _: None); store.save_monthly(payload, expected_version=None)
+    app.date_input(key='sugar-month-day').set_value(date(2026, 10, 30)).run()
+    assert not app.exception and not calls
+    assert not any('即期汇率估算' in str(e.value) or '尚无该日已归档行情' in str(e.value) for e in app.info)
+    app.button(key='sugar-month:巴西:2026-10-30:save').click().run()
+    assert not app.exception and not calls
+    saved = next(r['payload'] for r in store.monthly_records() if r['payload']['date'] == '2026-10-30')
+    assert saved == payload
+    assert monthly_rows(saved)[0]['ice'] == 19.52 and monthly_rows(saved)[0]['sr'] == 5263.
+
+
 def _seed_public_freight(tmp_path, value=54.):
     import hashlib, json
     from agri_research_agent.sugar_import_profit.freight import SCHEMA, DEFINITION

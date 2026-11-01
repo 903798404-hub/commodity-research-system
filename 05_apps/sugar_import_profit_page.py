@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from computation_cache import cache_computation
-from agri_research_agent.sugar_import_profit.model import COUNTRIES, LABELS, today, ice_quote
+from agri_research_agent.sugar_import_profit.model import COUNTRIES, LABELS, today, ice_quote, historical_input
 from agri_research_agent.sugar_import_profit.runtime import storage_context
 from agri_research_agent.sugar_import_profit.store import Store
 
@@ -145,7 +145,7 @@ def _monthly(store, enabled, freight_root=None):
         st.session_state[key + ':initial'] = payload
         st.session_state[key + ':version'] = current['version'] if current else None
         st.session_state[key + ':market'] = payload['market']
-        if payload['market'] is None and payload.get('historical_market') is None and archived is not None:
+        if payload['market'] is None and historical_input(payload) is None and archived is not None:
             st.session_state[key + ':market'] = archived['payload']
             st.session_state[key + ':archive-version'] = archived['version']
         elif payload['market'] is not None and payload['market'].get('archive_policy'):
@@ -193,6 +193,8 @@ def _monthly(store, enabled, freight_root=None):
                    source=source or '人工录入升贴水及海运费', parameters=params, quotes=quotes, market=st.session_state[key + ':market'])
     if initial.get('historical_market') is not None and payload['market'] is None:
         payload['historical_market'] = initial['historical_market']
+    if initial.get('historical_cfets_market') is not None and payload['market'] is None:
+        payload['historical_cfets_market'] = initial['historical_cfets_market']
     if initial.get('fx_override') is not None:
         payload['fx_override'] = initial['fx_override']
     if st.session_state.get(key + ':archive-version') is not None:
@@ -218,22 +220,24 @@ def _monthly(store, enabled, freight_root=None):
         payload['market_archive_version'] = initial['market_archive_version']
     if payload['market'] is not None:
         payload.pop('historical_market', None)
+        payload.pop('historical_cfets_market', None)
     rows = monthly_rows(payload)
     if payload['market'] and payload['market'].get('archive_policy'):
         st.info('已匹配' + day.isoformat() + '归档行情，实际获取时间：' + payload['market']['captured_at'] +
                 ('；待录报价。' if all(r['quote'] is None for r in quotes) else '；计算使用该日已存行情。'))
         if payload['market']['errors']:
             st.warning('该日归档存在缺项，相关成本和利润保持空白；可展开“行情时间、来源与缺失原因”查看。')
-    elif payload['market'] is None and payload.get('historical_market') is None:
+    elif payload['market'] is None and historical_input(payload) is None:
         st.info('尚无该日已归档行情。报价可先保存，待行情补齐后再载入计算；不会获取今天价格代替。')
-    if payload.get('historical_market') is not None and payload.get('fx_override') is None:
+    if ((payload.get('historical_market') or {}).get('fx_policy') == 'ECB_SPOT_ESTIMATE'
+            and payload.get('fx_override') is None):
         st.info('即期汇率估算：各船期统一采用当日ECB参考即期交叉汇率，未计远期掉期点。原糖采用中国报价日结束前已完成的日线；郑糖采用同日报价日收盘价。')
     st.iframe(monthly_html(rows, country, day), height=650, width='stretch')
     st.caption('配额内与配额外分别计算；保险按FOB×费率自动计入，无须逐月填保险金额。')
     market = payload['market']
-    if payload.get('historical_market') is not None:
+    if historical_input(payload) is not None:
         from agri_research_agent.sugar_import_profit.runtime import historical_market
-        market = historical_market(payload['historical_market'], day)
+        market = historical_market(historical_input(payload), day)
     with st.expander('行情时间、来源与缺失原因'):
         if market:
             st.caption('获取时间：' + market['captured_at'] + '；报价最多7天。原糖收盘价标注实际交易日；原糖最新价时间为供应商更新时间。')
@@ -241,8 +245,8 @@ def _monthly(store, enabled, freight_root=None):
                 items = {c: ice_quote(market, c) for c in market[kind]} if kind == 'ice' else market[kind]
                 st.dataframe(pd.DataFrame([dict(合约=c, 价格=r.get('price'), 价格口径='收盘价' if r.get('time_kind') == 'daily_close' else '最新价', 来源=r.get('provider'), 来源时间=r.get('quoted_at')) for c, r in items.items()]), hide_index=True)
             if market['errors']: st.warning('；'.join(f'{c}: {e}' for c, e in market['errors'].items()))
-            if payload.get('historical_market') is not None:
-                historical = payload['historical_market']
+            if historical_input(payload) is not None:
+                historical = historical_input(payload)
                 st.json(dict(原糖历史凭证=historical['ice'], 郑糖历史凭证=historical['domestic'])
                     if payload.get('fx_override') is not None else historical)
             else:

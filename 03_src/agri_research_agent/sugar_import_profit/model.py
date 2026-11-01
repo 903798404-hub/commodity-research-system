@@ -125,10 +125,15 @@ def month_end_fx(value, day):
     return curve, source
 
 
+def historical_input(payload):
+    return (payload['historical_cfets_market'] if payload.get('historical_cfets_market') is not None
+            else payload.get('historical_market'))
+
+
 def monthly_rows(payload):
     """Partial calculation: actual margins require insurance; estimates name the omission."""
     market, params = payload.get('market') or {}, payload['parameters']
-    historical = payload.get('historical_market')
+    historical = historical_input(payload)
     if historical is not None:
         if payload.get('market') is not None: raise ValueError('历史补录与实时快照不能混用')
         from .runtime import historical_market
@@ -145,7 +150,7 @@ def monthly_rows(payload):
         day = date.fromisoformat(payload['date'])
         tenor = (year - day.year) * 12 + month - day.month
         from agri_research_agent.commodity_import_margin.model import select_fx
-        fx = market.get('fx_spot') if historical is not None else select_fx(market.get('fx_curve', {}), tenor)[0]
+        fx = market['fx_spot'] if historical is not None and 'fx_spot' in market else select_fx(market.get('fx_curve', {}), tenor)[0]
         if fx_override is not None:
             fx = select_fx(override_curve, tenor)[0]
         ice_item = ice_quote(market, r['ice_contract'])
@@ -258,10 +263,21 @@ def validate_monthly(payload):
             if not isinstance(r.get('rizhao_date'), str) or date.fromisoformat(r['rizhao_date']) > day:
                 raise ValueError('日照现货需填写实际报价日期')
     market = value.get('market')
-    if value.get('historical_market') is not None:
+    if any(value.get(k) is not None and not isinstance(value[k], dict)
+           for k in ('historical_market', 'historical_cfets_market')):
+        raise ValueError('历史行情凭证必须为对象')
+    historical = historical_input(value)
+    if value.get('historical_cfets_market') is not None:
+        if (not research or value.get('historical_market') is not None
+                or value['historical_cfets_market'].get('fx_policy') != 'CFETS_CURVE'
+                or value['historical_cfets_market'].get('fx') != value.get('fx_override')):
+            raise ValueError('CFETS历史补录需独立凭证和一致的授权汇率')
+    elif value.get('historical_market') is not None and value['historical_market'].get('fx_policy') != 'ECB_SPOT_ESTIMATE':
+        raise ValueError('旧历史字段仅接受原ECB凭证')
+    if historical is not None:
         if market is not None: raise ValueError('历史补录与实时快照不能混用')
         from .runtime import historical_market
-        historical_market(value['historical_market'], day)
+        historical_market(historical, day)
     if market is not None:
         from .runtime import validate_monthly_market, validate_daily_market
         validate_monthly_market(market, day)
