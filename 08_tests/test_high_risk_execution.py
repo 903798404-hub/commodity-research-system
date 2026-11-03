@@ -33,12 +33,18 @@ def test_historical_locked_transport_preserves_real_application_build_inputs(tmp
     assert result['original_sha256']==hashlib.sha256(before).hexdigest()
     assert result['synthetic_sha256']==hashlib.sha256(after).hexdigest()
     changed=[(a,b) for a,b in zip(before.splitlines(),after.splitlines()) if a!=b]
-    assert len(changed)==1 and len(before.splitlines())==len(after.splitlines())
-    assert changed[0][0].startswith(b'RUN python -m pip install ')
-    assert changed[0][1].startswith(b'RUN timeout 600s python -m pip install --index-url=https://pypi.org/simple ')
-    assert b'--require-hashes -r requirements.txt' in changed[0][1]
+    assert len(changed)==3 and len(before.splitlines())==len(after.splitlines())
+    pip=[(a,b) for a,b in changed if a.startswith(b'RUN python -m pip install ')]
+    assert len(pip)==1
+    assert pip[0][1].startswith(b'RUN timeout 600s python -m pip install --index-url=https://pypi.org/simple ')
+    assert b'--require-hashes -r requirements.txt' in pip[0][1]
+    apt=[(a,b) for a,b in changed if b'mirrors.cloud.tencent.com/debian' in a]
+    assert len(apt)==2
+    assert all(b==a.replace(b'http://mirrors.cloud.tencent.com',b'https://deb.debian.org') for a,b in apt)
+    assert not any(flag in after for flag in (b'--allow-unauthenticated',b'trusted=yes',b'AllowInsecureRepositories'))
     assert not result['historical_application_and_control_code_changed'] and not result['runtime_environment_changed']
-    assert not result['dependency_versions_or_hashes_changed'] and not result['production_acceptance']
+    assert not result['python_dependency_versions_or_hashes_changed'] and not result['production_acceptance']
+    assert result['apt_signature_checks_unchanged'] and 'not claimed equal' in result['apt_selected_versions']
 
 
 def test_historical_transport_refuses_unknown_or_unlocked_installer_without_writing(tmp_path):
@@ -47,6 +53,18 @@ def test_historical_transport_refuses_unknown_or_unlocked_installer_without_writ
     original=b'RUN python -m pip install -r requirements.txt\n';docker.write_bytes(original)
     (tmp_path/'requirements.txt').write_bytes(b'unchanged lock')
     with pytest.raises(ValueError,match='Unrecognized historical locked installer'):
+        fixture.historical_download_transport(tmp_path)
+    assert docker.read_bytes()==original
+
+
+def test_historical_transport_refuses_unknown_apt_source_without_writing(tmp_path):
+    fixture=execution.load(ROOT,'08_tests/shared/high_risk_execution_docker_e2e.py','_test_unknown_historical_apt')
+    relative='09_deploy/spread_runtime/Dockerfile.spread-runtime'
+    docker=tmp_path/relative;docker.parent.mkdir(parents=True)
+    original=subprocess.check_output(['git','-C',str(ROOT),'show','88df880127bea4308ee752a37a59884b9198b2ce:'+relative])
+    original=original.replace(b'http://mirrors.cloud.tencent.com/debian|g',b'https://unknown.invalid/debian|g')
+    docker.write_bytes(original);(tmp_path/'requirements.txt').write_bytes(b'unchanged lock')
+    with pytest.raises(ValueError,match='Unrecognized historical signed APT sources'):
         fixture.historical_download_transport(tmp_path)
     assert docker.read_bytes()==original
 

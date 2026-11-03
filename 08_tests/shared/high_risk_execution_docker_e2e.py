@@ -185,14 +185,28 @@ def historical_download_transport(source):
     before=b'RUN python -m pip install --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \\\n'
     after=b'RUN timeout 600s python -m pip install --index-url=https://pypi.org/simple --no-cache-dir --default-timeout=120 --require-hashes -r requirements.txt \\\n'
     if original.count(before)!=1:raise ValueError('Unrecognized historical locked installer')
+    apt_before = (
+        b"-e 's|http://deb.debian.org/debian|http://mirrors.cloud.tencent.com/debian|g'",
+        b"-e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g'",
+    )
+    apt_after = (
+        b"-e 's|http://deb.debian.org/debian|https://deb.debian.org/debian|g'",
+        b"-e 's|http://deb.debian.org/debian-security|https://deb.debian.org/debian-security|g'",
+    )
+    if any(original.count(value)!=1 for value in apt_before):
+        raise ValueError('Unrecognized historical signed APT sources')
     updated=original.replace(before,after)
+    for old,new in zip(apt_before,apt_after):updated=updated.replace(old,new)
     path.write_bytes(updated)
     assert path.read_bytes()==updated and hashlib.sha256(lock.read_bytes()).hexdigest()==lock_sha
     return dict(path=relative,original_sha256=hashlib.sha256(original).hexdigest(),
                 synthetic_sha256=hashlib.sha256(updated).hexdigest(),requirements_sha256=lock_sha,
-                changed_instruction='Only the existing hash-locked pip RUN gains an official index and a total timeout.',
+                changed_instruction='Only build downloads change: hash-locked pip uses the official index and a total timeout; the two original signed Debian APT sources use official HTTPS URLs. No APT signature option changes.',
                 historical_application_and_control_code_changed=False,runtime_environment_changed=False,
-                dependency_versions_or_hashes_changed=False,production_acceptance=False)
+                python_dependency_versions_or_hashes_changed=False,
+                apt_signature_checks_unchanged=True,
+                apt_selected_versions='Original APT installer is unpinned; selected versions are not claimed equal to the regional mirror.',
+                production_acceptance=False)
 
 
 def clone(work, name, commit, trust, project=None):
