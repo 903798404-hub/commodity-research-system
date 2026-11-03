@@ -103,7 +103,8 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
     st.caption("红：向多 · 绿：向空 ｜ 净持仓与变化反映多空倾向。各市场日期不同，手数不合并。")
     outside, inside, sources = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with outside:
-        kind = REPORTS[st.radio("外盘口径", list(REPORTS), horizontal=True)]
+        has_legacy = any(r.get("report_basis") == "mifid_legacy_combined_v1" for r in snapshot["foreign"])
+        kind = REPORTS[st.radio("外盘口径", list(REPORTS), index=1 if has_legacy else 0, horizontal=True)]
         view = st.radio("图表模式", ["季节性", "连续历史"], horizontal=True, key=f"{domain}_foreign_view")
         field_label = st.radio("季节性指标", list(SEASONAL_FIELDS), horizontal=True, key=f"{domain}_foreign_field")
         for market, item in spec["foreign"].items():
@@ -119,8 +120,11 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
             a.metric(f"基金净持仓（{unit}）", fmt(latest["net"]))
             b.metric("较上一报告变化", fmt(latest["net_change"], True), delta_color="inverse")
             st.caption(f"持仓截至 {chinese_date(latest['report_date'])} · 对比 {chinese_date(latest['previous_date'])}")
-            st.caption("Euronext 投资基金分类；首版保留明确标注期货/期权的报告，较早历史口径待核查。"
+            st.caption(("Euronext 投资基金分类；早年报告为期货＋期权（Delta等价手），仅在合并口径对比。"
+                        if has_legacy else "Euronext 投资基金分类；按报告明确标注的期货/期权口径对比。")
                 if market == "euronext_rapeseed" else "CFTC 管理基金分类；各到期月份汇总，每周公布。")
+            if market == "euronext_rapeseed" and has_legacy and kind == "futures_only":
+                st.caption("早年未单独披露纯期货基金持仓；切换“期货＋期权”查看2022年起的季节性。")
             if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
                 st.warning("这份周报距今超过14天，请核对最新发布状态。")
             if len(data) >= 2 or view == "季节性":

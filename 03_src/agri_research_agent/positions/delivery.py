@@ -186,6 +186,12 @@ def _replay_source(key, source, raw, domain, spec):
         require(domain == "sugar" and url == f"https://www.ice.com/publicdocs/futures/COTHist{year}.csv",
                 "positions ICE URL invalid")
         return "foreign", parse_ice(raw, year, url, stamp)
+    if key.startswith("euronext_legacy_"):
+        from agri_research_agent.oilseed_positions.sources import parse_euronext_legacy
+        match = re.fullmatch(r"euronext_legacy_(20\d{6})", key)
+        require(domain == "rapeseed" and match is not None, "positions legacy Euronext source invalid")
+        day = datetime.strptime(match[1], "%Y%m%d").date()
+        return "foreign", parse_euronext_legacy(raw, day, url, stamp)
     if key.startswith("euronext_"):
         day = datetime.strptime(key[9:], "%Y%m%d").date()
         require(domain == "rapeseed" and url == day.strftime(

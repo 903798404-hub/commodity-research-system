@@ -71,6 +71,20 @@ def test_euronext_combined_chart_preserves_decimal_hover_and_unit():
     assert ".2f" in figure.data[0].hovertemplate and "Delta等价手" in figure.layout.yaxis.title.text
 
 
+def test_legacy_history_defaults_to_combined_and_never_fabricates_futures_only(monkeypatch):
+    import oilseed_positions_page
+    rows = [dict(market="euronext_rapeseed", report_type="combined", group="investment_funds",
+        report_date=f"{year}-01-07", long=11.25, short=5.1, open_interest=None,
+        unit="delta_equivalent_contracts", report_basis="mifid_legacy_combined_v1") for year in range(2022, 2027)]
+    monkeypatch.setattr(oilseed_positions_page, "read_snapshot", lambda root: {"foreign":rows,"domestic":[],"sources":{}})
+    app = AppTest.from_file(str(ROOT / "05_apps/rapeseed_positions_preview.py")).run(timeout=20)
+    assert not app.exception and app.radio[0].value == "期货＋期权"
+    figure = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert len(figure['data']) == 5 and "Delta等价手" in figure['layout']['yaxis']['title']['text']
+    app.radio[0].set_value("纯期货").run(timeout=20)
+    assert not app.exception and not app.get("plotly_chart")
+
+
 @pytest.mark.parametrize("domain,scope,member,label,short", [
     ("palm", "P2701", "高盛期货", "高盛", 45991),
     ("rapeseed", "OI", "永安期货", "永安", 7149),

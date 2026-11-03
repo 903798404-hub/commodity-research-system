@@ -55,8 +55,29 @@ def _table_grid(table):
 
 
 def parse_euronext(content, publication_day, source_url, stamp):
+    return _parse_euronext(content, publication_day, source_url, stamp)
+
+
+def parse_euronext_legacy(content, publication_day, source_url, stamp):
+    """The pre-v2 MiFID weekly report includes options, never futures-only.
+
+    ESMA's 2024 final report (74-2134169708-7577, section 4) documents the
+    additional report excluding options. The v2 reporting rollout was confirmed
+    for 3 September 2026. Only the official, single-table legacy format before
+    that boundary is eligible; an unlabeled current report remains an error.
+    """
+    expected = publication_day.strftime(
+        "https://live.euronext.com/sites/default/files/commodities_reporting/%Y/%m/%d/en/cdwpr_ECO_%Y%m%d.html")
+    if source_url != expected or not date(2022, 1, 1) <= publication_day < date(2026, 9, 3):
+        raise ValueError("Euronext 历史合并报告来源或日期越界")
+    return _parse_euronext(content, publication_day, source_url, stamp, legacy=True)
+
+
+def _parse_euronext(content, publication_day, source_url, stamp, *, legacy=False):
     soup = BeautifulSoup(content.decode("utf-8", errors="strict"), "html.parser")
     tables = soup.find_all("table")
+    if legacy and len(tables) != 1:
+        raise ValueError("Euronext 历史合并报告必须只有一张表")
     rows = []
     kinds = set()
     for table in tables:
@@ -71,13 +92,16 @@ def parse_euronext(content, publication_day, source_url, stamp):
         report_match = re.search(r"Report date (\d{2}/\d{2}/\d{4})", title)
         published_match = re.search(r"Publication date (\d{2}/\d{2}/\d{4})", title)
         kind_match = re.search(r"Report type (FUTR|COMB)\b", title)
-        if not report_match or not published_match or not kind_match:
+        if not report_match or not published_match or (not legacy and not kind_match):
             raise ValueError("Euronext 缺少日期或明确的期货/期权口径")
+        if legacy and ("Report type" in title or not re.search(r"Report status (NEWT|AMND)\b", title)
+                       or "Trading venue EURONEXT PARIS" not in title):
+            raise ValueError("Euronext 历史合并报告格式或口径不符")
         day = datetime.strptime(report_match[1], "%d/%m/%Y").date()
         published = datetime.strptime(published_match[1], "%d/%m/%Y").date()
         if published != publication_day or day > published or published > datetime.now(timezone.utc).date():
             raise ValueError("Euronext 日期不一致")
-        kind = {"FUTR": "futures_only", "COMB": "combined"}[kind_match[1]]
+        kind = "combined" if legacy else {"FUTR": "futures_only", "COMB": "combined"}[kind_match[1]]
         if kind in kinds:
             raise ValueError("Euronext 重复报告口径")
         kinds.add(kind)
@@ -107,6 +131,8 @@ def parse_euronext(content, publication_day, source_url, stamp):
                 long=float(amounts[index*2]), short=float(amounts[index*2+1]), spreading=0,
                 open_interest=None, unit="contracts" if kind == "futures_only" else "delta_equivalent_contracts",
                 scope="all_expiries", source_url=source_url, retrieved_at=stamp))
+            if legacy:
+                rows[-1]["report_basis"] = "mifid_legacy_combined_v1"
     if not rows:
         raise ValueError("Euronext 没有欧洲菜籽持仓表")
     unique_rows(rows, ("market", "report_type", "group", "report_date"))
