@@ -285,8 +285,12 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             "[ICE COT](https://www.ice.com/report/122) · "
             "[郑商所持仓排名](https://www.czce.com.cn/cn/jysj/ccpm/H077003004index_1.htm)")
         for source_id, metadata in snapshot["sources"].items():
-            source_label = (f"郑商所 · {chinese_date(datetime.strptime(source_id[5:], '%Y%m%d').date())}"
-                if source_id.startswith("czce_") else source_id)
+            if source_id.startswith("czce_cofco_official_"):
+                source_day = datetime.strptime(source_id.removeprefix("czce_cofco_official_"), "%Y%m%d").date()
+                source_label = f"郑商所SR品种中粮汇总 · {chinese_date(source_day)}"
+            else:
+                source_label = (f"郑商所 · {chinese_date(datetime.strptime(source_id[5:], '%Y%m%d').date())}"
+                    if source_id.startswith("czce_") else source_id)
             st.markdown(f"**{source_label}** · 采集时间 {chinese_time(metadata['retrieved_at'])} · [原始来源]({metadata['url']})")
         st.caption("当前为本地预览。公开展示前需确认相关数据展示授权。" if preview_mode
                    else "页面展示已保存报告；刷新页面不会触发数据采集。")

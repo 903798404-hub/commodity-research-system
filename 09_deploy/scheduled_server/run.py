@@ -184,9 +184,11 @@ def collector_command(config, work, *, public_preflight=False):
     public_materialize=config['job']=='akshare' and not public_preflight
     baseline='preflight-baseline' if public_preflight else 'baseline'
     output='preflight' if public_preflight else 'collection'
+    # Positions replay all retained source evidence, including the 2022 history.
+    memory='1536m' if config['job'].startswith('positions_') else ('1024m' if config['job']=='akshare' else '768m')
     command = ['docker','run','--rm','-i','--name',work.name,'--pull','never','--network','bridge',
         '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user','65532:65532',
-        '--memory','1024m' if config['job']=='akshare' else '768m','--cpus','1','--pids-limit','96',
+        '--memory',memory,'--cpus','1','--pids-limit','96',
         '--log-driver','json-file','--log-opt','max-size=20m','--log-opt','max-file=5',
         '--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=128m','--env','TZ=Asia/Shanghai',
         '--mount',f'type=bind,src={ROOT},dst=/source,readonly',

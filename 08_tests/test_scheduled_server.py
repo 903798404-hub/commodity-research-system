@@ -137,6 +137,8 @@ def test_collectors_have_no_formal_writable_mount_or_credentials_in_args(runner,
         for relative in host.DOMAIN_CONTRACTS[domain]['baseline']}}))
     for job in runner.JOBS:
         command=runner.collector_command(config(runner,job),tmp_path/'run')
+        expected_memory='1536m' if job.startswith('positions_') else ('1024m' if job=='akshare' else '768m')
+        assert command[command.index('--memory')+1]==expected_memory
         assert '--read-only' in command and '--user' in command and '65532:65532' in command
         assert '--pull' in command and 'never' in command and '-i' in command
         mounts=[command[i+1] for i,x in enumerate(command) if x=='--mount']

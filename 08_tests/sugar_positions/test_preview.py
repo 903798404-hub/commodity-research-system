@@ -57,6 +57,17 @@ def test_preview_empty_and_readonly(tmp_path):
     assert not (tmp_path / "01_data").exists()
 
 
+def test_preview_renders_official_cofco_source_identity(tmp_path):
+    project(tmp_path)
+    foreign, domestic = data()
+    publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic,
+        [("czce_cofco_official_20260901", b"synthetic source label fixture",
+          "https://www.czce.com.cn/cn/DFSStaticFiles/Future/2026/20260901/FutureDataHolding.txt", "zip")], [])
+    at = app(tmp_path).run(timeout=30)
+    assert not at.exception
+    assert any("郑商所SR品种中粮汇总 · 2026年9月1日" in item.value for item in at.markdown)
+
+
 def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     project(tmp_path)
     foreign, domestic = data()
