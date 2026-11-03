@@ -71,10 +71,39 @@ def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     assert goldman["多仓（手）"] == "未披露" and goldman["空仓（手）"] == "未披露"
     assert goldman["榜内净持仓（手）"] == "+0"
     assert goldman["榜内持仓倾向"] == "两侧未披露 · 榜内按0"
+    assert at.radio(key="sugar_foreign_view").value == "季节性"
+    assert any("尚无中粮期货" in item.value for item in at.info)
+    at.multiselect(key="foreign_years_sugar11").set_value([]).run()
+    assert not at.exception and len(at.get("plotly_chart")) == 4
+    at.radio(key="sugar_foreign_view").set_value("连续历史").run()
+    assert not at.exception and len(at.get("plotly_chart")) == 6
     at.radio[0].set_value("期货＋期权").run()
     at.selectbox[1].set_value("SR701").run()
     assert not at.exception
     assert any(m.label == "五家合计榜内净持仓" and m.value == "80" for m in at.metric)
+
+
+def test_cofco_independent_seasonality_preserves_fixed_five_and_cutoff(tmp_path):
+    project(tmp_path)
+    foreign, domestic = data()
+    for day in ("2025-09-01", "2026-09-01", "2026-09-09"):
+        for side, value in (("long", 100), ("short", 30)):
+            domestic.append(dict(report_date=day, scope="SR", side=side, rank=3,
+                member="中粮期货", raw_member="中粮期货（代客）", account="代客",
+                positions=value, reported_change=0))
+    publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
+    at = app(tmp_path).run(timeout=30)
+    assert not at.exception and len(at.get("plotly_chart")) == 9
+    assert at.multiselect(key="cofco_years").value == [2025, 2026]
+    assert any(m.label == "中粮榜内净持仓（手）" and m.value == "70" for m in at.metric)
+    fixed = next(d.value for d in at.dataframe if "榜内持仓倾向" in d.value and len(d.value) == 5)
+    assert "中粮期货" not in set(fixed["对象"])
+    at.selectbox[2].set_value("2026-09-02").run()
+    assert not at.exception
+    cofco_table = next(d.value for d in at.dataframe if "对象" in d.value and "中粮期货" in set(d.value["对象"]))
+    assert len(cofco_table) == 3 and "2026年9月9日" not in set(cofco_table["日期"])
+    at.selectbox[1].set_value("SR701").run()
+    assert not at.exception and any("尚无中粮期货" in item.value for item in at.info)
 
 
 def test_ranked_chart_draws_one_sided_net_and_preserves_undisclosed_hover():

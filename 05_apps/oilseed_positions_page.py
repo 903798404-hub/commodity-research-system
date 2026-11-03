@@ -13,7 +13,8 @@ from agri_research_agent.sugar_positions.model import load_members, positioning_
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 from sugar_positions_page import (
-    RANKED_NET_NOTICE, chart_pair, chinese_time, detail, domestic_detail, display_attempt,
+    RANKED_NET_NOTICE, SEASONAL_FIELDS, chart_pair, chinese_time, detail, domestic_detail, display_attempt,
+    seasonality, seasonal_selection,
 )
 
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
@@ -103,6 +104,8 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
     outside, inside, sources = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with outside:
         kind = REPORTS[st.radio("外盘口径", list(REPORTS), horizontal=True)]
+        view = st.radio("图表模式", ["季节性", "连续历史"], horizontal=True, key=f"{domain}_foreign_view")
+        field_label = st.radio("季节性指标", list(SEASONAL_FIELDS), horizontal=True, key=f"{domain}_foreign_field")
         for market, item in spec["foreign"].items():
             st.subheader(item["label"])
             data = [r for r in foreign if r["market"] == market and r["report_type"] == kind and r["group"] == item["fund_group"]]
@@ -120,7 +123,7 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 if market == "euronext_rapeseed" else "CFTC 管理基金分类；各到期月份汇总，每周公布。")
             if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
                 st.warning("这份周报距今超过14天，请核对最新发布状态。")
-            if len(data) >= 2:
+            if len(data) >= 2 or view == "季节性":
                 figure = movements(data[-26:], "最近报告净持仓变化")
                 known_changes = [r for r in data[-26:] if r["net_change"] is not None]
                 if len(known_changes) == 1:
@@ -129,11 +132,18 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 if unit == "Delta等价手":
                     figure.update_yaxes(title="净变化（Delta等价手）")
                     figure.update_traces(hovertemplate="%{customdata[1]}<br>净变化 %{y:+,.2f} Delta等价手<br>比较日期 %{customdata[0]}<extra></extra>")
-                chart_pair(series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"]),
-                    figure, keys=(f"trend_{market}", f"changes_{market}"))
+                if view == "季节性":
+                    selected = seasonal_selection(data, key=f"foreign_years_{market}")
+                    if selected:
+                        chart_pair(seasonality(selected, f"{item['label']} · 基金{field_label}季节性",
+                            field=SEASONAL_FIELDS[field_label], current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
+                            figure, keys=(f"seasonal_{market}", f"changes_{market}"), preserve_legend=True)
+                else:
+                    chart_pair(series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"]),
+                        figure, keys=(f"trend_{market}", f"changes_{market}"))
             with st.expander(item["label"] + "持仓明细"):
-                view = [dict(r, label="投资基金" if market == "euronext_rapeseed" else "管理基金") for r in data]
-                frame = detail(view).iloc[::-1]
+                detail_rows = [dict(r, label="投资基金" if market == "euronext_rapeseed" else "管理基金") for r in data]
+                frame = detail(detail_rows).iloc[::-1]
                 if unit == "Delta等价手":
                     frame = frame.rename(columns={c: c.replace("（手）", "（Delta等价手）") for c in frame.columns})
                 st.dataframe(frame, hide_index=True, width="stretch")

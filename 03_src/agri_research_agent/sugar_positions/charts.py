@@ -4,10 +4,68 @@ from datetime import date, timedelta
 import plotly.graph_objects as go
 
 from .model import RANKED_NET_METHOD
+from agri_research_agent.shared.chart_style import (
+    CURRENT_LINE_WIDTH, CURRENT_YEAR_COLOR, GRID_COLOR, HISTORY_LINE_WIDTH,
+    HISTORY_OPACITY, historical_year_color,
+)
 
 PALETTE = ("#356FA3", "#B08A32", "#C77B48", "#737F42", "#AE6D87")
 DASHES = ("solid", "dash", "dot", "dashdot", "longdash")
 SEAT_PALETTE = ("#2563EB", "#E59622", "#7C3AED", "#0D9488", "#DC4F86")
+
+
+def seasonality(rows, title, *, field="net", current_year=None):
+    """Overlay one report series by month/day, preserving dates, units and gaps."""
+    if field not in {"net", "long", "short"}:
+        raise ValueError("季节性指标无效")
+    identity = ("market", "report_type", "group", "scope", "account", "unit")
+    if len({tuple(r.get(k) for k in identity) for r in rows}) > 1:
+        raise ValueError("季节性曲线不能混合市场、口径、席位、账户或单位")
+    dates = [r["report_date"] for r in rows]
+    if len(set(dates)) != len(dates):
+        raise ValueError("季节性曲线包含重复报告日期")
+    current_year = current_year if current_year is not None else date.today().year
+    ranked = bool(rows) and all(r.get("net_method") == RANKED_NET_METHOD for r in rows)
+    label = {"net": "榜内净持仓" if ranked else "净持仓", "long": "多仓", "short": "空仓"}[field]
+    unit = "Delta等价手" if rows and rows[0].get("unit") == "delta_equivalent_contracts" else "手"
+    figure = go.Figure()
+    years = sorted({date.fromisoformat(d).year for d in dates})
+    for year in [y for y in years if y != current_year] + ([current_year] if current_year in years else []):
+        data = sorted([r for r in rows if date.fromisoformat(r["report_date"]).year == year],
+                      key=lambda r: r["report_date"])
+        xs, ys, custom = [], [], []
+        previous = None
+        for row in data:
+            day = date.fromisoformat(row["report_date"])
+            # A missing report or a changed source must not become a continuous line.
+            if previous and ((day - date.fromisoformat(previous["report_date"])).days > 10
+                    or any(row.get(k) != previous.get(k) for k in ("source_provider", "aggregation"))):
+                xs.append(day.replace(year=2000).isoformat())
+                ys.append(None)
+                custom.append([None])
+            xs.append(day.replace(year=2000).isoformat())
+            # Both sides absent is not an observed zero holding for this seat.
+            ys.append(None if ranked and row.get("long") is None and row.get("short") is None else row[field])
+            custom.append([chinese_date(day)])
+            previous = row
+        current = year == current_year
+        figure.add_trace(go.Scatter(x=xs, y=ys, customdata=custom,
+            name=f"{year}年（当年）" if current else f"{year}年", mode="lines+markers",
+            connectgaps=False, marker=dict(size=4),
+            line=dict(color=CURRENT_YEAR_COLOR if current else historical_year_color(year),
+                      width=CURRENT_LINE_WIDTH if current else HISTORY_LINE_WIDTH),
+            opacity=1 if current else HISTORY_OPACITY,
+            hovertemplate="%{customdata[0]}<br>" + label + " %{y:,.2f} " + unit + "<extra>%{fullData.name}</extra>"))
+    figure.update_layout(title=title, height=340, template="plotly_white",
+        margin=dict(l=40, r=25, t=90, b=40), showlegend=True,
+        font=dict(family="Microsoft YaHei, sans-serif", color="#263238"),
+        legend=dict(orientation="h", y=1.12), xaxis_title="持仓日期（月／日）",
+        yaxis_title=f"{label}（{unit}）", hovermode="closest")
+    figure.update_xaxes(range=["2000-01-01", "2000-12-31"], tickmode="array",
+        tickvals=[f"2000-{m:02d}-01" for m in range(1, 13)], ticktext=[f"{m}月" for m in range(1, 13)])
+    figure.update_yaxes(rangemode="tozero", gridcolor=GRID_COLOR)
+    figure.add_hline(y=0, line_width=1, line_color="#5C6368")
+    return figure
 
 
 def chinese_date(value):

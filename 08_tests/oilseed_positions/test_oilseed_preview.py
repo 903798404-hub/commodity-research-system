@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from copy import deepcopy
+import json
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -30,8 +31,36 @@ def test_soybean_page_shows_foreign_positions_and_domestic_gap_with_chinese_date
     assert any("2026年9月29日" in item.value for item in app.caption)
     assert any("品种汇总数据待接入" in item.value for item in app.info)
     assert app.selectbox(key='domestic_scope_soybean').value=='M'
+    assert app.radio(key="soybean_foreign_view").value == "季节性"
+    app.radio(key="soybean_foreign_field").set_value("多仓").run(timeout=20)
+    assert not app.exception
+    charts = [json.loads(c.proto.spec) for c in app.get("plotly_chart")]
+    seasonal = [c for c in charts if "季节性" in c["layout"]["title"]["text"]]
+    assert len(seasonal) == 3 and all("多仓" in c["layout"]["yaxis"]["title"]["text"] for c in seasonal)
+    app.radio(key="soybean_foreign_view").set_value("连续历史").run(timeout=20)
+    assert not app.exception and len(app.get("plotly_chart")) == 6
     app.radio[0].set_value("期货＋期权").run(timeout=20)
     assert not app.exception and any("此口径暂无" in item.value for item in app.info)
+
+
+def test_rapeseed_combined_seasonality_keeps_unit_year_filter_and_original_data(monkeypatch):
+    import oilseed_positions_page
+    rows = [dict(market="euronext_rapeseed", report_type="combined", group="investment_funds",
+        report_date=d, long=11.25, short=5.1, open_interest=None, unit="delta_equivalent_contracts")
+        for d in ("2025-10-03", "2026-10-02")]
+    original = deepcopy(rows)
+    monkeypatch.setattr(oilseed_positions_page, "read_snapshot", lambda root: {"foreign": rows, "domestic": [], "sources": {}})
+    app = AppTest.from_file(str(ROOT / "05_apps/rapeseed_positions_preview.py")).run(timeout=20)
+    app.radio[0].set_value("期货＋期权").run(timeout=20)
+    assert not app.exception and len(app.get("plotly_chart")) == 2
+    spec = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert "Delta等价手" in spec["layout"]["yaxis"]["title"]["text"]
+    assert len(spec["data"]) == 2
+    app.multiselect(key="foreign_years_euronext_rapeseed").set_value([2025]).run(timeout=20)
+    assert not app.exception
+    spec = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert len(spec["data"]) == 1 and spec["data"][0]["name"] == "2025年"
+    assert rows == original
 
 
 def test_euronext_combined_chart_preserves_decimal_hover_and_unit():

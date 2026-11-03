@@ -17,6 +17,7 @@ GROUPS = {
 }
 MARKETS = {"sugar11": "糖11（原糖）", "white_sugar": "伦敦白砂糖"}
 RANKED_NET_METHOD = "ranked_missing_zero_v1"
+COFCO_MEMBER = {"id": "cofco", "label": "中粮期货", "aliases": ["中粮期货", "中粮"]}
 
 
 def positioning_signal(net, change):
@@ -109,6 +110,24 @@ def changes(rows, key_fields, *, missing_as_zero=False):
 
 def foreign_metrics(rows):
     return changes(rows, ("market", "report_type", "group"))
+
+
+def member_metrics(rows, member, *, account="代客"):
+    """Read a standalone seat from saved rankings without changing the fixed five."""
+    sections = defaultdict(list)
+    for row in rows:
+        sections[(row["report_date"], row["scope"])].append(row)
+    result = []
+    for (day, scope), section in sorted(sections.items()):
+        selected = [r for r in section if r["member"] in member["aliases"] and r["account"] == account]
+        sides = {side: [r for r in selected if r["side"] == side] for side in ("long", "short")}
+        if any(len(value) > 1 for value in sides.values()):
+            raise ValueError(f"{member['label']}同日存在多条名称映射，请核对会员身份")
+        values = {side: found[0]["positions"] if found else None for side, found in sides.items()}
+        missing = ["多仓" if s == "long" else "空仓" for s, v in values.items() if v is None]
+        result.append(dict(report_date=day, scope=scope, group=member["id"], label=member["label"],
+            account=account, **values, coverage="缺少" + "、".join(missing) if missing else "两侧已披露"))
+    return changes(result, ("scope", "group", "account"), missing_as_zero=True)
 
 
 def domestic_metrics(rows, members, *, account="代客"):

@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
+from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend, seasonality
 from agri_research_agent.sugar_positions.model import (
-    GROUPS, MARKETS, domestic_metrics, foreign_metrics, load_members, positioning_signal,
+    GROUPS, MARKETS, COFCO_MEMBER, domestic_metrics, foreign_metrics, load_members, member_metrics, positioning_signal,
 )
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
@@ -27,9 +27,25 @@ foreign_metrics = cache_computation(foreign_metrics)
 domestic_metrics = cache_computation(domestic_metrics)
 trend = cache_computation(trend)
 movements = cache_computation(movements)
+seasonality = cache_computation(seasonality)
+member_metrics = cache_computation(member_metrics)
+
+SEASONAL_FIELDS = {"净持仓": "net", "多仓": "long", "空仓": "short"}
 
 
-def chart_pair(first, second, *, keys):
+def seasonal_selection(rows, *, key):
+    years = sorted({int(r["report_date"][:4]) for r in rows})
+    selected = st.multiselect("对比年份", years, default=years[-5:], key=key,
+                             format_func=lambda y: f"{y}年")
+    st.caption("按公历月日叠加；保留实际报告日期，缺失不补零、不延长；超过10天的报告间隔断线。")
+    if len(years) < 2:
+        st.caption("已保存数据仅覆盖一个年份，暂无跨年对比。")
+    if not selected:
+        st.info("请选择至少一个对比年份。")
+    return [r for r in rows if int(r["report_date"][:4]) in selected]
+
+
+def chart_pair(first, second, *, keys, preserve_legend=False):
     """Keep related charts visible together, stacking on narrow screens."""
     key = f"position-charts-{keys[0]}"
     st.html(f"""<style>@media(max-width:1000px) {{
@@ -37,7 +53,7 @@ def chart_pair(first, second, *, keys):
       .st-key-{key} [data-testid="stColumn"] {{width:100% !important; flex:1 1 100% !important;}}
     }}</style>""")
     with st.container(key=key):
-        if len(first.data) > 1:
+        if len(first.data) > 1 and not preserve_legend:
             first.update_layout(showlegend=False, margin=dict(l=40, r=130, t=70, b=40))
         for column, figure, chart_key in zip(st.columns(2), (first, second), keys):
             with column:
@@ -129,6 +145,8 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
     foreign_tab, domestic_tab, source_tab = st.tabs(["外盘基金", "国内持仓", "数据来源"])
     with foreign_tab:
         kind = REPORT_LABELS[st.radio("外盘口径", list(REPORT_LABELS), horizontal=True)]
+        view = st.radio("图表模式", ["季节性", "连续历史"], horizontal=True, key="sugar_foreign_view")
+        field_label = st.radio("季节性指标", list(SEASONAL_FIELDS), horizontal=True, key="sugar_foreign_field")
         group_label = st.selectbox("交易者分类", list(GROUPS.values()))
         group = next(key for key, label in GROUPS.items() if label == group_label)
         for market, label in MARKETS.items():
@@ -149,7 +167,14 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
                 "各到期月份汇总；每周公布，持仓日期与公布日期不同。")
             if (datetime.now(ZoneInfo("Asia/Shanghai")).date() - date.fromisoformat(latest["report_date"])).days > 14:
                 st.warning("这份周报距今超过14天，请核对最新发布状态。")
-            if len(data) >= 8:
+            if view == "季节性":
+                selected = seasonal_selection(data, key=f"foreign_years_{market}")
+                if selected:
+                    chart_pair(seasonality(selected, f"{label} · {group_label}{field_label}季节性",
+                        field=SEASONAL_FIELDS[field_label], current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
+                        movements(data[-26:], "近26份报告净持仓变化"),
+                        keys=(f"foreign_seasonal_{market}", f"foreign_changes_{market}"), preserve_legend=True)
+            elif len(data) >= 8:
                 chart_pair(trend(data, f"{label} · {group_label}净持仓", {group: group_label}),
                     movements(data[-26:], "近26份报告净持仓变化"),
                     keys=(f"foreign_trend_{market}", f"foreign_changes_{market}"))
@@ -189,6 +214,27 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
                     movements([r for r in history if r["group"] == "top20"], "前20名榜内净持仓变化"),
                     keys=("domestic_fixed_trend", "domestic_changes"))
                 st.caption("零线上方榜内偏多，下方榜内偏空；曲线末端显示席位名称与最新榜内净持仓。")
+            st.subheader("中粮期货 · 独立席位季节性")
+            cofco = [r for r in member_metrics(snapshot["domestic"], COFCO_MEMBER, account=account)
+                     if r["scope"] == scope and r["report_date"] <= day]
+            st.caption("中粮期货代客席位公开排名；不是中粮集团完整持仓。榜内净仓按已披露多仓减空仓，未披露一侧按0计算；两侧未披露时图表留空。")
+            if any(r["long"] is not None or r["short"] is not None for r in cofco):
+                latest_cofco = cofco[-1]
+                columns = st.columns(3)
+                for column, field, label in zip(columns, ("long", "short", "net"), ("多仓", "空仓", "榜内净持仓")):
+                    column.metric("中粮" + label + "（手）", fmt(latest_cofco[field])
+                        if field != "net" or latest_cofco["long"] is not None or latest_cofco["short"] is not None else "未披露")
+                selected_cofco = seasonal_selection(cofco, key="cofco_years")
+                if selected_cofco:
+                    chart_pair(seasonality(selected_cofco, "中粮期货 · 榜内净持仓季节性", current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
+                        seasonality(selected_cofco, "中粮期货 · 多仓季节性", field="long", current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
+                        keys=("cofco_net_seasonal", "cofco_long_seasonal"), preserve_legend=True)
+                    st.plotly_chart(seasonality(selected_cofco, "中粮期货 · 空仓季节性", field="short",
+                        current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year), width="stretch", key="cofco_short_seasonal")
+                with st.expander("中粮期货持仓明细"):
+                    st.dataframe(domestic_detail(cofco).iloc[::-1], hide_index=True, width="stretch")
+            else:
+                st.info("当前统计范围及日期内，已保存排名尚无中粮期货代客席位披露，季节性暂留空。")
             with st.expander("历史榜内净持仓与比较日期"):
                 st.dataframe(domestic_detail(history).iloc[::-1], hide_index=True, width="stretch")
             with st.expander("交易所原始排名"):
