@@ -132,7 +132,9 @@ def test_cofco_contract_history_has_separate_basis_and_does_not_replace_rankings
             side=side, member="中粮期货", raw_member=None, account="未披露", positions=None, disclosure="report_absent"))
     publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
     at = app(tmp_path).run(timeout=30)
-    assert not at.exception and at.radio(key="cofco_basis").value == "合约榜单可见持仓（历史）"
+    assert not at.exception and at.radio(key="cofco_basis").value == "当前范围代客排名"
+    at.radio(key="cofco_basis").set_value("合约榜单可见持仓（历史）").run()
+    assert not at.exception and any("此历史接口存在漏项" in item.value for item in at.warning)
     assert at.multiselect(key="cofco_years").value == [2022, 2025, 2026]
     assert len(at.get("plotly_chart")) == 9
     assert at.selectbox[1].options == ["SR 品种总排名", "SR701"]

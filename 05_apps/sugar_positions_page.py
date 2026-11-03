@@ -221,9 +221,11 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             st.subheader("中粮期货 · 独立席位季节性")
             contract_history = cofco_history_metrics(snapshot["domestic"])
             history_mode = bool(contract_history) and st.radio("中粮统计口径",
-                ["合约榜单可见持仓（历史）", "当前范围代客排名"], key="cofco_basis", horizontal=True) == "合约榜单可见持仓（历史）"
+                ["当前范围代客排名", "合约榜单可见持仓（历史）"], key="cofco_basis", horizontal=True) == "合约榜单可见持仓（历史）"
             if history_mode:
                 cofco = [r for r in contract_history if r["report_date"] <= day]
+                st.warning("此历史接口存在漏项，当前为合约榜单可见持仓，不是完整代客汇总。"
+                    "与文华白糖汇总核对时，请选择“当前范围代客排名”及“SR 品种总排名”。")
                 st.caption("白糖各合约榜单内中粮可见持仓求和；独立于上方统计范围，截止日期沿用上方选择。"
                     "原始账户标签保留，此处合计接口所列账户；早年未区分代客、自营，不能当作代客总持仓。")
                 st.caption("来源：用户指定的Tushare兼容服务。仅覆盖当日返回的合约与榜内席位，未入榜不是实际零仓；"
