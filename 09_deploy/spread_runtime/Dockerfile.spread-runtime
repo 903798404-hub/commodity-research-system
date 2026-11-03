@@ -9,13 +9,21 @@ ENV PIP_DEFAULT_TIMEOUT=120
 WORKDIR /app
 
 
-RUN sed -i \
-        -e 's|http://deb.debian.org/debian|http://mirrors.cloud.tencent.com/debian|g' \
-        -e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g' \
+# Keep the original signed Debian sources as the fallback when a regional
+# mirror rejects the builder. Both paths retain APT signature verification.
+RUN cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.official \
+    && sed -i \
+        -e 's|http://deb.debian.org/debian|https://mirrors.cloud.tencent.com/debian|g' \
+        -e 's|http://deb.debian.org/debian-security|https://mirrors.cloud.tencent.com/debian-security|g' \
         /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nginx \
+    && ((apt-get update \
+            && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nginx) \
+        || (cp /tmp/debian.sources.official /etc/apt/sources.list.d/debian.sources \
+            && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+            && apt-get update \
+            && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nginx)) \
     && fc-cache -fv \
+    && rm -f /tmp/debian.sources.official \
     && rm -rf /var/lib/apt/lists/*
 
 # requirements.txt is the hash-locked production input.  Development tools are
