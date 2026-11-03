@@ -62,13 +62,13 @@ def parse_euronext_legacy(content, publication_day, source_url, stamp):
     """The pre-v2 MiFID weekly report includes options, never futures-only.
 
     ESMA's 2024 final report (74-2134169708-7577, section 4) documents the
-    additional report excluding options. The v2 reporting rollout was confirmed
-    for 3 September 2026. Only the official, single-table legacy format before
-    that boundary is eligible; an unlabeled current report remains an error.
+    additional report excluding options. The official HTML remains single-table
+    through 23 September 2026; 30 September is the first verified dual report.
+    The regulatory rollout and the HTML format boundary are distinct facts.
     """
     expected = publication_day.strftime(
         "https://live.euronext.com/sites/default/files/commodities_reporting/%Y/%m/%d/en/cdwpr_ECO_%Y%m%d.html")
-    if source_url != expected or not date(2022, 1, 1) <= publication_day < date(2026, 9, 3):
+    if source_url != expected or not date(2022, 1, 1) <= publication_day < date(2026, 9, 30):
         raise ValueError("Euronext 历史合并报告来源或日期越界")
     return _parse_euronext(content, publication_day, source_url, stamp, legacy=True)
 

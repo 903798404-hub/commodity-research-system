@@ -39,7 +39,7 @@ def test_legacy_official_report_is_combined_only_and_replay_keeps_decimal_values
 def test_legacy_replay_rejects_ambiguous_or_out_of_scope_source(mutation):
     raw, url, day, domain = report(), URL, date(2022, 1, 12), 'rapeseed'
     if mutation == 'boundary':
-        day = date(2026, 9, 3)
+        day = date(2026, 9, 30)
         url = day.strftime('https://live.euronext.com/sites/default/files/commodities_reporting/%Y/%m/%d/en/cdwpr_ECO_%Y%m%d.html')
     if mutation == 'wrong_url': url = URL.replace('live.euronext.com', 'example.org')
     if mutation == 'unknown_type': raw = raw.replace(b'Report status NEWT', b'Report status NEWT Report type OTHER')
@@ -53,3 +53,11 @@ def test_legacy_replay_rejects_ambiguous_or_out_of_scope_source(mutation):
     with pytest.raises(ValueError):
         delivery._replay_source('euronext_legacy_' + day.strftime('%Y%m%d'),
             dict(url=url, retrieved_at=STAMP), raw, domain, config(ROOT))
+
+
+def test_html_transition_is_not_assumed_to_equal_regulatory_rollout_date():
+    day = date(2026, 9, 23)
+    url = day.strftime('https://live.euronext.com/sites/default/files/commodities_reporting/%Y/%m/%d/en/cdwpr_ECO_%Y%m%d.html')
+    raw = report().replace(b'07/01/2022', b'18/09/2026').replace(b'12/01/2022', b'23/09/2026')
+    rows = parse_euronext_legacy(raw, day, url, STAMP)
+    assert len(rows) == 5 and {r['report_type'] for r in rows} == {'combined'}
