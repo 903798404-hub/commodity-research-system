@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import date
 import json
 
 import pytest
@@ -108,3 +109,93 @@ def test_known_open_day_without_reports_is_a_blank_not_interpolated_or_zero():
     gap = next(r for r in metrics if r['report_date'] == '2022-11-07')
     assert gap['long'] is gap['short'] is gap['net'] is None
     assert gap['constituent_contracts'] == [] and '无白糖合约报表' in gap['coverage']
+
+
+def daily_capture(day='20261009'):
+    return dict(schema_version=stock.COFCO_HISTORY_SCHEMA, start_date=day, end_date=day,
+        catalogue=dict(fields=['ts_code', 'symbol', 'exchange', 'fut_code', 'list_date', 'delist_date'],
+            items=[['SR2701.ZCE', 'SR701', 'CZCE', 'SR', '20260119', '20270114']]),
+        calendar=dict(fields=['exchange', 'cal_date', 'is_open'], items=[['CZCE', day, 1]]),
+        reports=[dict(symbol='SR2701', windows=[dict(start_date=day, end_date=day,
+            pages=[dict(fields=FIELDS, items=[[day, 'SR2701', '中粮期货（代客）', 20, 1, 10, 1]])])])])
+
+
+def test_daily_gateway_keeps_credentials_out_and_unpublished_days_retryable():
+    body, requests = daily_capture(), []
+    class Response:
+        status_code = 200
+        def __init__(self, data): self.data = data
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def iter_content(self, size):
+            yield json.dumps(dict(code=0, msg='TEST_SECRET', data=self.data)).encode()
+    class Session:
+        empty = False
+        def post(self, url, **kwargs):
+            request = kwargs['json']; requests.append(request)
+            assert url == stock.URL and request['token'] == 'TEST_SECRET'
+            assert kwargs['allow_redirects'] is False and kwargs['headers']['Accept-Encoding'] == 'gzip'
+            if request['api_name'] == 'fut_basic':
+                assert request['params']['fut_code'] == 'SR'
+                return Response(body['catalogue'])
+            if request['api_name'] == 'fut_trade_cal': return Response(body['calendar'])
+            assert request['params']['symbol'] == 'SR2701'
+            data = deepcopy(body['reports'][0]['windows'][0]['pages'][0])
+            if self.empty: data['items'] = []
+            return Response(data)
+    session = Session()
+    source = stock.StockApiSources(token='TEST_SECRET', session=session)
+    rows, raw, _ = source.cofco_history(date(2026, 10, 9))
+    assert cofco_history_metrics(rows)[0]['net'] == 10
+    assert b'TEST_SECRET' not in raw and b'msg' not in raw
+    session.empty = True
+    with pytest.raises(stock.SourceNotPublished): source.cofco_history(date(2026, 10, 9))
+    assert sum(r['api_name'] == 'fut_basic' for r in requests) == 1
+
+
+def test_daily_extension_replays_increment_and_history_does_not_mask_official_dates(tmp_path, monkeypatch):
+    from agri_research_agent.automation import positions_scheduled_collection as collection
+    from test_positions_delivery import archive
+    from test_server_collection import Source as DceSource
+    baseline = archive(day='2026-10-08')
+    builder = delivery.IncrementBuilder(baseline, ROOT)
+    for day in ('20261007', '20261008'):
+        raw = delivery.canonical(daily_capture(day))
+        builder.publish(tmp_path/'sugar', [], stock.parse_cofco_history(raw, stock.URL, STAMP),
+            [(f'stockapi_CZCE_SR_cofco_{day}_{day}', raw, stock.URL, 'json')], [])
+    baseline = delivery.resolve_increment(builder.finish(ROOT)[0], baseline)
+    calls = []
+    def official(*args, **kwargs):
+        calls.append(kwargs['existing_dates'])
+        return [], [], [], []
+    monkeypatch.setattr(collection.delivery, '_module', lambda *a: type('Collector', (), {'collect': staticmethod(official)}))
+    class Source(DceSource):
+        def cofco_history(self, day):
+            raw = delivery.canonical(daily_capture(day.strftime('%Y%m%d')))
+            return stock.parse_cofco_history(raw, stock.URL, STAMP), raw, stock.URL
+    (tmp_path/'next').mkdir()
+    document, attempts = collection.collect_bundle(baseline, tmp_path/'next', markets='domestic',
+        today=date(2026, 10, 9), stock_source=Source(), incremental=True)
+    candidate = delivery.resolve_increment(document, baseline)
+    old = delivery.validate_archive(baseline, ROOT)[0]['sugar']
+    new = delivery.validate_archive(candidate, ROOT)[0]['sugar']
+    assert old['foreign'] == new['foreign'] and all(r in new['domestic'] for r in old['domestic'])
+    assert calls[0] == set()  # This baseline has member slices, no official sugar ranking yet.
+    assert cofco_history_metrics(new['domestic'])[-1]['report_date'] == '2026-10-09'
+    assert any(a['source_id'].startswith('stockapi_CZCE_SR_cofco_') and a['status'] == 'ok' for a in attempts)
+    assert delivery.observations(candidate, baseline, ROOT)['revised_partitions'] == []
+
+
+def test_unpublished_open_day_halts_catchup_without_exposing_error(tmp_path):
+    from agri_research_agent.automation.positions_scheduled_collection import collect_cofco
+    rows = stock.parse_cofco_history(delivery.canonical(daily_capture('20261007')), stock.URL, STAMP)
+    class Broken:
+        calls = []
+        def cofco_history(self, day):
+            self.calls.append(day)
+            raise stock.StockApiError('private-test-token')
+    source = Broken()
+    attempts, _ = collect_cofco(source, {'sugar': {'domestic': rows}}, tmp_path, date(2026, 10, 9),
+        publish_rows=lambda *a, **k: pytest.fail('failed source cannot publish'))
+    assert source.calls == [date(2026, 10, 8)] and attempts[0]['status'] == 'failed'
+    assert 'private-test-token' not in str(attempts)

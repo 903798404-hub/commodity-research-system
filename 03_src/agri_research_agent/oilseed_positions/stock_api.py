@@ -252,6 +252,71 @@ class StockApiSources:
         if not self.token or len(self.token) > 512:
             raise StockApiError('stock_api_credential_missing_or_invalid')
 
+    def _history_data(self, api, params):
+        with self.session.post(URL, json=dict(api_name=api, token=self.token, params=params),
+                headers={'Accept-Encoding': 'gzip'}, timeout=self.timeout, stream=True,
+                allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise StockApiError('stock_api_http_error')
+            raw = bytearray()
+            for block in response.iter_content(16384):
+                raw.extend(block)
+                if len(raw) > MAX_BYTES:
+                    raise StockApiError('stock_api_response_too_large')
+        payload = json.loads(raw.decode('utf-8'))
+        if payload.get('code') != 0:
+            raise StockApiError('stock_api_request_rejected')
+        data = payload['data']
+        return dict(fields=data['fields'], items=data['items'])
+
+    def cofco_history(self, day):
+        """A single trading day's exact-contract member observations, never SR totals."""
+        try:
+            compact = day.strftime('%Y%m%d')
+            if not hasattr(self, '_cofco_catalogue'):
+                self._cofco_catalogue = self._history_data('fut_basic',
+                    dict(exchange='CZCE', fut_type='1', fut_code='SR', limit=10000))
+            catalogue = self._cofco_catalogue
+            if not 0 < len(catalogue['items']) < 10000:
+                raise StockApiError('stock_api_cofco_catalogue_incomplete')
+            selected = []
+            for values in catalogue['items']:
+                row = dict(zip(catalogue['fields'], values))
+                if row['list_date'] <= compact <= row['delist_date']:
+                    if not re.fullmatch(r'SR\d{4}\.ZCE', row['ts_code']):
+                        raise StockApiError('stock_api_cofco_contract_invalid')
+                    selected.append(row['ts_code'].split('.')[0])
+            calendar = self._history_data('fut_trade_cal',
+                dict(exchange='CZCE', start_date=compact, end_date=compact, limit=2000, offset=0))
+            dates = [dict(zip(calendar['fields'], row)) for row in calendar['items']]
+            if len(dates) != 1 or dates[0]['cal_date'] != compact or dates[0]['exchange'] != 'CZCE':
+                raise StockApiError('stock_api_cofco_calendar_invalid')
+            if str(dates[0]['is_open']) == '0':
+                raise SourceNotPublished('stock_api_cofco_nontrading_day')
+            reports, count = [], 0
+            for symbol in sorted(selected):
+                pages = []
+                for index in range(MAX_PAGES):
+                    data = self._history_data('fut_holding', dict(exchange='CZCE', symbol=symbol,
+                        start_date=compact, end_date=compact, limit=MAX_ROWS, offset=index * MAX_ROWS))
+                    pages.append(data)
+                    count += len(data['items'])
+                    if len(data['items']) < MAX_ROWS:
+                        break
+                reports.append(dict(symbol=symbol, windows=[dict(start_date=compact, end_date=compact, pages=pages)]))
+            if not count:
+                # A not-yet-published day must remain retryable, not become a saved blank partition.
+                raise SourceNotPublished('stock_api_cofco_report_not_published')
+            raw = json.dumps(dict(schema_version=COFCO_HISTORY_SCHEMA, start_date=compact, end_date=compact,
+                catalogue=catalogue, calendar=calendar, reports=reports), ensure_ascii=False,
+                allow_nan=False, separators=(',', ':')).encode('utf-8')
+            rows = parse_cofco_history(raw, URL, datetime.now(timezone.utc).isoformat())
+            return rows, raw, URL
+        except (StockApiError, SourceNotPublished):
+            raise
+        except Exception:
+            raise StockApiError('stock_api_cofco_transport_or_schema_failed') from None
+
     def holdings(self, day, varieties, *, contract=None):
         pages = []
         try:
