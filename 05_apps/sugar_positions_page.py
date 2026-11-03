@@ -9,7 +9,8 @@ import streamlit as st
 
 from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend, seasonality
 from agri_research_agent.sugar_positions.model import (
-    GROUPS, MARKETS, COFCO_MEMBER, domestic_metrics, foreign_metrics, load_members, member_metrics, positioning_signal,
+    GROUPS, MARKETS, COFCO_MEMBER, COFCO_HISTORY_RECORD, cofco_history_metrics,
+    domestic_metrics, foreign_metrics, load_members, member_metrics, positioning_signal,
 )
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
@@ -29,6 +30,7 @@ trend = cache_computation(trend)
 movements = cache_computation(movements)
 seasonality = cache_computation(seasonality)
 member_metrics = cache_computation(member_metrics)
+cofco_history_metrics = cache_computation(cofco_history_metrics)
 
 SEASONAL_FIELDS = {"净持仓": "net", "多仓": "long", "空仓": "short"}
 
@@ -183,7 +185,8 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             with st.expander(f"{label}持仓明细"):
                 st.dataframe(detail(data).iloc[::-1], hide_index=True, width="stretch")
     with domestic_tab:
-        scopes = sorted({r["scope"] for r in snapshot["domestic"]}, key=lambda s: (s != "SR", s))
+        ranking_rows = [r for r in snapshot["domestic"] if r.get("record_type") != COFCO_HISTORY_RECORD]
+        scopes = sorted({r["scope"] for r in ranking_rows}, key=lambda s: (s != "SR", s))
         if not scopes:
             st.info("国内持仓尚未采集。")
         else:
@@ -215,9 +218,21 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
                     keys=("domestic_fixed_trend", "domestic_changes"))
                 st.caption("零线上方榜内偏多，下方榜内偏空；曲线末端显示席位名称与最新榜内净持仓。")
             st.subheader("中粮期货 · 独立席位季节性")
-            cofco = [r for r in member_metrics(snapshot["domestic"], COFCO_MEMBER, account=account)
-                     if r["scope"] == scope and r["report_date"] <= day]
-            st.caption("中粮期货代客席位公开排名；不是中粮集团完整持仓。榜内净仓按已披露多仓减空仓，未披露一侧按0计算；两侧未披露时图表留空。")
+            contract_history = cofco_history_metrics(snapshot["domestic"])
+            history_mode = bool(contract_history) and st.radio("中粮统计口径",
+                ["合约榜单可见持仓（历史）", "当前范围代客排名"], key="cofco_basis", horizontal=True) == "合约榜单可见持仓（历史）"
+            if history_mode:
+                cofco = [r for r in contract_history if r["report_date"] <= day]
+                st.caption("白糖各合约榜单内中粮可见持仓求和；独立于上方统计范围，截止日期沿用上方选择。"
+                    "原始账户标签保留，此处合计接口所列账户；早年未区分代客、自营，不能当作代客总持仓。")
+                st.caption("来源：用户指定的Tushare兼容服务。仅覆盖当日返回的合约与榜内席位，未入榜不是实际零仓；"
+                    "接口明确返回的0原样保留。可见净仓＝可见多仓－可见空仓；两侧均缺失留空。合约清单变化时不计算净变化。")
+                net_title, long_title, short_title = (f"中粮期货 · 合约榜单可见{label}季节性" for label in ("净仓", "多仓", "空仓"))
+            else:
+                cofco = [r for r in member_metrics(snapshot["domestic"], COFCO_MEMBER, account=account)
+                         if r["scope"] == scope and r["report_date"] <= day]
+                st.caption("中粮期货代客席位公开排名；不是中粮集团完整持仓。榜内净仓按已披露多仓减空仓，未披露一侧按0计算；两侧未披露时图表留空。")
+                net_title, long_title, short_title = ("中粮期货 · 榜内净持仓季节性", "中粮期货 · 多仓季节性", "中粮期货 · 空仓季节性")
             if any(r["long"] is not None or r["short"] is not None for r in cofco):
                 latest_cofco = cofco[-1]
                 columns = st.columns(3)
@@ -226,19 +241,24 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
                         if field != "net" or latest_cofco["long"] is not None or latest_cofco["short"] is not None else "未披露")
                 selected_cofco = seasonal_selection(cofco, key="cofco_years")
                 if selected_cofco:
-                    chart_pair(seasonality(selected_cofco, "中粮期货 · 榜内净持仓季节性", current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
-                        seasonality(selected_cofco, "中粮期货 · 多仓季节性", field="long", current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
+                    chart_pair(seasonality(selected_cofco, net_title, current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
+                        seasonality(selected_cofco, long_title, field="long", current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
                         keys=("cofco_net_seasonal", "cofco_long_seasonal"), preserve_legend=True)
-                    st.plotly_chart(seasonality(selected_cofco, "中粮期货 · 空仓季节性", field="short",
+                    st.plotly_chart(seasonality(selected_cofco, short_title, field="short",
                         current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year), width="stretch", key="cofco_short_seasonal")
                 with st.expander("中粮期货持仓明细"):
                     st.dataframe(domestic_detail(cofco).iloc[::-1], hide_index=True, width="stretch")
+                if history_mode:
+                    with st.expander("中粮各合约及原始账户明细"):
+                        raw_history = [r for r in snapshot["domestic"] if r.get("record_type") == COFCO_HISTORY_RECORD and r["report_date"] == cofco[-1]["report_date"]]
+                        st.dataframe(pd.DataFrame(raw_history)[["report_date", "scope", "raw_member", "account", "side", "positions", "disclosure"]],
+                            hide_index=True, width="stretch")
             else:
                 st.info("当前统计范围及日期内，已保存排名尚无中粮期货代客席位披露，季节性暂留空。")
             with st.expander("历史榜内净持仓与比较日期"):
                 st.dataframe(domestic_detail(history).iloc[::-1], hide_index=True, width="stretch")
             with st.expander("交易所原始排名"):
-                raw = [r for r in snapshot["domestic"] if r["scope"] == scope and r["report_date"] == day]
+                raw = [r for r in ranking_rows if r["scope"] == scope and r["report_date"] == day]
                 st.dataframe(pd.DataFrame(raw)[["side", "rank", "raw_member", "positions", "reported_change"]],
                     hide_index=True, width="stretch")
     with source_tab:

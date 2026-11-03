@@ -1,5 +1,5 @@
 """User-selected Tushare-compatible service. Credentials never enter captures."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import os
 import re
@@ -15,10 +15,148 @@ SCHEMA = 'stock-api-holdings/1'
 MAX_ROWS = 2000
 MAX_PAGES = 20
 MAX_BYTES = 4 * 1024 * 1024
+COFCO_HISTORY_SCHEMA = 'stock-api-cofco-history/1'
+COFCO_HISTORY_RECORD = 'cofco_contract_history_v1'
 
 
 class StockApiError(ValueError):
     pass
+
+
+def parse_cofco_history(raw, source_url, retrieved_at):
+    """Replay a complete SR catalogue and paginated contract responses.
+
+    These are member observations, including explicit absence markers, rather
+    than exchange rankings. Original account labels and source zeros survive.
+    """
+    from collections import defaultdict
+    from agri_research_agent.positions.delivery import strict_json, exact, require
+    from agri_research_agent.sugar_positions.model import COFCO_MEMBER
+    require(source_url == URL and 0 < len(raw) <= 32 * 1024**2, 'COFCO source identity invalid')
+    body = strict_json(raw)
+    exact(body, ('schema_version', 'start_date', 'end_date', 'catalogue', 'calendar', 'reports'), 'COFCO capture')
+    require(body['schema_version'] == COFCO_HISTORY_SCHEMA, 'COFCO capture version invalid')
+    start, end = body['start_date'], body['end_date']
+    for value in (start, end):
+        require(type(value) is str and re.fullmatch(r'20\d{6}', value), 'COFCO request date invalid')
+        datetime.strptime(value, '%Y%m%d')
+    require(start <= end <= datetime.now(timezone.utc).strftime('%Y%m%d'), 'COFCO request range invalid')
+    catalogue = exact(body['catalogue'], ('fields', 'items'), 'COFCO catalogue')
+    fields, items = catalogue['fields'], catalogue['items']
+    needed = {'ts_code', 'symbol', 'exchange', 'fut_code', 'list_date', 'delist_date'}
+    allowed = needed | {'name', 'multiplier', 'trade_unit', 'per_unit', 'quote_unit',
+        'quote_unit_desc', 'd_mode_desc', 'd_month', 'last_ddate', 'trade_time_desc'}
+    require(type(fields) is list and len(set(fields)) == len(fields) and needed <= set(fields) and not set(fields) - allowed
+            and type(items) is list and 0 < len(items) < 10000, 'COFCO catalogue incomplete')
+    expected, seen, listings = set(), set(), {}
+    for values in items:
+        require(type(values) is list and len(values) == len(fields), 'COFCO catalogue row invalid')
+        row = dict(zip(fields, values))
+        code = row['ts_code']
+        require(type(code) is str and re.fullmatch(r'SR\d{4}\.ZCE', code)
+                and row['exchange'] == 'CZCE' and row['fut_code'] == 'SR'
+                and code not in seen, 'COFCO catalogue identity invalid')
+        seen.add(code)
+        for field in ('list_date', 'delist_date'):
+            require(type(row[field]) is str and re.fullmatch(r'\d{8}', row[field]), 'COFCO listing date invalid')
+            datetime.strptime(row[field], '%Y%m%d')
+        if row['list_date'] <= end and row['delist_date'] >= start:
+            expected.add(code.split('.')[0])
+            listings[code.split('.')[0]] = (row['list_date'], row['delist_date'])
+    calendar = exact(body['calendar'], ('fields', 'items'), 'COFCO calendar')
+    fields, items = calendar['fields'], calendar['items']
+    require(type(fields) is list and len(set(fields)) == len(fields)
+            and {'exchange', 'cal_date', 'is_open'} <= set(fields)
+            and not set(fields) - {'exchange', 'cal_date', 'is_open', 'pretrade_date'}
+            and type(items) is list and 0 < len(items) < 2000, 'COFCO calendar invalid')
+    calendar_days, open_days = set(), set()
+    for values in items:
+        require(type(values) is list and len(values) == len(fields), 'COFCO calendar row invalid')
+        row = dict(zip(fields, values))
+        day = row['cal_date']
+        require(type(day) is str and re.fullmatch(r'\d{8}', day) and start <= day <= end
+                and row['exchange'] == 'CZCE' and str(row['is_open']) in {'0', '1'}
+                and day not in calendar_days, 'COFCO calendar identity invalid')
+        datetime.strptime(day, '%Y%m%d')
+        calendar_days.add(day)
+        if str(row['is_open']) == '1':
+            open_days.add(day)
+    reports = body['reports']
+    require(type(reports) is list and 0 < len(reports) <= 120, 'COFCO report count invalid')
+    require(len(reports) == len(expected) and {r['symbol'] for r in reports} == expected,
+            'COFCO contract catalogue coverage incomplete')
+    result, report_days = [], set()
+    for report in reports:
+        exact(report, ('symbol', 'windows'), 'COFCO report')
+        symbol, windows = report['symbol'], report['windows']
+        require(type(windows) is list and 1 <= len(windows) <= 120, 'COFCO windows invalid')
+        days, keys = defaultdict(list), set()
+        cursor = start
+        for window in windows:
+            exact(window, ('start_date', 'end_date', 'pages'), 'COFCO window')
+            first, last, pages = window['start_date'], window['end_date'], window['pages']
+            require(first == cursor and first <= last <= end, 'COFCO date window coverage incomplete')
+            cursor = (datetime.strptime(last, '%Y%m%d') + timedelta(days=1)).strftime('%Y%m%d')
+            require(type(pages) is list and 1 <= len(pages) <= MAX_PAGES, 'COFCO pages invalid')
+            for index, page in enumerate(pages):
+                exact(page, ('fields', 'items'), 'COFCO page')
+                fields, items = page['fields'], page['items']
+                required = {'trade_date', 'symbol', 'broker', 'long_hld', 'short_hld', 'long_chg', 'short_chg'}
+                require(type(fields) is list and len(set(fields)) == len(fields) and required <= set(fields)
+                        and not set(fields) - (required | {'vol', 'vol_chg', 'exchange'})
+                        and type(items) is list and len(items) <= MAX_ROWS, 'COFCO page fields invalid')
+                require((len(items) == MAX_ROWS) == (index < len(pages) - 1), 'COFCO pagination incomplete')
+                for values in items:
+                    require(type(values) is list and len(values) == len(fields), 'COFCO holding row invalid')
+                    row = dict(zip(fields, values))
+                    day, broker = row['trade_date'], row['broker']
+                    require(type(day) is str and re.fullmatch(r'\d{8}', day) and first <= day <= last
+                            and row['symbol'] == symbol, 'COFCO holding date or contract differs')
+                    datetime.strptime(day, '%Y%m%d')
+                    require(type(broker) is str and broker.strip() and (day, broker) not in keys,
+                            'COFCO duplicate member or repeated page')
+                    if 'exchange' in row:
+                        require(row['exchange'] == 'CZCE', 'COFCO exchange differs')
+                    keys.add((day, broker))
+                    for field in ('long_hld', 'short_hld', 'vol'):
+                        if field in row:
+                            require(not isinstance(row[field], bool), 'COFCO position invalid')
+                            integer(row[field], optional=True)
+                    for field in ('long_chg', 'short_chg', 'vol_chg'):
+                        if field in row:
+                            require(not isinstance(row[field], bool), 'COFCO change invalid')
+                            integer(row[field], signed=True, optional=True)
+                    days[day].append(row)
+        require(cursor == (datetime.strptime(end, '%Y%m%d') + timedelta(days=1)).strftime('%Y%m%d'), 'COFCO date window coverage incomplete')
+        for day, values in sorted(days.items()):
+            report_days.add(day)
+            selected = [r for r in values if split_member(r['broker'])[0] in COFCO_MEMBER['aliases']]
+            # An absent member is an explicit blank, never an inferred zero or rank.
+            for row in selected or [None]:
+                _, account = split_member(row['broker']) if row else ('中粮期货', '未披露')
+                for side in ('long', 'short'):
+                    result.append(dict(record_type=COFCO_HISTORY_RECORD,
+                        report_date=datetime.strptime(day, '%Y%m%d').date().isoformat(), scope=symbol,
+                        side=side, member=COFCO_MEMBER['label'], raw_member=row['broker'] if row else None, account=account,
+                        positions=integer(row[side + '_hld'], optional=True) if row else None,
+                        reported_change=integer(row[side + '_chg'], signed=True, optional=True) if row else None,
+                        source_provider='stock_api', source_url=URL, retrieved_at=retrieved_at, unit='contracts',
+                        disclosure='source_value' if row else 'member_absent'))
+    # A known open day with no returned SR report is an explicit chart gap.
+    # Unreturned calendar dates remain unknown; they are not assumed closed.
+    for day in sorted(open_days - report_days):
+        for symbol, (listed, delisted) in sorted(listings.items()):
+            if not listed <= day <= delisted:
+                continue
+            for side in ('long', 'short'):
+                result.append(dict(record_type=COFCO_HISTORY_RECORD,
+                    report_date=datetime.strptime(day, '%Y%m%d').date().isoformat(), scope=symbol,
+                    side=side, member=COFCO_MEMBER['label'], raw_member=None, account='未披露',
+                    positions=None, reported_change=None, source_provider='stock_api', source_url=URL,
+                    retrieved_at=retrieved_at, unit='contracts', disclosure='report_absent'))
+    unique_rows(result, ('report_date', 'scope', 'side', 'member', 'account'))
+    require(bool(result), 'COFCO history empty')
+    return result
 
 
 def parse_capture(raw, source_url, retrieved_at):

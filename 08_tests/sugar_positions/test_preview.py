@@ -119,6 +119,26 @@ def test_ranked_chart_draws_one_sided_net_and_preserves_undisclosed_hover():
     assert figure.layout.yaxis.title.text == "榜内净持仓（手）"
 
 
+def test_cofco_contract_history_has_separate_basis_and_does_not_replace_rankings(tmp_path):
+    project(tmp_path)
+    foreign, domestic = data()
+    for day, contract in (("2022-09-01", "SR2301"), ("2025-09-01", "SR2601"), ("2026-09-01", "SR2701")):
+        for side, value in (("long", 120), ("short", 30)):
+            domestic.append(dict(record_type="cofco_contract_history_v1", report_date=day, scope=contract,
+                side=side, member="中粮期货", raw_member="中粮期货", account="未区分", positions=value,
+                disclosure="source_value"))
+    publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
+    at = app(tmp_path).run(timeout=30)
+    assert not at.exception and at.radio(key="cofco_basis").value == "合约榜单可见持仓（历史）"
+    assert at.multiselect(key="cofco_years").value == [2022, 2025, 2026]
+    assert len(at.get("plotly_chart")) == 9
+    assert at.selectbox[1].options == ["SR 品种总排名", "SR701"]
+    assert any(m.label == "五家合计榜内净持仓" and m.value == "80" for m in at.metric)
+    assert any("早年未区分代客、自营" in item.value for item in at.caption)
+    at.radio(key="cofco_basis").set_value("当前范围代客排名").run()
+    assert not at.exception and any("尚无中粮期货" in item.value for item in at.info)
+
+
 def test_chart_does_not_connect_missing_positions():
     rows = foreign_metrics([dict(market="sugar11", report_type="futures_only", group="managed_money",
         report_date=day, long=long, short=10) for day, long in [

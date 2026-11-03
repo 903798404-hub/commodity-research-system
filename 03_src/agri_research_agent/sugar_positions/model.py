@@ -18,6 +18,7 @@ GROUPS = {
 MARKETS = {"sugar11": "糖11（原糖）", "white_sugar": "伦敦白砂糖"}
 RANKED_NET_METHOD = "ranked_missing_zero_v1"
 COFCO_MEMBER = {"id": "cofco", "label": "中粮期货", "aliases": ["中粮期货", "中粮"]}
+COFCO_HISTORY_RECORD = "cofco_contract_history_v1"
 
 
 def positioning_signal(net, change):
@@ -116,6 +117,8 @@ def member_metrics(rows, member, *, account="代客"):
     """Read a standalone seat from saved rankings without changing the fixed five."""
     sections = defaultdict(list)
     for row in rows:
+        if row.get("record_type") == COFCO_HISTORY_RECORD:
+            continue
         sections[(row["report_date"], row["scope"])].append(row)
     result = []
     for (day, scope), section in sorted(sections.items()):
@@ -130,10 +133,43 @@ def member_metrics(rows, member, *, account="代客"):
     return changes(result, ("scope", "group", "account"), missing_as_zero=True)
 
 
+def cofco_history_metrics(rows):
+    """Sum only returned COFCO contract observations, across disclosed accounts."""
+    days = defaultdict(list)
+    for row in rows:
+        if row.get("record_type") == COFCO_HISTORY_RECORD:
+            days[row["report_date"]].append(row)
+    result = []
+    for day, observations in sorted(days.items()):
+        contracts = sorted({r["scope"] for r in observations if r.get("disclosure") != "report_absent"})
+        values, counts = {}, {}
+        for side in ("long", "short"):
+            selected = [r for r in observations if r["side"] == side and r["positions"] is not None]
+            values[side] = sum(r["positions"] for r in selected) if selected else None
+            counts[side] = len({r["scope"] for r in selected})
+        result.append(dict(report_date=day, scope="SR", group="cofco", label="中粮期货",
+            account="公开披露账户合计", unit="contracts", source_provider="stock_api",
+            aggregation=COFCO_HISTORY_RECORD, constituent_contracts=contracts,
+            coverage=(f"当日返回{len(contracts)}个合约；中粮多侧可见{counts['long']}个、空侧可见{counts['short']}个"
+                      if contracts else "已知交易日无白糖合约报表返回；持仓留空"),
+            **values))
+    result = changes(result, ("scope", "group", "account"), missing_as_zero=True)
+    previous = None
+    for row in result:
+        if row["long"] is None and row["short"] is None:
+            row["net"] = row["net_change"] = None
+        if previous and (previous["net"] is None or previous["constituent_contracts"] != row["constituent_contracts"]):
+            row["net_change"] = None
+        previous = row
+    return result
+
+
 def domestic_metrics(rows, members, *, account="代客"):
     """Compute ranked nets with missing sides as zero, preserving disclosures."""
     sections = defaultdict(list)
     for row in rows:
+        if row.get("record_type") == COFCO_HISTORY_RECORD:
+            continue
         sections[(row["report_date"], row["scope"])].append(row)
     metrics = []
     for (day, scope), section in sorted(sections.items()):

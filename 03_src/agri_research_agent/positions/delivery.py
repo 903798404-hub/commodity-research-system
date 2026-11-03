@@ -199,6 +199,13 @@ def _replay_source(key, source, raw, domain, spec):
             "positions CZCE URL invalid")
         _xlsx_bound(raw)
         return "domestic", parse_czce(raw, day.isoformat(), url, stamp, varieties=varieties)
+    if key.startswith('stockapi_CZCE_SR_cofco_'):
+        from agri_research_agent.oilseed_positions.stock_api import parse_cofco_history, URL
+        match = re.fullmatch(r'stockapi_CZCE_SR_cofco_(20\d{6})_(20\d{6})', key)
+        require(domain == 'sugar' and url == URL and match is not None, 'positions COFCO source invalid')
+        capture = strict_json(raw)
+        require((capture['start_date'], capture['end_date']) == match.groups(), 'positions COFCO range differs')
+        return 'domestic', parse_cofco_history(raw, url, stamp)
     if key.startswith('stockapi_DCE_'):
         from agri_research_agent.oilseed_positions.stock_api import parse_capture, URL
         compact, *contracts = key.removeprefix('stockapi_DCE_').split('_')
