@@ -12,7 +12,7 @@ from agri_research_agent.positions import delivery as codec
 from agri_research_agent.positions.bundle import verified_files
 from agri_research_agent.sugar_positions.sources import OfficialSources
 from agri_research_agent.sugar_positions.storage import publish, read_snapshot
-from agri_research_agent.sugar_positions.model import COFCO_HISTORY_RECORD
+from agri_research_agent.sugar_positions.model import COFCO_HISTORY_RECORD, COFCO_PARTIAL_RECORDS
 
 
 def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, stock_source=None, incremental=False):
@@ -49,7 +49,7 @@ def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, st
             # Annual providers are indivisible. Include the preceding year in
             # the 35-day rollover window so late December reports are not lost.
             start_year = (today - timedelta(days=35)).year
-        existing = {row["report_date"] for row in old["domestic"] if row.get('record_type') != COFCO_HISTORY_RECORD}
+        existing = {row["report_date"] for row in old["domestic"] if row.get('record_type') not in COFCO_PARTIAL_RECORDS}
         start_day, end_day = domestic_window(existing, today) if markets == "domestic" else (today, today)
         windows[domain] = {"start": start_day.isoformat(), "end": end_day.isoformat(),
                            "target": today.isoformat(), "catchup_remaining": end_day < today}

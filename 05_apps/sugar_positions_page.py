@@ -9,7 +9,8 @@ import streamlit as st
 
 from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend, seasonality
 from agri_research_agent.sugar_positions.model import (
-    GROUPS, MARKETS, COFCO_MEMBER, COFCO_HISTORY_RECORD, cofco_history_metrics,
+    GROUPS, MARKETS, COFCO_MEMBER, COFCO_HISTORY_RECORD, COFCO_PARTIAL_RECORDS,
+    cofco_history_metrics, cofco_official_metrics,
     domestic_metrics, foreign_metrics, load_members, member_metrics, positioning_signal,
 )
 from agri_research_agent.sugar_positions.storage import read_snapshot
@@ -31,6 +32,7 @@ movements = cache_computation(movements)
 seasonality = cache_computation(seasonality)
 member_metrics = cache_computation(member_metrics)
 cofco_history_metrics = cache_computation(cofco_history_metrics)
+cofco_official_metrics = cache_computation(cofco_official_metrics)
 
 SEASONAL_FIELDS = {"净持仓": "net", "多仓": "long", "空仓": "short"}
 
@@ -186,7 +188,7 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             with st.expander(f"{label}持仓明细"):
                 st.dataframe(detail(data).iloc[::-1], hide_index=True, width="stretch")
     with domestic_tab:
-        ranking_rows = [r for r in snapshot["domestic"] if r.get("record_type") != COFCO_HISTORY_RECORD]
+        ranking_rows = [r for r in snapshot["domestic"] if r.get("record_type") not in COFCO_PARTIAL_RECORDS]
         scopes = sorted({r["scope"] for r in ranking_rows}, key=lambda s: (s != "SR", s))
         if not scopes:
             st.info("国内持仓尚未采集。")
@@ -220,12 +222,20 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
                 st.caption("零线上方榜内偏多，下方榜内偏空；曲线末端显示席位名称与最新榜内净持仓。")
             st.subheader("中粮期货 · 独立席位季节性")
             contract_history = cofco_history_metrics(snapshot["domestic"])
-            history_mode = bool(contract_history) and st.radio("中粮统计口径",
-                ["当前范围代客排名", "合约榜单可见持仓（历史）"], key="cofco_basis", horizontal=True) == "合约榜单可见持仓（历史）"
-            if history_mode:
+            basis = st.radio("中粮统计口径",
+                ["SR品种官方汇总", "当前范围代客排名", "合约榜单可见持仓（历史）"], key="cofco_basis", horizontal=True)
+            history_mode = basis == "合约榜单可见持仓（历史）"
+            if basis == "SR品种官方汇总":
+                cofco = [r for r in cofco_official_metrics(snapshot["domestic"]) if r["report_date"] <= day]
+                st.caption("直接采用郑商所SR品种总排名中的中粮席位，与文华白糖汇总核对；不再加总各合约可见榜单。"
+                    "独立于上方单合约选择，截止日期沿用上方选择。")
+                st.caption("早年会员名未区分账户时保留“未区分”，明确标注代客后采用代客排名；不伪造早年账户分类。"
+                    "原始账户变化处分段、不计算跨口径净变化。缺少一侧仅在榜内净仓中按0计算，两侧未披露留空。")
+                net_title, long_title, short_title = (f"中粮期货 · 官方品种汇总{label}季节性" for label in ("净仓", "多仓", "空仓"))
+            elif history_mode:
                 cofco = [r for r in contract_history if r["report_date"] <= day]
                 st.warning("此历史接口存在漏项，当前为合约榜单可见持仓，不是完整代客汇总。"
-                    "与文华白糖汇总核对时，请选择“当前范围代客排名”及“SR 品种总排名”。")
+                    "与文华白糖汇总核对时，请选择“SR品种官方汇总”。")
                 st.caption("白糖各合约榜单内中粮可见持仓求和；独立于上方统计范围，截止日期沿用上方选择。"
                     "原始账户标签保留，此处合计接口所列账户；早年未区分代客、自营，不能当作代客总持仓。")
                 st.caption("来源：用户指定的Tushare兼容服务。仅覆盖当日返回的合约与榜内席位，未入榜不是实际零仓；"

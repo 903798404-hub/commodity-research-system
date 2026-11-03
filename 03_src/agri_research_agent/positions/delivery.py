@@ -198,6 +198,11 @@ def _replay_source(key, source, raw, domain, spec):
             "https://live.euronext.com/sites/default/files/commodities_reporting/%Y/%m/%d/en/cdwpr_ECO_%Y%m%d.html"),
             "positions Euronext URL invalid")
         return "foreign", parse_euronext(raw, day, url, stamp)
+    if key.startswith("czce_cofco_official_"):
+        from agri_research_agent.sugar_positions.sources import parse_czce_cofco_capture as parse_capture
+        day = datetime.strptime(key[len('czce_cofco_official_'):], '%Y%m%d').date()
+        require(domain == 'sugar', 'positions official COFCO domain invalid')
+        return 'domestic', parse_capture(raw, day.isoformat(), url, stamp)
     if key.startswith("czce_"):
         day = datetime.strptime(key[5:], "%Y%m%d").date()
         require(domain in {"sugar", "rapeseed"} and url == day.strftime(

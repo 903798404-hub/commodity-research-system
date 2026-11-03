@@ -19,6 +19,8 @@ MARKETS = {"sugar11": "糖11（原糖）", "white_sugar": "伦敦白砂糖"}
 RANKED_NET_METHOD = "ranked_missing_zero_v1"
 COFCO_MEMBER = {"id": "cofco", "label": "中粮期货", "aliases": ["中粮期货", "中粮"]}
 COFCO_HISTORY_RECORD = "cofco_contract_history_v1"
+COFCO_OFFICIAL_RECORD = "cofco_official_product_v1"
+COFCO_PARTIAL_RECORDS = (COFCO_HISTORY_RECORD, COFCO_OFFICIAL_RECORD)
 
 
 def positioning_signal(net, change):
@@ -117,7 +119,7 @@ def member_metrics(rows, member, *, account="代客"):
     """Read a standalone seat from saved rankings without changing the fixed five."""
     sections = defaultdict(list)
     for row in rows:
-        if row.get("record_type") == COFCO_HISTORY_RECORD:
+        if row.get("record_type") in COFCO_PARTIAL_RECORDS:
             continue
         sections[(row["report_date"], row["scope"])].append(row)
     result = []
@@ -164,11 +166,44 @@ def cofco_history_metrics(rows):
     return result
 
 
+def cofco_official_metrics(rows):
+    """Follow the original SR product ranking, never sum contract leaderboards."""
+    days = defaultdict(list)
+    for row in rows:
+        if row['scope'] == 'SR' and row.get('record_type') != COFCO_HISTORY_RECORD:
+            days[row['report_date']].append(row)
+    result = []
+    for day, section in sorted(days.items()):
+        full = [r for r in section if r.get('record_type') != COFCO_OFFICIAL_RECORD]
+        section = full or section
+        account = '代客' if any(r['account'] == '代客' for r in section) else '未区分'
+        values = {}
+        for side in ('long', 'short'):
+            found = [r for r in section if r['side'] == side and r['account'] == account
+                     and r['member'] in COFCO_MEMBER['aliases']]
+            if len(found) > 1:
+                raise ValueError('中粮官方品种汇总同侧存在重复会员')
+            values[side] = found[0]['positions'] if found else None
+        result.append(dict(report_date=day, scope='SR', group='cofco', label='中粮期货',
+            account='交易所原披露会员口径', reported_account=account, unit='contracts',
+            source_provider='CZCE', aggregation='czce_product_member:' + account,
+            coverage='郑商所SR品种排名；原始账户：' + account, **values))
+    result = changes(result, ('scope', 'group', 'account'), missing_as_zero=True)
+    previous = None
+    for row in result:
+        if row['long'] is None and row['short'] is None:
+            row['net'] = row['net_change'] = None
+        if previous and row['reported_account'] != previous['reported_account']:
+            row['net_change'] = None
+        previous = row
+    return result
+
+
 def domestic_metrics(rows, members, *, account="代客"):
     """Compute ranked nets with missing sides as zero, preserving disclosures."""
     sections = defaultdict(list)
     for row in rows:
-        if row.get("record_type") == COFCO_HISTORY_RECORD:
+        if row.get("record_type") in COFCO_PARTIAL_RECORDS:
             continue
         sections[(row["report_date"], row["scope"])].append(row)
     metrics = []

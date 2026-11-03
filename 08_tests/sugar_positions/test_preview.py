@@ -103,7 +103,7 @@ def test_cofco_independent_seasonality_preserves_fixed_five_and_cutoff(tmp_path)
     cofco_table = next(d.value for d in at.dataframe if "对象" in d.value and "中粮期货" in set(d.value["对象"]))
     assert len(cofco_table) == 3 and "2026年9月9日" not in set(cofco_table["日期"])
     at.selectbox[1].set_value("SR701").run()
-    assert not at.exception and any("尚无中粮期货" in item.value for item in at.info)
+    assert not at.exception and any(m.label == "中粮榜内净持仓（手）" and m.value == "70" for m in at.metric)
 
 
 def test_ranked_chart_draws_one_sided_net_and_preserves_undisclosed_hover():
@@ -132,7 +132,7 @@ def test_cofco_contract_history_has_separate_basis_and_does_not_replace_rankings
             side=side, member="中粮期货", raw_member=None, account="未披露", positions=None, disclosure="report_absent"))
     publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
     at = app(tmp_path).run(timeout=30)
-    assert not at.exception and at.radio(key="cofco_basis").value == "当前范围代客排名"
+    assert not at.exception and at.radio(key="cofco_basis").value == "SR品种官方汇总"
     at.radio(key="cofco_basis").set_value("合约榜单可见持仓（历史）").run()
     assert not at.exception and any("此历史接口存在漏项" in item.value for item in at.warning)
     assert at.multiselect(key="cofco_years").value == [2022, 2025, 2026]
