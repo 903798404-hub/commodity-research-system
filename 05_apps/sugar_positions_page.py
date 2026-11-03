@@ -100,7 +100,8 @@ def detail(rows):
 def domestic_detail(rows):
     table = detail(rows).rename(columns={"净持仓（手）": "榜内净持仓（手）",
         "净变化（手）": "榜内净变化（手）", "持仓情绪": "榜内持仓倾向"})
-    table.loc[[r["long"] is None and r["short"] is None for r in rows], "榜内持仓倾向"] = "两侧未披露 · 榜内按0"
+    table.loc[[r["long"] is None and r["short"] is None and r["net"] is not None for r in rows], "榜内持仓倾向"] = "两侧未披露 · 榜内按0"
+    table.loc[[r["long"] is None and r["short"] is None and r["net"] is None for r in rows], "榜内持仓倾向"] = "两侧未披露 · 留空"
     return table
 
 

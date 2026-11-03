@@ -127,6 +127,9 @@ def test_cofco_contract_history_has_separate_basis_and_does_not_replace_rankings
             domestic.append(dict(record_type="cofco_contract_history_v1", report_date=day, scope=contract,
                 side=side, member="中粮期货", raw_member="中粮期货", account="未区分", positions=value,
                 disclosure="source_value"))
+    for side in ("long", "short"):
+        domestic.append(dict(record_type="cofco_contract_history_v1", report_date="2022-09-02", scope="SR2301",
+            side=side, member="中粮期货", raw_member=None, account="未披露", positions=None, disclosure="report_absent"))
     publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
     at = app(tmp_path).run(timeout=30)
     assert not at.exception and at.radio(key="cofco_basis").value == "合约榜单可见持仓（历史）"
@@ -135,6 +138,8 @@ def test_cofco_contract_history_has_separate_basis_and_does_not_replace_rankings
     assert at.selectbox[1].options == ["SR 品种总排名", "SR701"]
     assert any(m.label == "五家合计榜内净持仓" and m.value == "80" for m in at.metric)
     assert any("早年未区分代客、自营" in item.value for item in at.caption)
+    table = next(d.value for d in at.dataframe if "披露情况" in d.value and "两侧未披露 · 留空" in set(d.value.get("榜内持仓倾向", [])))
+    assert table[table["日期"] == "2022年9月2日"].iloc[0]["榜内净持仓（手）"] == "未披露"
     at.radio(key="cofco_basis").set_value("当前范围代客排名").run()
     assert not at.exception and any("尚无中粮期货" in item.value for item in at.info)
 
