@@ -464,7 +464,46 @@ def validate_daily_market(value):
     return value
 
 
-def capture_daily_market(*, now=None, calendar=None, capture=None, extra_quotes=()):
+def carry_forward_ice(value, previous_markets):
+    """Keep verified exact-contract exchange quotes through a temporary outage.
+
+    Preserve the original quote and timestamp. The existing seven-day validator
+    rejects expired observations; completed-bar request times are never rewritten.
+    """
+    from copy import deepcopy
+    from datetime import date, datetime
+    import hashlib
+    from .store import packed
+    from .model import ice_quote
+    if not previous_markets:
+        return value
+    origins = {}
+    candidates = sorted(previous_markets, key=lambda r: datetime.fromisoformat(r['captured_at']), reverse=True)
+    for previous in candidates:
+        for code in value['ice']:
+            if ice_quote(value, code).get('price') is not None:
+                continue
+            item = previous.get('ice', {}).get(code, {})
+            if item.get('price') is None:
+                continue
+            trial = deepcopy(value)
+            trial['ice'][code] = deepcopy(item)
+            try:
+                validate_monthly_market(trial, date.fromisoformat(value['date']))
+            except (ValueError, TypeError, KeyError, OverflowError):
+                continue
+            value['ice'][code] = trial['ice'][code]
+            value['errors'].pop(code, None)
+            origins[code] = dict(source_market_date=previous['date'], source_captured_at=previous['captured_at'],
+                quote_time=item['quoted_at'], source_market_sha256=hashlib.sha256(packed(previous).encode()).hexdigest())
+    if origins:
+        value['ice_carry_forward'] = origins
+    if all(ice_quote(value, c).get('price') is not None for c in value['ice']):
+        value['errors'].pop('ice', None)
+    return value
+
+
+def capture_daily_market(*, now=None, calendar=None, capture=None, extra_quotes=(), previous_markets=()):
     """Only the scheduled current-day window may collect; no historical clock override in CLI."""
     from datetime import date, datetime, time
     from .model import TZ, month_periods, default_mapping
@@ -502,6 +541,7 @@ def capture_daily_market(*, now=None, calendar=None, capture=None, extra_quotes=
         if any(datetime.fromisoformat(t).astimezone(TZ).date() != day for t in source['published_at']):
             value.update(fx_curve={}, fx_raw={})
             value['errors']['fx_archive'] = '未取得同日汇率，留空'
+    carry_forward_ice(value, previous_markets)
     validate_daily_market(value)
     return value
 
@@ -510,7 +550,7 @@ def archive_main(argv=None):
     """Small server entry point used by the independent 15:15 systemd timer."""
     import argparse
     import json
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from .model import TZ
     from .store import Store
     parser = argparse.ArgumentParser(description='白糖每日15:15行情归档，后补报价按所属日读取')
@@ -526,8 +566,15 @@ def archive_main(argv=None):
             print(json.dumps(dict(status='CHECK_ONLY' if args.check else 'ALREADY_ARCHIVED', date=day.isoformat(),
                                   version=existing['version'] if existing else None), ensure_ascii=False))
             return 0
-        extra = [q for r in store.monthly_records() if r['payload']['date'] == day.isoformat() for q in r['payload']['quotes']]
-        value = capture_daily_market(extra_quotes=extra)
+        records = store.monthly_records()
+        extra = [q for r in records if r['payload']['date'] == day.isoformat() for q in r['payload']['quotes']]
+        previous = [r['payload']['market'] for r in records if r['payload'].get('market') is not None
+                    and timedelta(0) <= day - datetime.fromisoformat(r['payload']['date']).date() <= timedelta(days=7)]
+        for offset in range(1, 8):
+            saved = store.daily_market(day - timedelta(days=offset))
+            if saved is not None:
+                previous.append(saved['payload'])
+        value = capture_daily_market(extra_quotes=extra, previous_markets=previous)
         if value is None:
             print(json.dumps(dict(status='NON_TRADING_DAY', date=day.isoformat())))
             return 0

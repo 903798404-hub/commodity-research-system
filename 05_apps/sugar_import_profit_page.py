@@ -246,6 +246,11 @@ def _monthly(store, enabled, freight_root=None):
             st.warning('该日归档存在缺项，相关成本和利润保持空白；可展开“行情时间、来源与缺失原因”查看。')
     elif payload['market'] is None and historical_input(payload) is None:
         st.info('尚无该日已归档行情。报价可先保存，待行情补齐后再载入计算；不会获取今天价格代替。')
+    if payload['market'] and payload['market'].get('ice_carry_forward'):
+        st.info('原糖接口暂不可用，沿用最近7天内已验证的同一合约报价；保留原始来源时间，实际日期见“原糖价格日期”，不是本日新报价。')
+    if payload['market'] and payload['market'].get('ice_close_backfill'):
+        st.caption('原糖历史收盘价于' + payload['market']['ice_close_backfill']['performed_at'] +
+            '补录，按该日原归档时点之前已经完成的交易日校验；原缺失版本保留，未使用事后价格。')
     if ((payload.get('historical_market') or {}).get('fx_policy') == 'ECB_SPOT_ESTIMATE'
             and payload.get('fx_override') is None):
         st.info('即期汇率估算：各船期统一采用当日ECB参考即期交叉汇率，未计远期掉期点。原糖采用中国报价日结束前已完成的日线；郑糖采用同日报价日收盘价。')

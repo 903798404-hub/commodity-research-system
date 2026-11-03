@@ -33,6 +33,48 @@ def daily_snapshot():
         calendar=dict(provider='AkShare/Sina', trading_day='2026-10-29', covered_through='2026-12-31'))
 
 
+def earlier_snapshot(day):
+    value=daily_snapshot()
+    value['date']=day
+    for key in ('captured_at','scheduled_at'):
+        value[key]=day+value[key][10:]
+    value['calendar']['trading_day']=day
+    row=value['ice']['SBH27'];row['quoted_at']=day+'T01:00:00+08:00'
+    row['raw']['utime']=int(datetime.fromisoformat(row['quoted_at']).timestamp())
+    value['domestic']['SR2701']['quoted_at']=day+'T15:00:00+08:00'
+    value['domestic']['SR2701']['raw'][17]=day
+    for body in value['fx_raw'].values():body['data']['showDateCN']=day+' 15:10:00'
+    runtime.validate_daily_market(value)
+    return value
+
+
+def test_outage_keeps_verified_exact_contract_without_redating_or_overwriting_fresh_quote(tmp_path):
+    previous=earlier_snapshot('2026-10-28')
+    value=daily_snapshot();value['ice']['SBH27']={'price':None};value['errors']={'ice':'unavailable','SBH27':'unavailable'}
+    actual=runtime.capture_daily_market(now=datetime.fromisoformat('2026-10-29T15:15:20+08:00'),
+        calendar=['2026-10-29'],capture=lambda *a:deepcopy(value),previous_markets=[previous])
+    assert actual['ice']['SBH27']==previous['ice']['SBH27']
+    assert actual['ice']['SBH27']['quoted_at']=='2026-10-28T01:00:00+08:00'
+    assert actual['ice_carry_forward']['SBH27']['source_market_date']=='2026-10-28'
+    assert not actual['errors']
+    store=Store(tmp_path/'cache.sqlite3',lambda _:None)
+    store.save_daily_market(actual,expected_version=None)
+    assert store.daily_market(date(2026,10,29))['payload']==actual
+    fresh=daily_snapshot();before=deepcopy(fresh)
+    assert runtime.carry_forward_ice(fresh,[previous])==before
+
+
+@pytest.mark.parametrize('damage',['expired','wrong_contract','zero'])
+def test_outage_never_reuses_expired_wrong_contract_or_zero_quotes(damage):
+    previous=earlier_snapshot('2026-10-21' if damage=='expired' else '2026-10-28')
+    if damage=='wrong_contract':previous['ice']['SBH27']['raw']['dm']='SB27K'
+    if damage=='zero':previous['ice']['SBH27']['price']=previous['ice']['SBH27']['raw']['p']=0
+    value=daily_snapshot();value['ice']['SBH27']={'price':None};value['errors']={'SBH27':'missing'}
+    runtime.carry_forward_ice(value,[previous])
+    assert value['ice']['SBH27']['price'] is None and value['errors']['SBH27']=='missing'
+    assert 'ice_carry_forward' not in value
+
+
 def test_archive_without_quotes_then_late_save_preserves_snapshot_and_independent_history(tmp_path):
     from test_sugar_import_profit import monthly_payload
     store = Store(tmp_path / 'archive.sqlite3', lambda _: None)
