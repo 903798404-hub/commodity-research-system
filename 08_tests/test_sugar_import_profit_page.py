@@ -231,3 +231,64 @@ def test_public_reference_does_not_overwrite_saved_zero_or_clear_and_never_fills
     assert grid.iloc[0].freight_usd_per_tonne == 54. and grid.iloc[1].isna().freight_usd_per_tonne
     assert _freight_source(saved['quotes'][0])['运费来源'] == '人工'
     assert _freight_source(saved['quotes'][2])['运费来源链接'] == row['sources'][0]['article_url']
+
+
+def test_uniform_freight_applies_twelve_months_preserves_unsaved_inputs_and_allows_exceptions(tmp_path, monkeypatch):
+    app, db = page(tmp_path, monkeypatch, formal=True)
+    key = 'sugar-month:巴西:' + today()
+    assert app.button(key=key + ':apply-uniform-freight').disabled
+    app.session_state[key + ':editor'] = dict(
+        edited_rows={'0': {'升贴水（美分/磅）': -.9}}, added_rows=[], deleted_rows=[])
+    app.number_input(key=key + ':processing').set_value(510.).run()
+    app.text_area(key=key + ':source').set_value('本周统一运费，保留逐月升贴水').run()
+    app.number_input(key=key + ':uniform-freight').set_value(54.5).run()
+    app.session_state[key + ':editor'] = dict(
+        edited_rows={'0': {'升贴水（美分/磅）': -.9}}, added_rows=[], deleted_rows=[])
+    app.button(key=key + ':apply-uniform-freight').click().run()
+    assert not app.exception and not db.exists()
+    staged = app.session_state[key + ':initial']
+    assert len(staged['quotes']) == 12 and all(r['freight'] == 54.5 for r in staged['quotes'])
+    assert staged['quotes'][0]['quote'] == -.9
+    assert staged['parameters']['processing'] == 510.
+    assert staged['source'] == '本周统一运费，保留逐月升贴水'
+    assert all(r['freight_origin']['kind'] == 'manual' and r['freight_origin']['quote_date'] == today()
+               for r in staged['quotes'])
+    app.button(key=key + ':save').click().run()
+    store = Store(db, lambda _: None)
+    assert all(r['freight'] == 54.5 for r in store.monthly_records()[0]['payload']['quotes'])
+    app.session_state[key + ':editor:1'] = dict(
+        edited_rows={'0': {'海运费（美元/吨）': 53.}}, added_rows=[], deleted_rows=[])
+    app.button(key=key + ':save').click().run()
+    saved = store.monthly_records()[0]
+    assert saved['payload']['quotes'][0]['freight'] == 53.
+    assert all(r['freight'] == 54.5 for r in saved['payload']['quotes'][1:])
+    app.session_state[key + ':editor:1'] = dict(
+        edited_rows={'0': {'海运费（美元/吨）': 53.}}, added_rows=[], deleted_rows=[])
+    app.button(key=key + ':save').click().run()
+    assert store.monthly_records()[0] == saved
+
+
+def test_uniform_freight_zero_country_isolation_and_stale_save_protection(tmp_path, monkeypatch):
+    app, db = page(tmp_path, monkeypatch)
+    key = 'sugar-month:巴西:' + today()
+    app.number_input(key=key + ':uniform-freight').set_value(0.).run()
+    assert not app.button(key=key + ':apply-uniform-freight').disabled
+    app.button(key=key + ':apply-uniform-freight').click().run()
+    app.button(key=key + ':save').click().run()
+    store = Store(db, lambda _: None)
+    current = store.monthly_records()[0]
+    assert all(r['freight'] == 0. for r in current['payload']['quotes'])
+    concurrent = current['payload']
+    concurrent['parameters']['processing'] = 520.
+    store.save_monthly(concurrent, expected_version=current['version'])
+    latest = store.monthly_records()[0]
+    app.number_input(key=key + ':uniform-freight').set_value(55.).run()
+    app.button(key=key + ':apply-uniform-freight').click().run()
+    app.button(key=key + ':save').click().run()
+    assert not app.exception and store.monthly_records()[0] == latest
+    assert any('另一会话' in w.value for w in app.warning)
+    app.radio(key='sugar-month-country').set_value('泰国').run()
+    thailand = 'sugar-month:泰国:' + today()
+    assert app.number_input(key=thailand + ':uniform-freight').value is None
+    assert app.button(key=thailand + ':apply-uniform-freight').disabled
+    assert all(r['freight'] is None for r in app.session_state[thailand + ':initial']['quotes'])

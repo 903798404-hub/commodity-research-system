@@ -157,11 +157,21 @@ def _monthly(store, enabled, freight_root=None):
     mode = QUOTE_MODES[0]
     with st.expander('录入升贴水和海运费'):
         st.caption('升贴水按日报价填写；海运费只在有新报价时修改并保存，后续日期自动沿用。平水填0，无依据留空。')
+        freight_values = [r.get('freight') for r in initial['quotes']]
+        uniform_default = freight_values[0] if all(v == freight_values[0] for v in freight_values) else None
+        uniform_freight = st.number_input('统一海运费（美元/吨）', min_value=0.,
+            value=float(uniform_default) if uniform_default is not None else None,
+            format='%.4f', key=key + ':uniform-freight')
+        apply_uniform = st.button('应用到全部12个月', key=key + ':apply-uniform-freight',
+                                  disabled=uniform_freight is None)
+        st.caption('运费相同填一次即可；应用后仍可逐月微调，确认后点击“保存当日报价与测算”。')
         st.dataframe(pd.DataFrame([dict(船期=r['period'], **_freight_source(r)) for r in initial['quotes']]),
                      hide_index=True, width='stretch')
         st.caption('巴西按船期加2个月匹配首个郑糖1/5/9月：1月→5月；ICE取船期后首个3/5/7/10月合约：1月→3月。此为研究映射，可修改。')
+        editor_generation = st.session_state.get(key + ':editor-generation', 0)
+        editor_key = key + ':editor' + (f':{editor_generation}' if editor_generation else '')
         edited = st.data_editor(pd.DataFrame(initial['quotes'])[['period', 'quote', 'freight', 'ice_contract', 'sr_contract']].sort_values('period').rename(columns=fields),
-            hide_index=True, disabled=['船期'], num_rows='fixed', height=460, key=key + ':editor',
+            hide_index=True, disabled=['船期'], num_rows='fixed', height=460, key=editor_key,
             column_config={name: st.column_config.NumberColumn(name, min_value=0. if field == 'freight' else None, format='%.4f')
                            for field, name in fields.items() if field in ('quote', 'freight')})
     quotes = edited.rename(columns={v: k for k, v in fields.items()}).astype(object).where(pd.notna(edited.rename(columns={v: k for k, v in fields.items()})), None).to_dict('records')
@@ -209,6 +219,13 @@ def _monthly(store, enabled, freight_root=None):
         skeleton = dict(initial, market=None, quotes=[dict(r, quote=None) for r in initial['quotes']])
         st.iframe(monthly_html(monthly_rows(skeleton), country, day), height=650, width='stretch')
         return
+    if apply_uniform:
+        for row in quotes:
+            row.update(freight=uniform_freight,
+                       freight_origin=provenance(None, uniform_freight, day.isoformat()))
+        st.session_state[key + ':initial'] = payload
+        st.session_state[key + ':editor-generation'] = editor_generation + 1
+        st.rerun()
     refresh = st.button('载入该日已归档行情', key=key + ':refresh', disabled=archived is None)
     if refresh:
         st.session_state[key + ':market'] = archived['payload']
