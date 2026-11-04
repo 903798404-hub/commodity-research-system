@@ -127,6 +127,13 @@ def test_goldman_history_is_appended_to_existing_cofco_report_partition():
     assert not summary["revised_partitions"]
     assert "sugar/domestic/SR/goldman_official_product_v1/2026-10-08" in summary["added_partitions"]
     updated = delivery.resolve_increment(increment, baseline)
+    host = producer.delivery._host_contract()
+    schema = Draft202012Validator(json.loads(
+        (ROOT / "09_deploy/production_data_delivery/delta_contract.schema.json").read_text(encoding="utf-8")))
+    for previous in (baseline, updated):
+        package = delta(updated, previous)
+        assert host.validate_delta_document(package) == package
+        schema.validate(package)
     rows = delivery.validate_archive(updated, ROOT)[0]["sugar"]["domestic"]
     assert len(rows) == 4
     goldman = [row for row in rows if row.get("record_type") == "goldman_official_product_v1"]

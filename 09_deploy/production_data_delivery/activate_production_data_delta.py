@@ -326,7 +326,8 @@ def validate_delta_document(value: object) -> dict[str, object]:
                 "positions record count invalid")
         dates = metadata["latest_dates"]
         require(type(dates) is dict and dates, "positions latest dates invalid")
-        series = r"(?:sugar|rapeseed|soybean|palm)/(?:foreign/[a-z0-9_]+/(?:combined|futures_only)|domestic/[A-Z]+[0-9]*)"
+        series = (r"(?:(?:sugar|rapeseed|soybean|palm)/(?:foreign/[a-z0-9_]+/(?:combined|futures_only)|domestic/[A-Z]+[0-9]*)"
+                  r"|sugar/domestic/SR/goldman_official_product_v1)")
         for key, value in dates.items():
             require(type(key) is str and re.fullmatch(series, key) and type(value) is str
                     and date.fromisoformat(value).isoformat() == value, "positions report series invalid")

@@ -113,11 +113,11 @@
               "record_count": {"type": "integer", "minimum": 1},
               "latest_dates": {
                 "type": "object", "minProperties": 1,
-                "propertyNames": {"pattern": "^(sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)$"},
+                "propertyNames": {"pattern": "^((sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)|sugar/domestic/SR/goldman_official_product_v1)$"},
                 "additionalProperties": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
               },
-              "added_partitions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}},
-              "revised_partitions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}
+              "added_partitions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^((sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)|sugar/domestic/SR/goldman_official_product_v1)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}},
+              "revised_partitions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^((sugar|rapeseed|soybean|palm)/(foreign/[a-z0-9_]+/(combined|futures_only)|domestic/[A-Z]+[0-9]*)|sugar/domestic/SR/goldman_official_product_v1)/[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}
             }
           },
           "payloads": {
