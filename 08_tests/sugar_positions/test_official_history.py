@@ -7,7 +7,8 @@ import pytest
 
 from agri_research_agent.sugar_positions.sources import parse_czce_cofco_capture as parse_capture
 from agri_research_agent.sugar_positions.model import (
-    COFCO_MEMBER, COFCO_OFFICIAL_RECORD, cofco_official_metrics, domestic_metrics, member_metrics,
+    COFCO_MEMBER, COFCO_OFFICIAL_RECORD, GOLDMAN_OFFICIAL_RECORD,
+    cofco_official_metrics, domestic_metrics, goldman_official_metrics, member_metrics,
 )
 from agri_research_agent.sugar_positions.charts import seasonality
 
@@ -62,6 +63,44 @@ def test_legacy_account_remains_unclassified_and_account_boundary_breaks_line():
     assert metrics[1]['net_change'] is None
     figure=seasonality(metrics,'中粮官方汇总',current_year=2026)
     assert list(figure.data[0].y)==[6271,None,6271]
+
+
+def test_goldman_projection_replays_existing_official_evidence_without_changing_cofco():
+    from pathlib import Path
+    from agri_research_agent.positions.delivery import _part, _replay_source
+    from agri_research_agent.oilseed_positions.model import config
+    from agri_research_agent.sugar_positions.model import load_members
+    from agri_research_agent.sugar_positions.sources import parse_czce_goldman_capture
+    root = Path(__file__).resolve().parents[2]
+    member = next(m for m in load_members(root / "02_configs/sugar_positions.json") if m["id"] == "goldman")
+    original, url = capture()
+    with ZipFile(BytesIO(original)) as z:
+        body = z.read("FutureDataHolding.txt").replace("中粮期货".encode(), "乾坤期货".encode())
+        manifest = json.loads(z.read("manifest.json"))
+    manifest["source_bytes"] = len(body)
+    manifest["source_sha256"] = hashlib.sha256(body).hexdigest()
+    out = BytesIO()
+    with ZipFile(out, "w", compression=ZIP_DEFLATED) as z:
+        z.writestr("FutureDataHolding.txt", body)
+        z.writestr("manifest.json", json.dumps(manifest))
+    raw = out.getvalue()
+    stamp = "2026-11-03T00:00:00+00:00"
+    goldman = parse_czce_goldman_capture(raw, "2026-11-02", url, stamp, member)
+    assert all(row["record_type"] == GOLDMAN_OFFICIAL_RECORD for row in goldman)
+    assert goldman_official_metrics(goldman, member)[0]["net"] == 6271
+    assert _part(goldman[0], "domestic") != _part(parse_capture(raw, "2026-11-02", url, stamp)[0], "domestic")
+    kind, replayed = _replay_source("czce_goldman_official_20261102",
+        dict(url=url, retrieved_at=stamp), raw, "sugar", config(root), project_root=root)
+    assert kind == "domestic" and replayed == goldman
+    assert cofco_official_metrics(goldman) == []
+    assert member_metrics(goldman, member) == []
+    cofco = parse_capture(original, "2026-11-02", url, stamp)
+    assert cofco_official_metrics(cofco + goldman)[0]["net"] == 6271
+    assert goldman_official_metrics(cofco + goldman, member)[0]["net"] == 6271
+    old = [dict(row, report_date="2026-10-30", account="未区分") for row in goldman]
+    series = goldman_official_metrics(old + goldman, member)
+    assert series[-1]["net"] == 6271 and series[-1]["net_change"] is None
+    assert series[-1]["reported_account"] == "代客"
 
 
 @pytest.mark.parametrize('change',['date','url','total','duplicate_entry','sha'])

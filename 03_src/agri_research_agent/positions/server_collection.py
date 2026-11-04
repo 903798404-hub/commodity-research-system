@@ -68,7 +68,7 @@ def collect(baseline, output: Path, project_root: Path, day, *, source=None, con
         for domain in ('sugar', 'rapeseed'):
             old = snapshots[domain]
             if any(r['report_date'] == day.isoformat() and r.get('record_type') not in
-                   ('cofco_contract_history_v1', 'cofco_official_product_v1') for r in old['domestic']):
+                   ('cofco_contract_history_v1', 'cofco_official_product_v1', 'goldman_official_product_v1') for r in old['domestic']):
                 attempts.append(dict(domain=domain, status='no_change', rows=0))
                 continue
             try:

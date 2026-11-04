@@ -89,6 +89,50 @@ def write(path, value):
     return path
 
 
+def test_goldman_history_is_appended_to_existing_cofco_report_partition():
+    from io import BytesIO
+    from zipfile import ZIP_DEFLATED, ZipFile
+    from agri_research_agent.sugar_positions.sources import parse_czce_cofco_capture
+
+    day = "2026-10-08"
+    url = "https://www.czce.com.cn/cn/DFSStaticFiles/Future/2026/20261008/FutureDataHolding.txt"
+    body = ("郑州商品交易所期货持仓排名表(2026-10-08)\n"
+        "品种：白糖SR    日期：2026-10-08\n"
+        "名次|会员简称|成交量（手）|增减量|会员简称|持买仓量|增减量|会员简称|持卖仓量|增减量\n"
+        "1|中粮期货（代客）|10|0|中粮期货（代客）|100|0|乾坤期货（代客）|80|0\n"
+        "合计||10|0||100|0||80|0\n").encode("utf-8")
+    manifest = dict(schema_version="czce-text-lossless/1", report_date=day,
+        source_url=url, source_bytes=len(body), source_sha256=delivery.digest(body))
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as z:
+        z.writestr("FutureDataHolding.txt", body)
+        z.writestr("manifest.json", json.dumps(manifest))
+    raw = buffer.getvalue()
+    baseline = archive(day=day)
+    files = delivery.decode(baseline)
+    snapshots, _ = delivery.archive_snapshots(baseline)
+    snapshot = snapshots["sugar"]
+    snapshot["domestic"] = parse_czce_cofco_capture(raw, day, url, STAMP)
+    name = "raw/" + delivery.digest(raw) + ".zip"
+    snapshot["sources"]["czce_cofco_official_20261008"] = dict(
+        url=url, retrieved_at=STAMP, sha256=delivery.digest(raw), raw_file=name)
+    files["sugar/" + name] = raw
+    put_snapshot(files, "sugar", snapshot)
+    baseline = delivery.encode(files)
+    spec = importlib.util.spec_from_file_location("goldman_history_builder",
+        ROOT / "04_scripts/positions/prepare_goldman_official_history.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    increment, summary = module.prepare(baseline, ROOT)
+    assert not summary["revised_partitions"]
+    assert "sugar/domestic/SR/goldman_official_product_v1/2026-10-08" in summary["added_partitions"]
+    updated = delivery.resolve_increment(increment, baseline)
+    rows = delivery.validate_archive(updated, ROOT)[0]["sugar"]["domestic"]
+    assert len(rows) == 4
+    goldman = [row for row in rows if row.get("record_type") == "goldman_official_product_v1"]
+    assert [(row["side"], row["positions"]) for row in goldman] == [("long", None), ("short", 80)]
+
+
 def export(root, value):
     files = delivery.decode(value)
     snapshots, _ = delivery.validate_archive(value, ROOT)

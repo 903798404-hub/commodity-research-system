@@ -12,7 +12,7 @@ from agri_research_agent.sugar_positions.charts import (
 )
 from agri_research_agent.sugar_positions.model import (
     GROUPS, MARKETS, COFCO_MEMBER, COFCO_HISTORY_RECORD, COFCO_PARTIAL_RECORDS,
-    cofco_history_metrics, cofco_official_metrics,
+    cofco_history_metrics, cofco_official_metrics, goldman_official_metrics,
     domestic_metrics, foreign_metrics, load_members, member_metrics, positioning_signal,
 )
 from agri_research_agent.sugar_positions.storage import read_snapshot
@@ -35,6 +35,7 @@ seasonality = cache_computation(seasonality)
 member_metrics = cache_computation(member_metrics)
 cofco_history_metrics = cache_computation(cofco_history_metrics)
 cofco_official_metrics = cache_computation(cofco_official_metrics)
+goldman_official_metrics = cache_computation(goldman_official_metrics)
 
 SEASONAL_FIELDS = {"净持仓": "net", "多仓": "long", "空仓": "short"}
 
@@ -286,9 +287,14 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             else:
                 st.info("当前统计范围及日期内，已保存排名尚无中粮期货代客席位披露，季节性暂留空。")
             st.subheader("高盛期货 · 独立席位季节性")
-            goldman = [r for r in history if r["group"] == "goldman"]
-            st.caption("采用上方所选白糖品种或合约的公开代客排名，沿用截止日期。"
-                "多空缺项保留未披露，两侧均未披露时净仓图留空。")
+            if scope == "SR":
+                member = next(m for m in members if m["id"] == "goldman")
+                goldman = [r for r in goldman_official_metrics(snapshot["domestic"], member) if r["report_date"] <= day]
+                st.caption("采用郑商所白糖品种排名，保留高盛及其历史名称乾坤的原始账户披露。"
+                    "多空缺项保留未披露，账户口径变化时不计算跨期变化。")
+            else:
+                goldman = [r for r in history if r["group"] == "goldman"]
+                st.caption("采用所选白糖合约的公开代客排名。多空缺项保留未披露。")
             if any(r["long"] is not None or r["short"] is not None for r in goldman):
                 title = "高盛期货 · 白糖" if scope == "SR" else f"高盛期货 · 白糖 {scope} "
                 render_member_seasonality(goldman, name="高盛", title=title, key="goldman")
@@ -314,6 +320,9 @@ def render_sugar_positions_page(project_root: Path, *, data_root=None, preview_m
             if source_id.startswith("czce_cofco_official_"):
                 source_day = datetime.strptime(source_id.removeprefix("czce_cofco_official_"), "%Y%m%d").date()
                 source_label = f"郑商所SR品种中粮汇总 · {chinese_date(source_day)}"
+            elif source_id.startswith("czce_goldman_official_"):
+                source_day = datetime.strptime(source_id.removeprefix("czce_goldman_official_"), "%Y%m%d").date()
+                source_label = f"郑商所SR品种高盛汇总 · {chinese_date(source_day)}"
             else:
                 source_label = (f"郑商所 · {chinese_date(datetime.strptime(source_id[5:], '%Y%m%d').date())}"
                     if source_id.startswith("czce_") else source_id)

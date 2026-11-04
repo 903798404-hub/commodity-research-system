@@ -141,7 +141,7 @@ def _xlsx_bound(raw):
                 and all(x.file_size <= MAX_FILE for x in entries), "positions XLSX size bound exceeded")
 
 
-def _replay_source(key, source, raw, domain, spec):
+def _replay_source(key, source, raw, domain, spec, project_root=None):
     # Business dependencies are only loaded in the producer / fixed image worker.
     # The protected Linux host's codec and stage materializer remain stdlib-only.
     from agri_research_agent.oilseed_positions.aggregation import parse_browser_capture
@@ -198,6 +198,13 @@ def _replay_source(key, source, raw, domain, spec):
             "https://live.euronext.com/sites/default/files/commodities_reporting/%Y/%m/%d/en/cdwpr_ECO_%Y%m%d.html"),
             "positions Euronext URL invalid")
         return "foreign", parse_euronext(raw, day, url, stamp)
+    if key.startswith("czce_goldman_official_"):
+        from agri_research_agent.sugar_positions.sources import parse_czce_goldman_capture
+        from agri_research_agent.sugar_positions.model import load_members
+        day = datetime.strptime(key[len('czce_goldman_official_'):], '%Y%m%d').date()
+        require(domain == 'sugar' and project_root is not None, 'positions official Goldman domain invalid')
+        member = next(m for m in load_members(project_root / '02_configs/sugar_positions.json') if m['id'] == 'goldman')
+        return 'domestic', parse_czce_goldman_capture(raw, day.isoformat(), url, stamp, member)
     if key.startswith("czce_cofco_official_"):
         from agri_research_agent.sugar_positions.sources import parse_czce_cofco_capture as parse_capture
         day = datetime.strptime(key[len('czce_cofco_official_'):], '%Y%m%d').date()
@@ -256,6 +263,8 @@ def _replay_source(key, source, raw, domain, spec):
 
 
 def _part(row, kind):
+    if kind == "domestic" and row.get("record_type") == "goldman_official_product_v1":
+        return row["scope"], row["record_type"], row["report_date"]
     fields = ("market", "report_type", "report_date") if kind == "foreign" else ("scope", "report_date")
     return tuple(row[k] for k in fields)
 
@@ -307,7 +316,7 @@ def validate_archive(archive, project_root):
             expected.add(name)
             raw = files[name]
             require(digest(raw) == source["sha256"], "positions raw SHA differs")
-            kind, rows = _replay_source(key, source, raw, domain, spec)
+            kind, rows = _replay_source(key, source, raw, domain, spec, project_root=project_root)
             # Each report partition must match one complete parsed capture.
             # Keeping older Sina evidence alongside newer browser evidence must
             # neither mix both rankings nor permit dropping a subset of members.

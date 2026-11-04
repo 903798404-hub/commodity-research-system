@@ -20,7 +20,8 @@ RANKED_NET_METHOD = "ranked_missing_zero_v1"
 COFCO_MEMBER = {"id": "cofco", "label": "中粮期货", "aliases": ["中粮期货", "中粮"]}
 COFCO_HISTORY_RECORD = "cofco_contract_history_v1"
 COFCO_OFFICIAL_RECORD = "cofco_official_product_v1"
-COFCO_PARTIAL_RECORDS = (COFCO_HISTORY_RECORD, COFCO_OFFICIAL_RECORD)
+GOLDMAN_OFFICIAL_RECORD = "goldman_official_product_v1"
+COFCO_PARTIAL_RECORDS = (COFCO_HISTORY_RECORD, COFCO_OFFICIAL_RECORD, GOLDMAN_OFFICIAL_RECORD)
 
 
 def positioning_signal(net, change):
@@ -166,25 +167,26 @@ def cofco_history_metrics(rows):
     return result
 
 
-def cofco_official_metrics(rows):
+def _official_member_metrics(rows, member, record_type):
     """Follow the original SR product ranking, never sum contract leaderboards."""
     days = defaultdict(list)
     for row in rows:
-        if row['scope'] == 'SR' and row.get('record_type') != COFCO_HISTORY_RECORD:
+        if row['scope'] == 'SR' and (row.get('record_type') not in COFCO_PARTIAL_RECORDS
+                                     or row.get('record_type') == record_type):
             days[row['report_date']].append(row)
     result = []
     for day, section in sorted(days.items()):
-        full = [r for r in section if r.get('record_type') != COFCO_OFFICIAL_RECORD]
+        full = [r for r in section if r.get('record_type') not in COFCO_PARTIAL_RECORDS]
         section = full or section
         account = '代客' if any(r['account'] == '代客' for r in section) else '未区分'
         values = {}
         for side in ('long', 'short'):
             found = [r for r in section if r['side'] == side and r['account'] == account
-                     and r['member'] in COFCO_MEMBER['aliases']]
+                     and r['member'] in member['aliases']]
             if len(found) > 1:
-                raise ValueError('中粮官方品种汇总同侧存在重复会员')
+                raise ValueError(f"{member['label']}官方品种汇总同侧存在重复会员")
             values[side] = found[0]['positions'] if found else None
-        result.append(dict(report_date=day, scope='SR', group='cofco', label='中粮期货',
+        result.append(dict(report_date=day, scope='SR', group=member['id'], label=member['label'],
             account='交易所原披露会员口径', reported_account=account, unit='contracts',
             source_provider='CZCE', aggregation='czce_product_member:' + account,
             coverage='郑商所SR品种排名；原始账户：' + account, **values))
@@ -197,6 +199,14 @@ def cofco_official_metrics(rows):
             row['net_change'] = None
         previous = row
     return result
+
+
+def cofco_official_metrics(rows):
+    return _official_member_metrics(rows, COFCO_MEMBER, COFCO_OFFICIAL_RECORD)
+
+
+def goldman_official_metrics(rows, member):
+    return _official_member_metrics(rows, member, GOLDMAN_OFFICIAL_RECORD)
 
 
 def domestic_metrics(rows, members, *, account="代客"):

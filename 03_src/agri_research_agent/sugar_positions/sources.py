@@ -12,7 +12,7 @@ from zipfile import BadZipFile, ZipFile
 import openpyxl
 import requests
 
-from .model import integer, split_member, unique_rows, COFCO_MEMBER, COFCO_OFFICIAL_RECORD
+from .model import integer, split_member, unique_rows, COFCO_MEMBER, COFCO_OFFICIAL_RECORD, GOLDMAN_OFFICIAL_RECORD
 
 CFTC_DATASETS = {"futures_only": "72hh-3qpy", "combined": "kh3c-gbw2"}
 FIELDS = {"producer": "prod_merc", "swap": "swap", "managed_money": "m_money",
@@ -257,7 +257,7 @@ def parse_czce_cofco_text(content, expected_day, source_url, retrieved_at):
     return parse_czce(buffer.getvalue(), expected_day, source_url, retrieved_at)
 
 
-def parse_czce_cofco_capture(content, expected_day, source_url, retrieved_at):
+def _parse_czce_member_capture(content, expected_day, source_url, retrieved_at, member, record_type):
     day = date.fromisoformat(expected_day)
     if day < date(2022, 1, 1) or day > date.today():
         raise ValueError('中粮官方历史日期超出范围')
@@ -289,12 +289,22 @@ def parse_czce_cofco_capture(content, expected_day, source_url, retrieved_at):
     result = []
     for side in ('long', 'short'):
         selected = [r for r in ranking if r['side'] == side and r['account'] == account
-                    and r['member'] in COFCO_MEMBER['aliases']]
+                    and r['member'] in member['aliases']]
         if len(selected) > 1:
-            raise ValueError('官方中粮会员身份重复')
+            raise ValueError(f"官方{member['label']}会员身份重复")
         row = (dict(selected[0]) if selected else dict(report_date=expected_day, scope='SR', side=side,
-            rank=None, raw_member=None, member='中粮期货', account=account, positions=None,
+            rank=None, raw_member=None, member=member['aliases'][0], account=account, positions=None,
             reported_change=None, unit='contracts', source_url=source_url, retrieved_at=retrieved_at))
-        row.update(record_type=COFCO_OFFICIAL_RECORD, disclosure='observed' if selected else 'member_absent')
+        row.update(record_type=record_type, disclosure='observed' if selected else 'member_absent')
         result.append(row)
     return result
+
+
+def parse_czce_cofco_capture(content, expected_day, source_url, retrieved_at):
+    return _parse_czce_member_capture(content, expected_day, source_url, retrieved_at,
+                                      COFCO_MEMBER, COFCO_OFFICIAL_RECORD)
+
+
+def parse_czce_goldman_capture(content, expected_day, source_url, retrieved_at, member):
+    return _parse_czce_member_capture(content, expected_day, source_url, retrieved_at,
+                                      member, GOLDMAN_OFFICIAL_RECORD)
