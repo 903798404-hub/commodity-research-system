@@ -90,9 +90,9 @@ def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     at.radio(key="sugar_foreign_view").set_value("连续历史").run()
     assert not at.exception and len(at.get("plotly_chart")) == 6
     trend_spec = json.loads(at.get("plotly_chart")[0].proto.spec)
-    latest, = trend_spec["layout"]["annotations"]
-    assert latest["xref"] == latest["yref"] == "paper" and latest["yshift"] == -52
-    assert "+100 手" in latest["text"]
+    day, value, change = trend_spec["layout"]["annotations"]
+    assert day["xref"] == day["yref"] == "paper" and day["yshift"] == 12
+    assert "2026-09-09" in day["text"] and "600" in value["text"] and "+100" in change["text"]
     at.radio[0].set_value("期货＋期权").run()
     at.selectbox[1].set_value("SR701").run()
     assert not at.exception
@@ -135,7 +135,7 @@ def test_seat_charts_show_sugar_titles_and_latest_daily_changes(tmp_path):
     at = app(tmp_path).run(timeout=30)
     assert not at.exception
     charts = [json.loads(c.proto.spec)["layout"] for c in at.get("plotly_chart")]
-    labels = {chart["title"]["text"]: chart["annotations"][0] for chart in charts if chart.get("annotations")}
+    labels = {chart["title"]["text"]: chart["annotations"] for chart in charts if chart.get("annotations")}
     for title, value, change in (
         ("高盛期货 · 白糖净仓季节性", "-125 手", "-25 手"),
         ("高盛期货 · 白糖空仓季节性", "125 手", "+25 手"),
@@ -143,12 +143,12 @@ def test_seat_charts_show_sugar_titles_and_latest_daily_changes(tmp_path):
         ("中粮期货 · 白糖多仓季节性", "125 手", "+25 手"),
         ("中粮期货 · 白糖空仓季节性", "30 手", "0 手"),
     ):
-        annotation = labels[title]
-        assert f" {value}</b>" in annotation["text"]
-        assert f">{change}</span>" in annotation["text"]
-        assert "日度变化" in annotation["text"] and "2026-09-09" in annotation["text"]
-        assert annotation["hovertext"] == "比较日期 2026-09-08"
-    assert "多仓未披露" in labels["高盛期货 · 白糖多仓季节性"]["text"]
+        day, position, daily = labels[title]
+        assert value.replace(" 手", "") in position["text"]
+        assert change.replace(" 手", "") in daily["text"]
+        assert "日度变化" in daily["text"] and "2026-09-09" in day["text"]
+        assert "比较日期 2026-09-08" in daily["hovertext"]
+    assert "未披露" in labels["高盛期货 · 白糖多仓季节性"][1]["text"]
 
 
 def test_ranked_chart_draws_one_sided_net_and_preserves_undisclosed_hover():

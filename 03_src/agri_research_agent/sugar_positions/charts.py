@@ -21,22 +21,18 @@ def _position_value(row, field):
 
 
 def label_latest_position(figure, rows, *, field="net", seasonal=False):
-    """Show the latest report below the plot using the unfiltered report series."""
+    """Show the latest report in a compact summary above the plot."""
     latest = rows[-1]
     value = _position_value(latest, field)
     day = date.fromisoformat(latest["report_date"])
     ranked = latest.get("net_method") == RANKED_NET_METHOD
     net_label = "榜内净持仓" if ranked else "净持仓"
     label = {"net": net_label, "long": "多仓", "short": "空仓"}[field]
-    figure.update_layout(height=400, margin=dict(b=115))
-    if value is None:
-        figure.add_annotation(x=0.5, y=0, xref="paper", yref="paper", yshift=-52,
-            text=f"{day.isoformat()} · {label}未披露", showarrow=False, xanchor="center", yanchor="top",
-            bgcolor="rgba(255,255,255,0.96)", font=dict(size=12, color="#58636C"))
-        return
+    figure.update_layout(height=420, margin=dict(t=155, b=40),
+                         legend=dict(orientation="h", y=1.36))
 
     change = None
-    if len(rows) > 1 and latest["comparison_days"] <= 10:
+    if value is not None and len(rows) > 1 and latest["comparison_days"] <= 10:
         previous = rows[-2]
         same_basis = all(latest.get(k) == previous.get(k)
                          for k in ("unit", "source_provider", "aggregation", "constituent_contracts"))
@@ -47,25 +43,27 @@ def label_latest_position(figure, rows, *, field="net", seasonal=False):
     delta_equivalent = latest.get("unit") == "delta_equivalent_contracts"
     unit = "Delta等价手" if delta_equivalent else "手"
     decimals = 2 if delta_equivalent else 0
-    change_text = "暂无可比数据"
+    change_text = "暂无可比"
     change_color = "#58636C"
     if change is not None:
         change = round(change, decimals) or 0
-        change_text = f"{change:{'+' if change else ''},.{decimals}f} {unit}"
+        change_text = f"{change:{'+' if change else ''},.{decimals}f}"
         direction = -change if field == "short" else change
         if direction:
             change_color = "#BC4749" if direction > 0 else "#278568"
 
     change_label = "日度变化" if ranked else "较上期"
-    figure.add_annotation(
-        x=0.5, y=0, xref="paper", yref="paper", yshift=-52,
-        text=f"<b>{label} {value:,.{decimals}f} {unit}</b><br>{day.isoformat()}<br>"
-             f"{change_label} <span style='color:{change_color}'>{change_text}</span>",
-        hovertext=f"比较日期 {latest['previous_date']}" if change is not None else None,
-        showarrow=False, xanchor="center", yanchor="top",
-        align="left", font=dict(size=12, color="#263238"),
-        bgcolor="rgba(255,255,255,0.96)", bordercolor="#C9D0D6", borderpad=4,
-    )
+    value_text = "未披露" if value is None else f"{value:,.{decimals}f}"
+    for x, anchor, heading, content, color in (
+        (0, "left", "持仓日期", day.isoformat(), "#263238"),
+        (0.5, "center", label, value_text, "#263238"),
+        (1, "right", change_label, change_text, change_color),
+    ):
+        figure.add_annotation(x=x, y=1, xref="paper", yref="paper", yshift=12,
+            text=f"<span style='color:#7B8794'>{heading}</span><br><b>{content}</b>",
+            hovertext=f"比较日期 {latest['previous_date']} · 单位：{unit}" if change is not None else f"单位：{unit}",
+            showarrow=False, xanchor=anchor, yanchor="bottom", align="center",
+            font=dict(size=12, color=color))
 
 
 def seasonality(rows, title, *, field="net", current_year=None):

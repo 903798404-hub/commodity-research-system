@@ -38,9 +38,9 @@ def test_soybean_page_shows_foreign_positions_and_domestic_gap_with_chinese_date
     seasonal = [c for c in charts if "季节性" in c["layout"]["title"]["text"]]
     assert len(seasonal) == 3 and all("多仓" in c["layout"]["yaxis"]["title"]["text"] for c in seasonal)
     for chart in seasonal:
-        latest, = chart["layout"]["annotations"]
-        assert latest["xref"] == latest["yref"] == "paper" and latest["yshift"] == -52
-        assert "2026-09-29" in latest["text"] and "+5 手" in latest["text"]
+        day, value, change = chart["layout"]["annotations"]
+        assert day["xref"] == day["yref"] == "paper" and day["yshift"] == 12
+        assert "2026-09-29" in day["text"] and "25" in value["text"] and "+5" in change["text"]
     app.radio(key="soybean_foreign_view").set_value("连续历史").run(timeout=20)
     assert not app.exception and len(app.get("plotly_chart")) == 6
     app.radio[0].set_value("期货＋期权").run(timeout=20)
@@ -60,8 +60,9 @@ def test_rapeseed_combined_seasonality_keeps_unit_year_filter_and_original_data(
     spec = json.loads(app.get("plotly_chart")[0].proto.spec)
     assert "Delta等价手" in spec["layout"]["yaxis"]["title"]["text"]
     assert len(spec["data"]) == 2
-    latest, = spec["layout"]["annotations"]
-    assert "6.15 Delta等价手" in latest["text"] and "暂无可比数据" in latest["text"]
+    _, value, change = spec["layout"]["annotations"]
+    assert "6.15" in value["text"] and "Delta等价手" in value["hovertext"]
+    assert "暂无可比" in change["text"]
     app.multiselect(key="foreign_years_euronext_rapeseed").set_value([2025]).run(timeout=20)
     assert not app.exception
     spec = json.loads(app.get("plotly_chart")[0].proto.spec)
