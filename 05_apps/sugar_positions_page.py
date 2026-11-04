@@ -67,11 +67,12 @@ def chart_pair(first, second, *, keys, preserve_legend=False):
       .st-key-{key} [data-testid="stColumn"] {{width:100% !important; flex:1 1 100% !important;}}
     }}</style>""")
     with st.container(key=key):
+        height = 400 if first.layout.margin.b >= 115 else 340
         if len(first.data) > 1 and not preserve_legend:
-            first.update_layout(showlegend=False, margin=dict(l=40, r=130, t=70, b=40))
+            first.update_layout(showlegend=False, margin=dict(l=40, r=130, t=70, b=first.layout.margin.b))
         for column, figure, chart_key in zip(st.columns(2), (first, second), keys):
             with column:
-                figure.update_layout(height=340)
+                figure.update_layout(height=height)
                 figure.update_xaxes(nticks=4, tickangle=0)
                 st.plotly_chart(figure, width="stretch", key=chart_key)
 

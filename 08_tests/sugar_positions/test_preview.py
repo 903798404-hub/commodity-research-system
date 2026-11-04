@@ -91,7 +91,7 @@ def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     assert not at.exception and len(at.get("plotly_chart")) == 6
     trend_spec = json.loads(at.get("plotly_chart")[0].proto.spec)
     latest, = trend_spec["layout"]["annotations"]
-    assert latest["x"] == "2026-09-09" and latest["y"] == 600
+    assert latest["xref"] == latest["yref"] == "paper" and latest["yshift"] == -52
     assert "+100 手" in latest["text"]
     at.radio[0].set_value("期货＋期权").run()
     at.selectbox[1].set_value("SR701").run()

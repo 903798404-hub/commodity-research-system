@@ -21,16 +21,17 @@ def _position_value(row, field):
 
 
 def label_latest_position(figure, rows, *, field="net", seasonal=False):
-    """Attach the latest report to its point using the unfiltered report series."""
+    """Show the latest report below the plot using the unfiltered report series."""
     latest = rows[-1]
     value = _position_value(latest, field)
     day = date.fromisoformat(latest["report_date"])
     ranked = latest.get("net_method") == RANKED_NET_METHOD
     net_label = "榜内净持仓" if ranked else "净持仓"
     label = {"net": net_label, "long": "多仓", "short": "空仓"}[field]
+    figure.update_layout(height=400, margin=dict(b=115))
     if value is None:
-        figure.add_annotation(x=0.98, y=0.97, xref="paper", yref="paper",
-            text=f"{day.isoformat()} · {label}未披露", showarrow=False, xanchor="right",
+        figure.add_annotation(x=0.5, y=0, xref="paper", yref="paper", yshift=-52,
+            text=f"{day.isoformat()} · {label}未披露", showarrow=False, xanchor="center", yanchor="top",
             bgcolor="rgba(255,255,255,0.96)", font=dict(size=12, color="#58636C"))
         return
 
@@ -55,25 +56,13 @@ def label_latest_position(figure, rows, *, field="net", seasonal=False):
         if direction:
             change_color = "#BC4749" if direction > 0 else "#278568"
 
-    point_x = day.replace(year=2000).isoformat() if seasonal else day.isoformat()
-    # Put the label toward the plot's interior, away from the nearest edge.
-    if seasonal and 4 <= day.month <= 9:
-        xanchor, ax = "center", 0
-    elif seasonal and day.month <= 3:
-        xanchor, ax = "left", 16
-    else:
-        xanchor, ax = "right", -16
-    values = [0, *(v for trace in figure.data for v in trace.y if v is not None)]
-    below = value >= (min(values) + max(values)) / 2
     change_label = "日度变化" if ranked else "较上期"
     figure.add_annotation(
-        x=point_x, y=value, xref="x", yref="y",
+        x=0.5, y=0, xref="paper", yref="paper", yshift=-52,
         text=f"<b>{label} {value:,.{decimals}f} {unit}</b><br>{day.isoformat()}<br>"
              f"{change_label} <span style='color:{change_color}'>{change_text}</span>",
         hovertext=f"比较日期 {latest['previous_date']}" if change is not None else None,
-        showarrow=True, arrowhead=0, arrowcolor="#65737D",
-        ax=ax, ay=14 if below else -14,
-        xanchor=xanchor, yanchor="top" if below else "bottom",
+        showarrow=False, xanchor="center", yanchor="top",
         align="left", font=dict(size=12, color="#263238"),
         bgcolor="rgba(255,255,255,0.96)", bordercolor="#C9D0D6", borderpad=4,
     )

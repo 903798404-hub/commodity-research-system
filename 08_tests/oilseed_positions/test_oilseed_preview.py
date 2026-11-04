@@ -39,7 +39,7 @@ def test_soybean_page_shows_foreign_positions_and_domestic_gap_with_chinese_date
     assert len(seasonal) == 3 and all("多仓" in c["layout"]["yaxis"]["title"]["text"] for c in seasonal)
     for chart in seasonal:
         latest, = chart["layout"]["annotations"]
-        assert latest["x"] == "2000-09-29" and latest["y"] == 25
+        assert latest["xref"] == latest["yref"] == "paper" and latest["yshift"] == -52
         assert "2026-09-29" in latest["text"] and "+5 手" in latest["text"]
     app.radio(key="soybean_foreign_view").set_value("连续历史").run(timeout=20)
     assert not app.exception and len(app.get("plotly_chart")) == 6
