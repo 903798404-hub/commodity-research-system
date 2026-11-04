@@ -144,6 +144,8 @@ def test_seat_charts_show_sugar_titles_and_latest_daily_changes(tmp_path):
         ("中粮期货 · 白糖空仓季节性", "30 手", "0 手"),
     ):
         day, position, daily = labels[title]
+        layout = next(chart for chart in charts if chart["title"]["text"] == title)
+        assert layout["title"]["x"] == 0.5 and layout["legend"]["y"] < 0
         assert value.replace(" 手", "") in position["text"]
         assert change.replace(" 手", "") in daily["text"]
         assert "日度变化" in daily["text"] and "2026-09-09" in day["text"]

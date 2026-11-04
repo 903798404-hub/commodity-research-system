@@ -38,6 +38,8 @@ def test_soybean_page_shows_foreign_positions_and_domestic_gap_with_chinese_date
     seasonal = [c for c in charts if "季节性" in c["layout"]["title"]["text"]]
     assert len(seasonal) == 3 and all("多仓" in c["layout"]["yaxis"]["title"]["text"] for c in seasonal)
     for chart in seasonal:
+        assert chart["layout"]["title"]["x"] == 0.5
+        assert chart["layout"]["legend"]["y"] < 0
         day, value, change = chart["layout"]["annotations"]
         assert day["xref"] == day["yref"] == "paper" and day["yshift"] == 12
         assert "2026-09-29" in day["text"] and "25" in value["text"] and "+5" in change["text"]

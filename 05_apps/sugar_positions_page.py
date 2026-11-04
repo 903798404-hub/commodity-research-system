@@ -67,9 +67,9 @@ def chart_pair(first, second, *, keys, preserve_legend=False):
       .st-key-{key} [data-testid="stColumn"] {{width:100% !important; flex:1 1 100% !important;}}
     }}</style>""")
     with st.container(key=key):
-        height = 420 if first.layout.margin.t >= 155 else 340
+        height = 420 if first.layout.margin.t >= 120 else 340
         if len(first.data) > 1 and not preserve_legend:
-            first.update_layout(showlegend=False, margin=dict(l=40, r=130, t=first.layout.margin.t, b=40))
+            first.update_layout(showlegend=False, margin=dict(l=40, r=130, t=first.layout.margin.t, b=first.layout.margin.b))
         for column, figure, chart_key in zip(st.columns(2), (first, second), keys):
             with column:
                 figure.update_layout(height=height)

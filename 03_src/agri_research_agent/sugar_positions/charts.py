@@ -28,8 +28,10 @@ def label_latest_position(figure, rows, *, field="net", seasonal=False):
     ranked = latest.get("net_method") == RANKED_NET_METHOD
     net_label = "榜内净持仓" if ranked else "净持仓"
     label = {"net": net_label, "long": "多仓", "short": "空仓"}[field]
-    figure.update_layout(height=420, margin=dict(t=155, b=40),
-                         legend=dict(orientation="h", y=1.36))
+    figure.update_layout(height=420, margin=dict(t=120, b=95),
+                         title=dict(x=0.5, xanchor="center"),
+                         legend=dict(orientation="h", x=0.5, xanchor="center",
+                                     y=-0.3, yanchor="top"))
 
     change = None
     if value is not None and len(rows) > 1 and latest["comparison_days"] <= 10:
@@ -107,10 +109,11 @@ def seasonality(rows, title, *, field="net", current_year=None):
                       width=CURRENT_LINE_WIDTH if current else HISTORY_LINE_WIDTH),
             opacity=1 if current else HISTORY_OPACITY,
             hovertemplate="%{customdata[0]}<br>" + label + " %{y:,.2f} " + unit + "<extra>%{fullData.name}</extra>"))
-    figure.update_layout(title=title, height=340, template="plotly_white",
-        margin=dict(l=40, r=25, t=90, b=40), showlegend=True,
+    figure.update_layout(title=dict(text=title, x=0.5, xanchor="center"), height=340, template="plotly_white",
+        margin=dict(l=40, r=25, t=90, b=95), showlegend=True,
         font=dict(family="Microsoft YaHei, sans-serif", color="#263238"),
-        legend=dict(orientation="h", y=1.12), xaxis_title="持仓日期（月／日）",
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.3, yanchor="top"),
+        xaxis_title="持仓日期（月／日）",
         yaxis_title=f"{label}（{unit}）", hovermode="closest")
     figure.update_xaxes(range=["2000-01-01", "2000-12-31"], tickmode="array",
         tickvals=[f"2000-{m:02d}-01" for m in range(1, 13)], ticktext=[f"{m}月" for m in range(1, 13)])
