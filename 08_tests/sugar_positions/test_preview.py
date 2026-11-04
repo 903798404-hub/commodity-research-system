@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 
 from streamlit.testing.v1 import AppTest
@@ -88,6 +89,10 @@ def test_preview_renders_charts_details_filters_and_missing_states(tmp_path):
     assert not at.exception and len(at.get("plotly_chart")) == 4
     at.radio(key="sugar_foreign_view").set_value("连续历史").run()
     assert not at.exception and len(at.get("plotly_chart")) == 6
+    trend_spec = json.loads(at.get("plotly_chart")[0].proto.spec)
+    latest, = trend_spec["layout"]["annotations"]
+    assert latest["x"] == "2026-09-09" and latest["y"] == 600
+    assert "+100 手" in latest["text"]
     at.radio[0].set_value("期货＋期权").run()
     at.selectbox[1].set_value("SR701").run()
     assert not at.exception
@@ -117,6 +122,35 @@ def test_cofco_independent_seasonality_preserves_fixed_five_and_cutoff(tmp_path)
     assert not at.exception and any(m.label == "中粮榜内净持仓（手）" and m.value == "70" for m in at.metric)
 
 
+def test_seat_charts_show_sugar_titles_and_latest_daily_changes(tmp_path):
+    project(tmp_path)
+    foreign, domestic = data()
+    for day, goldman, short in (("2026-09-08", "乾坤期货", 100), ("2026-09-09", "高盛期货", 125)):
+        for member, side, rank, value in ((goldman, "short", 3, short),
+                ("中粮期货", "short", 4, 30), ("中粮期货", "long", 3, short)):
+            domestic.append(dict(report_date=day, scope="SR", side=side, rank=rank,
+                member=member, raw_member=member + "（代客）", account="代客",
+                positions=value, reported_change=0))
+    publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
+    at = app(tmp_path).run(timeout=30)
+    assert not at.exception
+    charts = [json.loads(c.proto.spec)["layout"] for c in at.get("plotly_chart")]
+    labels = {chart["title"]["text"]: chart["annotations"][0] for chart in charts if chart.get("annotations")}
+    for title, value, change in (
+        ("高盛期货 · 白糖净仓季节性", "-125 手", "-25 手"),
+        ("高盛期货 · 白糖空仓季节性", "125 手", "+25 手"),
+        ("中粮期货 · 白糖净仓季节性", "95 手", "+25 手"),
+        ("中粮期货 · 白糖多仓季节性", "125 手", "+25 手"),
+        ("中粮期货 · 白糖空仓季节性", "30 手", "0 手"),
+    ):
+        annotation = labels[title]
+        assert f" {value}</b>" in annotation["text"]
+        assert f">{change}</span>" in annotation["text"]
+        assert "日度变化" in annotation["text"] and "2026-09-09" in annotation["text"]
+        assert annotation["hovertext"] == "比较日期 2026-09-08"
+    assert "多仓未披露" in labels["高盛期货 · 白糖多仓季节性"]["text"]
+
+
 def test_ranked_chart_draws_one_sided_net_and_preserves_undisclosed_hover():
     members = load_members(ROOT / "02_configs/sugar_positions.json")
     rows = domestic_metrics([dict(report_date="2026-10-09", scope="P2701", side="short",
@@ -143,7 +177,7 @@ def test_cofco_contract_history_has_separate_basis_and_does_not_replace_rankings
             side=side, member="中粮期货", raw_member=None, account="未披露", positions=None, disclosure="report_absent"))
     publish(tmp_path / "01_data/sugar_positions_preview", foreign, domestic, [], [])
     at = app(tmp_path).run(timeout=30)
-    assert not at.exception and at.radio(key="cofco_basis").value == "SR品种官方汇总"
+    assert not at.exception and at.radio(key="cofco_basis").value == "白糖品种汇总"
     at.radio(key="cofco_basis").set_value("合约榜单可见持仓（历史）").run()
     assert not at.exception and any("此历史接口存在漏项" in item.value for item in at.warning)
     assert at.multiselect(key="cofco_years").value == [2022, 2025, 2026]

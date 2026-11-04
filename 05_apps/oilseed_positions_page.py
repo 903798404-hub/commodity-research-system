@@ -8,13 +8,13 @@ import streamlit as st
 
 from agri_research_agent.oilseed_positions.model import config, metrics
 from agri_research_agent.oilseed_positions.aggregation import domestic_metrics, METHOD
-from agri_research_agent.sugar_positions.charts import chinese_date, movements, trend
+from agri_research_agent.sugar_positions.charts import chinese_date, label_latest_position, movements, trend
 from agri_research_agent.sugar_positions.model import load_members, positioning_signal
 from agri_research_agent.sugar_positions.storage import read_snapshot
 from agri_research_agent.positions.workspace import data_root as resolve_positions_root, validate_domain
 from sugar_positions_page import (
     RANKED_NET_NOTICE, SEASONAL_FIELDS, chart_pair, chinese_time, detail, domestic_detail, display_attempt,
-    seasonality, seasonal_selection,
+    labeled_seasonality, seasonal_selection,
 )
 
 REPORTS = {"纯期货": "futures_only", "期货＋期权": "combined"}
@@ -139,12 +139,14 @@ def render_oilseed_positions_page(project_root, domain, *, data_root=None, previ
                 if view == "季节性":
                     selected = seasonal_selection(data, key=f"foreign_years_{market}")
                     if selected:
-                        chart_pair(seasonality(selected, f"{item['label']} · 基金{field_label}季节性",
-                            field=SEASONAL_FIELDS[field_label], current_year=datetime.now(ZoneInfo("Asia/Shanghai")).year),
-                            figure, keys=(f"seasonal_{market}", f"changes_{market}"), preserve_legend=True)
+                        seasonal = labeled_seasonality(data, selected, f"{item['label']} · 基金{field_label}季节性",
+                            field=SEASONAL_FIELDS[field_label])
+                        chart_pair(seasonal, figure, keys=(f"seasonal_{market}", f"changes_{market}"),
+                            preserve_legend=True)
                 else:
-                    chart_pair(series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"]),
-                        figure, keys=(f"trend_{market}", f"changes_{market}"))
+                    history = series_figure(data, f"{item['label']} · 基金净持仓", item["fund_group"])
+                    label_latest_position(history, data)
+                    chart_pair(history, figure, keys=(f"trend_{market}", f"changes_{market}"))
             with st.expander(item["label"] + "持仓明细"):
                 detail_rows = [dict(r, label="投资基金" if market == "euronext_rapeseed" else "管理基金") for r in data]
                 frame = detail(detail_rows).iloc[::-1]
