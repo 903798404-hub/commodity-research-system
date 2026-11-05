@@ -153,8 +153,14 @@ def test_daily_gateway_keeps_credentials_out_and_unpublished_days_retryable():
     assert sum(r['api_name'] == 'fut_basic' for r in requests) == 1
 
 
-def test_daily_extension_replays_increment_and_history_does_not_mask_official_dates(tmp_path, monkeypatch):
+@pytest.mark.parametrize('incremental', [False, True])
+@pytest.mark.parametrize('unavailable', [False, True])
+def test_daily_sugar_uses_czce_only_and_preserves_legacy_history(tmp_path, monkeypatch, incremental, unavailable):
+    from io import BytesIO
+    import openpyxl
     from agri_research_agent.automation import positions_scheduled_collection as collection
+    from agri_research_agent.sugar_positions.sources import OfficialSources, parse_czce
+    from agri_research_agent.sugar_positions.model import cofco_official_metrics
     from test_positions_delivery import archive
     from test_server_collection import Source as DceSource
     baseline = archive(day='2026-10-08')
@@ -165,37 +171,48 @@ def test_daily_extension_replays_increment_and_history_does_not_mask_official_da
             [(f'stockapi_CZCE_SR_cofco_{day}_{day}', raw, stock.URL, 'json')], [])
     baseline = delivery.resolve_increment(builder.finish(ROOT)[0], baseline)
     calls = []
-    def official(*args, **kwargs):
+    def official(source, spec=None, **kwargs):
+        if spec is not None:
+            return [], [], [], []
+        assert isinstance(source, OfficialSources)
         calls.append(kwargs['existing_dates'])
-        return [], [], [], []
+        key = 'czce_20261009'
+        if unavailable:
+            return [], [], [], [dict(source_id=key, status='failed', rows=0)]
+        book = openpyxl.Workbook()
+        sheet = book.active
+        sheet.append(['品种：白糖SR 日期：2026-10-09'])
+        sheet.append(['名次', '会员简称', '交易量（手）', '增减量', '会员简称',
+                      '持买仓量', '增减量', '会员简称', '持卖仓量', '增减量'])
+        sheet.append([1, '中粮期货（代客）', 100, 0, '中粮期货（代客）', 100, 0,
+                      '中粮期货（代客）', 90, 0])
+        sheet.append(['合计', None, 100, None, None, 100, None, None, 90, None])
+        buffer = BytesIO()
+        book.save(buffer)
+        book.close()
+        raw = buffer.getvalue()
+        url = 'https://www.czce.com.cn/cn/DFSStaticFiles/Future/2026/20261009/FutureDataHolding.xlsx'
+        rows = parse_czce(raw, '2026-10-09', url, STAMP)
+        return [], rows, [(key, raw, url, 'xlsx')], [dict(source_id=key, status='ok', rows=len(rows))]
     monkeypatch.setattr(collection.delivery, '_module', lambda *a: type('Collector', (), {'collect': staticmethod(official)}))
     class Source(DceSource):
         def cofco_history(self, day):
-            raw = delivery.canonical(daily_capture(day.strftime('%Y%m%d')))
-            return stock.parse_cofco_history(raw, stock.URL, STAMP), raw, stock.URL
+            pytest.fail('sugar must never request the third-party history provider')
     (tmp_path/'next').mkdir()
-    document, attempts = collection.collect_bundle(baseline, tmp_path/'next', markets='domestic',
-        today=date(2026, 10, 9), stock_source=Source(), incremental=True)
-    candidate = delivery.resolve_increment(document, baseline)
+    result, attempts = collection.collect_bundle(baseline, tmp_path/'next', markets='domestic',
+        today=date(2026, 10, 9), stock_source=Source(), incremental=incremental)
+    candidate = (delivery.resolve_increment(result, baseline) if incremental
+                 else delivery.archive_bundle(result, ROOT))
     old = delivery.validate_archive(baseline, ROOT)[0]['sugar']
     new = delivery.validate_archive(candidate, ROOT)[0]['sugar']
     assert old['foreign'] == new['foreign'] and all(r in new['domestic'] for r in old['domestic'])
-    assert calls[0] == set()  # This baseline has member slices, no official sugar ranking yet.
-    assert cofco_history_metrics(new['domestic'])[-1]['report_date'] == '2026-10-09'
-    assert any(a['source_id'].startswith('stockapi_CZCE_SR_cofco_') and a['status'] == 'ok' for a in attempts)
+    assert calls == [set()]  # Member history never masks a complete official ranking.
+    assert cofco_history_metrics(new['domestic']) == cofco_history_metrics(old['domestic'])
+    assert not any(a['source_id'].startswith('stockapi_CZCE_') for a in attempts)
+    if unavailable:
+        assert old == new
+    else:
+        latest = cofco_official_metrics(new['domestic'])[-1]
+        assert (latest['report_date'], latest['long'], latest['short'], latest['net']) == ('2026-10-09', 100, 90, 10)
+        assert latest['source_provider'] == 'CZCE'
     assert delivery.observations(candidate, baseline, ROOT)['revised_partitions'] == []
-
-
-def test_unpublished_open_day_halts_catchup_without_exposing_error(tmp_path):
-    from agri_research_agent.automation.positions_scheduled_collection import collect_cofco
-    rows = stock.parse_cofco_history(delivery.canonical(daily_capture('20261007')), stock.URL, STAMP)
-    class Broken:
-        calls = []
-        def cofco_history(self, day):
-            self.calls.append(day)
-            raise stock.StockApiError('private-test-token')
-    source = Broken()
-    attempts, _ = collect_cofco(source, {'sugar': {'domestic': rows}}, tmp_path, date(2026, 10, 9),
-        publish_rows=lambda *a, **k: pytest.fail('failed source cannot publish'))
-    assert source.calls == [date(2026, 10, 8)] and attempts[0]['status'] == 'failed'
-    assert 'private-test-token' not in str(attempts)
