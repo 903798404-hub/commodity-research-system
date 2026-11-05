@@ -12,7 +12,7 @@ from agri_research_agent.positions import delivery as codec
 from agri_research_agent.positions.bundle import verified_files
 from agri_research_agent.sugar_positions.sources import OfficialSources
 from agri_research_agent.sugar_positions.storage import publish, read_snapshot
-from agri_research_agent.sugar_positions.model import COFCO_PARTIAL_RECORDS
+from agri_research_agent.sugar_positions.model import COFCO_HISTORY_RECORD, COFCO_PARTIAL_RECORDS
 
 
 def collect_bundle(baseline, work, *, markets, today=None, cftc_annual=False, stock_source=None, incremental=False):
@@ -162,6 +162,40 @@ def collect_dce(source, snapshots, store, today, *, publish_rows=publish, increm
         for domain,observed in by_domain.items():
             (store/domain/'last_attempt.json').write_bytes(delivery.canonical_json_bytes({'attempts':observed}))
     return attempts,dict(start=start.isoformat(),end=end.isoformat(),target=today.isoformat(),catchup_remaining=end<today)
+
+
+def collect_cofco(source, snapshots, store, today, *, publish_rows=publish):
+    """Extend the independently backfilled series without masking official reports."""
+    from agri_research_agent.oilseed_positions.stock_api import StockApiError
+    from agri_research_agent.oilseed_positions.sources import SourceNotPublished
+    previous = snapshots['sugar']['domestic']
+    dates = {r['report_date'] for r in previous if r.get('record_type') == COFCO_HISTORY_RECORD}
+    start, end = domestic_window(dates, today)
+    attempts, cursor = [], start
+    existing = {(r['scope'], r['report_date']) for r in previous}
+    while cursor <= end:
+        if cursor.weekday() < 5 and cursor.isoformat() not in dates:
+            source_id = f'stockapi_CZCE_SR_cofco_{cursor:%Y%m%d}_{cursor:%Y%m%d}'
+            halt = False
+            try:
+                rows, raw, url = source.cofco_history(cursor)
+                delivery.require(rows and all(r['report_date'] == cursor.isoformat()
+                    and r.get('record_type') == COFCO_HISTORY_RECORD for r in rows), 'COFCO source scope differs')
+                delivery.require(not any((r['scope'], r['report_date']) in existing for r in rows),
+                                 'COFCO historical revision requires review')
+                observed = dict(domain='sugar', source_id=source_id, status='ok', rows=len(rows))
+                publish_rows(store/'sugar', [], rows, [(source_id, raw, url, 'json')], [observed], preserve_untouched=True)
+            except (StockApiError, SourceNotPublished, ValueError) as exc:
+                # Never serialize upstream exception text or credentials.
+                missing = isinstance(exc, SourceNotPublished)
+                observed = dict(domain='sugar', source_id=source_id,
+                    status='not_published' if missing else 'failed', error='cofco_source_not_published' if missing else 'cofco_source_unavailable_or_invalid')
+                halt = not (missing and str(exc) == 'stock_api_cofco_nontrading_day')
+            attempts.append(observed)
+            if halt:
+                break  # Keep an unpublished open day retryable before advancing.
+        cursor += timedelta(days=1)
+    return attempts, dict(start=start.isoformat(), end=end.isoformat(), target=today.isoformat(), catchup_remaining=end < today)
 
 
 def domestic_window(existing_dates, today):

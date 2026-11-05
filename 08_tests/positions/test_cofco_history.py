@@ -155,7 +155,7 @@ def test_daily_gateway_keeps_credentials_out_and_unpublished_days_retryable():
 
 @pytest.mark.parametrize('incremental', [False, True])
 @pytest.mark.parametrize('unavailable', [False, True])
-def test_daily_sugar_uses_czce_only_and_preserves_legacy_history(tmp_path, monkeypatch, incremental, unavailable):
+def test_daily_extension_replays_increment_and_history_does_not_mask_official_dates(tmp_path, monkeypatch, incremental, unavailable):
     from io import BytesIO
     import openpyxl
     from agri_research_agent.automation import positions_scheduled_collection as collection
@@ -216,3 +216,18 @@ def test_daily_sugar_uses_czce_only_and_preserves_legacy_history(tmp_path, monke
         assert (latest['report_date'], latest['long'], latest['short'], latest['net']) == ('2026-10-09', 100, 90, 10)
         assert latest['source_provider'] == 'CZCE'
     assert delivery.observations(candidate, baseline, ROOT)['revised_partitions'] == []
+
+
+def test_unpublished_open_day_halts_catchup_without_exposing_error(tmp_path):
+    from agri_research_agent.automation.positions_scheduled_collection import collect_cofco
+    rows = stock.parse_cofco_history(delivery.canonical(daily_capture('20261007')), stock.URL, STAMP)
+    class Broken:
+        calls = []
+        def cofco_history(self, day):
+            self.calls.append(day)
+            raise stock.StockApiError('private-test-token')
+    source = Broken()
+    attempts, _ = collect_cofco(source, {'sugar': {'domestic': rows}}, tmp_path, date(2026, 10, 9),
+        publish_rows=lambda *a, **k: pytest.fail('failed source cannot publish'))
+    assert source.calls == [date(2026, 10, 8)] and attempts[0]['status'] == 'failed'
+    assert 'private-test-token' not in str(attempts)
