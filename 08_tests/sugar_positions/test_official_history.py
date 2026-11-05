@@ -118,3 +118,66 @@ def test_history_capture_rejects_identity_or_ranking_damage(change):
             if change=='duplicate_entry':z.writestr('unexpected.txt',b'not official data')
         raw=out.getvalue()
     with pytest.raises(ValueError):parse_capture(raw,day,url,'2026-11-03T00:00:00+00:00')
+
+
+def test_member_replays_share_validated_rankings_but_keep_provenance_and_mutations_separate(monkeypatch):
+    from collections import OrderedDict
+    from agri_research_agent.sugar_positions import sources
+    monkeypatch.setattr(sources, '_CZCE_HISTORY_CACHE', OrderedDict())
+    original = sources.parse_czce_cofco_text
+    calls = []
+    def parse(*args):
+        calls.append(args[1])
+        return original(*args)
+    monkeypatch.setattr(sources, 'parse_czce_cofco_text', parse)
+    raw, url = capture()
+    first = parse_capture(raw, '2026-11-02', url, '2026-11-03T00:00:00+00:00')
+    first[0]['positions'] = -999
+    member = dict(id='goldman', label='高盛', aliases=['其他期货'])
+    second = sources.parse_czce_goldman_capture(raw, '2026-11-02', url,
+        '2026-11-04T00:00:00+00:00', member)
+    third = parse_capture(raw, '2026-11-02', url, '2026-11-05T00:00:00+00:00')
+    assert calls == ['2026-11-02']
+    assert [r['positions'] for r in second] == [100, 100]
+    assert [r['positions'] for r in third] == [68525, 62254]
+    assert all(r['retrieved_at'] == '2026-11-04T00:00:00+00:00' for r in second)
+    assert all(r['retrieved_at'] == '2026-11-05T00:00:00+00:00' for r in third)
+
+
+def test_warm_history_cache_still_rejects_bad_envelopes_and_revised_bad_totals(monkeypatch):
+    from collections import OrderedDict
+    from agri_research_agent.sugar_positions import sources
+    monkeypatch.setattr(sources, '_CZCE_HISTORY_CACHE', OrderedDict())
+    raw, url = capture()
+    parse_capture(raw, '2026-11-02', url, '2026-11-03T00:00:00+00:00')
+    with ZipFile(BytesIO(raw)) as z:
+        body = z.read('FutureDataHolding.txt')
+        manifest = json.loads(z.read('manifest.json'))
+    manifest['source_sha256'] = '0' * 64
+    out = BytesIO()
+    with ZipFile(out, 'w', compression=ZIP_DEFLATED) as z:
+        z.writestr('FutureDataHolding.txt', body)
+        z.writestr('manifest.json', json.dumps(manifest))
+    with pytest.raises(ValueError, match='原文身份不符'):
+        parse_capture(out.getvalue(), '2026-11-02', url, '2026-11-03T00:00:00+00:00')
+    revised, url = capture(bad_total=True)
+    with pytest.raises(ValueError, match='合计校验失败'):
+        parse_capture(revised, '2026-11-02', url, '2026-11-03T00:00:00+00:00')
+
+
+def test_history_ranking_cache_is_bounded_and_eviction_revalidates(monkeypatch):
+    from collections import OrderedDict
+    from agri_research_agent.sugar_positions import sources
+    monkeypatch.setattr(sources, '_CZCE_HISTORY_CACHE', OrderedDict())
+    monkeypatch.setattr(sources, '_CZCE_HISTORY_CACHE_LIMIT', 1)
+    original = sources.parse_czce_cofco_text
+    calls = []
+    def parse(*args):
+        calls.append(args[1])
+        return original(*args)
+    monkeypatch.setattr(sources, 'parse_czce_cofco_text', parse)
+    for day in ('2026-11-02', '2026-11-03', '2026-11-02'):
+        raw, url = capture(day)
+        parse_capture(raw, day, url, '2026-11-04T00:00:00+00:00')
+    assert calls == ['2026-11-02', '2026-11-03', '2026-11-02']
+    assert len(sources._CZCE_HISTORY_CACHE) == 1

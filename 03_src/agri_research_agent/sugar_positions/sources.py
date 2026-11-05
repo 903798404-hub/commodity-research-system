@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import csv
+from collections import OrderedDict
 from datetime import date, datetime, timezone
 from io import BytesIO, StringIO
 import json
 import hashlib
 import re
+from threading import Lock
 from zipfile import BadZipFile, ZipFile
 
 import openpyxl
@@ -15,6 +17,9 @@ import requests
 from .model import integer, split_member, unique_rows, COFCO_MEMBER, COFCO_OFFICIAL_RECORD, GOLDMAN_OFFICIAL_RECORD
 
 CFTC_DATASETS = {"futures_only": "72hh-3qpy", "combined": "kh3c-gbw2"}
+_CZCE_HISTORY_CACHE = OrderedDict()
+_CZCE_HISTORY_CACHE_LOCK = Lock()
+_CZCE_HISTORY_CACHE_LIMIT = 2048
 FIELDS = {"producer": "prod_merc", "swap": "swap", "managed_money": "m_money",
           "other": "other_rept", "nonreportable": "nonrept"}
 CFTC_FIELDS = {
@@ -257,6 +262,23 @@ def parse_czce_cofco_text(content, expected_day, source_url, retrieved_at):
     return parse_czce(buffer.getvalue(), expected_day, source_url, retrieved_at)
 
 
+def _verified_czce_history_ranking(raw, expected_day, source_url, retrieved_at):
+    """Reuse immutable rankings, without retaining the full exchange text."""
+    key = (hashlib.sha256(raw).hexdigest(), expected_day, source_url)
+    with _CZCE_HISTORY_CACHE_LOCK:
+        cached = _CZCE_HISTORY_CACHE.get(key)
+        if cached is not None:
+            _CZCE_HISTORY_CACHE.move_to_end(key)
+            return [dict(row, retrieved_at=retrieved_at) for row in cached]
+    ranking = parse_czce_cofco_text(raw, expected_day, source_url, retrieved_at)
+    with _CZCE_HISTORY_CACHE_LOCK:
+        _CZCE_HISTORY_CACHE[key] = tuple(dict(row) for row in ranking)
+        _CZCE_HISTORY_CACHE.move_to_end(key)
+        while len(_CZCE_HISTORY_CACHE) > _CZCE_HISTORY_CACHE_LIMIT:
+            _CZCE_HISTORY_CACHE.popitem(last=False)
+    return ranking
+
+
 def _parse_czce_member_capture(content, expected_day, source_url, retrieved_at, member, record_type):
     day = date.fromisoformat(expected_day)
     if day < date(2022, 1, 1) or day > date.today():
@@ -284,7 +306,8 @@ def _parse_czce_member_capture(content, expected_day, source_url, retrieved_at, 
             or type(manifest['source_bytes']) is not int or manifest['source_bytes'] != len(raw)
             or manifest['source_sha256'] != hashlib.sha256(raw).hexdigest()):
         raise ValueError('中粮官方历史原文身份不符')
-    ranking = parse_czce_cofco_text(raw, expected_day, source_url, retrieved_at)
+    # Envelope, original bytes, SHA and date are rechecked on every invocation.
+    ranking = _verified_czce_history_ranking(raw, expected_day, source_url, retrieved_at)
     account = '代客' if any(r['account'] == '代客' for r in ranking) else '未区分'
     result = []
     for side in ('long', 'short'):
