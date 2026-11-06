@@ -122,7 +122,7 @@ def collector_command(config, work, name):
         "--mount", f"type=bind,src={work / 'credential.json'},dst=/run/secrets/tushare.json,readonly",
         "--entrypoint", "python", config["image_id"], "-I", "-B", "/app/04_scripts/update_warehouse_receipts.py",
         "--baseline-root", "/baseline", "--candidate-root", "/output/candidate", "--raw-root", "/output/raw",
-        "--secret-file", "/run/secrets/tushare.json"]
+        "--secret-file", "/run/secrets/tushare.json", "--czce-sr"]
 
 
 def publish_candidate(store, candidate, expected_baseline_sha):

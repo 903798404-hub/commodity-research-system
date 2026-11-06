@@ -1959,6 +1959,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/warehouse_receipts/czce.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/warehouse_receipts/charts.py",
       "role": "runtime_configuration"
     },

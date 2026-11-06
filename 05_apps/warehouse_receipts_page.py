@@ -97,6 +97,8 @@ def render_warehouse_receipts(project_root: Path) -> None:
                         delta = f"{latest.vol_chg:+,.0f}{unit}" if pd.notna(latest.vol_chg) else None
                         st.metric(f"{focus} 年最新仓单（{unit}）", f"{latest.vol:,.0f}", delta=delta, delta_color="off")
                         st.caption(f"观测日期 {latest.date:%Y-%m-%d} · {PRODUCTS[symbol][1]} · 源单位 {unit}")
+                        if symbol == "SR" and manifest.get("official_sugar_from"):
+                            st.caption(f"来源：{latest.source}；{manifest['official_sugar_from']} 起直连郑商所，之前历史保留原来源。")
                     chart_data = block.loc[block.date.dt.year.isin(years)]
                     if chart_data.empty or chart_data[field].notna().sum() == 0:
                         st.info(f"所选年份暂无{metric}观测（{unit}）。")
@@ -117,7 +119,10 @@ def render_warehouse_receipts(project_root: Path) -> None:
     scope = st.expander("仓单数据口径", key="warehouse_scope", on_change="rerun")
     if scope.open:
         with scope:
-            st.write("来源：Tushare兼容接口 fut_wsr，仓库/厂库日报。原始年度、等级、品牌、地区及折算标识均保留；总计与明细不重复累加。这里展示仓单，不能直接等同于产业库存。")
+            if manifest.get("official_sugar_from"):
+                st.write(f"白糖：{manifest['official_sugar_from']} 起直接读取郑商所官方仓单日报；此前历史保留 Tushare 兼容来源。其他品种继续使用原 fut_wsr 接口。官方原文及 SHA 留存，总计与明细不重复累加。仓单不能直接等同于产业库存。")
+            else:
+                st.write("来源：Tushare兼容接口 fut_wsr，仓库/厂库日报。原始年度、等级、品牌、地区及折算标识均保留；总计与明细不重复累加。这里展示仓单，不能直接等同于产业库存。")
             st.write("每日增减直接汇总源 vol_chg，昨日量缺失不反推；任一分项缺失或数量为负时对应总量留空。单位切换单独绘图，不推定吨数换算。")
             st.write(f"本次请求 {manifest['requested_start']} 至 {manifest['requested_end']}；实际覆盖如下。")
             st.dataframe(pd.DataFrame(manifest["coverage"]).T, width="stretch")

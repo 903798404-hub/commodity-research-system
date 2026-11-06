@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .model import FIELDS, DIMENSIONS, PRODUCTS, ReceiptError, aggregate_daily, load_snapshot, normalize_rows, sha256, write_snapshot
+from .model import FIELDS, DIMENSIONS, PRODUCTS, ReceiptError, aggregate_daily, apply_source_provenance, load_snapshot, normalize_rows, sha256, write_snapshot
 from .provider import acquire_history
 
 
@@ -25,7 +25,7 @@ def merge_observations(baseline: pd.DataFrame, incoming: pd.DataFrame, start: dt
 
 
 def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_root: Path,
-                        now: dt.datetime, *, lookback_days: int = 14) -> dict:
+                        now: dt.datetime, *, lookback_days: int = 14, official_sr: bool = False) -> dict:
     if now.tzinfo is None or not 1 <= lookback_days <= 90:
         raise ReceiptError("更新时间或回查范围无效")
     now = now.astimezone(dt.timezone(dt.timedelta(hours=8)))
@@ -41,6 +41,10 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
     if set(valid_baseline.symbol) != set(PRODUCTS):
         raise ReceiptError("增量基线缺少某品种的有效总量观测")
     latest = valid_baseline.groupby("symbol").date.max()
+    if old_manifest.get("official_sugar_from") and not official_sr:
+        raise ReceiptError("白糖官方来源已启用，禁止退回兼容服务覆盖")
+    cutover = (dt.date.fromisoformat(old_manifest["official_sugar_from"])
+               if old_manifest.get("official_sugar_from") else latest["SR"].date() + dt.timedelta(days=1))
     end = now.date()
     start = max(pd.Timestamp(old_manifest["requested_start"]).date(), latest.min().date() - dt.timedelta(days=lookback_days - 1))
     if end < start:
@@ -52,11 +56,20 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
         stop = min(cursor + dt.timedelta(days=364), end)
         calendar_rows.extend(client.calendar(cursor, stop))
         cursor = stop + dt.timedelta(days=1)
-    records = acquire_history(client, start, end, raw_root)
+    symbols = [s for s in PRODUCTS if s != "SR"] if official_sr else None
+    records = acquire_history(client, start, end, raw_root, symbols=symbols)
+    official_records = []
+    if official_sr:
+        from .czce import acquire_sugar_reports
+        days = [dt.datetime.strptime(r["cal_date"], "%Y%m%d").date() for r in calendar_rows
+                if r["is_open"] == 1 and r["cal_date"] >= max(start, cutover).strftime("%Y%m%d")]
+        official_records = acquire_sugar_reports(days, raw_root / "czce-sr")
+        records.extend(official_records)
     rows = [row for record in records for row in record["rows"]]
     incoming = normalize_rows(rows) if rows else pd.DataFrame(columns=[*FIELDS.split(","), "date"])
     merged = merge_observations(baseline, incoming, start, end)
-    daily = aggregate_daily(merged)
+    provenance = {"official_sugar_from": cutover.isoformat()} if official_sr else {}
+    daily = apply_source_provenance(aggregate_daily(merged), provenance)
     # Use source calendar for the update window, retaining the documented packaged
     # calendar only for the older bootstrap history.
     from akshare.futures.cons import get_calendar
@@ -73,10 +86,13 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
     changed = (merged[FIELDS.split(",")].to_csv(index=False) != baseline[FIELDS.split(",")].to_csv(index=False))
     candidate_root.mkdir(parents=True, exist_ok=False)
     if changed:
-        evidence = dict(source=old_manifest["source"], endpoint=client.endpoint, api_name="fut_wsr",
+        evidence = dict(source="Mixed: CZCE official SR and retained Tushare-compatible series" if official_sr else old_manifest["source"],
+            endpoint=client.endpoint, api_name="fut_wsr; CZCE FutureDataWhsheet.txt" if official_sr else "fut_wsr",
             requested_start=old_manifest["requested_start"], requested_end=end.isoformat(), captured_at=now.isoformat(),
             previous_snapshot_id=old_manifest["snapshot_id"], update_window_start=start.isoformat(),
             query_windows=len(records), empty_windows=sum(not r["rows"] for r in records),
+            **provenance,
+            **({"official_sugar_reports": [{k:v for k,v in r.items() if k != "rows"} for r in official_records]} if official_sr else {}),
             trading_dates=sorted(calendar), calendar_source="AKShare bootstrap; Tushare DCE trade_cal update window",
             invalid_quantity_rows=int((merged.vol.lt(0) | merged.pre_vol.lt(0)).sum()),
             invalid_daily_totals=int(daily.status.eq("invalid_component").sum()),
@@ -94,6 +110,7 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
         checked_at=now.isoformat(), business_changed=changed, snapshot_id=manifest["snapshot_id"],
         expected_trade_date=expected, latest_dates=latest_dates, pending_products=pending,
         update_window_start=start.isoformat(), requested_end=end.isoformat(), source_windows=len(records),
+        **provenance,
         baseline_pointer_sha256=sha256(baseline_root / "current.json"), candidate_pointer_sha256=sha256(candidate_root / "current.json"))
     (candidate_root / "update_status.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     (raw_root / "calendar.json").write_text(json.dumps(calendar_rows, ensure_ascii=False), encoding="utf-8")

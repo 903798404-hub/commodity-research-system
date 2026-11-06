@@ -100,6 +100,19 @@ def aggregate_daily(raw: pd.DataFrame) -> pd.DataFrame:
     return result.sort_values(["symbol", "unit", "date"]).reset_index(drop=True)
 
 
+def apply_source_provenance(daily: pd.DataFrame, manifest: dict) -> pd.DataFrame:
+    """A source cutover applies only to new SR days; retained history stays labelled."""
+    if "official_sugar_from" not in manifest:
+        return daily
+    import datetime as dt
+    from .czce import SOURCE
+    cutoff = dt.date.fromisoformat(manifest["official_sugar_from"])
+    result = daily.copy()
+    mask = result.symbol.eq("SR") & result.date.ge(pd.Timestamp(cutoff))
+    result.loc[mask, "source"] = SOURCE
+    return result
+
+
 def write_snapshot(root: Path, raw: pd.DataFrame, daily: pd.DataFrame, evidence: dict) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     folder = root / "snapshots"
@@ -161,7 +174,7 @@ def load_snapshot(root: Path, *, full_validation: bool = True) -> tuple[pd.DataF
             raw = pd.read_csv(folder / "raw.csv", dtype={key: str for key in DIMENSIONS}, keep_default_na=False,
                               na_values=[""])
             raw = normalize_rows(raw[FIELDS.split(",")].to_dict("records"))
-            daily = aggregate_daily(raw)
+            daily = apply_source_provenance(aggregate_daily(raw), manifest)
             pd.testing.assert_frame_equal(daily, stored, check_dtype=False, check_exact=False, rtol=0, atol=1e-8)
             if len(raw) != manifest["raw_rows"]:
                 raise ReceiptError("仓单原始条数与清单不一致")

@@ -100,9 +100,12 @@ def acquire_window(client: TushareReceipts, symbol: str, start: dt.date, end: dt
 
 
 def acquire_history(client: TushareReceipts, start: dt.date, end: dt.date, raw_root: Path,
-                    progress=lambda symbol, end, rows: None) -> list[dict]:
+                    progress=lambda symbol, end, rows: None, *, symbols=None) -> list[dict]:
     records = []
-    for symbol in PRODUCTS:
+    selected = list(PRODUCTS) if symbols is None else list(symbols)
+    if not selected or len(set(selected)) != len(selected) or not set(selected).issubset(PRODUCTS):
+        raise ReceiptError("仓单采集品种范围无效")
+    for symbol in selected:
         cursor = start
         while cursor <= end:
             # Fourteen calendar days usually remain below 1000 warehouse rows.

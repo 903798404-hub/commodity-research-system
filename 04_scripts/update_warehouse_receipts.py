@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--candidate-root", type=Path, required=True)
     parser.add_argument("--raw-root", type=Path, required=True)
     parser.add_argument("--secret-file", type=Path)
+    parser.add_argument("--czce-sr", action="store_true", help="Read new white-sugar days directly from CZCE; retain legacy history")
     args = parser.parse_args()
     try:
         for path in (args.candidate_root, args.raw_root):
@@ -31,7 +32,7 @@ def main() -> int:
         else:
             token, endpoint = os.getenv("TUSHARE_TOKEN", ""), os.getenv("TUSHARE_API_URL", "https://api.tushare.pro")
         result = prepare_incremental(TushareReceipts(token, endpoint), args.baseline_root, args.candidate_root,
-                                     args.raw_root, dt.datetime.now(dt.timezone.utc))
+                                     args.raw_root, dt.datetime.now(dt.timezone.utc), official_sr=args.czce_sr)
         print(json.dumps(result, ensure_ascii=False), flush=True)
         return 0
     except Exception as exc:

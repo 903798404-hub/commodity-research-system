@@ -1,7 +1,8 @@
 [Unit]
-Description=Warehouse receipts Beijing 17:30 with conditional 18:30 and 20:00 retries
+Description=Warehouse receipts Beijing 16:15 with conditional evening and morning retries
 
 [Timer]
+OnCalendar=Mon..Fri *-*-* 16:15:00 Asia/Shanghai
 OnCalendar=*-*-* 17:30:00 Asia/Shanghai
 OnCalendar=*-*-* 18:30:00 Asia/Shanghai
 OnCalendar=*-*-* 20:00:00 Asia/Shanghai
@@ -10,7 +11,7 @@ OnCalendar=Tue..Sat *-*-* 08:40:00 Asia/Shanghai
 AccuracySec=1s
 RandomizedDelaySec=0
 Persistent=true
-Unit=market-data-warehouse-receipts.service
+Unit=market-data-task-enqueue@warehouse.service
 
 [Install]
 WantedBy=timers.target
