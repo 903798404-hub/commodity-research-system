@@ -7,9 +7,9 @@ import pandas as pd
 import pytest
 
 from agri_research_agent.warehouse_receipts.czce import SOURCE, acquire_sugar_reports, parse_sugar_report, report_url
-from agri_research_agent.warehouse_receipts.model import ReceiptError, load_snapshot
+from agri_research_agent.warehouse_receipts.model import PRODUCTS, ReceiptError, aggregate_daily, load_snapshot, normalize_rows, write_snapshot
 from agri_research_agent.warehouse_receipts.update import prepare_incremental
-from test_warehouse_receipts_update import Client, seed
+from test_warehouse_receipts_update import Client, observation, seed
 
 DAY = dt.date(2026, 10, 12)
 
@@ -168,3 +168,19 @@ def test_deploy_timer_has_1615_first_check_and_preserves_bounded_retry_admission
     for t in ["17:30", "18:30", "20:00", "22:00", "08:40"]:
         assert t + ":00 Asia/Shanghai" in timer
     assert "Unit=market-data-task-enqueue@warehouse.service" in timer
+
+
+def test_first_cutover_preserves_even_invalid_legacy_days(tmp_path, monkeypatch):
+    from agri_research_agent.warehouse_receipts import czce
+    baseline = tmp_path / "baseline"
+    raw = normalize_rows([observation(s) for s in PRODUCTS] + [observation("SR", date="20261012", vol=-1)])
+    write_snapshot(baseline, raw, aggregate_daily(raw), dict(source="Tushare-compatible", requested_start="2026-10-01", requested_end="2026-10-12"))
+    before = (baseline / "current.json").read_bytes()
+    def official(days, root):
+        assert days == [dt.date(2026, 10, 13)]
+        return []
+    monkeypatch.setattr(czce, "acquire_sugar_reports", official)
+    result = prepare_incremental(Client([]), baseline, tmp_path / "candidate", tmp_path / "raw",
+                                 dt.datetime(2026, 10, 13, tzinfo=dt.timezone.utc), official_sr=True)
+    assert result["official_sugar_from"] == "2026-10-13" and not result["business_changed"]
+    assert (tmp_path / "candidate/current.json").read_bytes() == before

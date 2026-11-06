@@ -44,7 +44,8 @@ def prepare_incremental(client, baseline_root: Path, candidate_root: Path, raw_r
     if old_manifest.get("official_sugar_from") and not official_sr:
         raise ReceiptError("白糖官方来源已启用，禁止退回兼容服务覆盖")
     cutover = (dt.date.fromisoformat(old_manifest["official_sugar_from"])
-               if old_manifest.get("official_sugar_from") else latest["SR"].date() + dt.timedelta(days=1))
+               if old_manifest.get("official_sugar_from") else
+               old_daily.loc[old_daily.symbol.eq("SR"), "date"].max().date() + dt.timedelta(days=1))
     end = now.date()
     start = max(pd.Timestamp(old_manifest["requested_start"]).date(), latest.min().date() - dt.timedelta(days=lookback_days - 1))
     if end < start:
