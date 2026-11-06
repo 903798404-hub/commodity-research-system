@@ -89,6 +89,37 @@ def test_native_official_growth_chart_retains_printed_precision_and_missing_labe
     assert all(r['source_locator'].startswith('Fenologia das Lavouras!J') for r in rows)
 
 
+def test_official_native_chart_with_hidden_nonzero_stages_keeps_only_visible_values():
+    import hashlib
+    folder=Path(__file__).parent/'fixtures/conab-20261030'
+    source=json.loads((folder/'source.json').read_bytes());raw=(folder/'growth.xlsx').read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==source['sha256']
+    rows=parse_growth(raw,source)
+    assert {r['metric']:r['value'] for r in rows}=={'EMERGENCE':32.5,'VEGETATIVE':66.3}
+    assert all(r['date']=='2026-10-30' and r['season']=='2026/2027' for r in rows)
+    assert all(r['published_at']=='2026-11-02' for r in rows)
+    assert sum(r['value'] for r in rows)==98.8
+
+
+@pytest.mark.parametrize('change',['hidden_source_cache_mismatch','full_source_total','all_labels_hidden'])
+def test_hidden_native_labels_still_require_complete_consistent_source(change):
+    from openpyxl import load_workbook
+    from openpyxl.chart.label import DataLabel
+    from agri_research_agent.pipelines.brazil_soy_scheduled import native_growth_values
+    book=load_workbook(Path(__file__).parent/'fixtures/conab-20261030/growth.xlsx',data_only=False)
+    try:
+        sheet=book.active
+        chart=next(c for c in sheet._charts if 100<=c.anchor._from.row+1<119)
+        if change=='hidden_source_cache_mismatch':sheet['K98']=0.02
+        if change=='full_source_total':
+            sheet['K96']=0.225214
+            next(p for p in chart.series[0].val.numRef.numCache.pt if p.idx==0).v='0.225214'
+        if change=='all_labels_hidden':
+            chart.series[0].dLbls.dLbl=[DataLabel(idx=i,showVal=False) for i in range(6)]
+        with pytest.raises(ValueError):native_growth_values(sheet,96)
+    finally:book.close()
+
+
 @pytest.mark.parametrize('change',['formula','blank','label','format','cache_mismatch','wrong_range','duplicate_chart'])
 def test_native_growth_rejects_changed_or_inconsistent_source(change):
     from openpyxl import load_workbook

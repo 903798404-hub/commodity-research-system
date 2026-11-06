@@ -54,7 +54,7 @@ def native_growth_values(sheet, start):
     overrides={label.idx:label for label in display.dLbl}
     if len(overrides)!=len(display.dLbl) or not set(overrides)<=set(range(6)):
         raise ValueError('CONAB native soybean chart label indices changed')
-    values={};locations={}
+    values={};locations={};source_total=Decimal('0')
     for index,(label,metric) in enumerate(GROWTH_STAGES):
         name=sheet.cell(start+index,10);cell=sheet.cell(start+index,11)
         if (name.value!=label or labels[index]!=label or cell.data_type!='n'
@@ -64,13 +64,16 @@ def native_growth_values(sheet, start):
         if (not value.is_finite() or not cached.is_finite() or not 0<=value<=1
             or abs(value-cached)>Decimal('0.000000000001')):
             raise ValueError('CONAB native soybean source/cache mismatch')
+        source_total+=value
         override=overrides.get(index)
         if override is not None and override.showVal is False:
             continue
         values[metric]=float((value*100).quantize(Decimal('0.1'),rounding=ROUND_HALF_UP))
         locations[metric]=f'{sheet.title}!{name.coordinate}:{cell.coordinate};chart_row={charts[0].anchor._from.row+1};display_format=0.0%'
-    if not values or not 99.5<=sum(values.values())<=100.5:
-        raise ValueError('CONAB native soybean displayed labels incomplete')
+    # Small nonzero stages may have explicitly hidden chart labels. Validate
+    # the complete bound source vector, while publishing only visible labels.
+    if not values or not Decimal('0.995')<=source_total<=Decimal('1.005'):
+        raise ValueError('CONAB native soybean source total or visible labels incomplete')
     return values,locations
 
 
