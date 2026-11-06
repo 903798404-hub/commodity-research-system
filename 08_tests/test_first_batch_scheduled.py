@@ -37,6 +37,19 @@ def test_basis_transport_missing_or_invalid_receipt_is_fail_closed_and_keeps_saf
     assert not (tmp_path / "transport-receipt.json").exists()
 
 
+def test_basis_transport_error_detail_uses_existing_redactor_and_retains_root_cause(tmp_path):
+    stderr = ("Traceback with an unlogged private context\nRuntimeError: remote activation failed; "
+              "exit_code=125 password=do-not-leak https://name:do-not-leak@example.invalid "
+              "private_key=C:\\private\\identity.pem " + "x" * 1024)
+    with pytest.raises(jobs.delivery.ProductionDataError, match="no receipt"):
+        jobs.basis_transport_receipt(subprocess.CompletedProcess([], 1, "", stderr), tmp_path)
+    raw = (tmp_path / "transport-diagnostics.json").read_text()
+    detail = json.loads(raw)["safe_error_detail"]
+    assert "remote activation failed" in detail and "exit_code=125" in detail
+    assert len(detail) <= 512 and "do-not-leak" not in raw and "identity.pem" not in raw
+    assert "unlogged private context" not in raw
+
+
 @pytest.mark.parametrize("code", [0, 1, 124])
 def test_basis_transport_receipt_and_child_exit_are_both_required(tmp_path, code):
     receipt = {"schema_version": "public-data-transport/1", "status": "SYNCED", "package_id": "candidate"}

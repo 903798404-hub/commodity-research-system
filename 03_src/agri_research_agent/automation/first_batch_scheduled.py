@@ -10,6 +10,7 @@ import subprocess
 import shutil
 import re
 import hashlib
+import importlib.util
 import xml.etree.ElementTree as ET
 
 from agri_research_agent.automation import production_data_delta as delivery
@@ -139,6 +140,15 @@ def basis_transport_receipt(process, work):
         "SSH/SCP transport total timeout exhausted": "TRANSPORT_TIMEOUT",
     }
     last_error = stderr.strip().splitlines()[-1] if stderr.strip() else ""
+    if last_error:
+        # Reuse the transport's tested credential/URI/key-path redactor. Keep
+        # its bounded final error line, rather than a credential-bearing trace.
+        spec = importlib.util.spec_from_file_location(
+            "scheduled_basis_transport_detail", delivery.ROOT / "04_scripts/transfer_public_data_package.py")
+        transport = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(transport)
+        diagnostic["safe_error_detail"] = transport._bounded_remote_detail(
+            subprocess.CompletedProcess([], process.returncode, "", last_error))
     match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_]{0,79}): (.*)", last_error)
     if match:
         diagnostic["child_error_type"] = match[1]
