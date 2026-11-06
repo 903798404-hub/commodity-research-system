@@ -194,6 +194,24 @@ def config(tmp_path, job="canola_exports"):
     return {"schema_version": jobs.SCHEMA, "job": job, "runtime_root": str(tmp_path / "scheduler"), "delivery": inner}
 
 
+def test_basis_gui_interpreter_task_uses_pinned_entry_without_a_console_shell(tmp_path):
+    value = config(tmp_path, "nutstore_basis")
+    gui = tmp_path / "pythonw.exe"
+    gui.write_bytes(b"configuration-only fixture")
+    value["delivery"]["python"] = str(gui.resolve())
+    document = ET.fromstring(jobs.task_xml(config=value, control_root=jobs.delivery.ROOT,
+        config_path=tmp_path / "basis config.json", user_id="local-user", start_date=date(2026, 11, 6)))
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    assert document.findtext("t:Actions/t:Exec/t:Command", namespaces=ns) == str(gui.resolve())
+    arguments = document.findtext("t:Actions/t:Exec/t:Arguments", namespaces=ns)
+    assert arguments.startswith("-I -B -X utf8 ") and "run_first_batch_scheduled.py" in arguments
+    assert "--publish" in arguments and '"' in arguments
+    assert "powershell" not in arguments.lower()
+    assert [n.text for n in document.findall("t:Triggers/t:CalendarTrigger/t:StartBoundary", ns)] == [
+        "2026-11-06T17:00:00+08:00", "2026-11-06T20:00:00+08:00"]
+    assert document.findtext("t:Settings/t:MultipleInstancesPolicy", namespaces=ns) == "IgnoreNew"
+
+
 @pytest.mark.parametrize("job", ["canola_exports", "nutstore_basis", "positions_domestic", "positions_foreign"])
 def test_task_has_exact_scope_hidden_windows_and_no_overlapping_execution(tmp_path, job):
     value = config(tmp_path, job)

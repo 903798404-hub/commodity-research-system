@@ -27,7 +27,10 @@ def _bootstrap(config: dict) -> None:
     executable = str(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/cmd/git.exe") if os.name == "nt" else "git"
     def git(*args: str) -> bytes:
         result = subprocess.run([executable, "-c", "core.fsmonitor=false", "-C", str(ROOT), *args],
-                                env=env, capture_output=True, check=False, timeout=300)
+                                env=env, capture_output=True, check=False, timeout=300,
+                                stdin=subprocess.DEVNULL,
+                                # CREATE_NO_WINDOW also applies before repository imports are trusted.
+                                creationflags=0x08000000 if os.name == "nt" else 0)
         if result.returncode:
             raise ValueError("control source verification failed")
         return result.stdout

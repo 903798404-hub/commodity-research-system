@@ -191,6 +191,8 @@ def _run(command: list[str], *, cwd: Path | None = None, env: dict | None = None
                                 # Explicit payloads still use subprocess.run's pipe.
                                 **({"stdin": subprocess.DEVNULL} if input is None else {}),
                                 capture_output=True, text=not binary,
+                                # CREATE_NO_WINDOW: unattended children must not attach to a desktop console.
+                                creationflags=0x08000000 if os.name == "nt" else 0,
                                 **({"encoding": "utf-8", "errors": "strict"} if not binary else {}),
                                 timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:

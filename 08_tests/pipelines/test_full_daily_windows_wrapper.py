@@ -977,3 +977,16 @@ def _assert_first_batch_protected_nutstore_tree(tmp_path):
         with pytest.raises(ValueError, match="forbidden for writes"):
             jobs.validate_config(value)
     assert not protected.exists()
+    if os.name == "nt":
+        # This helper is part of the existing required real Windows filesystem
+        # case. Exercise both actual native-child launchers, not just kwargs.
+        probe = "import ctypes,json; print(json.dumps({'console':ctypes.windll.kernel32.GetConsoleWindow()}))"
+        result = jobs.delivery._run([sys.executable, "-I", "-B", "-c", probe], timeout=30)
+        assert json.loads(result.stdout)["console"] == 0
+        transfer = _load_script("windowless_basis_transport_probe", ROOT / "04_scripts/transfer_public_data_package.py")
+        result = transfer._run([sys.executable, "-I", "-B", "-c", probe])
+        assert result.returncode == 0 and json.loads(result.stdout)["console"] == 0
+        gui = Path(sys.executable).with_name("pythonw.exe")
+        assert gui.is_file()
+        gui_result = jobs.delivery._run([str(gui), "-I", "-B", "-c", probe], timeout=30)
+        assert json.loads(gui_result.stdout)["console"] == 0

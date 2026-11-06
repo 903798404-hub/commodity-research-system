@@ -107,6 +107,13 @@ def task_xml(*, config, control_root, config_path, user_id, start_date):
         ("Hidden", "true"), ("ExecutionTimeLimit", "PT90M")):
         element(settings, key, value)
     action = element(element(task, "Actions", Context="Author"), "Exec")
+    if config["job"] == "nutstore_basis" and Path(config["delivery"]["python"]).name.lower() == "pythonw.exe":
+        element(action, "Command", config["delivery"]["python"])
+        element(action, "Arguments", subprocess.list2cmdline(["-I", "-B", "-X", "utf8",
+            str(Path(control_root) / "04_scripts/automation/run_first_batch_scheduled.py"),
+            "--config", str(config_path), "--publish"]))
+        element(action, "WorkingDirectory", str(control_root))
+        return ET.tostring(task, encoding="utf-8", xml_declaration=True)
     element(action, "Command", r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
     element(action, "Arguments", subprocess.list2cmdline(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
         "-File", str(Path(control_root) / "04_scripts/automation/launch_first_batch_scheduled.ps1"),

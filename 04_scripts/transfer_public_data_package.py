@@ -184,7 +184,10 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
             raise TransportTimeoutError("SSH/SCP transport total timeout exhausted")
     try:
         return subprocess.run(
-            command, text=True, capture_output=True, check=False, timeout=timeout
+            command, text=True, capture_output=True, check=False, timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            # CREATE_NO_WINDOW keeps SSH/SCP out of desktop console control groups.
+            creationflags=0x08000000 if sys.platform == "win32" else 0,
         )
     except subprocess.TimeoutExpired as exc:
         raise TransportTimeoutError("SSH/SCP transport total timeout exhausted") from exc
