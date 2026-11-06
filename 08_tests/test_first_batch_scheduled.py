@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import sys
 import json
 import hashlib
+import subprocess
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -12,6 +13,41 @@ import pytest
 from agri_research_agent.automation import first_batch_scheduled as jobs
 from agri_research_agent.automation import scheduled_baselines as baselines
 from agri_research_agent.data_sources import nutstore_basis as nutstore
+
+
+@pytest.mark.parametrize("code,stdout,stderr,expected", [
+    (1, "", "RuntimeError: exact running application container could not be resolved\n", "MISSING"),
+    (0, "  \n", "password=never-save-this", "MISSING"),
+    (1, "not-json", "token=never-save-this", "INVALID"),
+    (0, '["unexpected"]', "", "INVALID"),
+    (0, '{"schema_version":"public-data-transport/1","status":[]}', "", "INVALID"),
+    (0, '{"schema_version":"public-data-transport/1","status":"SYNCED","status":"FAILED"}', "", "INVALID"),
+    (0, '{"password":"never-save-this"}', "", "INVALID"),
+])
+def test_basis_transport_missing_or_invalid_receipt_is_fail_closed_and_keeps_safe_evidence(
+        tmp_path, code, stdout, stderr, expected):
+    result = subprocess.CompletedProcess(["approved-python"], code, stdout, stderr)
+    with pytest.raises(jobs.delivery.ProductionDataError, match="basis transport returned"):
+        jobs.basis_transport_receipt(result, tmp_path)
+    diagnostic = json.loads((tmp_path / "transport-diagnostics.json").read_bytes())
+    assert diagnostic["exit_code"] == code and diagnostic["receipt"] == expected
+    assert diagnostic["stderr"]["sha256"] == hashlib.sha256(stderr.encode()).hexdigest()
+    assert diagnostic["stdout"]["size_bytes"] == len(stdout.encode())
+    assert "never-save-this" not in (tmp_path / "transport-diagnostics.json").read_text()
+    assert not (tmp_path / "transport-receipt.json").exists()
+
+
+@pytest.mark.parametrize("code", [0, 1, 124])
+def test_basis_transport_receipt_and_child_exit_are_both_required(tmp_path, code):
+    receipt = {"schema_version": "public-data-transport/1", "status": "SYNCED", "package_id": "candidate"}
+    process = subprocess.CompletedProcess([], code, "non-secret progress\n" + json.dumps(receipt), "")
+    if code:
+        with pytest.raises(jobs.delivery.ProductionDataError, match="child failed"):
+            jobs.basis_transport_receipt(process, tmp_path)
+    else:
+        assert jobs.basis_transport_receipt(process, tmp_path) == receipt
+    assert json.loads((tmp_path / "transport-receipt.json").read_bytes()) == receipt
+    assert json.loads((tmp_path / "transport-diagnostics.json").read_bytes())["exit_code"] == code
 
 
 def _public_copy_fixture(tmp_path, monkeypatch, *, changed=False, large=False):

@@ -8,6 +8,8 @@ import sys
 import uuid
 import subprocess
 import shutil
+import re
+import hashlib
 import xml.etree.ElementTree as ET
 
 from agri_research_agent.automation import production_data_delta as delivery
@@ -112,6 +114,59 @@ def task_xml(*, config, control_root, config_path, user_id, start_date):
     return ET.tostring(task, encoding="utf-8", xml_declaration=True)
 
 
+def basis_transport_receipt(process, work):
+    """Keep credential-free child evidence, including an absent CLI receipt."""
+    stdout = process.stdout or ""
+    stderr = process.stderr or ""
+    diagnostic = {
+        "schema_version": "nutstore-basis-transport-check/1",
+        "exit_code": process.returncode,
+        "stdout": {"sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
+                   "size_bytes": len(stdout.encode("utf-8"))},
+        "stderr": {"sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
+                   "size_bytes": len(stderr.encode("utf-8"))},
+        "receipt": "MISSING",
+    }
+    # Tracebacks can contain credentials. Retain only an exception class and
+    # exact known transport messages; never save arbitrary child output.
+    reasons = {
+        "remote Current preflight failed": "REMOTE_CURRENT_PREFLIGHT_FAILED",
+        "exact running application container could not be resolved": "APPLICATION_UNAVAILABLE",
+        "exact running application container could not be resolved for package store": "APPLICATION_UNAVAILABLE",
+        "remote permission contract preparation failed": "PERMISSION_PREPARATION_FAILED",
+        "private staging creation failed": "STAGING_CREATION_FAILED",
+        "SCP package transport failed": "SCP_FAILED",
+        "SSH/SCP transport total timeout exhausted": "TRANSPORT_TIMEOUT",
+    }
+    last_error = stderr.strip().splitlines()[-1] if stderr.strip() else ""
+    match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_]{0,79}): (.*)", last_error)
+    if match:
+        diagnostic["child_error_type"] = match[1]
+        if match[2] in reasons:
+            diagnostic["reason"] = reasons[match[2]]
+    elif last_error in reasons:
+        diagnostic["reason"] = reasons[last_error]
+    lines = stdout.strip().splitlines()
+    try:
+        delivery.require(bool(lines), "basis transport returned no receipt")
+        try:
+            receipt = delivery.strict_json(lines[-1])
+        except (ValueError, TypeError):
+            diagnostic["receipt"] = "INVALID"
+            raise delivery.ProductionDataError("basis transport returned an invalid receipt") from None
+        if receipt.get("schema_version") != "public-data-transport/1" or receipt.get("status") not in (
+            "SYNCED", "NO_CHANGE", "FAILED", "ALREADY_INITIALIZED",
+        ):
+            diagnostic["receipt"] = "INVALID"
+            raise delivery.ProductionDataError("basis transport returned an invalid receipt")
+        diagnostic["receipt"] = "PARSED"
+        (work / "transport-receipt.json").write_bytes(delivery.canonical_json_bytes(receipt))
+        delivery.require(process.returncode == 0, "basis transport child failed")
+        return receipt
+    finally:
+        atomic_write_json(work / "transport-diagnostics.json", diagnostic)
+
+
 def run_basis(config, work, *, publish):
     from agri_research_agent.pipelines.nutstore_domestic_basis import prepare_nutstore_basis_package
     from agri_research_agent.pipelines.lutou_domestic_basis import load_domestic_basis_current
@@ -166,8 +221,7 @@ def run_basis(config, work, *, publish):
                 "--candidate-manifest-sha256", delivery.sha256_file(package.directory / "manifest.json"),
                 "--reconciliation-manifest-sha256", delivery.sha256_file(work / "scope-evidence.json")]
         transported = delivery._run(args, timeout=4200, allow_failure=True)
-        receipt = delivery.strict_json(transported.stdout.strip().splitlines()[-1])
-        (work / "transport-receipt.json").write_bytes(delivery.canonical_json_bytes(receipt))
+        receipt = basis_transport_receipt(transported, work)
         delivery.require(transported.returncode == 0 and receipt.get("status") == "SYNCED"
                          and receipt.get("transport") == "PASS" and receipt.get("package_id") == package.package_id
                          and receipt.get("promotion", {}).get("cas_result") == "PASS",
