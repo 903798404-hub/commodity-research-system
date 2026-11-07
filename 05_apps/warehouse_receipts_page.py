@@ -73,7 +73,7 @@ def render_warehouse_receipts(project_root: Path) -> None:
             status = json.loads(status_path.read_text(encoding="utf-8", errors="strict"))
             checked = pd.Timestamp(status["checked_at"]).tz_convert("Asia/Shanghai")
             label = {"UPDATED": "已更新", "NO_CHANGE": "无新增数据", "WAITING_FOR_SOURCE": "等待源数据", "FAILED": "更新失败，保留上次数据"}.get(status["status"], "已检查")
-            st.caption(f"每日17:30更新 · 最近检查 {checked:%Y-%m-%d %H:%M} · {label}")
+            st.caption(f"工作日 16:15 首查 · 最近检查 {checked:%Y-%m-%d %H:%M} · {label}")
         except (OSError, ValueError, KeyError, TypeError):
             st.caption("最近更新状态暂不可读取；当前图表仍使用已校验快照。")
     for index, symbol in enumerate(selected):
