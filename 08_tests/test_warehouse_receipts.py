@@ -136,8 +136,15 @@ render_warehouse_receipts(Path({str(ROOT)!r}))
     daily = aggregate_daily(raw)
     write_snapshot(tmp_path, raw, daily, dict(requested_start="2025-01-01", requested_end="2026-10-09",
                    coverage={"M": {"first": "2025-10-09", "last": "2026-10-09", "units": ["手"], "observed_days": 2}}))
+    (tmp_path / "update_status.json").write_text(
+        json.dumps({"checked_at": "2026-10-09T08:16:00+00:00", "status": "NO_CHANGE"}), encoding="utf-8"
+    )
     app = AppTest.from_string(script, default_timeout=20).run()
     assert not app.exception
+    assert any(
+        "16:15 首查" in caption.value and "2026-10-09 16:16" in caption.value and "无新增数据" in caption.value
+        for caption in app.caption
+    )
     assert len(app.get("plotly_chart")) == 1
     assert not app.checkbox
     assert len(app.dataframe) == 0
