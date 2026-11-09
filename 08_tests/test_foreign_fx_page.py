@@ -57,6 +57,12 @@ def test_main_entry_displays_real_schema_changes_currency_and_comparison(monkeyp
     assert not app.exception
     assert app.metric[0].label=='USD/BRL'
     assert app.metric[2].value=='+25.00%'
+    assert len(app.get("plotly_chart")) == 2
+    assert any(
+        '[data-testid="stPlotlyChart"]' in item.proto.body
+        and "max-width: max(50%, 600px);" in item.proto.body
+        for item in app.get("html")
+    )
     app.selectbox[0].set_value('CAD').run(timeout=30)
     assert not app.exception and app.metric[0].label=='USD/CAD'
     app.multiselect(key='fx_season_years_CAD').set_value([]).run(timeout=30)
