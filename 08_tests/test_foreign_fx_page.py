@@ -28,6 +28,7 @@ def test_seasonal_chart_month_axis_and_current_year_highlight():
     assert figure.layout.legend.yref == "container" and figure.layout.legend.yanchor == "bottom"
     assert len(figure.layout.annotations) == 3
     assert all(note.y == 1 and note.yanchor == "bottom" for note in figure.layout.annotations)
+    assert all("font-size:14px" in note.text for note in figure.layout.annotations)
     assert next(t for t in figure.data if '均值' in t.name).y[0] == 4.5
 
 

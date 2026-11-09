@@ -87,12 +87,12 @@ def build_seasonality_figure(frame: pd.DataFrame, code: str, years: list[int], *
                     y=0.02, yref="container", yanchor="bottom", font=dict(size=10)),
     )
     for (label, value), (x, xshift, anchor) in zip(
-        _seasonality_metrics(code, overview(frame)), ((0, -58, "left"), (0.42, 0, "center"), (1, 4, "right"))
+        _seasonality_metrics(code, overview(frame)), ((0, -64, "left"), (0.42, 0, "center"), (1, 4, "right"))
     ):
         figure.add_annotation(
             xref="paper", yref="paper", x=x, y=1, xanchor=anchor, yanchor="bottom",
             xshift=xshift, yshift=12, align=anchor, showarrow=False, font=dict(size=10, color=MEAN_COLOR),
-            text=f'{label}<br><br><span style="font-size:16px;color:#172033"><b>{value}</b></span>',
+            text=f'{label}<br><br><span style="font-size:14px;color:#172033"><b>{value}</b></span>',
         )
     figure.update_xaxes(tickmode="array", tickvals=[date(2000, m, 1) for m in range(1, 13)],
                         ticktext=[f"{m}月" for m in range(1, 13)],
