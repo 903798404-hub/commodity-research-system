@@ -48,6 +48,15 @@ def _scope_table() -> pd.DataFrame:
                           "关联品种": c.commodities, "研究含义": c.meaning} for c in CURRENCIES])
 
 
+def _seasonality_metrics(code: str, summary: pd.DataFrame) -> tuple[tuple[str, str], ...]:
+    latest = summary.loc[summary["currency"] == code].iloc[0]
+    return (
+        (f"USD/{code}", "—" if pd.isna(latest["rate"]) else f"{latest['rate']:.4f}"),
+        ("最新业务日期", "—" if pd.isna(latest["latest_date"]) else str(latest["latest_date"])),
+        ("本币兑美元日涨跌", "—" if pd.isna(latest["return_1"]) else f"{latest['return_1']:+.2%}"),
+    )
+
+
 @cache_computation
 def build_seasonality_figure(frame: pd.DataFrame, code: str, years: list[int], *,
                              current_year: int, normalize: bool = False) -> go.Figure:
@@ -71,9 +80,23 @@ def build_seasonality_figure(frame: pd.DataFrame, code: str, years: list[int], *
             hovertemplate="%{x|%m}月<br>%{y:.4f}（%{customdata}年有报价）<extra>历史月度均值</extra>",
             line=dict(color=MEAN_COLOR, width=2.5, dash="dash")))
     _layout(figure, "汇率指数（年初＝100）" if normalize else f"{code} / USD")
+    figure.update_layout(
+        height=440,
+        margin=dict(l=65, t=65, b=75),
+        legend=dict(x=0.02, xref="container", xanchor="left",
+                    y=0.02, yref="container", yanchor="bottom", font=dict(size=10)),
+    )
+    for (label, value), (x, xshift, anchor) in zip(
+        _seasonality_metrics(code, overview(frame)), ((0, -58, "left"), (0.42, 0, "center"), (1, 4, "right"))
+    ):
+        figure.add_annotation(
+            xref="paper", yref="paper", x=x, y=1, xanchor=anchor, yanchor="bottom",
+            xshift=xshift, yshift=12, align=anchor, showarrow=False, font=dict(size=10, color=MEAN_COLOR),
+            text=f'{label}<br><br><span style="font-size:16px;color:#172033"><b>{value}</b></span>',
+        )
     figure.update_xaxes(tickmode="array", tickvals=[date(2000, m, 1) for m in range(1, 13)],
                         ticktext=[f"{m}月" for m in range(1, 13)],
-                        range=[date(2000, 1, 1), date(2000, 12, 31)], title="月份")
+                        range=[date(2000, 1, 1), date(2000, 12, 31)])
     return figure
 
 
@@ -121,22 +144,19 @@ def render_foreign_fx_page(*, project_root: Path = PROJECT_ROOT) -> None:
     code = st.selectbox("研究币种", available, format_func=lambda c: f"{BY_CODE[c].name} · USD/{c}")
     trend, compare, definitions = st.tabs(["季节性", "本币强弱对比", "数据与研究含义"])
     with trend:
-        rows = frame.loc[frame["currency"] == code].sort_values("date")
-        last = rows.iloc[-1]
-        cols = st.columns(3)
-        cols[0].metric(f"USD/{code}", f"{last['local_per_usd']:.4f}")
-        cols[1].metric("最新业务日期", str(last["date"]))
-        ret = summary.loc[summary["currency"] == code, "return_1"].iloc[0]
-        cols[2].metric("本币相对美元日涨跌", "—" if pd.isna(ret) else f"{ret:+.2%}")
-        years = sorted({d.year for d in rows["date"]})
+        chart_slot = st.empty()
+        years = sorted({d.year for d in frame.loc[frame["currency"] == code, "date"]})
         chosen = st.multiselect("比较年份", years, default=years[-6:], key=f"fx_season_years_{code}")
         mode = st.radio("图表口径", ["汇率水平", "年初＝100"], horizontal=True, key="fx_season_mode")
         current_year = datetime.now(timezone(timedelta(hours=8))).year
         if chosen:
-            st.plotly_chart(build_seasonality_figure(frame, code, chosen, current_year=current_year,
-                            normalize=mode == "年初＝100"), use_container_width=True)
+            chart_slot.plotly_chart(build_seasonality_figure(frame, code, chosen, current_year=current_year,
+                                    normalize=mode == "年初＝100"), width="stretch")
         else:
-            st.info("选择至少一个年份查看季节性。")
+            with chart_slot.container():
+                for column, (label, value) in zip(st.columns(3), _seasonality_metrics(code, summary)):
+                    column.metric(label, value)
+                st.info("选择至少一个年份查看季节性。")
         st.caption("灰线为所选历史年份的月度均值：先算各年月均值，再对年份等权平均；至少2年有报价，不含今年。日线不补缺失，闰日单独对齐。")
         if mode == "年初＝100":
             st.caption("指数＝当日汇率÷各年首个有报价日汇率×100；高于100代表美元相对本币升值。")

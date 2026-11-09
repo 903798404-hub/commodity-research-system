@@ -24,6 +24,10 @@ def test_seasonal_chart_month_axis_and_current_year_highlight():
     assert current.line.color == CURRENT_YEAR_COLOR and current.line.width == CURRENT_LINE_WIDTH
     assert current.x[0] == date(2000,3,1) and current.customdata[0] == '2026-03-01'
     assert list(figure.layout.xaxis.ticktext) == [f'{m}月' for m in range(1,13)]
+    assert figure.layout.xaxis.title.text is None
+    assert figure.layout.legend.yref == "container" and figure.layout.legend.yanchor == "bottom"
+    assert len(figure.layout.annotations) == 3
+    assert all(note.y == 1 and note.yanchor == "bottom" for note in figure.layout.annotations)
     assert next(t for t in figure.data if '均值' in t.name).y[0] == 4.5
 
 
@@ -55,18 +59,24 @@ def test_main_entry_displays_real_schema_changes_currency_and_comparison(monkeyp
     app=AppTest.from_file(str(ROOT/'05_apps/streamlit_app.py'),default_timeout=30).run()
     app.session_state['selected_workspace_page']='外盘汇率'; app.run(timeout=30)
     assert not app.exception
-    assert app.metric[0].label=='USD/BRL'
-    assert app.metric[2].value=='+25.00%'
-    assert len(app.get("plotly_chart")) == 2
+    charts = app.get("plotly_chart")
+    assert len(charts) == 2
+    annotations = json.loads(charts[0].proto.spec)["layout"]["annotations"]
+    assert "USD/BRL" in annotations[0]["text"] and "4.0000" in annotations[0]["text"]
+    assert "2026-10-08" in annotations[1]["text"]
+    assert "+25.00%" in annotations[2]["text"]
     assert any(
         '[data-testid="stPlotlyChart"]' in item.proto.body
         and "max-width: max(50%, 600px);" in item.proto.body
         for item in app.get("html")
     )
     app.selectbox[0].set_value('CAD').run(timeout=30)
-    assert not app.exception and app.metric[0].label=='USD/CAD'
+    assert not app.exception
+    chart = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert "USD/CAD" in chart["layout"]["annotations"][0]["text"]
     app.multiselect(key='fx_season_years_CAD').set_value([]).run(timeout=30)
     assert any('选择至少一个年份' in x.value for x in app.info)
+    assert app.metric[0].label == "USD/CAD"
     app.multiselect(key='fx_season_years_CAD').set_value([2026]).run(timeout=30)
     app.radio(key='fx_season_mode').set_value('年初＝100').run(timeout=30)
     assert not app.exception
@@ -103,5 +113,6 @@ def test_page_reports_failed_check_without_rewriting_stable_data(monkeypatch, tm
     assert not app.exception
     assert any('采集失败' in warning.value for warning in app.warning)
     assert any('最近检查' in caption.value and '北京时间' in caption.value for caption in app.caption)
-    assert app.metric[1].value == '2024-01-03'
+    chart = json.loads(app.get("plotly_chart")[0].proto.spec)
+    assert "2024-01-03" in chart["layout"]["annotations"][1]["text"]
     assert path.read_bytes() == original
