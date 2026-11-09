@@ -21,10 +21,14 @@ def _icon_markup(name: str, css_class: str = "agri-icon") -> str:
 
 
 def inject_workspace_theme() -> None:
-    """Install styling for the new homepage and custom sidebar fragments only."""
+    """Install shared presentation styles for the workspace."""
     st.html(
         """
 <style>
+/* Resize the Plotly container so the plot can redraw at its new width. */
+[data-testid="stMain"] [data-testid="stElementContainer"]:has([data-testid="stPlotlyChart"]):not([data-testid="stColumn"]:not(:only-child) *) {
+  max-width: max(50%, 600px);
+}
 .agri-home-header { padding: 5px 0 22px; border-bottom: 1px solid #DCE4EE; }
 .agri-home-kicker { color: #4D6B8E; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .agri-home-title { margin: 7px 0 8px; color: #15263A; font-size: clamp(32px, 3.1vw, 46px); letter-spacing: -.04em; line-height: 1.16; font-weight: 780; }
