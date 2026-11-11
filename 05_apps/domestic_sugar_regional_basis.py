@@ -13,6 +13,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError
+from agri_research_agent.data_sources.domestic_sugar_daily import load_daily
 from agri_research_agent.data_sources.domestic_sugar_regional_history import (
     REGIONS, RegionalSugarHistory, load_regional_history, resolve_regional_history,
 )
@@ -20,7 +21,38 @@ from agri_research_agent.shared.chart_style import GRID_COLOR, HISTORICAL_YEAR_C
 from basis_interactive_charts import PLOTLY_CONFIG
 
 REGION_COLORS = dict(zip(REGIONS, (HISTORICAL_YEAR_COLORS[0], HISTORICAL_YEAR_COLORS[6], MEAN_COLOR)))
+REGION_COLORS["广西糖厂"] = HISTORICAL_YEAR_COLORS[0]
+DISPLAY_REGIONS = (*REGIONS, "广西糖厂")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _daily_file() -> Path:
+    configured = os.environ.get("DOMESTIC_SUGAR_DAILY_FILE")
+    return (Path(configured) if configured else
+            Path("/runtime/import-profit/operational/cnf/domestic-sugar-daily/feed.json"))
+
+
+def render_daily_summary() -> None:
+    path = _daily_file()
+    if not path.exists():
+        return
+    try:
+        _, recent = load_daily(path)
+    except (SugarHistoryError, OSError, ValueError):
+        st.warning("日度白糖数据校验失败，保留历史数据。")
+        return
+    if recent.empty:
+        return
+    columns = st.columns(3)
+    for col, region in zip(columns, ("广西糖厂", "昆明", "乌鲁木齐")):
+        observations = recent.loc[recent.region.eq(region)].sort_values("business_date")
+        if observations.empty:
+            continue
+        last = observations.iloc[-1]
+        value = f"{last.cash_price:,.0f}" if pd.notna(last.cash_price) else "—"
+        col.metric(region + "现货（元/吨）", value)
+        col.caption(f"{last.business_date:%Y-%m-%d}｜基差 " +
+                    (f"{last.basis:+,.0f} 元/吨" if pd.notna(last.basis) else "—"))
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
@@ -44,8 +76,10 @@ def build_regional_basis_figure(daily: pd.DataFrame, *, missing_trading_days) ->
     figure = Figure(figsize=(12, 4.2), dpi=120); FigureCanvasAgg(figure)
     axis = figure.subplots()
     endpoints = []
-    for region in REGIONS:
+    for region in DISPLAY_REGIONS:
         selected = daily.loc[daily.region.eq(region)].sort_values("business_date")
+        if selected.empty:
+            continue
         xs, ys = [], []; previous = None
         for row in selected.itertuples(index=False):
             if previous is not None and missing_trading_days(previous, row.business_date) > 5:
@@ -102,8 +136,10 @@ def build_regional_basis_figure(daily: pd.DataFrame, *, missing_trading_days) ->
 def build_regional_basis_interactive(daily: pd.DataFrame, *, missing_trading_days) -> go.Figure:
     figure = go.Figure()
     endpoints = []
-    for region in REGIONS:
+    for region in DISPLAY_REGIONS:
         selected = daily.loc[daily.region.eq(region)].sort_values("business_date")
+        if selected.empty:
+            continue
         xs, ys, custom = [], [], []
         previous = None
         for row in selected.itertuples(index=False):
@@ -164,6 +200,15 @@ def render_regional_sugar_history(*, missing_trading_days, root: Path | None = N
         st.warning("三地白糖历史快照校验失败，该图暂停显示。")
         return
     daily = snapshot.daily
+    # A separate manually published feed keeps all legacy history untouched.
+    daily_file = _daily_file()
+    if daily_file.exists():
+        try:
+            _, recent = load_daily(daily_file)
+            if not recent.empty:
+                daily = pd.concat([daily, recent], ignore_index=True).sort_values(["business_date", "region"])
+        except (SugarHistoryError, OSError, ValueError):
+            st.warning("日度白糖数据校验失败，保留历史数据。")
     lower, upper = daily.business_date.min().date(), daily.business_date.max().date()
     default_start = max(lower, min(upper, pd.Timestamp("2025-01-01").date()))
     left, right = st.columns(2)
@@ -180,7 +225,7 @@ def render_regional_sugar_history(*, missing_trading_days, root: Path | None = N
     if selected.basis.notna().sum() == 0:
         st.info("所选日期没有有效的同日现货与期货配对。")
         return
-    st.caption("基差 = 各地贸易商现货报价平均值 − 同日SR主力合约未复权收盘价。"
+    st.caption("基差 = 现货价格 − 同日SR主力合约未复权收盘价。"
                "三地使用相同主力映射；换月跳变保留，缺失不填补。")
     figure = build_regional_basis_interactive(selected, missing_trading_days=missing_trading_days)
     st.plotly_chart(figure, width="stretch", config=PLOTLY_CONFIG, key="sugar_regional_chart")
