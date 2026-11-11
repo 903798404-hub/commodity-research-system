@@ -49,10 +49,10 @@ def render_daily_summary() -> None:
         if observations.empty:
             continue
         last = observations.iloc[-1]
-        value = f"{last.cash_price:,.0f}" if pd.notna(last.cash_price) else "—"
+        value = f"{last.cash_price:,.2f}".rstrip("0").rstrip(".") if pd.notna(last.cash_price) else "—"
         col.metric(region + "现货（元/吨）", value)
         col.caption(f"{last.business_date:%Y-%m-%d}｜基差 " +
-                    (f"{last.basis:+,.0f} 元/吨" if pd.notna(last.basis) else "—"))
+                    (f"{last.basis:+,.2f}".rstrip("0").rstrip(".") + " 元/吨" if pd.notna(last.basis) else "—"))
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
@@ -154,7 +154,7 @@ def build_regional_basis_interactive(daily: pd.DataFrame, *, missing_trading_day
         figure.add_trace(go.Scatter(x=xs, y=ys, name=region, mode="lines", connectgaps=False,
             customdata=custom, line=dict(color=REGION_COLORS[region], width=1.8,
                                         dash="dash" if region == "乌鲁木齐" else "solid"),
-            hovertemplate="%{x|%Y-%m-%d}<br>基差 %{y:+,.0f} 元/吨<br>现货 %{customdata[1]:,.0f}<br>%{customdata[0]} 收盘 %{customdata[2]:,.0f}<extra>%{fullData.name}</extra>"))
+            hovertemplate="%{x|%Y-%m-%d}<br>基差 %{y:+,.2f} 元/吨<br>现货 %{customdata[1]:,.2f}<br>%{customdata[0]} 收盘 %{customdata[2]:,.2f}<extra>%{fullData.name}</extra>"))
         valid = selected.loc[selected.basis.notna()]
         if not valid.empty:
             last = valid.iloc[-1]
