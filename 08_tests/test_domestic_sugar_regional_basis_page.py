@@ -13,8 +13,28 @@ sys.path.insert(0, str(ROOT / "05_apps"))
 from basis_page import missing_trading_days_between
 from domestic_sugar_regional_basis import REGION_COLORS, build_regional_basis_figure, build_regional_basis_interactive
 from agri_research_agent.data_sources.domestic_sugar_regional_history import REGIONS, load_regional_history
+from agri_research_agent.data_sources.domestic_sugar_daily import validate_daily
 
 pytest_plugins = ["data_sources.test_domestic_sugar_regional_history"]
+
+
+def test_manual_feed_adds_guangxi_without_changing_historic_liuzhou(regional_root):
+    import pandas as pd
+    historical = load_regional_history(regional_root).daily
+    extra = validate_daily(dict(schema_version="domestic-sugar-daily/1", workbook_sha256="a" * 64,
+        mapping_sha256="b" * 64, daily_sha256="c" * 64, records=[dict(
+            date="2026-11-10", region="广西糖厂",
+            components=[dict(name="东糖", price=5150, cell="J2701"),
+                        dict(name="凤糖", price=5160, cell="K2701")],
+            contract="SR2701.ZCE", close=5195),
+            dict(date="2026-11-10", region="昆明", components=[], contract="SR2701.ZCE", close=5195),
+            dict(date="2026-11-10", region="乌鲁木齐", components=[], contract="SR2701.ZCE", close=5195)]))
+    combined = pd.concat([historical, extra], ignore_index=True)
+    figure = build_regional_basis_interactive(combined, missing_trading_days=missing_trading_days_between)
+    legacy = next(t for t in figure.data if t.name == "柳州")
+    new = next(t for t in figure.data if t.name == "广西糖厂")
+    assert len(legacy.y) and list(new.y) == [-40.0]
+    assert new.customdata[0][0] == "SR2701.ZCE"
 
 
 def test_interactive_regions_preserve_exact_dates_values_contracts_and_missingness(regional_root):

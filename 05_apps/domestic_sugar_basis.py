@@ -16,7 +16,7 @@ from agri_research_agent.data_sources.domestic_sugar_history import (
     SugarHistoryError, SugarHistorySnapshot, file_sha256, load_sugar_history, resolve_sugar_history,
     reconcile_regional_history,
 )
-from domestic_sugar_regional_basis import render_regional_sugar_history, load_regional_page_data
+from domestic_sugar_regional_basis import render_regional_sugar_history, load_regional_page_data, render_daily_summary
 from basis_interactive_charts import seasonal_chart, PLOTLY_CONFIG
 
 
@@ -200,6 +200,7 @@ def render_sugar_basis_page(sugar_history_root: Path | None = None,
     # to sugar source readers, and to keep the route independent of oilseed Current.
     from basis_page import YEAR_COLORS, FALLBACK_COLORS, missing_trading_days_between
     st.title("白糖基差")
+    render_daily_summary()
     project = Path(__file__).resolve().parents[1]
     root = sugar_history_root or Path(os.environ.get("DOMESTIC_SUGAR_HISTORY_ROOT",
         str(project / "01_data/processed/domestic_sugar_history")))
