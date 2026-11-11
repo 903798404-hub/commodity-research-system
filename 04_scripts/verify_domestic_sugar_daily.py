@@ -79,8 +79,13 @@ def verify(candidate: Path, current: Path | None = None) -> dict:
         load_daily(current)
         old = json.loads(current.read_text(encoding="utf-8"))["records"]
         new = {(r["date"], r["region"]): r for r in feed["records"]}
-        if any(new.get((r["date"], r["region"])) != r for r in old):
-            raise ValueError("候选会改写或删除已发布的日度记录")
+        for previous in old:
+            latest = new.get((previous["date"], previous["region"]))
+            if (latest is None
+                    or (previous["components"] and latest["components"] != previous["components"])
+                    or (previous["contract"] is not None and latest["contract"] != previous["contract"])
+                    or (previous["close"] is not None and latest["close"] != previous["close"])):
+                raise ValueError("候选会改写或删除已发布的日度记录")
     return dict(feed_sha256=version, rows=len(frame), valid_spot=int(frame.cash_price.notna().sum()),
                 paired=int(frame.basis.notna().sum()), max_date=frame.business_date.max().strftime("%Y-%m-%d"))
 

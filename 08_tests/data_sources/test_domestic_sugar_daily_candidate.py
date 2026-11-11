@@ -52,3 +52,11 @@ def test_candidate_does_not_change_previously_published_row(tmp_path):
     old.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="改写或删除"):
         verify(tmp_path, old)
+
+
+def test_candidate_may_fill_a_previously_missing_price(tmp_path):
+    data = fixture(tmp_path)
+    old = tmp_path / "current.json"
+    data["records"][0]["components"] = []
+    old.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert verify(tmp_path, old)["paired"] == 1
