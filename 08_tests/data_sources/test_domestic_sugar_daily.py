@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import pytest
 
-from agri_research_agent.data_sources.domestic_sugar_daily import validate_daily
+from agri_research_agent.data_sources.domestic_sugar_daily import load_daily, validate_daily
 from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError
 
 
@@ -47,3 +47,10 @@ def test_rejects_invalid_data(mutate):
     data = payload(); mutate(data)
     with pytest.raises(SugarHistoryError):
         validate_daily(data)
+
+
+def test_duplicate_json_keys_are_rejected(tmp_path):
+    path = tmp_path / "feed.json"
+    path.write_text('{"schema_version":"domestic-sugar-daily/1","schema_version":"other"}', encoding="utf-8")
+    with pytest.raises(SugarHistoryError):
+        load_daily(path)
