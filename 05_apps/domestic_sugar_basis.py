@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -16,7 +18,8 @@ from agri_research_agent.data_sources.domestic_sugar_history import (
     SugarHistoryError, SugarHistorySnapshot, file_sha256, load_sugar_history, resolve_sugar_history,
     reconcile_regional_history,
 )
-from domestic_sugar_regional_basis import render_regional_sugar_history, load_regional_page_data, render_daily_summary
+from agri_research_agent.data_sources.domestic_sugar_daily import load_daily, load_fixed_closes
+from domestic_sugar_regional_basis import render_regional_sugar_history, load_regional_page_data, _daily_file
 from basis_interactive_charts import seasonal_chart, PLOTLY_CONFIG
 
 
@@ -36,6 +39,55 @@ def load_sugar_page_data(root: Path) -> SugarHistorySnapshot:
     if after["snapshot_id"] != snapshot.snapshot_id or file_sha256(after_database.parent / "manifest.json") != manifest_sha:
         raise ValueError("柳州历史指针在显示前发生变化")
     return snapshot
+
+
+def reconcile_daily_guangxi(snapshot: SugarHistorySnapshot, path: Path) -> SugarHistorySnapshot:
+    """Append only new daily factory observations to the immutable historical view."""
+    version, daily = load_daily(path)
+    fixed_prices = load_fixed_closes(path)
+    if file_sha256(path) != version:
+        raise SugarHistoryError("日度白糖记录在读取期间发生变化")
+    metadata = json.loads(path.read_text(encoding="utf-8"))
+    if file_sha256(path) != version:
+        raise SugarHistoryError("日度白糖记录在读取期间发生变化")
+    recent = daily.loc[daily.region.eq("广西糖厂") & ~daily.business_date.isin(snapshot.spot.business_date)].copy()
+    if recent.empty:
+        return snapshot
+    spot = recent[["business_date", "cash_price", "source_cell"]].copy()
+    spot["status"] = spot.cash_price.notna().map({True: "OBSERVED", False: "SOURCE_NULL"})
+    spot["source_sheet"] = "钢联原始数据"
+    spot["source_sha256"] = metadata["workbook_sha256"]
+    spot = pd.concat([snapshot.spot, spot.reindex(columns=snapshot.spot.columns)], ignore_index=True).sort_values("business_date")
+    main = recent[["business_date", "ts_code", "cash_price", "futures_price", "basis", "source_cell"]].copy()
+    main["price_field"] = "close"
+    main["spot_source_sha256"] = metadata["workbook_sha256"]
+    main["futures_source_sha256"] = metadata["daily_sha256"]
+    main["mapping_source_sha256"] = metadata["mapping_sha256"]
+    main = pd.concat([snapshot.main_basis, main.reindex(columns=snapshot.main_basis.columns)], ignore_index=True).sort_values("business_date")
+    prices = {(r.business_date, r.ts_code): r.futures_price for r in fixed_prices.itertuples()}
+    # The actual main close is also valid for its exact fixed contract and date.
+    for row in recent.itertuples():
+        if isinstance(row.ts_code, str) and pd.notna(row.futures_price):
+            key = (row.business_date, row.ts_code)
+            if key in prices and prices[key] != row.futures_price:
+                raise SugarHistoryError("固定合约与主力收盘价冲突")
+            prices[key] = row.futures_price
+    rows = []
+    for row in recent.itertuples():
+        for month in (1, 5, 9):
+            year = row.business_date.year + int(month < row.business_date.month)
+            code = f"SR{year % 100:02d}{month:02d}.ZCE"
+            close = prices.get((row.business_date, code))
+            rows.append(dict(business_date=row.business_date, ts_code=code, delivery_year=year,
+                delivery_month=month, cash_price=row.cash_price, futures_price=close,
+                basis=row.cash_price - close if pd.notna(row.cash_price) and close is not None else None,
+                futures_price_field="close", spot_source_sha256=metadata["workbook_sha256"],
+                futures_source_sha256=metadata["daily_sha256"]))
+    added = pd.DataFrame(rows)
+    fixed = pd.concat([snapshot.fixed_basis, added.reindex(columns=snapshot.fixed_basis.columns)], ignore_index=True)
+    nearest = pd.concat([snapshot.nearest_basis, added.reindex(columns=snapshot.nearest_basis.columns)], ignore_index=True)
+    return replace(snapshot, manifest={**snapshot.manifest, "daily_guangxi_feed": version},
+                   spot=spot, main_basis=main, fixed_basis=fixed, nearest_basis=nearest)
 
 
 def sugar_chart_rows(snapshot: SugarHistorySnapshot, kind: str) -> pd.DataFrame:
@@ -147,26 +199,26 @@ def _render_chart(snapshot: SugarHistorySnapshot, kind: str, title: str, years: 
 
 def render_sugar_history(snapshot: SugarHistorySnapshot, *, year_colors: dict[int, str],
                          fallback_colors: list[str], missing_trading_days, regional_snapshot=None) -> None:
-    st.subheader("白糖 · 柳州现货与基差")
+    region = "广西糖厂" if "daily_guangxi_feed" in snapshot.manifest else "柳州"
+    st.subheader(f"白糖 · {region}现货与基差")
     observed = snapshot.spot.loc[snapshot.spot.cash_price.notna()].sort_values("business_date")
     if observed.empty:
         st.info("柳州历史没有有效现货报价。")
         return
-    latest = observed.iloc[-1]
+    latest = snapshot.spot.sort_values("business_date").iloc[-1]
     prices = snapshot.nearest_basis.loc[snapshot.nearest_basis.business_date.eq(latest.business_date)].sort_values("delivery_month")
     cards = st.columns(4)
-    cards[0].metric("柳州现货（元/吨）", f"{latest.cash_price:,.0f}")
+    cards[0].metric(f"{region}现货（元/吨）", f"{latest.cash_price:,.2f}".rstrip("0").rstrip(".") if pd.notna(latest.cash_price) else "—")
     cards[0].caption(f"报价日期 {latest.business_date:%Y-%m-%d}")
     for card, month in zip(cards[1:], (1, 5, 9)):
         rows = prices.loc[prices.delivery_month.eq(month)]
         row = rows.iloc[0] if not rows.empty else None
         card.metric(f"{row.ts_code.removesuffix('.ZCE')} 基差" if row is not None and isinstance(row.ts_code, str) else f"SR{month:02d} 基差",
-                    f"{row.basis:,.0f}" if row is not None and pd.notna(row.basis) else "—")
+                    f"{row.basis:,.2f}".rstrip("0").rstrip(".") if row is not None and pd.notna(row.basis) else "—")
         card.caption(f"同日配对 {latest.business_date:%Y-%m-%d}" if row is not None and pd.notna(row.basis)
                      else f"{latest.business_date:%Y-%m-%d} 缺少同日收盘价")
     st.caption(f"现货报价 {latest.business_date:%Y-%m-%d}｜"
-               "基差 = 柳州贸易商报价平均值 − SR 原始合约收盘价；不同日不配对，缺失不填补。")
-    st.caption("现货按每天提供的报价截图核验后更新。当前显示已核验快照的实际报价日期。")
+               "基差 = 现货价格 − SR 原始合约收盘价；不同日不配对，缺失不填补。")
     years = sorted(observed.business_date.dt.year.unique().tolist())
     retained_years = st.session_state.get("sugar_history_years", years[-3:])
     selected = st.multiselect("白糖对比年份", years,
@@ -178,18 +230,18 @@ def render_sugar_history(snapshot: SugarHistorySnapshot, *, year_colors: dict[in
             render_regional_sugar_history(missing_trading_days=missing_trading_days, snapshot=regional_snapshot)
         return
     columns = st.columns(2)
-    for index, (kind, title) in enumerate((("spot", "柳州现货季节性"), ("01", "柳州 SR01 基差"), ("05", "柳州 SR05 基差"), ("09", "柳州 SR09 基差"), ("main", "柳州主力基差（辅助）"))):
+    for index, (kind, title) in enumerate((("spot", f"{region}现货季节性"), ("01", f"{region} SR01 基差"), ("05", f"{region} SR05 基差"), ("09", f"{region} SR09 基差"), ("main", f"{region}主力基差（辅助）"))):
         with columns[index % 2]:
             _render_chart(snapshot, kind, title, selected, year_colors, fallback_colors, missing_trading_days)
     with st.expander("白糖数据口径", expanded=False):
         source = snapshot.manifest["source_workbook"]
-        st.write(f"现货：钢联柳州当地贸易商报价平均值。原表工作表 {source['sheet']}，C列。")
+        st.write(f"日度现货使用广西糖厂有效报价均值。" if region == "广西糖厂" else f"现货：钢联柳州当地贸易商报价平均值。原表工作表 {source['sheet']}，C列。")
         if "regional_source_workbook" in snapshot.manifest:
             regional_source = snapshot.manifest["regional_source_workbook"]
             st.write(f"较新同口径现货：{regional_source['name']}，{regional_source['sheet']} B列。重叠非空报价与历史一致后合并显示，原快照保持不变。")
         st.write("另一条一级糖含税车板价独立保存，不与主序列拼接。期货来自已确认的Tushare兼容网关，使用close而非settle或复权价。")
         st.write("主力依据SR.ZCE实际合约映射，保留换月跳变；历史中03、07月主力使用对应原始行情。")
-        st.write("后续按每日报价截图核验日期、地区及报价口径，保留来源证据后更新；未提供或未核验日期不生成报价。")
+        st.write("后续以日度表中经核验的有效报价更新；未提供或未核验日期不生成报价。")
     if regional_snapshot is not None:
         render_regional_sugar_history(missing_trading_days=missing_trading_days, snapshot=regional_snapshot)
 
@@ -200,7 +252,6 @@ def render_sugar_basis_page(sugar_history_root: Path | None = None,
     # to sugar source readers, and to keep the route independent of oilseed Current.
     from basis_page import YEAR_COLORS, FALLBACK_COLORS, missing_trading_days_between
     st.title("白糖基差")
-    render_daily_summary()
     project = Path(__file__).resolve().parents[1]
     root = sugar_history_root or Path(os.environ.get("DOMESTIC_SUGAR_HISTORY_ROOT",
         str(project / "01_data/processed/domestic_sugar_history")))
@@ -220,5 +271,11 @@ def render_sugar_basis_page(sugar_history_root: Path | None = None,
         except (SugarHistoryError, OSError, ValueError, KeyError):
             st.warning("三地白糖历史快照校验失败或与柳州历史冲突，保留原柳州快照及其实际日期。")
             regional = None
+    daily_path = _daily_file()
+    if daily_path.exists():
+        try:
+            snapshot = reconcile_daily_guangxi(snapshot, daily_path)
+        except (SugarHistoryError, OSError, ValueError, KeyError):
+            st.warning("日度白糖数据校验失败，保留历史数据。")
     render_sugar_history(snapshot, year_colors=YEAR_COLORS, fallback_colors=FALLBACK_COLORS,
                          missing_trading_days=missing_trading_days_between, regional_snapshot=regional)

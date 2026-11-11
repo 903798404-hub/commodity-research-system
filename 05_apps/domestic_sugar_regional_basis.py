@@ -200,6 +200,10 @@ def render_regional_sugar_history(*, missing_trading_days, root: Path | None = N
         st.warning("三地白糖历史快照校验失败，该图暂停显示。")
         return
     daily = snapshot.daily
+    # Keep every historical observation unchanged, joining the newer Guangxi
+    # factory data to the first regional series rather than adding a fourth.
+    daily = daily.copy()
+    daily.loc[daily.region.eq("柳州"), "region"] = "广西糖厂"
     # A separate manually published feed keeps all legacy history untouched.
     daily_file = _daily_file()
     if daily_file.exists():

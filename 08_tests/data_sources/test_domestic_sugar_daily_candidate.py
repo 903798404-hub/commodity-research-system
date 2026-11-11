@@ -60,3 +60,14 @@ def test_candidate_may_fill_a_previously_missing_price(tmp_path):
     data["records"][0]["components"] = []
     old.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     assert verify(tmp_path, old)["paired"] == 1
+
+
+def test_fixed_closes_are_bound_to_captured_market_data(tmp_path):
+    data = fixture(tmp_path)
+    data["fixed_closes"] = [dict(date="2026-11-10", contract="SR2701.ZCE", close=5195)]
+    (tmp_path / "feed.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert verify(tmp_path)["paired"] == 1
+    data["fixed_closes"][0]["close"] = 5196
+    (tmp_path / "feed.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="原始行情不符"):
+        verify(tmp_path)

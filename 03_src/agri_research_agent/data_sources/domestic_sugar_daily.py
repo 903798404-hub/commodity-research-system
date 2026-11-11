@@ -92,3 +92,32 @@ def load_daily(path: Path) -> tuple[str, pd.DataFrame]:
         return hashlib.sha256(raw).hexdigest(), validate_daily(payload)
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
         raise SugarHistoryError("日度白糖记录不可读取") from exc
+
+
+def load_fixed_closes(path: Path) -> pd.DataFrame:
+    """Optional exact daily 01/05/09 closes, never inferred from a main contract."""
+    try:
+        # load_daily performs the strict JSON, identity and spot validation first.
+        version, daily = load_daily(path)
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != version:
+            raise ValueError("feed changed")
+        payload = json.loads(raw.decode("utf-8", errors="strict"))
+        entries = payload.get("fixed_closes", [])
+        if not isinstance(entries, list) or len(entries) > 30000:
+            raise ValueError("fixed closes")
+        dates = set(daily.business_date.dt.strftime("%Y-%m-%d"))
+        rows, seen = [], set()
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"date", "contract", "close"}:
+                raise ValueError("fixed fields")
+            day, code, close = entry["date"], entry["contract"], entry["close"]
+            if day not in dates or not isinstance(code, str) or not re.fullmatch(r"SR\d{2}(?:01|05|09)\.ZCE", code):
+                raise ValueError("fixed identity")
+            if (day, code) in seen or isinstance(close, bool) or not isinstance(close, (int, float)) or not math.isfinite(close) or close <= 0:
+                raise ValueError("fixed close")
+            seen.add((day, code))
+            rows.append(dict(business_date=pd.Timestamp(day), ts_code=code, futures_price=float(close)))
+        return pd.DataFrame(rows, columns=["business_date", "ts_code", "futures_price"])
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
+        raise SugarHistoryError("固定合约收盘价无效") from exc

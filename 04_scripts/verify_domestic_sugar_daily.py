@@ -12,7 +12,7 @@ from pathlib import Path
 import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "03_src"))
-from agri_research_agent.data_sources.domestic_sugar_daily import load_daily
+from agri_research_agent.data_sources.domestic_sugar_daily import load_daily, load_fixed_closes
 from agri_research_agent.pipelines.domestic_sugar_regional_history import _capture_rows
 from prepare_domestic_sugar_daily import COLUMNS
 
@@ -41,6 +41,19 @@ def verify(candidate: Path, current: Path | None = None) -> dict:
             if key in closes:
                 raise ValueError("收盘行情重复")
             closes[key] = r["close"]
+    fixed = load_fixed_closes(feed_path)
+    if "fixed_closes" in feed:
+        expected_fixed = {}
+        for date in {r["date"] for r in feed["records"]}:
+            day = dt.date.fromisoformat(date)
+            for month in (1, 5, 9):
+                code = f"SR{(day.year + int(month < day.month)) % 100:02d}{month:02d}.ZCE"
+                value = closes.get((day.strftime("%Y%m%d"), code))
+                if value is not None:
+                    expected_fixed[(date, code)] = value
+        actual_fixed = {(r.business_date.strftime("%Y-%m-%d"), r.ts_code): r.futures_price for r in fixed.itertuples()}
+        if actual_fixed != expected_fixed:
+            raise ValueError("固定合约收盘价与原始行情不符")
     book = openpyxl.load_workbook(candidate / "workbook.xlsx", read_only=False, data_only=True)
     try:
         sheet = book["钢联原始数据"]
@@ -77,6 +90,10 @@ def verify(candidate: Path, current: Path | None = None) -> dict:
         book.close()
     if current is not None:
         load_daily(current)
+        previous_fixed = load_fixed_closes(current)
+        fixed_map = {(r.business_date, r.ts_code): r.futures_price for r in fixed.itertuples()}
+        if any(fixed_map.get((r.business_date, r.ts_code)) != r.futures_price for r in previous_fixed.itertuples()):
+            raise ValueError("候选会改写或删除已发布的固定合约收盘价")
         old = json.loads(current.read_text(encoding="utf-8"))["records"]
         new = {(r["date"], r["region"]): r for r in feed["records"]}
         for previous in old:

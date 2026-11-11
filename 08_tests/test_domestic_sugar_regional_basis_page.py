@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -14,8 +15,66 @@ from basis_page import missing_trading_days_between
 from domestic_sugar_regional_basis import REGION_COLORS, build_regional_basis_figure, build_regional_basis_interactive
 from agri_research_agent.data_sources.domestic_sugar_regional_history import REGIONS, load_regional_history
 from agri_research_agent.data_sources.domestic_sugar_daily import validate_daily
+from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history
+from domestic_sugar_basis import reconcile_daily_guangxi
 
 pytest_plugins = ["data_sources.test_domestic_sugar_regional_history"]
+
+
+def test_guangxi_appends_exact_fixed_closes_and_preserves_history(prepared_root, tmp_path):
+    old = load_sugar_history(prepared_root)
+    day = "2026-11-10"
+    payload = dict(schema_version="domestic-sugar-daily/1", workbook_sha256="a" * 64,
+        mapping_sha256="b" * 64, daily_sha256="c" * 64,
+        records=[dict(date=day, region=region, components=components, contract="SR2701.ZCE", close=5195)
+                 for region, components in [("广西糖厂", [dict(name="东糖", price=5150, cell="J2701"),
+                                                          dict(name="凤糖", price=5160, cell="K2701")]),
+                                             ("昆明", []), ("乌鲁木齐", [])]],
+        fixed_closes=[dict(date=day, contract="SR2701.ZCE", close=5195),
+                      dict(date=day, contract="SR2705.ZCE", close=5261)])
+    feed = tmp_path / "feed.json"
+    feed.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    combined = reconcile_daily_guangxi(old, feed)
+    assert combined.spot.iloc[-1].cash_price == 5155
+    latest = combined.nearest_basis.loc[combined.nearest_basis.business_date.eq(day)].set_index("delivery_month")
+    assert latest.loc[1, "basis"] == -40 and latest.loc[5, "basis"] == -106
+    assert pd.isna(latest.loc[9, "basis"])
+    before = combined.spot.loc[combined.spot.business_date.isin(old.spot.business_date)].reset_index(drop=True)
+    pd.testing.assert_frame_equal(before[old.spot.columns], old.spot.reset_index(drop=True), check_dtype=False)
+
+
+def test_fixed_closes_reject_mismatch_with_actual_main(prepared_root, tmp_path):
+    from agri_research_agent.data_sources.domestic_sugar_history import SugarHistoryError
+    import pytest
+    payload = dict(schema_version="domestic-sugar-daily/1", workbook_sha256="a" * 64,
+        mapping_sha256="b" * 64, daily_sha256="c" * 64,
+        records=[dict(date="2026-11-10", region=r, components=[], contract="SR2701.ZCE", close=5195)
+                 for r in ("广西糖厂", "昆明", "乌鲁木齐")],
+        fixed_closes=[dict(date="2026-11-10", contract="SR2701.ZCE", close=5196)])
+    feed = tmp_path / "feed.json"; feed.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SugarHistoryError, match="冲突"):
+        reconcile_daily_guangxi(load_sugar_history(prepared_root), feed)
+
+
+def test_page_shows_guangxi_and_all_three_actual_contract_bases(prepared_root, regional_root, monkeypatch, tmp_path):
+    day = "2026-11-10"
+    payload = dict(schema_version="domestic-sugar-daily/1", workbook_sha256="a" * 64,
+        mapping_sha256="b" * 64, daily_sha256="c" * 64,
+        records=[dict(date=day, region=region, components=components, contract="SR2701.ZCE", close=5195)
+                 for region, components in [("广西糖厂", [dict(name="东糖", price=5150, cell="J2701"),
+                                                          dict(name="凤糖", price=5160, cell="K2701")]),
+                                             ("昆明", []), ("乌鲁木齐", [])]],
+        fixed_closes=[dict(date=day, contract=code, close=close) for code, close in
+                      [("SR2701.ZCE", 5195), ("SR2705.ZCE", 5261), ("SR2709.ZCE", 5333)]])
+    feed=tmp_path / "feed.json"; feed.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("DOMESTIC_SUGAR_DAILY_FILE", str(feed))
+    monkeypatch.setenv("DOMESTIC_SUGAR_HISTORY_ROOT", str(prepared_root))
+    monkeypatch.setenv("DOMESTIC_SUGAR_REGIONAL_HISTORY_ROOT", str(regional_root))
+    app=AppTest.from_string("from domestic_sugar_basis import render_sugar_basis_page\nrender_sugar_basis_page()", default_timeout=40).run()
+    assert not app.exception
+    assert [(m.label, m.value) for m in app.metric] == [("广西糖厂现货（元/吨）", "5,155"),
+        ("SR2701 基差", "-40"), ("SR2705 基差", "-106"), ("SR2709 基差", "-178")]
+    assert len(app.get("plotly_chart")) == 6
 
 
 def test_manual_feed_adds_guangxi_without_changing_historic_liuzhou(regional_root):

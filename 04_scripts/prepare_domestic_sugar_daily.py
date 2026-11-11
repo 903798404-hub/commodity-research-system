@@ -78,7 +78,9 @@ def prepare(workbook: Path, config_path: Path, output: Path, end: dt.date) -> di
     mapping = request(config, "fut_mapping", dict(ts_code="SR.ZCE", start_date=start, end_date=stop),
                       "ts_code,trade_date,mapping_ts_code")
     maps = _capture_rows(mapping, {"ts_code", "trade_date", "mapping_ts_code"})
-    codes = sorted({r["mapping_ts_code"] for r in maps})
+    fixed_codes = {f"SR{(day.year + int(month < day.month)) % 100:02d}{month:02d}.ZCE"
+                   for day in dates for month in (1, 5, 9)}
+    codes = sorted({r["mapping_ts_code"] for r in maps} | fixed_codes)
     daily = [request(config, "fut_daily", dict(ts_code=code, start_date=start, end_date=stop),
                      "ts_code,trade_date,close") for code in codes]
     mapped, closes = {}, {}
@@ -98,8 +100,12 @@ def prepare(workbook: Path, config_path: Path, output: Path, end: dt.date) -> di
         r["close"] = closes.get((trade_date, r["contract"]))
     mapping_raw = json.dumps(mapping, ensure_ascii=False, sort_keys=True, allow_nan=False).encode()
     daily_raw = json.dumps(daily, ensure_ascii=False, sort_keys=True, allow_nan=False).encode()
+    fixed = [dict(date=day.isoformat(), contract=code, close=closes[(day.strftime("%Y%m%d"), code)])
+             for day in sorted(dates) for month in (1, 5, 9)
+             for code in [f"SR{(day.year + int(month < day.month)) % 100:02d}{month:02d}.ZCE"]
+             if (day.strftime("%Y%m%d"), code) in closes and closes[(day.strftime("%Y%m%d"), code)] is not None]
     payload = dict(schema_version=SCHEMA, workbook_sha256=workbook_hash,
-                   mapping_sha256=sha(mapping_raw), daily_sha256=sha(daily_raw), records=prices)
+                   mapping_sha256=sha(mapping_raw), daily_sha256=sha(daily_raw), records=prices, fixed_closes=fixed)
     validate_daily(payload)
     output.mkdir(parents=True, exist_ok=False)
     (output / "workbook.xlsx").write_bytes(raw)
