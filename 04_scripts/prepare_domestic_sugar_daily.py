@@ -39,10 +39,14 @@ def prepare(workbook: Path, config_path: Path, output: Path, end: dt.date) -> di
     book = openpyxl.load_workbook(workbook, read_only=True, data_only=True)
     try:
         sheet = book["钢联原始数据"]
-        if (sheet["J2"].value != "白砂糖：一级：企业报价：广西东糖集团（日）"
-                or sheet["O2"].value != "白砂糖：一级：企业报价：南华昆明（日）"
-                or sheet["R2"].value != "白砂糖：一级：企业报价：英茂昆明（日）"
-                or sheet["AB2"].value != "白糖：现货价：乌鲁木齐（日）"):
+        expected_headers = {"J": "白砂糖：一级：企业报价：广西东糖集团（日）",
+                            "K": "白砂糖：一级：企业报价：凤糖生化（日）",
+                            "L": "白砂糖：一级：企业报价：湘桂集团（日）",
+                            "M": "白砂糖：一级：企业报价：广西南华（日）",
+                            "O": "白砂糖：一级：企业报价：南华昆明（日）",
+                            "R": "白砂糖：一级：企业报价：英茂昆明（日）",
+                            "AB": "白糖：现货价：乌鲁木齐（日）"}
+        if any(sheet[f"{column}2"].value != expected for column, expected in expected_headers.items()):
             raise ValueError("工作簿列口径不符")
         prices, dates = [], set()
         for number, row in enumerate(sheet.iter_rows(min_row=5, max_col=28, values_only=True), 5):
