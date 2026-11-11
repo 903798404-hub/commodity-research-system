@@ -43,3 +43,12 @@ def test_candidate_verifies_source_and_preserves_published(tmp_path):
     (tmp_path / "feed.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="样本不符"):
         verify(tmp_path, original)
+
+
+def test_candidate_does_not_change_previously_published_row(tmp_path):
+    data = fixture(tmp_path)
+    old = tmp_path / "current.json"
+    data["records"][0]["components"][0]["price"] = 5140
+    old.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="改写或删除"):
+        verify(tmp_path, old)
