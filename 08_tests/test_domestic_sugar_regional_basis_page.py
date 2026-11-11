@@ -12,13 +12,28 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "05_apps"))
 from basis_page import missing_trading_days_between
-from domestic_sugar_regional_basis import REGION_COLORS, build_regional_basis_figure, build_regional_basis_interactive
+from domestic_sugar_regional_basis import REGION_COLORS, build_regional_basis_figure, build_regional_basis_interactive, merge_regional_daily
 from agri_research_agent.data_sources.domestic_sugar_regional_history import REGIONS, load_regional_history
 from agri_research_agent.data_sources.domestic_sugar_daily import validate_daily
 from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history
 from domestic_sugar_basis import reconcile_daily_guangxi
 
 pytest_plugins = ["data_sources.test_domestic_sugar_regional_history"]
+
+
+def test_regional_history_is_preserved_and_daily_uses_three_lines(regional_root):
+    history=load_regional_history(regional_root).daily
+    old=history.loc[history.region.eq("柳州")].iloc[0]
+    recent=pd.DataFrame([dict(business_date=old.business_date, region="广西糖厂", cash_price=9999,
+                              ts_code=old.ts_code, futures_price=old.futures_price, basis=9999),
+                         dict(business_date=pd.Timestamp("2026-11-10"), region="广西糖厂", cash_price=5155,
+                              ts_code="SR2701.ZCE", futures_price=5195, basis=-40)])
+    combined=merge_regional_daily(history, recent)
+    first=combined.loc[combined.business_date.eq(old.business_date) & combined.region.eq("广西糖厂")]
+    assert len(first)==1 and first.iloc[0].cash_price==old.cash_price and first.iloc[0].basis==old.basis
+    figure=build_regional_basis_interactive(combined, missing_trading_days=missing_trading_days_between)
+    assert {t.name for t in figure.data}=={"广西糖厂", "昆明", "乌鲁木齐"}
+    assert list(next(t for t in figure.data if t.name=="广西糖厂").y)[-1]==-40
 
 
 def test_guangxi_appends_exact_fixed_closes_and_preserves_history(prepared_root, tmp_path):

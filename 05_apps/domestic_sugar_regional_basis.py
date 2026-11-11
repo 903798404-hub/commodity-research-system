@@ -32,6 +32,16 @@ def _daily_file() -> Path:
             Path("/runtime/import-profit/operational/cnf/domestic-sugar-daily/feed.json"))
 
 
+def merge_regional_daily(historical: pd.DataFrame, recent: pd.DataFrame) -> pd.DataFrame:
+    """Keep historical values, append only new dates, and retain three lines."""
+    daily = historical.copy()
+    daily.loc[daily.region.eq("柳州"), "region"] = "广西糖厂"
+    existing = pd.MultiIndex.from_frame(daily[["business_date", "region"]])
+    candidates = pd.MultiIndex.from_frame(recent[["business_date", "region"]])
+    new = recent.loc[~candidates.isin(existing)]
+    return pd.concat([daily, new], ignore_index=True).sort_values(["business_date", "region"])
+
+
 def render_daily_summary() -> None:
     path = _daily_file()
     if not path.exists():
@@ -199,18 +209,14 @@ def render_regional_sugar_history(*, missing_trading_days, root: Path | None = N
     except (SugarHistoryError, OSError, ValueError):
         st.warning("三地白糖历史快照校验失败，该图暂停显示。")
         return
-    daily = snapshot.daily
-    # Keep every historical observation unchanged, joining the newer Guangxi
-    # factory data to the first regional series rather than adding a fourth.
-    daily = daily.copy()
-    daily.loc[daily.region.eq("柳州"), "region"] = "广西糖厂"
+    daily = merge_regional_daily(snapshot.daily, pd.DataFrame(columns=snapshot.daily.columns))
     # A separate manually published feed keeps all legacy history untouched.
     daily_file = _daily_file()
     if daily_file.exists():
         try:
             _, recent = load_daily(daily_file)
             if not recent.empty:
-                daily = pd.concat([daily, recent], ignore_index=True).sort_values(["business_date", "region"])
+                daily = merge_regional_daily(snapshot.daily, recent)
         except (SugarHistoryError, OSError, ValueError):
             st.warning("日度白糖数据校验失败，保留历史数据。")
     lower, upper = daily.business_date.min().date(), daily.business_date.max().date()
