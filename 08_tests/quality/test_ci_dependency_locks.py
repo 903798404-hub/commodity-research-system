@@ -103,6 +103,22 @@ def test_every_ci_install_uses_an_existing_hashed_lock_and_checks_dependencies()
     assert {Path(p).name for p in installed} == {p.name for p in LOCKS.glob("*.txt")}
 
 
+def test_linux_runtime_validation_uses_digest_pinned_buildx():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/trusted-main-admission.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["linux"]["steps"]
+    provision = next(i for i, step in enumerate(steps) if "digest-pinned Buildx" in step.get("name", ""))
+    validate = next(i for i, step in enumerate(steps) if "Validate real spread-runtime image" in step.get("name", ""))
+    installer = steps[provision]
+    assert provision < validate
+    assert installer["if"] == steps[validate]["if"] == "needs.plan.outputs.spread_runtime_docker == 'true'"
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", installer["env"]["BUILDX_VERSION"])
+    assert re.fullmatch(r"[a-f0-9]{64}", installer["env"]["BUILDX_LINUX_AMD64_SHA256"])
+    run = installer["run"]
+    assert "https://github.com/docker/buildx/releases/download/$BUILDX_VERSION/" in run
+    assert run.index("sha256sum --check --strict") < run.index("sudo install") < run.index("sudo docker buildx version")
+    assert "sudo docker info" in run and ".ClientInfo.Plugins" in run
+
+
 def test_auxiliary_locks_pin_direct_packages_and_python310_only_dependencies():
     aggregate = _entries(LOCKS / "aggregate-py312.txt")
     assert set(aggregate) == {"pyyaml", "jsonschema", "attrs", "jsonschema-specifications", "referencing", "rpds-py", "typing-extensions"}

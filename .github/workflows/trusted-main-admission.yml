@@ -129,6 +129,29 @@ jobs:
         APPLICATION_RUNTIME_ACCIDENT_EVIDENCE: ${{ runner.temp }}/platform-results/linux/application-runtime-incident.json
       run: python -I -B 04_scripts/quality/platform_ci.py run --platform linux --plan
         "$RUNNER_TEMP/platform-plan/plan.json" --output "$RUNNER_TEMP/platform-results/linux"
+    - name: Provision digest-pinned Buildx for hosted Docker validation
+      if: needs.plan.outputs.spread_runtime_docker == 'true'
+      timeout-minutes: 4
+      env:
+        BUILDX_VERSION: v0.39.1
+        BUILDX_LINUX_AMD64_SHA256: 903090816da68f8bc1a2ff5346dd163a5adacfce4548d003c75df42cd47a9bf4
+      run: |
+        set -euo pipefail
+        # Buildx v0.39.1 fixes the file-sync HTTP 431 regression in v0.39.0.
+        test "$RUNNER_ARCH" = X64
+        archive="$(mktemp "$RUNNER_TEMP/buildx.XXXXXX")"
+        trap 'rm -f -- "$archive"' EXIT
+        curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+          --retry 2 --retry-max-time 120 --max-time 90 --output "$archive" \
+          "https://github.com/docker/buildx/releases/download/$BUILDX_VERSION/buildx-$BUILDX_VERSION.linux-amd64"
+        printf '%s  %s\n' "$BUILDX_LINUX_AMD64_SHA256" "$archive" | sha256sum --check --strict
+        # The runtime validator invokes Docker as root against the default local engine.
+        plugin=/usr/local/lib/docker/cli-plugins/docker-buildx
+        sudo install -D -o root -g root -m 0755 "$archive" "$plugin"
+        test "$(sudo docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "buildx"}}{{.Path}}{{end}}{{end}}')" = "$plugin"
+        version="$(sudo docker buildx version)"
+        printf '%s\n' "$version"
+        [[ "$version" == "github.com/docker/buildx $BUILDX_VERSION "* ]]
     - name: Validate real spread-runtime image with ephemeral candidate trust
       if: needs.plan.outputs.spread_runtime_docker == 'true'
       working-directory: candidate
