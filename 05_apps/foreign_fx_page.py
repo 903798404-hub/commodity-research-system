@@ -53,7 +53,7 @@ def _seasonality_metrics(code: str, summary: pd.DataFrame) -> tuple[tuple[str, s
     return (
         (f"USD/{code}", "—" if pd.isna(latest["rate"]) else f"{latest['rate']:.4f}"),
         ("最新业务日期", "—" if pd.isna(latest["latest_date"]) else str(latest["latest_date"])),
-        ("本币兑美元日涨跌", "—" if pd.isna(latest["return_1"]) else f"{latest['return_1']:+.2%}"),
+        ("本币兑美元周涨跌", "—" if pd.isna(latest["return_5"]) else f"{latest['return_5']:+.2%}"),
     )
 
 
@@ -157,6 +157,7 @@ def render_foreign_fx_page(*, project_root: Path = PROJECT_ROOT) -> None:
                 for column, (label, value) in zip(st.columns(3), _seasonality_metrics(code, summary)):
                     column.metric(label, value)
                 st.info("选择至少一个年份查看季节性。")
+        st.caption("周涨跌按该币种最近 5 个报价间隔计算。")
         st.caption("灰线为所选历史年份的月度均值：先算各年月均值，再对年份等权平均；至少2年有报价，不含今年。日线不补缺失，闰日单独对齐。")
         if mode == "年初＝100":
             st.caption("指数＝当日汇率÷各年首个有报价日汇率×100；高于100代表美元相对本币升值。")

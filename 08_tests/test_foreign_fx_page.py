@@ -48,7 +48,11 @@ def test_navigation_route_preserves_canada_and_loads_missing_fx_without_network(
 def test_main_entry_displays_real_schema_changes_currency_and_comparison(monkeypatch,tmp_path):
     rows=[]
     for i,c in enumerate(CURRENCIES):
-        for day,rate in [('2026-10-02',5+i),('2026-10-08',4+i)]:
+        quotes = [('2026-10-02', 5+i), ('2026-10-08', 4+i)]
+        if c.code == 'BRL':
+            quotes = [('2026-09-28', 4.8), ('2026-09-29', 4.9), ('2026-09-30', 5.1),
+                      ('2026-10-01', 5.2), *quotes]
+        for day,rate in quotes:
             rows.append(dict(currency=c.code,date=day,local_per_usd=rate,
                              provider='BCB_SGS1' if c.code=='BRL' else 'ECB_CROSS'))
     payload=dict(schema_version=SCHEMA_VERSION,generated_at='2026-10-09T02:00:00+00:00',
@@ -65,7 +69,9 @@ def test_main_entry_displays_real_schema_changes_currency_and_comparison(monkeyp
     annotations = json.loads(charts[0].proto.spec)["layout"]["annotations"]
     assert "USD/BRL" in annotations[0]["text"] and "4.0000" in annotations[0]["text"]
     assert "2026-10-08" in annotations[1]["text"]
-    assert "+25.00%" in annotations[2]["text"]
+    assert "本币兑美元周涨跌" in annotations[2]["text"]
+    assert "+20.00%" in annotations[2]["text"]
+    assert any("最近 5 个报价间隔" in caption.value for caption in app.caption)
     assert any(
         '[data-testid="stPlotlyChart"]' in item.proto.body
         and "max-width: max(50%, 600px);" in item.proto.body
@@ -78,6 +84,8 @@ def test_main_entry_displays_real_schema_changes_currency_and_comparison(monkeyp
     app.multiselect(key='fx_season_years_CAD').set_value([]).run(timeout=30)
     assert any('选择至少一个年份' in x.value for x in app.info)
     assert app.metric[0].label == "USD/CAD"
+    assert app.metric[2].label == "本币兑美元周涨跌"
+    assert app.metric[2].value == "—"
     app.multiselect(key='fx_season_years_CAD').set_value([2026]).run(timeout=30)
     app.radio(key='fx_season_mode').set_value('年初＝100').run(timeout=30)
     assert not app.exception
