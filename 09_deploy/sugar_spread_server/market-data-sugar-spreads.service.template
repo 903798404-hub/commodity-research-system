@@ -1,0 +1,16 @@
+[Unit]
+Description=White sugar spread quotes collection and verified publication
+RequiresMountsFor=/var/lib/market-data
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I -B @SOURCE_ROOT@/09_deploy/sugar_spread_server/run.py --config @CONFIG_PATH@ --publish
+TimeoutStartSec=12min
+UMask=0022
+Nice=10
+StandardOutput=journal
+StandardError=journal

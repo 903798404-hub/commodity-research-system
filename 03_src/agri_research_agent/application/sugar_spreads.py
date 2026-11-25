@@ -6,6 +6,10 @@ import csv
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+import gzip
+from hashlib import sha256
+import io
+import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -13,6 +17,12 @@ from urllib.parse import urlsplit
 
 DATA_PATH = Path("processed/sugar_spreads/daily_quotes.csv")
 DOMESTIC_CURVE_PATH = Path("processed/sugar_spreads/domestic_curve.csv")
+PREVIEW_ROOT = Path("01_data/candidates/sugar_spreads/preview")
+PREVIEW_RELEASES = DATA_PATH.parent / "preview-releases"
+PREVIEW_FILES = (DATA_PATH.name, DOMESTIC_CURVE_PATH.name, "historical_spread_database.parquet")
+SERVER_RELEASES = DATA_PATH.parent / "official-releases"
+SERVER_SCHEMA = "sugar-spread-quotes/1"
+MARKET_FILES = {"domestic": DOMESTIC_CURVE_PATH.name, "foreign": DATA_PATH.name}
 QUOTE_FIELDS = ("trade_date", "contract", "price_type", "price", "provider", "source_url")
 CONTRACT = re.compile(r"(SB|SR|W)(20\d{2})(0[1-9]|1[0-2])")
 MONTHS = {"SB": (3, 5, 7, 10), "W": (3, 5, 8, 10, 12), "SR": (1, 3, 5, 7, 9, 11)}
@@ -57,7 +67,8 @@ def load_quotes(path: Path, *, as_of: date) -> list[SugarQuote]:
     """Read one complete snapshot. Any ambiguous observation fails the snapshot."""
     quotes = []
     keys = set()
-    with path.open(encoding="utf-8-sig", newline="") as stream:
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         if tuple(reader.fieldnames or ()) != QUOTE_FIELDS:
             raise ValueError("行情文件字段不符")
@@ -87,6 +98,81 @@ def load_quotes(path: Path, *, as_of: date) -> list[SugarQuote]:
             quotes.append(SugarQuote(day, row["contract"], row["price_type"], price,
                                      row["provider"], row["source_url"]))
     return sorted(quotes, key=lambda quote: (quote.trade_date, quote.contract, quote.price_type))
+
+
+def serialize_quotes(quotes: list[SugarQuote]) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(QUOTE_FIELDS)
+    for quote in quotes:
+        writer.writerow((quote.trade_date, quote.contract, quote.price_type, quote.price,
+                         quote.provider, quote.source_url))
+    return output.getvalue().encode("utf-8")
+
+
+def merge_quotes(quotes: list[SugarQuote]) -> list[SugarQuote]:
+    merged = {}
+    for quote in quotes:
+        key = quote.trade_date, quote.contract, quote.price_type
+        previous = merged.setdefault(key, quote)
+        if (quote.price, quote.provider) != (previous.price, previous.provider):
+            raise ValueError(f"同一日期、合约及口径有冲突 {key}")
+    return [merged[key] for key in sorted(merged)]
+
+
+def resolve_preview_release(project_root: Path, data_root: Path) -> Path | None:
+    """Pin one local release for all three charts before any reader opens a file."""
+    project = project_root.resolve()
+    preview = project / PREVIEW_ROOT
+    if data_root.resolve() != preview or not (project / ".git").is_file():
+        return None
+    base = preview / PREVIEW_RELEASES
+    pointer = base / "current.json"
+    if not pointer.exists():
+        return None
+    if pointer.resolve() != pointer:
+        raise ValueError("白糖预览更新指针路径异常")
+    payload = json.loads(pointer.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or set(payload) != {"release_id", "files"}:
+        raise ValueError("白糖预览更新清单异常")
+    identity, files = payload["release_id"], payload["files"]
+    if (not isinstance(identity, str) or re.fullmatch(r"[a-f0-9]{24}", identity) is None
+            or not isinstance(files, dict) or set(files) != set(PREVIEW_FILES)):
+        raise ValueError("白糖预览快照身份异常")
+    release = base / identity
+    for name, expected in files.items():
+        path = release / name
+        if path.resolve() != path or sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"白糖预览文件校验失败。{name}")
+    return release
+
+
+def server_snapshots(base: Path, pointer: bytes) -> dict[str, Path]:
+    """Verify the exact market files named by an atomic publication pointer."""
+    payload = json.loads(pointer.decode("utf-8", errors="strict"))
+    if (not isinstance(payload, dict) or set(payload) != {"schema_version", "markets"}
+            or payload["schema_version"] != SERVER_SCHEMA or not isinstance(payload["markets"], dict)
+            or not set(payload["markets"]) <= MARKET_FILES.keys()):
+        raise ValueError("白糖正式行情清单无效")
+    paths = {}
+    for market, digest in payload["markets"].items():
+        if not isinstance(digest, str) or re.fullmatch(r"[a-f0-9]{64}", digest) is None:
+            raise ValueError("白糖正式行情哈希无效")
+        target = base / "snapshots" / (digest + ".csv.gz")
+        if target.resolve() != target.absolute() or sha256(target.read_bytes()).hexdigest() != digest:
+            raise ValueError(f"白糖正式行情校验失败。{market}")
+        paths[market] = target
+    return paths
+
+
+def resolve_server_quotes(data_root: Path) -> dict[str, Path]:
+    base = data_root / SERVER_RELEASES
+    pointer = base / "current.json"
+    if not pointer.exists() and not pointer.is_symlink():
+        return {}
+    if pointer.resolve() != pointer.absolute():
+        raise ValueError("白糖正式行情指针路径异常")
+    return server_snapshots(base, pointer.read_bytes())
 
 
 def spread_history(

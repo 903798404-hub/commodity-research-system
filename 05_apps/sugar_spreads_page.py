@@ -14,7 +14,7 @@ import streamlit as st
 
 from agri_research_agent.application.sugar_spreads import (
     DATA_PATH, DOMESTIC_CURVE_PATH, PREMIUM_PAIRS, RAW_PAIRS, SugarQuote, SugarSpread,
-    contract_month, latest_pair, load_quotes, spread_history,
+    contract_month, latest_pair, load_quotes, resolve_preview_release, resolve_server_quotes, spread_history,
 )
 from agri_research_agent.shared.chart_style import (
     CURRENT_LINE_WIDTH, CURRENT_YEAR_COLOR, GRID_COLOR, HISTORY_LINE_WIDTH, historical_year_color,
@@ -92,9 +92,9 @@ def _render_term_structure(quotes: list[SugarQuote], title: str, unit: str, key:
     return True
 
 
-def _render_domestic_term_structure(data_root: Path, *, as_of: date) -> None:
+def _render_domestic_term_structure(quote_path: Path, *, as_of: date) -> None:
     try:
-        quotes = load_quotes(data_root / DOMESTIC_CURVE_PATH, as_of=as_of)
+        quotes = load_quotes(quote_path, as_of=as_of)
     except FileNotFoundError:
         st.info("暂无郑糖期限结构行情。")
         return
@@ -106,16 +106,26 @@ def _render_domestic_term_structure(data_root: Path, *, as_of: date) -> None:
         st.info("最新交易日的有效郑糖合约收盘价不足两份。")
 
 
-def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[], None]) -> None:
+def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[Path | None], None]) -> None:
     st.title("白糖价差")
     view = st.radio("价差视图", [RAW_VIEW, PREMIUM_VIEW, DOMESTIC_VIEW], horizontal=True,
                     key="sugar_spread_view")
     configured = os.environ.get("PUBLIC_MARKET_DATA_RUNTIME_ROOT")
     data_root = Path(configured) if configured else project_root / "01_data"
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    try:
+        release = resolve_preview_release(project_root, data_root)
+        official = resolve_server_quotes(data_root) if release is None else {}
+    except (OSError, UnicodeError, ValueError) as exc:
+        st.error(f"白糖行情快照校验失败。{exc}")
+        if view == DOMESTIC_VIEW:
+            render_domestic(None)
+        return
     if view == DOMESTIC_VIEW:
-        _render_domestic_term_structure(data_root, as_of=today)
-        render_domestic()
+        quote_path = (release / DOMESTIC_CURVE_PATH.name if release
+                      else official.get("domestic", data_root / DOMESTIC_CURVE_PATH))
+        _render_domestic_term_structure(quote_path, as_of=today)
+        render_domestic(release / "historical_spread_database.parquet" if release else None)
         return
 
     premium = view == PREMIUM_VIEW
@@ -124,7 +134,8 @@ def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[], 
     st.caption("伦敦白糖 − 纽约原糖（折美元/吨） · 同交割月" if premium
                else "纽约原糖近月 − 远月 · 美分/磅")
     try:
-        quotes = [quote for quote in load_quotes(data_root / DATA_PATH, as_of=today)
+        quote_path = release / DATA_PATH.name if release else official.get("foreign", data_root / DATA_PATH)
+        quotes = [quote for quote in load_quotes(quote_path, as_of=today)
                   if quote.contract.startswith(("SB", "W"))]
     except FileNotFoundError:
         st.info("暂无白糖外盘日度行情快照。")
@@ -134,7 +145,7 @@ def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[], 
         return
 
     available = {}
-    preferred = ("settlement", "close") if premium else ("close", "settlement")
+    preferred = ("settlement", "close") if premium or "foreign" in official else ("close", "settlement")
     for basis in preferred:
         histories = {label: spread_history(quotes, *months, premium=premium, price_type=basis)
                      for label, months in pairs.items()}

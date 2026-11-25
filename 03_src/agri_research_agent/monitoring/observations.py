@@ -123,16 +123,17 @@ class Reader:
             return grouped_dates(frame, ["series_id"], "business_date")
         if identity in {"sugar_raw_spread", "sugar_white_premium"}:
             from agri_research_agent.application.sugar_spreads import (
-                DATA_PATH, PREMIUM_PAIRS, RAW_PAIRS, load_quotes, spread_history,
+                DATA_PATH, PREMIUM_PAIRS, RAW_PAIRS, load_quotes, resolve_server_quotes, spread_history,
             )
+            official = self.cached("sugar_spread_server_files", lambda: resolve_server_quotes(root))
             try:
                 quotes = self.cached("sugar_spread_quotes", lambda: load_quotes(
-                    root / DATA_PATH, as_of=self.now.astimezone(SHANGHAI).date()))
+                    official.get("foreign", root / DATA_PATH), as_of=self.now.astimezone(SHANGHAI).date()))
             except FileNotFoundError:
                 return Observation(None)
             premium = identity == "sugar_white_premium"
             pairs = PREMIUM_PAIRS if premium else RAW_PAIRS
-            bases = ("settlement", "close") if premium else ("close", "settlement")
+            bases = ("settlement", "close") if premium or "foreign" in official else ("close", "settlement")
             for basis in bases:
                 dates = {}
                 for label, months in pairs.items():

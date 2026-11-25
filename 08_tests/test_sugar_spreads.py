@@ -3,15 +3,23 @@
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
+from hashlib import sha256
+from io import BytesIO
 import importlib
 import json
 from pathlib import Path
 import sys
 
+import pandas as pd
+import pyarrow as pa
 import pytest
+from openpyxl import Workbook
 from streamlit.testing.v1 import AppTest
 
-from agri_research_agent.application.sugar_spreads import DOMESTIC_CURVE_PATH, DATA_PATH, load_quotes, spread_history
+from agri_research_agent.application.sugar_spreads import (
+    DATA_PATH, DOMESTIC_CURVE_PATH, PREVIEW_FILES, PREVIEW_RELEASES, PREVIEW_ROOT,
+    load_quotes, resolve_preview_release, spread_history,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,7 +122,7 @@ def test_domestic_term_structure_uses_the_latest_complete_source_and_exact_deliv
 from pathlib import Path
 import streamlit as st
 from sugar_spreads_page import render_sugar_spreads_page
-render_sugar_spreads_page(Path.cwd(), lambda: st.subheader("郑糖月差季节性"))
+render_sugar_spreads_page(Path.cwd(), lambda _path: st.subheader("郑糖月差季节性"))
 """, default_timeout=20).run()
     app.radio(key="sugar_spread_view").set_value("郑糖月差").run()
     assert not app.exception and not app.error
@@ -155,3 +163,79 @@ def test_monitor_uses_matching_pair_dates_and_keeps_missing_visible(tmp_path):
     premium = reader.read("sugar_white_premium")
     assert premium.actual is None
     assert premium.extra["series_dates"] == {"03月": "2026-11-24", "05月": None, "10月": None}
+
+def test_refresh_uses_exact_sr_closes_and_existing_month_windows():
+    refresh = importlib.import_module("refresh_sugar_spreads_preview")
+    source = importlib.import_module("agri_research_agent.application.sugar_spread_sources")
+    book = Workbook(write_only=True)
+    sheet = book.create_sheet()
+    sheet.append([f"郑州商品交易所期货每日行情表({AS_OF})"])
+    sheet.append(["合约代码", "今收盘", "今结算", "成交量(手)"])
+    sheet.append(["SR701", "5,114", "5,075", "495,948"])
+    sheet.append(["SR705", "5,159", "5,122", "9"])
+    sheet.append(["SR709", "5,202", "5,179", "6"])
+    sheet.append(["SR711", "0", "5,198", "0"])
+    data = BytesIO()
+    book.save(data)
+    url = source.report_url(AS_OF, "domestic")
+    quotes = source.parse_czce_daily(data.getvalue(), AS_OF, url)
+    assert [(q.contract, q.price) for q in quotes] == [
+        ("SR202701", 5114), ("SR202705", 5159), ("SR202709", 5202),
+    ]
+    with pytest.raises(ValueError, match="日期"):
+        source.parse_czce_daily(data.getvalue(), date(2026, 11, 25), url)
+    config = pd.read_excel(ROOT / "02_configs/historical_spread_config.xlsx", sheet_name="spread_config")
+    config = config[config.spread_name.isin(refresh.SR_SPREADS)]
+    rows = refresh.domestic_spread_rows(quotes, config)
+    assert {row["spread_name"]: row["spread_value"] for row in rows} == {"SR 1-5": -45, "SR 5-9": -43}
+    prior = pa.Table.from_pylist([rows[0]])
+    result = refresh.extend_spread_database(prior, rows)
+    assert result.num_rows == 2 and result.slice(0, 1).equals(prior)
+    assert refresh.extend_spread_database(result, rows) is result
+    with pytest.raises(ValueError, match="冲突"):
+        refresh.extend_spread_database(result, [dict(rows[0], leg1_price=999)])
+
+
+def test_refresh_validates_both_settlement_tables_and_reuses_covered_report():
+    source = importlib.import_module("agri_research_agent.application.sugar_spread_sources")
+    url = source.report_url(AS_OF, "foreign")
+    payload = """<h1>Daily Market Price Updates and Commentary 24th November 2026</h1>
+    <script>{"datePublished":"2026-11-24T18:11:05+00:00"}</script>
+    <h2>ICE Futures U.S. Sugar No.11 Contract</h2>
+    <table><tr><th>Settlement (cUS$/lb)</th></tr>
+    <tr><td>Mar27</td><td>17.66</td></tr><tr><td>May27</td><td>17.08</td></tr></table>
+    <h2>ICE Europe White Sugar Futures Contract</h2>
+    <table><tr><th>Settlement (US$/mt)</th></tr>
+    <tr><td>Mar27</td><td>501.00</td></tr><tr><td>May27</td><td>505.40</td></tr></table>"""
+    parsed = source.parse_czapp_settlements(payload.encode(), AS_OF, url)
+    assert [(q.contract, str(q.price)) for q in parsed] == [
+        ("SB202703", "17.66"), ("SB202705", "17.08"), ("W202703", "501.00"), ("W202705", "505.40"),
+    ]
+    with pytest.raises(ValueError, match="发布日"):
+        source.parse_czapp_settlements(payload.replace("T18:", "T08:").encode(), AS_OF, url)
+    with pytest.raises(ValueError, match="配对"):
+        source.parse_czapp_settlements(payload.replace("Settlement (US$/mt)", "Last (US$/mt)").encode(), AS_OF, url)
+    calls = []
+    batches, receipts, _ = source.collect_reports([AS_OF, date(2026, 11, 25)], "foreign", parsed,
+                                                  fetcher=lambda url: calls.append(url))
+    assert calls == [source.report_url(date(2026, 11, 25), "foreign")]
+    assert batches == [] and receipts[0]["status"] == "not_published"
+
+
+def test_local_generation_ties_every_input_to_one_validated_pointer(tmp_path):
+    (tmp_path / ".git").write_text("gitdir: linked-worktree", encoding="utf-8")
+    preview = tmp_path / PREVIEW_ROOT
+    base = preview / PREVIEW_RELEASES
+    release = base / ("1" * 24)
+    release.mkdir(parents=True)
+    for name in PREVIEW_FILES:
+        (release / name).write_bytes(name.encode())
+    (base / "current.json").write_text(json.dumps({
+        "release_id": release.name,
+        "files": {name: sha256((release / name).read_bytes()).hexdigest() for name in PREVIEW_FILES},
+    }), encoding="utf-8")
+    assert resolve_preview_release(tmp_path, preview) == release
+    assert resolve_preview_release(tmp_path, tmp_path / "external") is None
+    (release / DATA_PATH.name).write_bytes(b"changed")
+    with pytest.raises(ValueError, match="文件校验失败"):
+        resolve_preview_release(tmp_path, preview)

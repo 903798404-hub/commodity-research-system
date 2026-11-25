@@ -486,9 +486,15 @@ modules:
   application.sugar_spreads:
     code_paths:
       - 03_src/agri_research_agent/application/sugar_spreads.py
+      - 03_src/agri_research_agent/application/sugar_spread_sources.py
       - 04_scripts/prepare_sugar_spread_candidate.py
+      - 04_scripts/refresh_sugar_spreads_preview.py
       - 05_apps/sugar_spreads_page.py
-    direct_tests: [08_tests/test_sugar_spreads.py]
+      - 09_deploy/sugar_spread_server/collect.py
+      - 09_deploy/sugar_spread_server/run.py
+      - 09_deploy/sugar_spread_server/market-data-sugar-spreads.service.template
+      - 09_deploy/sugar_spread_server/market-data-sugar-spreads.timer.template
+    direct_tests: [08_tests/test_sugar_spreads.py, 08_tests/test_sugar_spread_server.py]
     impact_tests:
       - 08_tests/test_workspace_navigation_performance.py
       - 08_tests/domains/spreads/test_page_contract.py

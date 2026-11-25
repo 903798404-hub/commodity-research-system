@@ -351,13 +351,15 @@ def render_spread_dashboard() -> None:
     render_domestic_spreads(board)
 
 
-def render_domestic_spreads(board: str, *, show_workbench_status: bool = True) -> None:
+def render_domestic_spreads(
+    board: str, *, show_workbench_status: bool = True, snapshot_path: Path | None = None,
+) -> None:
     with st.expander("展示设置"):
         method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
         year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
 
     st.title(board)
-    database_path = get_database_path()
+    database_path = snapshot_path or get_database_path()
     if not database_path.exists():
         st.error(f"未找到历史价差数据库：{DATABASE_XLSX_FILE}")
         return
@@ -482,7 +484,9 @@ def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -
         from sugar_spreads_page import render_sugar_spreads_page
 
         render_sugar_spreads_page(
-            PROJECT_ROOT, lambda: render_domestic_spreads("国内白糖价差", show_workbench_status=False),
+            PROJECT_ROOT, lambda path: render_domestic_spreads(
+                "国内白糖价差", show_workbench_status=False, snapshot_path=path,
+            ),
         )
     elif selected_page == SUGAR_POSITIONS_PAGE_TITLE:
         from sugar_positions_page import render_sugar_positions_page

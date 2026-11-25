@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import csv
 from datetime import datetime
-import io
 from pathlib import Path
 import sys
 from zoneinfo import ZoneInfo
@@ -15,31 +13,11 @@ from filelock import FileLock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "03_src"))
 
-from agri_research_agent.application.sugar_spreads import QUOTE_FIELDS, SugarQuote, load_quotes
+from agri_research_agent.application.sugar_spreads import load_quotes, merge_quotes, serialize_quotes
 from agri_research_agent.shared.atomic_storage import atomic_write_bytes
 
 
 CANDIDATES = ROOT / "01_data/candidates/sugar_spreads"
-
-
-def serialize_quotes(quotes: list[SugarQuote]) -> bytes:
-    output = io.StringIO(newline="")
-    writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(QUOTE_FIELDS)
-    for quote in quotes:
-        writer.writerow((quote.trade_date, quote.contract, quote.price_type, quote.price,
-                         quote.provider, quote.source_url))
-    return output.getvalue().encode("utf-8")
-
-
-def merge_quotes(quotes: list[SugarQuote]) -> list[SugarQuote]:
-    merged = {}
-    for quote in quotes:
-        key = quote.trade_date, quote.contract, quote.price_type
-        previous = merged.setdefault(key, quote)
-        if (quote.price, quote.provider) != (previous.price, previous.provider):
-            raise ValueError(f"同一日期、合约及口径有冲突 {key}")
-    return [merged[key] for key in sorted(merged)]
 
 
 def main() -> None:

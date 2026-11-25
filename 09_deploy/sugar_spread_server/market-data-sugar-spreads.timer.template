@@ -1,0 +1,13 @@
+[Unit]
+Description=White sugar spreads after the Chinese close and before the morning session
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 18:30:00 Asia/Shanghai
+OnCalendar=*-*-* 07:45:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=market-data-sugar-spreads.service
+
+[Install]
+WantedBy=timers.target
