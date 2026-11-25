@@ -4,13 +4,14 @@ from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 import importlib
+import json
 from pathlib import Path
 import sys
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from agri_research_agent.application.sugar_spreads import DATA_PATH, load_quotes, spread_history
+from agri_research_agent.application.sugar_spreads import DOMESTIC_CURVE_PATH, DATA_PATH, load_quotes, spread_history
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,7 +74,7 @@ def test_sugar_group_order_and_default_price_views(tmp_path, monkeypatch):
 
     monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(tmp_path))
     write_quotes(tmp_path)
-    app = AppTest.from_file(str(ENTRY))
+    app = AppTest.from_file(str(ENTRY), default_timeout=20)
     app.query_params["workspace_page"] = "白糖价差"
     app.run()
     assert not app.exception
@@ -95,6 +96,40 @@ def test_sugar_group_order_and_default_price_views(tmp_path, monkeypatch):
     app.run()
     assert not app.exception
     assert calls == [(ROOT, {"preview_mode": False})]
+
+
+def test_domestic_term_structure_uses_the_latest_complete_source_and_exact_delivery_months(tmp_path, monkeypatch):
+    monkeypatch.setenv("PUBLIC_MARKET_DATA_RUNTIME_ROOT", str(tmp_path))
+    write_quotes(tmp_path)
+    target = tmp_path / DOMESTIC_CURVE_PATH
+    target.write_text("""trade_date,contract,price_type,price,provider,source_url
+2026-11-23,SR202703,close,5050,郑商所,https://example.com/old
+2026-11-24,SR202711,close,5214,郑商所,https://example.com/latest
+2026-11-24,SR202701,close,5114,郑商所,https://example.com/latest
+2026-11-24,SR202701,settlement,5075,郑商所,https://example.com/latest
+2026-11-24,SR202705,close,5159,郑商所,https://example.com/latest
+2026-11-24,SR202709,close,5202,另一来源,https://example.com/other
+""", encoding="utf-8")
+    app = AppTest.from_string("""
+from pathlib import Path
+import streamlit as st
+from sugar_spreads_page import render_sugar_spreads_page
+render_sugar_spreads_page(Path.cwd(), lambda: st.subheader("郑糖月差季节性"))
+""", default_timeout=20).run()
+    app.radio(key="sugar_spread_view").set_value("郑糖月差").run()
+    assert not app.exception and not app.error
+    chart, = app.get("plotly_chart")
+    trace, = json.loads(chart.proto.spec)["data"]
+    assert trace["x"] == ["2027-01", "2027-05", "2027-11"]
+    assert trace["y"] == [5114.0, 5159.0, 5214.0]
+    assert "元/吨" in trace["hovertemplate"]
+    assert [header.value for header in app.subheader] == ["郑糖期限结构", "郑糖月差季节性"]
+    assert app.caption[0].value == "2026-11-24 · 日收盘价 · 郑商所"
+
+    target.unlink()
+    app.run()
+    assert not app.exception and not app.get("plotly_chart")
+    assert [header.value for header in app.subheader] == ["郑糖月差季节性"]
 
 
 def test_local_candidate_merges_without_rewriting_prior_observations(tmp_path):

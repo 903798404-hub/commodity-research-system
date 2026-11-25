@@ -12,9 +12,10 @@ from urllib.parse import urlsplit
 
 
 DATA_PATH = Path("processed/sugar_spreads/daily_quotes.csv")
+DOMESTIC_CURVE_PATH = Path("processed/sugar_spreads/domestic_curve.csv")
 QUOTE_FIELDS = ("trade_date", "contract", "price_type", "price", "provider", "source_url")
-CONTRACT = re.compile(r"(SB|W)(20\d{2})(0[1-9]|1[0-2])")
-MONTHS = {"SB": (3, 5, 7, 10), "W": (3, 5, 8, 10, 12)}
+CONTRACT = re.compile(r"(SB|SR|W)(20\d{2})(0[1-9]|1[0-2])")
+MONTHS = {"SB": (3, 5, 7, 10), "W": (3, 5, 8, 10, 12), "SR": (1, 3, 5, 7, 9, 11)}
 RAW_PAIRS = {"03–05": (3, 5), "05–07": (5, 7), "07–10": (7, 10), "10–次年03": (10, 3)}
 PREMIUM_PAIRS = {"03月": (3, 3), "05月": (5, 5), "10月": (10, 10)}
 CENTS_PER_POUND_TO_USD_PER_TONNE = Decimal(10) / Decimal("0.45359237")
@@ -71,8 +72,11 @@ def load_quotes(path: Path, *, as_of: date) -> list[SugarQuote]:
             except (ValueError, ArithmeticError) as exc:
                 raise ValueError(f"行情文件第 {reader.line_num} 行格式无效") from exc
             key = day, row["contract"], row["price_type"]
+            # SR can still trade during its delivery month. The exchange daily
+            # table supplies actual closes and thus bounds the listed sessions.
+            expired = day.replace(day=1) > maturity if row["contract"].startswith("SR") else day >= maturity
             if (day.isoformat() != row["trade_date"] or day.weekday() >= 5
-                    or day > as_of or day >= maturity
+                    or day > as_of or expired
                     or row["price_type"] not in {"close", "settlement"}
                     or not price.is_finite() or price <= 0
                     or not row["provider"].strip() or source.scheme != "https"

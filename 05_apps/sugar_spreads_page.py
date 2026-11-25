@@ -13,7 +13,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from agri_research_agent.application.sugar_spreads import (
-    DATA_PATH, PREMIUM_PAIRS, RAW_PAIRS, SugarSpread, contract_month, latest_pair, load_quotes, spread_history,
+    DATA_PATH, DOMESTIC_CURVE_PATH, PREMIUM_PAIRS, RAW_PAIRS, SugarQuote, SugarSpread,
+    contract_month, latest_pair, load_quotes, spread_history,
 )
 from agri_research_agent.shared.chart_style import (
     CURRENT_LINE_WIDTH, CURRENT_YEAR_COLOR, GRID_COLOR, HISTORY_LINE_WIDTH, historical_year_color,
@@ -62,11 +63,58 @@ def _plot_history(points: list[SugarSpread], active_year: int, unit: str) -> go.
     return fig
 
 
+def _render_term_structure(quotes: list[SugarQuote], title: str, unit: str, key: str) -> bool:
+    if not quotes:
+        return False
+    day = max(quote.trade_date for quote in quotes)
+    providers: dict[str, list[SugarQuote]] = {}
+    for quote in quotes:
+        if quote.trade_date == day:
+            providers.setdefault(quote.provider, []).append(quote)
+    curve = sorted(max(providers.values(), key=len), key=lambda quote: contract_month(quote.contract))
+    if len(curve) < 2:
+        return False
+
+    st.subheader(title)
+    st.caption(f"{day:%Y-%m-%d} · {PRICE_LABELS[curve[0].price_type]} · {curve[0].provider}")
+    precision = 0 if unit == "元/吨" else 2
+    figure = go.Figure(go.Scatter(
+        x=[contract_month(quote.contract).strftime("%Y-%m") for quote in curve],
+        y=[float(quote.price) for quote in curve],
+        mode="lines+markers", line=dict(color=CURRENT_YEAR_COLOR),
+        text=[quote.contract for quote in curve],
+        hovertemplate=f"%{{text}}<br>%{{y:,.{precision}f}} {unit}<extra></extra>",
+    ))
+    figure.update_layout(height=260, margin=dict(l=48, r=22, t=15, b=35))
+    figure.update_xaxes(type="category", title="交割年月")
+    figure.update_yaxes(title=unit, gridcolor=GRID_COLOR)
+    st.plotly_chart(figure, width="stretch", key=key)
+    return True
+
+
+def _render_domestic_term_structure(data_root: Path, *, as_of: date) -> None:
+    try:
+        quotes = load_quotes(data_root / DOMESTIC_CURVE_PATH, as_of=as_of)
+    except FileNotFoundError:
+        st.info("暂无郑糖期限结构行情。")
+        return
+    except (OSError, UnicodeError, ValueError) as exc:
+        st.error(f"郑糖期限结构行情读取失败。{exc}")
+        return
+    close = [quote for quote in quotes if quote.contract.startswith("SR") and quote.price_type == "close"]
+    if not _render_term_structure(close, "郑糖期限结构", "元/吨", "sugar_domestic_curve"):
+        st.info("最新交易日的有效郑糖合约收盘价不足两份。")
+
+
 def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[], None]) -> None:
     st.title("白糖价差")
     view = st.radio("价差视图", [RAW_VIEW, PREMIUM_VIEW, DOMESTIC_VIEW], horizontal=True,
                     key="sugar_spread_view")
+    configured = os.environ.get("PUBLIC_MARKET_DATA_RUNTIME_ROOT")
+    data_root = Path(configured) if configured else project_root / "01_data"
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     if view == DOMESTIC_VIEW:
+        _render_domestic_term_structure(data_root, as_of=today)
         render_domestic()
         return
 
@@ -75,11 +123,9 @@ def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[], 
     unit = "美元/吨" if premium else "美分/磅"
     st.caption("伦敦白糖 − 纽约原糖（折美元/吨） · 同交割月" if premium
                else "纽约原糖近月 − 远月 · 美分/磅")
-    configured = os.environ.get("PUBLIC_MARKET_DATA_RUNTIME_ROOT")
-    data_root = Path(configured) if configured else project_root / "01_data"
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     try:
-        quotes = load_quotes(data_root / DATA_PATH, as_of=today)
+        quotes = [quote for quote in load_quotes(data_root / DATA_PATH, as_of=today)
+                  if quote.contract.startswith(("SB", "W"))]
     except FileNotFoundError:
         st.info("暂无白糖外盘日度行情快照。")
         return
@@ -104,26 +150,8 @@ def render_sugar_spreads_page(project_root: Path, render_domestic: Callable[[], 
     relevant = [quote for quote in quotes if quote.price_type == basis
                 and (premium or quote.contract.startswith("SB"))]
     reference_date = max(quote.trade_date for quote in relevant)
-    st.caption(f"{PRICE_LABELS[basis]} · 最新行情 {reference_date:%Y-%m-%d}")
-    if not premium:
-        curves = {}
-        for quote in relevant:
-            if quote.trade_date == reference_date:
-                curves.setdefault(quote.provider, []).append(quote)
-        curve = sorted(max(curves.values(), key=len), key=lambda quote: contract_month(quote.contract))
-        if len(curve) >= 2:
-            st.subheader("纽约原糖期限曲线")
-            figure = go.Figure(go.Scatter(
-                x=[quote.contract[2:] for quote in curve],
-                y=[float(quote.price) for quote in curve],
-                mode="lines+markers", line=dict(color=CURRENT_YEAR_COLOR),
-                text=[quote.provider for quote in curve],
-                hovertemplate="%{x}<br>%{y:.2f} 美分/磅<br>%{text}<extra></extra>",
-            ))
-            figure.update_layout(height=260, margin=dict(l=48, r=22, t=15, b=35))
-            figure.update_xaxes(type="category", title="交割年月")
-            figure.update_yaxes(title=unit, gridcolor=GRID_COLOR)
-            st.plotly_chart(figure, width="stretch", key="sugar_raw_curve")
+    if premium or not _render_term_structure(relevant, "纽约原糖期限曲线", unit, "sugar_raw_curve"):
+        st.caption(f"{PRICE_LABELS[basis]} · 最新行情 {reference_date:%Y-%m-%d}")
 
     metrics = {label: latest_pair(points, reference_date) for label, points in histories.items()}
     for column, (label, point) in zip(st.columns(len(metrics)), metrics.items()):

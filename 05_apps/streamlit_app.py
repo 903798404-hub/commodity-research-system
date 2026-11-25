@@ -351,7 +351,7 @@ def render_spread_dashboard() -> None:
     render_domestic_spreads(board)
 
 
-def render_domestic_spreads(board: str) -> None:
+def render_domestic_spreads(board: str, *, show_workbench_status: bool = True) -> None:
     with st.expander("展示设置"):
         method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
         year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
@@ -368,7 +368,8 @@ def render_domestic_spreads(board: str) -> None:
     config = load_spread_config(SPREAD_CONFIG_FILE, SPREAD_CONFIG_FILE.stat().st_mtime if SPREAD_CONFIG_FILE.exists() else 0)
     board_spreads = configured_spreads(success_data, config)
 
-    render_update_status(data)
+    if show_workbench_status:
+        render_update_status(data)
     if board == "国内白糖价差":
         expected = ["SR 9-1", "SR 1-5", "SR 5-9"]
         missing = [name for name in expected if name not in board_spreads[board]]
@@ -480,7 +481,9 @@ def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -
     elif selected_page == SUGAR_SPREAD_PAGE_TITLE:
         from sugar_spreads_page import render_sugar_spreads_page
 
-        render_sugar_spreads_page(PROJECT_ROOT, lambda: render_domestic_spreads("国内白糖价差"))
+        render_sugar_spreads_page(
+            PROJECT_ROOT, lambda: render_domestic_spreads("国内白糖价差", show_workbench_status=False),
+        )
     elif selected_page == SUGAR_POSITIONS_PAGE_TITLE:
         from sugar_positions_page import render_sugar_positions_page
 
