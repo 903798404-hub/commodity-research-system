@@ -43,6 +43,6 @@ def test_main_weather_navigation_renders_the_existing_service_without_collection
     assert [frame.proto.src for frame in app.get("iframe")] == ["http://research.example/?embed=true"]
     assert app.get("link_button")[0].proto.url == "http://research.example/"
     nav = importlib.import_module("navigation")
-    group = next(group for group in nav.NAVIGATION_GROUPS if group.title == "天气研究")
+    group = next(group for group in nav.NAVIGATION_GROUPS if group.title == "白糖")
     assert any(item.target == "白糖天气" for item in group.items)
     assert "广西甘蔗天气" in nav.internal_workspace_pages()

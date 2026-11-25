@@ -483,6 +483,19 @@ modules:
     dependents: [application.international_spreads]
     full_regression_when_changed: false
     contract: true
+  application.sugar_spreads:
+    code_paths:
+      - 03_src/agri_research_agent/application/sugar_spreads.py
+      - 04_scripts/prepare_sugar_spread_candidate.py
+      - 05_apps/sugar_spreads_page.py
+    direct_tests: [08_tests/test_sugar_spreads.py]
+    impact_tests:
+      - 08_tests/test_workspace_navigation_performance.py
+      - 08_tests/domains/spreads/test_page_contract.py
+      - 08_tests/test_production_packaging.py
+      - 08_tests/test_spread_runtime_contract.py
+    dependents: [apps.streamlit_dashboard]
+    full_regression_when_changed: false
   application.international_spreads:
     code_paths:
       - 03_src/agri_research_agent/application/international_spreads.py

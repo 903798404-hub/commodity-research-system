@@ -531,6 +531,10 @@
       "role": "runtime_configuration"
     },
     {
+      "path": "03_src/agri_research_agent/application/sugar_spreads.py",
+      "role": "runtime_configuration"
+    },
+    {
       "path": "03_src/agri_research_agent/automation/__init__.py",
       "role": "runtime_configuration"
     },
@@ -1940,6 +1944,10 @@
     },
     {
       "path": "05_apps/sugar_import_profit_page.py",
+      "role": "runtime_configuration"
+    },
+    {
+      "path": "05_apps/sugar_spreads_page.py",
       "role": "runtime_configuration"
     },
     {

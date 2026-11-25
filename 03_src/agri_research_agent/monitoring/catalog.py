@@ -21,8 +21,10 @@ PROFIT_PAGES = ("import_profit", "canola_import_profit", "palm_import_profit", "
 RULES = [
     Rule("navigation", "首页导航", ("home",), "静态导航", cadence="static"),
     Rule("monitor", "监测进程", ("status",), "服务器监测回执", cadence="static"),
-    Rule("domestic_spread", "国内月差及跨品种价差", ("spreads_dashboard",), "原正式价差及18个合约", cadence="china_daily", deadline="19:00", job="spreads"),
+    Rule("domestic_spread", "国内月差及跨品种价差", ("spreads_dashboard", "sugar_spreads"), "原正式价差及18个合约", cadence="china_daily", deadline="19:00", job="spreads"),
     Rule("basis", "国内基差与一口价", ("basis_domestic", "research_overview"), "坚果云原人工报价 / Formal Public Basis Current", cadence="china_daily", deadline="21:00", manual=True),
+    Rule("sugar_raw_spread", "纽约原糖月差", ("sugar_spreads",), "已交付的原糖合同月日度配对", cadence="on_demand", manual=True),
+    Rule("sugar_white_premium", "伦敦白糖升水", ("sugar_spreads",), "已交付的白糖／原糖同月日度配对", cadence="on_demand", manual=True),
     Rule("sugar_basis", "白糖柳州现货与基差", ("sugar_basis",), "柳州历史与较新三地快照；人工截图核验交付", cadence="china_daily", deadline="21:00", manual=True),
     Rule("fgis", "美豆出口检验", ("soybean_weekly", "research_overview"), "USDA FGIS", cadence="weekly", deadline="09:00", publish_weekday=1, data_lag_days=5, job="fgis"),
     Rule("fas", "美豆出口销售", ("soybean_weekly", "research_overview"), "USDA FAS", cadence="weekly", deadline="07:00", publish_weekday=4, data_lag_days=8, job="fas"),
@@ -54,9 +56,11 @@ for province, name, weekday, lag in [("SK","萨省",4,4),("AB","阿省",5,4),("M
 for symbol in ("M","Y","P","RM","OI","SR"):
     RULES.append(Rule("warehouse_"+symbol, symbol+"仓单", ("spreads_dashboard",), "原交易所仓单", cadence="china_daily", deadline="21:00", job="warehouse"))
 for symbol in ("M","Y","P","RM","OI","RS","SR"):
-    RULES.append(Rule("positions_"+symbol, symbol+"国内持仓", ("foreign_seats",), "原 DCE / CZCE 持仓", cadence="china_daily", deadline="19:00", job="positions_domestic"))
+    pages = ("foreign_seats", "sugar_positions") if symbol == "SR" else ("foreign_seats",)
+    RULES.append(Rule("positions_"+symbol, symbol+"国内持仓", pages, "原 DCE / CZCE 持仓", cadence="china_daily", deadline="19:00", job="positions_domestic"))
 for board in ("soybean","rapeseed","sugar"):
-    RULES.append(Rule("foreign_positions_"+board, board+"外盘持仓", ("foreign_seats",), "各原持仓来源；按独立报告日", cadence="weekly", deadline="10:00", publish_weekday=5, data_lag_days=4, job="positions_foreign"))
+    pages = ("foreign_seats", "sugar_positions") if board == "sugar" else ("foreign_seats",)
+    RULES.append(Rule("foreign_positions_"+board, board+"外盘持仓", pages, "各原持仓来源；按独立报告日", cadence="weekly", deadline="10:00", publish_weekday=5, data_lag_days=4, job="positions_foreign"))
 RULES.append(Rule("foreign_positions_euronext_rapeseed", "Euronext 菜籽持仓", ("foreign_seats",), "原 Euronext 周报（周五截止，随后周三发布）", cadence="weekly", deadline="10:00", publish_weekday=3, data_lag_days=6, job="positions_foreign"))
 RULES.append(Rule("foreign_positions_palm", "棕榈油FCPO持仓（原预留入口）", ("foreign_seats",), "原入口尚无正式报告或已接入更新器", manual=True, deadline="10:00"))
 

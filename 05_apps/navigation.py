@@ -25,6 +25,8 @@ INTERNATIONAL_SPREAD_PAGE_TITLE = "国际价差"
 RESEARCH_OVERVIEW_PAGE_TITLE = "研究快览 / 最新变化"
 FOREIGN_FX_PAGE_TITLE = "外盘汇率"
 SUGAR_BASIS_PAGE_TITLE = "白糖基差"
+SUGAR_SPREAD_PAGE_TITLE = "白糖价差"
+SUGAR_POSITIONS_PAGE_TITLE = "白糖持仓"
 
 
 @dataclass(frozen=True)
@@ -98,9 +100,32 @@ NAVIGATION_GROUPS = (
                 "quote",
                 "查看国内油脂油料现货基差、一口价与地区报价",
             ),
+        ),
+    ),
+    NavigationGroup(
+        "白糖",
+        (
+            NavigationItem(
+                "sugar_spreads", SUGAR_SPREAD_PAGE_TITLE, SUGAR_SPREAD_PAGE_TITLE, "chart",
+                "比较纽约原糖月差、伦敦白糖升水与郑糖月差",
+            ),
+            NavigationItem(
+                "sugar_positions", SUGAR_POSITIONS_PAGE_TITLE, SUGAR_POSITIONS_PAGE_TITLE, "chart",
+                "跟踪纽约原糖、伦敦白糖分类持仓及郑糖重点席位",
+            ),
             NavigationItem(
                 "sugar_basis", SUGAR_BASIS_PAGE_TITLE, SUGAR_BASIS_PAGE_TITLE, "quote",
                 "比较柳州白糖现货、01/05/09合约基差与三地主力基差",
+            ),
+            NavigationItem(
+                "sugar_import_profit", "白糖进口利润", SUGAR_IMPORT_ROUTE_ID,
+                "quote", "比较巴西与泰国配额内外历史利润，保存当日人工录价计算",
+                detail_label="覆盖", detail_text="巴西 · 泰国",
+            ),
+            NavigationItem(
+                "sugar_weather", SUGAR_WEATHER_PAGE_TITLE, SUGAR_WEATHER_PAGE_TITLE,
+                "leaf", "比较白糖主要甘蔗产区天气及历史同期变化",
+                detail_label="覆盖", detail_text="印度 · 泰国 · 广西 · 云南",
             ),
         ),
     ),
@@ -157,11 +182,6 @@ NAVIGATION_GROUPS = (
                 detail_label="覆盖",
                 detail_text="印度尼西亚 · 马来西亚",
             ),
-            NavigationItem(
-                "sugar_weather", SUGAR_WEATHER_PAGE_TITLE, SUGAR_WEATHER_PAGE_TITLE,
-                "leaf", "比较白糖主要甘蔗产区天气及历史同期变化",
-                detail_label="覆盖", detail_text="印度 · 泰国 · 广西 · 云南",
-            ),
         ),
     ),
     NavigationGroup(
@@ -201,11 +221,6 @@ NAVIGATION_GROUPS = (
             NavigationItem(
                 "palm_import_profit", "棕榈油进口利润", PALM_IMPORT_ROUTE_ID,
                 "quote", "测算24度精炼棕榈油进口利润并比较12个船期月的多年变化",
-            ),
-            NavigationItem(
-                "sugar_import_profit", "白糖进口利润", SUGAR_IMPORT_ROUTE_ID,
-                "quote", "比较巴西与泰国配额内外历史利润，保存当日人工录价计算",
-                detail_label="覆盖", detail_text="巴西 · 泰国",
             ),
             NavigationItem(
                 "foreign_seats",

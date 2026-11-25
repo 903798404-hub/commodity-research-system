@@ -121,6 +121,27 @@ class Reader:
                 frame = frame.loc[frame.segment.isin(["LIVE_LUTOU", "LIVE_NUTSTORE"])]
             frame = frame.loc[frame.commodity.isin(['一豆','24度','三菜','豆粕','菜粕'])]
             return grouped_dates(frame, ["series_id"], "business_date")
+        if identity in {"sugar_raw_spread", "sugar_white_premium"}:
+            from agri_research_agent.application.sugar_spreads import (
+                DATA_PATH, PREMIUM_PAIRS, RAW_PAIRS, load_quotes, spread_history,
+            )
+            try:
+                quotes = self.cached("sugar_spread_quotes", lambda: load_quotes(
+                    root / DATA_PATH, as_of=self.now.astimezone(SHANGHAI).date()))
+            except FileNotFoundError:
+                return Observation(None)
+            premium = identity == "sugar_white_premium"
+            pairs = PREMIUM_PAIRS if premium else RAW_PAIRS
+            bases = ("settlement", "close") if premium else ("close", "settlement")
+            for basis in bases:
+                dates = {}
+                for label, months in pairs.items():
+                    points = spread_history(quotes, *months, premium=premium, price_type=basis)
+                    dates[label] = points[-1].trade_date.isoformat() if points else None
+                if any(dates.values()):
+                    actual = min(dates.values()) if all(dates.values()) else None
+                    return Observation(actual, extra={"series_dates": dates, "price_type": basis})
+            return Observation(None)
         if identity == "sugar_basis":
             from agri_research_agent.data_sources.domestic_sugar_history import load_sugar_history, reconcile_regional_history
             snapshot = load_sugar_history(root / "processed/domestic_sugar_history")

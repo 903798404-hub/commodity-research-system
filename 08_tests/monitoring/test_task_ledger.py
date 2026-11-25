@@ -62,7 +62,10 @@ def host():
 def test_inventory_preserves_all_original_policies_and_excludes_old_weather():
     records=dataset_catalog()
     assert set(BY_TASK)==set(JOBS) and len(TASKS)==13
-    assert len(records)==len(RULES)==84
+    assert len(records)==len(RULES)==86
+    new = [row for row in records if row["identity"] in {"sugar_raw_spread", "sugar_white_premium"}]
+    assert len(new) == 2
+    assert all(row["task_id"] is None and row["cadence"] == "on_demand" for row in new)
     paused={'public_market','public_fx','international_palm','international_soy','international_rape',
         'weather_ARG','weather_AUS','weather_EU','weather_RUS','weather_UKR','weather_IND_COTTON','weather_IND_SUGARCANE'}
     assert {row['identity'] for row in records if row['mode']=='SOURCE_PAUSED'} == paused

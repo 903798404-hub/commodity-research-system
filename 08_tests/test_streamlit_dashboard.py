@@ -92,20 +92,22 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
         "国际价差",
         "价差动态",
         "国内现货（基差与一口价）",
+        "白糖价差",
+        "白糖持仓",
         "白糖基差",
+        "白糖进口利润",
+        "白糖天气",
         "美豆周度跟踪",
         "加拿大菜籽周度跟踪",
         "巴西大豆种植与生长",
         "大豆天气",
         "菜籽天气",
         "棕榈油天气",
-        "白糖天气",
         "USDA供需平衡",
         "Oil World供需平衡",
         "大豆进口榨利",
         "加拿大菜籽进口榨利",
         "棕榈油进口利润",
-        "白糖进口利润",
         "外资与重点席位",
         "运行监控",
     ]
@@ -118,7 +120,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     assert "自定义首页" not in home_source
     assert "清除记录" not in home_source
     assert [group.title for group in workspace.SIDEBAR_NAVIGATION] == [
-        "工作台", "市场行情", "周度跟踪", "天气研究", "国际供需", "研究工具"
+        "工作台", "市场行情", "白糖", "周度跟踪", "天气研究", "国际供需", "研究工具"
     ]
     sidebar_research_items = [
         item for group in workspace.SIDEBAR_NAVIGATION if group.title != "工作台" for item in group.items
@@ -132,7 +134,7 @@ def test_homepage_expands_the_authoritative_sidebar_navigation(monkeypatch) -> N
     }
 
     cards_markup = "\n".join(ui_theme.render_navigation_card(item) for item in research_items)
-    assert cards_markup.count('class="agri-card"') == 20
+    assert cards_markup.count('class="agri-card"') == 22
     assert cards_markup.count('class="agri-card-keyword"') == 18
     assert cards_markup.count('class="agri-card-detail-label"') == 8
     assert "?home_target=" not in cards_markup
@@ -185,7 +187,7 @@ def test_weather_navigation_exposes_all_approved_soybean_countries(monkeypatch) 
         ("巴西大豆种植与生长", workspace.BRAZIL_SOY_PAGE_TITLE, None),
     ]
     assert [item.label for item in groups["天气研究"]] == [
-        "大豆天气", "菜籽天气", "棕榈油天气", "白糖天气"
+        "大豆天气", "菜籽天气", "棕榈油天气"
     ]
     assert "美国大豆天气研究" not in [
         item.label for group in workspace.SIDEBAR_NAVIGATION for item in group.items

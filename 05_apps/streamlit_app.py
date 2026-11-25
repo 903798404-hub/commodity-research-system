@@ -63,6 +63,8 @@ from navigation import (
     INTERNATIONAL_SPREAD_PAGE_TITLE,
     FOREIGN_FX_PAGE_TITLE,
     SUGAR_BASIS_PAGE_TITLE,
+    SUGAR_POSITIONS_PAGE_TITLE,
+    SUGAR_SPREAD_PAGE_TITLE,
     INDIA_CROP_WEATHER_PAGE_TITLE,
     THAILAND_SUGARCANE_WEATHER_PAGE_TITLE,
     GUANGXI_WEATHER_PAGE_TITLE,
@@ -346,6 +348,10 @@ def render_spread_dashboard() -> None:
         render_warehouse_receipts(PROJECT_ROOT)
         return
     board = st.radio("板块", BOARD_OPTIONS, horizontal=True, label_visibility="collapsed")
+    render_domestic_spreads(board)
+
+
+def render_domestic_spreads(board: str) -> None:
     with st.expander("展示设置"):
         method = st.selectbox("计算方法", ["绝对价差 A-B", "商品比值 A/B"])
         year_count = int(st.number_input("显示年份数量", min_value=1, max_value=30, value=5, step=1))
@@ -471,6 +477,14 @@ def render_selected_workspace_page(selected_page: str, *, workspace_page=None) -
         render_foreign_fx_page(project_root=PROJECT_ROOT)
     elif selected_page == "基差/一口价":
         render_basis_page(get_public_basis_current_root())
+    elif selected_page == SUGAR_SPREAD_PAGE_TITLE:
+        from sugar_spreads_page import render_sugar_spreads_page
+
+        render_sugar_spreads_page(PROJECT_ROOT, lambda: render_domestic_spreads("国内白糖价差"))
+    elif selected_page == SUGAR_POSITIONS_PAGE_TITLE:
+        from sugar_positions_page import render_sugar_positions_page
+
+        render_sugar_positions_page(PROJECT_ROOT, preview_mode=False)
     elif selected_page == SUGAR_BASIS_PAGE_TITLE:
         from domestic_sugar_basis import render_sugar_basis_page
         render_sugar_basis_page()
